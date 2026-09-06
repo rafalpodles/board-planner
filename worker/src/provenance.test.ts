@@ -30,8 +30,6 @@ describe("unexpectedHistory", () => {
     expect(await unexpectedHistory(runner as never, "/wt", "base", ["sha1", "sha2"])).toMatch(/rev-list/);
   });
 
-  // No foreign sha in sight, but the range is short one of the run's own commits — an amend, a
-  // reset, or (per the reviewer's testing) a graft or a planted .git/shallow landing exactly here.
   it("refuses when the range is missing one of the run's own commits", async () => {
     const runner = runnerFor("sha2\n", "sha2\n");
     const reason = await unexpectedHistory(runner as never, "/wt", "base", ["sha1", "sha2"]);

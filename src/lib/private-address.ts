@@ -1,11 +1,3 @@
-/**
- * Is this literal address one we must never fetch from a server-side request?
- *
- * WHATWG `URL` keeps IPv6 hostnames bracketed and normalises the decimal, hex and
- * short IPv4 forms, so callers pass `url.hostname` straight in and only the bracket
- * stripping is left to do here.
- */
-
 type Cidr = [address: string, prefixBits: number];
 
 const BLOCKED_V4: Cidr[] = [
@@ -59,7 +51,6 @@ function isPrivateV4(host: string): boolean | null {
   return BLOCKED_V4.some((cidr) => inCidr(ip, cidr));
 }
 
-/** Expands an IPv6 literal to its eight 16-bit groups, or null if it is not one. */
 function ipv6Groups(host: string): number[] | null {
   if (!host.includes(":")) return null;
 
@@ -116,22 +107,15 @@ function isPrivateV6(groups: number[]): boolean {
   const [g0, g1, g2, g3, g4, g5, g6, g7] = groups;
   const allZeroThrough = (upTo: number) => groups.slice(0, upTo).every((g) => g === 0);
 
-  // ::/96 — ::1, ::, and the deprecated IPv4-compatible form. Refused whole rather than unwrapped:
-  // RFC 4291 deprecated it, nothing public is reachable this way, and `::127.0.0.1` was allowed
-  // because the loopback test above only fired when the low 32 bits were 0 or 1 (BP-317).
   if (allZeroThrough(6)) return true;
 
-  // ::ffff:0:0/96 — an IPv4 address wearing a v6 costume
   if (allZeroThrough(5) && g5 === 0xffff) return isPrivateV4(v4FromGroups(g6, g7)) === true;
 
-  // 64:ff9b::/96 NAT64, and 2002::/16 6to4 — both carry an IPv4 address inside
   if (g0 === 0x64 && g1 === 0xff9b && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0) {
     return isPrivateV4(v4FromGroups(g6, g7)) === true;
   }
   if (g0 === 0x2002) return isPrivateV4(v4FromGroups(g1, g2)) === true;
 
-  // 64:ff9b:1::/48 — the local-use NAT64 prefixes. Unlike the well-known /96 above these carry a
-  // network-specific mapping rather than an embedded address, so there is nothing to unwrap.
   if (g0 === 0x64 && g1 === 0xff9b && g2 === 1) return true;
 
   if ((g0 & 0xfe00) === 0xfc00) return true; // fc00::/7 unique local
@@ -140,13 +124,9 @@ function isPrivateV6(groups: number[]): boolean {
   if ((g0 & 0xff00) === 0xff00) return true; // ff00::/8 multicast
   if (g0 === 0x100 && g1 === 0 && g2 === 0 && g3 === 0) return true; // 100::/64 discard-only
 
-  // 2001::/23 IETF protocol assignments — Teredo (2001::/32) tunnels to an arbitrary IPv4, ORCHID
-  // is not routable — and 2001:db8::/32, which is documentation and should never be a destination
   if (g0 === 0x2001 && (g1 & 0xfe00) === 0) return true;
   if (g0 === 0x2001 && g1 === 0x0db8) return true;
 
-  // 3fff::/20 documentation, RFC 9637 — twenty bits is all of g0 and the top four of g1, so a
-  // mask on g0 alone would swallow 3ff0::–3ffe::, which is somebody else's
   if (g0 === 0x3fff && (g1 & 0xf000) === 0) return true;
   if (g0 === 0x5f00) return true; // 5f00::/16 SRv6 SIDs, RFC 9602
   if (g0 === 0x2620 && g1 === 0x4f && g2 === 0x8000) return true; // 2620:4f:8000::/48 AS112-v6
@@ -154,11 +134,6 @@ function isPrivateV6(groups: number[]): boolean {
   return false;
 }
 
-/**
- * True for a private, loopback, link-local or otherwise reserved literal address.
- * False for a public literal AND for anything that is not an address at all — a
- * name has to be resolved before this question can be answered about it.
- */
 export function isPrivateAddress(hostname: string): boolean {
   const host = unbracket(hostname);
 
@@ -171,13 +146,11 @@ export function isPrivateAddress(hostname: string): boolean {
   return false;
 }
 
-/** True when the hostname is an address rather than a name, so DNS has nothing to add. */
 export function isIpLiteral(hostname: string): boolean {
   const host = unbracket(hostname);
   return ipv4ToInt(host) !== null || ipv6Groups(host) !== null;
 }
 
-/** Names that resolve inward by convention, refused without waiting for DNS. */
 export function isInternalName(hostname: string): boolean {
   const host = unbracket(hostname);
   return (

@@ -44,14 +44,10 @@ export default function ForgotPasswordPage() {
 
         {sent ? (
           <div role="status">
-            {/* Deliberately says nothing about whether the account exists — a sign-in screen that
-                refuses to confirm an account would be pointless if this screen confirmed it */}
             <p className="text-sm text-text-muted text-center mb-6">
               If that account exists and has an email address, a link is on its way. The link works
               once and expires in an hour.
             </p>
-            {/* The one dead end the uniform answer creates: an account with no address waits for a
-                message that is never coming, and must not be told why. This is the way out. */}
             <p className="text-sm text-text-muted text-center mb-6">
               Nothing arrived? Ask an administrator to set a password for you.
             </p>

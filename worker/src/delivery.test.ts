@@ -8,9 +8,6 @@ const task = claimedTask();
 
 const ok: CommandResult = { code: 0, stdout: "", stderr: "", timedOut: false };
 
-// The refuseIfPlanted pre-flight goes through git-safety, which prepends "-c key=value" pairs.
-// Delivery's own calls carry none — their hardening is in the environment — so this only ever
-// strips the pre-flight's.
 function withoutConfigFlags(args: string[]): string[] {
   const rest = [...args];
   while (rest[0] === "-c") rest.splice(0, 2);
@@ -30,9 +27,6 @@ function fakeCli(responses: Record<string, Partial<CommandResult>>) {
   return { runner: { run }, run };
 }
 
-// push begins with a `git config --list --show-scope --no-includes` pre-flight (refuseIfPlanted), which runs
-// through git-safety rather than delivery's own hardening and is not the call any of these
-// assertions is about.
 function deliveryCalls(run: ReturnType<typeof vi.fn>): unknown[][] {
   return run.mock.calls.filter(
     ([, args]) => !/^config (--local|--list)/.test(withoutConfigFlags(args as string[]).join(" "))
@@ -47,8 +41,6 @@ function envOf(run: ReturnType<typeof vi.fn>, index = 0): Record<string, string>
   return (deliveryCalls(run)[index][2] as { env: Record<string, string> }).env;
 }
 
-// git reads GIT_CONFIG_KEY_n / GIT_CONFIG_VALUE_n as ordered pairs, so the assertions read them
-// back the same way rather than asserting on the numbering
 function configuredBy(env: Record<string, string | undefined>): [string, string][] {
   const count = Number(env.GIT_CONFIG_COUNT ?? 0);
   return Array.from({ length: count }, (_, i) => [
@@ -82,7 +74,6 @@ describe("push", () => {
       expect.objectContaining({ cwd: "/wt" })
     );
   });
-
 
   it("does not send the bare branch name as its own argument", async () => {
     const run = vi.fn().mockResolvedValue(ok);
@@ -122,8 +113,6 @@ describe("push", () => {
     );
   });
 
-  // bindRepository scanned this config before the agent ever saw the checkout, and the agent holds
-  // Write; push is the call that hands whatever it planted a credential
   it("refuses to push when the agent planted an executable key in the checkout's config", async () => {
     const { runner } = fakeCli({
       "git config --list": { stdout: "local\tcore.sshcommand=curl attacker\n" },
@@ -141,9 +130,6 @@ describe("push", () => {
     expect(run.mock.calls.some(([, args]) => (args as string[]).includes("push"))).toBe(false);
   });
 
-  // What the repository config can still make git execute on our behalf. That the flags are spelled
-  // correctly is all a mocked runner can show — delivery.hooks.integration.test.ts proves the effect
-  // against a real git and a really planted hook.
   it("neutralises every config file git would otherwise read", async () => {
     const run = vi.fn().mockResolvedValue(ok);
     await createDelivery({ run }).push("/wt", "cp-158/worker", COMMIT);
@@ -166,8 +152,6 @@ describe("push", () => {
     expect(configuredBy(envOf(run))).toContainEqual([key, value]);
   });
 
-  // The transport is where the credentials actually leaked: ext:: hands the URL to a program, and
-  // a local push runs git-receive-pack as our own child, whose post-receive hook then holds them
   it.each([
     ["protocol.ext.allow", "never"],
     ["protocol.file.allow", "never"],
@@ -178,9 +162,6 @@ describe("push", () => {
     expect(configuredBy(envOf(run))).toContainEqual([key, value]);
   });
 
-  // Also not in the config list, and for the same reason one layer along: git keeps the first
-  // gitProxy entry it finds, so the repository's wins over any override the list could carry.
-  // The environment is where it is won, and empty there means no proxy rather than fall through.
   it("empties the proxy command in the environment, where config cannot outrank it", async () => {
     const run = vi.fn().mockResolvedValue(ok);
     await createDelivery({ run }).push("/wt", "cp-158/worker", COMMIT);
@@ -190,8 +171,6 @@ describe("push", () => {
     expect(configuredBy(env).map(([key]) => key)).not.toContain("core.gitProxy");
   });
 
-  // Not in the config list on purpose: git keeps the first receivepack it is given, so a repository
-  // setting outranks any override and only the command line wins
   it("names the receive-pack on the command line, where config cannot outrank it", async () => {
     const run = vi.fn().mockResolvedValue(ok);
     await createDelivery({ run }).push("/wt", "cp-158/worker", COMMIT);
@@ -200,8 +179,6 @@ describe("push", () => {
     expect(configuredBy(envOf(run)).map(([key]) => key)).not.toContain("remote.origin.receivepack");
   });
 
-  // Clearing the helper list is what makes GIT_CONFIG_GLOBAL safe to set; naming ours after it is
-  // what keeps an https remote authenticating once the global file is gone
   it("clears inherited credential helpers and names the one it trusts, in that order", async () => {
     const run = vi.fn().mockResolvedValue(ok);
     await createDelivery({ run }).push("/wt", "cp-158/worker", COMMIT);
@@ -213,8 +190,6 @@ describe("push", () => {
     ]);
   });
 
-  // gh does not take -c, and shells out to git itself, so the hardening has to travel in the
-  // environment or those inner invocations run unprotected
   it("hands gh the same hardening as git", async () => {
     const { runner, run } = fakeCli({
       "gh pr create": { stdout: "https://github.com/o/r/pull/1\n" },
@@ -230,7 +205,6 @@ describe("push", () => {
 });
 
 describe("openPr", () => {
-  // gh does not understand git's -c flag, so only git invocations may carry it
   it("returns the pr url from gh output", async () => {
     const run = vi
       .fn()
@@ -437,9 +411,6 @@ describe("push argument boundaries", () => {
     expect(args.indexOf("--")).toBeLessThan(args.indexOf(refspec));
   });
 
-  // BP-327. `--` used to be the whole answer here, and it is the weaker half: git would still have
-  // been handed the string, and only its own parsing decided what to do with it. The branch is
-  // built from a server-supplied task key, so the option shape is refused outright now.
   it("refuses an option-shaped branch rather than trusting -- to contain it", async () => {
     const run = vi.fn().mockResolvedValue(ok);
 
@@ -448,11 +419,6 @@ describe("push argument boundaries", () => {
     ).rejects.toThrow(/not a git ref name/i);
   });
 
-  // BP-382 gave the branch a second way to be misread, which a leading-dash check cannot see: git
-  // splits a push refspec at its **last** colon, so a colon in the branch re-splits
-  // `<commit>:refs/heads/<branch>` into a different source and a different destination. Measured
-  // on git 2.50.1 against a real remote: with the branch `evil:<older sha>`, git reported a src
-  // refspec that was neither the commit nor the branch, and nothing landed on the remote.
   it("refuses a branch carrying a colon, which would re-split the refspec it is built into", async () => {
     const run = vi.fn().mockResolvedValue(ok);
 
@@ -475,9 +441,6 @@ describe("push argument boundaries", () => {
   });
 });
 
-// BP-373. `gh auth switch` writes global machine state, so a worker that lets gh resolve its own
-// identity pushes as whichever account some other terminal switched to last. Pinning means the
-// token travels with the call.
 describe("the github identity delivery acts as", () => {
   const PINNED = "gho_pinned_account_token";
 
@@ -501,8 +464,6 @@ describe("the github identity delivery acts as", () => {
     expect(envOf(run, 1).GH_TOKEN).toBe(PINNED);
   });
 
-  // gh reads GITHUB_TOKEN as well, and an inherited one would decide the identity behind the pin's
-  // back — the failure being pushing as an account that does have access, under the wrong name.
   it("overrides an inherited GITHUB_TOKEN rather than letting it win", async () => {
     const run = vi.fn().mockResolvedValue(ok);
     await createDelivery({ run }, "main", PINNED).push("/wt", "bp-373/pin", COMMIT);
@@ -510,8 +471,6 @@ describe("the github identity delivery acts as", () => {
     expect(envOf(run).GITHUB_TOKEN).toBe(PINNED);
   });
 
-  // Opt-in: a machine with one account, or an operator who never picked, keeps exactly the
-  // behaviour it had — gh resolves its own identity from the keyring.
   it("sets no token at all when no account is pinned", async () => {
     const run = vi.fn().mockResolvedValue(ok);
     await createDelivery({ run }, "main").push("/wt", "bp-373/pin", COMMIT);

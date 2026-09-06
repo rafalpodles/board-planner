@@ -1,13 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-/**
- * BP-429. The post-fetch half of sync had no test at any level, which is how three separate things
- * stayed wrong in it: the matcher never got the project's former keys, the merged-MR transition sent
- * a task to the wrong column, and the activity log recorded a destination the task did not go to.
- * The database, the models and auth are stubbed along with the network; the matcher, the
- * per-provider replacement rule and the transition itself all run for real.
- */
-
 const fetchMergeRequests = vi.fn();
 const projectFindById = vi.fn();
 const taskFindOne = vi.fn();
@@ -18,8 +10,6 @@ vi.mock("@/lib/encryption", () => ({ decryptSecret: (v: string) => `plain:${v}` 
 vi.mock("@/lib/activity", () => ({ logActivity }));
 vi.mock("@/models/project", () => ({ Project: { findById: projectFindById } }));
 vi.mock("@/models/task", () => ({ Task: { findOne: taskFindOne } }));
-// Partial: matchMRsToTasks is the REAL matcher, so the former-keys assertion is about the shipped
-// rule rather than about a stub that agrees with itself.
 vi.mock("@/lib/gitlab", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/gitlab")>()),
   fetchMergeRequests,
@@ -44,7 +34,6 @@ const mr = (
   updated_at: "2026-08-01T00:00:00Z",
 });
 
-// The renamed board from BP-110's tests: no seeded id appears in it anywhere.
 const RENAMED_COLUMNS = [
   { id: "icebox", label: "Icebox", color: "#000", role: "backlog", order: 0 },
   { id: "building", label: "Building", color: "#000", role: "active", order: 1 },
@@ -126,16 +115,12 @@ describe("POST .../gitlab/sync — linking", () => {
     await POST(request(), ctx());
 
     expect(doc.linkedPRs).toHaveLength(2);
-    // Without this, every assertion in this file is about an object mutated in memory and
-    // nothing proves the route ever wrote it back.
     expect(doc.save).toHaveBeenCalled();
   });
 });
 
 describe("POST .../gitlab/sync — the merged-MR transition", () => {
   it("sends a merged task to the last review column, not the next one", async () => {
-    // The default board has THREE review columns — in_review, needs_human_review, ready_to_test.
-    // "The next review column" put merged work in the queue that exists for a human to look at.
     const doc = task({ status: "in_review" });
     taskFindOne.mockResolvedValue(doc);
     fetchMergeRequests.mockResolvedValue([mr({ state: "merged", merged_at: "2026-08-02T00:00:00Z" })]);
@@ -173,8 +158,6 @@ describe("POST .../gitlab/sync — the merged-MR transition", () => {
     expect(doc.status).toBe("needs_human_review");
     expect(body.autoTransitioned).toBe(0);
     expect(logActivity).not.toHaveBeenCalled();
-    // The control: the route reached this task and linked its merge request, so the status
-    // standing still is a decision rather than a sync that did nothing at all.
     expect(body.prsLinked).toBe(1);
   });
 
@@ -203,9 +186,6 @@ describe("POST .../gitlab/sync — the merged-MR transition", () => {
   });
 
   it("does not lift a task out of a flagged column even when that column sorts first", async () => {
-    // The rule reads the flag, not the position. Under the positional one this board — the same
-    // columns, dragged into a different order — moved a task straight out of the human queue,
-    // which is what the two tests above are named after preventing.
     const reordered = [
       { id: "needs_human_review", label: "Needs Human Review", color: "#000", role: "review", order: 0, triggersPmReview: true },
       { id: "in_review", label: "In Review", color: "#000", role: "review", order: 1 },
@@ -229,7 +209,6 @@ describe("POST .../gitlab/sync — the merged-MR transition", () => {
     taskFindOne.mockResolvedValue(doc);
     fetchMergeRequests.mockResolvedValue([mr({ state: "merged", merged_at: "2026-08-02T00:00:00Z" })]);
 
-    // One review column, so there is nothing to advance into.
     const body = await (await POST(request(), ctx())).json();
     expect(body.autoTransitioned).toBe(0);
     expect(body.prsLinked).toBe(1);
@@ -250,8 +229,6 @@ describe("POST .../gitlab/sync — the merged-MR transition", () => {
     await POST(request(), ctx());
 
     expect(doc.status).toBe("verifying");
-    // On the default board the destination happens to BE "ready_to_test", so the hardcoded string
-    // this route used to log was indistinguishable from the real one. Here it is not.
     expect(logActivity).toHaveBeenCalledWith(
       "t1",
       "u1",

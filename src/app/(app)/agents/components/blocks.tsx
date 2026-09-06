@@ -13,7 +13,6 @@ export const BUCKET_PREFIX = "bucket:";
 export interface Entry {
   uid: string;
   key: string;
-  /** Set only where this position overrides the block's own parameters. */
   params?: Record<string, string>;
 }
 
@@ -60,8 +59,6 @@ export function PaletteItem({
         isDragging ? "opacity-40" : ""
       }`}
     >
-      {/* The drag lives on the body rather than the row, so the Add control is not a button
-          nested inside dnd-kit's role="button" */}
       <span {...attributes} {...listeners} className="min-w-0 flex-1 cursor-grab">
         <BlockBody block={block} />
       </span>
@@ -142,7 +139,6 @@ function SortableEntry({
   entry: Entry;
   onRemove: () => void;
   lookup: Lookup;
-  /** Shows the composition without the controls that edit it, for a reader who cannot save */
   readOnly?: boolean;
 }) {
   const { setNodeRef, attributes, listeners, transform, transition, isDragging } = useSortable({

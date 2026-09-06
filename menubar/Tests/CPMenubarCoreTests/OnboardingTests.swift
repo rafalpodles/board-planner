@@ -12,7 +12,6 @@ final class OnboardingTests: XCTestCase {
         XCTAssertFalse(OnboardingState().isOnboarded)
     }
 
-    // Stored canonical, so the next consumer does not have to know it needs fixing up
     func testWhatSomebodyTypesIsStoredAsAnAddressThatWorks() {
         let state = Onboarding.preflightPassed(
             OnboardingState(), apiURL: "localhost:3973", workerName: "mac", toolPath: "/bin")
@@ -34,8 +33,6 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual(reloaded.toolPath, "/opt/bin")
     }
 
-    // The whole point of recording this: a browser nobody came back to used to leave repos.json
-    // written and the app in a state with no name.
     func testAnAbandonedApprovalKeepsTheFolderAndAsksAgain() {
         var state = Onboarding.folderChosen(OnboardingState(), path: "/checkout")
         state = Onboarding.approvalStarted(state, deviceCode: "cpd_x", userCode: "BCDF2345", verificationURL: "https://app/enrol/BCDF2345")
@@ -59,8 +56,6 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual(after.deviceCode, "", "a spent secret must not be left in defaults")
     }
 
-    // Re-entering a step is re-running one function, so running preflight again out of curiosity
-    // must not walk a working machine back to the beginning
     func testPreflightRunAgainDoesNotUnwindARunningWorker() {
         var state = Onboarding.folderChosen(OnboardingState(), path: "/checkout")
         state = Onboarding.approved(state, workerID: "w1")
@@ -109,9 +104,6 @@ final class OnboardingTests: XCTestCase {
     }
 }
 
-// BP-376. The board's address was asked for once and never again: FirstRunView is only shown while
-// the machine is not onboarded, so the field holding it — and the button beside it — were both
-// unreachable for the rest of the machine's life.
 final class ChangingBoardTests: XCTestCase {
     private func running() -> OnboardingState {
         OnboardingState(
@@ -128,20 +120,15 @@ final class ChangingBoardTests: XCTestCase {
         XCTAssertEqual(next.step, .needsFolder)
     }
 
-    // A change of board, not a fresh machine: asking for the folder and the tools again is asking
-    // the operator to redo a setup that is still true.
     func testItKeepsWhatDescribesTheMachineRatherThanTheBoard() {
         let next = Onboarding.changingBoard(running())
 
         XCTAssertEqual(next.checkoutsFolder, "/Users/rpo/checkouts")
         XCTAssertEqual(next.toolPath, "/opt/homebrew/bin")
         XCTAssertEqual(next.workerName, "rig-mac")
-        // The address being changed is the one worth showing in the field about to be edited
         XCTAssertEqual(next.apiURL, "http://localhost:3958")
     }
 
-    // What the old board minted describes a relationship that is ending. A worker id left behind
-    // would have this machine reporting as somebody the new board has never registered.
     func testItDropsWhatTheOldBoardMinted() {
         let next = Onboarding.changingBoard(running())
 

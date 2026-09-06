@@ -1,8 +1,3 @@
-// Keyed by worker id, one controller per open stream, living in this process's memory only. On
-// more than one Railway replica, a command published while the worker's stream is open on a
-// different replica never reaches this map — the heartbeat (which already carries `command`) is
-// therefore the contract, and this map is only an accelerator for a worker connected to the
-// replica handling the command request.
 const streams = new Map<string, ReadableStreamDefaultController<Uint8Array>>();
 
 export function registerWorkerStream(
@@ -16,7 +11,6 @@ export function unregisterWorkerStream(
   workerId: string,
   controller: ReadableStreamDefaultController<Uint8Array>
 ): void {
-  // A stale close from a superseded connection must not evict the newer one
   if (streams.get(workerId) === controller) streams.delete(workerId);
 }
 

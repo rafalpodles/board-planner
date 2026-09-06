@@ -2,48 +2,27 @@ import mongoose from "mongoose";
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 
-// Never the development database. The URI is passed to the dev server too, so a mistake here
-// would have the browser writing into whatever the developer is using at the time.
 export const E2E_MONGODB_URI =
   process.env.E2E_MONGODB_URI ?? "mongodb://localhost:27017/boardplanner_e2e";
 
 export const ADMIN_USERNAME = "admin";
 export const ADMIN_PASSWORD = "test1234";
 
-// A plain project member, reaching the board through a grant rather than through role "admin".
-// withProjectAccess short-circuits on the instance-admin check, so nothing an admin does can
-// tell whether the grants path still works.
 export const MEMBER_USERNAME = "member";
 export const MEMBER_PASSWORD = "test1234";
 
-// A genuine project owner: reaches "admin"-need routes through a Grant `relation: "owner"`, with
-// no standing on the instance at all (role "member", same as MEMBER_USERNAME). "admin" sign-in
-// bypasses the grant lookup entirely via `principal.instanceAdmin` in src/lib/grants.ts, so it
-// cannot tell this path apart from the instance-admin one — every `withProjectOwner` route's own
-// test mocks `check()` rather than composing this persona, which is what this fills in.
 export const OWNER_USERNAME = "owner";
 export const OWNER_PASSWORD = "test1234";
 
 export const PROJECT_KEY = "TP";
-// Deliberately not "Test Project": a project keyed TP also exists in the development database,
-// so the name is what proves which one the server is actually reading.
 export const PROJECT_NAME = "E2E Run Conflict Board";
 
 export const WORKER_NAME = "e2e-macbook-pro";
-// The credential the seeded machine authenticates with, so a spec can drive the claim route itself
-// rather than the service behind it
 export const WORKER_CREDENTIAL = "e2e-worker-credential";
 
-// Real API tokens: the browser authenticates with a session cookie no APIRequestContext can be
-// handed, so every setup call the suite makes over the API carries one of these instead. The
-// prefix is the first 11 characters, which is what verifyBearerToken looks a candidate up by.
 export const API_TOKEN = "cp_e2e00001deadbeefdeadbeefdeadbeef";
 export const MEMBER_API_TOKEN = "cp_e2e00002deadbeefdeadbeefdeadbeef";
 
-// The browser's counterpart to the tokens above: a session row seed() lays down, so a test can
-// arrive signed in by setting one cookie instead of driving the sign-in form. 236 calls to a
-// hand-rolled signIn() across 31 specs were ~2s each, and the wipe before every test is what made
-// them unavoidable. Specs whose subject IS signing in keep the form — see e2e/session.ts.
 export const ADMIN_SESSION_TOKEN = "cps_e2e00003deadbeefdeadbeefdeadbeef";
 export const MEMBER_SESSION_TOKEN = "cps_e2e00004deadbeefdeadbeefdeadbeef";
 export const OWNER_SESSION_TOKEN = "cps_e2e00005deadbeefdeadbeefdeadbeef";
@@ -56,8 +35,6 @@ export const HELD_TASK_TITLE = "Held by a live worker run";
 export const DECOY_TASK_NUMBER = 2;
 export const DECOY_TASK_TITLE = "Already in review";
 
-// Shares the held task's column so a same-column drop has somewhere to land and a bulk move has
-// something it is allowed to take
 export const SIBLING_TASK_NUMBER = 3;
 export const SIBLING_TASK_KEY = `${PROJECT_KEY}-${SIBLING_TASK_NUMBER}`;
 export const SIBLING_TASK_TITLE = "Free to move";
@@ -66,9 +43,6 @@ export const FINISHED_TASK_NUMBER = 4;
 export const FINISHED_TASK_KEY = `${PROJECT_KEY}-${FINISHED_TASK_NUMBER}`;
 export const FINISHED_TASK_TITLE = "Its run already finished";
 
-// The two below are seeded on request rather than by seed(), and both for the same reason: a
-// board-wide "no run badges left" is how several tests prove a run was released, and a second
-// badge standing on the board would let that assertion pass without anything being released.
 export const SECOND_HELD_TASK_NUMBER = 5;
 export const SECOND_HELD_TASK_KEY = `${PROJECT_KEY}-${SECOND_HELD_TASK_NUMBER}`;
 export const SECOND_HELD_TASK_TITLE = "Held by a second live worker run";
@@ -79,15 +53,10 @@ export const QUIET_TASK_TITLE = "Held by a run that has gone quiet";
 
 export const SOURCE_COLUMN = { id: "in_progress", label: "In Progress" };
 export const TARGET_COLUMN = { id: "in_review", label: "In Review" };
-// Somewhere other than the two the refusal tests use, so the finished-run task is never in the
-// way of a drag those tests make
 export const SPARE_COLUMN = { id: "todo", label: "To Do" };
 
 const id = (hex: string) => new mongoose.Types.ObjectId(hex);
 
-// Hashed once per worker process rather than once per seed(). bcrypt at cost 10 is ~56ms a call
-// and seed() made four of them, which was 224ms of its 378ms — paid before every one of the
-// suite's tests. The values are still computed, not pasted, so they cannot go stale.
 const ADMIN_PASSWORD_HASH = bcrypt.hashSync(ADMIN_PASSWORD, 10);
 const MEMBER_PASSWORD_HASH = bcrypt.hashSync(MEMBER_PASSWORD, 10);
 const API_TOKEN_HASH = bcrypt.hashSync(API_TOKEN, 10);
@@ -137,8 +106,6 @@ async function connect() {
   return mongoose.connection;
 }
 
-// The whole database, not a list of collections: this one exists for the fixture, and a run
-// leaves activity logs and notifications behind that a fixed list would keep missing.
 async function empty(db: mongoose.mongo.Db) {
   const names = (await db.listCollections().toArray()).map((c) => c.name);
   await Promise.all(names.map((name) => db.collection(name).deleteMany({})));
@@ -149,11 +116,6 @@ export async function wipe() {
   await mongoose.disconnect();
 }
 
-/**
- * The stored run subdocument, which no endpoint returns: the API publishes only what a reader may
- * see, and a released run is invisible there by design. A test asserting on the absence of a
- * refusal needs to know the fixture still carries the worker that could have caused one.
- */
 export async function storedExecution(
   taskId: mongoose.Types.ObjectId
 ): Promise<Record<string, unknown> | undefined> {
@@ -163,11 +125,6 @@ export async function storedExecution(
   return task?.execution as Record<string, unknown> | undefined;
 }
 
-/**
- * A task the product would accept, for specs that need many of them. Exported because a hand-rolled
- * insert drifts from the schema — one without `createdBy` reads as a product bug the day a test
- * loads the board (BP-482 review).
- */
 export const taskFactory = (now: Date) => (over: Record<string, unknown>) => ({
   project: PROJECT_ID,
   description: "",
@@ -191,10 +148,6 @@ export const taskFactory = (now: Date) => (over: Record<string, unknown>) => ({
   ...over,
 });
 
-/**
- * Adds a card to the board seed() already laid down, and keeps taskCounter ahead of it so the
- * project could still mint the next number.
- */
 async function addTask(over: Record<string, unknown>, taskNumber: number) {
   const db = (await connect()).db!;
   await db.collection("tasks").insertOne(taskFactory(new Date())({ taskNumber, ...over }));
@@ -204,7 +157,6 @@ async function addTask(over: Record<string, unknown>, taskNumber: number) {
   await mongoose.disconnect();
 }
 
-/** A second task under a live run, for the bulk move that has to name more than one refusal. */
 export async function seedSecondHeldTask() {
   const now = new Date();
   await addTask(
@@ -228,16 +180,12 @@ export async function seedSecondHeldTask() {
   );
 }
 
-// BP-529. A sprint that closed with this task still in it, and never swept to the backlog — the
-// one situation where "Remove from sprint" is needed, and the board has no *open* sprint to pair
-// it with.
 export const STRANDED_SPRINT_ID = id("e2e00000000000000000c105");
 export const STRANDED_SPRINT_NAME = "Sprint 2";
 export const STRANDED_TASK_ID = id("e2e00000000000000000d007");
 export const STRANDED_TASK_NUMBER = 15;
 export const STRANDED_TASK_TITLE = "Left in a sprint that already closed";
 
-/** Adds a completed sprint and a task still carrying it, on a board with no open sprint. */
 export async function seedTaskInCompletedSprint() {
   const db = (await connect()).db!;
   const now = new Date();
@@ -268,22 +216,6 @@ export async function seedTaskInCompletedSprint() {
   await mongoose.disconnect();
 }
 
-/**
- * A run that still holds its task but has not reported in `quietForMs`. Past the card's threshold
- * it reads quiet rather than live — and runHolding keys on runId, not on the clock, so the server
- * must refuse the move exactly as it does for a chatty one.
- */
-/**
- * The project fields CP-250 is about. Two properties are deliberate and load-bearing:
- *
- * - every option id differs from the text it stands for, so an implementation that logs the
- *   stored value instead of the displayed one cannot pass;
- * - the ids sort alphabetically in the *reverse* of the order the project configured, so an
- *   implementation that sorts a multiselect by id rather than by option order cannot pass either.
- *
- * A fixture already shaped like the answer proves nothing, and both of these started life that
- * way before a mutation showed the tests staying green.
- */
 export const FIELDS = {
   difficulty: {
     _id: id("e2e00000000000000000f001"),
@@ -303,14 +235,10 @@ export const FIELDS = {
       { id: "aa-web", value: "Web", color: "#6b7280", order: 1 },
     ],
   },
-  // The punctuation is the point: the task asked whether a field named oddly still reads sensibly
-  // once its name is dropped into a sentence.
   spike: { _id: id("e2e00000000000000000f003"), name: "Spike?", fieldType: "checkbox", options: [] },
   points: { _id: id("e2e00000000000000000f004"), name: "Points", fieldType: "number", options: [] },
   target: { _id: id("e2e00000000000000000f005"), name: "Target", fieldType: "date", options: [] },
   notes: { _id: id("e2e00000000000000000f006"), name: "Notes", fieldType: "text", options: [] },
-  // Archived, not deleted: its values survive on tasks and stop being policed, so an edit that
-  // moves one still has to be recorded.
   retired: {
     _id: id("e2e00000000000000000f007"),
     name: "Retired",
@@ -322,10 +250,6 @@ export const FIELDS = {
 
 const fieldDefaults = { required: false, showOnCard: false, showInList: false, filterable: false, archived: false };
 
-/**
- * Puts the fields above on the project and, optionally, values on the task the field tests edit.
- * Kept out of seed() so the run-conflict board stays exactly as that suite left it.
- */
 export async function seedCustomFields(values: Record<string, unknown> = {}) {
   const db = (await connect()).db!;
   const customFields = Object.values(FIELDS).map((field, order) => ({
@@ -341,7 +265,6 @@ export async function seedCustomFields(values: Record<string, unknown> = {}) {
   await mongoose.disconnect();
 }
 
-/** Every history entry on a task, newest first, as the API returns them to the timeline. */
 export async function storedActivity(
   taskId: mongoose.Types.ObjectId
 ): Promise<{ action: string; field: string; oldValue: string; newValue: string }[]> {
@@ -360,7 +283,6 @@ export async function storedActivity(
   }));
 }
 
-/** Renames a field, or one of its options, after history has already been written about it. */
 export async function renameField(
   fieldId: mongoose.Types.ObjectId,
   changes: { name?: string; optionId?: string; optionValue?: string }
@@ -378,9 +300,6 @@ export async function renameField(
   await mongoose.disconnect();
 }
 
-// A sprint with a done and an undone task already in it, plus a fourth task sitting in the
-// backlog with no sprint — enough for a drag to cross the boundary in either direction and for
-// the header's done/total to have somewhere real to move from.
 export const PLANNING_SPRINT_ID = id("e2e00000000000000000c101");
 export const PLANNING_SPRINT_NAME = "Sprint Alpha";
 
@@ -446,11 +365,6 @@ export async function seedSprintPlanning() {
   await mongoose.disconnect();
 }
 
-// BP-208 Task 11: a sprint whose tasks span every shape a numeric field's stored value takes in
-// this database — a genuine number, a value the inline editor wrote as a string ("value: string"
-// on ListView's onFieldChange), a string pre-dating CP-213's validation that isn't a number at
-// all, and a task nobody ever gave one. Only a real MongoDB can say what $convert does with the
-// last two — a unit test mocking Task.aggregate would just echo back whatever it's told to.
 export const ESTIMATE_FIELD_ID = id("e2e00000000000000000f008");
 export const ESTIMATE_SPRINT_ID = id("e2e00000000000000000c201");
 export const ESTIMATE_SPRINT_NAME = "Sprint Estimates";
@@ -533,23 +447,14 @@ export async function seedSprintEstimates() {
   await mongoose.disconnect();
 }
 
-// BP-389. A board with a sprint history: two sprints already closed, one running with a finished
-// and an unfinished task in it, and one planned. A third close puts it on OLDER_COMPLETED_THRESHOLD
-// (src/lib/sprint-selection.ts), so a fourth completed sprint hides one behind "Show N older". Enough for the whole lifecycle to be driven from
-// the screens — activate, edit, close — and for the velocity chart to have two real totals to
-// plot rather than a fixture of its own.
 const LIFECYCLE_POINTS_FIELD_ID = id("e2e00000000000000000f009");
 
 export const LIFECYCLE_PAST_ONE_ID = id("e2e00000000000000000c401");
 export const LIFECYCLE_PAST_ONE_NAME = "Sprint 5";
-// Delivered, and the sprint also carries an unfinished task worth LIFECYCLE_PAST_ONE_ABANDONED —
-// so a chart plotting committed points instead of delivered ones reads a different number
 export const LIFECYCLE_PAST_ONE_DELIVERED = 8;
 export const LIFECYCLE_PAST_ONE_ABANDONED = 4;
 
 const LIFECYCLE_PAST_TWO_ID = id("e2e00000000000000000c402");
-// Numbered above every other sprint and *not* the latest-ending one, so the form's suggestion
-// tells "the latest sprint plus one" apart from "the highest number plus one"
 export const LIFECYCLE_PAST_TWO_NAME = "Sprint 12";
 export const LIFECYCLE_PAST_TWO_DELIVERED = 2;
 
@@ -566,9 +471,6 @@ export const LIFECYCLE_FINISHED_TASK_NUMBER = 120;
 const LIFECYCLE_UNFINISHED_TASK_ID = id("e2e00000000000000000d402");
 export const LIFECYCLE_UNFINISHED_TASK_NUMBER = 121;
 
-// In the backlog and in the done column at once. Whether the planning view offers it is decided in
-// the browser (PlanningView's columnIdsWithRole), and /tasks?sprint=backlog returns it either way —
-// so it is the one thing on this board no server response can answer for.
 export const LIFECYCLE_BACKLOG_DONE_TASK_NUMBER = 125;
 export const LIFECYCLE_BACKLOG_DONE_TASK_TITLE = "Finished long before this sprint";
 
@@ -628,7 +530,6 @@ export async function seedSprintLifecycle() {
       status: "active",
       ...dates(-3, 11),
     }),
-    // Planned, and ending last, so the new-sprint form's suggestion chains off this one
     sprint({
       _id: LIFECYCLE_PLANNED_ID,
       name: LIFECYCLE_PLANNED_NAME,
@@ -695,10 +596,6 @@ export async function seedSprintLifecycle() {
   await mongoose.disconnect();
 }
 
-/**
- * Takes the `done` role off the board's only column that carries it, leaving the column itself in
- * place, so nothing on this board can be finished any more.
- */
 export async function demoteDoneColumn() {
   const db = (await connect()).db!;
   const result = await db
@@ -709,19 +606,11 @@ export async function demoteDoneColumn() {
       { arrayFilters: [{ "column.id": "done" }] }
     );
   await mongoose.disconnect();
-  // An array filter matching nothing updates nothing and still succeeds, which would leave the
-  // board finishing tasks as usual and the failure naming the product rather than this line
   if (result.modifiedCount !== 1) {
     throw new Error(`demoteDoneColumn changed ${result.modifiedCount} boards, expected 1`);
   }
 }
 
-/**
- * Takes the `active` role off the board's only column that carries it, leaving the column in
- * place, so a worker on this board has nowhere to move a task it takes (BP-512). Written straight
- * to the database because the columns endpoint refuses to create this state — which is the point
- * of the specs that use it.
- */
 export async function demoteActiveColumn() {
   const db = (await connect()).db!;
   const result = await db
@@ -737,7 +626,6 @@ export async function demoteActiveColumn() {
   }
 }
 
-/** A sprint as the database holds it, for assertions the API's derived counts would blur. */
 export async function storedSprint(sprintId: mongoose.Types.ObjectId) {
   const db = (await connect()).db!;
   const row = await db.collection("sprints").findOne({ _id: sprintId });
@@ -745,7 +633,6 @@ export async function storedSprint(sprintId: mongoose.Types.ObjectId) {
   return row;
 }
 
-/** The sprint a task belongs to, as an id string, or null when it is back in the backlog. */
 export async function storedTaskSprint(taskNumber: number): Promise<string | null> {
   const db = (await connect()).db!;
   const row = await db.collection("tasks").findOne({ project: PROJECT_ID, taskNumber });
@@ -754,9 +641,6 @@ export async function storedTaskSprint(taskNumber: number): Promise<string | nul
   return row.sprint ? String(row.sprint) : null;
 }
 
-// BP-402. A second person with a grant on the board and no notification preferences of any kind —
-// the control for the task_created row. Their silence is what tells a working opt-in apart from a
-// notification pipeline that is not wired up in this environment at all.
 export const BYSTANDER_USERNAME = "bystander";
 export const BYSTANDER_PASSWORD = "test1234";
 const BYSTANDER_PASSWORD_HASH = bcrypt.hashSync(BYSTANDER_PASSWORD, 10);
@@ -805,8 +689,6 @@ export async function seedQuietTask(quietForMs: number) {
         runId: "e2e-run-0003",
         workerId: String(WORKER_ID),
         attempts: 1,
-        // Older than the silence, so the card cannot read as live off either timestamp: it
-        // falls back to startedAt when phaseAt is missing
         startedAt: new Date(now.getTime() - quietForMs - 60_000),
         lastError: "",
         phase: RUN_PHASE,
@@ -818,13 +700,6 @@ export async function seedQuietTask(quietForMs: number) {
   );
 }
 
-/**
- * The board every spec starts from.
- *
- * `withSessions` is what the auth suite turns off: it counts the rows in `sessions` to say what a
- * sign-in, a logout or a password change did, and a session seeded for the convenience of every
- * other spec is a second row those counts cannot tell from the one under test.
- */
 async function seedBoard(withSessions: boolean) {
   const db = (await connect()).db!;
   await empty(db);
@@ -834,7 +709,6 @@ async function seedBoard(withSessions: boolean) {
   const person = (over: Record<string, unknown>) => ({
     email: "",
     emailNotifications: false,
-    // Off, so every column stays a real drop target instead of collapsing to a rail
     collapseEmptyColumns: false,
     kind: "human",
     createdAt: now,
@@ -854,8 +728,6 @@ async function seedBoard(withSessions: boolean) {
       username: MEMBER_USERNAME,
       password: MEMBER_PASSWORD_HASH,
       fullName: "E2E Member",
-      // Not "admin": this account has no standing on the instance at all, and everything it can
-      // reach on this project it reaches through the grant below
       role: "member",
     }),
     person({
@@ -863,14 +735,10 @@ async function seedBoard(withSessions: boolean) {
       username: OWNER_USERNAME,
       password: OWNER_PASSWORD_HASH,
       fullName: "E2E Owner",
-      // Same as MEMBER_ID: no instance standing. Only the grant below tells the two apart.
       role: "member",
     }),
   ]);
 
-  // Before this grant, the board had no "owner" relation at all, so `ownerCount` (members/route.ts)
-  // was 0 and the "a board must keep at least one owner" refusal was unreachable on this fixture.
-  // It is now — a spec that promotes then demotes a grant will behave differently than on `main`.
   await db.collection("grants").insertMany([
     {
       _id: GRANT_ID,
@@ -907,8 +775,6 @@ async function seedBoard(withSessions: boolean) {
     webhooks: [],
     notificationChannels: [],
     pm: {
-      // On, so a turn can actually run against the stubbed model. dailyTurnCap must be positive:
-      // isOverDailyTurnCap compares used >= cap, so a zero cap refuses the very first turn.
       enabled: true,
       lockedByInstance: false,
       model: "e2e/stub-model",
@@ -1033,8 +899,6 @@ async function seedBoard(withSessions: boolean) {
       taskNumber: HELD_TASK_NUMBER,
       title: HELD_TASK_TITLE,
       status: SOURCE_COLUMN.id,
-      // runId is what makes the run live: task-service keys the refusal on it, and clears it
-      // on release. phaseAt is stamped now so the card reads as alive rather than gone quiet.
       execution: {
         runId: "e2e-run-0001",
         workerId: String(WORKER_ID),
@@ -1065,9 +929,6 @@ async function seedBoard(withSessions: boolean) {
       taskNumber: FINISHED_TASK_NUMBER,
       title: FINISHED_TASK_TITLE,
       status: SPARE_COLUMN.id,
-      // Exactly what a finished run leaves behind: releasing a task $unsets runId and the phase
-      // trio, and keeps workerId and startedAt as history. Nothing here still holds the task, so
-      // it must move like any other card — no card badge, no refusal, no dialog.
       execution: {
         workerId: String(WORKER_ID),
         attempts: 1,
@@ -1082,13 +943,6 @@ async function seedBoard(withSessions: boolean) {
 
 export const seed = () => seedBoard(true);
 
-/**
- * A board that hands off from two columns at once — a state the settings screen warns about and
- * the product does not support. The flag used to be a per-column checkbox, so a project could
- * carry several; the editor cannot reach the state any more, which is exactly why the fixture has
- * to write it. `escalationColumnId` resolves the first review column carrying the flag, so this
- * makes In Review the survivor and Needs Human Review the stranded one.
- */
 export async function seedSecondEscalationColumn() {
   const db = (await connect()).db!;
   await db
@@ -1100,14 +954,6 @@ export async function seedSecondEscalationColumn() {
   await mongoose.disconnect();
 }
 
-/**
- * One column id this board does not share with `DEFAULT_PROJECT_COLUMNS`.
- *
- * The seeded columns are byte-identical to those seven, so a reader that forgets to LOAD a board's
- * columns falls back to them and answers exactly as a correct one does — every claim that
- * project-defined columns decide is invisible on this fixture. Renaming one id separates the two
- * answers in both directions: the new id has to be accepted and the old one refused.
- */
 export const RENAMED_COLUMN_ID = "parked";
 
 export async function seedRenamedColumn() {
@@ -1121,32 +967,23 @@ export async function seedRenamedColumn() {
   await mongoose.disconnect();
 }
 
-/** seed(), minus the session rows — see seedBoard. */
 export const seedWithoutSessions = () => seedBoard(false);
 
-// BP-386. Search answers differently depending on who is asking, so the corpus is two boards
-// sharing one word: the member holds a grant on TP only, and SEARCH_WORD matches a task on each.
-// A single-board fixture cannot tell an enforced project filter from an absent one.
 export const OTHER_PROJECT_ID = id("e2e00000000000000000c301");
 export const OTHER_PROJECT_KEY = "SB";
 export const OTHER_PROJECT_NAME = "E2E Second Search Board";
 
-// Stored capitalised and queried in lower case, so a search that only matches literally cannot pass
 export const SEARCH_WORD = "zeppelin";
 
 export const TITLE_HIT_ID = id("e2e00000000000000000d301");
 export const TITLE_HIT_NUMBER = 10;
 export const TITLE_HIT_TITLE = "Zeppelin mooring mast";
 
-// The word appears nowhere in the title: this is the hit that only a description search finds
 export const BODY_HIT_ID = id("e2e00000000000000000d302");
 export const BODY_HIT_NUMBER = 11;
 export const BODY_HIT_TITLE = "Airship paperwork";
 export const BODY_HIT_DESCRIPTION = "Ordered a new Zeppelin cable for the gondola.";
 
-// Carried in a description and in no title anywhere, on both boards. The endpoint ORs title and
-// description together, so a project filter pushed into one arm of that $or would leak every
-// description on the instance while a title-matched leak test stayed green.
 export const BODY_ONLY_WORD = "gondola";
 
 export const OTHER_HIT_ID = id("e2e00000000000000000d303");
@@ -1155,38 +992,20 @@ export const OTHER_HIT_TITLE = "Zeppelin hangar on the other board";
 export const OTHER_HIT_DESCRIPTION = "Spare gondola parts live in this hangar.";
 export const OTHER_HIT_KEY = `${OTHER_PROJECT_KEY}-${OTHER_HIT_NUMBER}`;
 
-// A word no seeded task carries, for the no-results state
 export const ABSENT_WORD = "quokka";
 
-// Its priority key is deliberately absent, the way a task predating the field is stored. The
-// endpoint applies the default on the way out and the page renders a badge from it, so a corpus
-// where every task already carries one leaves both unexercised.
 export const LEGACY_HIT_ID = id("e2e00000000000000000d304");
 export const LEGACY_HIT_NUMBER = 12;
 export const LEGACY_HIT_WORD = "dirigible";
 export const LEGACY_HIT_TITLE = "Dirigible logbook from before priorities";
 export const LEGACY_HIT_KEY = `${PROJECT_KEY}-${LEGACY_HIT_NUMBER}`;
 
-// Regex metacharacters in a title people would actually type. Escaped, "[v2]" finds this one
-// task; unescaped it is a character class and matches every title holding a "v" or a "2".
 export const META_HIT_ID = id("e2e00000000000000000d305");
 export const META_HIT_NUMBER = 13;
 export const META_HIT_TITLE = "Rewrite the (old) mast [v2]";
 export const META_QUERY = "[v2]";
-// Escaped this matches nothing; unescaped it matches everything
 export const META_WILDCARD = ".*";
 
-/**
- * Never fold this into seed(). What seed() lays down is a contract other specs count against, in
- * two dimensions:
- *
- * - tasks — kanban-board-core.spec.ts counts cards against SEEDED_TASKS = 4 and asserts the number
- *   the next created task is minted with, so four more tasks on TP and a taskCounter of 13 break it;
- * - projects — a screen that lists every board the reader can reach (the OAuth consent screen is
- *   the one that counts them) would silently gain a row for this second board.
- *
- * Both are elsewhere in the suite, and neither failure names this function.
- */
 export async function seedSearchCorpus() {
   const db = (await connect()).db!;
   const now = new Date();
@@ -1238,10 +1057,6 @@ export async function seedSearchCorpus() {
     updatedAt: now,
   });
 
-  // Distinct updatedAt, because the API sorts on it: the arrow-key test needs to know which hit
-  // the cursor starts on and which one it lands on. Inserted in the OPPOSITE order to the one the
-  // sort produces — a collection scan returns insertion order, so a corpus inserted newest-first
-  // lets the sort be deleted with every test still green.
   const task = taskFactory(now);
   await db.collection("tasks").insertMany([
     task({
@@ -1281,8 +1096,6 @@ export async function seedSearchCorpus() {
     }),
   ]);
 
-  // Inserted separately because the factory supplies a priority and this task is defined by not
-  // having one — deleting the key is the only way to store the shape the default exists for.
   const legacy: Record<string, unknown> = task({
     _id: LEGACY_HIT_ID,
     taskNumber: LEGACY_HIT_NUMBER,
@@ -1299,23 +1112,12 @@ export async function seedSearchCorpus() {
   await mongoose.disconnect();
 }
 
-/**
- * BP-400. Somebody with an account on this instance and no way whatsoever to reach this board:
- * role "member", and no grant. Seeded on request rather than by seed(), so specs that count the
- * instance's accounts keep meaning what they meant.
- *
- * The task comes with them, assigned while they still had access — the row the fix must leave
- * alone, and which the detail rail used to render as "Unassigned" because the roster no longer
- * carries the person it names.
- */
 export const OUTSIDER_USERNAME = "outsider";
 export const OUTSIDER_PASSWORD = "test1234";
 const OUTSIDER_PASSWORD_HASH = bcrypt.hashSync(OUTSIDER_PASSWORD, 10);
 export const OUTSIDER_FULL_NAME = "E2E Outsider";
 export const OUTSIDER_ID = id("e2e00000000000000000a006");
 
-// 14, not 10: the search fixture already seeds taskNumber 10 on this project and
-// {project, taskNumber} is a unique index, so both fixtures in one test would collide
 export const OUTSIDER_TASK_NUMBER = 14;
 export const OUTSIDER_TASK_KEY = `${PROJECT_KEY}-${OUTSIDER_TASK_NUMBER}`;
 export const OUTSIDER_TASK_TITLE = "Assigned before they lost access";
@@ -1333,8 +1135,6 @@ export async function seedAssignmentOutsider() {
     emailNotifications: false,
     collapseEmptyColumns: false,
     kind: "human",
-    // No grant is written for them anywhere in this file, and "member" carries no standing on the
-    // instance — so this account reaches exactly nothing on this board.
     role: "member",
     createdAt: now,
   });
@@ -1354,14 +1154,6 @@ export async function seedAssignmentOutsider() {
   );
 }
 
-/**
- * BP-407. Delivery itself needs a real receiver, which loopback-blocked `safeFetch` refuses under
- * BP-408 — so what this seeds is the OUTCOME of an attempt, the shape `dispatchWebhooks` writes
- * back onto a webhook row after one, not a delivery this fixture actually performs.
- *
- * Both rows, not just the failed one: a page that always prints "Last delivery failed" regardless
- * of what is stored would pass a fixture carrying only the negative case.
- */
 export const WEBHOOK_OK_ID = id("e2e00000000000000000f001");
 export const WEBHOOK_UNTRIED_ID = id("e2e00000000000000000ba03");
 export const WEBHOOK_FAILED_ID = id("e2e00000000000000000f002");
@@ -1392,8 +1184,6 @@ export async function seedWebhookDeliveryOutcomes() {
             lastStatus: "failed",
             lastError: "connect ECONNREFUSED",
           },
-          // Never delivered to. The control for the panel: without it, a panel that printed an
-          // outcome for every endpoint would satisfy every assertion about the other two.
           {
             _id: WEBHOOK_UNTRIED_ID,
             url: "https://e2e-receiver.example/never-tried",
@@ -1408,9 +1198,6 @@ export async function seedWebhookDeliveryOutcomes() {
   await mongoose.disconnect();
 }
 
-// BP-396. A second board the consent screen offers and the test deliberately leaves unticked, so
-// "the token sees only what was granted" has something it could have seen and did not. Without it
-// the assertion holds on a board of one project whatever the scope does.
 export const SECOND_PROJECT_ID = id("e2e00000000000000000c601");
 export const SECOND_PROJECT_KEY = "IB";
 export const SECOND_PROJECT_NAME = "E2E Board Nobody Granted";
@@ -1448,20 +1235,6 @@ export async function seedSecondProject() {
   await mongoose.disconnect();
 }
 
-/**
- * BP-433. A second instance admin, and a card on the second board for them to be given.
- *
- * The point of the shape is what happens after a demotion. This account holds a grant on
- * SECOND_PROJECT_ID and none at all on the seeded board, so demoting it to "member" leaves its
- * accessible list non-empty — which is what makes the read routes' `project: { $in: ... }` clause
- * load-bearing rather than shadowed by their "no boards at all" early return. An account with no
- * grant anywhere would take that early return instead and the filter itself would never run.
- *
- * A demotion is also the door: PUT /api/users/[userId] changes the role and leaves grants,
- * sessions and notifications exactly where they were.
- *
- * Requires seedSecondProject() to have run — the grant and the task both point at that board.
- */
 export const AUDITOR_USERNAME = "auditor";
 export const AUDITOR_PASSWORD = "test1234";
 const AUDITOR_PASSWORD_HASH = bcrypt.hashSync(AUDITOR_PASSWORD, 10);
@@ -1486,8 +1259,6 @@ export async function seedDemotableAdmin() {
     emailNotifications: false,
     collapseEmptyColumns: false,
     kind: "human",
-    // Everything this account reaches on the seeded board, it reaches through this and nothing
-    // else. Taking it away is the whole test.
     role: "admin",
     createdAt: now,
   });
@@ -1519,8 +1290,6 @@ export async function seedDemotableAdmin() {
   await mongoose.disconnect();
 }
 
-/** A webhook on the seeded project, written straight in: adding one through the settings screen is
- * settings-save.spec.ts's subject, and this file's tests are about what happens afterwards. */
 export async function seedWebhook(
   url: string,
   events: string[] = ["task_created", "status_changed", "comment_added"]
@@ -1533,8 +1302,6 @@ export async function seedWebhook(
   await mongoose.disconnect();
 }
 
-/** What a project names as its repository. No token: storing one needs ENCRYPTION_KEY, which this
- * run deliberately does not set, and every assertion here is reached before a token is read. */
 export async function seedRepository(fields: {
   repositoryUrl?: string;
   githubToken?: string;
@@ -1546,10 +1313,6 @@ export async function seedRepository(fields: {
   await mongoose.disconnect();
 }
 
-// What a sync leaves on a task once a pull request has been matched to its key. Written here
-// rather than fetched, because the fetch is the one hop of this integration that cannot be run
-// locally: fetchPullRequests names api.github.com in the code, and safe-fetch refuses a loopback
-// address for GitLab — see the note at the top of external-integrations.spec.ts.
 export const LINKED_PR_NUMBER = 178;
 export const LINKED_PR_TITLE = "fix(board): keep the header visible";
 export const LINKED_MR_NUMBER = 9;
@@ -1588,10 +1351,6 @@ export async function seedLinkedPRs() {
   await mongoose.disconnect();
 }
 
-// BP-396. seed()'s categories are bug/doc/user-story/idea — character for character the fallback
-// `generateTask` uses when a project offers none. A generated task landing on one of those proves
-// nothing about the project's own list having been read, which is the CP-213 defect one field
-// across. This is a category no fallback can produce.
 export const EXTRA_CATEGORY = "chore";
 
 export async function seedExtraCategory() {
@@ -1603,18 +1362,6 @@ export async function seedExtraCategory() {
   await mongoose.disconnect();
 }
 
-/**
- * Backdates an access token's expiry and reports whether the row is still there.
- *
- * Only `accessExpiresAt` is moved. The TTL index sits on `refreshExpiresAt` (`models/oauthToken`),
- * so the row is not made a candidate for the reaper — and the caller asserts it survived anyway,
- * because a refusal caused by a missing row is not the refusal the test is about.
- */
-/**
- * The row is there and readable, but carries no expiry — the shape BP-444 found reading
- * `.getTime()` off undefined, so an ordinary refusal left `verifyOAuthAccessToken` as a TypeError.
- * Returns whether the row survived, so a test cannot mistake a reaped row for the refusal.
- */
 export async function stripAccessExpiry(accessToken: string): Promise<boolean> {
   const db = (await connect()).db!;
   const accessTokenHash = crypto.createHash("sha256").update(accessToken).digest("hex");
@@ -1637,10 +1384,6 @@ export async function expireAccessToken(accessToken: string): Promise<boolean> {
   return !!still;
 }
 
-// BP-464. The two agents `update_task` resolves by name, and the two rules that resolution has to
-// keep: a project agent anybody who may edit a TP task may choose, and a personal one of the
-// admin's that only the admin's own tasks may carry. Both runnable — every agent is born empty,
-// and an empty one is a draft a task refuses to carry.
 export const PROJECT_AGENT_NAME = "Board Runner";
 export const PERSONAL_AGENT_NAME = "Admin's own";
 
@@ -1674,11 +1417,6 @@ export async function seedAgents() {
   await mongoose.disconnect();
 }
 
-/**
- * A project-scoped agent that belongs to the second board and nowhere else, for BP-496: naming it
- * from a task on the seeded board must be refused as belonging to another project, not treated as
- * though no such agent existed at all. Requires seedSecondProject().
- */
 export const FOREIGN_ONLY_AGENT_NAME = "Their Runner";
 export const FOREIGN_ONLY_AGENT_ID = id("e2e00000000000000000ab03");
 
@@ -1700,10 +1438,6 @@ export async function seedForeignAgent() {
   await mongoose.disconnect();
 }
 
-/**
- * A sprint on the second board, for the cross-project reference BP-314 closed: named through TP,
- * it has to be refused as if it did not exist. Requires seedSecondProject().
- */
 export const FOREIGN_SPRINT_ID = id("e2e00000000000000000c701");
 export const FOREIGN_SPRINT_NAME = "Their sprint";
 
@@ -1724,7 +1458,6 @@ export async function seedForeignSprint() {
   await mongoose.disconnect();
 }
 
-/** A task on the seeded board as the database holds it, for the fields the API populates or renames. */
 export async function storedTask(taskNumber: number): Promise<Record<string, unknown>> {
   const db = (await connect()).db!;
   const row = await db.collection("tasks").findOne({ project: PROJECT_ID, taskNumber });
@@ -1733,23 +1466,9 @@ export async function storedTask(taskNumber: number): Promise<Record<string, unk
   return row as Record<string, unknown>;
 }
 
-// BP-469. The cross-board list on /my-tasks, which is the one screen whose whole subject is tasks
-// this reader has on boards that agree on nothing but their column roles.
-//
-// Requires seedSecondProject(): the second group's tasks live on that board, and a list that spans
-// exactly one project cannot tell grouping from a heading.
 export const MINE_ACTIVE_NUMBER = 200;
 export const MINE_ACTIVE_TITLE = "Painting the mooring mast";
 
-// Two columns this board invented, and both are discriminators.
-//
-// `Triage Desk` is what role ordering is proved against: keyed on column *ids* it sorts last
-// whatever it means, and keyed on the role it sits second. Its colour is the other half of that
-// same fix.
-//
-// `Shipped` is what the Hide done filter is proved against. The board's seeded done column is
-// called `done`, so a filter written as `status !== "done"` and one written on the column's role
-// agree on it exactly — and the page's filter is the client-side one this spec is about.
 export const MINE_CUSTOM_COLUMN = {
   id: "triage_desk",
   label: "Triage Desk",
@@ -1779,34 +1498,19 @@ export const MINE_APPROVED_TITLE = "Ordering the gondola cable";
 export const MINE_DONE_NUMBER = 203;
 export const MINE_DONE_TITLE = "Riveting the keel, finished";
 
-// Left behind by a deleted column: no such id on the board, so the server can resolve neither role
-// nor label nor colour and the page has to show the row anyway.
 export const MINE_ORPHAN_STATUS = "mothballed";
 export const MINE_ORPHAN_NUMBER = 204;
 export const MINE_ORPHAN_TITLE = "Left in a column that is gone";
 
-// Assigned to the member, on the board the member can reach. Two jobs: the admin must not see it
-// (the assignee filter), and it is the member's own control against the one below.
 export const THEIRS_NUMBER = 205;
 export const THEIRS_TITLE = "The member's own rivets";
 
-// On the board the member holds no grant on. Assigned to them, so the only thing keeping it off
-// their list is the project filter — which is what this row is here to prove. The spec reads it
-// back as the admin, whose list carries no project clause, so that claim has a control.
 export const THEIRS_UNREACHABLE_NUMBER = 2;
 export const THEIRS_UNREACHABLE_TITLE = "On a board the member cannot reach";
 
 export const MINE_OTHER_BOARD_NUMBER = 3;
 export const MINE_OTHER_BOARD_TITLE = "A chore on the other board";
 
-/**
- * `updatedAt` in minutes before now, per task.
- *
- * Deliberately the reverse of the order the page must put them in: the endpoint sorts on
- * `updatedAt` descending, so a page that dropped its sort altogether would render this list
- * backwards rather than in the order it happens to have been seeded in. Every value is distinct,
- * so the secondary key is stated rather than left to Mongo's tie-break.
- */
 const MINUTES_OLD: Record<number, number> = {
   [MINE_ORPHAN_NUMBER]: 10,
   [MINE_DONE_NUMBER]: 20,
@@ -1906,11 +1610,6 @@ export async function seedMyTasks() {
   await mongoose.disconnect();
 }
 
-/**
- * Everything this reader has, finished. The page has two empty states and they say different
- * things — a fixture with no tasks at all can only reach the first. The board's own `Shipped`
- * column comes with it, for the same reason seedMyTasks adds it.
- */
 export const MINE_ONLY_DONE_NUMBER = 210;
 export const MINE_ONLY_DONE_TITLE = "The only thing left, and it is done";
 
@@ -1932,25 +1631,12 @@ export async function seedMyTasksAllDone() {
   );
 }
 
-/** Deletes a project row and nothing else, which is a state the product itself never leaves. */
 export async function deleteProjectRow(projectId: mongoose.Types.ObjectId) {
   const db = (await connect()).db!;
   await db.collection("projects").deleteOne({ _id: projectId });
   await mongoose.disconnect();
 }
 
-/**
- * BP-469. A third board, for the one claim the projects list makes that a two-board fixture
- * cannot separate: the order.
- *
- * `/api/projects` sorts `{ sortOrder: 1, createdAt: -1 }`. This board is seeded last, so it is the
- * newest of the three, and carries sortOrder 0 like the seeded board — which puts it first under
- * the real rule and second under a sort that only reads createdAt (IB is newer than TP and would
- * come between them).
- *
- * It also carries a description and an icon of its own, where IB has neither, so the card's two
- * conditional halves both have a case.
- */
 export const NEWEST_PROJECT_ID = id("e2e00000000000000000c801");
 export const NEWEST_PROJECT_KEY = "NB";
 export const NEWEST_PROJECT_NAME = "E2E Newest Board";
@@ -1990,12 +1676,6 @@ export async function seedNewestProject() {
   await mongoose.disconnect();
 }
 
-/**
- * BP-469. A grant for the seeded member on another board, so a test can put a second row in their
- * sidebar. Without one the member reaches exactly one project, and `ProjectTree` hides its drag
- * handles when there is nothing to reorder — which makes "a member cannot drag" pass whatever the
- * gate does.
- */
 export async function grantMemberOn(projectId: mongoose.Types.ObjectId) {
   const db = (await connect()).db!;
   const now = new Date();

@@ -12,7 +12,6 @@ vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/hooks/use-auth", () => ({ useAuth: () => auth }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), back: vi.fn() }),
-  // useOpenTask asks where the reader is before it decides how to leave (BP-540)
   usePathname: () => "/projects/TP",
 }));
 vi.mock("@/lib/board-refresh", () => ({
@@ -21,7 +20,6 @@ vi.mock("@/lib/board-refresh", () => ({
 }));
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
 
-// The self-fetching panels are stubbed; this spec is about the assembly
 vi.mock("./TaskActivityPanel", () => ({
   TaskActivityPanel: () => <div data-testid="activity-panel" />,
 }));
@@ -107,7 +105,6 @@ describe("TaskDetail", () => {
     expect(screen.getByText("Description")).toBeTruthy();
   });
 
-  // typeof null === "object", so a deleted creator used to take the populated branch and throw
   it("renders a task whose creator was deleted", async () => {
     api.get.mockImplementation((url: string) => {
       if (url === "/api/projects/TP/assignable-users") return Promise.resolve([]);
@@ -134,7 +131,6 @@ describe("TaskDetail", () => {
   it("offers the status as a picker carrying the column label", async () => {
     renderDetail();
     await loaded();
-    // "todo" is the seeded column's id; the pill shows its label
     const pill = screen.getByRole("combobox", { name: "Status" });
     expect(pill.textContent).toMatch(/To Do/i);
     await act(async () => pill.click());
@@ -185,18 +181,6 @@ describe("TaskDetail", () => {
     expect(api.del).not.toHaveBeenCalled();
   });
 
-  /**
-   * BP-298. The property rail holding "Delete task" only appears at lg, and below it the same
-   * button sits at the foot of the "All details" sheet, under every field on the task — so a
-   * phone or a tablet had no delete anyone could find. The overflow menu is that affordance:
-   * two taps from an open task, and through the same confirmation as the rail.
-   */
-  /**
-   * BP-337. A delete the server refuses because a run holds the task is a question, not an error —
-   * the same shape the status change already answers with a second dialog. A toast here would
-   * report a failure for something the operator can simply say yes to, and the outcome is stronger
-   * than a status change: the task and its comments are gone rather than moved.
-   */
   it("asks again when a run holds the task, and resends the delete with force", async () => {
     api.del
       .mockRejectedValueOnce({
@@ -215,7 +199,6 @@ describe("TaskDetail", () => {
     await act(async () => menu.getByRole("option", { name: "Delete task" }).click());
     await act(async () => screen.getByRole("button", { name: "Delete" }).click());
 
-    // The refusal names the worker and its phase rather than saying the delete failed
     expect(screen.getByText(/being executed by mac \(phase agent\)/)).toBeTruthy();
     expect(onClose).not.toHaveBeenCalled();
 
@@ -244,7 +227,6 @@ describe("TaskDetail", () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 
-  // Cancelling is the whole point of the confirmation — the menu must not delete on its own
   it("leaves the task alone when the confirmation is dismissed", async () => {
     renderDetail();
     await loaded();
@@ -258,8 +240,6 @@ describe("TaskDetail", () => {
     expect(screen.queryByText(/cannot be undone/)).toBeNull();
   });
 
-  // Columns are per project since CP-128, so sending a literal "planned" is a 400 in any
-  // project that renamed or rebuilt its board — the server picks the backlog column itself
   it("duplicates without dictating a status, and carries the custom fields over", async () => {
     api.post.mockResolvedValue({ taskNumber: 7 });
     renderDetail();
@@ -274,9 +254,6 @@ describe("TaskDetail", () => {
     expect(body.title).toBe("Copy of Recurring one");
   });
 
-  // BP-462. The copy of a weekly task did not repeat, the copy of an urgent one was medium, and
-  // the checklist came over still ticked — three fields decided by which six the POST happened
-  // to name.
   it("duplicates the rhythm and the priority, and unticks the criteria", async () => {
     api.post.mockResolvedValue({ taskNumber: 7 });
     api.get.mockImplementation((url: string) => {
@@ -306,7 +283,6 @@ describe("TaskDetail", () => {
       { text: "First criterion", done: false },
       { text: "Second criterion", done: false },
     ]);
-    // The hand-over is not copied: the task screen navigates to the copy and a person decides
     for (const field of ["assignee", "sprint", "agent"]) {
       expect(body).not.toHaveProperty(field);
     }
@@ -339,9 +315,6 @@ describe("TaskDetail", () => {
   });
 });
 
-// CP-235. The board asks before taking a task off a worker; this view reaches the same refusal
-// through the same endpoint, and used to answer it with "Failed to update status" — an error
-// message for something that is not an error, and no way to proceed.
 describe("TaskDetail, moving a task a worker is running", () => {
   const refusal = () =>
     Object.assign(new Error("held"), {
@@ -380,7 +353,6 @@ describe("TaskDetail, moving a task a worker is running", () => {
     });
   });
 
-  // A refusal for any other reason is still a failure, and must not be dressed up as a question
   it("still reports an ordinary failure", async () => {
     api.patch.mockRejectedValueOnce(Object.assign(new Error("boom"), { status: 500 }));
     renderDetail();
@@ -393,12 +365,6 @@ describe("TaskDetail, moving a task a worker is running", () => {
   });
 });
 
-// BP-358 review round 1: PropertyRail's `projectDefaultAgent` sort is unit-tested in isolation, but
-// nothing pinned TaskDetail actually carrying it to either call site — removing the prop from either
-// the desktop aside or the mobile sheet left every test above green, because the shared `auth` mock
-// never set `isAdmin` (so the Agent row took the read-only branch, which ignores the prop) and the
-// shared `/api/agent*` mock returned `[]` (nothing to order even if it hadn't). Scoped to its own
-// describe rather than changed file-wide, so the other 19 tests keep their current, unrelated shape.
 describe("TaskDetail, the agent picker's project default", () => {
   const AGENTS = [
     { _id: "ag1", name: "Default", scope: "global", description: "" },
@@ -447,20 +413,7 @@ describe("TaskDetail, the agent picker's project default", () => {
   });
 });
 
-/**
- * BP-358 fix wave: the same escape as the block above, for the prop that carries the whole
- * user-visible half of this branch. `handoverOf` and the notice it renders are unit-tested in
- * PropertyRail.test.tsx, where `stored` is passed directly — so blanking `stored={task}` on the
- * desktop aside, or on the mobile sheet, or nulling `assignedBy` inside it, left the entire suite
- * green while the product went back to saying nothing about why a task will never run.
- *
- * Both call sites are asserted separately, because that is what "removing it from either" means.
- */
 describe("TaskDetail, the Agent row's handover notice", () => {
-  // Assigned to one person BY ANOTHER, which is the branch with something to say. `todo` carries
-  // the approved role in DEFAULT_PROJECT_COLUMNS, which is what the empty `columns` above resolves
-  // to — a task outside that column would report "not-approved-yet" instead and pass for the wrong
-  // reason.
   const handedOver = {
     ...task,
     status: "todo",
@@ -500,8 +453,6 @@ describe("TaskDetail, the Agent row's handover notice", () => {
     expect(notice.textContent).toContain("Krzysiek");
   });
 
-  // The stored task, not a blank: reading `assignedBy` off anything else is how the notice would
-  // silently stop describing this task
   it("reads the assigner off the task the page loaded", async () => {
     serve({ assignedBy: { _id: "u3", username: "ada", fullName: "Ada" } });
     renderDetail();
@@ -512,9 +463,6 @@ describe("TaskDetail, the Agent row's handover notice", () => {
     ).toContain("Ada");
   });
 
-  // The board's own columns have to reach the rail as well, or a task sitting in the backlog with
-  // an agent reports that its hand-over is fine. Asserted at both call sites for the same reason
-  // `stored` is: dropping it from either one alone is what a test on the other misses.
   const inTheBacklog = {
     status: "planned",
     assignedBy: { _id: "u1", username: "rpo", fullName: "Rafal Podles" },
@@ -541,12 +489,6 @@ describe("TaskDetail, the Agent row's handover notice", () => {
     ).toBe("not-approved-yet");
   });
 
-  /**
-   * The reproduction, at the assembly rather than in the unit: a task with an agent, handed to
-   * itself, under a run — and the rail told the reader beside the live indicator that nothing would
-   * run it. `done` printed the same sentence. Reading the board's ROLES rather than a list of its
-   * approved ids is what distinguishes "not there yet" from "already past there".
-   */
   it.each(["in_progress", "done"])(
     "says nothing about a task in %s, whatever the rest of its hand-over is",
     async (status) => {
@@ -558,8 +500,6 @@ describe("TaskDetail, the Agent row's handover notice", () => {
     }
   );
 
-  // Nothing to say about a task whose assignee handed it to themselves — the everyday case, and a
-  // notice on it would be on almost every task on the board
   it("says nothing when the hand-over is sound", async () => {
     serve({ assignedBy: { _id: "u1", username: "rpo", fullName: "Rafal Podles" } });
     renderDetail();
@@ -569,15 +509,6 @@ describe("TaskDetail, the Agent row's handover notice", () => {
   });
 });
 
-/**
- * The notice above tells the reader to "assign it again to record that", and this is the view that
- * prints it. Auto-save sends the diff, so re-picking the person already on the task sent nothing at
- * all: no PUT, no toast, no change — the recovery the product documents was a no-op exactly where
- * it was documented. The e2e that proves the repair calls updateTask directly and steps over this.
- *
- * Asserted on the request rather than on a callback, because the callback is the half that already
- * worked: what broke is between the picker and the wire.
- */
 describe("TaskDetail, re-assigning a task whose assigner was never recorded", () => {
   const RAFAL = { _id: "u1", username: "rpo", fullName: "Rafal Podles" };
   const legacy = {
@@ -585,7 +516,6 @@ describe("TaskDetail, re-assigning a task whose assigner was never recorded", ()
     status: "todo",
     agent: "ag1",
     assignee: RAFAL,
-    // The absence itself. A null would take the same branch, but an old document has no key at all.
     assignedBy: undefined,
   };
 
@@ -616,8 +546,6 @@ describe("TaskDetail, re-assigning a task whose assigner was never recorded", ()
     expect(api.put).toHaveBeenCalledWith("/api/projects/TP/tasks/t1", { assignee: "rpo" });
   });
 
-  // The task is re-read afterwards, or the reader performs the repair and watches the complaint it
-  // fixed stay on screen until they navigate away
   it("re-reads the task, so the notice it just fixed goes", async () => {
     serve();
     renderDetail();
@@ -633,8 +561,6 @@ describe("TaskDetail, re-assigning a task whose assigner was never recorded", ()
     );
   });
 
-  // The forced write is for the missing assigner and nothing else. A task that records one is
-  // already correct, and re-picking on it must stay the no-op the diff makes it.
   it("sends nothing when the assigner is already recorded", async () => {
     serve({ assignedBy: RAFAL });
     renderDetail();
@@ -646,15 +572,6 @@ describe("TaskDetail, re-assigning a task whose assigner was never recorded", ()
   });
 });
 
-/**
- * A personal agent runs only on a task its owner assigned to themselves, so the rail withholds one
- * from the picker anywhere else — which it can only do if it is told who is reading. The prop is
- * required, so dropping it from a call site is a `tsc` error; passing the WRONG thing is not, and a
- * rail that never matches the reader silently offers nobody their own agents anywhere.
- *
- * Both call sites, separately, and in both polarities: the note is the only visible difference, so
- * a test asserting it in one state alone would pass with a rail that always printed it.
- */
 describe("TaskDetail, whether the rail knows who is reading", () => {
   const MINE = { _id: "ag9", name: "My own agent", scope: "user", description: "" };
 
@@ -715,13 +632,6 @@ describe("TaskDetail, whether the rail knows who is reading", () => {
   });
 });
 
-/**
- * BP-400 code review. `users` now comes from the project-scoped roster, which deliberately omits
- * anybody who has since lost access — so a plain `.find()` against it resolves to nothing for such
- * a task, and the mobile chip printed "Unassigned" over a task the server has assigned. This is the
- * same defect the desktop rail was fixed for, one component over; assigneeToShow is what both now
- * ask, so the two cannot disagree.
- */
 describe("TaskDetail, the mobile summary's assignee chip", () => {
   it("names an assignee the roster no longer carries, rather than reading as unassigned", async () => {
     api.get.mockImplementation((url: string) => {

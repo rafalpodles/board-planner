@@ -9,7 +9,6 @@ const sessionUpdateOne = vi.fn();
 const bcryptCompare = vi.fn();
 
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
-// A plain array, not a spy: beforeEach clears mocks, and this call happens once at module load
 const hashSyncCalls: unknown[][] = [];
 const bcryptHashSync = (...args: unknown[]) => {
   hashSyncCalls.push(args);
@@ -142,13 +141,9 @@ describe("getAuthUser — machine credentials", () => {
 });
 
 describe("getAuthUser — an OAuth row that cannot be shown to be live", () => {
-  // BP-444: every stale shape here answers 401, and one of them arrived there by throwing. A row
-  // whose expiry is missing read `.getTime()` off undefined, so an ordinary refusal left the
-  // module as a TypeError — 401 downstream only because mcp-handler catches everything.
   it.each([
     ["missing", undefined],
     ["null", null],
-    // NaN is not less than Date.now(), so this row was read as a LIVE credential
     ["an unparseable date", new Date("not a date")],
   ])("refuses a row whose accessExpiresAt is %s without throwing", async (_label, value) => {
     oauthTokenFindOne.mockResolvedValue({
@@ -160,8 +155,6 @@ describe("getAuthUser — an OAuth row that cannot be shown to be live", () => {
     await expect(
       getAuthUser(request({ authorization: `Bearer ${MACHINE_TOKEN}` }))
     ).resolves.toBeNull();
-    // The refusal is the token's, not the user's: reaching the user lookup would mean the row was
-    // read as live
     expect(userFindById).not.toHaveBeenCalled();
   });
 
@@ -219,8 +212,6 @@ describe("getAuthUser — machine token planted in the session cookie", () => {
 
     expect(result).toBeNull();
     expect(oauthTokenFindOne).not.toHaveBeenCalled();
-    // Without this the assertion above is satisfied by the default empty Session collection and
-    // would pass against code that has no cookie support at all
     expect(sessionFindOne).toHaveBeenCalledWith({ tokenHash: sha256(MACHINE_TOKEN) });
   });
 
@@ -234,8 +225,6 @@ describe("getAuthUser — machine token planted in the session cookie", () => {
 
     const result = await getAuthUser(withCookie(MACHINE_TOKEN));
 
-    // A row keyed on sha256(cpat_) can only exist if someone put it there; it is still a session,
-    // so it must not carry machine authority
     expect(result?.viaMachineCredential).toBe(false);
     expect(oauthTokenFindOne).not.toHaveBeenCalled();
   });
@@ -341,8 +330,6 @@ describe("getAuthUser — a presented Bearer never falls back to the cookie", ()
       })
     );
 
-    // /api/mcp gates on the header merely being present, so falling through here would hand it an
-    // AuthInfo for a token nothing validated, authenticated by a cookie that rode along
     expect(result).toBeNull();
     expect(sessionFindOne).not.toHaveBeenCalled();
   });
@@ -357,8 +344,6 @@ describe("getAuthUser — a presented Bearer never falls back to the cookie", ()
 });
 
 describe("getAuthUser — the five machine-gated endpoints", () => {
-  // Each gate is `if (user.viaMachineCredential) return 403`, so a cookie principal must carry a
-  // strict false rather than an absent property
   it("gives a cookie session a strict false, which is what the gates test", async () => {
     sessionFound(sessionRow());
 
@@ -388,9 +373,6 @@ describe("getAuthUser — the five machine-gated endpoints", () => {
   });
 });
 
-// BP-318: the miss path returned before bcrypt, so an unknown username answered in single-digit
-// milliseconds against ~100 ms for a real one — a username oracle on /api/auth/login and
-// /oauth/authorize that needs no statistics to read.
 describe("verifyCredentials and the username oracle", () => {
   function lookupReturns(user: unknown) {
     userFindOne.mockReturnValue({ select: () => Promise.resolve(user) });
@@ -419,16 +401,11 @@ describe("verifyCredentials and the username oracle", () => {
     expect(bcryptCompare.mock.calls.length).toBe(onMiss);
   });
 
-  // The stand-in must be a real hash comparison, not a cheap string compare that returns at once
-  // Counting calls is not enough: comparing against a string that is not a hash returns in
-  // microseconds and restores the oracle with the suite green. Pin what it compares against.
   it("compares against the module's own hash, not against something cheap", async () => {
     lookupReturns(null);
 
     await verifyCredentials("nobody", "hunter2");
 
-    // The mocked hashSync returns this; the assertion is that the compare uses what the module
-    // hashed at load, not a literal that bcrypt would reject in microseconds
     expect(bcryptCompare.mock.calls[0][1]).toBe("$2a$10$absent");
   });
 

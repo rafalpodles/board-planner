@@ -31,8 +31,6 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   const token = decryptSecret(project.gitlabToken);
   const taskKey = `${project.key}-${task.taskNumber}`;
 
-  // Commit search needs GitLab's search feature; a repo without it should still
-  // show branches rather than failing the whole panel
   const [branches, commits] = await Promise.allSettled([
     fetchTaskBranches(host, projectPath, token, taskKey),
     fetchTaskCommits(host, projectPath, token, taskKey),

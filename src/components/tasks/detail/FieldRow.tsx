@@ -18,7 +18,6 @@ function RowBody({
 }: {
   label: string;
   align: "center" | "start";
-  /** Marks the value column so a picker's panel opens under it, not under the label */
   anchor?: boolean;
   children: ReactNode;
 }) {
@@ -43,10 +42,8 @@ interface FieldRowProps {
   label: string;
   children: ReactNode;
   onClick?: () => void;
-  /** Sheet sizing: the repo's 44px tap target */
   touch?: boolean;
   align?: "center" | "start";
-  /** Set when the row opens a popup, so the row announces itself as one */
   expanded?: boolean;
 }
 
@@ -82,7 +79,6 @@ export function FieldRow({
   );
 }
 
-/** Value shown when a field holds nothing yet */
 export function EmptyValue({ children }: { children: ReactNode }) {
   return <span className="text-text-muted">{children}</span>;
 }
@@ -130,7 +126,6 @@ interface ComboboxRowSharedProps {
   options: ComboboxOption[];
   touch?: boolean;
   align?: "center" | "start";
-  /** Offered above the options; picking it clears the field */
   emptyOption?: string;
 }
 
@@ -148,11 +143,6 @@ interface ComboboxRowMultiProps extends ComboboxRowSharedProps {
   children: (selected: ComboboxOption[]) => ReactNode;
 }
 
-/**
- * A rail row whose value comes from a fixed set. The same picker the board's list view
- * uses — one implementation, so a tick, a colour dot and the search box behave the same
- * wherever a value is chosen.
- */
 export function ComboboxRow(props: ComboboxRowSingleProps | ComboboxRowMultiProps) {
   const { label, options, touch = false, align = "center", emptyOption } = props;
   const trigger = `-mx-2.5 cursor-pointer transition-colors hover:bg-bg-hover ${rowClass(
@@ -201,7 +191,6 @@ export function ComboboxRow(props: ComboboxRowSingleProps | ComboboxRowMultiProp
 interface OptionItemProps {
   onClick: () => void;
   selected?: boolean;
-  /** Destructive action — coloured apart from the choices around it */
   danger?: boolean;
   children: ReactNode;
 }

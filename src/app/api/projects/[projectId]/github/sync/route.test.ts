@@ -1,13 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-/**
- * BP-429. This route is unchanged by that ticket; the tests are what it was missing. Its
- * transition is still keyed to the seeded column ids, so a board that renamed them opts out in
- * silence — asserted below rather than fixed, because which column merged work lands in is a
- * decision about the pipeline and not one to take while adding a missing argument to a matcher.
- * The network is stubbed; the matcher, the linking rule and the transition all run for real.
- */
-
 const fetchPullRequests = vi.fn();
 const projectFindById = vi.fn();
 const taskFindOne = vi.fn();
@@ -97,8 +89,6 @@ describe("POST .../github/sync", () => {
     await POST(request(), ctx());
 
     expect(doc.linkedPRs).toHaveLength(1);
-    // Without this, every assertion here is about an object mutated in memory and nothing
-    // proves the route ever wrote it back.
     expect(doc.save).toHaveBeenCalled();
   });
 
@@ -121,8 +111,6 @@ describe("POST .../github/sync", () => {
   });
 
   it("replaces a link with no provider recorded, because a link predating the field is this one's", async () => {
-    // This is the route where the `?? "github"` default is observable: read the other way, the
-    // legacy row would survive as a duplicate of the pull request that just replaced it.
     const doc = task({ linkedPRs: [{ number: 7, url: "https://github.com/o/r/pull/7" }] });
     taskFindOne.mockResolvedValue(doc);
     fetchPullRequests.mockResolvedValue([pr({ number: 1 })]);
@@ -160,8 +148,6 @@ describe("POST .../github/sync", () => {
 
     expect(doc.status).toBe("needs_human_review");
     expect(logActivity).not.toHaveBeenCalled();
-    // The control: the route ran and did its other work, so the silence above is a decision
-    // rather than a sync that never reached this task.
     expect(body.prsLinked).toBe(1);
   });
 
@@ -178,9 +164,6 @@ describe("POST .../github/sync", () => {
   });
 
   it("transitions nothing on a board that renamed its columns — the known gap, pinned", async () => {
-    // BP-110 made GitLab's transition role-based and left this one keyed to the seeded ids, so a
-    // renamed board gets a sync that reports success and moves nothing. Asserted so that whoever
-    // closes it has to come here and say so, instead of finding a test that agrees either way.
     projectFindById.mockReturnValue({ lean: () => project({ columns: RENAMED_COLUMNS }) });
     const doc = task({ status: "checking" });
     taskFindOne.mockResolvedValue(doc);

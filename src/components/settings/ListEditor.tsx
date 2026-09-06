@@ -8,9 +8,7 @@ interface ListEditorProps<T> {
   items: T[];
   onChange: (next: T[]) => void;
   keyOf: (item: T, index: number) => string;
-  /** The row's own controls. Whatever a row contains is the caller's business. */
   renderRow: (item: T, index: number) => React.ReactNode;
-  /** Names the row in the reorder and remove labels a screen reader announces */
   nameOf: (item: T) => string;
   onAdd?: () => void;
   addLabel?: string;
@@ -19,13 +17,6 @@ interface ListEditorProps<T> {
   empty?: React.ReactNode;
 }
 
-/**
- * Add, reorder, edit, remove — for columns, categories, field options and templates,
- * which each grew their own version of this.
- *
- * Removal is `onChange` on the array, not a request: a row is a field, so it collects in
- * the save bar like every other field. Destroying a whole object is DangerAction's job.
- */
 export function ListEditor<T>({
   items,
   onChange,
@@ -94,7 +85,6 @@ export function ListEditor<T>({
             <div className="flex items-center gap-1">
               {reorderable && (
                 <>
-                  {/* The grip is pointer-only, so the same move has to be reachable by key */}
                   <button
                     type="button"
                     onClick={() => move(i, i - 1)}

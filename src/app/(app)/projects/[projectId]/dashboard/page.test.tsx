@@ -37,8 +37,6 @@ const emptyStats: Stats = {
   createdOverTime: weeks.map((week) => ({ week, created: 0, completed: 0 })),
 };
 
-// What /api/projects/[projectId]/stats really answers for a project with no tasks:
-// the status keys are seeded to zero, the other breakdowns come back absent
 const noTasksStats: Partial<Stats> = {
   total: 0,
   statusBreakdown: Object.fromEntries(TASK_STATUSES.map((s) => [s, 0])),
@@ -116,8 +114,6 @@ describe("Dashboard charts with partial data", () => {
     expect(screen.getAllByText("Jul 20").length).toBeGreaterThan(0);
   });
 
-  // A percentage height is what made every bar collapse to its minimum: the column
-  // sizes to its content, so there is nothing for the percentage to resolve against
   it("sizes the velocity bars in px, never as a percentage of an auto-height column", async () => {
     await renderDashboard({
       velocity: weeks.map((week, i) => ({ week, count: i })),

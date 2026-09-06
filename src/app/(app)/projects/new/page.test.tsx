@@ -7,8 +7,6 @@ import type { ApiUser } from "@/types";
 const { api, nav, auth } = vi.hoisted(() => ({
   api: { post: vi.fn() },
   nav: { replace: vi.fn(), back: vi.fn(), push: vi.fn() },
-  // Annotated, so a field added to AuthState fails here instead of reaching the component as
-  // undefined with the suite green
   auth: {
     user: null as ApiUser | null,
     isAdmin: true as boolean,
@@ -36,8 +34,6 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-// BP-534: this page used to read no auth state at all, so a member reached the full form by URL
-// and was only refused after posting.
 describe("the admin gate", () => {
   it("renders the form for an admin", () => {
     render(<NewProjectPage />);

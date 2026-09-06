@@ -3,8 +3,6 @@ import { connectDB } from "@/lib/db";
 import { withAdmin } from "@/lib/middleware";
 import { Project } from "@/models/project";
 
-// The sidebar order is one list shared by everyone, so it is an instance-level
-// setting — the same reason creating a project is admin-only.
 export const PUT = withAdmin(async (request) => {
   await connectDB();
 

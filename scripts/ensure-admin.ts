@@ -1,12 +1,3 @@
-/**
- * Migration script: ensures at least one admin user exists.
- * If no user has role "admin", promotes the oldest user.
- *
- * Usage: npx tsx scripts/ensure-admin.ts
- *
- * Requires MONGODB_URI environment variable.
- */
-
 import mongoose from "mongoose";
 
 const MONGODB_URI = process.env.MONGODB_URI;
@@ -28,7 +19,6 @@ async function main() {
 
   const users = db.collection("users");
 
-  // Check if any admin exists
   const adminCount = await users.countDocuments({ role: "admin" });
 
   if (adminCount > 0) {
@@ -44,7 +34,6 @@ async function main() {
     return;
   }
 
-  // Find the oldest user
   const oldest = await users.findOne({}, { sort: { createdAt: 1 } });
   if (!oldest) {
     console.error("Could not find oldest user");
@@ -52,7 +41,6 @@ async function main() {
     process.exit(1);
   }
 
-  // Promote to admin
   await users.updateOne(
     { _id: oldest._id },
     { $set: { role: "admin" } }
@@ -62,7 +50,6 @@ async function main() {
     `Promoted "${oldest.fullName}" (@${oldest.username}) to admin.`
   );
 
-  // Set all other users without role to "member"
   const result = await users.updateMany(
     { role: { $exists: false } },
     { $set: { role: "member" } }

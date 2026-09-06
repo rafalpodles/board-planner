@@ -6,11 +6,6 @@ import { join } from "node:path";
 import { collectDiff } from "./diff.js";
 import { createRunner } from "./exec.js";
 
-/**
- * BP-509. Real git, because the claim is about what `--numstat` can and cannot express — and the
- * answer is what made this invisible: a symlink and a one-line text file are the same three fields.
- */
-
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, {
     cwd,
@@ -53,10 +48,6 @@ describe("collectDiff and the symlinks a change adds", () => {
 
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-  /**
-   * The premise the whole ticket rests on, asserted on its own so a failure here reads as "git
-   * changed" rather than "the gate changed": the four paths are indistinguishable in numstat.
-   */
   it("cannot be told from a one-line text file by the numbers alone", () => {
     const numstat = git(work, "diff", "--numstat", baseSha, "HEAD", "--").trim().split("\n");
 
@@ -75,21 +66,11 @@ describe("collectDiff and the symlinks a change adds", () => {
       ])
     );
     expect(diff.symlinks).toHaveLength(3);
-    // The control: the file that is genuinely one line of text is not among them, while still
-    // being in changedFiles like everything else
     expect(diff.symlinks.map((s) => s.path)).not.toContain("plain.txt");
     expect(diff.changedFiles).toContain("plain.txt");
   });
 
-  /**
-   * The rename form. `--raw` prints two paths for an `R` status, and the destination is the last —
-   * the one that exists after the change. Nothing asserted that until the BP-509 review mutated
-   * `paths[paths.length - 1]` to `paths[0]` and watched the suite stay green.
-   */
   it("takes the destination path when a symlink is renamed, not the source", async () => {
-    // The rename has to be what `baseSha..HEAD` sees, so the link exists at base and the run moves
-    // it. The first version created it after base, which git reports as a plain addition with one
-    // path — the two-path form the code handles was never reached, and the mutation survived.
     const dir2 = mkdtempSync(join(tmpdir(), "bp509-rename-"));
     const renamed = join(dir2, "work");
     execFileSync("git", ["init", "--quiet", "-b", "main", renamed], { stdio: "pipe" });
@@ -102,7 +83,6 @@ describe("collectDiff and the symlinks a change adds", () => {
     git(renamed, "mv", "before", "after");
     git(renamed, "commit", "--quiet", "-m", "the run renames it");
 
-    // The premise: git really does report this as one row with two paths
     const raw = git(renamed, "diff", "--raw", "-M", base, "HEAD", "--").trim();
     expect(raw.split("\t")).toHaveLength(3);
 

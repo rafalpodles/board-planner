@@ -20,9 +20,6 @@ export const GET = withProjectOwner(async (_request, { params }) => {
     .select("subject relation")
     .lean();
 
-  // The same filter the assignable-users endpoint builds on, rather than a second copy of the
-  // same $or: this list and that one are answers to the same question and must not drift. Built
-  // from the rows already in hand, so the grants are read once per request rather than twice.
   const users = await User.find({
     ...audienceFilterFrom(grants.map((g) => g.subject)),
     kind: { $ne: "machine" },
@@ -81,7 +78,6 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
       { upsert: true }
     );
   } catch (e) {
-    // Two concurrent grants of the same pair race the unique index; the row exists either way
     if ((e as { code?: number }).code !== 11000) throw e;
   }
 
@@ -94,15 +90,9 @@ export const DELETE = withProjectOwner(async (request, { params }) => {
   if (!userId) {
     return NextResponse.json({ error: "userId is required" }, { status: 400 });
   }
-  // PUT validates this and DELETE did not, so anything unparseable reached Grant.deleteOne and
-  // left the handler as a CastError-shaped 500.
   if (!isValidObjectId(userId)) {
     return NextResponse.json({ error: "userId must be an object id" }, { status: 400 });
   }
-  // Normalised once, because the check below compares this against a stored subject as strings and
-  // BSON accepts a hex id in either case: the same id shouted was a different string and the same
-  // row, so it skipped the last-owner refusal while `deleteOne` cast it back and removed the grant.
-  // Same defect as BP-546, one route over, and reachable here by any board owner.
   const subject = new Types.ObjectId(userId).toString();
 
   await connectDB();
@@ -123,18 +113,6 @@ export const DELETE = withProjectOwner(async (request, { params }) => {
 
   await Grant.deleteOne({ subject, objectType: "project", object: projectId });
 
-  // Hygiene, NOT containment: what makes a lost board unreadable is the filter on the read
-  // routes, which is authoritative and covers every way access can end — including the ones that
-  // never touch a grant row, like an instance admin being demoted. Do not "simplify" those
-  // readers on the strength of this line; that reopens BP-328 in full.
-  //
-  // Asked rather than assumed, because deleting a grant is not the same as removing access: an
-  // instance admin reaches every board without ever having one. Clearing their backlog here
-  // would empty the feed of somebody this call removed nothing from, repeatably.
-  // The grant is already gone, so nothing below may turn into a failed response: the caller would
-  // be told the removal did not happen when it did. Both queries are logged instead, and both
-  // default to leaving the backlog alone — the read filter is what makes it unreadable, so
-  // keeping it costs nothing, while deleting it on a guess cannot be undone.
   let stillReaches = true;
   try {
     stillReaches = (await recipientsWithAccess([subject], projectId)).length > 0;

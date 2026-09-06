@@ -35,7 +35,6 @@ import { useOpenTask } from "@/hooks/use-open-task";
 interface TaskDetailProps {
   projectId: string;
   taskId: string;
-  /** Back to the board: the page navigates, the modal just closes */
   onClose: () => void;
   onLoaded?: (task: ApiTask, project: ApiProject) => void;
 }
@@ -75,8 +74,6 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId]);
 
-  // /api/users is admin-only, so this used to leave every non-admin with an empty picker and a
-  // task that IS assigned rendering as "Unassigned" (BP-400)
   useEffect(() => {
     api
       .get(`/api/projects/${projectId}/assignable-users`)
@@ -85,8 +82,6 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
-  // The board was not the only view going stale on a PM write — this view never reloaded
-  // at all, so it kept editing a task that had moved underneath it
   useEffect(() => subscribeBoardRefresh(projectId, loadData), [projectId, loadData]);
 
   if (loading || !task || !project) {
@@ -144,13 +139,10 @@ function TaskDetailView({
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [scrollBox, setScrollBox] = useState<HTMLElement | null>(null);
   const [titleBehindBar, watchTitle] = useScrolledBehind(scrollBox);
-  // A status change the server refused because a worker holds this task, parked for the dialog
   const [heldStatus, setHeldStatus] = useState<{
     conflict: RunConflict;
     retry: () => Promise<unknown>;
   } | null>(null);
-  // Deliberately its own state rather than reusing heldStatus: the two dialogs say different
-  // things about what is lost, and one is undoable while the other is not (BP-337)
   const [heldDelete, setHeldDelete] = useState<RunConflict | null>(null);
   const [addingChild, setAddingChild] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -163,23 +155,15 @@ function TaskDetailView({
   );
 
   const columns = effectiveColumns(project.columns);
-  // What a written task key is measured against. Former keys included, because this board renamed
-  // itself once and everything written before that still says the old prefix.
   const scope = { key: project.key, formerKeys: project.formerKeys };
   const triggers = useEditorTriggers(projectId, project.key);
   const taskKey = `${project.key}-${task.taskNumber}`;
-  // Not a plain lookup in the roster: that holds only people who reach the board, so a task
-  // assigned before somebody lost access resolved to nothing and the mobile chip printed
-  // "Unassigned" over it. Same rule the rail's picker uses, so the two cannot disagree.
   const assignee = assigneeToShow(users, draft.assignee, task.assignee);
   const reporter =
     task.createdBy && typeof task.createdBy === "object" ? task.createdBy.fullName : null;
   const watching = !!currentUser && (task.watchers || []).includes(currentUser._id);
   const projectDefaultAgent = project.worker?.agent ? String(project.worker.agent) : undefined;
 
-  // Forces the write the diff-based auto-save would drop, which is how "assign it again" repairs a
-  // task whose assigner was never recorded. Reloaded straight after: that write is what clears the
-  // notice asking for it, and without this the reader repairs the task and watches it stay.
   const repairAssigner = useCallback(
     async (username: string | null) => {
       await resend("assignee", username);
@@ -207,14 +191,8 @@ function TaskDetailView({
       });
     try {
       await patch();
-      // A status change ends any run the task was under, and the server clears the execution phase
-      // in the same write — so patching status alone would leave the panel asserting a live run the
-      // user just stopped, counting up from a snapshot that is no longer true
       onReload();
     } catch (err) {
-      // The board asks before taking a task off a worker; the detail view reaches the same refusal
-      // through the same endpoint and has to offer the same way out, or the only answer here is an
-      // error message for something that is not an error.
       const failure = err as { status?: number; body?: { runConflict?: RunConflict } };
       if (failure?.status === 409 && failure.body?.runConflict) {
         setHeldStatus({ conflict: failure.body.runConflict, retry: () => patch(true) });
@@ -255,8 +233,6 @@ function TaskDetailView({
 
   async function handleDuplicate() {
     try {
-      // What a copy carries, and what it deliberately leaves behind, is decided in one place —
-      // the board's context menu duplicates through the same payload
       const created = await api.post(`/api/projects/${projectId}/tasks`, duplicatePayload(task));
       toast("Task duplicated", "success");
       openTask(taskPath(projectId, created.taskNumber));
@@ -275,9 +251,6 @@ function TaskDetailView({
       toast("Task deleted", "success");
       onClose();
     } catch (err) {
-      // The same shape the status change already handles, and it has to be handled here for a
-      // stronger reason: a status change takes the task off the worker, a delete takes the task.
-      // A toast would report an error for something that is a question (BP-337).
       const failure = err as { status?: number; body?: { runConflict?: RunConflict } };
       if (failure?.status === 409 && failure.body?.runConflict) {
         setDeleting(false);
@@ -347,8 +320,6 @@ function TaskDetailView({
                 <span aria-hidden className="opacity-40">
                   •
                 </span>
-                {/* One live region across all four states: parked in the non-error branch it
-                    unmounted on failure, so the refusal was announced to nobody. */}
                 <span
                   aria-live="polite"
                   className={autoSaveState === "saved" ? "text-success" : ""}

@@ -61,7 +61,6 @@ export function Column({
           : (e) => {
               e.preventDefault();
               e.dataTransfer.dropEffect = "move";
-              // If dragging over empty area (not a card), drop at end
               if (e.target === e.currentTarget || (e.target as HTMLElement).closest("[data-column-body]") === e.target) {
                 setDropIndex(tasks.length);
               }
@@ -106,8 +105,6 @@ export function Column({
             }
       }
       onClick={collapsed ? onToggleCollapsed : undefined}
-      // The rail has to stay a div — it is also the drop target — so it borrows
-      // a button's keyboard contract rather than becoming one
       role={collapsed ? "button" : undefined}
       tabIndex={collapsed ? 0 : undefined}
       aria-label={collapsed ? `Expand ${column.label}` : undefined}
@@ -122,8 +119,6 @@ export function Column({
           : undefined
       }
       title={collapsed ? `${column.label} — 0 tasks. Click to expand.` : undefined}
-      // Addressable by id rather than by its heading text: an e2e test otherwise has to find the
-      // label and walk back up the tree, which breaks on any markup change
       data-testid={`column-${column.id}`}
       className={`bg-bg-card rounded-xl border border-border
         border-t-2 flex flex-col max-h-[calc(100vh-12rem)] lg:max-h-full lg:h-full lg:min-h-0
@@ -157,7 +152,6 @@ export function Column({
           <span className="text-xs text-text-muted bg-bg-input rounded-full px-2 py-0.5">
             {tasks.length}
           </span>
-          {/* Only an empty column can return to the rail, so only it offers the way back */}
           {tasks.length === 0 && onToggleCollapsed && (
             <button
               type="button"

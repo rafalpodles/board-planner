@@ -31,8 +31,6 @@ public func parseHead(_ bytes: Data) -> (status: Int, headerLength: Int, chunked
     return (status, bytes.distance(from: bytes.startIndex, to: terminator.upperBound), chunked)
 }
 
-// Node sets no Content-Length on any socket route, so every body arrives chunked — including the
-// SSE stream, where a chunk boundary can land anywhere inside an event.
 public func dechunk(from buffer: inout Data) -> (data: Data, finished: Bool) {
     let crlf = Data("\r\n".utf8)
     var decoded = Data()
@@ -42,7 +40,6 @@ public func dechunk(from buffer: inout Data) -> (data: Data, finished: Bool) {
 
         let sizeLine = buffer[..<sizeLineEnd.lowerBound]
         guard let sizeText = String(data: sizeLine, encoding: .utf8) else { return (decoded, false) }
-        // A chunk extension (";name=value") follows the size and is not part of it
         let digits = sizeText.split(separator: ";", maxSplits: 1).first.map(String.init) ?? sizeText
         guard let size = Int(digits.trimmingCharacters(in: .whitespaces), radix: 16) else {
             return (decoded, false)
@@ -69,9 +66,6 @@ public protocol Transport: Sendable {
     func send(_ request: String, to path: String) async throws -> AsyncThrowingStream<Data, Error>
 }
 
-// AF_UNIX, spoken directly. URLSession cannot address a unix socket at all, and NWConnection with
-// `using: .tcp` stands up an IP stack that returns ENETDOWN against a unix endpoint — found against
-// a running worker, not in a test.
 public struct POSIXTransport: Transport {
     private let queue = DispatchQueue(label: "com.boardplanner.menubar.socket", qos: .utility)
 
@@ -106,8 +100,6 @@ public struct POSIXTransport: Transport {
                 }
                 continuation.finish()
             }
-            // Reading blocks in read(2), so shutdown is what actually unblocks it; close alone
-            // would leave the loop parked on a descriptor number that may be reused.
             continuation.onTermination = { _ in shutdown(descriptor, SHUT_RDWR) }
         }
     }

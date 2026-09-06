@@ -33,9 +33,6 @@ const REVIEWER_PROMPT = [
   "is itself a reason to reject.",
 ].join(" ");
 
-// Appended after the untrusted-data clause, never before it. An agent can carry two review gates —
-// the shipped "With security review" carries security and general — and without this they run the
-// identical prompt twice and are paid for twice.
 const FOCUS: Record<string, string> = {
   general: "",
   security:
@@ -118,23 +115,6 @@ function buildPrompt(context: GateContext): string {
 
 const CHECKOUT_TIMEOUT_MS = 60_000;
 
-/**
- * A clean checkout of the commit under review, somewhere the run's worktree cannot reach.
- *
- * The reviewer used to start in `context.worktreePath`, where the CLI loads `CLAUDE.md`, `.claude/`
- * and `.mcp.json` from its cwd as *instructions* — above the "untrusted data" boundary the prompt
- * draws. Every gate judges committed content, so an agent that commits a one-line `.gitignore`
- * naming `CLAUDE.md` and then writes `CLAUDE.md` untracked hands the reviewer its own instructions
- * through a file no gate can see: absent from `diff --numstat`, absent from `status --porcelain`,
- * present on disk (BP-404).
- *
- * Under `os.tmpdir()` rather than beside the worktree so the reviewer is not standing in the run's
- * own tree. That is all it buys: `os.tmpdir()` is itself agent-writable — `TMPDIR` is on
- * `childEnv`'s allowlist and the agent writes unsandboxed — so a plant in the checkout's *parent*
- * reaches the reviewer just as well. What closes the instruction channel is `--safe-mode` on the
- * CLI, above; what this closes is the reviewer reading, as data, files no gate ever saw, and it is
- * what makes the reviewer's tree the artefact the pipeline verified rather than a neighbouring one.
- */
 async function reviewCheckout(
   runner: Runner,
   worktreePath: string,
@@ -142,16 +122,6 @@ async function reviewCheckout(
   configBaseline?: readonly string[] | null,
   signal?: AbortSignal,
 ): Promise<{ path: string } | { refusal: string }> {
-  // A checkout runs smudge filters, so this is an execution point in the same sense staging is:
-  // `[filter "z"] smudge = <script>` in .git/config plus `* filter=z` in .git/info/attributes runs
-  // that script as this process's uid, and `git worktree add` was measured doing exactly that.
-  // Nothing under .git is ever tracked, so protected-paths cannot see it, and there is no key to
-  // override because the filter's name is the agent's to choose. Same scan BP-403 put before
-  // staging, for the same reason, before the checkout rather than after it.
-  // Since BP-346 the scan reads every scope the agent writes and refuses `include.path` rather
-  // than following it, and the baseline is what lets it judge `~/.gitconfig` without refusing the
-  // machine's own credential helper. This is the third caller of it, after delivery.push and
-  // commitAll, and the one that runs before an action the pipeline takes on its own behalf.
   const planted = await plantedConfig(runner, worktreePath, configBaseline);
   if (planted) {
     return {
@@ -209,8 +179,6 @@ async function discardCheckout(
   await rm(path, { recursive: true, force: true }).catch(() => undefined);
 }
 
-// reviewModel is its own policy field, never policy.model: turning the implementer down for cost
-// must not quietly hand the last gate before a merge to a weaker reviewer
 export function reviewGate(
   runner: Runner,
   timeoutMs: number,
@@ -222,9 +190,6 @@ export function reviewGate(
   return {
     name: "review",
     async run(context) {
-      // The CLI loads CLAUDE.md, .claude/ and .mcp.json from its cwd as instructions and
-      // configuration, above any "untrusted data" boundary the prompt can draw — so a diff
-      // that writes them would be handing the reviewer its own instructions
       const instructionFiles = context.diff.changedFiles.filter((file) =>
         AGENT_INSTRUCTION_FILE.test(file),
       );
@@ -235,8 +200,6 @@ export function reviewGate(
         };
       }
 
-      // A reviewer cannot approve what it was not shown, and a diff long enough
-      // to be cut is exactly the kind that hides something past the cut
       if (context.diff.truncated) {
         return {
           ok: false,
@@ -247,9 +210,6 @@ export function reviewGate(
         return { ok: false, reason: "there is no patch to review" };
       }
 
-      // Same allowlist as the implementer: the CLI authenticates from its logged-in session under
-      // HOME, and the reviewer judges a diff written by an agent, so it is the last place that
-      // should hold the operator's board or GitHub credential
       const env = childEnv();
 
       const checkout = await reviewCheckout(
@@ -273,20 +233,9 @@ export function reviewGate(
             JSON.stringify(VERDICT_SCHEMA),
             "--append-system-prompt",
             prompt,
-            // The reviewer's whole value is that it only reads; --allowedTools did not make that true
             "--tools",
             "Read Grep Glob",
             "--strict-mcp-config",
-            // Every instruction channel the CLI would otherwise discover: CLAUDE.md from the cwd
-            // AND from every directory above it, ~/.claude/CLAUDE.md, settings hooks, skills,
-            // plugins, custom agents. The clean checkout below cannot close those on its own —
-            // measured on 2.1.248, a CLAUDE.md planted in the checkout's PARENT was obeyed, and
-            // the agent is handed TMPDIR and writes with no filesystem sandbox, so choosing a
-            // directory was never going to be enough (BP-404 review).
-            //
-            // --safe-mode rather than --bare: --bare closes the same channels and also makes auth
-            // "strictly ANTHROPIC_API_KEY or apiKeyHelper", which this gate deliberately withholds.
-            // --safe-mode says auth works normally, and measured, it does.
             "--safe-mode",
             "--model",
             model,

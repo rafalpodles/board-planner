@@ -29,9 +29,6 @@ import { useStore } from "../store";
 import { useComposition } from "../useComposition";
 import { BlockBody, Bucket, Palette } from "../components/blocks";
 
-// Corner distance picks a neighbouring bucket's first row over the bucket the cursor is actually
-// inside; the pointer is the only honest signal here. rectIntersection is the keyboard fallback,
-// where there is no pointer at all.
 const collisionDetection: CollisionDetection = (args) => {
   const byPointer = pointerWithin(args);
   return byPointer.length > 0 ? byPointer : rectIntersection(args);
@@ -44,32 +41,6 @@ const ARROWS: string[] = [
   KeyboardCode.Right,
 ];
 
-/**
- * Where an arrow key moves the drag.
- *
- * `sortableKeyboardCoordinates` computes the next position from the items of a `SortableContext`.
- * A bucket entry is a `useSortable` and lives in one; a palette block is a plain `useDraggable`
- * and belongs to none, so the getter had nothing to compute from and returned nothing — dnd-kit
- * announced "Picked up draggable item new:implement" and then every arrow key did nothing at all,
- * for ever (BP-455). Composing an agent was the one thing that screen could not be made to do
- * without a mouse.
- *
- * A sortable active is handed straight back to the sortable getter, so every gesture that worked
- * before this change still runs the code that made it work. Everything else searches the droppable
- * rectangles in the direction pressed, which is what dnd-kit does for its own multiple-container
- * example.
- *
- * **Deleting the delegation changes no assertion in the spec beside this file, and that is
- * measured rather than assumed.** Four shapes were tried: two entries; three entries with the
- * first travelling to the end; three entries whose rows are deliberately unequal in height (58,
- * 42, 58 px, since `sortableKeyboardCoordinates` differs from the search below only by an offset
- * of `collisionRect.height - newRect.height`); and an entry moved from one bucket to another. The
- * search answers identically in all four.
- *
- * It is kept anyway, and the reason is minimum change rather than evidence: the palette path is
- * what was broken, and replacing the library's getter for a case it was written for buys nothing.
- * A future reader who wants this line gone should delete it knowing the suite will stay green.
- */
 const keyboardCoordinates: KeyboardCoordinateGetter = (event, args) => {
   const { active, collisionRect, droppableRects, droppableContainers } = args.context;
   if (active?.data.current?.sortable) return sortableKeyboardCoordinates(event, args);
@@ -117,16 +88,6 @@ export default function AgentDetailPage() {
   const { projects } = useProjects();
   const agent = store.allAgents.find((a) => a._id === params.agentId);
 
-  /**
-   * The same three answers `mayEdit` gives on the server (`api/agents/[agentId]/route.ts`).
-   * A personal agent needs no owner check here: `/api/agents` only ever sends the reader their
-   * own, so `scope: "user"` in this list always means mine.
-   *
-   * Without this the palette, the drag, the remove buttons and Save were all rendered to
-   * everybody — a member could spend a minute rearranging Default's gates and learn only on
-   * pressing Save that it was never theirs to change. The catalog one level up already withholds
-   * its actions "where it would 403"; this is that, one screen down.
-   */
   const mayEdit =
     agent?.scope === "user" ||
     (agent?.scope === "project"
@@ -141,9 +102,6 @@ export default function AgentDetailPage() {
 
   const [saved, setSaved] = useState(false);
   const [refusal, setRefusal] = useState("");
-  // `store.renameAgent` and `PUT /api/agents/:id`'s name/description have existed since the
-  // catalog was written and nothing ever called them, so a typo in an agent's name was permanent
-  // short of delete-and-recreate — which the in-use guard may itself refuse.
   const [naming, setNaming] = useState<{ name: string; description: string } | null>(null);
   const problems = agentProblems(composition, lookup);
 
@@ -181,10 +139,6 @@ export default function AgentDetailPage() {
                 Back
               </Button>
             </Link>
-            {/* Not the shipped three: `agent-seed.ts` finds them by NAME, so renaming one makes
-                the next seed mint a second agent called Default beside it. The route does not
-                refuse it — that gap is worth its own ticket; withholding the affordance is what
-                this screen can do about it today. */}
             {mayEdit && !agent.builtIn && !naming && (
               <Button
                 size="sm"

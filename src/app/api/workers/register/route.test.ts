@@ -74,17 +74,12 @@ describe("POST /api/workers/register", () => {
     expect(attachWorkerToEnrolment).toHaveBeenCalledWith("e1", "w1");
   });
 
-  // BP-358: enrolment is enrolment whichever door it comes through. This path has no admin session
-  // to read a user from, but the token itself was minted by one — that person is the owner.
   it("passes the token's creator as the machine's owner", async () => {
     await POST(request(VALID, "cpe_good"));
 
     expect(registerWorker.mock.calls[0][0].ownerId).toBe("u1");
   });
 
-  // BP-233. No user on this one: the caller is a machine holding a token and no session, which is
-  // the fact worth recording — a token minted for one person and spent on an unexpected host is
-  // the shape of a leaked enrolment.
   it("records the spend against the machine, with no user to attribute it to", async () => {
     await POST(request(VALID, "cpe_good"));
 
@@ -97,9 +92,6 @@ describe("POST /api/workers/register", () => {
     expect(entry.user).toBeUndefined();
   });
 
-  // Whoever holds a valid enrolment token chooses these, and they now reach an admin-facing list.
-  // The device flow already capped them; this path did not, and the audit row is what made an
-  // oversized host somebody else's problem.
   it("caps the name and host a registering machine chooses for itself", async () => {
     await POST(request({ ...VALID, name: "n".repeat(500), host: "h".repeat(900) }, "cpe_good"));
 
@@ -116,8 +108,6 @@ describe("POST /api/workers/register", () => {
     expect(logInstanceAudit).not.toHaveBeenCalled();
   });
 
-  // The property this whole credential exists for: no admin session, no admin API token, nothing
-  // on the laptop that could reach PATCH /api/workers/:id and lift lockedByInstance.
   it("never consults the session — an admin identity does not register a worker", async () => {
     await POST(request(VALID, "cpe_good"));
 
@@ -140,7 +130,6 @@ describe("POST /api/workers/register", () => {
     expect(registerWorker).not.toHaveBeenCalled();
   });
 
-  // Distinguishing "real but spent" from "never existed" would turn this into a guessing oracle
   it("says the same thing whether the token was spent, expired or invented", async () => {
     const messages: string[] = [];
     for (const reason of ["unknown", "used", "expired"]) {
@@ -151,7 +140,6 @@ describe("POST /api/workers/register", () => {
     expect(new Set(messages).size).toBe(1);
   });
 
-  // An operator gets one token; burning it on a missing field would mean minting another
   it("checks the request shape before spending the token", async () => {
     const response = await POST(request({ host: "mac.home" }, "cpe_good"));
 
@@ -176,8 +164,6 @@ describe("POST /api/workers/register", () => {
     expect(json.policy).toEqual({ pollIntervalMs: 5000 });
   });
 
-  // A worker that has just registered has reported no checkouts, so nothing can be matched yet.
-  // Its first heartbeat carries the inventory and gets the projects back.
   it("assigns nothing at registration, before the worker has reported what it has", async () => {
     const json = await (await POST(request(VALID, "cpe_good"))).json();
 

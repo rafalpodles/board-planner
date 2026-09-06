@@ -28,35 +28,10 @@ import {
 } from "./seed";
 import { signIn } from "./session";
 
-/**
- * BP-467. What an operator does to a machine once it is connected.
- *
- * `workers-enrolment.spec.ts` covers the handshake and the two switches that stop a machine
- * outright — lock and off — and proves each on a real request. Everything after that was driven by
- * nothing: the pause/resume/stop commands and the chip that reports them, the stream that pushes a
- * command ahead of the heartbeat, the phase a run reports and the badge that shows it, the lease
- * that takes a task off a machine that died, the enrolment-token path, the screen that decides
- * what a machine clones and deletes, and the admin-only gates in front of all of it.
- *
- * The seam under test is the same everywhere: **what the machine says on its own credential and
- * what a person reads on a screen have to be one fact.** A chip that reads "Paused" from the
- * console's own click, before the machine has said so, is the failure this file exists to catch —
- * an admin told a machine has stopped while it is mid-merge. So the machine's half is always a real
- * HTTP call on the seeded worker's credential, never a fixture write, and the person's half is the
- * screen; a fixture write is used only to reach a state the product cannot reach quickly (a lease
- * two hours old, a command sixty seconds unanswered).
- *
- * The one thing seeded rather than driven is the agent catalog: `seed()` wipes the database and
- * the app writes the built-in blocks at boot, so the claim tests insert the two blocks their agent
- * names. Without them `snapshotFor` resolves nothing and the claim route hands the task straight
- * back — which is a different test, and not this one.
- */
-
 const PROTOCOL = "1";
 const REPOSITORY = "https://github.com/rafalpodles/board-planner";
 const SECOND_REPOSITORY = "https://github.com/rafalpodles/board-planner-site";
 const CHECKOUT = "/Users/somebody/code/board-planner";
-// The run seed() leaves holding TP-1 — mirrored, not imported, because seed.ts writes the literal
 const HELD_RUN_ID = "e2e-run-0001";
 const NEXT_RUN_ID = "e2e-run-0002";
 const AGENT_NAME = "Board Runner";
@@ -91,7 +66,6 @@ function asMachine(machine: Machine = SEEDED_MACHINE) {
   };
 }
 
-/** The machine reporting in, exactly as worker/src/registration.ts does — and reading its answer. */
 async function heartbeat(request: APIRequestContext, body: Record<string, unknown> = {}) {
   const response = await request.post(`/api/workers/${WORKER_ID}/heartbeat`, {
     headers: asMachine(),
@@ -101,7 +75,6 @@ async function heartbeat(request: APIRequestContext, body: Record<string, unknow
   return response.json();
 }
 
-/** A run reporting where it is, for the task seed() left it holding. */
 function reportPhase(
   request: APIRequestContext,
   event: { runId?: string; seq: number; phase: string }
@@ -127,7 +100,6 @@ function fleetRow(page: Page, name: string) {
   return page.getByRole("row").filter({ hasText: name }).first();
 }
 
-/** The label a project occupies on the checkout picker; its checkbox and its hints live inside. */
 function pickerRow(page: Page, projectName: string) {
   return page.locator("label").filter({ hasText: projectName });
 }
@@ -156,13 +128,6 @@ async function setHeldTask(fields: Record<string, unknown>) {
   await (await db()).collection("tasks").updateOne({ _id: HELD_TASK_ID }, { $set: fields });
 }
 
-/**
- * The next poll of the fleet list that is SENT after this call — `waitForRequest`, not
- * `waitForResponse`, because a response arriving now may answer a request made before whatever
- * the caller just did. Returns what the console was told, so a negative claim about the chip can
- * be checked against the data it renders from rather than against a render that may not have
- * happened yet.
- */
 async function pollAfter(page: Page): Promise<Record<string, unknown>[]> {
   const request = await page.waitForRequest(
     (r) => new URL(r.url()).pathname === "/api/admin/workers"
@@ -192,10 +157,6 @@ interface Stream {
   close: () => void;
 }
 
-/**
- * The machine's SSE connection, held open by node:http rather than Playwright's request context,
- * which buffers a response to its end and so can never read a stream that has not ended.
- */
 function openStream(machine: Machine = SEEDED_MACHINE): Promise<Stream> {
   return new Promise((resolve, reject) => {
     const req = http.get(
@@ -213,7 +174,6 @@ function openStream(machine: Machine = SEEDED_MACHINE): Promise<Stream> {
             const frame = buffer.slice(0, end);
             buffer = buffer.slice(end + 2);
             end = buffer.indexOf("\n\n");
-            // A comment line is the keep-alive ping, and not an event
             if (frame.startsWith(":")) continue;
             const lines = frame.split("\n");
             const name = lines.find((line) => line.startsWith("event: "))?.slice("event: ".length);
@@ -249,13 +209,6 @@ function openStream(machine: Machine = SEEDED_MACHINE): Promise<Stream> {
   });
 }
 
-/**
- * Everything a claim needs from the seeded machine, none of which seed() gives it: an owner (the
- * admin, so the machine reaches every board), a checkout of the project's repository, the identity
- * user it acts as (the notification an abandoned run sends is written in that name, and is
- * silently skipped without it), and an agent the claim can resolve — with the two catalog blocks
- * it names, since seed() wiped the ones the app seeded at boot.
- */
 const WORKER_IDENTITY_ID = new mongoose.Types.ObjectId("e2e00000000000000000a901");
 const AGENT_ID = new mongoose.Types.ObjectId("e2e00000000000000000ab01");
 
@@ -318,20 +271,17 @@ async function makeTheMachineClaimCapable() {
   });
 }
 
-/** TP-1 as a claim leaves it: handed by the owner to themselves, an agent named, a watcher on it. */
 async function handedToTheMachine(execution: Record<string, unknown>) {
   await setHeldTask({
     assignee: ADMIN_ID,
     assignedBy: ADMIN_ID,
     agent: AGENT_ID,
     watchers: [MEMBER_ID],
-    // What a real claim writes: the assignment is the person's, so a release hands it back
     "execution.assignedByRun": false,
     ...execution,
   });
 }
 
-/** Save, and what the route answered — the message on screen is built from it. */
 async function save(
   page: Page
 ): Promise<{ projects: string[]; leftDisabled: string[]; refused: string[] }> {
@@ -367,20 +317,15 @@ test("Pause reads as asked until the machine acknowledges it over heartbeat, and
   await page.goto("/settings/workers");
   const row = fleetRow(page, WORKER_NAME);
   await expect(row.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
-  // Nothing has been asked of this machine, so nothing is claimed about it
   await expect(row.getByText(/Pausing…|Paused/)).toHaveCount(0);
 
   const { issuedAt } = await issueCommand(page, row, "Pause");
   await expect(row.getByText("Pausing…", { exact: true })).toBeVisible();
 
-  // The machine is told on its next heartbeat, and told when it was asked — the field it uses to
-  // tell a repeated request apart from the same one seen twice
   const told = await heartbeat(request);
   expect(told.command).toBe("pause");
   expect(told.commandIssuedAt).toBe(issuedAt);
 
-  // Reporting in is not acknowledging. Read off what the console is polled with, because a render
-  // that has not happened yet looks the same as a chip that did not change.
   const polled = await pollAfter(page);
   expect(polled.find((w) => w._id === SEEDED_MACHINE.workerId)).toMatchObject({
     command: "pause",
@@ -393,8 +338,6 @@ test("Pause reads as asked until the machine acknowledges it over heartbeat, and
   const acked = await workerRow();
   expect(new Date(acked?.commandAckedAt).getTime()).toBeGreaterThan(new Date(issuedAt).getTime());
 
-  // Stop is asked next. The machine's late acknowledgement of the PAUSE must not stand in for it:
-  // that is the ack the heartbeat still carries from the previous cycle.
   await issueCommand(page, row, "Stop");
   await expect(row.getByText("Stopping…", { exact: true })).toBeVisible();
   await heartbeat(request, { acked: "pause" });
@@ -409,8 +352,6 @@ test("Pause reads as asked until the machine acknowledges it over heartbeat, and
 });
 
 test("a command nobody acknowledged says so, and for how long", async ({ page }) => {
-  // Sixty seconds is the threshold and a test cannot wait it out; the issue time is the one
-  // fixture write here, and the ack that follows is what proves the reading is off the timestamps
   await setWorker({
     command: "stop",
     commandIssuedAt: new Date(Date.now() - 90_000),
@@ -425,7 +366,6 @@ test("a command nobody acknowledged says so, and for how long", async ({ page })
   await expect(chip).toHaveClass(/text-danger/);
   expect(Number((await chip.innerText()).match(/(\d+)s/)![1])).toBeGreaterThanOrEqual(90);
 
-  // Acknowledged later than it was asked reads as done, however old the request
   await setWorker({ commandAckedAt: new Date(Date.now() - 30_000) });
   await page.reload();
   await expect(fleetRow(page, WORKER_NAME).getByText("Stopped", { exact: true })).toBeVisible();
@@ -437,8 +377,6 @@ test("the emergency brake is a person's control: a machine credential, a member 
 }) => {
   const url = `/api/workers/${WORKER_ID}/command`;
 
-  // An unscoped admin API token keeps role "admin" and sits on a disk the coding agent can read;
-  // the counterpart switches were gated this way and this one was not (BP-306)
   const asToken = await request.post(url, { headers: ADMIN_AUTH, data: { command: "pause" } });
   expect(asToken.status()).toBe(403);
   expect((await asToken.json()).error).toBe("Interactive admin session required");
@@ -451,10 +389,8 @@ test("the emergency brake is a person's control: a machine credential, a member 
   expect(nonsense.status()).toBe(400);
   expect((await nonsense.json()).error).toBe("command must be pause, resume or stop");
 
-  // None of the three wrote anything the machine would read
   expect((await workerRow())?.command).toBe("");
 
-  // The control, on the same session: a real command is taken
   const accepted = await request.post(url, { headers: SAME_ORIGIN, data: { command: "resume" } });
   expect(accepted.status(), await accepted.text()).toBe(200);
   expect((await workerRow())?.command).toBe("resume");
@@ -472,7 +408,6 @@ test("a command reaches the machine's open stream the moment it is issued, and a
   const row = fleetRow(page, WORKER_NAME);
   try {
     const { issuedAt } = await issueCommand(page, row, "Pause");
-    // The same issuance the heartbeat would report, pushed instead of polled
     expect(await stream.next()).toEqual({
       event: "command",
       command: "pause",
@@ -482,8 +417,6 @@ test("a command reaches the machine's open stream the moment it is issued, and a
     stream.close();
   }
 
-  // The kill switch closes this door too. Without the refusal a locked machine would keep a
-  // channel the console still believes in, and only its heartbeat would be told to stop.
   await row.getByRole("button", { name: "Lock", exact: true }).click();
   await expect(row.getByRole("button", { name: "Locked" })).toBeVisible();
   const refused = await openStream();
@@ -504,13 +437,10 @@ test("a phase the machine reports over /events is what the card and the fleet co
   const card = page.locator(`a[href="${cardHref}"]`);
   await expect(card.getByTestId("card-run-live")).toContainText("gates:build");
 
-  // Overtaken: an older event landing late writes nothing, and is answered rather than refused —
-  // a race is the expected outcome of fire-and-forget reporting, not an error the run reacts to
   const late = await reportPhase(request, { seq: 5, phase: "agent" });
   expect(late.status()).toBe(200);
   expect(await late.json()).toEqual({ applied: false });
 
-  // A run that no longer holds the task writes nothing, however valid the credential
   const superseded = await reportPhase(request, {
     runId: "e2e-run-9999",
     seq: 9,
@@ -519,7 +449,6 @@ test("a phase the machine reports over /events is what the card and the fleet co
   expect(superseded.status()).toBe(200);
   expect(await superseded.json()).toEqual({ applied: false });
 
-  // Not a label at all: no order, no text, a control character
   for (const bad of [
     { seq: 0, phase: "gates:review" },
     { seq: 9, phase: "" },
@@ -536,8 +465,6 @@ test("a phase the machine reports over /events is what the card and the fleet co
   await expect(row.getByText(HELD_TASK_KEY, { exact: true })).toBeVisible();
   await expect(row.getByText("gates:build", { exact: true })).toBeVisible();
 
-  // The kill switch reaches the run in flight: its next report is told to abort, and the board
-  // keeps the last phase that was true rather than one the admin just stopped
   await row.getByRole("button", { name: "Lock", exact: true }).click();
   await expect(row.getByRole("button", { name: "Locked" })).toBeVisible();
   const aborted = await reportPhase(request, { seq: 9, phase: "gates:review" });
@@ -557,8 +484,6 @@ test("a run abandoned past the lease is handed back on the next claim, and that 
   await makeTheMachineClaimCapable();
   await handedToTheMachine({});
 
-  // The control: the run is silent but within its lease, so the claim finds nothing and touches
-  // nothing — a sweep that ignored the lease would be caught here
   const early = await claim(request, NEXT_RUN_ID);
   expect(early.status(), await early.text()).toBe(204);
   expect((await storedTask())?.execution).toMatchObject({ runId: HELD_RUN_ID, attempts: 1 });
@@ -573,22 +498,18 @@ test("a run abandoned past the lease is handed back on the next claim, and that 
 
   const stored = await storedTask();
   expect(stored?.status).toBe("in_progress");
-  // A second attempt, not a first: the one that outlived its worker is not refunded, so a task
-  // that keeps doing so runs out and reaches a person rather than cycling forever
   expect(stored?.execution).toMatchObject({
     runId: NEXT_RUN_ID,
     workerId: SEEDED_MACHINE.workerId,
     attempts: 2,
   });
   expect(stored?.execution.phase).toBeUndefined();
-  // The person's assignment survived the release — it was theirs, not the run's
   expect(String(stored?.assignee)).toBe(String(ADMIN_ID));
 
   await signIn(page);
   await page.goto(`/projects/${PROJECT_KEY}`);
   const card = page.getByTestId("column-in_progress").locator(`a[href="${cardHref}"]`);
   await expect(card).toBeVisible();
-  // A fresh run that has not reported yet, not the old run's last phase
   await expect(card.getByTestId("card-run-live")).toContainText("starting");
 
   await page.goto("/settings/workers");
@@ -607,7 +528,6 @@ test("a run out of attempts is parked for a person, off the machine, and the wat
     "execution.startedAt": new Date(Date.now() - EXECUTION_LEASE_MS - 60_000),
   });
 
-  // Swept, and then nothing left to take: the parked task is not in the approved column any more
   const swept = await claim(request, "e2e-run-0003");
   expect(swept.status(), await swept.text()).toBe(204);
 
@@ -625,8 +545,6 @@ test("a run out of attempts is parked for a person, off the machine, and the wat
     card.locator('[data-testid="card-run-live"], [data-testid="card-run-quiet"]')
   ).toHaveCount(0);
 
-  // The move had no actor and went through updateMany, so this row is the only way anybody hears.
-  // Written fire-and-forget, so the feed is reloaded until it is there.
   await expect(async () => {
     await page.goto("/notifications");
     const rows = page.locator("#main-content").locator(`a[href="${cardHref}"]`);
@@ -634,18 +552,9 @@ test("a run out of attempts is parked for a person, off the machine, and the wat
     await expect(rows).toContainText(`${HELD_TASK_KEY} needs a human — the run was abandoned`);
   }).toPass({ timeout: 30_000 });
 
-  // And the fleet console no longer shows the machine running it. The machine's own row is waited
-  // for first: until /api/admin/workers answers, this page is a spinner with no rows at all, and
-  // "the task key is not on the row" holds trivially there — the same silence a working sweep
-  // produces.
   await signIn(page);
   await page.goto("/settings/workers");
   await expect(fleetRow(page, WORKER_NAME).getByText(WORKER_NAME)).toBeVisible();
-  // Any task key, not just this one. The Running cell reports a single task per machine, chosen
-  // newest-claim-first, and this board leaves a *finished* run on TP-4 whose workerId is the same
-  // machine — so a regression that stopped filtering on a live runId would fill this cell with
-  // TP-4 and leave "TP-1 is not here" perfectly true. Measured: naming the key alone let exactly
-  // that mutation through green.
   await expect(fleetRow(page, WORKER_NAME).getByText(/^TP-\d+$/)).toHaveCount(0);
 });
 
@@ -677,8 +586,6 @@ test("an admin mints a single-use enrolment token, and a machine spends it on a 
       data,
     });
 
-  // Shape and protocol are checked before the token is spent: an operator gets one, and burning
-  // it on a typo would mean minting another
   const wrongProtocol = await register({ "x-cp-protocol": "0" }, NEW_MACHINE);
   expect(wrongProtocol.status()).toBe(409);
   const noHost = await register({}, { name: NEW_MACHINE.name });
@@ -688,26 +595,21 @@ test("an admin mints a single-use enrolment token, and a machine spends it on a 
   expect(registered.status(), await registered.text()).toBe(200);
   const machine: Machine & { assignments: unknown[] } = await registered.json();
   expect(machine.credential).toMatch(/^cpw_/);
-  // Nothing reported yet, so nothing matched
   expect(machine.assignments).toEqual([]);
 
-  // Spent: the same string buys nothing a second time, and one message covers every failure
   const again = await register({}, { ...NEW_MACHINE, name: "e2e-build-box-2" });
   expect(again.status()).toBe(401);
   expect((await again.json()).error).toBe("Invalid or spent enrolment token");
 
-  // The credential is worth something: a real request the server answers
   const answer = await machineReadsItsWork(request, machine);
   expect(answer.status(), await answer.text()).toBe(200);
 
-  // The machine belongs to whoever minted the token, and the fleet says so
   await dialog.getByRole("button", { name: "Done" }).click();
   await expect(dialog).toBeHidden();
   const row = fleetRow(page, NEW_MACHINE.name);
   await expect(row.getByText(NEW_MACHINE.host)).toBeVisible();
   await expect(row.getByText("E2E Admin")).toBeVisible();
 
-  // Both halves are on the record: who minted, and which host spent it
   await page.goto("/settings/audit");
   await expect(
     page.getByRole("row").filter({ hasText: "Enrolment token minted" }).first()
@@ -716,8 +618,6 @@ test("an admin mints a single-use enrolment token, and a machine spends it on a 
   await expect(spent).toContainText(NEW_MACHINE.name);
   await expect(spent).toContainText(`Registered ${NEW_MACHINE.host}`);
 
-  // A machine credential cannot mint: a token readable off the worker's disk that could would hand
-  // back the very power enrolment tokens exist to remove
   const asToken = await request.post("/api/workers/enrolment", { headers: ADMIN_AUTH, data: {} });
   expect(asToken.status()).toBe(403);
   expect((await asToken.json()).error).toBe("Interactive session required");
@@ -735,16 +635,12 @@ test("the checkout picker: what a machine has, what it is given, and what saving
   await page.goto(`/settings/workers/${WORKER_ID}/projects`);
   await expect(page.getByRole("heading", { name: `Projects for ${WORKER_NAME}` })).toBeVisible();
 
-  // The seeded board names no repository, so there is nothing to clone — shown and disabled
-  // rather than hidden, with the fix named
   const tp = pickerRow(page, PROJECT_NAME);
   await expect(tp.getByRole("checkbox")).toBeDisabled();
   await expect(
     tp.getByText("no repository set — add one under the project's Integrations settings")
   ).toBeVisible();
 
-  // Once it does, and the machine reports a checkout of it, the row is connected and ticked: with
-  // nothing chosen yet, what the machine wants is what it already has
   await nameRepository(PROJECT_ID, REPOSITORY);
   await heartbeat(request, { repos: [{ remote: REPOSITORY, path: CHECKOUT }] });
   await page.reload();
@@ -767,16 +663,11 @@ test("the checkout picker: what a machine has, what it is given, and what saving
   expect([...saved.projects].sort()).toEqual([String(PROJECT_ID), String(SECOND_PROJECT_ID)].sort());
   await expect(page.getByText("Saved. The app picks this up and sets up the checkouts.")).toBeVisible();
 
-  // Ticking it turned workers on for that project, which is an instance-admin act and audited as one
   expect((await projectRow(SECOND_PROJECT_ID))?.worker.enabled).toBe(true);
   await page.reload();
-  // The row itself first: this screen renders "Loading…" and no labels at all until its own fetch
-  // resolves, and a warning that is absent because nothing has rendered reads exactly like a
-  // warning that is gone
   await expect(pickerRow(page, SECOND_PROJECT_NAME).getByRole("checkbox")).toBeChecked();
   await expect(pickerRow(page, SECOND_PROJECT_NAME).getByText(/does not run machines/)).toHaveCount(0);
 
-  // The machine reads the same decision on its own route — the one it clones from
   const catalogue = wantedByProject(await (await machineReadsItsWork(request)).json());
   expect(catalogue.get(String(PROJECT_ID))).toMatchObject({ wanted: true, servedHere: true });
   expect(catalogue.get(String(SECOND_PROJECT_ID))).toMatchObject({
@@ -785,8 +676,6 @@ test("the checkout picker: what a machine has, what it is given, and what saving
     workersEnabled: true,
   });
 
-  // Unticking a checkout the machine has is a delete on somebody's disk, and the screen says so by
-  // name before the save that does it
   await pickerRow(page, PROJECT_NAME).getByRole("checkbox").uncheck();
   const warning = page
     .locator("div")
@@ -799,8 +688,6 @@ test("the checkout picker: what a machine has, what it is given, and what saving
   const removed = await save(page);
   expect(removed.projects).toEqual([String(SECOND_PROJECT_ID)]);
   const after = wantedByProject(await (await machineReadsItsWork(request)).json());
-  // Still reported — the app has not acted yet — and no longer wanted, which is the request to
-  // remove it
   expect(after.get(String(PROJECT_ID))).toMatchObject({ wanted: false, servedHere: true });
   expect(after.get(String(SECOND_PROJECT_ID))).toMatchObject({ wanted: true });
 
@@ -819,8 +706,6 @@ test("a member picks for their own machine; what they cannot switch on is said, 
   await nameRepository(SECOND_PROJECT_ID, SECOND_REPOSITORY);
   await setWorker({ owner: MEMBER_ID, repos: [{ remote: REPOSITORY, path: CHECKOUT }] });
   const handle = await db();
-  // A grant on the switched-off board, so it is in the member's reach and on the screen — the row
-  // whose switch they cannot throw
   await handle.collection("grants").insertOne({
     subject: MEMBER_ID,
     relation: "member",
@@ -830,7 +715,6 @@ test("a member picks for their own machine; what they cannot switch on is said, 
     createdAt: new Date(),
     updatedAt: new Date(),
   });
-  // A colleague's machine, for the refusal at the end
   const othersId = new mongoose.Types.ObjectId();
   await handle.collection("workers").insertOne({
     ...(await workerRow()),
@@ -855,13 +739,11 @@ test("a member picks for their own machine; what they cannot switch on is said, 
       `Saved. ${SECOND_PROJECT_KEY} does not run machines yet, and only an instance admin can turn that on — the machine will leave it alone until somebody does.`
     )
   ).toBeVisible();
-  // The wish is recorded and the switch is not thrown
   expect((await projectRow(SECOND_PROJECT_ID))?.worker.enabled).toBe(false);
   expect((await workerRow())?.desiredProjects.map(String).sort()).toEqual(
     [String(PROJECT_ID), String(SECOND_PROJECT_ID)].sort()
   );
 
-  // A board outside the reach is refused by id and not stored, whatever the screen was told
   const outside = String(new mongoose.Types.ObjectId());
   const pushed = await page.request.put(`/api/workers/${WORKER_ID}/projects`, {
     headers: SAME_ORIGIN,
@@ -871,8 +753,6 @@ test("a member picks for their own machine; what they cannot switch on is said, 
   expect(await pushed.json()).toMatchObject({ projects: [String(PROJECT_ID)], refused: [outside] });
   expect((await workerRow())?.desiredProjects.map(String)).toEqual([String(PROJECT_ID)]);
 
-  // The screen that decides what a machine clones is closed to machines: the worker's own
-  // credential is not a person's at all, and a person's API token is refused as a machine's
   const asTheMachine = await request.get(`/api/workers/${WORKER_ID}/projects`, {
     headers: asMachine(),
   });
@@ -883,7 +763,6 @@ test("a member picks for their own machine; what they cannot switch on is said, 
   });
   expect(asAToken.status()).toBe(403);
 
-  // Somebody else's machine answers as a wrong guess would
   await page.goto(`/settings/workers/${othersId}/projects`);
   await expect(page.getByText("Worker not found")).toBeVisible();
   await expect(page.getByRole("checkbox")).toHaveCount(0);
@@ -905,20 +784,16 @@ test("a plain member is bounced off every admin-only worker screen, and the rout
     await expect(page.getByRole("heading", { name: heading })).toHaveCount(0);
   }
 
-  // The nav is honest about it: no Administration group is offered
   await page.goto("/settings/profile");
   await expect(page.getByRole("heading", { name: "Profile" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Workers", exact: true })).toHaveCount(0);
   await expect(page.getByText("Administration")).toHaveCount(0);
 
-  // The routes the screens read, on the member's own credential
   const fleet = await request.get("/api/admin/workers", { headers: MEMBER_AUTH });
   expect(fleet.status()).toBe(403);
   const runs = await request.get("/api/admin/runs", { headers: MEMBER_AUTH });
   expect(runs.status()).toBe(403);
 
-  // The run history carries every project's run detail, so an admin's API token is refused too —
-  // and the fleet list on the same token is the control that it is the token, not the role
   const runsOnToken = await request.get("/api/admin/runs", { headers: ADMIN_AUTH });
   expect(runsOnToken.status()).toBe(403);
   expect((await runsOnToken.json()).error).toBe("Interactive admin session required");
@@ -945,7 +820,6 @@ test("the run history reads a finished run's project, agent, machine, outcome, d
     ...over,
   });
   await handle.collection("agentruns").insertMany([
-    // Inserted oldest first, so the newest-first order on screen is the sort and not the scan
     run({
       outcome: "merged",
       worker: null,
@@ -975,7 +849,6 @@ test("the run history reads a finished run's project, agent, machine, outcome, d
   await expect(delivered.getByText("Pull request open")).toHaveClass(/text-success/);
   await expect(page.getByTestId("run-detail")).toHaveText("Opened pull request #12");
 
-  // A run filed by hand, or before the machine reported itself: blank cells are the honest answer
   const merged = page.getByRole("row").filter({ hasText: "Merged" });
   await expect(merged).toHaveCount(1);
   await expect(merged).toContainText("20 min");
@@ -985,7 +858,6 @@ test("the run history reads a finished run's project, agent, machine, outcome, d
     "Nothing was recorded about how this run ended."
   );
 
-  // Newest first
   const order = await page.locator("tbody tr").filter({ hasText: / min/ }).allInnerTexts();
   expect(order.map((text) => (text.includes("Pull request open") ? "delivered" : "merged"))).toEqual([
     "delivered",

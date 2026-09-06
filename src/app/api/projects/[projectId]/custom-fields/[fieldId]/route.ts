@@ -46,8 +46,6 @@ export const PATCH = withProjectAccess(async (request, { params }) => {
   }
 
   if (body.options !== undefined && isOptionField(field)) {
-    // Existing options are passed in so an edit keeps their ids, which is what
-    // holds a renamed option onto every task that has it
     const parsed = parseOptions(body.options, normalizeOptions(field.options));
     if (parsed.error) return NextResponse.json({ error: parsed.error }, { status: 400 });
     field.options = parsed.options!;
@@ -60,8 +58,6 @@ export const PATCH = withProjectAccess(async (request, { params }) => {
     field.order = Number(body.order);
   }
 
-  // An archived field vanishes from every picker while the designation would survive,
-  // so archiving strands the pointer exactly like deleting the field does.
   if (field.archived && project.estimateFieldId === fieldId) {
     project.estimateFieldId = "";
   }
@@ -89,7 +85,6 @@ export const DELETE = withProjectOwner(async (_request, { params }) => {
   }
   await project.save();
 
-  // Clean up orphaned values from all tasks in this project
   await Task.updateMany(
     { project: projectId },
     { $unset: { [`customFieldValues.${fieldId}`]: "" } }

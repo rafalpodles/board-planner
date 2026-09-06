@@ -22,12 +22,7 @@ describe("columns", () => {
   });
 });
 
-// BP-227. Eight places compared a task's status against a literal id, so any board that was
-// renamed or rebuilt behaved as if its columns meant nothing — and closing a sprint moved work
-// nobody asked it to move.
 describe("resolving columns by role", () => {
-  // Deliberately not the seeded ids: with those, an implementation that still hardcodes "done"
-  // passes every assertion below
   const renamed = [
     { id: "icebox", label: "Icebox", color: "#111", role: "backlog", order: 0 },
     { id: "ready", label: "Ready", color: "#222", role: "approved", order: 1 },
@@ -41,7 +36,6 @@ describe("resolving columns by role", () => {
     expect(columnIdsWithRole({ columns: renamed }, "done")).toEqual(["shipped"]);
   });
 
-  // A board may split review across several columns, so a single id would silently drop one
   it("returns every column carrying the role, not the first", () => {
     expect(columnIdsWithRole({ columns: renamed }, "review")).toEqual(["checking", "verifying"]);
   });
@@ -62,18 +56,10 @@ describe("resolving columns by role", () => {
     });
   });
 
-  // What happens to work left behind by a column somebody deleted: naming it undefined is the
-  // point, so callers show the raw status rather than inventing a label for it
   it("returns undefined for a status naming no column the project has", () => {
     expect(columnFor({ columns: renamed }, "done")).toBeUndefined();
   });
 
-  // BP-463. The fallback was columns[0], which on a board with no backlog column can be a done
-  // one — a task born there is born finished, and a recurring occurrence born there ends its
-  // series silently, because creation never runs the status-change side effects.
-  //
-  // The seeded board cannot tell any of this apart: `planned` is both its backlog column and its
-  // first, so every board here puts the backlog somewhere other than the front.
   describe("the column a new task opens in", () => {
     const at = (...roles: string[]) =>
       ({
@@ -110,12 +96,6 @@ describe("resolving columns by role", () => {
   });
 });
 
-/**
- * BP-429. A merged merge request advances a task one review column, never into or out of a column
- * somebody flagged for a human. Every shape below is a board a project can actually build in
- * settings, and the first version of this rule — "the first review column advances to the last" —
- * was wrong on four of them.
- */
 describe("mergedReviewDestination", () => {
   const col = (id: string, role: string, order: number, flagged = false) =>
     ({ id, label: id, color: "#000", role, order, triggersPmReview: flagged }) as never;
@@ -129,7 +109,6 @@ describe("mergedReviewDestination", () => {
   it("never moves a task out of the flagged column, wherever that column sorts", () => {
     expect(mergedReviewDestination(null, "needs_human_review")).toBeUndefined();
 
-    // Column order is whatever somebody last dragged it into, so it cannot be what decides this.
     const reordered = board([
       col("needs_human_review", "review", 0, true),
       col("in_review", "review", 1),
@@ -147,7 +126,6 @@ describe("mergedReviewDestination", () => {
       col("uat", "review", 2),
       col("shipped", "done", 3),
     ]);
-    // "First advances to last" sent this straight to uat, skipping two columns somebody built.
     expect(mergedReviewDestination(pipeline, "code_review")).toBe("qa");
     expect(mergedReviewDestination(pipeline, "qa")).toBe("uat");
     expect(mergedReviewDestination(pipeline, "uat")).toBeUndefined();

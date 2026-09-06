@@ -71,8 +71,6 @@ describe("useAuthProvider — telling an outage from a signed-out session", () =
     expect(screen.getByTestId("outage").textContent).toBe("false");
   });
 
-  // The pair the guard reads. `outage` is what stops it redirecting, so a 503 that only cleared the
-  // user would still bounce somebody to a sign-in page that cannot sign them in (BP-362).
   it("reports an outage when the server could not answer", async () => {
     vi.mocked(fetch).mockResolvedValue(jsonResponse(503, { error: "The database is unreachable." }));
 
@@ -201,8 +199,6 @@ describe("useAuthProvider — what the rest of the app reports back", () => {
     expect(screen.getByTestId("user").textContent).toBe("rpo");
   }
 
-  // The only way the shell learns about an outage for somebody already signed in: they are never
-  // sent back through /api/auth/me, so each screen used to invent its own explanation
   it("takes an outage from any 5xx the app receives, and clears it on the next answer", async () => {
     await signedIn();
 
@@ -210,7 +206,6 @@ describe("useAuthProvider — what the rest of the app reports back", () => {
       screen.getByText("saw 503").click();
     });
     expect(screen.getByTestId("outage").textContent).toBe("true");
-    // Still signed in — an outage is not a logout, which is the whole point
     expect(screen.getByTestId("user").textContent).toBe("rpo");
 
     await act(async () => {
@@ -230,8 +225,6 @@ describe("useAuthProvider — what the rest of the app reports back", () => {
       screen.getByText("rejected").click();
     });
 
-    // The server answered, so it is reachable: showing "having trouble" on the way to a sign-in
-    // page that works would be the same lie in the other direction
     expect(screen.getByTestId("outage").textContent).toBe("false");
     expect(screen.getByTestId("user").textContent).toBe("-");
   });
@@ -259,14 +252,11 @@ describe("useAuthProvider — what the rest of the app reports back", () => {
       screen.getByText("refresh").click();
     });
 
-    // Before, a revoked session left the app rendering as signed in until a reload
     expect(screen.getByTestId("user").textContent).toBe("-");
     expect(screen.getByTestId("outage").textContent).toBe("false");
   });
 
   it("gives up on a request that never answers, rather than spinning on it", async () => {
-    // mongoose waits on server selection, so /api/auth/me can hang for tens of seconds; the abort
-    // is what turns that into a panel instead of an unlabelled spinner
     vi.mocked(fetch).mockImplementation((_url, init?: RequestInit) => {
       return new Promise((_resolve, reject) => {
         init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));

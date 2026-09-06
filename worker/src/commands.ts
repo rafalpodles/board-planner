@@ -15,10 +15,6 @@ export function isWorkerCommand(value: unknown): value is WorkerCommand {
   return typeof value === "string" && COMMANDS.has(value);
 }
 
-// An operator asking the worker to stop is a deliberate act and must not cost the task an attempt.
-// A process signal can come from a supervisor restarting in a loop, and a task released with its
-// attempt refunded every cycle never accrues one — so it never runs out of retries and never
-// reaches a human, which is the whole point of counting them.
 export const SHUTDOWN_SIGNAL = Symbol("shutdown");
 
 export interface RunGuard {
@@ -53,21 +49,11 @@ export interface CommandDeps {
 }
 
 export function createCommandHandlers(deps: CommandDeps): CommandChannels {
-  // Both SERVER transports deliver the same standing command, so the issuance instant — not the
-  // command name — is what separates a redelivery from an operator asking again. Applying is gated
-  // on recency, not equality: a heartbeat computed before a later command was written still carries
-  // the old issuance, and must not resurrect what that later command already superseded.
-  //
-  // Every instant compared here comes from the server's clock. A local command must never enter
-  // this guard: it would order the laptop's clock against the server's, and a laptop running ahead
-  // would make one local pause silently swallow a later board-issued stop — the emergency brake,
-  // dropped, while the run carries on to merge.
   let lastAppliedAt = -Infinity;
 
   function apply(command: WorkerCommand, issuedAt: string | undefined, effect: () => void): void {
     const instant = issuedAt ? Date.parse(issuedAt) : NaN;
     if (Number.isNaN(instant)) {
-      // Undated pause/stop is a safe default to apply; undated resume is not — see commit message.
       if (command === "resume") return;
     } else {
       if (instant <= lastAppliedAt) return;
@@ -92,8 +78,6 @@ export function createCommandHandlers(deps: CommandDeps): CommandChannels {
     },
   };
 
-  // A local command arrives by direct call from an operator at this machine. It is never
-  // redelivered and never reordered, so it needs no recency guard — and must not touch one.
   function applyLocal(command: WorkerCommand): void {
     effects[command]();
     settle(command);

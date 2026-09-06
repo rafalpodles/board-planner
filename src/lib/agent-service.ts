@@ -14,14 +14,6 @@ import {
 } from "@/types";
 import { brokenProblems, keysOf, normaliseComposition } from "./agent-rules";
 
-/**
- * Why a composition must not be stored, or null. Shared because the create and edit routes had a
- * copy each, and BP-457 was two routes on the same file disagreeing about the same question.
- *
- * The unknown-key arm is not covered by the rules: they no-op on a key that resolves to nothing,
- * while `snapshotFor` returns null for one — so a composition of nonsense strands the tasks
- * pointing at it exactly the way an empty one does.
- */
 export async function compositionRefusal(
   composition: AgentComposition
 ): Promise<{ error: string; problems: string[] } | null> {
@@ -78,10 +70,6 @@ export function toApiBlock(block: IAgentBlock): ApiAgentBlock {
   };
 }
 
-/**
- * Every agent this user may pick: the shipped ones, their own, and those belonging to a project
- * they can reach. A project agent is never offered on another project.
- */
 export async function visibleAgents(user: IUser, projectIds: string[]) {
   return Agent.find({
     $or: [
@@ -108,15 +96,12 @@ export function toApiRun(run: IAgentRun): ApiAgentRun {
     outcome: run.outcome,
     refusedBy: run.refusedBy,
     detail: run.detail,
-    // Whole minutes: a run is measured in tens of them, and a decimal reads as precision it has not
     minutes: Math.max(0, Math.round(ms / 60000)),
     costUsd: run.costUsd,
     finishedAt: run.finishedAt.toISOString(),
   };
 }
 
-// An unpopulated ref is an ObjectId, which has neither field — so it reads as absent rather than
-// serialising an id into a column that exists to name something.
 function named(ref: unknown, field: string): string {
   return ref && typeof ref === "object" && field in ref
     ? String((ref as Record<string, unknown>)[field] ?? "")
@@ -144,11 +129,6 @@ function slugify(name: string): string {
   );
 }
 
-/**
- * The client used to derive this and hand it over, which meant two different names could arrive as
- * the same key and come back as a bare 409. Only the server knows what is taken, so only the server
- * can settle it.
- */
 export async function freeBlockKey(name: string): Promise<string> {
   const base = slugify(name);
   if (!(await AgentBlock.exists({ key: base }))) return base;

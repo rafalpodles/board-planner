@@ -13,8 +13,6 @@ interface PlanningViewProps {
   projectId: string;
   board: ProjectBoard;
   sprintId: string;
-  // The sprint header's counts have nowhere else to read a task added from the backlog:
-  // board.tasks never gains it (see the sprintOverlay note below), so this is the true list.
   onTasksChange?: (tasks: ApiTask[]) => void;
 }
 
@@ -26,13 +24,8 @@ export function PlanningView({ projectId, board, sprintId, onTasksChange }: Plan
   const [backlogError, setBacklogError] = useState(false);
   const [backlogReloadToken, setBacklogReloadToken] = useState(0);
   const [filter, setFilter] = useState("");
-  // board.applySprintChange can only ever drop a task out of board.tasks, never add one in —
-  // a task moved here from the backlog has nowhere else to live until the next poll catches up
   const [sprintOverlay, setSprintOverlay] = useState<ApiTask[]>([]);
 
-  // Plain fetch into local state, not a second useProjectBoard — that would bring a second
-  // 10s poll, a second held-move dialog and a second copy of every write handler for a list
-  // that needs none of them.
   useEffect(() => {
     setBacklogLoading(true);
     setBacklogError(false);
@@ -48,8 +41,6 @@ export function PlanningView({ projectId, board, sprintId, onTasksChange }: Plan
     setSprintOverlay([]);
   }, [sprintId]);
 
-  // board.tasks lags a scope change by one round trip (Task 6's forward note); rendering it
-  // under the new sprint's name in the meantime is the bug Phase A already fixed once
   const tasksLoaded = board.loadedScope === sprintId;
   const sprintTasks = useMemo(
     () =>
@@ -59,9 +50,6 @@ export function PlanningView({ projectId, board, sprintId, onTasksChange }: Plan
     [tasksLoaded, board.tasks, sprintOverlay]
   );
 
-  // Reporting on every render — including the ones before tasksLoaded catches up with a
-  // new sprintId — would hand the page an empty (but truthy) array it can't tell apart
-  // from "this sprint genuinely has no tasks", flashing 0/0 over the fallback count.
   useEffect(() => {
     if (!tasksLoaded) return;
     onTasksChange?.(sprintTasks);
@@ -83,8 +71,6 @@ export function PlanningView({ projectId, board, sprintId, onTasksChange }: Plan
     applyLocally(task, targetSprintId);
     try {
       await api.put(`/api/projects/${projectId}/tasks/${task._id}`, { sprint: targetSprintId });
-      // applySprintChange can drop a task out of board.tasks but never insert one, so a
-      // task pulled in from the backlog only exists here until board.tasks catches up
       board.reload();
     } catch {
       applyLocally(task, targetSprintId === null ? sprintId : null);

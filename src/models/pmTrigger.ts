@@ -8,8 +8,6 @@ const pmTriggerSchema = new Schema<IPmTrigger>(
     taskKey: { type: String, required: true },
     task: { type: Schema.Types.ObjectId, ref: "Task", required: true },
     state: { type: String, enum: PM_TRIGGER_STATES, default: "pending" },
-    // Mirrors state ∈ {pending, running}; a plain boolean keeps the partial index
-    // portable — MongoDB 4.4 rejects $in inside partialFilterExpression
     active: { type: Boolean, default: true },
     attempts: { type: Number, default: 0 },
     lastError: { type: String, default: "" },
@@ -18,7 +16,6 @@ const pmTriggerSchema = new Schema<IPmTrigger>(
 );
 
 pmTriggerSchema.index({ state: 1, createdAt: 1 });
-// At most one un-finished trigger per task: bouncing a task in and out yields one review
 pmTriggerSchema.index(
   { project: 1, task: 1 },
   { unique: true, partialFilterExpression: { active: true } }

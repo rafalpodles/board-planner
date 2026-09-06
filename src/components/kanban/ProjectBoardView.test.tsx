@@ -40,7 +40,6 @@ const tasks = [
   },
 ] as ApiTask[];
 
-// Every field the hook exposes; individual tests override only what they need
 function makeBoard(overrides: Partial<ProjectBoard> = {}): ProjectBoard {
   return {
     project,
@@ -163,8 +162,6 @@ describe("A read-only ProjectBoardView's other write paths", () => {
     expect(screen.getByText("Duplicate")).toBeTruthy();
   });
 
-  // A sprint can complete while the menu from an earlier, still-open right-click is on
-  // screen; onTaskContextMenu being withheld only stops a NEW menu from opening.
   it("closes an already-open context menu once readOnly turns on", () => {
     const { rerender } = render(<ProjectBoardView board={makeBoard({ tasks })} />);
     const card = screen.getByRole("link", { name: /A bug/i });
@@ -217,8 +214,6 @@ describe("ProjectBoardView's pinViewMode prop", () => {
 });
 
 describe("ProjectBoardView's loadedScope gate", () => {
-  // board.tasks still holds the previous scope's list until its own request lands;
-  // showing them under the new scope would be the board stating something untrue
   it("shows a spinner instead of stale cards while the new scope's tasks are in flight", () => {
     render(
       <ProjectBoardView board={makeBoard({ tasks, scope: "sprint-2", loadedScope: "sprint-1" })} />

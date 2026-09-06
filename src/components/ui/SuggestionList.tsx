@@ -3,11 +3,6 @@
 import type { Suggestion } from "@/hooks/use-trigger-autocomplete";
 import type { CaretPoint } from "@/lib/caret";
 
-/**
- * The list an autocomplete trigger drops above the caret. Extracted from Comments along with the
- * logic, so the composer and the description editor cannot drift apart in how they look or in
- * which key does what.
- */
 export function SuggestionList({
   items,
   index,
@@ -19,8 +14,6 @@ export function SuggestionList({
   index: number;
   onPick: (suggestion: Suggestion) => void;
   onHover?: (index: number) => void;
-  /** Where the caret is inside the field. Without it the list sits above the whole box, which is
-      fine on a two-line composer and useless on a 400px description. */
   at?: CaretPoint | null;
 }) {
   if (items.length === 0) return null;
@@ -43,7 +36,6 @@ export function SuggestionList({
             i === index ? "bg-bg-hover" : ""
           }`}
           onMouseEnter={() => onHover?.(i)}
-          // mousedown, not click: the textarea blurs first and the list would be gone by then
           onMouseDown={(e) => {
             e.preventDefault();
             onPick(item);

@@ -11,13 +11,6 @@ interface Person {
   fullName: string;
 }
 
-/**
- * What every editor in a project offers: `@` for the people who can be mentioned, and the board's
- * own key for the tasks that can be referred to.
- *
- * Shared so the comment composer and the description editor cannot drift apart — the mention half
- * lived inside Comments and reached nowhere else, which is why a description never offered one.
- */
 export function useEditorTriggers(projectId: string, projectKey?: string): Trigger[] {
   const api = useApi();
   const [people, setPeople] = useState<Person[]>([]);
@@ -34,8 +27,6 @@ export function useEditorTriggers(projectId: string, projectKey?: string): Trigg
     () => [
       {
         name: "mention",
-        // Unchanged from when it lived inline: an `@` anywhere before the caret, matched against
-        // username and full name alike
         pattern: /@([a-zA-Z0-9_-]*)$/,
         suggest: (query: string) =>
           people
@@ -52,19 +43,10 @@ export function useEditorTriggers(projectId: string, projectKey?: string): Trigg
               hint: u.fullName,
             })),
       },
-      // The board's own key, so the trigger is whatever this project is called. Only the current
-      // key: a former one is a way of recognising what somebody already wrote, not something to
-      // offer them now.
       ...(projectKey
         ? [
             {
               name: "task",
-              // Zero-width guard, because the whole match is what insertion replaces — a consuming
-              // one would swallow the space before the key and paste the word onto it.
-              // Case-insensitive, like the rendering and like every other key comparison here.
-              // Escaped, like every server-side use of a key (`github.ts`, `gitlab.ts`): `Project.key`
-              // carries only `uppercase` and `trim`, so a stored key of `(((` throws inside this
-              // useMemo and takes the editor down for everyone who opens the task (BP-329).
               pattern: new RegExp(
                 `(?<![\\w-])${escapeRegex(projectKey)}-([A-Za-z0-9_-]{0,30})$`,
                 "i"
@@ -75,9 +57,6 @@ export function useEditorTriggers(projectId: string, projectKey?: string): Trigg
                 );
                 return tasks.map((t) => ({
                   id: t._id,
-                  // Plain text, never a markdown link: the key is what gets stored and the link is
-                  // made when it is rendered, so renaming a project does not rewrite every
-                  // description that mentions it
                   insert: `${projectKey}-${t.taskNumber}`,
                   label: `${projectKey}-${t.taskNumber}`,
                   hint: t.title,

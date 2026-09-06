@@ -24,10 +24,6 @@ const TONE_CLASSES = {
   warning: "text-danger",
 };
 
-// Whose machine this is, which since BP-358 is the whole of what it may reach: the projects that
-// person can reach, resolved on every call. A worker with no owner reaches nothing at all, and
-// looked identical to a healthy one until this column existed — it has no binding error, no failed
-// heartbeat and an empty assignment list, which is also what an idle machine has.
 function OwnerCell({
   worker,
   disabled,
@@ -49,9 +45,6 @@ function OwnerCell({
       <span className="text-xs text-text" title={worker.owner.username}>
         {worker.owner.fullName || worker.owner.username}
       </span>
-      {/* Registration refuses to re-register a machine that belongs to somebody else, so without a
-          way to let one go, a machine whose owner has left could never be enrolled again under the
-          same name and host. */}
       <button
         data-testid="worker-release"
         disabled={disabled}
@@ -65,8 +58,6 @@ function OwnerCell({
   );
 }
 
-// A worker that has never reported this is not a worker that passed — showing it green would be the
-// "healthy in the console, fails every task" this column exists to end.
 function PreflightCell({ preflight }: { preflight: ApiWorkerPreflight | null }) {
   if (!preflight) return <span className="text-text-muted">not reported</span>;
 
@@ -98,9 +89,6 @@ export default function AdminWorkersPage() {
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [enrolling, setEnrolling] = useState(false);
-  // The only way back from a release is a fresh enrolment run on that machine, by whoever sits at
-  // it — every other destructive control in this product asks first, and this one is less reversible
-  // than most of them.
   const [releasing, setReleasing] = useState<ApiWorker | null>(null);
 
   const load = useCallback(async () => {
@@ -179,8 +167,6 @@ export default function AdminWorkersPage() {
           <p className="text-sm text-text-muted">
             Every worker registered on this instance. Only an instance admin can change what is on this page.
           </p>
-          {/* This page can only say what a machine is doing right now: every exit clears the run
-              identity it reads. What a finished run said is next door. */}
           <Link href="/settings/workers/runs" className="mt-1 inline-block text-sm text-primary underline">
             Run history
           </Link>
@@ -241,8 +227,6 @@ export default function AdminWorkersPage() {
                       {worker.version || "—"}
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap">
-                      {/* The count was the whole answer here, and the question it left was "so how
-                          do I give it another one" — which had no answer on any screen. */}
                       <Link
                         href={`/settings/workers/${worker._id}/projects`}
                         className="text-sm text-text-muted underline"

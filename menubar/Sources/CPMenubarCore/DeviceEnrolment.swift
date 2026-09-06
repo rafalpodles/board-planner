@@ -10,8 +10,6 @@ public struct DeviceEnrolmentStart: Decodable, Equatable, Sendable {
 public enum DeviceEnrolmentPoll: Equatable, Sendable {
     case pending
     case approved(workerID: String, credential: String, heartbeatMs: Int, repositoryURL: String, projectKey: String)
-    /// Refused, expired, or already collected. The server answers these alike on purpose, so the
-    /// app treats them alike too: start again.
     case finished
 }
 
@@ -29,9 +27,6 @@ private struct PollBody: Decodable {
     let projectKey: String?
 }
 
-// The app's half of CP-237: begin, open the browser, poll. Nothing here is authenticated, because
-// the machine has nothing to authenticate with yet — that is the problem being solved. What it
-// receives is worth nothing until somebody signed in confirms it in a browser.
 public struct DeviceEnrolmentClient: Sendable {
     public typealias Send = @Sendable (URLRequest) async throws -> (Data, URLResponse)
 
@@ -66,7 +61,6 @@ public struct DeviceEnrolmentClient: Sendable {
             try request("/api/workers/enrolment/device/token", body: ["deviceCode": deviceCode]))
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
 
-        // 410 is the server saying this exchange is over, whichever way it ended
         if status == 410 { return .finished }
         guard status == 200 else { throw DeviceEnrolmentError.badResponse(status) }
 

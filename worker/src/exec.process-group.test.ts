@@ -14,11 +14,6 @@ function alive(pid: number): boolean {
   }
 }
 
-// Both signals have already been sent by the time a run resolves — the direct child cannot outlive
-// its own group. What this waits out is the kernel finishing them: process.kill(pid, 0) also
-// succeeds for a process that is SIGKILLed but not yet scheduled to die, and for a grandchild
-// sitting unreaped because its parent was killed in the same syscall. Neither holds a worktree.
-// It never waits for a kill that has still to happen — nothing sends one after this point.
 async function awaitDead(pid: number): Promise<void> {
   await vi.waitFor(() => expect(alive(pid)).toBe(false), { timeout: 10_000 });
 }
@@ -33,14 +28,6 @@ function pidFiles(label: string): { stubborn: string; obedient: string } {
   return { stubborn: `${stem}-stubborn`, obedient: `${stem}-obedient` };
 }
 
-// The shape a run actually has: `claude -p` and `npm test` spawn their own children, and those
-// children are what hold the worktree open. Two of them, because terminate() sends two signals and
-// each has to reach the group: `obedient` dies on the SIGTERM, `stubborn` only on the escalation.
-//
-// Each grandchild writes its own pid rather than having the parent report it, and writes it only
-// once it is in the state the assertions rest on. spawn() returns a pid as soon as exec succeeds,
-// which is before `-e` has run: a stubborn grandchild reported that early can still be signalled
-// before its SIGTERM handler exists, and would then die on the SIGTERM it is here to survive.
 function childSpawningGrandchildren(files: { stubborn: string; obedient: string }): string {
   const announce = (file: string): string =>
     `require('fs').writeFileSync(${JSON.stringify(file)}, String(process.pid))`;
@@ -80,15 +67,11 @@ async function awaitGrandchildren(files: {
     stubborn: Number(readFileSync(files.stubborn, "utf8")),
     obedient: Number(readFileSync(files.obedient, "utf8")),
   };
-  // Without this the kill assertions below pass just as well against a grandchild that never
-  // started, which is the state a broken spawn would leave too
   expect(alive(pids.stubborn)).toBe(true);
   expect(alive(pids.obedient)).toBe(true);
   return pids;
 }
 
-// terminate() signalling only the direct child is what leaves a hung `npm test` running inside a
-// worktree the pipeline removes the moment the run resolves.
 describe("killing the whole process group", () => {
   it(
     "kills the grandchildren too when the run times out",
@@ -133,15 +116,12 @@ describe("killing the whole process group", () => {
         const abortedAt = Date.now();
         controller.abort();
 
-        // The SIGTERM is the group kill, not just the escalation behind it: this one dies on the
-        // first signal, well inside the grace period the SIGKILL waits out.
         await vi.waitFor(() => expect(alive(pids.obedient)).toBe(false), { timeout: 4000 });
         expect(Date.now() - abortedAt).toBeLessThan(4500);
 
         const result = await running;
 
         expect(result.timedOut).toBe(false);
-        // ...and the escalation is a group kill too, or this one outlives the run
         await awaitDead(pids.stubborn);
       } finally {
         reap(files);
@@ -159,9 +139,6 @@ describe("killGroup", () => {
 
     await new Promise((resolve) => child.on("exit", resolve));
 
-    // The precondition, not an aside: the group id is released with the pid, so by the time an
-    // abort or a timeout lands on a child that has just exited, -pid is ESRCH. That race is
-    // ordinary — it happens on every run that finishes near its deadline.
     expect(() => process.kill(-pid, 0)).toThrow(/ESRCH/);
 
     let directKills = 0;
@@ -179,18 +156,12 @@ describe("killGroup", () => {
   });
 
   it("signals the direct child when there is no group of its own to signal", () => {
-    // process.kill(-0) is process.kill(0): every process in the worker's own group, which is the
-    // worker itself and whatever launched it. A child that never spawned has pid undefined.
     const signalled: (number | NodeJS.Signals | undefined)[] = [];
     const record = (signal?: number | NodeJS.Signals): boolean => {
       signalled.push(signal);
       return false;
     };
 
-    // Asserting on the fallback alone cannot tell "the guard caught it" from "we signalled some
-    // other process and then fell back" — as non-root pid -1 negates to 1 and fails EPERM, which
-    // falls back and looks identical, while as root it would succeed and this test would fail on
-    // correct source. So watch the syscall itself: the guard means it is never reached.
     const realKill = process.kill;
     const groupKills: number[] = [];
     process.kill = ((pid: number, signal?: number | NodeJS.Signals) => {
@@ -213,7 +184,6 @@ describe("killGroup", () => {
   it("falls back to the direct child when the group cannot be signalled for any other reason", () => {
     let signalled = 0;
     const unsignallable = {
-      // not a pid the kernel will ever be asked about: process.kill rejects it before any syscall
       pid: Number.MAX_SAFE_INTEGER,
       kill: (): boolean => {
         signalled += 1;

@@ -2,12 +2,6 @@ import Foundation
 import Testing
 @testable import CPMenubarCore
 
-// Opt-in: these need a worker actually running. Everything else in this suite is hermetic.
-//
-//   CP_LIVE_SOCKET=$HOME/cp-rig/state/worker.sock swift test
-//
-// They exist because the transport is the one part unit tests cannot reach — a real AF_UNIX socket,
-// a real HTTP response, and a real SSE stream.
 private let liveSocket = ProcessInfo.processInfo.environment["CP_LIVE_SOCKET"]
 
 private func liveClient() -> SocketClient {
@@ -46,8 +40,6 @@ func theConfigRouteDisclosesNoCredential() async throws {
 func openingTheStreamAgainstARunningWorkerDoesNotFailImmediately() async throws {
     let client = liveClient()
 
-    // An idle worker emits nothing, so this proves the stream opens and stays open rather than
-    // erroring — the SSE head is flushed eagerly for exactly this case.
     let opened = Task { () -> TelemetryEvent? in
         for await event in client.stream() { return event }
         return nil
@@ -58,10 +50,6 @@ func openingTheStreamAgainstARunningWorkerDoesNotFailImmediately() async throws 
     #expect(Bool(true))
 }
 
-// The whole path the panel depends on, against a real worker: chunked framing, SSE framing, the
-// union decode, and the reducer. Needs a task to be claimed while it runs.
-//
-//   CP_LIVE_SOCKET=... CP_LIVE_RUN=1 swift test --filter followsARealRun
 @Test(.enabled(if: liveSocket != nil && ProcessInfo.processInfo.environment["CP_LIVE_RUN"] != nil),
       .timeLimit(.minutes(5)))
 func followsARealRun() async throws {

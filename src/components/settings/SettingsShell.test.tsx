@@ -22,8 +22,6 @@ const SELECTED: SettingsNavGroup[] = [
   ] },
 ];
 
-// Both rows are always in the DOM — Tailwind decides which one the viewport shows — so the
-// tests address them by which one they are rather than by their shared accessible name
 const sidebar = () => document.querySelector('[data-settings-nav="sidebar"]')!;
 const pills = () => document.querySelector('[data-settings-nav="pills"]')!;
 
@@ -73,15 +71,6 @@ describe("SettingsShell", () => {
     expect(container.querySelectorAll('[title="Unsaved changes"]').length).toBeGreaterThan(0);
   });
 
-  /**
-   * BP-498. The marker sits inside the item's own button, so its `title` folds into that button's
-   * accessible name and a dirty section announced as "General Unsaved changes". The five markers
-   * BP-450 fixed were spelled `title="Unsaved"`, which is why a grep for that string missed this
-   * one — and `Select.test.tsx` has had exactly this assertion for its own marker since.
-   *
-   * The test above passes either way: it selects the dot by `title`, which `aria-hidden` does not
-   * affect. This is the one that separates them.
-   */
   it("keeps the unsaved marker out of the item's name", () => {
     const { container } = render(<SettingsShell groups={SELECTED} active="general" onSelect={() => {}}>body</SettingsShell>);
 
@@ -89,7 +78,6 @@ describe("SettingsShell", () => {
     expect(marker).not.toBeNull();
     expect(marker!.getAttribute("aria-hidden")).toBe("true");
 
-    // The control, and what the reader actually hears: the button is still named for its section
     for (const button of container.querySelectorAll("button")) {
       if ((button.textContent ?? "").includes("General")) {
         expect(button.textContent?.replace(/\s+/g, " ").trim()).toBe("General");
@@ -118,11 +106,6 @@ describe("SettingsShell", () => {
     expect(sidebar().textContent).not.toContain("Board");
   });
 
-  /**
-   * The defect this component exists to prevent. BP-365 pinned the pill row on project
-   * settings and left the account settings row scrolling away with the page, because the
-   * two surfaces each wrote their own. One shell means one answer for both.
-   */
   it("pins the mobile pill row against the top of the scrollport", () => {
     render(<SettingsShell groups={ROUTED} active="profile">body</SettingsShell>);
     const cls = pills().className;
@@ -130,10 +113,6 @@ describe("SettingsShell", () => {
     expect(cls).toContain("bg-bg");
     expect(cls).toContain("border-b");
 
-    // The offset, the pull-out and the pay-back all cancel main's padding, so they are one
-    // number in four places — changing one and missing the others is the way this breaks.
-    // What the number has to *be* is main's own padding, which only the browser can measure:
-    // `e2e/settings-mobile-nav.spec.ts`.
     const step = (pattern: RegExp) => cls.match(pattern)?.[1];
     const sizes = [step(/-top-(\d+)/), step(/-mx-(\d+)/), step(/-mt-(\d+)/), step(/ px-(\d+)/)];
     expect(sizes, cls).not.toContain(undefined);
@@ -141,7 +120,6 @@ describe("SettingsShell", () => {
   });
 });
 
-// Whichever surface is added next inherits the fix instead of re-deciding it
 describe("no settings surface builds its own nav", () => {
   const FILES = [
     "src/app/(app)/settings/layout.tsx",

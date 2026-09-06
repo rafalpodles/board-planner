@@ -20,8 +20,6 @@ final class AppModel {
         SocketClient(socketPath: SocketClient.defaultSocketPath(), transport: POSIXTransport())
     }
 
-    // Pointing the app at another state directory has to take effect without a relaunch, since the
-    // operator has just been told that is where the socket lives.
     func reconnect() {
         guard !fixedClient else { return }
         client = AppModel.liveClient()
@@ -40,20 +38,12 @@ final class AppModel {
         pump = nil
     }
 
-    // A worker restart drops the socket; reconnecting on our own is what makes "retrying" true
-    // rather than decorative.
     private func pumpForever() async {
         while !Task.isCancelled {
             do {
                 let status = try await client.status()
                 state.adopt(status, at: Date())
                 config = try? await client.config()
-                // The picking happens in a browser; this is where the machine catches up with it.
-                // The runner is handed the question rather than an answer, because a clone takes
-                // minutes and the answer would be stale by the time a deletion acts on it.
-                //
-                // A socket that will not answer counts as busy — SyncPass.busy(asking:) states why,
-                // and is where that rule is tested.
                 if let catalogue = config?.catalogue {
                     await ProjectSyncRunner.shared.sync(
                         catalogue: catalogue,

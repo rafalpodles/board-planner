@@ -63,8 +63,6 @@ public struct Outcome: Equatable, Sendable, Decodable {
     }
 }
 
-// Structurally discriminated, in the same order telemetry.ts does it: status means quota, outcome
-// means outcome, otherwise progress. The wire carries no tag to key on.
 public enum TelemetryEvent: Equatable, Sendable, Decodable {
     case progress(Progress)
     case quota(Quota)

@@ -1,7 +1,5 @@
 import { AgentRunOutcome } from "@/types";
 
-// One definition for every view that reads a finished run: the project's recent runs and the
-// fleet's run history.
 const OUTCOME_LABELS: Record<AgentRunOutcome, string> = {
   delivered: "Pull request open",
   merged: "Merged",
@@ -19,7 +17,6 @@ interface Ended {
   refusedBy: string;
 }
 
-/** Which gate refused is the difference between raising a limit and rewriting the change. */
 export function endState(run: Ended): string {
   return run.refusedBy ? `Refused: ${run.refusedBy}` : OUTCOME_LABELS[run.outcome];
 }

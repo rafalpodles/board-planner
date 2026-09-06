@@ -143,9 +143,6 @@ describe("DELETE /api/projects/[projectId]", () => {
   });
 });
 
-// BP-411 made project keys immutable through this route; BP-415 found the guard written twice
-// (the second copy dead — the first already returns) and neither copy pinned by a test. Deleting
-// the *live* one by mistake would silently undo BP-411 with every check staying green.
 describe("PUT /api/projects/[projectId] key immutability", () => {
   beforeEach(() => {
     check.mockResolvedValue(true);
@@ -158,8 +155,6 @@ describe("PUT /api/projects/[projectId] key immutability", () => {
     expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
   });
 
-  // Control: an ordinary field update must still go through, so the 403 above is about `key`
-  // specifically and not the route refusing every PUT.
   it("still allows an ordinary name update", async () => {
     const res = await PUT(putRequest({ name: "Renamed" }), ctx());
 
@@ -199,8 +194,6 @@ describe("PUT /api/projects/[projectId] estimateFieldId", () => {
   });
 
   it("refuses a non-string designation instead of coercing it", async () => {
-    // String([]) === "" and String([numberFieldId]) === numberFieldId — either would have
-    // slipped past a bare String(...) coercion instead of being refused.
     const res = await PUT(putRequest({ estimateFieldId: [] }), ctx());
 
     expect(res.status).toBe(400);
@@ -237,8 +230,6 @@ describe("PUT /api/projects/[projectId] estimateFieldId", () => {
   });
 });
 
-// The clearing rule was pinned only in the helper's own unit tests, so deleting the whole block
-// from this route left the suite green — the mutation the BP-315 review ran to prove it.
 describe("PUT /api/projects/[projectId] and a repointed integration host", () => {
   function storedProject(overrides: Record<string, unknown> = {}) {
     return {
@@ -295,7 +286,6 @@ describe("PUT /api/projects/[projectId] and a repointed integration host", () =>
     expect(updatesSentToMongo()).not.toHaveProperty("gitlabToken");
   });
 
-  // .lean() skips the schema default, and the form posts that default on every save
   it("does not clear the token when the stored host was never persisted", async () => {
     storedAs(storedProject({ gitlabHost: undefined }));
 
@@ -313,13 +303,6 @@ describe("PUT /api/projects/[projectId] and a repointed integration host", () =>
   });
 });
 
-/**
- * A key reaches a task URL and from there Slack and Discord message markup (BP-401). The empty
- * string mattered most: the first version validated only a truthy, changed key, and
- * findByIdAndUpdate runs no validators, so `{"key":"  "}` erased the stored key — task keys
- * rendering as `-12`, and the old key never reaching formerKeys, which is what keeps existing
- * pull requests matching.
- */
 describe("the key a project may be renamed to", () => {
   beforeEach(() => {
     check.mockResolvedValue(true);
@@ -343,7 +326,6 @@ describe("the key a project may be renamed to", () => {
     expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
   });
 
-  // Without this the refusals above would pass on a route that refuses every rename
   it("refuses a key change", async () => {
     const res = await PUT(putRequest({ key: " bp " }), ctx());
 

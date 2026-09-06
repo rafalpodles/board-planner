@@ -6,9 +6,6 @@ import { Textarea } from "./Textarea";
 
 afterEach(cleanup);
 
-// The label rendered as a plain sibling with no htmlFor, so every "labelled"
-// field in the app was in fact unnamed — only a placeholder kept some of them
-// from being announced as bare edit boxes
 describe("Input label association", () => {
   it("names the field by its label", () => {
     render(<Input label="Email" />);

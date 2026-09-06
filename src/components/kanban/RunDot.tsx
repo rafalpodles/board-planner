@@ -3,11 +3,6 @@
 import { ApiTaskExecution } from "@/types";
 import { runLook, runStateOf } from "@/lib/run-state";
 
-/**
- * A worker holds this task — the compact form, for rows where a card's phase label would not fit.
- * The list had nothing at all before this: the only way to learn a task was being executed was to
- * try to move it and be refused.
- */
 export function RunDot({ execution }: { execution?: ApiTaskExecution }) {
   const state = runStateOf(execution);
   if (!state) return null;

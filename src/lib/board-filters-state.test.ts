@@ -10,8 +10,6 @@ import {
 describe("migratePersistedFilters — category renames", () => {
   const stored = { filters: { ...EMPTY_FILTERS, category: "bug" } };
 
-  // Categories are stored on a task by name, so renaming one leaves this filter pointing
-  // at a name the picker no longer offers: an empty board and no way to clear it
   it("drops a category filter the project no longer has", () => {
     const state = migratePersistedFilters(stored, "rpo", [], ["defect", "doc"]);
     expect(state.filters.category).toBe("");
@@ -22,7 +20,6 @@ describe("migratePersistedFilters — category renames", () => {
     expect(state.filters.category).toBe("bug");
   });
 
-  // Callers that do not know the categories yet must not have their filter wiped
   it("leaves the filter alone when the category list is not supplied", () => {
     const state = migratePersistedFilters(stored, "rpo", []);
     expect(state.filters.category).toBe("bug");
@@ -51,7 +48,6 @@ describe("migratePersistedFilters", () => {
     expect(state.sortDir).toBe("desc");
   });
 
-  // The regression this function exists to prevent
   it("carries a legacy myTasks toggle over to the assignee filter", () => {
     const state = migratePersistedFilters({ myTasks: true, filters: {} }, "rpo");
     expect(state.filters.assignee).toBe("rpo");
@@ -75,8 +71,6 @@ describe("migratePersistedFilters", () => {
     expect(state.filters.assignee).toBe("");
   });
 
-  // A truthy non-boolean must not switch the filter on — the string "false" is
-  // truthy, and a corrupted blob should not silently start filtering the board
   it("only migrates a literal true, not any truthy value", () => {
     for (const value of ["false", "true", 1, "yes", {}]) {
       const state = migratePersistedFilters({ myTasks: value, filters: {} }, "rpo");
@@ -122,7 +116,6 @@ describe("countActiveFilters", () => {
     ).toBe(3);
   });
 
-  // Search lives in the resting row, not the popover, so it must not inflate the pill
   it("does not count search", () => {
     const withSearch = { ...EMPTY_FILTERS, assignee: "rpo", search: "CP-128" };
     expect(countActiveFilters(withSearch as never)).toBe(1);
@@ -145,7 +138,6 @@ describe("project field filters", () => {
     expect(countActiveFilters({ ...EMPTY_FILTERS, fields: { f1: {} } })).toBe(0);
   });
 
-  // Otherwise the board keeps filtering on a field the panel no longer shows
   it("drops filters for archived and non-filterable fields", () => {
     const kept = sanitizeFieldFilters(
       { f1: { from: "3" }, f2: { value: "x" }, f3: { value: "y" } },

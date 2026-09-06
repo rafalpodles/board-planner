@@ -29,7 +29,6 @@ export async function enqueuePmTrigger(
       state: "pending",
     });
   } catch (err) {
-    // Duplicate key = a trigger for this task is already queued or running
     if ((err as { code?: number }).code !== 11000) throw err;
   }
 }
@@ -73,7 +72,6 @@ async function failTrigger(trigger: IPmTrigger, error: string): Promise<void> {
   await settleTrigger(trigger, exhausted ? "failed" : "pending", error);
 }
 
-// Reusing comment_added avoids touching the NotificationType enum, model and notifications UI
 async function notifyWatchers(
   trigger: IPmTrigger,
   pmUserId: string,
@@ -135,8 +133,6 @@ export async function runPmTrigger(trigger: IPmTrigger): Promise<PmTriggerOutcom
     return "ran";
   }
 
-  // A turn is already running for this project — hand the trigger back untouched
-  // so a busy lock never burns a retry, and let the next scheduler tick pick it up
   const pmUser = await getPmUser();
   const abort = acquireTurnLock(projectId, String(pmUser._id));
   if (!abort) {
@@ -147,7 +143,6 @@ export async function runPmTrigger(trigger: IPmTrigger): Promise<PmTriggerOutcom
 
   try {
     const result = await runPmTurn({
-      // Nobody is driving this one — see runPmTurn's `autonomous` (BP-321)
       autonomous: true,
       projectId,
       userMessage: buildNeedsHumanReviewPrompt(trigger.taskKey),

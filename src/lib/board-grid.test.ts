@@ -19,7 +19,6 @@ describe("isColumnCollapsed", () => {
     expect(isColumnCollapsed(0, true, false)).toBe(false);
   });
 
-  // Otherwise there is nowhere to drop a card into an empty column
   it("expands while a card is dragged over it", () => {
     expect(isColumnCollapsed(0, false, true)).toBe(false);
   });
@@ -29,7 +28,6 @@ describe("isColumnCollapsed", () => {
     expect(isColumnCollapsed(3, false, true)).toBe(false);
   });
 
-  // The user preference is a veto, not another input to weigh
   it("collapses nothing once the preference is off", () => {
     expect(isColumnCollapsed(0, false, false, false)).toBe(false);
     expect(isColumnCollapsed(0, true, false, false)).toBe(false);
@@ -71,16 +69,12 @@ describe("boardMinWidth", () => {
     );
   });
 
-  // The point of the change: a collapsed column must stop costing 200px of
-  // horizontal scroll it is not using
   it("charges a collapsed column only the rail width", () => {
     expect(boardMinWidth([true, false])).toBe(
       COLLAPSED_COLUMN_PX + MIN_EXPANDED_COLUMN_PX + BOARD_GAP_PX
     );
   });
 
-  // Measured live before this was added: eight columns at gap-4 lost 112px to the
-  // gaps, squeezing every expanded column to 178px — under the 200px floor
   it("counts the gaps, which otherwise eat into the columns", () => {
     expect(boardMinWidth([true, false, false, true, false, false, false, true])).toBe(
       3 * COLLAPSED_COLUMN_PX + 5 * MIN_EXPANDED_COLUMN_PX + 7 * BOARD_GAP_PX

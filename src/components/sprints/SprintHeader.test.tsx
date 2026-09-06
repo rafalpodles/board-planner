@@ -152,11 +152,6 @@ describe("SprintHeader view toggle", () => {
   });
 });
 
-/**
- * BP-311. A board with no column carrying the `done` role resolves the done ids to `[]`, so
- * `doneCount` is 0 for every sprint for ever. Rendering that as `0/8` and an empty bar states
- * something about the sprint; the truth is about the board.
- */
 describe("a board with no Done column", () => {
   it("says the progress cannot be measured, rather than reporting none", () => {
     renderHeader({ canMeasureDone: false });
@@ -167,7 +162,6 @@ describe("a board with no Done column", () => {
     );
   });
 
-  // The control: an ordinary board is untouched, and 0 of 8 still reads as 0 of 8
   it("leaves a measurable sprint saying exactly what it did", () => {
     renderHeader();
 
@@ -175,7 +169,6 @@ describe("a board with no Done column", () => {
     expect(screen.queryByTestId("sprint-progress-unmeasurable")).toBeNull();
   });
 
-  // The distinction the whole change rests on: nothing done is not the same as nothing countable
   it("still shows a real zero when the board CAN measure it", () => {
     renderHeader({ doneCount: 0, totalCount: 8 });
 

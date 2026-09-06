@@ -1,8 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { scrub } from "./scrub.js";
 
-// Shapes taken from what this system actually mints: src/app/api/tokens/route.ts:56 is
-// `cp_` + 40 hex, src/lib/worker-service.ts:50 is `cpw_` + 64 hex.
 const GITHUB_PAT = "ghp_0123456789abcdefghijABCDEFGHIJ012345";
 const WORKER_CREDENTIAL = `cpw_${"9f3c".repeat(16)}`;
 const API_TOKEN = `cp_${"a1b2".repeat(10)}`;
@@ -10,7 +8,6 @@ const ANTHROPIC_KEY = "sk-ant-api03-7Vd2mQx_pLr8Kt3NwZa5Yb1Ce6Hg9Jk4Ml0Op2Qs";
 const BEARER = "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ3b3JrZXIifQ.7sVn-_1qO0aP";
 const SESSION_TOKEN = `cps_${"7d1e".repeat(16)}`;
 
-// randomToken() mints every one of these as its prefix plus 32 random bytes as hex
 const PREFIXES = ["cp_", "cpw_", "cps_", "cpat_", "cprt_", "cpac_", "cpct_", "cpc_"];
 
 interface Row {
@@ -22,8 +19,6 @@ interface Row {
 
 const rows: Row[] = [
   {
-    // gh auth login stores gho_, delivery.ts forwards GH_TOKEN into gh, and github_pat_ is a
-    // different shape from ghp_ rather than a longer one
     name: "the GitHub token shapes that are not ghp_",
     input:
       "GH_TOKEN=gho_16C7e42F292c6912E7710c838347Ae178B4a rejected; also github_pat_11AABBCCD0aBcDeFgHiJk_LmNoPqRsTuVwXyZ0123456789aBcDeFgHiJkLmNoPqRs",
@@ -31,7 +26,6 @@ const rows: Row[] = [
     mustAppear: ["GH_TOKEN=[redacted]", "rejected"],
   },
   {
-    // This system accepts Basic auth as well as Bearer, and base64 hides every other pattern here
     name: "an Authorization header echoed back by an HTTP error",
     input: "401 from /api/projects/CP/tasks/claim: Authorization: Basic cnBvOmNwX2ExYjJhMWIyYTFiMmExYjJhMWIyYTFiMmExYjJhMWIyYTFiMmExYjI=",
     mustNotAppear: ["cnBvOmNwX2Ex"],
@@ -44,22 +38,18 @@ const rows: Row[] = [
     mustAppear: ["authorization: [redacted]"],
   },
   {
-    // A credential in userinfo is caught by where it sits, not by matching a known token shape
     name: "a credential in a pull request url's userinfo",
     input: "Merged https://x-access-token:ghp_0123456789abcdefghijABCDEFGHIJ012345@github.com/rafalpodles/BoardPlanner/pull/7",
     mustNotAppear: ["x-access-token", "ghp_0123456789"],
     mustAppear: ["https://[redacted]@github.com/rafalpodles/BoardPlanner/pull/7", "Merged"],
   },
   {
-    // The counterexample the no-\b decision turns on. Nothing pinned it before, so the tempting
-    // one-character "fix" could be made without any test objecting.
     name: "kebab-case identifiers that merely look like key prefixes",
     input: "disk-ant-collector-metrics-service failed after risk-based routing in task-service",
     mustNotAppear: ["[redacted]"],
     mustAppear: ["disk-ant-collector-metrics-service", "risk-based", "task-service"],
   },
   {
-    // ...and the glued secret the same decision protects, which \b would have missed
     name: "a credential glued straight to preceding word characters",
     input: `${"x".repeat(40)}cpw_9f3c9f3c9f3c9f3c9f3c9f3c9f3c9f3c9f3c9f3c9f3c9f3c9f3c9f3c9f3c9f3c`,
     mustNotAppear: ["cpw_9f3c"],
@@ -81,7 +71,6 @@ const rows: Row[] = [
     mustAppear: ["Cookie: theme=dark; [redacted]; sidebar=open", "GET /api/auth/me", "< 401"],
   },
   {
-    // COOKIE_ALLOW_INSECURE drops the prefix, and the value need not be a cps_ shape to be a session
     name: "an unprefixed session cookie whose value is not a recognisable token shape",
     input: "session rejected: Cookie: bp_session=Zm9vYmFy.trunc4ted; other=1",
     mustNotAppear: ["Zm9vYmFy", "bp_session="],
@@ -167,8 +156,6 @@ describe("scrub", () => {
     for (const kept of mustAppear) expect(output).toContain(kept);
   });
 
-  // Making the prefix group mandatory, or dropping its w branch, stops scrubbing cp_ and cpw_ —
-  // the only two shapes the pattern caught before sessions and OAuth tokens were added to it
   it.each(PREFIXES)("redacts a %s credential", (prefix) => {
     const token = `${prefix}${"4e7a".repeat(16)}`;
 
@@ -230,8 +217,6 @@ describe("scrub", () => {
 describe("scrub — every credential prefix this system mints", () => {
   const HEX = "a1b2".repeat(8);
 
-  // cpe_ is the worker's own enrolment token, read off its own disk; cpd_ is a device code. Both
-  // reach agent-authored summaries that get posted as board comments.
   const PREFIXES = ["cp_", "cpw_", "cps_", "cpe_", "cpd_", "cpat_", "cprt_", "cpac_", "cpct_", "cpc_"];
 
   for (const prefix of PREFIXES) {
@@ -242,8 +227,6 @@ describe("scrub — every credential prefix this system mints", () => {
   }
 });
 
-// BP-306: what an agent with Read and HOME finds on a developer's disk, rather than what this
-// codebase mints. Prefix coverage for our own tokens was already complete.
 describe("credentials an agent reads off a disk", () => {
   it("redacts a PEM private key block, body and all", () => {
     const key = [
@@ -273,14 +256,11 @@ describe("credentials an agent reads off a disk", () => {
   it.each([
     ["AKIAIOSFODNN7EXAMPLE", "AWS access key"],
     ["ASIAIOSFODNN7EXAMPLE", "AWS session key"],
-    // Assembled rather than written out: a literal here trips GitHub push protection, which
-    // is the scanner agreeing that the pattern is right
     [["glpat", "ABCdef123456789_xyz1"].join("-"), "GitLab token"],
   ])("redacts %s (%s)", (secret) => {
     expect(scrub(`token=${secret} rest`)).not.toContain(secret);
   });
 
-  // URL_USERINFO was anchored to https?://, so this walked straight through
   it("redacts userinfo on a scheme that is not http", () => {
     const out = scrub("MONGODB_URI=mongodb://admin:hunter2@cluster.example/db");
 

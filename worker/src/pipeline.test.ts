@@ -12,8 +12,6 @@ import { BaseUnavailableError, Workspace } from "./workspace.js";
 import { ClaimedTask, DiffStats, ExecutionResult, Gate, SnapshotEntry } from "./types.js";
 import { PipelineDeps, resolveStatusIds, runTask } from "./pipeline.js";
 
-// Exactly today's pipeline, expressed as an agent — the composition every existing project is
-// backfilled with, so a task claimed here means what it has always meant.
 const DEFAULT_SEQUENCE: SnapshotEntry[] = [
   { key: "implement", kind: "step", name: "Implement", prompt: "make the change", capability: "edit" },
   { key: "protected-paths", kind: "gate", name: "Protected files", gateKind: "protected-paths" },
@@ -47,7 +45,6 @@ const MERGE: SnapshotEntry = { key: "merge", kind: "step", name: "Merge", determ
 
 const KNOWN = new Map([...DEFAULT_SEQUENCE, MERGE].map((entry) => [entry.key, entry]));
 
-/** The same task, running a different agent. An unknown key is a gate of its own kind. */
 function running(...keys: string[]): ClaimedTask {
   return {
     ...task,
@@ -55,7 +52,6 @@ function running(...keys: string[]): ClaimedTask {
   };
 }
 
-/** Everything the default does, and merges. What the "Merges its own work" agent is. */
 const merging = running(...DEFAULT_SEQUENCE.map((entry) => entry.key), "merge");
 
 const completed: ExecutionResult = {
@@ -66,7 +62,6 @@ const completed: ExecutionResult = {
   blockedReason: "",
 };
 
-// Deliberately none of the seeded ids, so any surviving literal fails
 const statuses: StatusIds = { approved: "ready", review: "checking", done: "shipped" };
 const board = ["ready", "doing", "checking", "shipped"];
 
@@ -93,9 +88,6 @@ function shell(stdout = "", overrides: Partial<CommandResult> = {}): CommandResu
 
 const IMPLEMENT_COMMIT_SHA = "sha-implement001";
 
-// A worktree that starts dirty, the way the implement step actually leaves one, and goes clean the
-// moment commitAll's own `git commit` runs — so the sha it hands back is what reaches push, and the
-// unfinishedWork check right after it does not mistake the just-committed tree for leftover work.
 function defaultRunner(): { run: ReturnType<typeof vi.fn> } {
   let committed = false;
   const run = vi.fn<Runner["run"]>(async (_command, args) => {
@@ -104,7 +96,6 @@ function defaultRunner(): { run: ReturnType<typeof vi.fn> } {
       committed = true;
       return shell();
     }
-    // The provenance guard's range: exactly the commit the mock above made, once it made it.
     if (args.includes("rev-list")) return shell(committed ? `${IMPLEMENT_COMMIT_SHA}\n` : "");
     if (args.includes("rev-parse")) return shell(IMPLEMENT_COMMIT_SHA);
     return shell();
@@ -165,8 +156,6 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
   };
   const collectDiff = vi.fn<PipelineDeps["collectDiff"]>().mockResolvedValue(diff);
   const runner = defaultRunner();
-  // Every gate passes unless a test says otherwise. What each kind actually does is
-  // gates/from-entry.test.ts's subject; this file is about the order they run in.
   const gateFor = vi.fn<PipelineDeps["gateFor"]>((entry) => passingGate(entry.key));
   const recordRun = vi.fn<PipelineDeps["recordRun"]>();
 
@@ -202,14 +191,10 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
   };
 }
 
-/** A gateFor that answers with the given gate for one key, and passes everything else. */
 function gateForOnly(key: string, gate: Gate): PipelineDeps["gateFor"] {
   return (entry) => (entry.key === key ? gate : passingGate(entry.key));
 }
 
-// reporter.gateRejected is mocked throughout this file, so nothing here exercises reporter.ts's
-// own composition. This mirrors it (reporter.ts:107-116) to catch pipeline.ts handing it a branch
-// that contradicts the reason it just gave — reporter.ts's own comment names the hazard directly.
 function composedGateRejectedComment(call: unknown[]): string {
   const [, gate, reason, branch] = call as [ClaimedTask, string, string, string];
   const where = branch ? `\n\nThe work is pushed to \`${branch}\` for inspection.` : "";
@@ -238,9 +223,6 @@ describe("resolveStatusIds", () => {
     await expect(promise).rejects.toThrow(/shipped/);
   });
 
-  // An empty id is what api.statusIds now answers for a role no column carries (BP-512). The
-  // repair is different from a deleted column's — give a column the role, rather than find where
-  // an id went — so the message has to say which it is.
   it("says when no column carries the role at all, instead of quoting an empty id", async () => {
     const promise = resolveStatusIds(
       {
@@ -284,9 +266,6 @@ describe("runTask", () => {
     expect(h.collectDiff).toHaveBeenCalledWith(h.runner, "/wt", "base111");
   });
 
-  // A base that could not be established is the machine's failure, not the task's. requeued charges
-  // the attempt and nothing ever resets execution.attempts, so charging one unreachable remote to
-  // the queue parks every task in it in front of a human, permanently, for a network problem.
   it("releases the task with its attempt refunded when the base cannot be established", async () => {
     const h = harness();
     h.workspace.create.mockRejectedValue(
@@ -301,11 +280,6 @@ describe("runTask", () => {
     expect(h.reporter.released.mock.calls[0][1]).toMatch(/no route to host/);
   });
 
-  // The other half of the taxonomy. A remote that answers and reports no such ref is this project's
-  // configuration — a default branch of master under a policy default of main, a branch renamed
-  // away, an empty repository. Refunding that would circle the task through the approved column for
-  // ever with nothing on the machine able to fix it, and would end every pass on a project that is
-  // merely misconfigured. It spends the attempt so a human eventually sees it.
   it("charges the attempt, and reports no machine fault, when the remote has no such base branch", async () => {
     const h = harness();
     h.workspace.create.mockRejectedValue(
@@ -333,8 +307,6 @@ describe("runTask", () => {
     expect(logError).toHaveBeenCalledWith(expect.stringMatching(/CP-158.*no route to host/));
   });
 
-  // Everything else that can go wrong creating a worktree is still the task's problem and still
-  // spends the attempt — a task whose own key or branch breaks the worktree must run out of retries.
   it("still charges the attempt when the worktree fails for a reason that is not the base", async () => {
     const h = harness();
     h.workspace.create.mockRejectedValue(new Error("worktree add failed"));
@@ -366,15 +338,10 @@ describe("runTask", () => {
 
     expect(h.workspace.create).not.toHaveBeenCalled();
     expect(h.executor.execute).not.toHaveBeenCalled();
-    // Charged: a refunded release put the task back at the head of the queue, and the loop —
-    // which does not sleep after a run — claimed it again at once, for ever (BP-512)
     expect(h.api.release).toHaveBeenCalledWith("CP", "t1", { refund: false });
     expect(h.api.comment.mock.calls[0][2]).toMatch(/shipped/);
   });
 
-  // The ticket's own shape (BP-512): a Done column demoted to review keeps its id, so the id is
-  // still on the board while no column carries the role. statusIds answers "" for it now, and the
-  // run has to hand the task back — charged — rather than deliver into the column that is left
   it("hands back a task whose board still has a column called done but none meaning it", async () => {
     const columnIds = vi
       .fn<PipelineDeps["columnIds"]>()
@@ -390,7 +357,6 @@ describe("runTask", () => {
     expect(h.api.comment.mock.calls[0][2]).toMatch(/done \(no column carries that role\)/);
   });
 
-  // This comment is posted directly, before a reporter exists to scrub it
   it("redacts a credential in the error it comments when the board cannot be resolved", async () => {
     const credential = `cpw_${"9f3c".repeat(16)}`;
     const h = harness();
@@ -482,13 +448,10 @@ describe("runTask", () => {
     expect(h.workspace.destroy).not.toHaveBeenCalled();
   });
 
-  // The commit's own status has to succeed first, or commitAll fails and this never reaches the
-  // check it is named after — which is exactly how it passed while asserting nothing
   it("treats a worktree whose state cannot be read as dirty", async () => {
     let calls = 0;
     const runner = {
       run: vi.fn<Runner["run"]>(async (_command, args) => {
-        // The pre-staging config scan (BP-403) is not one of the calls this fixture counts
         if (args.includes("--list")) return shell("");
         calls += 1;
         return calls === 1
@@ -504,7 +467,6 @@ describe("runTask", () => {
     expect(h.workspace.destroy).not.toHaveBeenCalled();
   });
 
-  // The agent has no Bash any more, so nothing but this puts its work in a commit
   it("commits what the agent wrote, under the task key", async () => {
     const runner = { run: vi.fn<Runner["run"]>().mockResolvedValue(shell(" M src/a.ts\n")) };
     const h = harness({ runner });
@@ -536,8 +498,6 @@ describe("runTask", () => {
 
     expect(gate.run).toHaveBeenCalledWith({
       worktreePath: "/wt",
-      // What the config said before the agent ran, handed to the gate rather than re-read: a gate
-      // that reads it now is reading the version the agent has had (BP-346)
       configBaseline: [],
       task: merging,
       result: completed,
@@ -559,8 +519,6 @@ describe("runTask", () => {
       "diff-size",
       "too big",
       "cp-158/worker",
-      // The refused change travels with the refusal now; the reporter only renders it where no
-      // branch carries it, which for this gate is not the case.
       expect.anything()
     );
     expect(later.run).not.toHaveBeenCalled();
@@ -589,8 +547,6 @@ describe("runTask", () => {
     expect(h.reporter.requeued).not.toHaveBeenCalled();
   });
 
-  // A killed agent settles as an ordinary failed run, so without a check here the operator's stop
-  // is charged to the task and three of them park it in review as "gave up on attempt 3"
   it("releases without charging the attempt when the stop lands inside the agent run", async () => {
     const controller = new AbortController();
     const execute = vi.fn<Executor["execute"]>(async () => {
@@ -606,10 +562,6 @@ describe("runTask", () => {
     expect(h.delivery.push).not.toHaveBeenCalled();
   });
 
-  // A supervisor restarting the worker on a failing health check signals it every cycle. Refunding
-  // there means claim(+1), abort, refund(-1), restart, re-claim the same task — attempts never
-  // grow, so the task never runs out of retries and never reaches a human, which is the entire
-  // point of counting them.
   it("charges the attempt when a process signal stopped the run, not an operator", async () => {
     const controller = new AbortController();
     const execute = vi.fn<Executor["execute"]>(async () => {
@@ -625,8 +577,6 @@ describe("runTask", () => {
     expect(h.delivery.push).not.toHaveBeenCalled();
   });
 
-  // Same shape one phase later: the gate's own subprocess is killed, so the gate reports a
-  // perfectly ordinary "build failed (exit -1)" and the board would blame the change for it
   it("releases and pushes nothing when the stop lands inside a gate's own subprocess", async () => {
     const controller = new AbortController();
     const gate = {
@@ -737,9 +687,6 @@ describe("runTask", () => {
     expect(h.workspace.destroy).toHaveBeenCalledWith("CP-158");
   });
 
-  // Every other test in this file runs a single writing step, where commits[0] and the last commit
-  // are the same value — so none of them can tell a correct index from a stale one. Two writing
-  // steps is the smallest arrangement where the difference exists at all.
   it("pushes the last commit the run made, not its first, when a gate rejects after two writing steps", async () => {
     const FIRST = "sha-first00001";
     const LAST = "sha-last000001";
@@ -747,7 +694,6 @@ describe("runTask", () => {
     let commitsMade = 0;
     const runner = {
       run: vi.fn<Runner["run"]>(async (_command, args) => {
-        // dirty before each commit, clean at the check that follows it
         if (args.includes("status")) {
           statusCalls += 1;
           return shell(statusCalls % 2 === 1 ? " M a.ts\n" : "");
@@ -756,7 +702,6 @@ describe("runTask", () => {
           commitsMade += 1;
           return shell();
         }
-        // the provenance guard's range: newest first, exactly the commits made so far
         if (args.includes("rev-list")) {
           return shell(commitsMade >= 2 ? `${LAST}\n${FIRST}\n` : commitsMade === 1 ? `${FIRST}\n` : "");
         }
@@ -801,7 +746,6 @@ describe("runTask", () => {
     expect(reason).toMatch(/too big/);
     expect(reason).toMatch(/stale info/);
     expect(reason).toMatch(/not on the remote/);
-    // The bug this guards: a failed push must not also promise the branch is there to inspect.
     expect(branch).toBe("");
     expect(composedGateRejectedComment(call)).not.toMatch(/is pushed to/);
     expect(h.workspace.destroy).not.toHaveBeenCalled();
@@ -816,8 +760,6 @@ describe("runTask", () => {
           committed = true;
           return shell();
         }
-        // A foreign sha alongside the real one — planted the way an agent with Write under .git
-        // could, not something this run's own commit() calls ever produced.
         if (args.includes("rev-list")) return shell(`shaX\n${IMPLEMENT_COMMIT_SHA}\n`);
         if (args.includes("rev-parse")) return shell(IMPLEMENT_COMMIT_SHA);
         return shell();
@@ -936,8 +878,6 @@ describe("runTask", () => {
     expect(seen).toEqual(["gate:review", "step:implement", "gate:diff-size"]);
   });
 
-  // Skipping it would run a shorter agent than the one somebody composed, and a missing check looks
-  // exactly like a check that passed
   it("refuses a gate kind this worker does not implement, naming it", async () => {
     const h = harness({ gateFor: () => null });
     await runTask(h.deps, running("implement", "invented"));
@@ -947,19 +887,12 @@ describe("runTask", () => {
     expect(h.workspace.destroy).not.toHaveBeenCalled();
   });
 
-  // With several writing steps an unclean tree poisons everything after it, so the check runs after
-  // each of them rather than once after the first
   it("ends the run when a later writing step leaves the tree unclean", async () => {
     let calls = 0;
     const runner = {
       run: vi.fn<Runner["run"]>(async (_command, args) => {
-        // The pre-staging config scan is not one of the calls this fixture counts. Skipped by
-        // shape rather than counted: BP-403 added one call to it and BP-346 a second, and each
-        // time the numbering below moved while still reading as though it named the checks
         if (args.includes("--list")) return shell("");
         calls += 1;
-        // 1: the first commit's status, 2: the check after step one, 3: the second commit's status,
-        // 4: the check after step two — the one that only exists because steps can follow steps
         return shell(calls >= 4 ? " M src/a.ts\n" : "");
       }),
     };
@@ -979,17 +912,12 @@ describe("runTask", () => {
     expect(h.delivery.merge).not.toHaveBeenCalled();
   });
 
-  // A gate that runs npm ci or the project's suite leaves build output behind; failing the run over
-  // an artifact the target repo does not gitignore would be a refusal of nothing
   it("does not judge the tree after a gate, only after a step that could write", async () => {
     let calls = 0;
     const runner = {
       run: vi.fn<Runner["run"]>(async (_command, args) => {
-        // The provenance guard's rev-list/rev-parse are not the "is the tree dirty" check this
-        // test is about — an untampered range with no commits made must still pass it.
         if (args.includes("rev-list")) return shell("");
         if (args.includes("rev-parse")) return shell("base1");
-        // The pre-staging config scan (BP-403) is not one of the calls this fixture counts
         if (args.includes("--list")) return shell("");
         calls += 1;
         return shell(calls > 2 ? "?? dist/main.js\n" : "");
@@ -1003,8 +931,6 @@ describe("runTask", () => {
     expect(h.delivery.push).toHaveBeenCalled();
   });
 
-  // A pushed branch carrying .github/workflows/*.yml runs in Actions with the repository's secrets,
-  // whatever the verdict said
   it("does not push when protected-paths refuses, and says where the work is", async () => {
     const h = harness({
       gateFor: () => rejectingGate("protected-paths", "it edits .github/workflows/ci.yml"),
@@ -1014,13 +940,10 @@ describe("runTask", () => {
 
     expect(h.delivery.push).not.toHaveBeenCalled();
     expect(h.reporter.gateRejected.mock.calls[0][2]).toMatch(/on purpose/);
-    // No branch, so the comment cannot promise one that is not on the remote
     expect(h.reporter.gateRejected.mock.calls[0][3]).toBe("");
     expect(h.workspace.destroy).not.toHaveBeenCalled();
   });
 
-  // Nothing read the timeout a step or a gate was handed, so folding both onto the gate's cap cut
-  // every model step from thirty minutes to ten without a single test noticing
   it("bounds a model step by the project's step timeout, and a gate by the gate cap", async () => {
     const h = harness({ config: { ...config, taskTimeoutMs: 1_800_000 } });
 
@@ -1067,8 +990,6 @@ describe("runTask", () => {
     expect(h.gateFor).not.toHaveBeenCalled();
   });
 
-  // execution.runId lives on the task and every exit clears it, so without this a finished run is
-  // one nobody can ask about afterwards
   it("leaves a record on a delivered run, naming the agent that ran", async () => {
     const h = harness();
     await runTask(h.deps, task);
@@ -1089,8 +1010,6 @@ describe("runTask", () => {
     });
   });
 
-  // Every other exit settles; this one returned bare, so the menubar showed the run parked in
-  // "claiming" for ever and no record was written for a task that was claimed and handed back
   it("leaves a record when the board cannot route the outcome", async () => {
     const columnIds = vi
       .fn<PipelineDeps["columnIds"]>()
@@ -1102,8 +1021,6 @@ describe("runTask", () => {
     expect(h.recordRun).toHaveBeenCalledWith("CP", expect.objectContaining({ taskKey: "CP-158" }));
   });
 
-  // A gate handed the last few seconds fails on the clock and is reported as its own refusal —
-  // "blocked the merge at the build gate" for a build that never ran
   it("calls the ceiling rather than starting an entry that cannot finish", async () => {
     let now = 0;
     const h = harness({
@@ -1124,7 +1041,6 @@ describe("runTask", () => {
     expect(h.reporter.requeued.mock.calls[0][1]).toMatch(/ceiling/);
   });
 
-  // The record is a durable sink and the detail is model-authored prose, the same as a comment
   it("redacts a credential in the detail it records", async () => {
     const credential = `cpw_${"9f3c".repeat(16)}`;
     const executor = {
@@ -1154,21 +1070,13 @@ describe("runTask", () => {
     expect(h.recordRun.mock.calls[0][1].costUsd).toBe(0.25);
   });
 
-  // With one step this could not happen — a step that blocks never reaches its commit. With two,
-  // the first one's work is committed and only the worktree holds it: nothing is pushed, and the
-  // branch ref the parent clone keeps is reset by the next attempt's `git worktree add -B`.
   it("keeps the worktree when a later step blocks after an earlier one committed", async () => {
     let calls = 0;
     const runner = {
       run: vi.fn<Runner["run"]>(async (_command, args) => {
-        // The pre-staging config scan (BP-403) is not one of the calls this fixture counts
         if (args.includes("--list")) return shell("");
         calls += 1;
-        // rev-parse HEAD is what commitAll hands back as the sha it made — a real commit always
-        // resolves it, so a mock that left it empty would prove nothing about state.committed
-        // beyond what an unconditional flag already faked.
         if (args.includes("rev-parse")) return shell(IMPLEMENT_COMMIT_SHA);
-        // 1: the commit's status, dirty so a commit happens; the rest clean
         return calls === 1 ? shell(" M src/a.ts\n") : shell("");
       }),
     };
@@ -1199,9 +1107,6 @@ describe("runTask", () => {
     expect(h.reporter.blocked.mock.calls[0][1]).toMatch(/not pushed/);
   });
 
-  // gh pr merge deliberately runs with no signal, so a stop pressed during it is only observed
-  // afterwards. Releasing there puts a task whose change is already on the base branch back in the
-  // queue, and the next claim runs the whole agent again over work that has landed.
   it("reports a merged run as merged even when the stop lands during the merge", async () => {
     const controller = new AbortController();
     const delivery = deliverySpy({
@@ -1326,8 +1231,6 @@ describe("what the run says it is doing", () => {
     ]);
   });
 
-  // The detail reaches a Notification Center database that outlives the run, so it takes the same
-  // route as board-bound text rather than a shorter one.
   it("scrubs a secret out of an outcome detail", async () => {
     const executor = {
       execute: vi.fn<Executor["execute"]>().mockResolvedValue({
@@ -1343,14 +1246,11 @@ describe("what the run says it is doing", () => {
 
     await runTask(h.deps, task);
 
-    // Asserted positively first: an empty outcome list would satisfy the negative on its own
     expect(outcomes()).toHaveLength(1);
     expect(outcomes()[0]).toMatchObject({ outcome: "blocked", taskKey: "CP-158" });
     expect(JSON.stringify(outcomes())).not.toContain("cpw_deadbeef");
   });
 
-  // Asserted only that runTask resolved, with no bus attached to count outcomes on — it could not
-  // fail for the property it names. Counting them on a bus that IS attached is the real question.
   it("emits exactly one outcome for a run, never a second after it settles", async () => {
     const { h, outcomes } = watched({ gateFor: () => rejectingGate("build", "it does not build") });
 
@@ -1387,8 +1287,6 @@ describe("what the run says it is doing", () => {
     expect(phases()).toEqual(["claiming", "worktree"]);
   });
 
-  // The run's only agent-authored input, and the only route it may take: summarise() bounds it into
-  // a name and a path. Handing the raw event to a sink instead would put file bodies on the board.
   it("puts the agent's own stream on the bus through the summarising entry point", async () => {
     const execute = vi.fn<Executor["execute"]>(async ({ onEvent }) => {
       onEvent?.({
@@ -1415,8 +1313,6 @@ describe("what the run says it is doing", () => {
     expect(JSON.stringify(seen)).not.toContain("cpw_deadbeef");
   });
 
-  // It used to hand the executor nothing when no bus was attached. Cost is read off the same
-  // stream, and a run record with costUsd permanently 0 is worse than a listener nobody watches.
   it("listens to the agent's stream even with no bus attached, because cost is measured there", async () => {
     const h = harness();
 
@@ -1427,8 +1323,6 @@ describe("what the run says it is doing", () => {
   });
 });
 
-// Merging is a property of the composition now: the default agent pushes and opens a pull request,
-// and only an agent carrying a Merge step merges. There is no flag to turn on.
 describe("whether a run merges", () => {
   it("opens the pull request and stops when the agent carries no merge step", async () => {
     const h = harness();

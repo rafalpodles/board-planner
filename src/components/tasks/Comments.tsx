@@ -20,11 +20,8 @@ interface CommentsProps {
   taskId: string;
   hideHeading?: boolean;
   onCountChange?: (count: number) => void;
-  /** Bumped when a comment is posted from somewhere else, e.g. the phone's bottom bar */
   refreshKey?: number;
-  // Adding, editing and deleting a comment each write an activity entry; reacting does not
   onMutated?: () => void;
-  /** The board these comments belong to, so a written task key becomes a link to that task */
   scope?: ReferenceScope | null;
 }
 
@@ -172,8 +169,6 @@ export function Comments({
     return comment.author.username === user.username;
   }
 
-  // Two instances, one per composer: each owns a textarea, and the edit box used to share the new
-  // comment's state through a "target" flag threaded into every handler.
   const triggers = useEditorTriggers(projectId, scope?.key);
   const newMention = useTriggerAutocomplete(triggers, textareaRef, setBody);
   const editMention = useTriggerAutocomplete(triggers, editTextareaRef, setEditBody);
@@ -280,7 +275,6 @@ export function Comments({
               </div>
             )}
 
-            {/* Reactions */}
             <div className="flex items-center gap-1 mt-2 flex-wrap">
               {Object.entries(groupReactions(comment.reactions || [])).map(
                 ([emoji, { count, users, hasOwn }]) => (
@@ -323,8 +317,6 @@ export function Comments({
         )}
       </div>
 
-      {/* Wide screens only: a phone comments through the bar pinned to the bottom of
-          the task, so a second composer here would be a decoy */}
       <form onSubmit={handleSubmit} className="hidden items-start gap-3 pt-3 lg:flex">
         <Avatar name={user?.fullName} size={28} className="mt-1 hidden sm:inline-flex" />
         <div className="flex min-w-0 flex-1 flex-col gap-2.5">

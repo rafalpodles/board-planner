@@ -14,7 +14,6 @@ export function parseHex(hex: string): Rgb {
   };
 }
 
-// Matches CSS `color-mix(in srgb, a <pct>%, b)`
 export function mix(a: Rgb, b: Rgb, pct: number): Rgb {
   const w = pct / 100;
   return {
@@ -44,12 +43,10 @@ export const CHIP_SURFACE_PCT = 18;
 export const CHIP_LABEL_PCT = 85;
 export const CHIP_CUSTOM_LABEL_PCT = 55;
 
-// The `.chip` rule in globals.css, evaluated in TypeScript so it can be asserted
 export function chipContrast(accent: Rgb, cardBg: Rgb, text: Rgb): number {
   return contrastRatio(mix(accent, text, CHIP_LABEL_PCT), mix(accent, cardBg, CHIP_SURFACE_PCT));
 }
 
-// `.chip-custom` — an arbitrary project colour, pulled toward the foreground
 export function chipCustomContrast(accent: Rgb, cardBg: Rgb, text: Rgb): number {
   return contrastRatio(
     mix(accent, text, CHIP_CUSTOM_LABEL_PCT),

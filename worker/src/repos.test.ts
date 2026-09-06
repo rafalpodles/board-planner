@@ -41,8 +41,6 @@ describe("bindRepository", () => {
     expect((result as { worktreeRoot: string }).worktreeRoot).toBe(join("/", "cp-worktrees", "worker-1"));
   });
 
-  // Two worker processes running as the same OS user must not collide on the same worktree root —
-  // the whole reason RepoDeps.workerId went from optional to required
   it("derives worktreeRoot from the given workerId, not the OS uid", async () => {
     const a = await bindRepository(depsWith({ workerId: "worker-a", uid: 501 }), "/repo");
     const b = await bindRepository(depsWith({ workerId: "worker-b", uid: 501 }), "/repo");
@@ -52,9 +50,6 @@ describe("bindRepository", () => {
     expect((a as { worktreeRoot: string }).worktreeRoot).not.toBe((b as { worktreeRoot: string }).worktreeRoot);
   });
 
-  // BP-327, belt and braces: registration.ts refuses a workerId that is not an ObjectId, and this
-  // is the sink that would suffer if anything ever got past it. `join` normalises "..", so the
-  // root has to be checked after it is computed, not before.
   it.each([
     "../../../../Users/rpo/Library/LaunchAgents",
     "..",
@@ -82,7 +77,6 @@ describe("bindRepository", () => {
     expect((result as { reason: string }).reason).toMatch(/not approved on this machine/i);
   });
 
-  // Allowlist a benign path, then point a symlink somewhere else
   it("refuses when the allowlisted path resolves elsewhere", async () => {
     const deps = depsWith({ allowlist: ["/repo"], realpath: () => "/tmp/evil" });
 
@@ -119,8 +113,6 @@ describe("bindRepository", () => {
     expect((result as { reason: string }).reason).toMatch(/git config/i);
   });
 
-  // The reproduction that matters most: neither key alone is a command, but together they make
-  // git run one — this is what delivery.ts's own push would otherwise execute
   it("refuses a repository pairing a permissive protocol.allow with an ext:: remote", async () => {
     const gitConfig = "protocol.ext.allow=always\nremote.origin.url=ext::sh -c 'touch /tmp/pwned'\n";
     const result = await bindRepository(depsWith({ gitConfig }), "/repo");
@@ -129,10 +121,6 @@ describe("bindRepository", () => {
     expect((result as { reason: string }).reason).toMatch(/git config/i);
   });
 
-  // These sit in the same families as the dangerous keys above but hold no command, so refusing
-  // them would reject ordinary Git-LFS and gitattributes repositories for no security benefit.
-  // protocol.*.allow=never is the explicitly safe value — it reinforces ext's default, it does not
-  // relax it — and must not be refused just because the key shape matches.
   it.each([
     "filter.lfs.required=true",
     "diff.d.binary=true",
@@ -146,12 +134,7 @@ describe("bindRepository", () => {
     expect(result.ok).toBe(true);
   });
 
-  // toplevel is pinned to the proposed path so rule 6 (own toplevel) cannot also refuse and mask
-  // whether the rule actually under test fired — depsWith()'s default toplevel is "/repo", which
-  // none of these paths equal, so without the override every case here would "pass" vacuously.
   it.each([
-    // Derived from homedir(), like the rule itself: hard-coding one machine's home meant this
-    // case asserted nothing anywhere else, and CI on Linux was the first thing to notice
     [join(homedir(), ".ssh"), /sensitive/i],
     [join(homedir(), ".claude"), /sensitive/i],
     ["/etc", /sensitive/i],
@@ -194,7 +177,6 @@ describe("bindRepository", () => {
     expect((result as { reason: string }).reason).toMatch(/readable by group or others/);
   });
 
-  // A hostile system-wide gitconfig would otherwise reach every invocation this module makes
   it("neutralises system and repository git config on every call it makes", async () => {
     const deps = depsWith();
     await bindRepository(deps, "/repo");
@@ -230,9 +212,6 @@ describe("createAllowlistReader", () => {
   });
 });
 
-// Reporting [] for a fault made the server wipe its stored inventory, leaving a worker that looked
-// live, enabled and error-free while claiming nothing — and, for a mode-644 repos.json, never
-// self-healing. The reason has to survive as a reason.
 describe("repoInventory", () => {
   const runner = (remote: string) => ({
     run: async () => ({ code: 0, stdout: remote, stderr: "", timedOut: false }),
@@ -267,7 +246,6 @@ describe("repoInventory", () => {
     expect(empty).toEqual({ ok: true, repos: [] });
   });
 
-  // The `for…of` used to sit outside the try, so this threw and took out the whole refresh
   it("refuses a repos.json whose repos is not an array, instead of throwing", async () => {
     const result = await repoInventory({
       runner: runner("x") as never,

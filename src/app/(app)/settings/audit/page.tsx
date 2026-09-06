@@ -63,9 +63,6 @@ export default function InstanceAuditPage() {
         <div className="border border-border rounded-lg overflow-hidden">
           <table className="w-full text-xs">
             <tbody>
-              {/* Five columns, four of them nowrap, inside an overflow-hidden card: on a phone
-                  every row was sliced mid-word with nothing to scroll. Below sm the row is a
-                  wrapping block instead, and only the table shape is kept for wider screens. */}
               {logs.map((log) => (
                 <tr
                   key={log._id}
@@ -74,8 +71,6 @@ export default function InstanceAuditPage() {
                   <td className="align-top text-text-muted sm:table-cell sm:whitespace-nowrap sm:px-3 sm:py-2">
                     {new Date(log.createdAt).toLocaleString()}
                   </td>
-                  {/* "system" for a machine, matching the project log — a worker spending its
-                      enrolment token has no session to attribute the row to */}
                   <td className="align-top font-medium sm:table-cell sm:whitespace-nowrap sm:px-3 sm:py-2">
                     {auditActor(log)}
                   </td>
@@ -89,8 +84,6 @@ export default function InstanceAuditPage() {
                   <td className="align-top sm:table-cell sm:whitespace-nowrap sm:px-3 sm:py-2">
                     {log.target}
                   </td>
-                  {/* w-full + max-w-0 is what lets a cell truncate instead of pushing the table
-                      past its container */}
                   <td
                     className="w-full align-top text-text-muted sm:table-cell sm:max-w-0 sm:truncate sm:px-3 sm:py-2"
                     title={log.detail || undefined}

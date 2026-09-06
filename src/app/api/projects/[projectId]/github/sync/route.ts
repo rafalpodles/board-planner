@@ -41,11 +41,9 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
     );
   }
 
-  // Fetch PRs from GitHub (token is encrypted at rest)
   const rawPRs = await fetchPullRequests(parsed.owner, parsed.repo, decryptSecret(project.githubToken));
   const matchedPRs = matchPRsToTasks(rawPRs, project.key, project.formerKeys || []);
 
-  // Group by task number
   const prsByTask = new Map<number, typeof matchedPRs>();
   for (const pr of matchedPRs) {
     const existing = prsByTask.get(pr.matchedTaskNumber) || [];
@@ -56,12 +54,10 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
   let linked = 0;
   let autoTransitioned = 0;
 
-  // Update tasks
   for (const [taskNumber, prs] of prsByTask) {
     const task = await Task.findOne({ project: projectId, taskNumber });
     if (!task) continue;
 
-    // Update linkedPRs array
     const prDocs = prs.map((pr) => ({
       provider: "github" as const,
       number: pr.number,
@@ -72,13 +68,10 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
       updatedAt: pr.updatedAt,
     }));
 
-    // Replace only this provider's entries; GitLab links stay untouched
     const others = (task.linkedPRs || []).filter((pr) => (pr.provider ?? "github") !== "github");
     task.linkedPRs = [...others, ...prDocs] as typeof task.linkedPRs;
     linked += prs.length;
 
-    // Auto-transition: merged PR + task in_review → ready_to_test.
-    // Keyed to the seeded column ids; projects that removed either column opt out.
     const hasMerged = prs.some((pr) => pr.state === "merged");
     const columnIds = new Set(getProjectColumns(project).map((c) => c.id));
     if (hasMerged && task.status === "in_review" && columnIds.has("ready_to_test")) {

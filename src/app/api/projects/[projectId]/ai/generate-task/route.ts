@@ -11,7 +11,6 @@ import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
 async function fetchReadme(githubRepo: string): Promise<string | undefined> {
   if (!githubRepo) return undefined;
 
-  // Support both "owner/repo" and full URL formats
   const ownerRepo = githubRepo
     .replace(/^https?:\/\/github\.com\//, "")
     .replace(/\.git$/, "")
@@ -63,8 +62,6 @@ export const POST = withProjectAccess(async (request, { params }) => {
   }
 
   const [readme, tasks] = await Promise.all([
-    // raw.githubusercontent.com only serves GitHub, so a project hosted anywhere else gets no
-    // README rather than a request that cannot work
     fetchReadme(repositoryProvider(project) === "github" ? projectRepositoryUrl(project) : ""),
     Task.find(
       { project: projectId, status: { $ne: "done" } },
@@ -99,8 +96,6 @@ export const POST = withProjectAccess(async (request, { params }) => {
       settings.aiModel
     );
 
-    // Resolved here, where the field definitions live, so the client never has to work
-    // out which field an answer belongs to
     const customFieldValues = resolveGeneratedFields(task.fields, project.customFields || []);
 
     return NextResponse.json({ ...task, customFieldValues });

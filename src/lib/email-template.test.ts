@@ -27,8 +27,6 @@ describe("renderEmail", () => {
     expect(text).toContain("Settings: https://app.example.com/settings/profile");
   });
 
-  // The old callers passed `text` alone and sendEmail used it as the HTML body, so a mail client
-  // collapsed every newline and glued separate sentences together.
   it("keeps the text part free of markup and the paragraphs apart", () => {
     const { text } = renderEmail({
       ...MINIMAL,
@@ -113,8 +111,6 @@ describe("renderEmail", () => {
 });
 
 describe("pillToneForRole", () => {
-  // The header used to hold the string "BP" — not the product's mark, and a second place the brand
-  // was spelled out, which a rename would leave beside the new name coming from APP_NAME.
   it("draws the mark instead of spelling the brand out", () => {
     const { html } = renderEmail(MINIMAL);
 
@@ -124,8 +120,6 @@ describe("pillToneForRole", () => {
     for (const fill of ["#ebf2fe", "#b1cdfb", "#89b4fa"]) expect(html).toContain(fill);
   });
 
-  // A mark fetched over the network is a mark most readers never see: images are blocked by
-  // default in Gmail, Outlook and Apple Mail
   it("asks the client to load nothing", () => {
     const { html } = renderEmail({
       ...MINIMAL,

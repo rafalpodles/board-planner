@@ -39,8 +39,6 @@ describe("loadBootstrap", () => {
     expect(bootstrap.stateDir).toBe("/custom/state");
   });
 
-  // The menubar app has to find the socket without asking the worker where it put it, so its
-  // location is derived from the one directory both sides already agree on
   it("puts the local control socket in the state dir the operator chose", () => {
     const bootstrap = loadBootstrap({ ...base, CP_STATE_DIR: "/custom/state" });
     expect(localSocketPath(bootstrap.stateDir)).toBe("/custom/state/worker.sock");
@@ -53,13 +51,9 @@ describe("loadBootstrap", () => {
   });
 
   it("does not require a project or a repository path", () => {
-    // CP_PROJECT_ID and CP_REPO_PATH are gone: assignments and their proposed paths come from
-    // the server now, not from the environment
     expect(() => loadBootstrap(base)).not.toThrow();
   });
 
-  // CP-237 removed the second credential, so this is no longer a boot requirement. The worker's
-  // own credential is minted by registration and its scope follows its assignments.
   it("boots with no CP_API_TOKEN at all", () => {
     expect(() => loadBootstrap({ ...base, CP_API_TOKEN: undefined })).not.toThrow();
   });
@@ -69,7 +63,6 @@ describe("loadBootstrap", () => {
   });
 });
 
-// Nothing reads this any more; it is still parsed so an existing plist keeps booting unchanged.
 describe("the legacy api token", () => {
   const base = { CP_API_URL: "https://app.example.com", CP_WORKER_NAME: "worker-1" };
 
@@ -99,8 +92,6 @@ describe("the legacy api token", () => {
     ).toBe("");
   });
 
-  // It used to stop the boot, which was right while the token was load-bearing. Now that nothing
-  // reads it, a badly-permissioned leftover file must not keep a working worker from starting.
   it("does not stop the boot over a badly-permissioned leftover file", () => {
     const read = vi.fn(() => {
       throw new Error("/secrets/token is readable by group or others (mode 644)");
@@ -111,8 +102,6 @@ describe("the legacy api token", () => {
 });
 
 describe("applyPolicy", () => {
-  // The one field the worker recomputes rather than adopts: a ceiling past the server's own lease
-  // gets the task reclaimed under a running worker
   it("clamps a run ceiling that would outlive the server's lease", () => {
     expect(applyPolicy(DEFAULT_POLICY, { runCeilingMs: 8 * 60 * 60_000 }).runCeilingMs).toBeLessThan(
       2 * 60 * 60_000
@@ -150,7 +139,6 @@ describe("applyPolicy", () => {
     });
   });
 
-  // The reviewer is the last gate before a merge, so it does not move when the implementer does
   it("leaves the review model alone when only the implementer's model changes", () => {
     const next = applyPolicy(DEFAULT_POLICY, { model: "haiku" });
 
@@ -172,7 +160,6 @@ describe("applyPolicy", () => {
     expect(next.pollIntervalMs).toBe(DEFAULT_POLICY.pollIntervalMs);
   });
 
-  // A patch may carry fields this version of the worker has never heard of — dropped, not adopted
   it("ignores a field the worker does not recognise", () => {
     const next = applyPolicy(DEFAULT_POLICY, { baseBranch: "develop", futureField: "x" });
     expect(next).not.toHaveProperty("futureField");
@@ -197,9 +184,6 @@ describe("applyPolicy", () => {
     expect(second.pollIntervalMs).toBe(10_000);
   });
 
-  // BP-327: these three fields are the only free text in the policy, and each one is spent as an
-  // argument to a program. Dropped like any other malformed field rather than refusing the whole
-  // patch — one bad project must not cost this machine the others it serves.
   it.each([
     "--output=/tmp/pwned",
     "-o/tmp/pwned",
@@ -243,9 +227,6 @@ describe("applyPolicy", () => {
   );
 });
 
-// BP-327. A step and a review gate each carry their own model override, straight off the agent
-// snapshot the claim returned — neither goes through applyPolicy, and both end at `--model`.
-// modelOr is where all three meet, so it is the one place the shape has to hold.
 describe("modelOr", () => {
   it("falls back for a blank value, as it always has", () => {
     expect(modelOr("", "opus")).toBe("opus");
@@ -266,8 +247,6 @@ describe("modelOr", () => {
 });
 
 describe("parseAssignments", () => {
-  // An assignment names a remote, never a path: the worker resolves its own checkout from it, so
-  // the server has no way to point this machine at a directory.
   it("keeps a well-formed assignment", () => {
     const assignments = parseAssignments([{ project: "p1", remote: "git@github.com:o/r.git" }]);
     expect(assignments).toEqual([{ project: "p1", remote: "git@github.com:o/r.git" }]);
@@ -295,13 +274,6 @@ describe("parseAssignments", () => {
   });
 });
 
-// The autoMerge and reviewGate describes stood here. Both flags are retired: an agent merges
-// because its sequence carries a Merge step, and is reviewed because a Reviewed gate stands after
-// the last step that writes. agent-rules.test.ts is where those two rules are asserted now.
-
-// `node dist/main.js --preflight` is what the app runs before a machine has enrolled: no CP_API_URL,
-// no CP_WORKER_NAME, nothing loadBootstrap would accept. It still has to find the state directory,
-// because the pinned GitHub account lives there and the check answers for that identity.
 describe("stateDirFrom", () => {
   it("resolves without any of the variables a bootstrap needs", () => {
     expect(stateDirFrom({ CP_STATE_DIR: "/Users/rpo/rig/state" })).toBe("/Users/rpo/rig/state");

@@ -43,12 +43,7 @@ const OWNER_ID = "6a732075133f935b19154cd2";
 
 const INSTANCE_ADMIN = { _id: "admin-1", role: "admin" };
 const PLAIN_MEMBER = { _id: "member-1", role: "member" };
-// A project owner used to reach the policy fields here. Those describe the work and moved to the
-// project, so this route is instance-admin only now. Ownership is a grant, so the test that uses
-// this one has check() answer true for it.
 const PROJECT_OWNER = { _id: "powner-1", role: "member" };
-// An API token with no project scope never passes through applyTokenScope, so tokenScoped stays
-// false and it stayed an instance admin — the credential the worker itself used to hold.
 const UNSCOPED_ADMIN_TOKEN = {
   _id: "admin-1",
   role: "admin",
@@ -63,7 +58,6 @@ const WORKER = {
   policy: { pollIntervalMs: 30_000 },
   policyOverrides: [],
   repos: [{ remote: "git@github.com:owner/repo.git", path: "/repo" }],
-  // BP-305/BP-358: assignments are what the owner can reach, narrowed by the reported repos
   owner: OWNER_ID,
   enabled: true,
   lockedByInstance: false,
@@ -106,8 +100,6 @@ beforeEach(() => {
   ]);
 });
 
-// BP-358 removed the stored approved set: what a machine may serve is what its owner may serve,
-// resolved live. A stale writer would have quietly reintroduced the per-worker grant it replaced.
 describe("PATCH no longer writes a per-worker project list", () => {
   const PROJECT = "69a52e3b399b27d3cbb2c5c9";
 
@@ -124,8 +116,6 @@ describe("PATCH no longer writes a per-worker project list", () => {
     expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
   });
 
-  // Sent alongside a field this route does accept: the request goes through, and the list is
-  // dropped rather than riding along into the update
   it("drops it from an otherwise valid update", async () => {
     const res = await PATCH(patchRequest({ enabled: false, approvedProjects: [PROJECT] }), ctx());
 
@@ -134,18 +124,11 @@ describe("PATCH no longer writes a per-worker project list", () => {
   });
 });
 
-// BP-358: registration refuses to re-register a machine that belongs to somebody else, so a machine
-// whose owner has left needs a way to be let go — or it can never be enrolled again under the same
-// name and host.
 describe("PATCH releases a machine from its owner", () => {
   beforeEach(() => {
     getAuthUser.mockResolvedValue(INSTANCE_ADMIN);
   });
 
-  // Without it toApiWorker answers `owner: null` for a machine that has one, the console merges
-  // that into the row it just changed, and the Owner column flashes its red "claims nothing" flag
-  // until the next poll — a false alarm on the indicator this branch added, raised by the page's
-  // most-used control.
   it("answers with the owner's name, not a bare reference", async () => {
     await PATCH(patchRequest({ enabled: false }), ctx());
 
@@ -159,8 +142,6 @@ describe("PATCH releases a machine from its owner", () => {
     expect(workerFindByIdAndUpdate.mock.calls[0][1].$set).toEqual({ owner: null });
   });
 
-  // Clearing is the recovery; assigning from here would hand the decision to somebody who is not at
-  // the machine, which is the step BP-358 removed
   it("refuses to assign one instead", async () => {
     const res = await PATCH(patchRequest({ owner: "6a732075133f935b19154cd3" }), ctx());
 
@@ -217,8 +198,6 @@ describe("PATCH /api/workers/:workerId", () => {
     });
   });
 
-  // Found by driving a real server: an unscoped admin API token passed the old tokenScoped guard
-  // and cleared lockedByInstance — the kill switch, lifted by the credential the worker held.
   it("refuses an unscoped admin API token, which is still a machine credential", async () => {
     getAuthUser.mockResolvedValue(UNSCOPED_ADMIN_TOKEN);
 
@@ -235,8 +214,6 @@ describe("PATCH /api/workers/:workerId", () => {
     expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
   });
 
-  // Owning a project no longer buys anything here: what the work looks like is set on the
-  // project, and what the machine does is the instance's business.
   it("refuses a project owner", async () => {
     getAuthUser.mockResolvedValue(PROJECT_OWNER);
     check.mockResolvedValue(true);
@@ -256,8 +233,6 @@ describe("PATCH /api/workers/:workerId", () => {
       expect((await PATCH(patchRequest({ name: "   " }), ctx())).status).toBe(400);
     });
 
-    // Same field, same rule as registration (BP-413): stripped, not refused, because an admin CAN
-    // retype -- but consistency matters more than a second behaviour for one field.
     it("strips a control character from a rename rather than storing it raw", async () => {
       const response = await PATCH(patchRequest({ name: "evil\nrig" }), ctx());
 
@@ -269,9 +244,6 @@ describe("PATCH /api/workers/:workerId", () => {
       );
     });
 
-    // The blank-name check above runs on the RAW string; a name of nothing but control characters
-    // passes it (they are not whitespace) and would reach the write as "" if stripping happened
-    // without a second check after it
     it("refuses a name that is nothing but control characters once they are stripped", async () => {
       const response = await PATCH(patchRequest({ name: "\u0000\u0000" }), ctx());
 
@@ -286,7 +258,6 @@ describe("PATCH /api/workers/:workerId", () => {
       expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
     });
 
-    // Work policy belongs to the project; accepting it here would leave two places to set it
     it("ignores a field that moved to the project", async () => {
       const response = await PATCH(patchRequest({ baseBranch: "develop" }), ctx());
 
@@ -302,11 +273,6 @@ describe("PATCH /api/workers/:workerId", () => {
   });
 });
 
-// The worker polls this between heartbeats for its current policy and assignments. It returned
-// neither once assignments stopped being stored, so a worker that had reported its checkouts never
-// learned which projects they matched — caught by running it, not by a test.
-// BP-305: the one withWorker route that answered a killed worker, handing it its policy, its
-// assignments and the whole fleet inventory
 describe("the kill switch covers this route too", () => {
   function killSwitchRequest() {
     return new Request(`http://localhost/api/workers/${WORKER_ID}`, {
@@ -361,8 +327,6 @@ describe("GET /api/workers/:workerId", () => {
     expect((await (await GET(getRequest(), ctx())).json()).assignments).toEqual([]);
   });
 
-  // BP-358: this is the field the worker's own loop reads and iterates to attempt a claim, so an
-  // ownerless machine offered one here would poll straight into a claim it cannot win.
   it("offers nothing to a machine with no owner, even when it matches an enabled project", async () => {
     verifyWorkerCredential.mockResolvedValue({ ...WORKER, owner: null });
 
@@ -375,9 +339,6 @@ describe("GET /api/workers/:workerId", () => {
     expect((await (await GET(getRequest(), ctx())).json()).assignments).toEqual([]);
   });
 
-  // BP-375. The app can only offer to set up a project it has been told about, and assignments name
-  // only the ones already working — which is why adding the second project was a git clone in a
-  // terminal that nothing on screen mentions.
   describe("the projects this machine could set up", () => {
     beforeEach(() => {
       accessibleProjectIds.mockResolvedValue(["p1", "p2"]);
@@ -412,8 +373,6 @@ describe("GET /api/workers/:workerId", () => {
       ]);
     });
 
-    // The one being served is not something to add, and offering it invites a second clone of a
-    // repository this machine already has.
     it("says nothing about the project it is already working on", async () => {
       const json = await (await GET(getRequest(), ctx())).json();
 
@@ -427,9 +386,6 @@ describe("GET /api/workers/:workerId", () => {
       expect((await (await GET(getRequest(), ctx())).json()).offers).toEqual([]);
     });
 
-    // BP-378. The checkbox screen needs the rows offers deliberately omits: the ones already
-    // served, and the ones nobody has switched on yet — which is the row somebody goes there to
-    // tick in the first place.
     describe("the catalogue the picker renders", () => {
       it("carries the served project and the switched-off one alike", async () => {
         projectFind.mockResolvedValue([
@@ -455,7 +411,6 @@ describe("GET /api/workers/:workerId", () => {
           expect.objectContaining({ key: "BP", servedHere: true, workersEnabled: true, wanted: true }),
           expect.objectContaining({ key: "SB", servedHere: false, workersEnabled: false, wanted: false }),
         ]);
-        // and the narrower answer still excludes both, for the reasons it always did
         expect(json.offers).toEqual([]);
       });
 
@@ -477,8 +432,6 @@ describe("GET /api/workers/:workerId", () => {
   });
 });
 
-// The heartbeat also computes assignments, but nothing reads that field — the worker only ever uses
-// this route. So the contested-checkout decision has to be applied here or it is not applied at all.
 describe("GET and a contested checkout", () => {
   function getRequest() {
     return new Request(`http://localhost/api/workers/${WORKER_ID}`, {
@@ -514,8 +467,6 @@ describe("GET and a contested checkout", () => {
   });
 });
 
-// BP-233. BP-232 removed stored worker assignments and the audit call that hung off them went with
-// it, so stopping a machine became a thing nobody could prove had happened.
 describe("what the fleet audit log records", () => {
   const entries = () => logInstanceAudit.mock.calls.map((c) => c[0]);
 
@@ -551,8 +502,6 @@ describe("what the fleet audit log records", () => {
     expect(entries()[0].action).toBe("worker_disabled");
   });
 
-  // The old name, because that is what earlier rows call this machine and a reader following its
-  // history backwards has nothing else to match on
   it("names a rename by where it came from as well as where it went", async () => {
     await PATCH(patchRequest({ name: "studio-mini" }), ctx());
 
@@ -564,8 +513,6 @@ describe("what the fleet audit log records", () => {
   });
 
   it("records the poll interval it moved from", async () => {
-    // Pinned in the fixture: the stored 30000 on an unpinned worker is inert, so the interval it
-    // moved from is the default, not that number
     workerFindById.mockResolvedValue({ ...WORKER, policyOverrides: ["pollIntervalMs"] });
 
     await PATCH(patchRequest({ pollIntervalMs: 60_000 }), ctx());
@@ -576,8 +523,6 @@ describe("what the fleet audit log records", () => {
     });
   });
 
-  // One request, two changes, two rows — a reader scanning actions should not have to unpack a
-  // detail column to find the one that stopped the machine
   it("writes one entry per field that actually changed", async () => {
     await PATCH(patchRequest({ lockedByInstance: true, enabled: false }), ctx());
 
@@ -590,10 +535,6 @@ describe("what the fleet audit log records", () => {
     expect(logInstanceAudit).not.toHaveBeenCalled();
   });
 
-  // The stored copy is inert until somebody pins it: the schema materialises pollIntervalMs into
-  // every worker, but the machine resolves against its own default unless the field is in
-  // policyOverrides. So resending the default is a real change — it pins it — and comparing
-  // against the stored value read that as no change at all.
   it("records pinning the default, which is a change the stored value cannot show", async () => {
     workerFindById.mockResolvedValue({ ...WORKER, policyOverrides: [] });
 
@@ -613,7 +554,6 @@ describe("what the fleet audit log records", () => {
     expect(logInstanceAudit).not.toHaveBeenCalled();
   });
 
-  // Otherwise the log asserts a kill switch that never landed, right before the handler throws
   it("records nothing when the document is gone by the time it is written", async () => {
     workerFindByIdAndUpdate.mockReturnValue({ populate: () => Promise.resolve(null) });
 

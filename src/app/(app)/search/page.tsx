@@ -15,7 +15,6 @@ interface Group {
   hits: SearchHit[];
 }
 
-/** Task hits gathered under the project they belong to, in the order the API returned them */
 function byProject(hits: SearchHit[]): Group[] {
   const groups: Group[] = [];
   const seen = new Map<string, Group>();
@@ -41,7 +40,6 @@ function SearchContent() {
   const { projects } = useProjects();
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Read once: after this the box owns the query and writes the address, not the other way round
   const initialQuery = useSearchParams().get("q") ?? "";
   const { query, setQuery, trimmed, active, loading, hits } = useSearch(
     projects,
@@ -53,10 +51,6 @@ function SearchContent() {
     inputRef.current?.focus();
   }, []);
 
-  // The address follows the box so the page stays linkable. `history.replaceState`, not
-  // `router.replace`: a router navigation queued here lands *after* a result the reader has
-  // just clicked and takes them back to the search page. Nothing on this page reads the
-  // address after the first render, so the bare history entry is enough.
   const inTheAddress = useRef(initialQuery);
   useEffect(() => {
     if (inTheAddress.current === trimmed) return;
@@ -75,8 +69,6 @@ function SearchContent() {
     <div className="mx-auto w-full max-w-3xl">
       <PageHeader title="Search" />
 
-      {/* No submit handler: the hook searches as the box changes, and Enter would only fire
-          the same request a second time — the defect BP-406 fixed here once already. */}
       <form onSubmit={(e) => e.preventDefault()} className="mb-6">
         <div className="relative">
           <svg

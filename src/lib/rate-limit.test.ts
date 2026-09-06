@@ -46,8 +46,6 @@ describe("the counter itself", () => {
     expect(await isRateLimited("b", 1)).toBe(true);
   });
 
-  // The document outlives the window: Mongo's TTL reaper runs on its own schedule, up to a minute
-  // late, so every read has to filter on resetAt rather than trust that the row is gone
   it("stops counting a window that has run out, before the reaper gets to it", async () => {
     vi.useFakeTimers();
     await recordFailedAttempt("k");
@@ -69,7 +67,6 @@ describe("the counter itself", () => {
     expect(await isRateLimited("k", 2)).toBe(false);
   });
 
-  // A module-scope Map lost every counter on each deploy, and Railway redeploys from main
   it("survives the process that wrote it", async () => {
     for (let i = 0; i < 10; i++) await recordFailedAttempt("k");
 
@@ -80,8 +77,6 @@ describe("the counter itself", () => {
   });
 });
 
-// BP-318: the account key interpolated the username, and Mongoose applies the schema's `trim` and
-// `lowercase` to query filters — so " admin" and "admin" were one account and two buckets.
 describe("the account key names the account the lookup will find", () => {
   it.each([" admin", "admin ", "\tadmin", "admin\n", "  admin  ", "ADMIN", "Admin"])(
     "gives %o the same bucket as admin",
@@ -94,7 +89,6 @@ describe("the account key names the account the lookup will find", () => {
     expect(lockoutKey("-", "admin")).not.toBe(lockoutKey("-", "administrator"));
   });
 
-  // The key becomes an _id, and nothing bounds the length of a posted username
   it("is a bounded length whatever the caller sends", () => {
     const huge = lockoutKey("-", "a".repeat(1_000_000));
 
@@ -120,7 +114,6 @@ describe("a caller with no identity still meets a ceiling across accounts", () =
     const { lockedOut } = await withLockout(lockoutKey("-", "someone-new"), verify);
 
     expect(lockedOut).toBe(true);
-    // Refused before the credential check, so it bounds the bcrypt as well as the guessing
     expect(verify).not.toHaveBeenCalled();
   });
 
@@ -133,8 +126,6 @@ describe("a caller with no identity still meets a ceiling across accounts", () =
   });
 });
 
-// bcryptjs chunks through setImmediate, so concurrent compares finish in the same millisecond and
-// arrive here together — the read-modify-write this replaced recorded 1 for 1000 of them
 describe("counting under concurrency", () => {
   it("records every one of a simultaneous burst", async () => {
     await Promise.all(Array.from({ length: 50 }, () => recordFailedAttempt("burst")));
@@ -165,8 +156,6 @@ describe("withLockout", () => {
     expect(await isRateLimited(key, 1)).toBe(false);
   });
 
-  // Clearing the source on success would let anyone holding one valid login reset the budget and
-  // guess forever, fifty tries per own login
   it("never clears the source budget, even on a correct credential", async () => {
     await recordFailedAttempt(source);
 
@@ -206,9 +195,6 @@ describe("withLockout", () => {
 });
 
 describe("clearing an account's counters", () => {
-  // The caller who filled the counter is not the one changing the password, and where there is no
-  // client address the key they filled is the shared one. So a password change cannot delete "its"
-  // key — it has to clear the account across every address (BP-353).
   it("forgets failures recorded from every address, not just one", async () => {
     const fromAttacker = lockoutKey("203.0.113.9", "rafal");
     const fromAnonymous = lockoutKey("-", "rafal");

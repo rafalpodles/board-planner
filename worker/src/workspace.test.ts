@@ -18,11 +18,6 @@ function runnerReturning(stdout = "") {
   return { runner: { run }, run };
 }
 
-// Every local call carries the hardening flags gitArgs prepends — stripped here so the response
-// maps below keep naming the real git subcommand. What those flags ARE is git-safety.test.ts's
-// subject; taking them from the same source is what stops this file breaking every time one is
-// added. The ls-remote/fetch calls carry no such prefix (workspace.ts composes their env instead
-// of their args — see workspace.ts's remoteRun), so responses key on the raw args for those.
 const HARDENING_PREFIX = gitArgs([]);
 const REMOTE_URL = "https://git.example/acme/repo.git";
 const LS_REMOTE = `ls-remote -- ${REMOTE_URL} refs/heads/main`;
@@ -39,7 +34,6 @@ function fakeGit(responses: Record<string, Partial<CommandResult>>) {
   return { runner: { run }, run };
 }
 
-// The base always comes off the wire now; these are the three calls that resolve it.
 function baseFromRemote(sha: string, extra: Record<string, Partial<CommandResult>> = {}) {
   return {
     [LS_REMOTE]: { stdout: `${sha}\trefs/heads/main\n` },
@@ -123,35 +117,18 @@ describe("createWorkspace", () => {
     expect(result.baseSha).toBe("fresh1");
   });
 
-  // A repository-local url.<x>.insteadOf rewrites even a URL given literally in argv, and no
-  // GIT_CONFIG_* variable disables it. The only thing that does is giving git no repository to
-  // read a config from — and `os.tmpdir()` itself will not do, because the agent is handed TMPDIR
-  // and a `.git` planted there survives between runs. GIT_CEILING_DIRECTORIES cannot save that:
-  // git never excludes the working directory itself, and an entry equal to cwd is not a proper
-  // ancestor of anything. Hence a fresh directory plus an explicit GIT_DIR, which skips discovery
-  // rather than bounding it. The behavioural proof is in gate-integrity.integration.test.ts.
   it("asks the remote from a directory it creates, with discovery switched off", async () => {
     const { runner, run } = fakeGit(baseFromRemote("fresh1"));
     await withRemote(runner).create("BP-1", "worker");
 
     const [, , opts] = run.mock.calls.find((call) => call[1][0] === "ls-remote")!;
     expect(opts.cwd).not.toBe("/repo");
-    // not the shared temp directory itself — a fresh child of it
     expect(opts.cwd).not.toBe(tmpdir());
     expect(opts.cwd?.startsWith(tmpdir())).toBe(true);
     expect(opts.env?.GIT_DIR?.startsWith(opts.cwd!)).toBe(true);
-    // the ceiling is a proper ancestor, the only shape git honours
     expect(opts.env?.GIT_CEILING_DIRECTORIES).toBe(tmpdir());
   });
 
-  // The GIT_DIR half, which the ceiling cannot cover on its own. Measured on git 2.50.1 with a
-  // `.git` planted in the lookup's own working directory: with GIT_CEILING_DIRECTORIES alone git
-  // read the planted config, with GIT_DIR alone it did not. The ceiling stops discovery at a
-  // *proper ancestor* and git documents that it never excludes the working directory itself — the
-  // test above plants one directory higher, where either variable would have held, so nothing
-  // there could fail if GIT_DIR were dropped. mkdtemp makes reaching this directory hard rather
-  // than impossible: the agent runs at this worker's own uid, so an orphan of an earlier run can
-  // list $TMPDIR and write into the lookup's directory while the lookup is still in it.
   it("does not read a repository planted in the lookup directory itself", async () => {
     let discovered = "";
     const responses = baseFromRemote("fresh1");
@@ -205,8 +182,6 @@ describe("createWorkspace", () => {
     expect(existsSync(opts.cwd!)).toBe(false);
   });
 
-  // A hang and an instant refusal by the server are the same exit code with no stderr, and the
-  // local git() helper next door has said so since it was written.
   it("says a remote call timed out rather than reporting an empty failure", async () => {
     const { runner } = fakeGit(
       baseFromRemote("fresh1", { [LS_REMOTE]: { code: 143, timedOut: true } })
@@ -228,8 +203,6 @@ describe("createWorkspace", () => {
     const { runner, run } = fakeGit(baseFromRemote("genuine1"));
     await withRemote(runner).create("BP-1", "worker");
 
-    // The positive half first: a bare "the word origin is absent" assertion is satisfied by an
-    // implementation that makes no calls at all, and was.
     const remoteCalls = run.mock.calls.filter(
       (call) => call[1][0] === "ls-remote" || call[1][0] === "fetch"
     );
@@ -251,9 +224,6 @@ describe("createWorkspace", () => {
     expect(run.mock.calls.some((call) => call[1].join(" ").includes("FETCH_HEAD"))).toBe(false);
   });
 
-  // ls-remote matches its pattern against the tail of a ref name at a / boundary, so a branch
-  // called aaa/refs/heads/main comes back too — and sorts first. Anyone who can push a branch to
-  // the base repository could otherwise choose the base every run is judged against.
   it("takes the sha of the exact ref, not the first line ls-remote happens to print", async () => {
     const { runner } = fakeGit(
       baseFromRemote("genuine1", {
@@ -277,9 +247,6 @@ describe("createWorkspace", () => {
     expect(readsLocalRef(run)).toBe(false);
   });
 
-  // The kind is what the pipeline charges the attempt on. A remote that answered and has no such
-  // branch is the project's own setting — nothing on this machine will change it and no sibling
-  // project is affected — so it must not be reported as the machine being broken.
   it("calls a remote that answered without the ref a configuration fault, not a transport one", async () => {
     const { runner } = fakeGit(
       baseFromRemote("genuine1", {
@@ -310,9 +277,6 @@ describe("createWorkspace", () => {
     });
   });
 
-  // The fallback these three replace was the vulnerability handed back: the local ref is writable
-  // by the agent of any run that ever executed against this checkout, and an agent can force the
-  // fallback deliberately by planting an http.proxy or an insteadOf pointing at nothing.
   it("fails the run when the fetch fails, and never reads the local ref", async () => {
     const { runner, run } = fakeGit(
       baseFromRemote("fresh1", { [FETCH]: { code: 1, stderr: "could not resolve host" } })
@@ -342,12 +306,6 @@ describe("createWorkspace", () => {
     expect(readsLocalRef(run)).toBe(false);
   });
 
-  // The regression this exists to catch: workspace.ts used to build these two calls with
-  // gitArgs(), which appends `-c credential.helper=` as the last thing git evaluates. For this
-  // specific multi-valued key that silently discards whatever the env-based provider installed —
-  // verified empirically against a real git binary (see task-8 fix-round report) — so the fetch
-  // could never authenticate over https and always, silently, fell back. A test that only checks
-  // "fetch was called" cannot see this; it has to look at the actual argument vector.
   it("composes the ls-remote and fetch calls without any -c flags, so a credential helper the env provider installs cannot be reset by one riding along", async () => {
     const { runner, run } = fakeGit(baseFromRemote("fresh1"));
     await withRemote(runner, () => ({ GH_TOKEN: "tok" })).create("BP-1", "worker");
@@ -355,8 +313,6 @@ describe("createWorkspace", () => {
     const remoteCallArgs = run.mock.calls
       .filter((call) => call[1][0] === "ls-remote" || call[1][0] === "fetch")
       .map((call) => call[1]);
-    // `--` on both: without it a value beginning with a dash is read as an option, and
-    // --upload-pack=<cmd> runs that command — verified against a real git binary.
     expect(remoteCallArgs).toEqual([
       ["ls-remote", "--", REMOTE_URL, "refs/heads/main"],
       ["fetch", "--no-tags", "--", REMOTE_URL, "main"],
@@ -528,7 +484,6 @@ describe("reapOrphans", () => {
     expect(workspace.destroy.mock.calls.map(([key]) => key)).toEqual(["CP-1", "CP-2"]);
   });
 
-  // "/worktrees-archive" starts with "/worktrees" as a string but is a different directory
   it("leaves a sibling directory whose name merely starts the same alone", async () => {
     const workspace = workspaceListing(["/worktrees-archive/CP-1", "/worktrees.bak/CP-2"]);
 

@@ -6,19 +6,6 @@ import { join } from "node:path";
 import { collectDiff } from "./diff.js";
 import { createRunner } from "./exec.js";
 
-/**
- * diff.external (a repo-wide git config key) and diff.<driver>.textconv (a per-path attribute,
- * set in .git/info/attributes — itself untracked, shared with the main clone, and invisible to
- * protected-paths the same way .git/config is) both let something other than git decide what a
- * `git diff` prints. Both are plantable by an agent holding Write under .git in a linked
- * worktree, and both close over an arbitrary program: the review gate would read that program's
- * output instead of the change, and the program runs — Bash back under an agent this pipeline
- * took Bash away from — before every gate's verdict.
- *
- * Real git against a real repository: the question is what git actually does with these two
- * config keys, not whether a mocked runner was handed the right flag spelling.
- */
-
 const REAL = "the real change\n";
 const DECOY = "DECOY-CONTENT\n";
 
@@ -34,8 +21,6 @@ describe("collectDiff against a planted diff.external and diff.*.textconv", () =
   let dir: string;
   let work: string;
   let baseSha: string;
-  // Where each planted program proves it ran, distinct per program so one cannot be mistaken for
-  // the other.
   let externalMarker: string;
   let textconvMarker: string;
 
@@ -54,13 +39,10 @@ describe("collectDiff against a planted diff.external and diff.*.textconv", () =
     git(work, "commit", "--quiet", "-m", "base");
     baseSha = git(work, "rev-parse", "HEAD").trim();
 
-    // The real change this run made — what delivery.push sends and what a gate has to review.
     writeFileSync(join(work, "a.txt"), REAL);
     git(work, "add", "a.txt");
     git(work, "commit", "--quiet", "-m", "implement");
 
-    // diff.external: a program that replaces the whole patch git would print, wherever it is
-    // asked for one — planted the way an agent with Write under .git could, in .git/config.
     const externalScript = join(dir, "external.sh");
     writeFileSync(
       externalScript,
@@ -69,9 +51,6 @@ describe("collectDiff against a planted diff.external and diff.*.textconv", () =
     chmodSync(externalScript, 0o755);
     git(work, "config", "diff.external", externalScript);
 
-    // diff.<driver>.textconv: the sibling leaf, reached through a per-path attribute instead of
-    // the blanket repo-wide setting above — planted in .git/info/attributes, which git never
-    // tracks and protected-paths never sees.
     const textconvScript = join(dir, "textconv.sh");
     writeFileSync(
       textconvScript,
@@ -102,13 +81,7 @@ describe("collectDiff against a planted diff.external and diff.*.textconv", () =
     expect(existsSync(externalMarker)).toBe(false);
   });
 
-  // Measured: the driver here ignores which blob it was handed and always prints the same decoy,
-  // so old and new convert to identical text and git reports no difference at all — an empty
-  // patch, not a decoy one. That is the actual production shape of this defect: the review gate
-  // sees nothing to object to, while the program still ran with a shell underneath it.
   it("proves diff.*.textconv is live: an unguarded git diff comes back empty and runs the program", () => {
-    // diff.external takes precedence when both are set, so this program's liveness is proved on
-    // its own with diff.external unset for this one call.
     const patch = execFileSync("git", ["diff", "--no-ext-diff", baseSha, "HEAD"], {
       cwd: work,
     }).toString();

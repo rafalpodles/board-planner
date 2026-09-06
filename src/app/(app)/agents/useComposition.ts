@@ -12,7 +12,6 @@ type Entries = Record<AgentBucket, Entry[]>;
 let counter = 0;
 const nextUid = () => `e${++counter}`;
 
-// An entry carries a uid because the same block may appear twice; the stored composition is keys.
 function toEntries(composition: AgentComposition): Entries {
   const out = {} as Entries;
   for (const bucket of AGENT_BUCKETS) {
@@ -37,8 +36,6 @@ export function useComposition(source: AgentComposition | undefined, lookup: Loo
   const [entries, setEntries] = useState<Entries>(() => toEntries(source ?? emptyComposition()));
   const [dragging, setDragging] = useState<ApiAgentBlock | null>(null);
 
-  // The agent arrives after the first render, so the editor is seeded when it does — and exactly
-  // once, or the refetch that follows a save would undo the save.
   const seeded = useRef(false);
   useEffect(() => {
     if (!source || seeded.current) return;
@@ -111,12 +108,6 @@ export function useComposition(source: AgentComposition | undefined, lookup: Loo
     });
   }
 
-  /**
-   * Adding without dragging. The drag is the only way a block reaches a bucket, and it is the one
-   * gesture a keyboard and a touch screen are worst at — dnd-kit announced the pick-up and then
-   * refused to move (BP-455). Appends, because a bucket is an ordered sequence and the end is the
-   * only position a control with no pointer can mean.
-   */
   function addTo(bucket: AgentBucket, key: string) {
     setEntries((prev) => ({ ...prev, [bucket]: [...prev[bucket], { uid: nextUid(), key }] }));
   }

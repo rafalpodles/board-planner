@@ -31,9 +31,6 @@ const area = field({
 });
 
 describe("choiceFieldsForPrompt", () => {
-  // A project that defines no choice fields must not be asked about any. The prompt
-  // used to fall back to a hardcoded S/M/L/XL scale, so every generation spent tokens
-  // on a field the project did not have and could not store.
   it("is empty for a project with no choice fields", () => {
     expect(choiceFieldsForPrompt([])).toEqual([]);
     expect(choiceFieldsForPrompt([field({ _id: "t", name: "Notes", fieldType: "text" })])).toEqual(
@@ -79,7 +76,6 @@ describe("resolveGeneratedFields", () => {
     expect(resolveGeneratedFields({ "  size  ": "s" }, [size])).toEqual({ "f-size": "s" });
   });
 
-  // The model's answer is a suggestion. Anything that misses is dropped, never thrown.
   it("drops a field the project does not have", () => {
     expect(resolveGeneratedFields({ Nonsense: "x" }, [size])).toEqual({});
   });
@@ -96,8 +92,6 @@ describe("resolveGeneratedFields", () => {
     expect(resolveGeneratedFields("not an object", [size])).toEqual({});
   });
 
-  // A multiselect stores an array; a bare string there fails validation on save, so the
-  // task the user just generated would refuse to save with no clue why
   it("wraps a multi-choice answer in an array", () => {
     const platforms = field({
       _id: "f-plat",
@@ -125,9 +119,6 @@ describe("resolveGeneratedFields", () => {
     expect(resolveGeneratedFields({ Size: "L" }, [size])).toEqual({ "f-size": "l" });
   });
 
-  // The prompt allows an array where several values apply, and a model will sometimes
-  // send one for a single-choice field too. Dropping it silently is the same fault this
-  // change exists to remove: asking, then throwing the answer away.
   it("takes the first usable value when a single-choice field answers with a list", () => {
     expect(resolveGeneratedFields({ Size: ["L", "S"] }, [size])).toEqual({ "f-size": "l" });
     expect(resolveGeneratedFields({ Size: ["nope", "S"] }, [size])).toEqual({ "f-size": "s" });

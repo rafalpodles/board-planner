@@ -20,9 +20,6 @@ const { POST } = await import("./route");
 const ADMIN = { _id: "admin-1", role: "admin", tokenScoped: false };
 const MEMBER = { _id: "member-1", role: "member", tokenScoped: false };
 
-// The prompt of a step block is what the worker runs on the operator's machine, with writes
-// allowed and no permission prompts. Authoring one is therefore an instance-level act — the whole
-// point of BP-345 — and "logged in" is not the bar.
 function post(body: Record<string, unknown>) {
   return POST(
     new Request("http://localhost/api/agent-blocks", {
@@ -57,7 +54,6 @@ describe("POST /api/agent-blocks", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
-  // The refusals above prove nothing on their own if the route rejects everybody
   it("lets an instance admin author one", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
 

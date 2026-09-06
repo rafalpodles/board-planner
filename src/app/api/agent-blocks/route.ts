@@ -11,11 +11,6 @@ export const GET = withAuth(async () => {
   return NextResponse.json(blocks.map(toApiBlock));
 });
 
-// A step block is a prompt the worker runs on the operator's machine with writes allowed, so
-// authoring one is an instance-level act, not something any account on the board may do. Composing
-// an agent out of existing blocks stays open (POST /api/agents), and choosing which agent a task
-// runs under is a project-admin act (updateTask) — those three together are what stop an ordinary
-// member reaching the machine. BP-345.
 export const POST = withAdmin(async (request, { user }) => {
   await connectDB();
   const body = await request.json();
@@ -28,8 +23,6 @@ export const POST = withAdmin(async (request, { user }) => {
 
   const key = await freeBlockKey(name);
 
-  // Parameters are values, never patterns or commands: the worker owns what a gate does and this
-  // only says how strictly. Anything unrecognised is dropped rather than passed through.
   const params: Record<string, string> = {};
   if (body.params && typeof body.params === "object") {
     for (const [k, v] of Object.entries(body.params as Record<string, unknown>)) {

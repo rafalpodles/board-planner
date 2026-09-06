@@ -36,9 +36,6 @@ async function json(res: Response) {
   return res.json();
 }
 
-// The unit suite mocks Mongoose, so it can only prove what the *code* does with whatever
-// Task.aggregate returns — never what MongoDB itself does with a string in $convert. That
-// question belongs to e2e/sprint-estimates.spec.ts, against a real database.
 function mockNoDesignation() {
   projectFindById.mockReturnValue({
     lean: () => Promise.resolve({ columns: [TODO_COLUMN, DONE_COLUMN], estimateFieldId: "" }),
@@ -92,9 +89,6 @@ describe("GET /api/projects/[projectId]/sprints — estimate accumulators", () =
     const group = groupStageOf(taskAggregate.mock.calls[0][0]);
     expect(group.estimateTotal).toBeDefined();
     expect(group.estimateDone).toBeDefined();
-    // The dotted path is established practice (stats/route.ts) — asserted here as a string
-    // rather than the exact $convert shape, so this stays a shape check and not a rewrite of
-    // MongoDB's own $convert semantics.
     expect(JSON.stringify(group.estimateTotal)).toContain(
       `$customFieldValues.${ESTIMATE_FIELD_ID}`
     );
@@ -142,11 +136,6 @@ describe("GET /api/projects/[projectId]/sprints — estimate accumulators", () =
     expect(body[0]).not.toHaveProperty("estimateDone");
   });
 
-  // The schema doesn't constrain estimateFieldId to ObjectId hex, so a migration, a bulk
-  // import, or a direct database edit could leave something else there. Trusting it straight
-  // into the $convert path would let a leading "$" parse as an aggregation operator and throw
-  // at parse time — the one failure onError/onNull cannot cover, since they guard conversion,
-  // not a malformed path.
   it("treats a non-hex estimateFieldId (e.g. one starting with '$') as no designation", async () => {
     projectFindById.mockReturnValue({
       lean: () =>

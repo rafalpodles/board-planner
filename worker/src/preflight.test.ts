@@ -13,20 +13,14 @@ const LOGGED_IN = JSON.stringify({
 const ok = (stdout = ""): CommandResult => ({ code: 0, stdout, stderr: "", timedOut: false });
 const fail = (stderr = ""): CommandResult => ({ code: 1, stdout: "", stderr, timedOut: false });
 
-// Resolution goes through a login shell, so every stub keys on what that shell was asked to run
 interface Machine {
   has?: string[];
   claudeAuth?: CommandResult;
   ghAuth?: CommandResult;
-  // `gh auth token --user <login>` — the authoritative answer to "does gh hold this account", and
-  // a different call from `gh auth status`
   ghToken?: CommandResult;
   versions?: Record<string, CommandResult>;
   shellNoise?: string;
-  // Present on disk but not on the login shell's PATH — ~/.local/bin, which .zshrc adds and a
-  // login shell never reads
   onDiskOnly?: Record<string, string>;
-  // What PATH each verification actually ran with, keyed by the binary
   ranWith?: Record<string, string | undefined>;
 }
 
@@ -192,8 +186,6 @@ describe("runPreflight", () => {
     expect(check(report, "claude").detail).toMatch(/claude auth login/);
   });
 
-  // An API key can do the work — it just bills per token instead of drawing on the subscription,
-  // which is a thing to say out loud, not a thing to refuse
   it("passes but reports the billing when claude is authenticated with an API key", async () => {
     const m = machine({
       claudeAuth: ok(JSON.stringify({ loggedIn: true, authMethod: "apiKey", apiProvider: "firstParty" })),
@@ -225,10 +217,6 @@ describe("runPreflight", () => {
     expect(check(report, "gh").detail).toMatch(/gh auth login/);
   });
 
-  // BP-373. The check said `authenticated (/opt/homebrew/bin/gh)` while gh's active account was one
-  // with no write access to the repository, so the panel was green and the clone step failed with
-  // GitHub's own 403 two steps later. The identity that pushes is worth as much as the identity
-  // that writes the code, and the claude check has always named that one.
   it("names the github account it is authenticated as", async () => {
     const m = machine({ ghAuth: ok(TWO_GH_ACCOUNTS) });
 
@@ -267,15 +255,10 @@ describe("runPreflight", () => {
     expect(check(report, "gh").ok).toBe(true);
     expect(report.githubAccount).toBe("rafalpodles");
     expect(report.githubPinned).toBe(true);
-    // Both names, because the difference between them is the whole answer to "why is it pushing as
-    // somebody else" — and it is invisible from either name alone
     expect(check(report, "gh").detail).toContain("rafalpodles");
     expect(check(report, "gh").detail).toContain("podlesrafal");
   });
 
-  // Deciding a machine is broken on a text parse would turn any change to gh's status output into a
-  // red row on a worker that is perfectly fine. `auth token --user` answers the actual question by
-  // name, with an exit code, so the pin survives an output shape this parser has never seen.
   it("verifies the pin against gh itself, not against the status text it parsed", async () => {
     const m = machine({ ghAuth: ok("some future format nobody has parsed") });
 
@@ -292,8 +275,6 @@ describe("runPreflight", () => {
     ]);
   });
 
-  // The token is the means, never the message: a preflight report travels to the server on the
-  // heartbeat and is rendered in the fleet console.
   it("puts no token in the report it hands back", async () => {
     const m = machine({ ghAuth: ok(TWO_GH_ACCOUNTS), ghToken: ok("gho_a_real_looking_token") });
 
@@ -302,8 +283,6 @@ describe("runPreflight", () => {
     expect(JSON.stringify(report)).not.toContain("gho_");
   });
 
-  // Refused here, where the fix is one click away, rather than at push time — which is 30 minutes
-  // of agent work later, and reads as a repository permission problem.
   it("fails when the pinned account is one gh has no session for", async () => {
     const m = machine({ ghAuth: ok(TWO_GH_ACCOUNTS), ghToken: fail("no such user") });
 
@@ -315,11 +294,7 @@ describe("runPreflight", () => {
     expect(check(report, "gh").detail).toMatch(/gh auth login/);
   });
 
-  // Both found by running this against a real machine under a launchd-shaped PATH, and neither was
-  // visible to the stubs before that.
   it("verifies each binary on the repaired PATH, not the one the worker was started with", async () => {
-    // npm's shebang is `env node`, so asking it for its version on launchd's PATH reports a
-    // perfectly good npm as broken
     const m = machine();
 
     await runPreflight(depsFor(m));
@@ -335,8 +310,6 @@ describe("runPreflight", () => {
     expect(report.paths.node).toBe(NODE);
   });
 
-  // zsh reads .zprofile on login but .zshrc only when interactive, so a PATH entry added there —
-  // ~/.local/bin, where claude installs itself — is invisible to `zsh -lc`
   it("finds a tool the login shell cannot see but which is on disk anyway", async () => {
     const m = machine({
       has: ["git", "npm", "gh"],

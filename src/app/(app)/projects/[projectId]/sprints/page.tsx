@@ -39,13 +39,8 @@ export default function SprintsPage() {
   const { toast } = useToast();
 
   const requested = searchParams.get("sprint");
-  // Anything other than "planning" means the board — including absent, mistyped, or a
-  // value left over from a feature this page never grew.
   const requestedView = searchParams.get("view") === "planning" ? "planning" : "board";
 
-  // Starts null on purpose: passing `requested` straight through would fire
-  // /tasks?sprint=<unvalidated>, which the endpoint refuses with a 400 — so a stale bookmark
-  // would be an error rather than a fallback.
   const [scope, setScope] = useState<string | null>(null);
   const board = useProjectBoard(projectId, scope);
 
@@ -57,14 +52,7 @@ export default function SprintsPage() {
   const [deletingSprint, setDeletingSprint] = useState(false);
   const [initialLoadDone, setInitialLoadDone] = useState(false);
   const [showVelocity, setShowVelocity] = useState(false);
-  // The panes' own counts come straight from board.tasks, but board.applySprintChange can
-  // only ever drop a task out of that list, never add one — so a task the planning view just
-  // pulled in from the backlog has no other way to reach the header's done/total.
   const [planningTasks, setPlanningTasks] = useState<ApiTask[] | null>(null);
-  // Reset during render, not in an effect: an effect only runs after this render has
-  // already committed with the new sprint's name and the outgoing sprint's counts still
-  // attached to planningTasks. Resetting here lets React throw that render away before
-  // anything paints, instead of one frame later.
   const [planningTasksScope, setPlanningTasksScope] = useState<string | null>(null);
   if (planningTasksScope !== scope) {
     setPlanningTasksScope(scope);
@@ -73,16 +61,10 @@ export default function SprintsPage() {
 
   useEffect(() => {
     if (board.loading) return;
-    // A route transition away from this tab lands here too, one commit before the page
-    // unmounts: the destination's URL (no ?sprint=) is already visible through `requested`,
-    // which would otherwise read as "the sprint fell out of the URL" and replace it right
-    // back. This guard is the only thing telling the two apart.
     if (pathname !== `/projects/${projectId}/sprints`) return;
     const next = resolveSelectedSprint(board.sprints, requested);
     if (next !== scope) setScope(next);
     if (next && next !== requested) {
-      // A second writer touches this same URL (the view toggle); carry whatever it wrote
-      // rather than clobbering it back to just ?sprint=.
       const suffix = requestedView === "planning" ? "&view=planning" : "";
       router.replace(`/projects/${projectId}/sprints?sprint=${next}${suffix}`);
     }
@@ -150,26 +132,16 @@ export default function SprintsPage() {
     }
   }
 
-  // sprintScopeToQuery (src/lib/sprint-scope.ts) emits a leading "?" and stops at one
-  // parameter, so a second one is built by hand here rather than forced through it.
   function sprintUrl(sprintId: string, targetView: "board" | "planning"): string {
     const suffix = targetView === "planning" ? "&view=planning" : "";
     return `/projects/${projectId}/sprints?sprint=${sprintId}${suffix}`;
   }
 
   const selected = scope ? board.sprints.find((s) => s._id === scope) ?? null : null;
-  // The one place this page decides a sprint is locked; passed down to every read-only
-  // gate on this page (SprintHeader included) so they can't drift apart
   const sprintIsReadOnly = selected?.status === "completed";
-  // A completed sprint offers no planning — never lets a stale ?view=planning bookmark in
   const view = !sprintIsReadOnly && requestedView === "planning" ? "planning" : "board";
-  // Until this sprint's own tasks are in, `board.tasks` still holds the sprint we came from,
-  // and showing them under this name would be the page stating something untrue
   const tasksLoaded = scope !== null && board.loadedScope === scope;
   const doneIds = new Set(columnIdsWithRole(board.project, "done"));
-  // The planning view's own merged list is the truth while it's mounted, since it is the
-  // only place a task moved in from the backlog exists; the sprint list's own counts stand
-  // in until the first round trip lands, and board.tasks after that
   const doneCount =
     view === "planning" && planningTasks
       ? planningTasks.filter((t) => doneIds.has(t.status)).length
@@ -184,8 +156,6 @@ export default function SprintsPage() {
         : selected?.taskCount ?? 0;
   const estimateField = resolveEstimateField(board.project);
   const estimateFieldId = estimateField?._id ?? "";
-  // Also gates the Velocity button: VelocityChart itself renders null with zero
-  // completed sprints, so there would be nothing to open either
   const hasCompletedSprint = board.sprints.some((s) => s.status === "completed");
   const canShowVelocity = !!estimateField && hasCompletedSprint;
   const estimateTotal =
@@ -204,8 +174,6 @@ export default function SprintsPage() {
     ? { total: estimateTotal, done: estimateDone, label: estimateField.name }
     : undefined;
 
-  // Latches once, on the first render where there is nothing left to wait for, and never
-  // resets — a later sprint switch is ProjectBoardView's own loadedScope/scope gate, not this
   useEffect(() => {
     if (initialLoadDone || !board.project) return;
     if (board.sprints.length === 0 || tasksLoaded) setInitialLoadDone(true);

@@ -17,8 +17,6 @@ export function AuditSection({ projectId, active }: { projectId: string; active:
   const loadSeq = useRef(0);
 
   const load = useCallback(() => {
-    // Single-flight is the render's doing today: the spinner takes the branch before the Retry
-    // button that could ask for a second read. This keeps a late answer harmless regardless.
     const seq = ++loadSeq.current;
     setLoading(true);
     api
@@ -51,9 +49,6 @@ export function AuditSection({ projectId, active }: { projectId: string; active:
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
         </div>
       ) : failed ? (
-        // Not the empty state: "nothing was ever changed here" is a claim about this board's
-        // history, and a read that never answered supports no claim about it at all. The toast
-        // fades; this stays until somebody has an answer
         <div className="flex flex-col items-center justify-center gap-3 py-8 text-center">
           <p role="alert" className="text-sm text-text-muted">
             Failed to load the audit log.
@@ -65,10 +60,6 @@ export function AuditSection({ projectId, active }: { projectId: string; active:
       ) : logs.length === 0 ? (
         <EmptyState>No settings changes recorded yet.</EmptyState>
       ) : (
-        // A table, so the columns line up across rows: separate flex rows each sized
-        // themselves, which is why "settings updated" wrapped in one row and not the next.
-        // Four columns need width the phone has not got — three of them nowrap, and the one
-        // that carries the change truncates to nothing — so below sm each entry is a block.
         <div className="max-h-[420px] overflow-y-auto">
           <table className="w-full text-xs">
             <tbody>
@@ -86,9 +77,6 @@ export function AuditSection({ projectId, active }: { projectId: string; active:
                   <td className="align-top text-text-muted sm:table-cell sm:whitespace-nowrap sm:py-1.5 sm:pr-3">
                     {log.action.replace(/_/g, " ")}
                   </td>
-                  {/* w-full + max-w-0 is what lets a table cell truncate instead of pushing
-                      the table past its container; below sm it gets the whole next line
-                      instead, because truncated to a phone's width it showed nothing */}
                   <td
                     className="w-full align-top text-text sm:table-cell sm:max-w-0 sm:truncate sm:py-1.5"
                     title={log.detail || undefined}

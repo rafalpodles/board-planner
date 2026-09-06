@@ -4,13 +4,8 @@ import { AgentBlock } from "@/models/agentBlock";
 import { AgentComposition, IAgentBlock } from "@/types";
 import { GATE_KINDS } from "./agent-kinds";
 
-// The blocks the worker implements today. Seeding them is what makes the catalog describe the
-// machine rather than an intention: a key here has a counterpart in worker/src, and a key without
-// one refuses the run.
 type SeedBlock = Partial<IAgentBlock> & Pick<IAgentBlock, "key" | "kind" | "name">;
 
-// Derived rather than restated: a kind's name, description and defaults live in agent-kinds, so the
-// seeded row and the form that edits it cannot describe the same gate differently.
 function gateSeeds(): SeedBlock[] {
   return GATE_KINDS.map((kind) => ({
     key: kind.key,
@@ -58,14 +53,10 @@ export const BUILT_IN_BLOCKS: SeedBlock[] = [
   ...gateSeeds(),
 ];
 
-/** The seeded "Default" agent's name. Not a fallback — a project or task still has to choose it. */
 export const SEEDED_DEFAULT_NAME = "Default";
 
-/** The one that carries a Merge step; projects that used to merge automatically adopt it. */
 export const MERGING_AGENT_NAME = "Merges its own work";
 
-// Exactly today's pipeline. Adopting agents has to be a no-op for a project that never touches one,
-// so this is what a project naming no agent of its own runs.
 export const DEFAULT_COMPOSITION: AgentComposition = {
   analysis: [],
   implementation: [{ key: "implement" }],
@@ -95,8 +86,6 @@ export const CAREFUL_COMPOSITION: AgentComposition = {
   delivery: [{ key: "push" }, { key: "pull-request" }],
 };
 
-// The agent that merges its own work. Merging is a property of the composition now, so "may this project
-// merge" is answered by whether its agent carries the step — not by a boolean beside it.
 export const MERGING_COMPOSITION: AgentComposition = {
   analysis: [],
   implementation: [{ key: "implement" }],
@@ -120,7 +109,6 @@ export const SECURITY_REVIEW_BLOCK: SeedBlock = {
   params: { focus: "security", model: "opus" },
 };
 
-/** Idempotent: safe to run on every boot, and it never overwrites a description someone edited. */
 export async function seedAgents() {
   for (const block of [...BUILT_IN_BLOCKS, SECURITY_REVIEW_BLOCK]) {
     await AgentBlock.updateOne(

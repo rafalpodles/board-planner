@@ -93,15 +93,8 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
 
   const draft = useDraft(pmDraftFrom(project));
 
-  /**
-   * What today has actually cost (BP-284). Read once on mount rather than polled: it is a number to
-   * inform a setting, not a live meter, and a settings screen that refetched on a timer would be
-   * spending requests to watch a number that changes when somebody else is chatting.
-   */
   const [usage, setUsage] = useState<PmUsageToday | null>(null);
   useEffect(() => {
-    // Behind the same gate as the card that renders it: a member never sees these numbers, so
-    // fetching them spends a request on data the screen will not show
     if (!isAdmin) return;
     let cancelled = false;
     api
@@ -109,7 +102,6 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
       .then((data) => {
         if (!cancelled) setUsage(data as PmUsageToday);
       })
-      // A settings screen that cannot show the spend still has to let the settings be edited
       .catch(() => {});
     return () => {
       cancelled = true;
@@ -120,26 +112,11 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
   const [newLinkUrl, setNewLinkUrl] = useState("");
 
   const servers = draft.value.mcpServers;
-  // What each server row calls itself to a screen reader. `config.ts` refuses a duplicate name at
-  // save time, but the DRAFT being typed into has no such guard — an admin naming a second server
-  // the same as an existing one puts two rows on screen sharing a name before either save fires.
   const serverRowNames = distinctRowNames(
     servers.map((s, i) => s.name || `Server ${i + 1}`)
   );
-  /**
-   * The same two refusals `validatePmConfig` gives, asked here so they reach the field rather
-   * than arriving as a toast after the save — with the draft still dirty and nothing saying which
-   * field was at fault. `reviewHour` and `reviewInterval` were already safe this way: one is
-   * clamped before posting and the other comes from a fixed select.
-   */
   const typedTimezone = draft.value.timezone.trim();
   const timezoneReadable = isValidTimezone(typedTimezone);
-  /**
-   * Only while the schedule is on, which is the only time this field is rendered. Judging it
-   * always meant an unreadable value typed and then undone by switching the schedule off went on
-   * refusing **every** later save — of context notes, of links, of anything — through a toast
-   * about a field no longer on screen. That is the very failure this change exists to remove.
-   */
   const timezoneError = !draft.value.dailyReview
     ? ""
     : timezoneReadable
@@ -147,10 +124,6 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
       : typedTimezone
         ? `Not a timezone this server knows: ${typedTimezone}`
         : "A review has to run somewhere — name a timezone, for example Europe/Warsaw.";
-  // What the project already has, which is by definition something the server accepted
-  // The rule the SERVER uses, not a truthiness check: `turn-cap.ts` falls back when the stored
-  // zone is unreadable, so a legacy row holding "Warsaw" would otherwise be announced here while
-  // the count ran in Europe/Warsaw.
   const stored = project.pm?.autonomy?.timezone;
   const storedTimezone = stored && isValidTimezone(stored) ? stored : DEFAULT_PM_AUTONOMY.timezone;
 
@@ -179,11 +152,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
   }
 
   async function savePm(options?: { silent?: boolean }): Promise<boolean> {
-    // The field already says what is wrong; sending it would answer 400 and say the same thing
-    // one round trip later, in a toast that does not name the field.
     if (timezoneError || capError) {
-      // Not gated on `silent`: connectOauth saves silently first, and swallowing this made
-      // Connect a button that flickered and did nothing with no reason given anywhere.
       toast(timezoneError || capError, "error");
       return false;
     }
@@ -195,9 +164,6 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
         dailyReview: v.dailyReview,
         reviewHour: firstReviewHour({ reviewHour: Number(v.reviewHour) }),
         reviewIntervalHours: Number(v.reviewInterval) || 24,
-        // The server judges this whether or not the schedule is on, and an empty string is not
-        // nullish so its `??` fallback never fires. A hidden, unreadable value must not be what
-        // blocks an unrelated save.
         timezone: timezoneReadable ? v.timezone.trim() : storedTimezone,
         handleNeedsHumanReview: v.handleNhr,
       },
@@ -266,7 +232,6 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
   async function connectOauth(index: number) {
     const serverName = servers[index].name.trim();
     setTransientAt(index, { connecting: true, testResult: "" });
-    // Persist the draft first so Connect works without a manual save
     if (!(await savePm({ silent: true }))) {
       setTransientAt(index, { connecting: false });
       return;
@@ -342,8 +307,6 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
               <p className="mt-1 text-xs text-text-muted">
                 Autonomous turns count too, and so does a turn the model failed. Resets at midnight
                 in {storedTimezone}.{" "}
-                {/* The sentence this screen was missing: the cap above is in turns, and a turn is
-                    not one model call, so the number alone never said what it permitted. */}
                 <strong>One turn is up to {usage?.maxCallsPerTurn ?? 15} model calls</strong>, so
                 this is a rate limit rather than a budget.
               </p>
@@ -544,9 +507,6 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
         >
           <div className="space-y-3">
             {servers.map((server, i) => {
-              // Every control in the row is named through this one value, so a reader with three
-              // servers hears which of them they are on rather than the same word three times.
-              // Disambiguated across the whole list — see serverRowNames above.
               const rowName = serverRowNames[i];
               return (
               <div key={i} className="space-y-2 rounded-lg border border-border p-3">
@@ -583,8 +543,6 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                 <div className="flex flex-wrap items-center gap-2">
                   {isAdmin && (
                     <select
-                      // Per row: several servers can be listed, and one name for all of them is
-                      // ambiguous to a reader and a strict-mode collision to a test
                       aria-label={`Authentication for ${rowName}`}
                       value={server.authType}
                       onChange={(e) =>

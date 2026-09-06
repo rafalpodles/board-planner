@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { pmThreadFilter } from "./thread";
 
-// A tiny stand-in for Mongo's matcher, enough to state what the filter means
 function matches(filter: Record<string, unknown>, doc: Record<string, unknown>): boolean {
   if (filter.project !== doc.project) return false;
   const branches = filter.$or as Record<string, unknown>[];
@@ -30,14 +29,12 @@ describe("pmThreadFilter", () => {
     ).toBe(true);
   });
 
-  // CP-164: the bug was that another person's requests were replayed as the caller's own
   it("excludes another user's chat", () => {
     expect(
       matches(filter, { project: PROJECT, triggeredBy: BOB, triggerType: "chat" })
     ).toBe(false);
   });
 
-  // Board-level events belong to everyone, so a new user does not open an empty thread
   it("keeps autonomous turns whoever they are attributed to", () => {
     expect(
       matches(filter, { project: PROJECT, triggeredBy: PM, triggerType: "daily_review" })

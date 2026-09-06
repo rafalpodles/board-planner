@@ -31,7 +31,6 @@ final class ProjectSyncTests: XCTestCase {
         XCTAssertEqual(plan.remove.map(\.path), ["/checkouts/BP"])
     }
 
-    // Steady state has to be silent, or every poll re-does the last one
     func testItDoesNothingWhenTheDiskAlreadyAgrees() {
         let plan = ProjectSync.plan(
             catalogue: [
@@ -43,8 +42,6 @@ final class ProjectSyncTests: XCTestCase {
         XCTAssertTrue(plan.isEmpty)
     }
 
-    // The checkout the operator added by hand, somewhere of their own choosing, in whichever form
-    // of the address git wrote. It counts as connected: cloning a second copy is the wrong answer.
     func testACheckoutAddedByHandCountsAsTheProjectsOwn() {
         let plan = ProjectSync.plan(
             catalogue: [row("SB", repo: sbRemote, wanted: true, servedHere: true)],
@@ -53,8 +50,6 @@ final class ProjectSyncTests: XCTestCase {
         XCTAssertTrue(plan.isEmpty)
     }
 
-    // ...and unticking that one plans to delete it, wherever it lives. The rail that would have
-    // spared it was taken off deliberately; this test is what says so out loud.
     func testUntickingRemovesACheckoutOutsideTheAppsOwnFolder() {
         let plan = ProjectSync.plan(
             catalogue: [row("SB", repo: sbRemote, wanted: false, servedHere: true)],
@@ -63,8 +58,6 @@ final class ProjectSyncTests: XCTestCase {
         XCTAssertEqual(plan.remove.map(\.path), ["/Users/rpo/code/my-ventures"])
     }
 
-    // Reaching for it would be one failure per poll, forever, for a project the screen already
-    // shows as unavailable
     func testItDoesNotTryToCloneAProjectWithNoRepository() {
         let plan = ProjectSync.plan(
             catalogue: [row("MC", repo: "", wanted: true, servedHere: false, available: false)],
@@ -73,7 +66,6 @@ final class ProjectSyncTests: XCTestCase {
         XCTAssertTrue(plan.isEmpty)
     }
 
-    // An unrelated checkout is nobody's business: it belongs to no row, so no row may remove it
     func testItLeavesACheckoutNoProjectClaims() {
         let plan = ProjectSync.plan(
             catalogue: [row("BP", repo: bpRemote, wanted: true, servedHere: true)],

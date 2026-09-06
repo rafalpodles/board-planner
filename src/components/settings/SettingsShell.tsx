@@ -11,7 +11,6 @@ import {
 export interface SettingsNavItem {
   id: string;
   label: string;
-  /** Set when the section is its own route; without it the shell asks `onSelect` to switch */
   href?: string;
   icon?: React.ReactNode;
   dirty?: boolean;
@@ -25,7 +24,6 @@ export interface SettingsNavGroup {
 interface SettingsShellProps {
   title?: string;
   subtitle?: React.ReactNode;
-  /** Drives the sidebar; a surface that filters it passes `pillItems` for the unfiltered row */
   groups: SettingsNavGroup[];
   active: string;
   onSelect?: (id: string) => void;
@@ -35,15 +33,6 @@ interface SettingsShellProps {
   children: React.ReactNode;
 }
 
-/**
- * The app's scroll container is `main`, not the window, so the `window.scrollTo` this replaces had
- * never moved anything (BP-405). It lives here because the shell already encodes the same geometry
- * in the sticky offset its pill row uses, and both settings surfaces wear the shell.
- *
- * Deliberately a function the caller invokes rather than an effect on `active`: the project page's
- * section search changes `active` on every keystroke and must NOT scroll, so a shell that scrolled
- * whenever `active` moved would break searching without failing anything.
- */
 export function scrollSettingsToTop() {
   document.getElementById("main-content")?.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -51,11 +40,6 @@ export function scrollSettingsToTop() {
 function DirtyDot({ className = "" }: { className?: string }) {
   return (
     <span
-      // The dot lives inside the section's nav button, so without this its `title` folds into that
-      // button's accessible name and "Board" is announced as "Board Unsaved changes". The five
-      // markers BP-450 dealt with were spelled `title="Unsaved"`; this one was worded differently
-      // and a grep for that string missed it. The dirty state is already conveyed by the section's
-      // own contents, so there is nothing to replace it with here.
       aria-hidden="true"
       title="Unsaved changes"
       className={`h-1.5 w-1.5 shrink-0 rounded-full bg-warning ${className}`}
@@ -63,15 +47,6 @@ function DirtyDot({ className = "" }: { className?: string }) {
   );
 }
 
-/**
- * The layout both settings surfaces wear: page header, sticky sidebar above md, sticky pill
- * row below it. It owns the shape and nothing else — which sections exist, who may see them
- * and how switching one works stay with the caller, because the account pages are real routes
- * and the project page keeps every section mounted for its save bar.
- *
- * It exists because BP-365 pinned the pill row on one surface and left the other scrolling
- * away with the page: two hand-rolled copies of one layout only ever agree by accident.
- */
 export function SettingsShell({
   title = "Settings",
   subtitle,
@@ -182,11 +157,6 @@ export function SettingsShell({
           {sidebarFooter}
         </nav>
 
-        {/* A sticky offset is measured from the scrollport's content box, so these four numbers
-            have to equal the padding on the app's `main` — `p-2` everywhere this row is on
-            screen, since both it and main's larger desktop padding turn over at `md`. Get them
-            wrong and the row parks off the top edge; `e2e/settings-mobile-nav.spec.ts` is what
-            catches it. */}
         <SectionPillsNav className="sticky -top-2 z-30 -mx-2 -mt-2 mb-3 border-b border-border bg-bg px-2 py-3 md:hidden">
           {pills.map(pill)}
         </SectionPillsNav>

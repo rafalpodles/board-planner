@@ -22,10 +22,6 @@ beforeEach(() => {
   findOneAndDelete.mockResolvedValue(null);
 });
 
-// BP-316: this route is unauthenticated and built its redirect target from x-forwarded-host, so
-// `GET /api/pm/oauth/callback?state=x` with a forged header answered a 302 to wherever the caller
-// named. A relative Location cannot be moved by a header — the browser resolves it against the
-// origin it actually asked.
 describe("GET /api/pm/oauth/callback", () => {
   it("redirects to a relative path, not an absolute URL", async () => {
     const res = await GET(request());

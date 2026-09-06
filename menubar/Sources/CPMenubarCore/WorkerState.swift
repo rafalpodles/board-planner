@@ -89,8 +89,6 @@ public struct WorkerState: Equatable, Sendable {
     }
 
     public func stepperRows() -> [StepRow] {
-        // A composed agent names the block it is on — "step:implement", "gates:diff-size". The
-        // stepper shows the fixed stages, so every block folds back onto the stage it belongs to.
         let normalised = currentPhase.map { phase -> String in
             if phase.hasPrefix("gates:") { return "gates" }
             if phase.hasPrefix("step:") { return "agent" }
@@ -106,8 +104,6 @@ public struct WorkerState: Equatable, Sendable {
 }
 
 extension WorkerState {
-    // Test seam: every other route into a Health goes through an event, and no event produces
-    // disconnected and paused from the same starting point.
     mutating func forceHealth(_ next: Health) {
         health = next
     }

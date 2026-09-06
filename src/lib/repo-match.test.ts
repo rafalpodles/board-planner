@@ -17,8 +17,6 @@ describe("normaliseRemote", () => {
     );
   });
 
-  // The remote this repository is actually cloned with. A per-account ssh alias is invisible to the
-  // host it resolves to, so matching on the raw string would never fire.
   it("sees through a per-account ssh host alias", () => {
     expect(normaliseRemote("git@github-rafalpodles:rafalpodles/board-planner.git")).toBe(
       "rafalpodles/board-planner"
@@ -71,8 +69,6 @@ describe("projectRemotes", () => {
 describe("matchRepo", () => {
   const project = { _id: "p1", githubRepo: "rafalpodles/board-planner" };
 
-  // Returns what the worker sent, not the normalised form: the worker looks its own checkout up by
-  // this string, and only recognises the one it reported.
   it("answers with the exact string the worker reported", () => {
     const reported = [
       { remote: "git@github-rafalpodles:rafalpodles/board-planner.git", path: "/a" },
@@ -96,7 +92,6 @@ describe("matchRepo", () => {
     expect(matchRepo(project, [{ remote: "git@github.com:someone/else.git", path: "/a" }])).toBeNull();
   });
 
-  // Without this a project naming no repository would match the first checkout on any machine
   it("is null for a project that names no repository, whatever the worker reports", () => {
     const reported = [{ remote: "git@github.com:anything/at-all.git", path: "/a" }];
 
@@ -108,8 +103,6 @@ describe("matchRepo", () => {
     expect(matchRepo(project, [])).toBeNull();
   });
 
-  // The operator decides which checkout wins by what they list first in repos.json — their machine,
-  // their call — so the order they reported is the order honoured.
   it("takes the first reported checkout when a machine has two of the same repository", () => {
     const reported = [
       { remote: "git@github.com:rafalpodles/board-planner.git", path: "/first" },
@@ -127,8 +120,6 @@ describe("matchRepo", () => {
   });
 });
 
-// Dropping the host entirely made a self-hosted mirror, or a second account, match a project it has
-// nothing to do with — and the agent would then run and push in the wrong checkout.
 describe("hosts", () => {
   it("refuses two different real hosts holding the same owner/repo", () => {
     const project = { _id: "p1", githubRepo: "https://github.com/owner/repo" };
@@ -144,7 +135,6 @@ describe("hosts", () => {
       .toBe("git@git.internal.example.com:owner/repo.git");
   });
 
-  // An ssh alias resolves through this machine's ssh config, so it is not a hostname to compare
   it("does not treat a per-account ssh alias as a host", () => {
     const project = { _id: "p1", githubRepo: "https://github.com/rafalpodles/board-planner" };
     const aliased = [{ remote: "git@github-rafalpodles:rafalpodles/board-planner.git", path: "/a" }];

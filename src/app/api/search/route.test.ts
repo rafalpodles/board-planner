@@ -23,10 +23,6 @@ const ctx = () => ({ params: Promise.resolve({}) });
 const search = (q: string) =>
   GET(new Request(`http://localhost/api/search?q=${encodeURIComponent(q)}`), ctx());
 
-/**
- * Records what reached the database rather than what came back, because the question these tests
- * answer is where the narrowing happens — not whether the answer looks right for a corpus of five.
- */
 let lastQuery: { filter: unknown; limit?: number; sorted?: unknown };
 
 function chain(rows: unknown[]) {
@@ -80,11 +76,6 @@ describe("GET /api/search", () => {
     expect(accessibleProjectIds).not.toHaveBeenCalled();
   });
 
-  /**
-   * A member whose grants resolve to nothing must match nothing. The `?? []` in the route is what
-   * makes that true: an undefined project filter would be no filter at all, which is the whole
-   * instance.
-   */
   it("gives a member with no accessible projects an empty set, not every project", async () => {
     accessibleProjectIds.mockResolvedValue(null);
 
@@ -93,13 +84,6 @@ describe("GET /api/search", () => {
     expect(lastQuery.filter).toMatchObject({ project: { $in: [] } });
   });
 
-  /**
-   * The 50-row cap is only safe because the grant filter is inside the same query: the database
-   * narrows first and spends the fifty slots on rows this reader may see. Move the filtering into
-   * a `.filter()` after the query — a refactor that looks harmless — and the cap starts being
-   * spent on other people's tasks, silently truncating the reader's own. No corpus small enough
-   * to run in an e2e can show that, which is why it is asserted here instead.
-   */
   it("applies the cap to the already-narrowed query", async () => {
     await search("zeppelin");
 

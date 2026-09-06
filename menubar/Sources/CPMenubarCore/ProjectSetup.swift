@@ -1,9 +1,5 @@
 import Foundation
 
-// Adding a second project to a machine, after onboarding added the first. The two steps are the
-// same two — clone it, then grant it — and they are in this order for the same reason: repos.json
-// is what lets a worker bind a directory, so granting a checkout that does not exist, or one whose
-// push was refused, produces a machine the board believes can work and which cannot.
 public struct ProjectSetup: Sendable {
     private let clone: CloneStep
     private let repos: ReposFile
@@ -18,7 +14,6 @@ public struct ProjectSetup: Sendable {
         case grant(reason: String)
     }
 
-    /// The path of the checkout this machine now has for that project.
     @discardableResult
     public func add(_ offer: ProjectOffer, parent: String) -> Result<String, Failure> {
         let projectKey = offer.key.isEmpty ? offer.project : offer.key
@@ -34,8 +29,6 @@ public struct ProjectSetup: Sendable {
                 }
                 return .success(path)
             } catch {
-                // The clone is on disk and the grant is not, which is recoverable by hand — say
-                // where it is rather than leaving the operator to guess what half happened.
                 return .failure(
                     .grant(reason: "Cloned to \(path), but could not write repos.json: \(error.localizedDescription)"))
             }

@@ -1,12 +1,5 @@
 import Foundation
 
-// The difference between what the operator picked and what this machine has, and the acting on it.
-// The picking happens in a browser; this is the half that touches the disk.
-//
-// Split from the doing on purpose: what is about to happen is a value that can be shown before it
-// happens and asserted about in a test, rather than a sequence of side effects nobody can see
-// coming. That matters most for the deletions.
-
 public struct SyncPlan: Equatable {
     public let add: [ProjectOffer]
     public let remove: [PlannedRemoval]
@@ -16,36 +9,19 @@ public struct SyncPlan: Equatable {
 
 public struct PlannedRemoval: Equatable {
     public let project: ProjectOffer
-    /// The checkout this machine holds for it, resolved locally by remote — the socket never says
-    /// where anything lives.
     public let path: String
 }
 
 public enum SyncStep: Equatable {
     case added(project: String, path: String)
     case removed(project: String, path: String)
-    /// The grant was dropped and the checkout directory was not deleted, because it had already
-    /// gone. Distinct from `.removed` because telling an operator a directory was deleted when it
-    /// was not is the kind of thing they only discover when they go looking for it.
-    ///
-    /// Says nothing about the checkout's worktrees. They can only have been deleted if the
-    /// directory vanished between the guard and the act, which needs a race — but "nothing was
-    /// deleted" would be a stronger claim than this case can make.
     case forgotten(project: String, path: String)
-    /// A removal a guard said no to. Not a failure: the checkout is intact and the reason is one
-    /// the operator can act on.
     case refused(project: String, reason: String)
-    /// A removal that deleted some of what it meant to and then stopped. Its own case rather than a
-    /// `.failed` carrying a longer sentence, for the reason `.forgotten` is its own case: the
-    /// difference between "nothing happened" and "some of it is gone" is the whole of what the
-    /// operator has afterwards, and a message naming only the path that failed reads as the first
-    /// while meaning the second.
     case partiallyRemoved(project: String, removed: [String], reason: String)
     case failed(project: String, reason: String)
 }
 
 public enum ProjectSync {
-    /// `checkouts` maps an allowlisted path to the remote its `origin` reports.
     public static func plan(
         catalogue: [ProjectCatalogueRow],
         checkouts: [String: String]
@@ -59,8 +35,6 @@ public enum ProjectSync {
             let held = checkouts.first { RemoteMatch.same($0.value, row.repositoryUrl) }?.key
 
             if row.wanted {
-                // A project with no repository cannot be cloned; the screen already shows it as
-                // unavailable, and reaching for it here would be one failure per poll forever.
                 guard row.available, held == nil else { continue }
                 add.append(offer)
             } else if let held {
@@ -72,8 +46,6 @@ public enum ProjectSync {
     }
 }
 
-/// The catalogue row as the socket carries it. Declared here rather than in SocketClient so the
-/// planning above can be tested without a transport.
 public struct ProjectCatalogueRow: Decodable, Sendable, Equatable, Identifiable {
     public let project: String
     public let key: String

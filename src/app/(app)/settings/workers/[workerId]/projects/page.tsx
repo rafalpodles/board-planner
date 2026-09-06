@@ -7,11 +7,6 @@ import { useApi } from "@/hooks/use-api";
 import { Button } from "@/components/ui/Button";
 import { PageHeader } from "@/components/shell/PageHeader";
 
-// Where somebody says which projects a machine works on. A browser screen and not a pane in the
-// menubar app, for a reason that is not a preference: ticking a project may mean switching workers
-// on for it, and that is an instance admin in an interactive session — which the app, holding only
-// the machine's own credential, can never be.
-
 interface CatalogueRow {
   project: string;
   key: string;
@@ -47,8 +42,6 @@ export default function MachineProjectsPage() {
         setView(data);
         setPicked(new Set(data.catalogue.filter((row) => row.wanted).map((row) => row.project)));
       })
-      // A failed load has to say so. Left to a `finally` alone this renders as a spinner nobody
-      // can get out of, which is the same screen as a server that is simply slow.
       .catch((e: Error) => setError(e.message || "Could not load this machine's projects"));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workerId]);
@@ -151,8 +144,6 @@ export default function MachineProjectsPage() {
         ))}
       </div>
 
-      {/* Named by path before it happens, because "which directory" is the last question anybody
-          gets to ask about a delete. */}
       {removing.length > 0 && (
         <div className="mt-6 rounded-lg border border-danger/40 bg-danger/10 p-4 text-sm text-text">
           <p className="font-medium">Saving removes {removing.length === 1 ? "a checkout" : "checkouts"} from this machine:</p>

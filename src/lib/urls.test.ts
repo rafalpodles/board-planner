@@ -9,8 +9,6 @@ import {
 } from "./urls";
 
 describe("projectRefFromPathname", () => {
-  // The CP-159 regression: links moved to project keys while the widget still matched a
-  // 24-hex ObjectId, so the PM chat button vanished from every project page
   it("resolves a project key", () => {
     expect(projectRefFromPathname("/projects/TP")).toBe("TP");
   });
@@ -39,8 +37,6 @@ describe("projectRefFromPathname", () => {
     expect(projectRefFromPathname("/projects/")).toBeUndefined();
   });
 
-  // /projects/new is a page in its own right; treating it as a project fires a doomed
-  // API call and would show project chrome on the create form
   it("does not treat reserved segments as a project", () => {
     expect(projectRefFromPathname("/projects/new")).toBeUndefined();
   });
@@ -57,7 +53,6 @@ describe("projectRefFromPathname", () => {
   });
 
   it("rejects a segment that is neither a key nor an id", () => {
-    // leading digit, and longer than the 20-char key limit
     expect(projectRefFromPathname("/projects/1abc")).toBeUndefined();
     expect(projectRefFromPathname(`/projects/${"a".repeat(21)}`)).toBeUndefined();
   });
@@ -83,7 +78,6 @@ describe("path builders", () => {
     expect(taskPath("TP", 4)).toBe("/projects/TP/tasks/4");
   });
 
-  // The round trip is the invariant the widget depends on
   it("round-trips through projectRefFromPathname", () => {
     expect(projectRefFromPathname(projectPath("CP"))).toBe("CP");
     expect(projectRefFromPathname(taskPath("CP", "CP-9"))).toBe("CP");

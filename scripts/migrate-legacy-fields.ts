@@ -1,20 +1,3 @@
-/**
- * CP-213: seed Component, Difficulty and Labels as project fields and copy every
- * task's legacy value into `customFieldValues`.
- *
- * Usage:
- *   MONGODB_URI=... npx tsx scripts/migrate-legacy-fields.ts --dry-run
- *   MONGODB_URI=... npx tsx scripts/migrate-legacy-fields.ts
- *
- * Safe to re-run: a project that already has the three definitions is not seeded
- * again, and a task whose values are already copied is left alone. The old columns
- * are not touched, so a rollback loses nothing.
- *
- * Reads fall back to the legacy column (see src/lib/legacy-fields.ts), so this
- * script is an optimisation rather than a prerequisite — an unmigrated database
- * still renders correctly.
- */
-
 import mongoose from "mongoose";
 import { legacyFieldSeeds, findLegacyField, migratedValuesFor, withValuesInUse } from "../src/lib/legacy-fields";
 import { resolveUri, dbName } from "./mongo-uri";
@@ -30,8 +13,6 @@ async function main() {
   console.log(`Database: ${db.databaseName} (from ${source})`);
 
   const projects = await db.collection("projects").find({}).toArray();
-  // Pointing at the wrong database does no damage here, but it would report a
-  // clean run and leave the real one unmigrated
   if (!projects.length) {
     throw new Error(`No projects in "${db.databaseName}" — wrong database? Set MONGODB_DB.`);
   }
@@ -46,8 +27,6 @@ async function main() {
       .project({ component: 1, difficulty: 1, labels: 1, customFieldValues: 1 })
       .toArray();
 
-    // Options must cover values already on tasks, or a task holding a component
-    // that was removed from the project list loses it on its next save
     const componentsInUse = tasks.map((t) => String(t.component || "")).filter(Boolean);
 
     let fields = existing;
@@ -100,7 +79,6 @@ async function main() {
       `${dryRun ? "would migrate" : "migrated"} ${migratedTasks} task(s).`
   );
 
-  // A second run must report zero, or the migration is not idempotent
   if (!dryRun) console.log("Re-run with --dry-run to confirm it reports nothing left to do.");
 
   await mongoose.disconnect();

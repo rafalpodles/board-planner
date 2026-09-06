@@ -119,10 +119,6 @@ function htmlPage(body: string, status = 200, head = ""): Response {
       status,
       headers: {
         "content-type": "text/html; charset=utf-8",
-        // These pages carry a live consent ticket, the account's username, the list of every board
-        // it can reach, and finally the authorization code. next.config.ts scopes no-store to
-        // /api/*, so without this a shared cache is free to hand one person's ticket to the next
-        // (BP-383 review).
         "cache-control": "private, no-store",
         vary: "Cookie",
       },
@@ -148,9 +144,6 @@ function hiddenFields(p: AuthParams): string {
     .join("");
 }
 
-// The one fact that lets somebody notice they are on an attacker's authorization: the whole
-// flow happens on the real domain with a real certificate, and the client name is free text
-// the client chose for itself.
 function provenance(clientName: string, redirectUri: string): string {
   const label = clientName ? escapeHtml(clientName) : "An application";
   return `
@@ -190,8 +183,6 @@ function loginForm(p: AuthParams, clientName: string, error?: string): Response 
     </form>`);
 }
 
-// Picking "All projects" leaves the checkbox list standing, and a list you can still tick while it
-// is being ignored reads as a broken control rather than an inactive one (BP-383).
 const CONSENT_SCRIPT = `
   (function () {
     var form = document.getElementById("consent");
@@ -227,8 +218,6 @@ function consentForm(
   options: { signedInAs?: string; switchAccountHref?: string; error?: string } = {}
 ): Response {
   const label = clientName ? escapeHtml(clientName) : "An application";
-  // With nothing to select, "Only selected projects" is a dead end — but the way out is not to
-  // pre-tick the widest credential this account can issue. The choice stays unmade (BP-383 review).
   const empty = projects.length === 0;
   const rows = projects
     .map(
@@ -272,18 +261,7 @@ function consentForm(
     <script>${CONSENT_SCRIPT}</script>`);
 }
 
-// The authorization has to leave this origin, and a form submission cannot: `form-action 'self'` is
-// enforced across the redirect chain, so the 302 this used to answer with was blocked by the
-// browser — the whole flow died at the Authorize button with a CSP error and no navigation
-// (BP-383). A navigation the page performs itself is not a form submission, so no directive covers
-// it. Both mechanisms are declared and they do not collide: the script runs during parsing, while
-// the zero-second refresh cannot start its timer until the frame completes, so location.replace
-// wins and cancels it — measured as exactly one request at the client. The link covers the case
-// where neither ran.
 function returnToClient(target: string, clientName: string, headline = "Authorized"): Response {
-  // Checked when the row was written, and checked again here, at the point where
-  // location.replace would run a `javascript:` URI in this origin rather than ignore it the way
-  // a Location header does. A check at write time goes stale; this one cannot.
   if (!isValidRedirectUri(target)) {
     return errorPage("This client's redirect address is not a web address.");
   }
@@ -302,10 +280,6 @@ function returnToClient(target: string, clientName: string, headline = "Authoriz
 
 async function validateClientAndRedirect(p: AuthParams): Promise<IOAuthClient | null> {
   if (!p.clientId || !p.redirectUri) return null;
-  // Registration's rule, applied again to what registration stored. Rows written before BP-302
-  // accepted http on any host and nothing purged them — and the consent page now hands the code to
-  // the client by navigating there itself, where a `javascript:` URI would run in THIS origin
-  // rather than being ignored the way a Location header is (BP-383 review).
   if (!isValidRedirectUri(p.redirectUri)) return null;
   const client = await OAuthClient.findOne({ clientId: p.clientId });
   if (!client) return null;
@@ -320,8 +294,6 @@ async function accessibleProjects(user: IUser): Promise<{ _id: string; name: str
   return projects.map((p) => ({ _id: String(p._id), name: p.name as string, key: p.key as string }));
 }
 
-// Only the browser session counts here. A Bearer token belongs to an application, and an
-// application must not be able to authorize itself a second credential.
 async function browserSession(req: Request): Promise<{ sessionId: string; userId: string } | null> {
   const token = readSessionCookie(req.headers.get("cookie"));
   if (!token) return null;
@@ -330,10 +302,6 @@ async function browserSession(req: Request): Promise<{ sessionId: string; userId
   return { sessionId: String(session.sessionId), userId: String(session.userId) };
 }
 
-// Keyed on the account and nothing else. An address is the wrong dimension twice over: with no
-// proxy hop configured getClientIp returns null for everybody, which is one bucket for the whole
-// instance — and behind a proxy it is one bucket per NAT, so a single caller can shut the consent
-// screen for every colleague sharing the egress. The account is in hand here; use it.
 function consentKey(userId: string): string {
   return sourceKey(`user:${userId}`, "oauth_consent");
 }
@@ -354,8 +322,6 @@ async function issueTicket(p: AuthParams, user: IUser, sessionId: string): Promi
   return ticket;
 }
 
-// A consent row holds everything the authorization started with except response_type and
-// code_challenge_method, of which this endpoint accepts exactly one value each.
 function paramsOfConsent(consent: IOAuthConsent): AuthParams {
   return {
     clientId: consent.clientId,
@@ -382,8 +348,6 @@ function authorizeHref(p: AuthParams, extra: Record<string, string> = {}): strin
   return `/oauth/authorize?${sp.toString()}`;
 }
 
-// `prompt=login` is how OpenID Connect says "ask again anyway", and it is what the consent screen's
-// own "use a different account" link comes back with.
 function switchAccountHref(p: AuthParams): string {
   return authorizeHref(p, { prompt: "login" });
 }
@@ -400,17 +364,10 @@ export async function GET(req: Request) {
     return errorPage("PKCE required: code_challenge with code_challenge_method=S256.");
   }
 
-  // Signing in again while a session cookie is sitting right there is a password prompt that
-  // proves nothing the cookie has not already proven (BP-383). The consent screen still stands:
-  // what is being asked for is the grant, not the identity.
   if (query.get("prompt") !== "login") {
     const session = await browserSession(req);
     const user = session ? await User.findById(session.userId) : null;
     if (session && user) {
-      // A GET that writes a row is a GET that can be looped. It is keyed on the account rather
-      // than the address: getClientIp returns null unless a proxy hop is configured, so an
-      // address key would be one bucket for the whole instance, and a single caller could hold
-      // the consent screen shut for everybody (BP-383 review).
       if (await isRateLimited(consentKey(session.userId), CONSENTS_PER_WINDOW)) {
         return errorPage("Too many authorization attempts on this account. Try again later.", 429);
       }
@@ -430,24 +387,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  // What this closes is CSRF from somebody's browser: a page on another origin auto-submitting this
-  // form, where the victim's cookies ride along and `Sec-Fetch-Site` is a forbidden header the page
-  // cannot forge. The login route has refused that for a while; this endpoint verifies a credential
-  // and grants a consent, and did not.
-  //
-  // What it does NOT close, despite reaching the same throttle counters as the login route under the
-  // same keys: a script spending somebody else's lockout budget. A script sets `Sec-Fetch-Site`
-  // itself, so the refusal costs it one header — the same reasoning /oauth/register already records
-  // about its own guard. The aimable lockout is answered in rate-limit.ts, by giving it an exit.
-  //
-  // The consent and login forms are served by the GET above, from this instance's own origin, so a
-  // genuine submission is same-origin — verified in a real browser across all three entry paths.
-  // The cross-site step of the flow is that initial GET, which checkProvenance ignores because it
-  // only inspects mutating methods.
   if (!checkProvenance(req).ok) {
-    // 403, matching provenanceRefusal everywhere else: a 400 here is indistinguishable from
-    // "Unknown client" and "PKCE required", which makes cross-site attempts unalertable in an
-    // access log.
     return errorPage(
       "This form was submitted from another site, so it was refused. Start again from this instance.",
       403
@@ -463,7 +403,6 @@ export async function POST(req: Request) {
     return handleConsent(req, form);
   }
 
-  // --- Login phase ---
   const p = readParamsFromForm(form);
   const client = await validateClientAndRedirect(p);
   if (!client) return errorPage("Unknown client or unregistered redirect_uri.");
@@ -485,19 +424,11 @@ export async function POST(req: Request) {
   }
   if (!user) return loginForm(p, client.clientName, "Invalid username or password.");
 
-  // Post/Redirect/Get. The consent page must not be a POST result: no-store keeps it out of the
-  // back/forward cache, so Back re-fetches — and re-fetching a POST replays the password from the
-  // browser's own buffer, handing the next person at a shared machine a fresh consent screen on
-  // this account. A GET entry has nothing to replay, and it is the path that mints a
-  // session-bound ticket, so no ticket is unbound any more (BP-383 review).
   const session = await createSession({
     userId: user._id,
     userAgent: req.headers.get("user-agent"),
     ip: clientIp,
   });
-  // Headers, not an object literal: a second `set-cookie` key would collapse into the first, and
-  // this has to clear the cookie under the name this instance is not using, exactly as
-  // /api/auth/login does.
   const headers = new Headers({
     location: authorizeHref(p),
     "cache-control": "private, no-store",
@@ -509,8 +440,6 @@ export async function POST(req: Request) {
 
 async function handleConsent(req: Request, form: FormData): Promise<Response> {
   const ticket = String(form.get("ticket") || "");
-  // Only "all" is the wide grant. Absent, misspelt, or anything a hand-built form put there is the
-  // narrow one: an authorization decision must not fail open on a value nobody recognises.
   const wide = String(form.get("access") || "") === "all";
   const selected = form.getAll("projects").map((v) => String(v));
 
@@ -519,10 +448,6 @@ async function handleConsent(req: Request, form: FormData): Promise<Response> {
     return errorPage("Your session expired. Please start the authorization again.");
   }
 
-  // The ticket is the whole authority here, and it is minted on a GET and rendered into a page a
-  // browser will restore from history. Whoever redeems it must be the session it was issued to —
-  // unconditionally, so a row that carries no session (one written before this rule) is refused
-  // rather than waved through.
   const holder = await browserSession(req);
   if (!consent.session || !holder || holder.sessionId !== String(consent.session)) {
     await OAuthConsent.deleteOne({ _id: consent._id });
@@ -541,8 +466,6 @@ async function handleConsent(req: Request, form: FormData): Promise<Response> {
     return errorPage("Account no longer exists.");
   }
 
-  // RFC 6749 §4.1.2.1: refusing is an answer the client is owed, not a dead end in the browser.
-  // Only an explicit allow grants, for the same reason only an explicit "all" widens.
   if (String(form.get("decision") || "") !== "allow") {
     const refused = await OAuthConsent.deleteOne({ _id: consent._id });
     if (refused?.deletedCount !== 1) {
@@ -565,8 +488,6 @@ async function handleConsent(req: Request, form: FormData): Promise<Response> {
       .map((p) => p.key)
       .join(", ");
     if (allowedProjects.length === 0) {
-      // This branch re-renders without consuming the ticket, and costs more than the GET that
-      // issued it, so it answers to the same budget.
       await recordFailedAttempt(consentKey(String(consent.user)));
       return consentForm(ticket, client.clientName, consent.redirectUri, accessible, {
         signedInAs: user.username,
@@ -578,8 +499,6 @@ async function handleConsent(req: Request, form: FormData): Promise<Response> {
     }
   }
 
-  // The delete is the claim, not a tidy-up: two submissions of one ticket that interleave between
-  // the read above and here would otherwise mint two independently redeemable codes.
   const claimed = await OAuthConsent.deleteOne({ _id: consent._id });
   if (claimed?.deletedCount !== 1) {
     return errorPage("This authorization was already completed. Start it again.");
@@ -597,8 +516,6 @@ async function handleConsent(req: Request, form: FormData): Promise<Response> {
     expiresAt: new Date(Date.now() + AUTH_CODE_TTL_SECONDS * 1000),
   });
 
-  // The grant outlives this browser window, so it is worth a line in an inbox the account holder
-  // reads even when the authorization happened somewhere they were not looking.
   void notifyCredentialCreated({
     email: user.email,
     username: user.username,

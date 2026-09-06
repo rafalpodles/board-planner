@@ -52,8 +52,6 @@ describe("DELETE /api/projects/:projectId/tasks/:taskId/links", () => {
     );
   });
 
-  // BP-304: {"$ne": null} became {$pull: {blockedBy: {$ne: null}}} — every dependency
-  // stripped in one call, uncast by Mongoose.
   it("refuses a Mongo operator in place of a taskId", async () => {
     const res = await DELETE(request("DELETE", { taskId: { $ne: null } }), ctx());
 
@@ -68,7 +66,6 @@ describe("DELETE /api/projects/:projectId/tasks/:taskId/links", () => {
     expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 
-  // {$pull: {relations: {task, type: {$ne: null}}}} drops every relation to that task
   it("refuses an unknown dependency type", async () => {
     const res = await DELETE(request("DELETE", { taskId: OTHER_TASK, type: { $ne: null } }), ctx());
 

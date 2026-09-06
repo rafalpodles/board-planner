@@ -9,12 +9,6 @@ import {
 } from "./seed";
 import { signIn } from "./session";
 
-/**
- * BP-300. The copy control is the one part of this feature no unit test can settle: what ends up
- * on the system clipboard, and whether the click reaches the card and row underneath it, are
- * both browser behaviour.
- */
-
 const TASK_URL = `${BASE_URL}/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`;
 const COPY_BUTTON = `Copy link to ${SIBLING_TASK_KEY}`;
 
@@ -62,8 +56,6 @@ test("a list row copies the same URL without opening the task", async ({ page })
   await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_KEY}$`));
 });
 
-// Enter on a focused button is the browser's own activation; a unit test can only show the
-// handler does not swallow it
 test("the task page copies on Enter from the keyboard", async ({ page }) => {
   await signIn(page);
   await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);

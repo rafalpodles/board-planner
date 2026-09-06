@@ -1,6 +1,5 @@
 import { ColumnRole, DEFAULT_PROJECT_COLUMNS, IProjectColumn } from "@/types";
 
-// Structural shape shared by IProjectColumn (server) and ApiProjectColumn (client)
 export type AnyColumn = {
   id: string;
   label: string;
@@ -10,7 +9,6 @@ export type AnyColumn = {
   triggersPmReview?: boolean;
 };
 
-// Falls back to the built-in seven for documents created before the seeding migration
 export function effectiveColumns(columns: AnyColumn[] | null | undefined): AnyColumn[] {
   if (!columns || columns.length === 0) {
     return DEFAULT_PROJECT_COLUMNS;
@@ -36,9 +34,6 @@ export function roleOf(
   return getProjectColumns(project).find((c) => c.id === statusId)?.role;
 }
 
-// A board need not have a backlog column, and columns[0] on such a board can be a done one — where
-// a task is born already finished. A recurring occurrence landing there ends the series silently,
-// because creation never runs the status-change side effects that would mint the one after it.
 export function defaultStatusFor(project: HasColumns | null | undefined): string {
   const columns = getProjectColumns(project);
   const landing =
@@ -49,12 +44,6 @@ export function defaultStatusFor(project: HasColumns | null | undefined): string
   return landing.id;
 }
 
-// Which column ids carry a role, for the queries that used to compare against a literal id.
-// A project that renamed or rebuilt its board has ids nothing hardcoded can match — and the query
-// that mattered most, carrying unfinished tasks out of a closing sprint, then dragged finished
-// work into the next one because its column was not literally called "done".
-// Structural, so the board page and the API can share it: the client's columns carry no _id and
-// the two types are otherwise the same shape.
 type HasAnyColumns = { columns?: AnyColumn[] | null };
 
 export function columnIdsWithRole(
@@ -66,16 +55,6 @@ export function columnIdsWithRole(
     .map((c) => c.id);
 }
 
-// Where a merged merge request sends a task, or undefined if it sends it nowhere.
-//
-// One review column forward, never into or out of a column somebody flagged for a human. The flag
-// is the signal because it is already the repo's answer to "which column means a human needs to
-// look at this" (see escalationColumnId in ./escalation) — position is not: that helper falls back
-// to the FIRST review column, and column order is whatever somebody last dragged it into.
-//
-// The default board is the case that matters: three columns carry the review role, so advancing to
-// the merely-next one parked merged work in needs_human_review, which is flagged, and moved it back
-// out again on the next sync. Boards that flag nothing keep advancing one step, as before.
 export function mergedReviewDestination(
   project: HasAnyColumns | null | undefined,
   status: string
@@ -86,8 +65,6 @@ export function mergedReviewDestination(
   return review.slice(from + 1).find((c) => !c.triggersPmReview)?.id;
 }
 
-// The column a task is sitting in, or undefined if its status names no column the project has —
-// which happens to a task left behind by a column somebody deleted.
 export function columnFor(
   project: HasAnyColumns | null | undefined,
   statusId: string
@@ -95,8 +72,6 @@ export function columnFor(
   return effectiveColumns(project?.columns).find((c) => c.id === statusId);
 }
 
-// What a board means, rather than what its columns are called. Anything ordering work across
-// projects has to compare these: two boards agree on roles and on nothing else.
 export const ROLE_ORDER: Record<ColumnRole, number> = {
   active: 0,
   blocked: 1,

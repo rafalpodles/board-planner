@@ -94,8 +94,6 @@ describe("createRunner", () => {
     expect((await running).code).not.toBe(0);
   });
 
-  // The timeout branch above covers its own escalation; the abort branch had none, and the
-  // pipeline removes the worktree the moment this resolves
   it(
     "escalates an abort to SIGKILL and does not resolve while the child is still alive",
     async () => {
@@ -132,9 +130,6 @@ describe("createRunner", () => {
     20_000
   );
 
-  // The "close" event waits for stdio EOF as well as process exit. A gate spawns npm, whose own
-  // children inherit its stdio; if the direct child exits while a grandchild still holds those
-  // pipes open, "close" never fires. Reproduces the reviewer's repro: exit at ~1.3s, no close by 6s.
   it(
     "settles when a child exits but a grandchild keeps its inherited stdio open",
     async () => {
@@ -207,7 +202,6 @@ describe("createRunner", () => {
 });
 
 describe("watching stdout while it is still being written", () => {
-  // The whole point: a 30-minute agent run is invisible until it ends if output is only read at exit
   it("hands a chunk over before the process has exited", async () => {
     const chunks: string[] = [];
     let settled = false;
@@ -232,13 +226,9 @@ describe("watching stdout while it is still being written", () => {
     const result = await running;
 
     expect(chunks.join("")).toBe("first\nsecond\n");
-    // observing is additive: every consumer downstream still reads the whole output
     expect(result.stdout).toBe("first\nsecond\n");
   });
 
-  // A "data" handler runs on the stream's own stack, so a throw there is an uncaught exception and
-  // ends the worker process. Asserted on the process, not on the result: the result comes back
-  // intact either way, so only the absence of the exception distinguishes the two.
   it("keeps an observer's throw out of the process", async () => {
     const uncaught: unknown[] = [];
     const record = (error: unknown): void => {
@@ -271,8 +261,6 @@ describe("watching stdout while it is still being written", () => {
 });
 
 describe("the default child environment", () => {
-  // Every gate calls runner.run without an env of its own, so this default is what npm ci,
-  // npm run build and npm test actually inherit — including any dependency's lifecycle script
   it("hands a spawned process none of the worker's secrets", async () => {
     process.env.CP_API_TOKEN = "cp_secret_for_test";
     try {

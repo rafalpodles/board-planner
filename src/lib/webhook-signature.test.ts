@@ -19,8 +19,6 @@ afterEach(() => {
   else process.env.WEBHOOK_SIGNING_SECRET = ORIGINAL;
 });
 
-// BP-306: deliveries were unsigned and carried no timestamp, so a receiver could not tell one
-// from anybody else who learned the URL, and a captured delivery replayed forever
 describe("signatureHeaders", () => {
   it("signs the body and states when it was signed", () => {
     const headers = signatureHeaders('{"event":"task_created"}', 1_700_000_000_000);
@@ -29,7 +27,6 @@ describe("signatureHeaders", () => {
     expect(headers[SIGNATURE_HEADER]).toMatch(/^t=1700000000,v1=[0-9a-f]{64}$/);
   });
 
-  // The timestamp is inside the MAC, so rewriting the header to a fresh one breaks the signature
   it("covers the timestamp, not just the body", () => {
     const body = '{"event":"task_created"}';
     const expected = crypto
@@ -45,8 +42,6 @@ describe("signatureHeaders", () => {
     expect(signWebhook("a", "1")).not.toBe(signWebhook("b", "1"));
   });
 
-  // An instance that never configured a secret has receivers that do not check one; dropping
-  // their deliveries would be the worse bug
   it("sends unsigned rather than not at all when no secret is configured", () => {
     delete process.env.WEBHOOK_SIGNING_SECRET;
 

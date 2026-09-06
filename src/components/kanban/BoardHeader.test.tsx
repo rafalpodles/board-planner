@@ -58,9 +58,6 @@ const DISPLAY_UTILITIES = new Set([
   "contents",
 ]);
 
-// Mobile-first, so the widest matching container query wins. A display utility behind any other
-// variant throws instead of reading as visible — silence there would blind the spec to the very
-// class that hid the element.
 function displayAt(el: Element, boardWidth: number): string {
   let display = "inline";
   let from = -1;
@@ -114,7 +111,6 @@ describe("BoardHeader", () => {
     expect(screen.getByLabelText("Change sprint scope").textContent).toBe("All tasks");
   });
 
-  // CP-206 stripped the label, the count and the meter; only the scope survives
   it("carries no board label, task count or done meter", () => {
     renderHeader();
     expect(screen.queryByText(/Board ·/)).toBeNull();
@@ -132,7 +128,6 @@ describe("BoardHeader", () => {
     expect(screen.getByLabelText("Change sprint scope").textContent).toBe("Backlog");
   });
 
-  // Matches SprintSelector returning null when a project has no sprints
   it("shows no scope control at all for a project with no sprints", () => {
     renderHeader({ sprints: [] });
     expect(screen.queryByLabelText("Change sprint scope")).toBeNull();
@@ -146,7 +141,6 @@ describe("BoardHeader", () => {
 
     const menu = screen.getByRole("menu", { name: "Sprint scope" });
     const options = [...menu.querySelectorAll("button")].map((b) => b.textContent);
-    // Completed sprints stay out, as they did in SprintSelector
     expect(options).toEqual([
       "All tasks",
       "Backlog (no sprint)",
@@ -214,7 +208,6 @@ describe("BoardHeader", () => {
     expect(onNewTask).toHaveBeenCalledTimes(1);
   });
 
-  // The title block is the only element allowed to shrink; everything else is fixed
   it("lets only the title block shrink", () => {
     const { container } = renderHeader();
     const header = container.querySelector("header")!;
@@ -237,7 +230,6 @@ const PARTS: Record<string, () => Element> = {
   "shortcut hint": () => screen.getByText("N"),
 };
 
-// rpo's call: refresh survives on a phone; the icon and the button label pay for it
 const ESSENTIAL = [
   "project name",
   "scope control",
@@ -246,12 +238,8 @@ const ESSENTIAL = [
   "refresh",
 ];
 const NEEDS_448 = ["project icon", "new task label"];
-// CP-206 removed the meter, the "Board ·" prefix and the task count; the
-// shortcut hint is the last thing the header buys back with width
 const NEEDS_576 = ["shortcut hint"];
 
-// The board is narrower than the viewport by a sidebar that is 260px, 56px when collapsed, or
-// absent below md — so what the header can afford is its own width, never the viewport's.
 const BOARD_WIDTHS = [
   { width: 343, is: "the board on a 375px phone", shows: [...ESSENTIAL, "new task icon"] },
   { width: 447, is: "one pixel short of room for the labels", shows: [...ESSENTIAL, "new task icon"] },

@@ -56,8 +56,6 @@ export function CopyTaskLink({ projectRef, taskNumber, taskKey, className = "" }
       }}
       onKeyDown={(e) => {
         if (e.key !== "Enter" && e.key !== " ") return;
-        // Same collision as the card's own Enter: the board's handler sits on the
-        // node React delegates from, which only the native stop reaches
         e.stopPropagation();
         e.nativeEvent.stopImmediatePropagation();
       }}

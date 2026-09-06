@@ -1,19 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
 
-/**
- * BP-497 review. The standalone stdio server was asserted about by reading its source text, which
- * a local `const strictInput = (shape) => z.object(shape)` shim would have passed with the suite
- * green. It also runs a different zod major from the app — 4 rather than 3 — and the two spell the
- * error hook `error` and `errorMap` respectively, so the app's tests exercise only one of the two
- * hooks the shared helper passes. This drives the real thing: mcp-server's own SDK, its own zod,
- * its own registrations.
- */
-
-// Every path into the sibling package's node_modules is built rather than written, because
-// tsconfig globs **/*.ts and `next build` type-checks what it globs: a literal specifier here is
-// resolved at build time, and .dockerignore drops **/node_modules, so the image cannot have it.
-// That broke the production build on main and no CI job could see it — the app job installs the
-// sibling package before it type-checks (BP-501).
 const STANDALONE_MODULES = "../../../mcp-server/node_modules";
 
 async function standalone() {
@@ -55,9 +41,6 @@ async function connected(client: ReturnType<typeof stubClient>) {
 }
 
 describe("the standalone MCP server, driven rather than read", () => {
-  // Guards the instrument. `mcp-server/src/*` imports zod by bare specifier, so with the sibling
-  // package's dependencies missing it resolves upwards to the app's zod 3 and every assertion
-  // below would quietly exercise the hook that is already covered.
   it("is really running the other zod", async () => {
     const [standaloneZod, appZod] = await Promise.all([
       import(`${STANDALONE_MODULES}/zod`),
@@ -79,13 +62,10 @@ describe("the standalone MCP server, driven rather than read", () => {
 
     expect(refused).toBe(true);
     expect(said).toContain("checklist");
-    // The hint arrives through zod 4's `error` hook. zod 3 ignores that key entirely, so nothing
-    // in the app's suite can tell whether it still works here
     expect(said).toContain("acceptanceCriteria");
     expect(client.updateTask).not.toHaveBeenCalled();
   });
 
-  // The control. A registration that refused everything would satisfy the assertions above
   it("still writes a parameter it does declare", async () => {
     const client = stubClient();
     const call = await connected(client);
@@ -115,7 +95,6 @@ describe("the standalone MCP server, driven rather than read", () => {
     };
     registerTools(server as never, stubClient() as never);
 
-    // guards the guard: an empty map would satisfy the filter below without proving anything
     expect(schemas.size).toBe(12);
 
     const permissive = [...schemas.entries()].filter(([, schema]) => {

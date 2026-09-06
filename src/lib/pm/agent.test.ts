@@ -56,8 +56,6 @@ vi.mock("./availability", () => ({
   pmDisabledReason: () => "",
   resolvePmModel: async () => "test/model",
 }));
-// A function, not a constant: BP-321's withholding is about which MCP tools a turn is offered, and
-// a mock that always answers "none" can only ever prove the empty case.
 const discoverMcpToolsMock = vi.fn(async () => ({
   tools: new Map<string, unknown>(),
   serverNames: [] as string[],
@@ -88,8 +86,6 @@ vi.mock("./tools", () => ({
     assign_task: { write: true, execute: assignTaskExecute },
     add_comment: { write: true, execute: addCommentExecute },
   },
-  // Stands in for the real guard, which tools.arg-guard.test.ts drives against the real schemas.
-  // What is under test here is that the dispatcher consults it at all, and before execute
   refuseUndeclaredArgs: (_tool: unknown, args: Record<string, unknown>) =>
     "stray" in args ? 'Not a parameter of this tool: "stray".' : null,
 }));
@@ -128,8 +124,6 @@ beforeEach(() => {
   addCommentExecute.mockResolvedValue({ result: { ok: true } });
 });
 
-// BP-301: board text reaches this turn verbatim, so withholding has to survive a model
-// that calls the tool anyway — the definition being absent is not the boundary.
 describe("runPmTurn withholding", () => {
   it("refuses a withheld tool the model calls regardless, without executing it", async () => {
     chatCompletion
@@ -165,8 +159,6 @@ describe("runPmTurn withholding", () => {
   });
 });
 
-// Step 4 of the chain in BP-301 needs the task assigned to the machine's owner by that owner, an
-// agent named, and a status in an approved column; any one missing stops claimNextTask from matching.
 describe("autonomous turns cannot hand work to a machine", () => {
   it("withholds assign_task and change_status from the needs_human_review trigger", () => {
     expect(NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS).toContain("assign_task");
@@ -179,10 +171,6 @@ describe("autonomous turns cannot hand work to a machine", () => {
   });
 });
 
-/**
- * BP-500. The tools whitelist what they apply and dropped the rest in silence — the shape BP-497
- * fixed on the MCP servers, on the same tool name, reachable from an autonomous turn.
- */
 describe("a tool call naming a parameter the tool does not declare", () => {
   it("is refused without the tool running", async () => {
     chatCompletion
@@ -195,7 +183,6 @@ describe("a tool call naming a parameter the tool does not declare", () => {
     expect(toolReplies().join("\n")).toContain("stray");
   });
 
-  // The control: the same path still runs a call whose parameters are all declared
   it("still runs a call that names only what the tool declares", async () => {
     chatCompletion
       .mockResolvedValueOnce(toolCall("change_status", { taskKey: "BP-1" }))
@@ -207,13 +194,6 @@ describe("a tool call naming a parameter the tool does not declare", () => {
   });
 });
 
-/**
- * BP-321, finding 3. `disallowedTools` is a list of exact names, MCP tools are exposed as
- * `mcp_<server>_<tool>`, and both autonomy lists name only the four built-in PM tools — so no MCP
- * tool was ever withheld from an unattended turn. On a project with a write-enabled MCP server,
- * an injected autonomous turn kept full write access to it. That is the arm that reaches furthest
- * now that a PM assignment can put work on a machine (BP-419).
- */
 describe("an unattended turn and a project's MCP server", () => {
   const mcpTool = (exposedName: string, write: boolean): [string, unknown] => [
     exposedName,
@@ -248,8 +228,6 @@ describe("an unattended turn and a project's MCP server", () => {
     expect(offered()).not.toContain("mcp_acme_create_ticket");
   });
 
-  // The control, in the same run: withholding writes must not be "withholding everything", or the
-  // board review loses the reads it exists to do
   it("keeps the read-only ones", async () => {
     chatCompletion.mockResolvedValue({ type: "text", content: "done" });
 
@@ -258,7 +236,6 @@ describe("an unattended turn and a project's MCP server", () => {
     expect(offered()).toContain("mcp_acme_list_tickets");
   });
 
-  // The other control: a turn somebody is driving is unchanged
   it("leaves an attended turn with both", async () => {
     chatCompletion.mockResolvedValue({ type: "text", content: "done" });
 
@@ -279,12 +256,6 @@ describe("an unattended turn and a project's MCP server", () => {
   });
 });
 
-/**
- * BP-284. `dailyTurnCap` counts turns, and this loop makes up to MAX_STEPS round-trips per turn, so
- * the cap permitted a fifteen-fold range of spend. The provider reports usage on every response and
- * the client discarded it; the turn now records what it cost, on every exit including the ones that
- * fail — a turn that burned nine calls and then met a provider error cost nine calls.
- */
 describe("what a turn records about its own cost", () => {
   const withUsage = (result: object, tokens: number) => ({
     ...result,
@@ -313,7 +284,6 @@ describe("what a turn records about its own cost", () => {
     });
   });
 
-  // The control: one call is one call, so the number is not inflated by the loop itself
   it("records a single round-trip as one", async () => {
     chatCompletion.mockResolvedValue(withUsage({ type: "text", content: "done" }, 10));
 
@@ -332,12 +302,6 @@ describe("what a turn records about its own cost", () => {
     expect(lastMessage().usage).toMatchObject({ calls: 2 });
   });
 
-  /**
-   * The most expensive shape a turn takes, and the one the operator most wants to hear about: it
-   * spent every step and stopped because it ran out, not because it was finished. Nothing asserted
-   * this arm, so the flag, the `$cond` that counts it and the sentence on the settings screen all
-   * rested on one untested line.
-   */
   it("says when it ran out of steps rather than finishing", async () => {
     chatCompletion.mockResolvedValue(
       withUsage(toolCall("add_comment", { taskKey: "BP-1", body: "again" }), 10)
@@ -348,7 +312,6 @@ describe("what a turn records about its own cost", () => {
     expect(lastMessage().usage).toMatchObject({ hitStepLimit: true, calls: 15 });
   });
 
-  // The control: a turn that finished says it did, so the flag is not simply always true
   it("does not claim it ran out when it answered", async () => {
     chatCompletion.mockResolvedValue(withUsage({ type: "text", content: "done" }, 10));
 
@@ -357,7 +320,6 @@ describe("what a turn records about its own cost", () => {
     expect(lastMessage().usage).toMatchObject({ hitStepLimit: false });
   });
 
-  // A provider that reports no usage must read as "unknown", never as free
   it("still counts the calls when the provider reports no usage at all", async () => {
     chatCompletion.mockResolvedValue({ type: "text", content: "done" });
 

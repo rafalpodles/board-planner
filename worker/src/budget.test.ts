@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import { clampCeiling, createBudget, DEFAULT_RUN_CEILING_MS, LEASE_MS } from "./budget.js";
 
 describe("createBudget", () => {
-  // The cap is the caller's: a model step is bounded by taskTimeoutMs and a gate by its own cap
   it("gives an entry the cap the caller asked for while there is room", () => {
     const budget = createBudget(90 * 60_000, () => 0);
 
@@ -37,10 +36,6 @@ describe("createBudget", () => {
 });
 
 describe("clampCeiling", () => {
-  // The same trust applyPolicy withholds over the rest of the policy: the worker recomputes
-  // Not merely "under the lease": the server's clock starts at the claim and the worker's at the
-  // run, and the claim round trip and the worktree sit between them. toBeLessThan(LEASE_MS) passes
-  // for any margin at all, including a margin of one millisecond.
   it("keeps a quarter hour under the lease, so the gap between the two clocks fits", () => {
     expect(clampCeiling(4 * 60 * 60_000)).toBe(LEASE_MS - 15 * 60_000);
   });

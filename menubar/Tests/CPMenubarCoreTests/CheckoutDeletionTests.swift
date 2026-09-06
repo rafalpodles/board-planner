@@ -7,9 +7,6 @@ private struct Boom: Error, LocalizedError {
 }
 
 final class CheckoutDeletionTests: XCTestCase {
-    /// Captures what was asked of the disk, in order, so the sequence can be asserted rather than
-    /// described. The order is the whole point: the grant is what lets the worker touch the
-    /// directory, so dropping it before the delete succeeds strands a directory nothing may clean.
     private final class Recorder: @unchecked Sendable {
         var removed: [String] = []
         var forgotten: [String] = []
@@ -44,8 +41,6 @@ final class CheckoutDeletionTests: XCTestCase {
         XCTAssertEqual(r.forgotten, ["/co"], "the grant goes last, and only on success")
     }
 
-    /// The bug this file exists for. `try?` used to swallow this, leaving no step and letting the
-    /// run report `.removed` for a checkout whose worktrees were still there.
     func testAWorktreeThatWillNotDeleteFailsTheWholeRemoval() {
         let r = Recorder()
         r.failOn = "/wt/two"
@@ -53,8 +48,6 @@ final class CheckoutDeletionTests: XCTestCase {
         let step = deletion(r).perform(
             project: "BP", path: "/co", worktrees: ["/wt/one", "/wt/two", "/wt/three"])
 
-        // Partial, not failed: /wt/one is gone and saying only "/wt/two could not be removed"
-        // reads as nothing having happened (BP-427).
         guard case .partiallyRemoved(let project, let removed, let reason) = step else {
             XCTFail("expected a partial removal, got \(step)")
             return
@@ -80,10 +73,6 @@ final class CheckoutDeletionTests: XCTestCase {
         XCTAssertEqual(r.forgotten, [], "a directory nothing may touch, with nothing on screen, is the worse end")
     }
 
-    /// A checkout already gone is not an error, and the grant still has to go — but it is not a
-    /// removal either. The first version of this test asserted `.removed`, which would have told
-    /// an operator a directory was deleted when it was still on disk under another name or on an
-    /// unmounted volume. They would find out by going to look for it.
     func testACheckoutThatIsAlreadyGoneIsForgotten_notReported_asRemoved() {
         let r = Recorder()
 
@@ -95,7 +84,6 @@ final class CheckoutDeletionTests: XCTestCase {
         XCTAssertEqual(r.forgotten, ["/co"], "but the allowlist entry is still stale")
     }
 
-    /// The other side of the same distinction, so neither outcome can drift into the other.
     func testACheckoutThatWasThereIsReportedAsRemoved() {
         let r = Recorder()
 
@@ -105,8 +93,6 @@ final class CheckoutDeletionTests: XCTestCase {
         XCTAssertEqual(step, .removed(project: "BP", path: "/co"))
         XCTAssertEqual(r.removed, ["/co"])
     }
-
-    // MARK: - removeIfSafe: the seam that used to live in an untested app target
 
     private func alwaysRefusing() -> CheckoutRemoval {
         CheckoutRemoval(run: { _, _ in (128, "nope") }, exists: { _ in true })
@@ -136,8 +122,6 @@ final class CheckoutDeletionTests: XCTestCase {
         XCTAssertEqual(r.forgotten, [], "and the grant stays, so the worker may still clean up")
     }
 
-    /// What the guard found is what gets deleted. The two used to be wired together by hand in the
-    /// app target, where passing an empty list would have deleted no worktrees and told nobody.
     func testItDeletesExactlyTheWorktreesTheGuardFound() {
         let r = Recorder()
 
@@ -149,10 +133,6 @@ final class CheckoutDeletionTests: XCTestCase {
         XCTAssertEqual(r.removed, ["/wt/one", "/wt/two", "/co"])
     }
 
-    // MARK: - BP-427: what the operator is told when only some of it went
-
-    /// The checkout itself refuses after both worktrees are already gone. The old step named the
-    /// checkout and nothing else, which reads as "nothing was deleted" — the opposite of the truth.
     func testAFailedCheckoutDeleteStillNamesTheWorktreesThatWent() {
         let r = Recorder()
         r.failOn = "/co"
@@ -167,8 +147,6 @@ final class CheckoutDeletionTests: XCTestCase {
         XCTAssertEqual(r.forgotten, [], "the grant stays, so the worker may still clean up")
     }
 
-    /// Everything is deleted and only the allowlist write fails. The disk is in its final state and
-    /// the grant is not — the one case where "partly done" means the directory is gone.
     func testAFailedForgetAfterEverythingWentIsStillPartial() {
         let r = Recorder()
         r.failForget = true
@@ -181,8 +159,6 @@ final class CheckoutDeletionTests: XCTestCase {
         XCTAssertEqual(removed, ["/wt/one", "/co"], "the checkout is gone and has to be named")
     }
 
-    /// The control that keeps the new case honest: when the very first act throws, nothing went,
-    /// and "partly removed" would be its own kind of lie.
     func testAFirstActThatThrowsIsStillAPlainFailure() {
         let r = Recorder()
         r.failOn = "/wt/one"
@@ -193,7 +169,6 @@ final class CheckoutDeletionTests: XCTestCase {
         XCTAssertEqual(r.removed, [], "and nothing reached the disk")
     }
 
-    /// The other control: a removal that finishes is reported exactly as it was before.
     func testACompleteRemovalIsUnchanged() {
         let r = Recorder()
 

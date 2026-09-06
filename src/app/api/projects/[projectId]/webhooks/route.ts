@@ -24,10 +24,6 @@ export const GET = withProjectOwner(async (_request, { params }) => {
   return NextResponse.json(masked(project));
 });
 
-// All three writers below use an atomic operator ($push/$set/$pull) rather than load, mutate
-// in memory, save() — that pattern re-sent the WHOLE webhooks array on every save, and
-// dispatchWebhooks records a delivery outcome onto one row from its own background write
-// (BP-407). A save() landing after that write clobbered it with the stale in-memory snapshot.
 export const POST = withProjectOwner(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
@@ -95,8 +91,6 @@ export const PUT = withProjectOwner(async (request, { params }) => {
     { returnDocument: "after" }
   );
   if (!project) {
-    // Ambiguous on purpose the same way it always was: the project itself may be gone, or just
-    // this webhook — one extra round trip only to tell those apart is not worth it here.
     return NextResponse.json({ error: "Webhook not found" }, { status: 404 });
   }
 
@@ -112,7 +106,6 @@ export const DELETE = withProjectOwner(async (request, { params, user }) => {
     return NextResponse.json({ error: "webhookId is required" }, { status: 400 });
   }
 
-  // Read before the pull only to name it in the audit log — the removal itself is the $pull below
   const before = await Project.findOne(
     { _id: projectId, "webhooks._id": webhookId },
     { "webhooks.$": 1 }

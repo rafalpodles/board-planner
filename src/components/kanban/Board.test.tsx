@@ -6,7 +6,6 @@ import { ApiTask, ApiProjectCategory } from "@/types";
 import { ApiProjectColumn } from "@/types";
 import { pagedColumnOffset } from "@/lib/board-swipe";
 
-// Every test below a desktop board unless it says otherwise
 const media = vi.hoisted(() => ({ phone: false }));
 vi.mock("@/hooks/use-media-query", () => ({ useMediaQuery: () => media.phone }));
 
@@ -51,9 +50,6 @@ function card(container: HTMLElement) {
 afterEach(cleanup);
 
 describe("Board category tinting", () => {
-  // The board page silently stopped passing projectCategories during the (app)
-  // route-group move, so every card lost its category colour while the list
-  // view kept it. Nothing failed.
   it("carries the category colour down to the card", () => {
     const { container } = renderBoard(categories);
     const el = card(container);
@@ -103,7 +99,6 @@ describe("Board empty-column rail", () => {
     expect(screen.queryByLabelText("Collapse To Do")).toBeNull();
   });
 
-  // CP-174 made expanding one-way: pinning had no inverse, so the only way back was a reload
   it("round-trips between rail and open column", async () => {
     const { container } = renderTwoColumnBoard();
 
@@ -123,7 +118,6 @@ describe("Board empty-column rail", () => {
   it("leaves the empty column at full width when the preference is off", () => {
     const { container } = renderTwoColumnBoard(false);
     expect(rail(container)).toBeNull();
-    // Full width, not a 44px slot
     const grid = container.querySelector("[style*='grid-template-columns']") as HTMLElement;
     expect(grid.style.gridTemplateColumns).toBe("minmax(0, 1fr) minmax(0, 1fr)");
   });
@@ -177,8 +171,6 @@ describe("A read-only board", () => {
     expect(el.getAttribute("href")).toContain("/TP/tasks/");
   });
 
-  // The href assertion above passes even if the click itself is swallowed — an
-  // <a> still carries its href either way. Only a real click proves the card opens.
   it("still opens on a real click", async () => {
     const onTaskClick = vi.fn();
     render(
@@ -213,12 +205,6 @@ describe("A read-only board", () => {
     expect(screen.queryByText("Drop tasks here")).toBeNull();
   });
 
-  // handleCardDragOver calls preventDefault unconditionally; under the native HTML5
-  // DnD contract that is what permits a drop at that position — of anything, not just
-  // an app card. With the column's own onDrop withheld, nothing downstream cancels the
-  // browser's default handling, so a drag started outside the app (a file, a link) could
-  // still be dropped over a card on a read-only board unless this per-card handler is
-  // withheld too.
   it("does not preempt a native drag over a card, so an outside drop is not implicitly permitted", () => {
     renderReadOnlyBoard();
     const link = screen.getByRole("link", { name: /A bug/i });
@@ -227,9 +213,6 @@ describe("A read-only board", () => {
     expect(notPrevented).toBe(true);
   });
 
-  // onStatusChange is the one write prop that stays live on a completed sprint's board:
-  // everything else is withheld through readOnly, so this is the prop that must be
-  // withholdable too rather than papered over with a no-op callback
   it("renders and ignores a drop with no onStatusChange at all", () => {
     const { container } = render(
       <Board
@@ -247,10 +230,6 @@ describe("A read-only board", () => {
   });
 });
 
-/**
- * BP-488. On a phone the columns are pages and a flick moves between them, because reaching the
- * next column by dragging a 200px-wide strip sideways is the gesture nobody makes.
- */
 describe("Board paged on a phone", () => {
   const PAGE_WIDTH = 390;
 
@@ -260,8 +239,6 @@ describe("Board paged on a phone", () => {
     { _id: "c3", id: "done", label: "Done", color: "#22c55e", role: "done", order: 2, triggersPmReview: false },
   ];
 
-  // A plain Event carrying the fields React copies onto its synthetic touch event: happy-dom's
-  // TouchEvent is not what is under test, and constructing one adds a dependency on it
   function touchEvent(
     type: "touchstart" | "touchmove" | "touchend" | "touchcancel",
     key: "touches" | "changedTouches",
@@ -287,7 +264,6 @@ describe("Board paged on a phone", () => {
     );
   }
 
-  /** Moves the row the way anything other than `goToColumn` would, and reports it. */
   function scrollRowTo(scroller: HTMLElement, left: number) {
     Object.defineProperty(scroller, "scrollLeft", { configurable: true, value: left });
     fireEvent.scroll(scroller);
@@ -304,8 +280,6 @@ describe("Board paged on a phone", () => {
       />
     );
     const scroller = view.container.querySelector(".overflow-x-auto") as HTMLElement;
-    // happy-dom lays nothing out, and both the page width and the scroll are what the
-    // paging arithmetic is written against
     Object.defineProperty(scroller, "clientWidth", { configurable: true, value: PAGE_WIDTH });
     const scrollTo = vi.fn();
     scroller.scrollTo = scrollTo as unknown as typeof scroller.scrollTo;
@@ -370,7 +344,6 @@ describe("Board paged on a phone", () => {
     expect(active()).toBe("Show Done");
   });
 
-  // The same finger scrolls a column's cards, and that gesture must not page the board
   it("leaves the board where it is when the drag is mostly vertical", () => {
     const { scroller, scrollTo } = renderPhoneBoard();
     swipe(scroller, -120, 300);
@@ -384,7 +357,6 @@ describe("Board paged on a phone", () => {
     expect(scrollTo).not.toHaveBeenCalled();
   });
 
-  // Swiping is additive: the indicator is still a way to pick a column outright
   it("jumps to the column whose dot is tapped", () => {
     const { scrollTo } = renderPhoneBoard();
     fireEvent.click(screen.getByLabelText("Show Done"));
@@ -402,24 +374,18 @@ describe("Board paged on a phone", () => {
     expect(active()).toBe("Show In Progress");
   });
 
-  // The defect this guard was hiding: waiting only for the target to arrive left it wedged when
-  // the animation was interrupted, and from then on the dots named a column that was not on
-  // screen. Reproduced by moving the row somewhere else while a flick's scroll is in flight.
   it("follows the row when something interrupts the scroll it asked for", () => {
     const { scroller } = renderPhoneBoard();
 
     swipe(scroller, -100);
     expect(active()).toBe("Show In Progress");
 
-    // Not the column it asked for, and then stuck there — a field scrolled into view, a URL bar
     scrollRowTo(scroller, pagedColumnOffset(0, PAGE_WIDTH));
     scrollRowTo(scroller, pagedColumnOffset(0, PAGE_WIDTH));
 
     expect(active(), "the dots kept naming a column that is not on screen").toBe("Show To Do");
   });
 
-  // The consequence of the wedge, and the one a person actually sees: the next flick steps from
-  // the stale index and jumps two columns.
   it("does not skip a column on the flick after an interrupted one", () => {
     const { scroller, scrollTo } = renderPhoneBoard();
 
@@ -434,8 +400,6 @@ describe("Board paged on a phone", () => {
     expect(active()).toBe("Show In Progress");
   });
 
-  // The control for the two above: while the scroll really is closing on its target, the frames
-  // on the way must NOT move the indicator, which is what the guard exists for
   it("ignores the positions a smooth scroll reports on its way", () => {
     const { scroller } = renderPhoneBoard();
 
@@ -446,8 +410,6 @@ describe("Board paged on a phone", () => {
     expect(active()).toBe("Show In Progress");
   });
 
-  // Peek at the next column and come back, overshooting the start: net displacement alone reads
-  // that as a swipe the other way
   it("stays put when the finger turns around and overshoots", () => {
     const { scroller, scrollTo } = renderPhoneBoard();
 
@@ -470,7 +432,6 @@ describe("Board paged on a phone", () => {
     expect(scrollTo).not.toHaveBeenCalled();
   });
 
-  // A second finger arriving mid-drag is a pinch, and its travel says nothing about columns
   it("abandons the gesture when a second finger arrives", () => {
     const { scroller, scrollTo } = renderPhoneBoard();
 
@@ -484,15 +445,11 @@ describe("Board paged on a phone", () => {
     expect(scrollTo).not.toHaveBeenCalled();
   });
 
-  // The declaration the whole feature rests on with a real finger: without it the browser pans
-  // the row itself, against the paging. Deletable with the entire suite green before this.
   it("tells the browser not to pan the row itself", () => {
     const { scroller } = renderPhoneBoard();
     expect(scroller.style.touchAction).toBe("pan-y pinch-zoom");
   });
 
-  // These are the only pointer controls on the mobile board, and the app sizes such targets at
-  // 44px everywhere else
   it("gives each dot a thumb-sized hit area", () => {
     renderPhoneBoard();
     const dot = screen.getByLabelText("Show To Do");
@@ -508,10 +465,6 @@ describe("Board on a wide screen", () => {
     { _id: "c2", id: "in_progress", label: "In Progress", color: "#f59e0b", role: "active", order: 1, triggersPmReview: false },
   ];
 
-  // The control for the paged tests: it catches a mis-wired *use* of the flag — paging that
-  // ignores it and runs everywhere. It cannot catch a mis-wired query string, because the hook
-  // is mocked in this file and the string is never evaluated: inverting `max-width` to
-  // `min-width` leaves every test here green. Only the e2e, which sets a real viewport, sees it.
   it("has no column dots and keeps the side-by-side columns", () => {
     const { container } = render(
       <Board

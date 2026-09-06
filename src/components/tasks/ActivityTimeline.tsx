@@ -10,7 +10,6 @@ interface ActivityTimelineProps {
   taskId: string;
   hideHeading?: boolean;
   onCountChange?: (count: number) => void;
-  // Bumped by the parent when something outside this component wrote an activity entry
   refreshKey?: number;
 }
 
@@ -79,13 +78,9 @@ function describeAction(log: ApiActivityLog): string {
         const to = log.newValue || "unassigned";
         return `${userName} changed assignee from ${from} to ${to}`;
       }
-      // createNextRecurrence writes a sentence into newValue rather than a before/after pair,
-      // so reading it as one would claim the recurrence config had been edited
       if (log.field === "recurrence" && !log.oldValue && log.newValue) {
         return `${userName} — ${log.newValue}`;
       }
-      // A field entry that carries values says what changed; one that does not still reads.
-      // Project fields are the reason this matters — "updated Difficulty" alone tells you nothing.
       if (log.oldValue || log.newValue) {
         return `${userName} changed ${formatFieldLabel(log.field)} from ${formatValue(log.field, log.oldValue)} to ${formatValue(log.field, log.newValue)}`;
       }

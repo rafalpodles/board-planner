@@ -2,7 +2,6 @@
 @plugin "@tailwindcss/typography";
 
 @theme {
-  /* Accent-as-text; overridden per theme so it stays readable on the background */
   --color-primary: #60a5fa;
   --color-primary-hover: #93c5fd;
   --color-danger: #f87171;
@@ -10,7 +9,6 @@
   --color-success: #4ade80;
   --color-warning: #fbbf24;
 
-  /* Accent-as-surface, dark enough to carry white text in either theme */
   --color-primary-solid: #2563eb;
   --color-primary-solid-hover: #1d4ed8;
   --color-danger-solid: #dc2626;
@@ -48,7 +46,6 @@ body {
   color: var(--color-text);
 }
 
-/* Light theme overrides */
 [data-theme="light"] {
   --color-bg: #f8fafc;
   --color-bg-card: #ffffff;
@@ -83,17 +80,12 @@ body {
   --color-priority-urgent: #b91c1c;
 }
 
-/* Tinted chips: --chip carries the accent, the surface is a tint of it against
-   the card. The semantic tokens are tuned per theme, so the label stays close to
-   the accent — enough hue to tell categories apart at a glance. */
 .chip {
   --chip: var(--color-primary);
   background-color: color-mix(in srgb, var(--chip) 18%, var(--color-bg-card));
   color: color-mix(in srgb, var(--chip) 85%, var(--color-text));
 }
 
-/* Project-defined category and label colours are arbitrary and not theme-tuned,
-   so the label is pulled toward the foreground far enough to stay readable */
 .chip-custom {
   color: color-mix(in srgb, var(--chip) 55%, var(--color-text));
 }
@@ -113,14 +105,6 @@ body {
   animation: slide-in 0.2s ease-out;
 }
 
-/* A worker holding a task is a live state, so the board says so rather than making
-   someone open the task to find out. --run-accent is the entire colour decision.
-   An outline, not a box-shadow: the card's focus and hover rings are box-shadows
-   (Tailwind's `ring-*`), and an animated box-shadow here would silently replace
-   them — a card that is focusable but shows no focus. Drawn over the border at a
-   negative offset, so it reads as the card's single outline whatever the border
-   underneath is doing, without a specificity fight against `selected` or
-   `.cat-card`. */
 @keyframes run-pulse {
   0%,
   100% {
@@ -138,15 +122,11 @@ body {
   animation: run-pulse 1.8s ease-out infinite;
 }
 
-/* A run that has stopped reporting is not a run in progress. Same threshold as the task's
-   own Execution panel, so the board and the detail never disagree about one run. */
 .task-running.run-quiet {
   --run-accent: var(--color-warning);
   animation: none;
 }
 
-/* The pulse carries the meaning, so when motion is unwelcome the outline stays lit.
-   No compound selector above, so this is not out-specified on a tinted card. */
 @media (prefers-reduced-motion: reduce) {
   .task-running {
     animation: none;
@@ -154,40 +134,21 @@ body {
   }
 }
 
-/* One keyboard-focus treatment for every field and control. An outline rather than a
-   box-shadow ring so the element keeps its own border while focused, instead of trading
-   it for a ring drawn where the border used to be.
-
-   This does NOT survive a scroll container on its own. A scrollport clips everything its
-   descendants paint outside it, an outline exactly as much as a box-shadow — measured, in
-   both directions, four ways. A field flush against the edge loses the left and right of
-   its ring whichever mechanism draws it, which is what `.scroll-ring-room` below is for. */
 .focus-ring:focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: 2px;
 }
 
-/* Sits flush inside a bordered group (the sort control), where an offset outline
-   would be cropped by the parent's rounding */
 .focus-ring-inset:focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: -2px;
 }
 
-/* For a scroll container holding fields: the padding gives the focus ring the room the
-   scrollport would otherwise clip, and the equal negative margin puts the content back where
-   it was, so by construction nothing moves. Wide enough for a 2px outline at 2px offset.
-
-   All four sides, not just the horizontal ones. An axis with nothing to scroll still clips —
-   a short list under `max-h-48` never moves vertically, and its checkboxes lost the top and
-   bottom of their ring to the same edge. */
 .scroll-ring-room {
   padding: 0.3125rem;
   margin: -0.3125rem;
 }
 
-/* Every scroll container scrolls without a visible bar. Only the bar's appearance
-   goes — wheel, trackpad and keyboard scrolling are untouched. */
 * {
   scrollbar-width: none;
   -ms-overflow-style: none;
@@ -196,8 +157,6 @@ body {
   display: none;
 }
 
-/* Category tinting: --cat carries the category colour. Mixing against --color-bg
-   means one rule gives a pale tint in light mode and a dark one in dark mode. */
 .cat-card {
   border-color: var(--cat);
   background-color: color-mix(in srgb, var(--cat) 8%, var(--color-bg));
@@ -206,28 +165,16 @@ body {
   background-color: color-mix(in srgb, var(--cat) 16%, var(--color-bg));
 }
 
-/* Hover thickens the card's edge. An inset outline rather than a second border pixel,
-   which would reflow the card's contents by 1px on every hover; --cat is set only on
-   tinted cards, so the fallback covers the plain ones. Cards under a live run keep
-   their run outline — that ring already says more than a hover would. */
-/* The outline is always present and merely transparent, so hover animates colour alone.
-   Declaring it only on :hover meant transitioning from the initial outline-color —
-   currentColor, i.e. the text — which flashed dark for a frame on the way in.
-   `transition-colors` covers outline-color in Tailwind 4, and the card carries it. */
 .card-edge:not(.task-running) {
   outline: 2px solid transparent;
   outline-offset: -1px;
 }
 
-/* Gated on a real pointer: on touch, :hover sticks after a tap until something else is
-   tapped, which would leave a card outlined for no reason. The Tailwind hover utilities
-   this replaced were gated the same way. */
 @media (hover: hover) {
   .card-edge:not(.task-running):hover {
     outline-color: var(--color-primary);
   }
 
-  /* A tinted card thickens in its own colour rather than the accent */
   .cat-card.card-edge:not(.task-running):hover {
     outline-color: var(--cat);
   }
@@ -241,15 +188,11 @@ body {
   background-color: color-mix(in srgb, var(--cat) 13%, var(--color-bg));
 }
 
-/* --color-text-muted clears AA against the plain background by 0.05, so any tint
-   drops it below 4.5:1 — pull it toward the foreground on tinted surfaces */
 .cat-card .text-text-muted,
 .cat-row .text-text-muted {
   color: color-mix(in srgb, var(--color-text-muted) 85%, var(--color-text));
 }
 
-/* Typography plugin ships a fixed light/dark palette; bind it to the theme tokens
-   so prose follows [data-theme] instead of needing prose-invert */
 .prose {
   --tw-prose-body: var(--color-text);
   --tw-prose-headings: var(--color-text);
@@ -282,18 +225,6 @@ body {
   background-color: var(--color-bg-input);
 }
 
-/* iOS Safari zooms the whole page when a text-entry control whose computed size is under 16px
-   takes focus, and does not zoom back when the keyboard closes — so one tap on the board's sort
-   control leaves the app permanently magnified until the reader pinches out (BP-495).
-
-   Gated on the pointer rather than on width, like the hover rule above: this is a property of
-   touch, and an iPad in portrait is 768px wide and does it too. Unlayered, so it outranks the
-   `text-[13px]` utilities it has to beat — a bare element selector loses to a class on
-   specificity, and only being outside `@layer` wins it back.
-
-   Buttons never trigger the zoom, and the input types listed here would have their boxes
-   resized rather than their text, so all of them are left alone. Nothing in the app sets a
-   control above 16px, so this only ever raises. */
 @media (hover: none) and (pointer: coarse) {
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="button"]):not([type="submit"]),
   select,

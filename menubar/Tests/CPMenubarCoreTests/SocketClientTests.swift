@@ -39,7 +39,6 @@ private struct RecordingTransport: Transport {
     #expect(buffer.isEmpty)
 }
 
-// The failure that shows up only against a real worker: a chunk boundary lands mid-event.
 @Test func holdsAPartialEventUntilItsTerminatorArrives() {
     var buffer = Data("data: {\"a\":".utf8)
     #expect(sseEvents(from: &buffer).isEmpty)
@@ -74,11 +73,7 @@ private struct RecordingTransport: Transport {
 
     #expect(config.workerName == "rig")
     #expect(config.pollIntervalMs == 30000)
-    // Work settings are per project, so they are read from there and not from the top level
     #expect(config.projects.first?.maxDiffLines == 400)
-    // The body above is a copy of what local-server.ts serves. It used to be written to match the
-    // decoder instead, autoMerge and all, so it stayed green for years describing a payload no
-    // worker sends — see ConfigDecodingTests for the fixture taken from a running one.
 }
 
 @Test func surfacesEventsFromASplitStream() async throws {
@@ -96,7 +91,6 @@ private struct RecordingTransport: Transport {
     ])
 }
 
-// The panel depends on this stream; one malformed frame must not end it.
 @Test func ignoresAnEventItCannotDecodeRatherThanEndingTheStream() async throws {
     let client = SocketClient(socketPath: "/x", transport: FakeTransport(chunks: [
         "HTTP/1.1 200 OK\r\n\r\ndata: {\"nonsense\":1}\n\ndata: {\"phase\":\"push\"}\n\n",
@@ -133,8 +127,6 @@ private struct RecordingTransport: Transport {
     #expect(SocketClient.defaultSocketPath().hasSuffix("/worker.sock"))
 }
 
-// The shape the worker actually sends: chunked framing wrapped around each SSE write, with the
-// read(2) boundary landing wherever it lands.
 @Test func surfacesEventsFromAChunkedStream() async throws {
     let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n"
     let first = "data: {\"phase\":\"agent\",\"taskKey\":\"CP-2\"}\n\n"

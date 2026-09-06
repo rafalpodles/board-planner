@@ -18,8 +18,6 @@ function bodySent() {
 }
 
 describe("a personal chat message", () => {
-  // A title can close the link Slack is asked to draw, and open one of its own — in a channel the
-  // reader trusts, from a sender they trust. Anyone who can rename a task could do it.
   it("cannot close the link it is placed inside", async () => {
     safeFetch.mockClear();
 
@@ -50,8 +48,6 @@ describe("a personal chat message", () => {
 });
 
 describe("what the message may not do", () => {
-  // The URL half carries project.key, which this instance constrains nowhere — so a project owner
-  // choosing a key is choosing part of the link expression
   it("cannot close the link from the URL half either", async () => {
     safeFetch.mockClear();
 

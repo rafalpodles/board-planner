@@ -12,9 +12,7 @@ interface FocusTrapOptions {
   active: boolean;
   containerRef: RefObject<HTMLElement | null>;
   onEscape: () => void;
-  /** Where focus lands on close when nothing was focused at open time — keyboard shortcuts, Safari clicks */
   returnFocusTo?: RefObject<HTMLElement | null>;
-  /** Off for layers that leave the page scrollable behind them */
   lockScroll?: boolean;
 }
 
@@ -25,9 +23,6 @@ export function useFocusTrap({
   returnFocusTo,
   lockScroll = true,
 }: FocusTrapOptions) {
-  // BP-530: every caller passes an inline arrow, so a dep on it re-subscribes the keydown listener
-  // whenever another handler writes state during the same dispatch — and a listener added during a
-  // dispatch never sees that event. BP-522 is that bug one layer up
   const onEscapeRef = useRef(onEscape);
   onEscapeRef.current = onEscape;
 

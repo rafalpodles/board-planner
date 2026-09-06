@@ -42,8 +42,6 @@ export function SprintFormModal({
   onSubmit,
   onClose,
 }: SprintFormModalProps) {
-  // Mounted only while open, so the suggested name and dates are computed once on
-  // open rather than recomputed under the 10s poll while somebody is typing
   const [initial] = useState<SprintFormValues>(() => {
     if (editing) {
       return {

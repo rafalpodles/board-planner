@@ -35,7 +35,6 @@ function request(headers: Record<string, string>, body: unknown) {
 
 const event = { taskId: TASK_ID, runId: "run-1", seq: 1, phase: "gates:build" };
 
-// enabled and lockedByInstance carry schema defaults, so a real Worker document always has them
 function workerDoc(overrides: Record<string, unknown> = {}) {
   return { _id: WORKER_ID, credentialHash: "h", enabled: true, lockedByInstance: false, ...overrides };
 }
@@ -47,8 +46,6 @@ beforeEach(() => {
 });
 
 describe("POST /api/workers/:workerId/events", () => {
-  // An abort is asynchronous, so a killed worker keeps running for a while. Without this the board
-  // would show that run advancing normally, right when the operator needs the badge to be true
   it.each([
     ["disabled", { enabled: false }],
     ["locked by the instance", { lockedByInstance: true }],
@@ -62,8 +59,6 @@ describe("POST /api/workers/:workerId/events", () => {
     expect(updateOne).not.toHaveBeenCalled();
   });
 
-  // Unauthenticated, this endpoint would let anyone write execution.phase on any task in the
-  // instance — so the wrapper is the feature, not decoration
   it("refuses an unauthenticated caller without touching a task", async () => {
     const { req, ctx } = request({ "content-type": "application/json" }, event);
 
@@ -100,8 +95,6 @@ describe("POST /api/workers/:workerId/events", () => {
     expect(update.$set["execution.phaseAt"]).toBeInstanceOf(Date);
   });
 
-  // The credential identifies the worker; a body claiming to be someone else must not widen
-  // what this run can write to
   it("takes the worker identity from the credential, never from the body", async () => {
     const { req, ctx } = request(authed, { ...event, workerId: "69a52e3b399b27d3cbb2c5c9" });
 

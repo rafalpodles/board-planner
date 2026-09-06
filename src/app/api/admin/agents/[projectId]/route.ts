@@ -7,12 +7,7 @@ import { logProjectAudit } from "@/lib/projectAudit";
 
 const MAX_MODEL_LENGTH = 100;
 
-// Deliberately narrow: this endpoint exists so an instance admin can govern
-// agents, not as a second way to write arbitrary project config
 export const PATCH = withAdmin(async (request, { params, user }) => {
-  // A machine credential must not reach a kill switch. An unscoped admin API token keeps
-  // role: "admin" and so passes withAdmin; the counterpart to this action is already gated
-  // this way, and the asymmetry was the bug (BP-306).
   if (user.viaMachineCredential) {
     return NextResponse.json({ error: "Interactive admin session required" }, { status: 403 });
   }

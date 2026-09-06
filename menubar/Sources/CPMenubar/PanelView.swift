@@ -78,10 +78,6 @@ struct PanelView: View {
 
             Spacer()
 
-            // Two things are needed, not one. An LSUIElement app has no menu bar, so the Settings
-            // scene is otherwise unreachable — and it runs as an accessory, so nothing activates it:
-            // SettingsLink alone opens the window behind every other app, which reads as a dead
-            // button. Activating first is what puts it in front.
             Button("Preferences…") {
                 NSApp.activate(ignoringOtherApps: true)
                 openSettings()
@@ -95,7 +91,6 @@ struct PanelView: View {
         case .working: return model.state.title(now: now) ?? "Working"
         case .paused: return "Paused"
         case .needsHuman: return "Needs a human"
-        // Only the socket is visible from here, so this cannot claim to know about the network.
         case .disconnected: return "Can't reach the worker · retrying"
         }
     }

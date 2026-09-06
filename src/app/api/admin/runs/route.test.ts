@@ -87,8 +87,6 @@ describe("GET /api/admin/runs", () => {
     expect(runFind).not.toHaveBeenCalled();
   });
 
-  // An unscoped admin API token keeps role "admin", and one on a worker's disk is readable by the
-  // agent running there — which would hand it every project's run detail
   it("refuses an admin credential presented by a machine", async () => {
     getAuthUser.mockResolvedValue({ ...ADMIN, viaMachineCredential: true });
 
@@ -111,8 +109,6 @@ describe("GET /api/admin/runs", () => {
     expect(run.minutes).toBe(4);
   });
 
-  // An unpopulated ref serialises as a bare id, and rendering one would put "6a70…" in the column
-  // that exists to name a machine
   it("reports no machine rather than an id when the ref was not populated", async () => {
     mockRuns([runDoc({ worker: null, project: null })]);
 
@@ -137,8 +133,6 @@ describe("GET /api/admin/runs", () => {
     ]);
   });
 
-  // Number("") is 0 and Mongoose reads .limit(0) as no limit at all, which on a fleet-wide read is
-  // every run this instance has ever recorded
   it("keeps a default limit when the parameter is blank or nonsense", async () => {
     await call("?limit=");
     await call("?limit=abc");

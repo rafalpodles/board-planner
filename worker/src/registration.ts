@@ -30,18 +30,11 @@ export interface RegistrationInfo {
 export interface HeartbeatDeps {
   apiBaseUrl: string;
   enrolmentToken: string;
-  // Undefined means "could not tell", which is not the same as an empty list
   repos?: () => RepoInventory[] | undefined;
-  // Whether this machine can actually do the work. Undefined until it has been established, and
-  // omitted from the body then, so a worker that has not run it yet does not report itself broken.
-  // Resolved binary paths stay local: the server has no use for a path on someone's laptop.
   preflight?: () => ReportedPreflight | undefined;
-  // Removed after a successful registration: the token is already spent server-side, and leaving a
-  // dead secret on a disk the agent can read is pointless risk.
   forgetEnrolmentToken?: () => void;
   registration: RegistrationInfo;
   store: Store;
-  // The command channel that survives SSE loss and a restart, so this is the durable one
   handlers: CommandHandlers;
   fetchImpl?: typeof fetch;
   log?: (message: string) => void;
@@ -52,9 +45,6 @@ export interface Heartbeat {
   stop(): void;
   onAbort(cb: () => void): void;
   ack(command: string): void;
-  // Surfaced on every heartbeat, so a project this worker cannot bind to shows the reason in
-  // /settings/workers without needing its own endpoint. An empty string clears a previously-reported
-  // error once the operator fixes it — bindingError is always sent, never merely omitted.
   reportBindingError(message: string): void;
 }
 
@@ -62,15 +52,8 @@ interface StoredIdentity extends Identity {
   heartbeatMs: number;
 }
 
-// Only a bootstrap retry, never the steady-state heartbeat interval — that one always comes from
-// a real registration response, so it can't drift from the server's staleness window
 const REGISTER_RETRY_MS = 30_000;
 
-// The server mints this as a Mongo ObjectId, and repos.ts interpolates it into a filesystem path —
-// `join` normalises "..", so a workerId of "../../../../Users/rpo/Library/LaunchAgents" relocated
-// the worktree root outside the repos.json allowlist, which is the worker's whole containment
-// story. Checked on both sides of the disk: whoever controls the API answers the registration, and
-// the identity file itself sits under a state directory the agent's own HOME reaches.
 const WORKER_ID = /^[a-f0-9]{24}$/;
 
 export function isWorkerId(value: unknown): value is string {
@@ -89,7 +72,6 @@ function parseIdentity(text: string): Identity | null {
       return { workerId: parsed.workerId, credential: parsed.credential };
     }
   } catch {
-    // empty, missing, or malformed file — same as never registered
   }
   return null;
 }
@@ -157,8 +139,6 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
         credential: body.credential,
         heartbeatMs: body.heartbeatMs,
       };
-      // Identity first: losing the credential would strand this worker with a spent token and no
-      // way to register again. Only once it is safely on disk is the enrolment token removed.
       deps.store.write(JSON.stringify(identity), { mode: 0o600 });
       try {
         deps.forgetEnrolmentToken?.();
@@ -213,10 +193,6 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
         body: JSON.stringify({
           version: deps.registration.version,
           bindingError,
-          // What this machine has on disk. The server matches projects against these remotes and
-          // answers with assignments; it never sends a path back. Omitted entirely when the
-          // inventory could not be read, so the server keeps what it already knows rather than
-          // being told this machine suddenly has nothing.
           ...(reported === undefined ? {} : { repos: reported }),
           ...(preflight === undefined ? {} : { preflight }),
           ...(acked !== undefined ? { acked } : {}),
@@ -226,8 +202,6 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
       if (response.status === 403) {
         for (const cb of abortCallbacks) cb();
       } else if (response.status === 401) {
-        // The credential no longer authenticates (e.g. the worker was deleted server-side) — drop
-        // it so the next tick registers afresh instead of retrying the same dead credential forever
         cached = null;
         deps.store.write("", { mode: 0o600 });
       } else if (response.ok) {

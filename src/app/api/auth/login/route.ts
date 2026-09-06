@@ -37,9 +37,6 @@ export async function POST(request: Request) {
       clientIp ? sourceKey(clientIp) : undefined
     ));
   } catch (e) {
-    // Both the throttle counters and the credential check read the database, so an outage lands
-    // here — and "Invalid credentials" is exactly the wrong thing to tell somebody who was just
-    // signed out by that same outage, on the page it sent them to (BP-362)
     if (isDatabaseUnreachable(e)) return databaseUnavailable();
     throw e;
   }

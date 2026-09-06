@@ -45,8 +45,6 @@ function filterUsed() {
   return notificationFind.mock.calls.at(-1)?.[0] as Record<string, unknown>;
 }
 
-// BP-328. The rows were written before the grant was revoked, so filtering only the write path
-// leaves everything already banked readable through a session that is still valid.
 describe("GET /api/notifications", () => {
   beforeEach(() => {
     getAuthUser.mockReset();
@@ -56,9 +54,6 @@ describe("GET /api/notifications", () => {
     getAuthUser.mockImplementation(async () => ({ _id: READER, role: "member" }));
   });
 
-  // Two boards, not one: with a single seeded project, keeping only the first accessible board
-  // passes every assertion — and that mutation silences the feed for everybody who belongs to
-  // more than one project, which is the likeliest regression this change could cause.
   it("constrains the feed to every project the reader can still reach", async () => {
     const res = await GET(request(), noParams);
 

@@ -1,8 +1,5 @@
 import Foundation
 
-// An app launched from Finder or a login item inherits no environment, so CP_STATE_DIR — which is
-// the worker's own way of being told where to live — is invisible to it. The operator's setting has
-// to survive a normal launch, so it is stored in defaults and consulted first.
 public enum StateDirectory {
     public static let defaultsKey = "stateDirectory"
 

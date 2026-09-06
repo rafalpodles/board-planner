@@ -66,9 +66,6 @@ beforeEach(() => {
   workerFindOne.mockResolvedValue(null);
 });
 
-// BP-358: this page stopped being admin-only, so the list it renders stopped being "every project
-// on the instance". A machine is told which repository to clone, and the whole point of dropping
-// the admin step is that a person only ever hands it something they already reach.
 describe("GET /api/workers/enrolment/device/:userCode", () => {
   it("answers for an ordinary member", async () => {
     const response = await GET(request(), ctx());
@@ -86,8 +83,6 @@ describe("GET /api/workers/enrolment/device/:userCode", () => {
     expect(JSON.stringify(await GET(request(), ctx()).then((r) => r.json()))).not.toContain(THEIRS);
   });
 
-  // Null is what accessibleProjectIds answers an instance admin, and filtering on it would offer
-  // an admin nothing at all
   it("asks for every project when the person is under no restriction", async () => {
     accessibleProjectIds.mockResolvedValue(null);
 
@@ -96,8 +91,6 @@ describe("GET /api/workers/enrolment/device/:userCode", () => {
     expect(projectFind).toHaveBeenCalledWith({});
   });
 
-  // Rendered so the page can say the machine will connect and then sit idle, which is the one
-  // outcome nothing on the machine itself can explain
   it("says an instance admin could turn machines on", async () => {
     getAuthUser.mockResolvedValue({ ...MEMBER, role: "admin" });
 
@@ -106,9 +99,6 @@ describe("GET /api/workers/enrolment/device/:userCode", () => {
     expect(json.projects[0]).toMatchObject({ workersEnabled: true, canEnable: true });
   });
 
-  // The fixture's only project has workers on, so an assertion that reads `true` cannot tell the
-  // computation from a constant. This is the other direction, which is also the state the page's
-  // warning exists for.
   it("reports a project with machines switched off as switched off", async () => {
     projectLean.mockResolvedValue([
       { _id: MINE, name: "Mine", key: "BP", repositoryUrl: "git@github.com:owner/repo.git", worker: { enabled: false } },
@@ -117,8 +107,6 @@ describe("GET /api/workers/enrolment/device/:userCode", () => {
     expect((await (await GET(request(), ctx())).json()).projects[0].workersEnabled).toBe(false);
   });
 
-  // A project that has never had a worker has no `worker` subdocument at all, and `undefined` is
-  // not a value the page can render a switch from
   it("reports a project that has never had one as switched off, not undefined", async () => {
     projectLean.mockResolvedValue([
       { _id: MINE, name: "Mine", key: "BP", repositoryUrl: "git@github.com:owner/repo.git" },
@@ -127,8 +115,6 @@ describe("GET /api/workers/enrolment/device/:userCode", () => {
     expect((await (await GET(request(), ctx())).json()).projects[0].workersEnabled).toBe(false);
   });
 
-  // Committing a project to machines is instance-admin, exactly as PUT /api/projects/:id has it —
-  // a grant on the project does not make it a project admin's call
   it("reports canEnable false for a member, whatever grants they hold", async () => {
     check.mockResolvedValue(true);
 
@@ -137,11 +123,6 @@ describe("GET /api/workers/enrolment/device/:userCode", () => {
     expect(json.projects[0].canEnable).toBe(false);
   });
 
-  /**
-   * The name and host this is looked up by come from the UNAUTHENTICATED start route, so returning
-   * the record turned this into a probe for whose machines exist and when they last ran —
-   * reconnaissance that sat behind withAdmin until BP-358.
-   */
   describe("a machine of this name that is already enrolled", () => {
     it("says only whether it is claimable, never who has it", async () => {
       workerFindOne.mockResolvedValue({ _id: "w1", owner: "somebody-else" });
@@ -158,7 +139,6 @@ describe("GET /api/workers/enrolment/device/:userCode", () => {
       expect((await (await GET(request(), ctx())).json()).existingWorker).toEqual({ mine: true });
     });
 
-    // An ownerless record is the pre-BP-358 enrolment, and adopting one is the documented recovery
     it("reports one nobody owns as claimable", async () => {
       workerFindOne.mockResolvedValue({ _id: "w1", owner: null });
 
@@ -170,9 +150,6 @@ describe("GET /api/workers/enrolment/device/:userCode", () => {
     });
   });
 
-  // The approve route validates with projectRepositoryUrl, which also accepts the legacy
-  // githubRepo/gitlabRepo pair. Reading repositoryUrl alone told an instance that had not run
-  // scripts/migrate-repository-url.ts that no project names a repository at all.
   it("judges a repository the way the confirmation does", async () => {
     projectLean.mockResolvedValue([
       { _id: MINE, name: "Legacy", key: "BP", githubRepo: "owner/repo", worker: { enabled: true } },

@@ -1,14 +1,6 @@
 import XCTest
 @testable import CPMenubarCore
 
-/// BP-423. The folder-boundary rail was removed on the understanding that three guards would carry
-/// the weight: uncommitted changes, unpushed commits, a worker running a task. They answered a
-/// narrower question than the operator's — "is there tracked work committed to a branch that is not
-/// on a remote", against "will I lose anything" — and four shapes passed them.
-///
-/// Real git throughout: each of these is a fact about what git reports, and a stub would report
-/// whatever it was handed. Every catch is paired with the honest checkout it must still allow,
-/// because each of these guards can be widened into refusing work nobody wanted refused.
 @Sendable private func reachGit(_ cwd: String, _ args: [String]) -> (code: Int32, output: String) {
     let task = Process()
     task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
@@ -24,9 +16,6 @@ import XCTest
     let pipe = Pipe()
     task.standardOutput = pipe
     task.standardError = pipe
-    // Answers instead of hanging. `try?` here swallowed a spawn that never happened — pointing a
-    // process at a file as its working directory does that — and `waitUntilExit` then blocked for
-    // ever on a task with no process behind it.
     do {
         try task.run()
     } catch {
@@ -59,9 +48,6 @@ final class CheckoutRemovalReachTests: XCTestCase {
         CheckoutRemoval(run: { args, cwd in reachGit(cwd, args) })
     }
 
-    /// A checkout every existing guard is happy with: committed, pushed, nothing stashed. Anything
-    /// these tests refuse is refused by the guard under test and not by a fixture that was never
-    /// clean — the trap the sibling file records having fallen into.
     @discardableResult
     private func cleanCheckout(_ name: String = "checkout") -> String {
         let origin = dir + "/\(name)-origin.git"
@@ -88,16 +74,12 @@ final class CheckoutRemovalReachTests: XCTestCase {
         return reason
     }
 
-    // MARK: - the control that every catch below is measured against
-
     func testAGenuinelyCleanCheckoutIsStillRemovable() {
         let checkout = cleanCheckout()
 
         XCTAssertEqual(verdict(checkout), .go(worktrees: []))
     }
 
-    /// The trap this whole ticket walks beside: a clean checkout still holds ignored files. If the
-    /// guard were "any ignored path", this — and every real checkout — would refuse.
     func testOrdinaryIgnoredFilesDoNotStopARemoval() {
         let checkout = cleanCheckout()
         FileManager.default.createFile(
@@ -110,12 +92,8 @@ final class CheckoutRemovalReachTests: XCTestCase {
             atPath: checkout + "/build", withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: checkout + "/build/out.o", contents: Data("x".utf8))
 
-        // Deliberate, and the gap rpo chose to leave: that .env is unrecoverable and goes with the
-        // directory. No git flag separates it from build/out.o, so the guard does not try.
         XCTAssertEqual(verdict(checkout), .go(worktrees: []))
     }
-
-    // MARK: - a commit reachable only from a detached HEAD
 
     func testACommitOnADetachedHeadIsNotInvisible() {
         let checkout = cleanCheckout()
@@ -124,8 +102,6 @@ final class CheckoutRemovalReachTests: XCTestCase {
         _ = git(checkout, ["add", "-A"])
         _ = git(checkout, ["commit", "-qm", "work nobody named"])
 
-        // The premise, asserted separately so a failure reads as "git changed" rather than
-        // "the guard changed": --branches cannot see this, which is the whole bug.
         XCTAssertTrue(
             git(checkout, ["log", "--branches", "--not", "--remotes", "--oneline"]).output.isEmpty,
             "--branches is what made this invisible")
@@ -133,8 +109,6 @@ final class CheckoutRemovalReachTests: XCTestCase {
         XCTAssertTrue(refusal(checkout).contains("on no remote"), refusal(checkout))
     }
 
-    /// A stash is also reachable from refs/, so `--all` reports it as commits. It is still a stash,
-    /// and "run git stash list" is what the operator can act on — so that check runs first.
     func testAStashIsStillReportedAsAStash() {
         let checkout = cleanCheckout()
         FileManager.default.createFile(atPath: checkout + "/a.txt", contents: Data("changed\n".utf8))
@@ -142,8 +116,6 @@ final class CheckoutRemovalReachTests: XCTestCase {
 
         XCTAssertTrue(refusal(checkout).contains("stashed"), refusal(checkout))
     }
-
-    // MARK: - a submodule the repository told git to ignore
 
     func testASubmoduleItsOwnGitmodulesSilencedIsStillSeen() throws {
         let checkout = cleanCheckout()
@@ -176,8 +148,6 @@ final class CheckoutRemovalReachTests: XCTestCase {
         XCTAssertFalse(refusal(checkout).isEmpty)
     }
 
-    /// The control that matters more than the catch: a repository shipping `ignore = all` for a
-    /// submodule that is simply clean has done nothing wrong and must still be removable.
     func testACleanSubmoduleSilencedTheSameWayStillGoes() throws {
         let checkout = cleanCheckout()
         let subOrigin = dir + "/sub2-origin.git"
@@ -202,8 +172,6 @@ final class CheckoutRemovalReachTests: XCTestCase {
         XCTAssertEqual(verdict(checkout), .go(worktrees: []))
     }
 
-    // MARK: - a worktree the operator locked by hand
-
     func testALockedWorktreeIsHonouredRatherThanDeleted() {
         let checkout = cleanCheckout()
         let worktree = dir + "/cp-worktrees/BP-1"
@@ -213,7 +181,6 @@ final class CheckoutRemovalReachTests: XCTestCase {
         let reason = refusal(checkout)
 
         XCTAssertTrue(reason.contains("locked"), reason)
-        // The operator's own words, not a sentence this app invented for them.
         XCTAssertTrue(reason.contains("external drive"), reason)
     }
 
@@ -226,8 +193,6 @@ final class CheckoutRemovalReachTests: XCTestCase {
         XCTAssertTrue(refusal(checkout).contains("locked"), refusal(checkout))
     }
 
-    /// The control: an unlocked worktree is what the app is for, and unlocking is the documented
-    /// way an operator says they meant it.
     func testAnUnlockedWorktreeStillGoes() {
         let checkout = cleanCheckout()
         let worktree = dir + "/cp-worktrees/BP-3"
@@ -239,8 +204,6 @@ final class CheckoutRemovalReachTests: XCTestCase {
             verdict(checkout).goWorktrees?.map { ($0 as NSString).resolvingSymlinksInPath },
             [(worktree as NSString).resolvingSymlinksInPath])
     }
-
-    // MARK: - a separate repository living in an ignored directory
 
     private func nestedRepo(in checkout: String, at relative: String) -> String {
         FileManager.default.createFile(
@@ -279,7 +242,6 @@ final class CheckoutRemovalReachTests: XCTestCase {
         XCTAssertTrue(refusal(checkout).contains("separate repository"), refusal(checkout))
     }
 
-    /// The control: a nested repository whose work is all on a remote is not work anybody loses.
     func testARepositoryInAnIgnoredDirectoryWhoseWorkIsPushedStillGoes() {
         let checkout = cleanCheckout()
         let nested = nestedRepo(in: checkout, at: "thesis")
@@ -294,22 +256,10 @@ final class CheckoutRemovalReachTests: XCTestCase {
         XCTAssertEqual(verdict(checkout), .go(worktrees: []))
     }
 
-    // MARK: - the widening that nearly refused everything
-
-    /// `git maintenance start` fetches hourly into refs/prefetch/* and deliberately leaves the
-    /// remote-tracking refs alone. Those commits came FROM the remote, so `--all` counted them as
-    /// work on no remote and refused a pristine checkout — permanently, since the next prefetch
-    /// re-arms it. Found by review after the first cut shipped `--all` bare.
     func testAPrefetchRefDoesNotMakeACleanCheckoutRefuse() {
         let checkout = cleanCheckout()
         let origin = dir + "/checkout-origin.git"
 
-        // The state under test is "a prefetch ref holds a commit no remote-tracking ref has", and
-        // it is built directly rather than by imitating `git maintenance`'s fetch. The first
-        // version pointed the ref at HEAD — already on the remote, so the guard found nothing
-        // either way. The second used `--refmap=` to stop the opportunistic remote-tracking
-        // update; that held on git 2.50 here and not on 2.55 on CI, where the premise assertion
-        // below failed and the test then passed for no reason at all.
         _ = git(checkout, ["checkout", "-q", "-b", "prefetched"])
         FileManager.default.createFile(atPath: checkout + "/b.txt", contents: Data("b\n".utf8))
         _ = git(checkout, ["add", "-A"])
@@ -328,7 +278,6 @@ final class CheckoutRemovalReachTests: XCTestCase {
         XCTAssertEqual(verdict(checkout), .go(worktrees: []))
     }
 
-    /// Notes are not pushed by default, and one of them refused the whole checkout.
     func testAGitNoteDoesNotMakeACleanCheckoutRefuse() {
         let checkout = cleanCheckout()
         _ = git(checkout, ["notes", "add", "-m", "reviewed by hand"])
@@ -339,8 +288,6 @@ final class CheckoutRemovalReachTests: XCTestCase {
         XCTAssertEqual(verdict(checkout), .go(worktrees: []))
     }
 
-    /// A tag on a pushed commit is not unpushed work either — the control on the other side of the
-    /// same widening.
     func testATagOnAPushedCommitStillGoes() {
         let checkout = cleanCheckout()
         _ = git(checkout, ["tag", "v1"])
@@ -349,10 +296,6 @@ final class CheckoutRemovalReachTests: XCTestCase {
         XCTAssertEqual(verdict(checkout), .go(worktrees: []))
     }
 
-    // MARK: - shapes the first cut skipped
-
-    /// core.quotePath quotes a path with a space, so it ends in `"` and the directory test missed
-    /// it — a nested repository under `my scratch/` was invisible.
     func testANestedRepositoryUnderAQuotedDirectoryIsSeen() {
         let checkout = cleanCheckout()
         let nested = nestedRepo(in: checkout, at: "my scratch")
@@ -362,9 +305,6 @@ final class CheckoutRemovalReachTests: XCTestCase {
         XCTAssertTrue(refusal(checkout).contains("separate repository"), refusal(checkout))
     }
 
-    /// "on the external drive" is the reason people lock a worktree for, and an unmounted volume is
-    /// exactly when its directory is absent. The first cut filtered locks by `exists` and so
-    /// honoured the lock only while it did not matter.
     func testALockedWorktreeOnAnUnmountedVolumeIsStillHonoured() {
         let checkout = cleanCheckout()
         let worktree = dir + "/cp-worktrees/BP-4"
@@ -377,9 +317,6 @@ final class CheckoutRemovalReachTests: XCTestCase {
         XCTAssertTrue(reason.contains("external drive"), reason)
     }
 
-
-    /// The parent sweep excludes refs/prefetch and refs/notes; the nested one did not, so a
-    /// `vendor/thesis` with maintenance enabled refused the operator's own checkout for ever.
     func testAPrefetchRefInsideANestedRepositoryDoesNotRefuseTheParent() {
         let checkout = cleanCheckout()
         let nested = nestedRepo(in: checkout, at: "thesis")

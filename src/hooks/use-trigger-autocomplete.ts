@@ -5,41 +5,25 @@ import { caretCoordinates, type CaretPoint } from "@/lib/caret";
 
 export interface Suggestion {
   id: string;
-  /** What replaces the trigger and everything typed after it. */
   insert: string;
   label: string;
-  /** Shown beside the label — a full name, a task title. */
   hint?: string;
 }
 
 export interface Trigger {
   name: string;
-  /**
-   * Matched against the text before the caret and therefore anchored with `$`. Group 1 is the
-   * query. The whole match is what the insertion replaces, so a trigger may be more than one
-   * character — `BP-` as readily as `@`.
-   */
   pattern: RegExp;
   suggest: (query: string) => Suggestion[] | Promise<Suggestion[]>;
 }
 
 interface Open {
   trigger: string;
-  /** Where the match begins, so insertion never has to search backwards for the trigger. */
   start: number;
   caret: number;
 }
 
 const MAX_SUGGESTIONS = 10;
 
-/**
- * The autocomplete that used to live inside Comments, as five pieces of state and a lastIndexOf.
- *
- * Generalised on the way out so one mechanism serves both triggers: `@` for people and a project
- * key for tasks. The trigger's own match decides what gets replaced, rather than searching back for
- * a character — with a multi-character trigger, `lastIndexOf` finds the wrong thing as soon as the
- * text contains a second hyphen.
- */
 export function useTriggerAutocomplete(
   triggers: Trigger[],
   textareaRef: RefObject<HTMLTextAreaElement | null>,
@@ -48,14 +32,8 @@ export function useTriggerAutocomplete(
   const [open, setOpen] = useState<Open | null>(null);
   const [items, setItems] = useState<Suggestion[]>([]);
   const [index, setIndex] = useState(0);
-  // Measured when the trigger fires, not on every render: the list stays where the caret was when
-  // it opened, which is where the person is looking
   const [at, setAt] = useState<CaretPoint | null>(null);
-  // Answers can arrive out of order once a trigger asks the server; only the newest may land
   const request = useRef(0);
-  // What the last detection was looking at, so a trigger whose data arrives later can be asked
-  // again. The people list is fetched on mount: type an `@` before it lands and the list came back
-  // empty with nothing to make it look again.
   const last = useRef<{ value: string; caret: number } | null>(null);
 
   const close = useCallback(() => {
@@ -96,8 +74,6 @@ export function useTriggerAutocomplete(
     [triggers, close, textareaRef]
   );
 
-  // Triggers change identity when their data does — the people list arriving, the board key
-  // resolving. Anything already typed is re-offered against it.
   useEffect(() => {
     if (last.current) detect(last.current.value, last.current.caret);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -113,7 +89,6 @@ export function useTriggerAutocomplete(
       onChange(next);
       close();
 
-      // After the state lands, or the browser puts the caret back where React re-rendered it
       const caret = open.start + suggestion.insert.length + 1;
       requestAnimationFrame(() => {
         textarea.selectionStart = textarea.selectionEnd = caret;
@@ -125,8 +100,6 @@ export function useTriggerAutocomplete(
 
   const onKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
-      // Only while the list is showing something. Enter sends a comment in some composers, and
-      // swallowing it whenever a trigger happened to match would take that away.
       if (!open || items.length === 0) return;
 
       if (event.key === "ArrowDown") {
@@ -147,7 +120,6 @@ export function useTriggerAutocomplete(
   );
 
   return {
-    /** Null unless a trigger matched; carries which one, so a caller can style per trigger. */
     trigger: open?.trigger ?? null,
     at,
     items,

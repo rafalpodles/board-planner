@@ -25,10 +25,6 @@ function requestedUrl(): string {
 const PROJECT = "507f1f77bcf86cd799439011";
 const TASK = "507f1f77bcf86cd799439012";
 
-// A tool argument becomes a path segment. The WHATWG parser normalises `..` away before the request
-// leaves, so an argument could pick the route rather than name the resource (BP-316) — and the first
-// fix, plain encodeURIComponent, escaped `/` while leaving dots alone, so the one input it was named
-// after still went through (BP-339). It is an allowlist now: an ObjectId or a project key, nothing else.
 describe("PlannerClient path building", () => {
   const client = new PlannerClient("https://board.example.com", "cp_token");
 
@@ -56,8 +52,6 @@ describe("PlannerClient path building", () => {
   });
 });
 
-// Every earlier test here used an argument containing slashes — which encodes, and goes green — so
-// none of them could see that a bare ".." walked straight through (BP-339).
 describe("a segment that could choose the path is refused, not encoded", () => {
   const client = new PlannerClient("https://board.example.com", "cp_token");
 
@@ -74,7 +68,6 @@ describe("a segment that could choose the path is refused, not encoded", () => {
     ["is a backslash form", "..\\.."],
     ["carries a newline", "p1\nx"],
     ["is percent-encoded", "%2e%2e"],
-    // RegExp.test coerces, so an array whose String() is a dot segment would otherwise pass
     ["is not a string at all", [".."]],
     ["is an object that stringifies to one", { toString: () => ".." }],
   ];
@@ -89,8 +82,6 @@ describe("a segment that could choose the path is refused, not encoded", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  // Only getProject/getTask/listTasks were covered before, so dropping the guard from the other
-  // eight left the suite green — the mutation the BP-316 review ran
   it.each([
     ["getProject", (v: string) => client.getProject(v)],
     ["listTasks", (v: string) => client.listTasks(v)],
@@ -107,7 +98,6 @@ describe("a segment that could choose the path is refused, not encoded", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  // The message names the value so the tool caller can see what it sent, and nothing else
   it("says which value was refused, without leaking the URL it would have built", async () => {
     const error = await client.getProject("..").catch((e: Error) => e);
 

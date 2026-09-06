@@ -9,8 +9,6 @@ const userFindById = vi.fn();
 const resolveSession = vi.fn();
 const createSession = vi.fn();
 const oauthConsentDeleteOne = vi.fn();
-// A permanently empty board list cannot exercise the line that narrows a grant, which is the
-// privilege-limiting line of the whole feature (BP-383 review).
 let projects: { _id: string; name: string; key: string }[] = [];
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -32,8 +30,6 @@ vi.mock("@/models/oauthConsent", () => ({
 }));
 vi.mock("@/models/user", () => ({ User: { findById: userFindById } }));
 vi.mock("@/lib/security-mail", () => ({ notifyCredentialCreated: vi.fn() }));
-// Partial: the route's own provenance gate is the real checkProvenance, and the cookie is read by
-// the real reader — only the session lookup is stubbed.
 vi.mock("@/lib/session", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/session")>()),
   resolveSession,
@@ -69,7 +65,6 @@ function login(username: string, password = "secret") {
     method: "POST",
     headers: {
       "content-type": "application/x-www-form-urlencoded",
-      // What a browser sends posting the sign-in form this endpoint itself served
       "sec-fetch-site": "same-origin",
     },
     body,
@@ -78,8 +73,6 @@ function login(username: string, password = "secret") {
 
 async function attempt(username: string): Promise<string> {
   const res = await POST(login(username));
-  // A successful login is a 303 back to the authorize URL, so the body says nothing; the tests
-  // below read it for the refusals and use `signedIn` for the successes.
   return res.status === 303 ? "Signed in" : res.text();
 }
 
@@ -108,10 +101,6 @@ beforeEach(async () => {
 
 describe("POST /oauth/authorize login phase", () => {
   it("bounds guessing when no client identity is available", async () => {
-    // Without a proxy header every caller shares the account key, so a refusal there can be aimed
-    // at somebody else — but leaving it unchecked left login entirely unthrottled, which is worse.
-    // The threshold is raised rather than removed, and BP-353 gave the person aimed at a way out:
-    // any password change clears the counter.
     for (let i = 0; i < ANONYMOUS_ACCOUNT_ATTEMPTS; i++) await attempt("locked");
 
     verifyCredentials.mockClear();
@@ -119,7 +108,6 @@ describe("POST /oauth/authorize login phase", () => {
     const body = await attempt("locked");
 
     expect(body).toContain("Too many failed attempts.");
-    // The point of refusing before verification: the server stops doing bcrypt work
     expect(verifyCredentials).not.toHaveBeenCalled();
   });
 
@@ -152,9 +140,6 @@ describe("POST /oauth/authorize login phase", () => {
     expect(await attempt("recovering")).toContain("Signed in");
   });
 
-  // A consent page rendered straight from the password POST is a POST history entry, and with
-  // no-store keeping it out of the back/forward cache, Back re-fetches it — replaying the password
-  // from the browser's own buffer. Post/Redirect/Get leaves a GET entry with nothing to replay.
   it("answers a correct password with a session and a redirect, not with the consent page", async () => {
     verifyCredentials.mockResolvedValue(USER);
 
@@ -166,13 +151,9 @@ describe("POST /oauth/authorize login phase", () => {
     expect(response.headers.get("location")).toContain("code_challenge=challenge");
     expect(response.headers.get("location")).not.toContain("prompt=login");
     expect(createSession).toHaveBeenCalledTimes(1);
-    // The ticket is minted by the GET that follows, where it can be bound to that session
     expect(oauthConsentCreate).not.toHaveBeenCalled();
   });
 
-  // BP-355. This endpoint reaches the same throttle counters as /api/auth/login, under the same
-  // keys, and a client can be registered at the unauthenticated /oauth/register — so without the
-  // refusal the login route makes, this is the quieter way to spend somebody else's budget.
   describe("provenance", () => {
     function crossSite(headers: Record<string, string>) {
       const body = new URLSearchParams({
@@ -192,8 +173,6 @@ describe("POST /oauth/authorize login phase", () => {
       });
     }
 
-    // BP-444: same-origin, so it is past the gate above, and `formData()` throws on a body that is
-    // not a form — a 500 for what is a plain refusal.
     it("refuses a same-origin post whose body is not a form", async () => {
       verifyCredentials.mockResolvedValue(USER);
 
@@ -218,8 +197,6 @@ describe("POST /oauth/authorize login phase", () => {
       expect(verifyCredentials).not.toHaveBeenCalled();
     });
 
-    // The gate has to cover BOTH phases. Neither shipped test set `phase`, so both landed on the
-    // login branch and consent was never exercised (BP-355 review).
     it("refuses a cross-site consent submission too", async () => {
       const body = new URLSearchParams({ phase: "consent", ticket: "t1", decision: "allow" });
       const response = await POST(
@@ -280,8 +257,6 @@ describe("GET /oauth/authorize", () => {
     expect(oauthConsentCreate).not.toHaveBeenCalled();
   });
 
-  // BP-383: the browser already holds a session cookie, and typing the password again proves
-  // nothing that cookie has not already proven.
   it("takes the browser session instead of asking for the password again", async () => {
     resolveSession.mockResolvedValue({ userId: "u1", sessionId: "s1" });
 
@@ -293,8 +268,6 @@ describe("GET /oauth/authorize", () => {
     expect(oauthConsentCreate).toHaveBeenCalledTimes(1);
   });
 
-  // An account with no boards cannot fill a narrow grant, and the answer to that dead end is not to
-  // pre-tick the widest credential the account can issue (BP-383 review).
   it("offers the wide grant to an account with no boards without pre-selecting it", async () => {
     resolveSession.mockResolvedValue({ userId: "u1", sessionId: "s1" });
     projects = [];
@@ -306,9 +279,6 @@ describe("GET /oauth/authorize", () => {
     expect(body).not.toContain('value="all" checked');
   });
 
-  // Third iteration of this counter and the first test of it. The point is the dimension: one
-  // account exhausting its budget must not refuse a second account, which is what an
-  // address-keyed counter does behind a proxy or a NAT (BP-383 review).
   it("bounds ticket issuance per account, without touching another account", async () => {
     resolveSession.mockResolvedValue({ userId: "u1", sessionId: "s1" });
     for (let i = 0; i < 61; i++) await GET(authorizeGet({}, sessionCookie()));
@@ -331,11 +301,7 @@ describe("GET /oauth/authorize", () => {
     expect(oauthConsentCreate).not.toHaveBeenCalled();
   });
 
-  // An access token belongs to an application. Letting one stand in for the person at the keyboard
-  // would let an application mint itself a second, wider credential without anybody present.
   it("does not let a bearer token stand in for the person authorizing", async () => {
-    // The bearer names one account and the cookie another. If the header were read at all, the
-    // page would be built for whoever it resolved to.
     resolveSession.mockResolvedValue({ userId: "u1", sessionId: "s1" });
 
     const body = await (
@@ -398,9 +364,6 @@ describe("POST /oauth/authorize consent phase", () => {
     });
   }
 
-  // BP-383: `form-action 'self'` is enforced across the redirect chain, so answering the consent
-  // POST with a 302 to the client had the browser block the submission outright — the Authorize
-  // button did nothing but log a CSP violation. A page that navigates itself is not a submission.
   it("hands the code over by navigating, not by redirecting the form", async () => {
     const response = await POST(consent({ access: "all" }));
     const body = await response.text();
@@ -428,8 +391,6 @@ describe("POST /oauth/authorize consent phase", () => {
     expect(oauthCodeCreate).not.toHaveBeenCalled();
   });
 
-  // Only "all" is the wide grant. Anything else — a typo, a hand-built form, a value from a future
-  // version of this page — has to land on the narrow branch rather than skipping the filter.
   it("treats an access value it does not recognise as the narrow grant", async () => {
     projects = [{ _id: "p1", name: "Orbit", key: "ORB" }];
     const body = await (await POST(consent({ access: "everything" }))).text();
@@ -467,8 +428,6 @@ describe("POST /oauth/authorize consent phase", () => {
     expect(oauthCodeCreate.mock.calls[0][0].allowedProjects).toEqual(["p1"]);
   });
 
-  // BP-383 review: the ticket is now minted on a GET and rendered into a page a browser will
-  // restore from history, so whoever redeems it has to be the session it was issued to.
   it("refuses a ticket redeemed by a different session", async () => {
     oauthConsentFindOne.mockResolvedValue({
       _id: "cs1",
@@ -539,7 +498,6 @@ describe("POST /oauth/authorize consent phase", () => {
     expect(oauthCodeCreate).toHaveBeenCalledTimes(1);
   });
 
-  // RFC 6749 4.1.2.1 — refusing is an answer the client is owed
   it("tells the client when the person says no", async () => {
     const body = await (await POST(consent({ decision: "deny", access: "all" }))).text();
 
@@ -570,8 +528,6 @@ describe("POST /oauth/authorize consent phase", () => {
     expect(oauthCodeCreate).not.toHaveBeenCalled();
   });
 
-  // A row written before the binding existed carries no session, and must be refused rather than
-  // waved through on a falsy check.
   it("refuses a ticket that names no session", async () => {
     oauthConsentFindOne.mockResolvedValue({
       _id: "cs1",
@@ -591,7 +547,6 @@ describe("POST /oauth/authorize consent phase", () => {
     expect(oauthCodeCreate).not.toHaveBeenCalled();
   });
 
-  // Two submissions of one ticket that interleave must not mint two redeemable codes
   it("mints nothing when the ticket was already claimed", async () => {
     oauthConsentDeleteOne.mockResolvedValue({ deletedCount: 0 });
 
@@ -601,7 +556,6 @@ describe("POST /oauth/authorize consent phase", () => {
     expect(oauthCodeCreate).not.toHaveBeenCalled();
   });
 
-  // Only an explicit allow grants, for the same reason only an explicit "all" widens
   it("does not grant a submission that carries no decision", async () => {
     const body = await (
       await POST(

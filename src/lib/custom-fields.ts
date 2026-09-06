@@ -6,16 +6,10 @@ import {
 } from "@/types";
 import { hasControlCharacters } from "@/lib/identifiers";
 
-/** An option value reaches the PM's system prompt, and had no limit at all before BP-321 */
 export const MAX_OPTION_VALUE_LENGTH = 100;
 
 type LegacyOption = string | Partial<ICustomFieldOption>;
 
-/**
- * A field defined before CP-211 carries plain strings. Its option `id` becomes that
- * same string, so every value already stored on a task stays valid and no task data
- * has to be rewritten. Renaming later moves `value` and leaves `id` alone.
- */
 export function normalizeOptions(options: LegacyOption[] | undefined): ICustomFieldOption[] {
   return (options || []).map((option, index) => {
     if (typeof option === "string") {
@@ -53,11 +47,8 @@ export function normalizeFields(fields: unknown[] | undefined): ICustomField[] {
   return (fields || []).map((field, index) => normalizeField(field as LegacyField, index));
 }
 
-// Generic over the field shape: the same ordering serves the Mongoose documents and
-// the API objects, which differ only in the type of `_id`
 type Orderable = { order?: number; archived?: boolean };
 
-/** Form order, with archived fields last so they cannot bury a live one */
 export function sortedFields<T extends Orderable>(definitions: T[]): T[] {
   return [...definitions].sort((a, b) => {
     if (!!a.archived !== !!b.archived) return a.archived ? 1 : -1;
@@ -89,7 +80,6 @@ export function validateCustomFieldValues(
       return { valid: false, error: `Unknown custom field: ${key}` };
     }
 
-    // An archived field's values are history: kept, and no longer policed
     if (field.archived) continue;
     if (val === null || val === undefined || val === "") continue;
 
@@ -131,7 +121,6 @@ export function validateCustomFieldValues(
   }
 
   for (const def of definitions) {
-    // Archiving beats required: a field nobody can fill must not block every save
     if (!def.required || def.archived) continue;
     const val = values[def._id.toString()];
     const empty =
@@ -144,11 +133,6 @@ export function validateCustomFieldValues(
   return { valid: true };
 }
 
-/**
- * Strip values whose field no longer exists. Archived fields are kept on purpose —
- * before CP-211, removing a definition silently wiped that value from every task on
- * its next save, which is the loss archiving exists to prevent.
- */
 export function sanitizeCustomFieldValues(
   values: Record<string, unknown>,
   definitions: ICustomField[]
@@ -163,11 +147,6 @@ export function sanitizeCustomFieldValues(
   return result;
 }
 
-/**
- * The option id for a value written the way a human or a model would write it, or
- * undefined when the field does not offer it. Unlike resolveFieldsByName this never
- * throws: a model's guess at an option is a suggestion, not a command.
- */
 export function matchOptionValue(
   field: { options?: LegacyOption[] } | undefined,
   value: unknown
@@ -182,7 +161,6 @@ export function matchOptionValue(
   return match?.id;
 }
 
-/** Options in their configured order; dropdown and multiselect both render from this */
 export function orderedOptions(field: { options?: LegacyOption[] }): ICustomFieldOption[] {
   return normalizeOptions(field.options).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 }
@@ -190,11 +168,6 @@ export function orderedOptions(field: { options?: LegacyOption[] }): ICustomFiel
 export const MAX_FIELD_NAME_LENGTH = 100;
 export const MAX_OPTIONS = 100;
 
-/**
- * Turns whatever the editor posted into storable options. Strings are accepted so
- * the API keeps working for older clients; each one becomes its own id, matching
- * how pre-CP-211 options migrate.
- */
 export function parseOptions(
   input: unknown,
   existing: ICustomFieldOption[] = []
@@ -208,18 +181,12 @@ export function parseOptions(
     const source = typeof raw === "string" ? { value: raw } : (raw as Partial<ICustomFieldOption>);
     const value = String(source?.value ?? "").trim();
     if (!value) return { error: "Every option needs a value" };
-    // Both because this reaches the PM's system prompt and any member can write it (BP-321): it had
-    // no length limit at all, and nothing stopped a newline starting a line of its own there.
     if (value.length > MAX_OPTION_VALUE_LENGTH) {
       return { error: `An option value must be ${MAX_OPTION_VALUE_LENGTH} characters or less` };
     }
     if (hasControlCharacters(value)) {
       return { error: "An option value cannot contain control characters" };
     }
-    // Keep the id of an option that already exists, or every task loses it on rename.
-    // `||` not `??`: the editor sends "" for a row the user just added, and ?? keeps
-    // an empty string — which then reads as "no value" everywhere downstream, and
-    // collides with the next new option on the uniqueness check.
     const id = source?.id && byId.has(source.id) ? source.id : source?.id || newOptionId(value);
     options.push({
       id,
@@ -250,11 +217,6 @@ export interface FieldBadge {
   color?: string;
 }
 
-/**
- * Badges for the fields a project marked `showOnCard`. Option-backed fields carry
- * their option's colour; the rest read as "Name: value", because a bare value on a
- * card says nothing about which field it came from.
- */
 export function cardBadges(
   values: Record<string, unknown> | undefined,
   fields: { _id: string; name: string; fieldType: ICustomField["fieldType"];
@@ -272,7 +234,6 @@ export function cardBadges(
       const ids = Array.isArray(value) ? (value as string[]) : [String(value)];
       for (const id of ids) {
         const option = byId.get(id);
-        // An id with no option left is history, not a badge
         if (option) badges.push({ key: `${field._id}:${id}`, label: option.value, color: option.color });
       }
       continue;
@@ -289,10 +250,6 @@ export function cardBadges(
   return badges;
 }
 
-/**
- * Whether a task passes one field's filter. Ranges are inclusive and open-ended:
- * a `from` with no `to` means "at least this", which is how people read it.
- */
 export function matchesFieldFilter(
   value: unknown,
   filter: { value?: string; from?: string; to?: string },
@@ -338,14 +295,12 @@ export function matchesAllFieldFilters(
   const byId = new Map(definitions.map((f) => [f._id, f]));
   for (const [fieldId, filter] of Object.entries(filters || {})) {
     const field = byId.get(fieldId);
-    // A filter whose field vanished is stale, not a reason to hide every task
     if (!field) continue;
     if (!matchesFieldFilter(values?.[fieldId], filter, field)) return false;
   }
   return true;
 }
 
-/** A field's value as one line of text. No field name — a table header already carries it. */
 export function fieldCellText(
   values: Record<string, unknown> | undefined,
   field: { _id: string; fieldType: ICustomField["fieldType"]; options?: LegacyOption[] }
@@ -370,11 +325,6 @@ export interface FieldChange {
 
 export type StoredFieldValues = Record<string, unknown> | Map<string, unknown> | undefined;
 
-/**
- * Mongoose hands `customFieldValues` back as a Map on a hydrated document and as a plain
- * object on a lean read. An update returns the first and reads the second, so a diff across
- * the two sees every value as absent unless both are brought to the same shape.
- */
 export function asValueRecord(values: StoredFieldValues): Record<string, unknown> {
   return values instanceof Map ? Object.fromEntries(values) : values ?? {};
 }
@@ -386,13 +336,6 @@ type DiffableField = {
   options?: LegacyOption[];
 };
 
-/**
- * One entry per field whose *displayed* value changed. Keyed on the field's name rather
- * than its id, and on `fieldCellText` rather than the raw value, so an entry reads
- * "Difficulty: M → L" instead of naming two ObjectIds nobody recognises. History written
- * this way survives a later rename of the field or of its options, because it stored what
- * the value said at the time rather than a pointer to what it says now.
- */
 export function customFieldActivityChanges(
   before: StoredFieldValues,
   after: StoredFieldValues,
@@ -410,21 +353,12 @@ export function customFieldActivityChanges(
   return changes;
 }
 
-/**
- * What the task actually shows for one field. A multiselect is stored in the order the options
- * were picked but rendered in the project's own order, so un-picking and re-picking one option
- * rewrites the array without changing anything a reader can see — and comparing the stored order
- * would log that as a change.
- */
 function displayedValue(
   values: Record<string, unknown>,
   field: DiffableField & { _id: string }
 ): string {
   const stored = values[field._id];
 
-  // A checkbox nobody has touched renders as "No", exactly like one that was ticked and
-  // unticked, so reading the untouched one as blank would log a change to the state it is
-  // already showing.
   if (field.fieldType === "checkbox") {
     return fieldCellText({ [field._id]: stored === true }, field);
   }
@@ -438,14 +372,6 @@ function displayedValue(
   return fieldCellText({ [field._id]: inOptionOrder }, field);
 }
 
-/**
- * Turns `{ "Owoce": "Apples" }` into `{ <fieldId>: <optionId> }`. An MCP client
- * knows a field by the name a human gave it, never by its id, so the generic
- * `fields` parameter is resolved here rather than at every call site.
- *
- * Throws rather than silently dropping: a caller that names a field wrong should
- * hear about it, not watch the value vanish.
- */
 export function resolveFieldsByName(
   input: Record<string, unknown>,
   definitions: { _id: string; name: string; fieldType: ICustomField["fieldType"]; options?: LegacyOption[]; archived?: boolean }[]
@@ -467,7 +393,6 @@ export function resolveFieldsByName(
       const options = normalizeOptions(field.options);
       const resolve = (value: unknown) => {
         const text = String(value).trim().toLowerCase();
-        // Accept the option's own id too, so a client can round-trip what it read
         const match =
           options.find((o) => o.id.toLowerCase() === text) ||
           options.find((o) => o.value.trim().toLowerCase() === text);

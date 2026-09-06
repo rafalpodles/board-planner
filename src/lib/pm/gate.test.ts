@@ -12,7 +12,6 @@ describe("isPmRunnable", () => {
     expect(isPmRunnable({ enabled: false })).toBe(false);
   });
 
-  // CP-166: an instance lock the project side cannot clear must beat pm.enabled
   it("refuses an instance-locked project even when enabled", () => {
     expect(isPmRunnable({ enabled: true, lockedByInstance: true })).toBe(false);
   });
@@ -31,7 +30,6 @@ describe("isPmLockedByInstance", () => {
     expect(isPmLockedByInstance(undefined)).toBe(false);
   });
 
-  // A locked project must not be sent to project settings, which cannot clear the lock
   it("distinguishes a lock from a plain disable", () => {
     expect(isPmLockedByInstance({ enabled: false })).toBe(false);
   });
@@ -51,8 +49,6 @@ describe("pmDisabledReason", () => {
 });
 
 describe("PM_RUNNABLE_QUERY", () => {
-  // The Mongo form and the in-process guard must agree, or bulk selection and per-request
-  // checks disagree about which agents may run
   it("mirrors isPmRunnable", () => {
     expect(PM_RUNNABLE_QUERY).toEqual({
       "pm.enabled": true,

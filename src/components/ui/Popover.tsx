@@ -3,11 +3,9 @@
 import { ReactNode, useEffect, useRef, useState } from "react";
 
 interface PopoverProps {
-  /** Rendered inside the anchor; `toggle` opens and closes the panel */
   trigger: (state: { open: boolean; toggle: () => void }) => ReactNode;
   children: (state: { close: () => void }) => ReactNode;
   align?: "left" | "right";
-  /** Panel width; anything Tailwind accepts */
   width?: string;
   label?: string;
 }
@@ -23,17 +21,12 @@ export function Popover({
   const anchorRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // The trigger lives inside the anchor, so one contains() check covers both it and
-  // the panel — clicking the trigger to close must not read as an outside click
   useEffect(() => {
     if (!open) return;
     function onPointerDown(e: MouseEvent) {
       if (anchorRef.current?.contains(e.target as Node)) return;
       setOpen(false);
     }
-    // Captured, not bubbled: a modal's Escape handler is a second listener on
-    // document, and stopPropagation between two listeners on the same target does
-    // nothing — one Escape would close the popover and the dialog holding it
     function onKeyDown(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
       e.stopPropagation();

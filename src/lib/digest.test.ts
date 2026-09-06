@@ -41,19 +41,12 @@ const { digestTick, dueDigestDay, digestHour, digestTimezone, DIGEST_ROW_LIMIT, 
 
 const BOARD = "69a52e3b399b27d3cbb2c5a5";
 const SECOND_BOARD = "69a52e3b399b27d3cbb2c5a7";
-// `role` is what the grant lookup reads; `emailNotifications` is what the grid falls back to for
-// an account that predates it. The digest asks both questions, so the fixture answers both.
 const WAITING = [
   { _id: "u1", email: "rpo@example.com", username: "rpo", role: "member", emailNotifications: true },
 ];
 
 const PROJECT = "507f1f77bcf86cd799439021";
 
-/**
- * Rows are stamped oldest-first, and the mock honours BOTH `sort` and `limit`. A mock that ignores
- * either can only ever confirm the chain resolves: ignoring `limit` hid the scan ceiling, and
- * ignoring `sort` let a test named for the ordering pass with the ordering reverted.
- */
 function notifications(shown: number, total = shown) {
   const rows = Array.from({ length: total }, (_, i) => ({
     title: `BP-${i + 1} moved to In Review`,
@@ -104,7 +97,6 @@ describe("when the digest is due", () => {
     process.env.DIGEST_HOUR = "7";
     process.env.DIGEST_TIMEZONE = "Europe/Warsaw";
 
-    // 04:00 UTC is 06:00 in Warsaw in August — still too early
     expect(dueDigestDay(new Date("2026-08-17T04:00:00Z"))).toBeNull();
     expect(dueDigestDay(new Date("2026-08-17T05:30:00Z"))).toBe("2026-08-17");
   });
@@ -132,9 +124,7 @@ describe("digestTick", () => {
     expect(await digestTick(morning)).toBe(1);
 
     expect(sent().subject).toBe("[Board Planner] 3 updates on your tasks");
-    // The key labels the row, so the title does not repeat it
     expect(sent().text).toContain("BP-1: moved to In Review");
-    // Each line keeps the link the per-event mail would have carried
     expect(sent().text).toContain("https://app.example.com/projects/BP/tasks/1");
     expect(sent().html).toContain('href="https://app.example.com/projects/BP/tasks/2"');
     expect(sent().text).toContain("Open my tasks: https://app.example.com/my-tasks");
@@ -152,8 +142,6 @@ describe("digestTick", () => {
     expect(filter.createdAt.$gte).toEqual(new Date(morning.getTime() - 24 * 60 * 60 * 1000));
   });
 
-  // Claimed by the day before the send, so two app instances ticking at the same minute cannot
-  // both take the same person
   it("claims the day first, and skips a person another instance already claimed", async () => {
     userFindOneAndUpdate.mockResolvedValue(null);
 
@@ -172,8 +160,6 @@ describe("digestTick", () => {
     expect(sendEmail).not.toHaveBeenCalled();
   });
 
-  // The page stops at the row limit; the number in the mail must be what is really waiting, not
-  // what one page happened to hold
   it("counts what it could not fit instead of dropping it silently", async () => {
     notifications(DIGEST_ROW_LIMIT, DIGEST_ROW_LIMIT + 40);
 
@@ -202,8 +188,6 @@ describe("digestTick", () => {
     });
   });
 
-  // Turning mail off means no mail, digest included — decided in code now, because the condition
-  // reads over a grid keyed by event
   it("leaves out somebody whose grid has mail off everywhere", async () => {
     userFind.mockReturnValue({
       lean: async () => [{ ...WAITING[0], emailNotifications: false }],
@@ -213,8 +197,6 @@ describe("digestTick", () => {
     expect(sendEmail).not.toHaveBeenCalled();
   });
 
-  // The point of storing rows the bell hides: turning the in-app column off must not empty the
-  // morning mail as well, or the two switches would silently cancel each other out
   it("lists a row the bell was told to hide, when the mail column is on", async () => {
     userFind.mockReturnValue({
       lean: async () => [
@@ -232,7 +214,6 @@ describe("digestTick", () => {
     expect(sent().text).toContain("BP-1: moved to In Review");
   });
 
-  // Muting a project has to hold in the morning too, or it only silences the day
   it("drops the rows belonging to a project muted in the mail column", async () => {
     userFind.mockReturnValue({
       lean: async () => [
@@ -255,7 +236,6 @@ describe("digestTick", () => {
     expect(sendEmail).not.toHaveBeenCalled();
   });
 
-  // One person's mail server refusing must not cost everybody else their digest
   it("keeps going when a send fails", async () => {
     userFind.mockReturnValue({
       lean: async () => [
@@ -274,10 +254,6 @@ describe("digestTick", () => {
 describe("past the scan ceiling", () => {
   const morning = new Date("2026-08-17T05:30:00Z");
 
-  // The count stops being a count once the read is capped, and a mail that prints a precise
-  // number nobody computed is the silent cap this file already warns about, wearing a number.
-  // Asserted on the SUBJECT: the "and N more" line contains the same words, so a body assertion
-  // passed with the heading reverted to an exact figure.
   it("says the remainder is a floor rather than a total", async () => {
     notifications(DIGEST_SCAN_LIMIT + 200);
 
@@ -291,8 +267,6 @@ describe("past the scan ceiling", () => {
     notifications(total);
     await digestTick(morning);
 
-    // Ascending, the ceiling kept the first 500 of the day and the reader never saw what had just
-    // happened. The newest row must be in the mail and the oldest must not.
     expect(sent().text).toContain(`BP-${total}:`);
     expect(sent().text).not.toContain("BP-1:");
   });
@@ -306,9 +280,6 @@ describe("past the scan ceiling", () => {
   });
 });
 
-// BP-328. The digest is the one channel that reads the backlog straight out of the collection, so
-// a row banked while somebody still held a grant would be mailed to them the morning after it was
-// revoked — task keys, titles and links included.
 describe("a digest for somebody who lost the board", () => {
   const DUE = new Date("2026-08-17T06:00:00Z");
 
@@ -316,7 +287,6 @@ describe("a digest for somebody who lost the board", () => {
     return (notificationFind.mock.calls.at(-1) ?? [])[0] as Record<string, unknown>;
   }
 
-  // Two boards, so a digest that quietly covers only the first is a failure and not a pass.
   it("carries every board the reader can still reach", async () => {
     await digestTick(DUE);
 

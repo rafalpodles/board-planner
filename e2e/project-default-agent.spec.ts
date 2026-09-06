@@ -3,13 +3,6 @@ import mongoose from "mongoose";
 import { ADMIN_AUTH } from "./api";
 import { E2E_MONGODB_URI, PROJECT_ID, PROJECT_KEY, seed } from "./seed";
 
-/**
- * BP-458. The project's default agent could be set and never unset — the route required an
- * `agentId` — so a project was stuck with a suggestion it had outgrown and the picker had no way
- * back. The other three defects are in the control itself and are covered in
- * `WorkersSection.test.tsx`, where the agent store can be handed to the component directly.
- */
-
 const EMPTY = { analysis: [], implementation: [], verification: [], delivery: [] };
 const RUNNABLE = {
   analysis: [],
@@ -51,8 +44,6 @@ test("a default can be set, and then cleared again", async ({ request }) => {
   });
   const agentId = String(inserted.insertedId);
 
-  // The control: setting has to work, or the clearing below would be indistinguishable from a
-  // route that refuses everything
   const set = await request.put(`/api/projects/${PROJECT_KEY}/agent`, {
     headers: ADMIN_AUTH,
     data: { agentId },
@@ -85,8 +76,6 @@ test("a body that does not say is a refusal, not a clear", async ({ request }) =
   await request.put(`/api/projects/${PROJECT_KEY}/agent`, { headers: ADMIN_AUTH, data: { agentId } });
   expect(String(await storedDefault())).toBe(agentId);
 
-  // Coercing a missing or wrong-typed field to "" made every one of these answer 200 and null
-  // the default — "did not say" and "asked to clear" are not the same request.
   for (const data of [{}, { agentId: null }, { agent: agentId }, { agentId: 7 }]) {
     const response = await request.put(`/api/projects/${PROJECT_KEY}/agent`, {
       headers: ADMIN_AUTH,
@@ -96,7 +85,6 @@ test("a body that does not say is a refusal, not a clear", async ({ request }) =
     expect(String(await storedDefault()), JSON.stringify(data)).toBe(agentId);
   }
 
-  // The control: the one body that does mean clear still clears
   const cleared = await request.put(`/api/projects/${PROJECT_KEY}/agent`, {
     headers: ADMIN_AUTH,
     data: { agentId: "" },
@@ -123,7 +111,6 @@ test("an agent with nothing in it is still refused, and says why", async ({ requ
     headers: ADMIN_AUTH,
     data: { agentId: String(inserted.insertedId) },
   });
-  // Clearing must not have turned every refusal into a silent success
   expect(response.status()).toBe(400);
   expect(await response.text()).toContain("nothing in it yet");
   expect(await storedDefault()).toBeNull();

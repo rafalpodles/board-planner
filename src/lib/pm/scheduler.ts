@@ -38,7 +38,6 @@ export async function pmSchedulerTick(): Promise<void> {
     const slot = dueReviewSlot(now, project.pm?.autonomy);
     if (!slot) continue;
 
-    // Claim the slot before running: a crash costs one review instead of a spend loop
     const claimed = await Project.findOneAndUpdate(
       { _id: project._id, "pm.autonomy.lastReviewSlot": { $ne: slot } },
       { $set: { "pm.autonomy.lastReviewSlot": slot } }
@@ -78,7 +77,6 @@ async function runBoardReview(
     const digest = await buildBoardDigest(projectId);
     if (!digest) return;
     const result = await runPmTurn({
-      // Nobody is driving this one — see runPmTurn's `autonomous` (BP-321)
       autonomous: true,
       projectId,
       userMessage: buildBoardReviewPrompt(projectKey, renderBoardDigest(digest)),

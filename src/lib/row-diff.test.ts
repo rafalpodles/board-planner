@@ -30,8 +30,6 @@ describe("diffById", () => {
     expect(diffById([a, b], [a, edited])).toEqual({ added: [], removed: [], changed: [edited] });
   });
 
-  // Reordering alone is not a change these APIs can express, and sending every row as
-  // an edit would make a drag look like a rewrite of the whole list
   it("ignores a pure reorder", () => {
     expect(diffById([a, b], [b, a])).toEqual({ added: [], removed: [], changed: [] });
   });

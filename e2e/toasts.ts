@@ -1,9 +1,5 @@
 import { expect, type Page } from "@playwright/test";
 
-/**
- * A toast clears itself before a poll can see it, so the page records every one it shows: the
- * same MutationObserver trick kanban-board-core and run-conflict carry locally.
- */
 export async function recordToasts(page: Page) {
   await page.evaluate(() => {
     const seen: string[] = ((window as unknown as { __toasts?: string[] }).__toasts = []);

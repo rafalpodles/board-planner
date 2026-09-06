@@ -43,11 +43,6 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-/**
- * BP-432: `AgentRun.detail` was written by the worker on every exit and rendered nowhere. The fleet
- * page can only report a run in flight — every exit clears the run identity it reads — so the
- * account a finished run left behind was reachable only through a Mongo shell.
- */
 describe("the fleet's run history", () => {
   it("renders what a finished run said on the way out", async () => {
     api.get.mockResolvedValue([run()]);
@@ -78,8 +73,6 @@ describe("the fleet's run history", () => {
     expect(await screen.findByText("Failed")).toBeTruthy();
   });
 
-  // A refusal puts its reason in the gate's name and leaves the detail empty, so an empty detail
-  // there is expected rather than missing — and "a run failed" is not what an operator can act on
   it("names the gate that refused, where there is no detail to show", async () => {
     api.get.mockResolvedValue([
       run({ outcome: "refused", refusedBy: "diff-size", detail: "" }),
@@ -108,7 +101,6 @@ describe("the fleet's run history", () => {
     expect(await screen.findByText("Nothing has finished yet.")).toBeTruthy();
   });
 
-  // The fleet console is instance-admin, and so is everything a run's detail can contain
   it("sends a non-admin away without reading anything", async () => {
     auth.isAdmin = false;
 

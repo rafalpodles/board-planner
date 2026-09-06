@@ -6,8 +6,6 @@ public struct NotificationRequest: Equatable, Sendable {
     public let body: String
 }
 
-// Split from delivery so the decision is testable: UNUserNotificationCenter needs a signed bundle
-// and a running app, and none of that is what could be wrong here.
 public func notification(for event: TelemetryEvent) -> NotificationRequest? {
     switch event {
     case .progress:
@@ -25,8 +23,6 @@ public func notification(for event: TelemetryEvent) -> NotificationRequest? {
             return NotificationRequest(
                 title: "\(outcome.taskKey) merged",
                 body: "The worker is free again.")
-        // With autoMerge off this replaces "merged" as the end of a successful run, so without it
-        // the operator would get no notification at all for work that went well.
         case "delivered":
             return NotificationRequest(
                 title: "\(outcome.taskKey) is ready for review",

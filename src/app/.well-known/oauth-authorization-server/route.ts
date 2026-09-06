@@ -5,10 +5,6 @@ import { selfOrigin, ORIGIN_REQUIRED } from "@/lib/session";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// This document tells an MCP client where to send the user to authorize and where to POST the
-// code, so the origin in it must not come from a request header. It carries no Cache-Control, so
-// a forged x-forwarded-host stored by any shared cache would hand other clients an attacker's
-// authorization and token endpoints (BP-316).
 export async function GET() {
   const origin = selfOrigin();
   if (!origin) {

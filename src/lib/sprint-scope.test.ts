@@ -32,8 +32,6 @@ describe("sprintScopeFromParam", () => {
     expect(sprintScopeFromParam("backlog")).toBe("backlog");
   });
 
-  // A stale bookmark or a link to a sprint somebody deleted must not reach the tasks
-  // endpoint as a raw string — it would cast into a Mongoose CastError and 500
   it("falls back to all for a value that cannot be a scope", () => {
     expect(sprintScopeFromParam("not-an-id")).toBe("all");
     expect(sprintScopeFromParam("deleted-sprint")).toBe("all");
@@ -54,7 +52,6 @@ describe("isSprintScopeShape", () => {
 });
 
 describe("sprintScopeToQuery", () => {
-  // An unscoped board must not carry ?sprint=all around — the URL should look untouched
   it("produces no query string for the unscoped board", () => {
     expect(sprintScopeToQuery("all")).toBe("");
   });
@@ -87,8 +84,6 @@ describe("sprintScopeLabel", () => {
     expect(sprintScopeLabel(S2, sprints)).toBe("Sprint 13");
   });
 
-  // A shared link can outlive the sprint it points at; a raw ObjectId in the
-  // subtitle would be worse than showing nothing
   it("has no label for a sprint that no longer exists", () => {
     expect(sprintScopeLabel("deleted-id", sprints)).toBeNull();
     expect(sprintScopeLabel(S1, [])).toBeNull();
@@ -96,8 +91,6 @@ describe("sprintScopeLabel", () => {
 });
 
 describe("sprintDefaultForNewTask", () => {
-  // CP-176: without this the task saves with sprint null and the server filter
-  // hides it from the very board that created it
   it("adopts the scoped sprint", () => {
     expect(sprintDefaultForNewTask(S1)).toBe(S1);
   });
@@ -106,7 +99,6 @@ describe("sprintDefaultForNewTask", () => {
     expect(sprintDefaultForNewTask("all")).toBe("");
   });
 
-  // Backlog is defined as "no sprint", so adopting it would be self-contradictory
   it("means no sprint for the backlog scope", () => {
     expect(sprintDefaultForNewTask("backlog")).toBe("");
   });

@@ -22,11 +22,6 @@ export interface OrToolCall {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type OrChatMessage = Record<string, any>;
 
-/**
- * What one round-trip cost, as the provider reported it. Absent when the response carried no
- * `usage` block — every OpenRouter model returns one today, but a stub or a future provider need
- * not, and a missing number must read as "unknown" rather than as zero (BP-284).
- */
 export interface OrUsage {
   promptTokens: number;
   completionTokens: number;
@@ -60,7 +55,6 @@ function usageOf(data: any): OrUsage | undefined {
   return {
     promptTokens,
     completionTokens,
-    // Some providers omit the total; adding the two is what it means
     totalTokens: Number.isFinite(total) ? total : promptTokens + completionTokens,
   };
 }

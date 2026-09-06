@@ -44,7 +44,6 @@ export const PUT = withAuth(async (request, { user }) => {
     );
   }
 
-  // password is select:false, so the authenticated user object never carries the hash
   const record = await User.findById(user._id).select("+password");
   if (!record) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
@@ -69,13 +68,8 @@ export const PUT = withAuth(async (request, { user }) => {
   record.password = await bcrypt.hash(newPassword, PASSWORD_COST_FACTOR);
   await record.save();
 
-  // Immediately after the write, for the same reason the reset route does it there: the two calls
-  // below can reject, and a throw between them would leave the password changed and the lockout
-  // standing (BP-353)
   await clearAccountAttempts(user.username).catch(() => {});
 
-  // Somebody who changes their password after asking for a reset link has answered the question
-  // themselves; the link in their inbox must not still be able to overwrite this
   await invalidateResetTokens(user._id);
   await revokeUserSessions(user._id, user.sessionId);
 

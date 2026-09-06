@@ -4,7 +4,6 @@ import { withAuth } from "@/lib/middleware";
 import { check } from "@/lib/grants";
 import { projectForUpload, uploadsBucket } from "@/lib/upload-ownership";
 
-// SVG excluded: served as attachment so scripts never run in the app's origin
 const INLINE_SAFE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
 export const GET = withAuth(async (_request, { params, user }) => {
@@ -30,8 +29,6 @@ export const GET = withAuth(async (_request, { params, user }) => {
 
   const file = files[0];
 
-  // 404 rather than 403 throughout: a file id is a bare ObjectId, so distinguishing "exists but not
-  // yours" from "no such file" would confirm the existence of other boards' attachments.
   const project = projectForUpload(file);
   if (!project) {
     return new Response("File not found", { status: 404 });

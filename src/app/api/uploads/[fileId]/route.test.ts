@@ -13,8 +13,6 @@ vi.mock("@/lib/auth", () => ({
 }));
 vi.mock("@/lib/grants", () => ({ check }));
 vi.mock("@/lib/upload-ownership", async (importOriginal) => ({
-  // projectForUpload stays real: it is half of the rule under test, and a mock of it would
-  // assert my own arrangement rather than the code's
   ...(await importOriginal<typeof import("@/lib/upload-ownership")>()),
   uploadsBucket: () => ({ find, openDownloadStream }),
 }));
@@ -55,14 +53,6 @@ beforeEach(() => {
   );
 });
 
-/**
- * BP-290 reported uploads as reachable without a per-project check. That was true when it was
- * filed and was closed by #119 — but the rule lived only in the route, and the only test was on
- * the `projectForUpload` helper. So deleting the `check(...)` call left the suite green, which is
- * the same shape of gap as the finding itself.
- *
- * These drive the route.
- */
 describe("GET /api/uploads/[fileId]", () => {
   it("serves a file to somebody with access to its project", async () => {
     const response = await GET(request(), ctx());
@@ -81,8 +71,6 @@ describe("GET /api/uploads/[fileId]", () => {
     expect(openDownloadStream).not.toHaveBeenCalled();
   });
 
-  // 404 rather than 403 on purpose: a file id is a bare ObjectId, so telling the two apart would
-  // confirm the existence of other boards' attachments to anyone enumerating ids
   it("says not-found rather than forbidden, so the id cannot be probed", async () => {
     check.mockResolvedValue(false);
     const refused = await GET(request(), ctx());
@@ -93,8 +81,6 @@ describe("GET /api/uploads/[fileId]", () => {
     bucketHas(storedFile({}));
     const unstamped = await GET(request(), ctx());
 
-    // All three arms, byte for byte: an attacker enumerating ids must not be able to tell "exists
-    // but not yours" from "exists but has no owner" from "no such file" (BP-290 review)
     const answers = [refused, missing, unstamped];
     const statuses = new Set(answers.map((r) => r.status));
     const bodies = new Set(await Promise.all(answers.map((r) => r.text())));
@@ -112,9 +98,6 @@ describe("GET /api/uploads/[fileId]", () => {
     expect(find).not.toHaveBeenCalled();
   });
 
-  // Files stored before #119 carry no owner. They are unreadable until the migration stamps them,
-  // which is the safe direction: the alternative was resolving an owner per request, and that
-  // search was attacker-controlled.
   it.each([
     ["no metadata at all", null],
     ["metadata without a project", {}],
@@ -145,7 +128,6 @@ describe("GET /api/uploads/[fileId]", () => {
     expect(find).not.toHaveBeenCalled();
   });
 
-  // SVG can carry script, so it is served as a download rather than rendered in the app's origin
   it.each([
     ["image/png", "inline"],
     ["image/jpeg", "inline"],

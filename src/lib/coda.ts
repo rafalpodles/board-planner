@@ -4,8 +4,6 @@ const DEFAULT_HOST = "https://coda.io";
 const REQUEST_TIMEOUT_MS = 15000;
 const MUTATION_POLL_ATTEMPTS = 10;
 const MUTATION_POLL_INTERVAL_MS = 1000;
-// Coda allows 10 writes per 6s; one upsert carries the whole batch, so a chunk
-// per request keeps even a large board to a handful of calls
 const UPSERT_CHUNK = 200;
 
 export const CODA_COLUMNS = [
@@ -34,8 +32,6 @@ export interface CodaTaskRow {
   link: string;
 }
 
-// The host is validated on write with the same guard GitLab uses; here it is
-// only normalised for URL building
 export function normaliseCodaHost(host: string): string {
   return (host || "").trim().replace(/\/+$/, "") || DEFAULT_HOST;
 }
@@ -79,8 +75,6 @@ export async function fetchTableColumns(
   return (data.items || []).map((c) => c.name);
 }
 
-// Reshaping someone's hand-built doc is the destructive option, so a missing
-// column is reported rather than created
 export function missingColumns(present: string[]): string[] {
   const have = new Set(present.map((n) => n.trim().toLowerCase()));
   return CODA_COLUMNS.filter((c) => !have.has(c.toLowerCase()));
@@ -100,8 +94,6 @@ function toCells(row: CodaTaskRow) {
   ];
 }
 
-// Writes return 202 with a requestId — the edit is queued, not applied, so the
-// caller must not report success until the mutation reports completed
 async function awaitMutation(host: string, token: string, requestId: string): Promise<boolean> {
   for (let attempt = 0; attempt < MUTATION_POLL_ATTEMPTS; attempt++) {
     const status = await codaFetch<{ completed?: boolean }>(

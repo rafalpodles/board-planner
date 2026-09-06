@@ -76,7 +76,6 @@ export const POST = withProjectAccess(async (request, { params }) => {
     fieldType,
     options: parsedOptions,
     required: !!isRequired,
-    // A new field lands at the end of the form rather than jumping to the top
     order: fields.length,
     showOnCard: !!showOnCard,
     showInList: !!showInList,

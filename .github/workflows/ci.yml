@@ -4,7 +4,6 @@ on:
   push:
   workflow_dispatch:
 
-# A branch that gets several commits in a row only needs the newest one checked
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -21,38 +20,23 @@ jobs:
           cache: npm
       - run: npm ci
 
-      # Deliberately before the sibling package is installed: the Docker image never has
-      # mcp-server/node_modules (.dockerignore drops **/node_modules) and `next build` type-checks
-      # everything tsconfig globs, so a literal path into it compiles here and breaks the
-      # production build. Installing first hid exactly that, and Railway found it (BP-501).
       - name: Types
         run: npx tsc --noEmit
 
-      # Needed to RUN the standalone spec, not to type-check it. Runs even when the types failed,
-      # so that failure stays the one reported rather than cascading into a missing module
       - name: Standalone MCP server dependencies
         if: ${{ !cancelled() }}
         working-directory: mcp-server
         run: npm ci
 
-      # Runs even when the type check failed: the group guard lives here, and a spec that belongs
-      # to no CI job is exactly the thing you want to hear about while you are still editing
       - name: Unit tests
         if: ${{ !cancelled() }}
         run: npm test
 
-      # Proven not to touch the database: the build succeeds against an unreachable URI, so this
-      # value only exists to keep the step from depending on whatever the runner happens to have
       - name: Build
         run: npm run build
         env:
           MONGODB_URI: mongodb://127.0.0.1:1/build-does-not-connect
 
-      # The Dockerfile copies only .next/standalone, and whether the instrumentation hook gets
-      # packaged into it is decided by a non-recursive scan of the app directory's parent — so a
-      # file one directory too high builds cleanly, emits its chunk, and is simply absent from the
-      # image, taking the PM scheduler and all seeding with it. The ordinary build above cannot see
-      # that: it passed while the image was broken (BP-356).
       - name: Standalone output carries the instrumentation hook
         run: |
           BUILD_STANDALONE=1 npm run build
@@ -64,7 +48,6 @@ jobs:
   worker:
     name: Worker — the package npm test never reaches
     runs-on: ubuntu-latest
-    # The root vitest config includes src/** only, so these 680-odd tests run nowhere else
     defaults:
       run:
         working-directory: worker
@@ -76,17 +59,8 @@ jobs:
           cache: npm
           cache-dependency-path: worker/package-lock.json
       - run: npm ci
-      # `npm run build` compiles src/ with the tests excluded, and vitest does not type-check at
-      # all, so nothing here had ever read a worker test file's types. The script existed and was
-      # called by no one; 27 errors had collected behind it, including a test asserting a config
-      # shape the worker never serves (BP-334).
-      # Named for what it covers: tsconfig.test.json globs all of src/**, so this is the tests plus
-      # the sources they import, and a production type error surfaces here rather than at Build
       - name: Types (tests and the sources they import)
         run: npm run typecheck:tests
-      # Runs even when the type check failed. Steps are fail-fast, so one bad annotation used to
-      # mean the 866 worker tests never ran and the job reported no test result at all — the type
-      # error is the cheaper thing to know, and it must not cost the answer to "did behaviour break"
       - name: Tests
         if: ${{ !cancelled() }}
         run: npm test
@@ -111,9 +85,6 @@ jobs:
       - run: npm run build
 
   e2e:
-    # One job per group in e2e/groups.ts, each with a runner, a Mongo and a dev server of its own,
-    # so the groups need no isolation from one another. `groups.test.ts` fails the unit job when
-    # this list and that file disagree, and when a spec belongs to no group at all.
     name: End to end — ${{ matrix.group }}
     runs-on: ubuntu-latest
     strategy:
@@ -140,8 +111,6 @@ jobs:
           cache: npm
       - run: npm ci
 
-      # Keyed on the resolved Playwright version: a browser cache from an older one is not
-      # merely stale, it fails to launch
       - name: Playwright version
         id: pw
         run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
@@ -160,8 +129,6 @@ jobs:
       - name: Tests
         run: npx playwright test --project=${{ matrix.group }}
 
-      # The trace is the only way to see what the page looked like when a run fails on a machine
-      # nobody can open
       - uses: actions/upload-artifact@v7
         if: failure()
         with:

@@ -2,8 +2,6 @@ import { CommandResult, Runner } from "../exec.js";
 import { Gate } from "../types.js";
 
 const MAX_REASON_CHARS = 2000;
-// --ignore-scripts: a lifecycle script from the worktree or any dependency would run as the
-// worker, outside the agent's tool allowlist and before the review gate reads a single line
 const INSTALL_ARGS = ["ci", "--ignore-scripts", "--no-audit", "--no-fund"];
 
 function outputTail(result: CommandResult): string {
@@ -18,7 +16,6 @@ export function buildGate(runner: Runner, timeoutMs: number): Gate {
     async run({ worktreePath, signal }) {
       const deadline = Date.now() + timeoutMs;
 
-      // a worktree is a fresh checkout with no node_modules — skip this and every build fails with "next: command not found"
       const install = await runner.run("npm", INSTALL_ARGS, { cwd: worktreePath, timeoutMs, signal });
       if (install.timedOut) {
         return { ok: false, reason: `dependency install timed out after ${timeoutMs}ms` };

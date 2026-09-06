@@ -50,7 +50,6 @@ function workerDoc(overrides: Record<string, unknown> = {}) {
     policy: { pollIntervalMs: 5000 },
     policyOverrides: ["pollIntervalMs"],
     repos: [{ remote: REMOTE, path: "/repo" }],
-    // BP-305/BP-358: assignments are what the owner can reach, narrowed by the reported repos
     owner: OWNER_ID,
     command: "",
     commandIssuedAt: null,
@@ -86,8 +85,6 @@ beforeEach(() => {
 });
 
 describe("POST /api/workers/:workerId/heartbeat", () => {
-  // The one channel that survives SSE loss and a restart: the worker applies what this says,
-  // and keys "already applied" on the issuance
   it("carries the standing command and its issuance", async () => {
     verifyWorkerCredential.mockResolvedValue(
       workerDoc({ command: "pause", commandIssuedAt: new Date("2026-08-01T12:00:00.000Z") })
@@ -122,9 +119,6 @@ describe("POST /api/workers/:workerId/heartbeat", () => {
     expect(touchWorker).not.toHaveBeenCalled();
   });
 
-  // Only the fields an operator set. A worker that is handed the whole stored policy pins every
-  // field forever, because the schema materialises a default into each one at creation — so a
-  // later change to a default would never reach it.
   it("returns the machine's own pinned settings, and nothing else", async () => {
     const { req, ctx } = request();
 
@@ -140,7 +134,6 @@ describe("POST /api/workers/:workerId/heartbeat", () => {
     expect((await (await POST(req, ctx)).json()).policy).toEqual({});
   });
 
-  // The whole inversion in one assertion: a remote comes back, never a path.
   it("answers with assignments keyed by remote, carrying the project's own policy", async () => {
     const { req, ctx } = request();
 
@@ -160,8 +153,6 @@ describe("POST /api/workers/:workerId/heartbeat", () => {
     expect((await (await POST(req, ctx)).json()).assignments).toEqual([]);
   });
 
-  // BP-358: a non-empty list here is what the worker's own loop iterates and attempts to claim.
-  // Offering one to a machine with no owner would send it straight into a claim it cannot win.
   it("offers nothing to a machine with no owner, even when it matches an enabled project", async () => {
     verifyWorkerCredential.mockResolvedValue(workerDoc({ owner: null }));
     const { req, ctx } = request();
@@ -181,8 +172,6 @@ describe("POST /api/workers/:workerId/heartbeat", () => {
     );
   });
 
-  // An older worker that does not report yet must keep the inventory it already has, or it would
-  // silently lose every project the moment it heartbeats.
   it("keeps the stored inventory when a heartbeat carries none", async () => {
     const { req, ctx } = request();
 
@@ -193,10 +182,7 @@ describe("POST /api/workers/:workerId/heartbeat", () => {
   });
 });
 
-// Two worker processes sharing one working tree both run git in it. Different machines cannot, so
-// only a same-host pair collides — and the one that got there first keeps it.
 describe("one working tree, one worker", () => {
-  // Registered earlier than the worker under test, so it is the one that keeps the checkout
   const otherOnSameHost = {
     _id: "w2",
     name: "second-process",
@@ -230,7 +216,6 @@ describe("one working tree, one worker", () => {
     expect((await (await POST(req, ctx)).json()).assignments).toHaveLength(1);
   });
 
-  // Only the contested checkout drops out; a second, uncontested one must still be offered
   it("drops only the contested checkout, not the whole inventory", async () => {
     workerFind.mockResolvedValue([otherOnSameHost]);
     accessibleProjectIds.mockResolvedValue([PROJECT_ID, "p2"]);
@@ -251,9 +236,6 @@ describe("one working tree, one worker", () => {
   });
 });
 
-// Preflight arrives from the worker, so it is rebuilt field by field like the checkout list rather
-// than trusted. A machine that cannot run the work has to show that in the console instead of
-// looking live, enabled and error-free.
 describe("the preflight report a worker sends", () => {
   function preflightPatch() {
     return touchWorker.mock.calls[0]?.[1]?.preflight;

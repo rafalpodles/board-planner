@@ -10,7 +10,6 @@ const SIZE_CLASSES = {
   sm: "sm:max-w-md",
   md: "sm:max-w-lg",
   lg: "sm:max-w-2xl",
-  // The task detail's own width, so the modal and the standalone page match
   xl: "sm:max-w-[1240px]",
 } as const;
 
@@ -20,9 +19,7 @@ interface ModalProps {
   title: string;
   children: React.ReactNode;
   size?: keyof typeof SIZE_CLASSES;
-  /** Where focus lands on close when nothing was focused at open time — keyboard shortcuts, Safari clicks */
   returnFocusTo?: React.RefObject<HTMLElement | null>;
-  /** Drops the header and padding for a child that draws its own frame */
   bare?: boolean;
 }
 
@@ -40,10 +37,6 @@ export function Modal({
   const scrollRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const named = title.trim().length > 0;
-  // Only a tab stop when there is something to scroll — otherwise every dialog that just fits
-  // (most of them: confirms, short forms) would gain a dead stop between the close button and
-  // its real controls. Re-measured after every render rather than once, so content that grows
-  // after open (an error message appearing, a field expanding) still gets picked up.
   const [scrollable, setScrollable] = useState(false);
 
   useFocusTrap({
@@ -83,8 +76,6 @@ export function Modal({
         ${
           bare
             ? // A phone has no room to spend on a backdrop around a whole page of content.
-              // Only this variant reaches the top of the screen, so it is the only one that
-              // owes the notch any room — and the child's own header sticks right under it.
               `h-dvh overflow-hidden rounded-none border-0 pt-[env(safe-area-inset-top)]
                sm:h-auto sm:max-h-[90vh] sm:rounded-2xl sm:border sm:border-border sm:pt-0`
             : "max-h-[90vh] rounded-t-2xl border border-border p-4 sm:rounded-2xl sm:p-6"
@@ -101,9 +92,6 @@ export function Modal({
             </button>
           </div>
         )}
-        {/* A bare child draws its own frame, header included, and scrolls inside itself:
-            padding here would show as a strip above that header, and scrolling here would
-            move it. Every other dialog keeps the room its focus rings need. */}
         <div
           ref={scrollRef}
           tabIndex={scrollable ? 0 : undefined}

@@ -26,8 +26,6 @@ vi.mock("@/hooks/use-project-board", async (importOriginal) => {
   };
 });
 
-// Fills every field the page's own view doesn't drive, so a test that only cares
-// about the loading/project/loadError branch isn't tied to the rest of the shape
 function baseBoard(overrides: Partial<ProjectBoard>): ProjectBoard {
   return {
     project: null,
@@ -150,9 +148,6 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-// BP-293 follow-up: an unknown ?sprint= used to be sent straight to the API, which
-// answers with a Mongoose CastError 500 for anything that isn't an ObjectId — and the
-// hook's catch never sets `project`, so the board spun forever, re-toasting every poll
 describe("An unknown ?sprint= scope", () => {
   it("falls back to the unscoped board instead of sending the raw value to the API", async () => {
     currentSearchParams = new URLSearchParams("sprint=not-an-id");
@@ -175,8 +170,6 @@ describe("An unknown ?sprint= scope", () => {
     await waitFor(() =>
       expect(window.location.pathname + window.location.search).toBe("/projects/p1")
     );
-    // Native replaceState, not router.replace: this page sits under an @modal
-    // parallel route, and a soft navigation risks waking it
     expect(replace).not.toHaveBeenCalled();
   });
 
@@ -192,9 +185,6 @@ describe("An unknown ?sprint= scope", () => {
   });
 });
 
-// Previously: `if (loading || !project) return spinner`, and loading always ends up
-// false once the request settles — success or failure — while a failed load never
-// sets `project`. The page had no way out of the spinner and no way to tell the person.
 describe("A board whose initial load fails", () => {
   it("does not spin forever — it offers a retry instead", async () => {
     api.get.mockImplementation((url: string) => {
@@ -234,11 +224,6 @@ describe("A board whose initial load fails", () => {
   });
 });
 
-// BP-293 follow-up: `loadData`'s stale-request guard returned before `setProject`, but
-// the surrounding `finally` ran anyway — a `finally` runs on an early `return` too. Two
-// overlapping loads (mount fires it twice in React's dev-mode double-invoke) meant the
-// superseded one flipped `loading` to false while `project` was still null, and the page
-// briefly rendered "Failed to load" even though nothing had actually failed.
 describe("A second load starting before the first settles", () => {
   it("never shows the Retry panel while the superseded request is the one that resolves first", async () => {
     const projectCalls = [deferred<ApiProject>(), deferred<ApiProject>()];
@@ -253,19 +238,16 @@ describe("A second load starting before the first settles", () => {
 
     render(<KanbanPage />);
 
-    // A second load overlapping the first, before either has settled.
     await act(async () => {
       document.dispatchEvent(new Event("visibilitychange"));
     });
     expect(projectCallIndex).toBe(2);
 
-    // The superseded first request settles first — this is the exact window the bug lived in.
     await act(async () => {
       projectCalls[0].resolve(project);
     });
     expect(screen.queryByText("Failed to load this board.")).toBeNull();
 
-    // The current, second request settles and the board actually appears.
     await act(async () => {
       projectCalls[1].resolve(project);
     });

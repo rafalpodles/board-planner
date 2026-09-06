@@ -1,18 +1,3 @@
-/**
- * CP-242: fill each project's `repositoryUrl` from the legacy `githubRepo` / `gitlabRepo` pair.
- *
- * Usage:
- *   MONGODB_URI=... npx tsx scripts/migrate-repository-url.ts --dry-run
- *   MONGODB_URI=... npx tsx scripts/migrate-repository-url.ts
- *
- * Safe to re-run: a project that already has a repositoryUrl is left alone, and the legacy fields
- * are not touched, so a rollback loses nothing.
- *
- * Reads fall back to the legacy pair (src/lib/repository.ts), so this is an optimisation rather
- * than a prerequisite — an unmigrated database still renders, still syncs and still matches
- * workers. Which means the deploy and this script can happen in either order.
- */
-
 import mongoose from "mongoose";
 import { projectRepositoryUrl } from "../src/lib/repository";
 
@@ -55,8 +40,6 @@ async function main() {
       continue;
     }
 
-    // Reported rather than resolved silently: GitHub wins, but which one was dropped is exactly
-    // the thing worth a human's eye before the legacy columns are removed.
     if (project.githubRepo?.trim() && project.gitlabRepo?.trim()) {
       bothSet.push(`${name}: kept ${project.githubRepo.trim()}, dropped ${project.gitlabRepo.trim()}`);
     }

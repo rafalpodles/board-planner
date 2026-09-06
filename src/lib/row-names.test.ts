@@ -25,13 +25,6 @@ describe("distinctRowNames", () => {
     expect(distinctRowNames(["only"])).toEqual(["only"]);
   });
 
-  /**
-   * The second independent review of this fix. A naive position suffix is not itself guaranteed
-   * unused: nothing stops a row from being named exactly what disambiguation would produce for
-   * another row, and the first version of this function did not check for that — two `alerts`
-   * rows plus a third literally named `alerts (2)` disambiguated to `["alerts (1)", "alerts (2)",
-   * "alerts (2)"]`, recreating the bug the function exists to remove.
-   */
   it("never produces two rows with the same name, whatever the input contains", () => {
     const adversarial = [
       ["alerts", "alerts", "alerts (2)"],
@@ -46,10 +39,6 @@ describe("distinctRowNames", () => {
   });
 });
 
-/**
- * The reason webhooks need this at all: they carry no name, so the row is identified by the mask,
- * and the mask is lossy in a way that is easy to hit rather than contrived.
- */
 describe("the webhook masks this exists for", () => {
   it("two different endpoints on one host can mask to the same string", () => {
     const a = maskSecretUrl("https://example.com/hooks/board");
@@ -60,7 +49,6 @@ describe("the webhook masks this exists for", () => {
   });
 
   it("a path of four characters or fewer leaves nothing but the origin", () => {
-    // The shape e2e/seed.ts already produces for `/ok`
     expect(maskSecretUrl("https://api.example.com/ok")).toBe(
       maskSecretUrl("https://api.example.com/no")
     );

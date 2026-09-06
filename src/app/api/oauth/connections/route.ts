@@ -5,7 +5,6 @@ import { withAuth } from "@/lib/middleware";
 import { OAuthToken } from "@/models/oauthToken";
 import { OAuthClient } from "@/models/oauthClient";
 
-// A user's own active OAuth connections (one per issued access token).
 export const GET = withAuth(async (_request, { user }) => {
   await connectDB();
 
@@ -37,8 +36,6 @@ export const DELETE = withAuth(async (request, { user }) => {
 
   const body = await request.json().catch(() => null);
   const id = (body as { id?: unknown } | null)?.id;
-  // Typed, not merely truthy: a JSON body can carry an operator object, and {"$ne": null} would
-  // delete an arbitrary row of the caller's own instead of the one named
   if (typeof id !== "string" || !isValidObjectId(id)) {
     return NextResponse.json({ error: "Connection id is required" }, { status: 400 });
   }

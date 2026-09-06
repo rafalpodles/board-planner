@@ -29,13 +29,8 @@ function ctx(changedLines: number): GateContext {
 
 const idleRunner = { run: vi.fn() } as never;
 
-// What a block that names no parameter of its own falls back to: the project's worker policy,
-// deliberately not the built-in constants — a project that pinned a limit before the catalog
-// existed must keep it.
 const FALLBACKS = { maxDiffLines: 400, maxDiffFiles: 10, reviewModel: "opus" };
 
-// BP-404: the review gate asks git for a config scan and a clean checkout before it runs the
-// reviewer, so the reviewer's argv is no longer the first call recorded.
 function reviewerArgv(run: { mock: { calls: unknown[][] } }): string[] {
   const call = run.mock.calls.find(([command]) => command === "claude");
   if (!call) throw new Error("the reviewer was never run");
@@ -43,7 +38,6 @@ function reviewerArgv(run: { mock: { calls: unknown[][] } }): string[] {
 }
 
 describe("gateFromEntry", () => {
-  // Two Size gates in one agent have to be distinguishable in the comment that refuses
   it("names the gate after the block, not after the kind", () => {
     expect(gateFromEntry(entry({ key: "size-strict" }), idleRunner, 1000, FALLBACKS)?.name).toBe(
       "size-strict"
@@ -58,7 +52,6 @@ describe("gateFromEntry", () => {
     expect(verdict.reason).toMatch(/10/);
   });
 
-  // A threshold of zero refuses every change, which reads as a broken gate rather than a strict one
   it("falls back to the built-in default when a parameter is not a positive number", async () => {
     for (const maxLines of ["lots", "0", "-5", ""]) {
       const gate = gateFromEntry(entry({ params: { maxLines } }), idleRunner, 1000, FALLBACKS);
@@ -66,8 +59,6 @@ describe("gateFromEntry", () => {
     }
   });
 
-  // The project's own setting, not the built-in 400: a project that pinned 2000 before the catalog
-  // existed keeps it, and a block that names no limit inherits it
   it("falls back to the project's pinned limit, not to the built-in one", async () => {
     const gate = gateFromEntry(entry({ params: {} }), idleRunner, 1000, {
       ...FALLBACKS,
@@ -128,9 +119,6 @@ describe("gateFromEntry", () => {
     expect(argv[argv.indexOf("--append-system-prompt") + 1]).not.toMatch(/injection/i);
   });
 
-  // That this list IS the catalog's is asserted in catalog-contract.test.ts, which reads the app's
-  // source rather than importing it — drift is what makes a run die mid-task with "this worker
-  // implements no gate of kind …", after the agent has already done the work.
   it("builds every kind the catalog offers", () => {
     for (const gateKind of ["diff-size", "protected-paths", "test-presence", "build", "test-run", "review"]) {
       expect(gateFromEntry(entry({ gateKind }), idleRunner, 1000, FALLBACKS)).not.toBeNull();

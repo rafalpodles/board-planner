@@ -2,8 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const connect = vi.fn();
 const close = vi.fn();
-// `client` rather than the connection's own `close`: the code closes the MongoClient, because
-// closing the connection would make mongoose rebuild every model's indexes on the reconnect.
 const connection: {
   readyState: number;
   client?: { close: () => Promise<void> };
@@ -18,9 +16,6 @@ vi.mock("mongoose", () => ({ default: { connect, connection } }));
 
 type Db = typeof import("./db");
 
-// The shapes the driver really produces. A plain `new Error("ECONNREFUSED")` is not one of them, and
-// a fixture the system never builds cannot tell an outage from a misconfiguration — which is the
-// only distinction this file exists to check.
 function named(name: string, message: string): Error {
   const error = new Error(message);
   error.name = name;
@@ -75,10 +70,6 @@ describe("connectDB", () => {
     expect(thrown.message).toBe("connect ECONNREFUSED 127.0.0.1:27017");
   });
 
-  // The bug behind BP-362's second half: the rejected promise stayed in the cache, so it became the
-  // answer to every later request. One refused connection — at boot, or a restart of the database —
-  // left the instance permanently unable to reach a database that had already come back, and only
-  // a redeploy fixed it.
   it("retries after a failure instead of serving the rejection forever", async () => {
     vi.useFakeTimers();
     const { connectDB } = await freshModule();
@@ -87,8 +78,6 @@ describe("connectDB", () => {
     connect.mockRejectedValueOnce(refused()).mockResolvedValue({ ok: true });
 
     await expect(connectDB()).rejects.toThrow();
-    // Past the burst cooldown: within it the answer comes from the last failure by design, which is
-    // a different thing from the rejected promise being cached forever
     vi.advanceTimersByTime(1_500);
     await expect(connectDB()).resolves.toEqual({ ok: true });
 
@@ -102,7 +91,6 @@ describe("connectDB", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     connect.mockRejectedValue(refused());
 
-    // Spread across the cooldown so these are genuine attempts rather than the burst absorber
     for (let i = 0; i < 5; i++) {
       await connectDB().catch(() => {});
       vi.advanceTimersByTime(1_500);
@@ -147,8 +135,6 @@ describe("connectDB", () => {
 
     const thrown = await connectDB().catch((e) => e);
 
-    // Misconfiguration, not an outage: nothing will fix it by being retried, and answering 503
-    // would tell an operator to wait for a database that was never named
     expect(thrown).not.toBeInstanceOf(DatabaseUnavailableError);
     expect(thrown.message).toContain("MONGODB_URI");
     expect(connect).not.toHaveBeenCalled();
@@ -168,8 +154,6 @@ describe("connectDB — a wrong deployment is not an outage", () => {
 
   afterEach(() => vi.restoreAllMocks());
 
-  // Wrapping every rejection made a config typo present as a transient outage: the client retries
-  // every few seconds forever, and the one line naming the cause had scrolled away
   it("leaves a configuration fault as itself, so it answers 500 rather than 'retry'", async () => {
     const { connectDB, DatabaseUnavailableError } = await freshModule();
     const cause = misconfigured();
@@ -202,8 +186,6 @@ describe("connectDB — a wrong deployment is not an outage", () => {
     await expect(connectDB()).resolves.toEqual({ ok: true });
   });
 
-  // Latched, an operator who started reading the log after the first request saw an endless stream
-  // of 503s with no cause anywhere
   it("repeats the outage line once the throttle window has passed", async () => {
     vi.useFakeTimers();
     const { connectDB } = await freshModule();
@@ -226,8 +208,6 @@ describe("isDatabaseUnreachable", () => {
   it("recognises the failure a database that died mid-connection produces", async () => {
     const { isDatabaseUnreachable } = await freshModule();
 
-    // The common shape, and the one connectDB never sees: mongoose reports readyState 2 while it
-    // reconnects, so the cached connection is handed back and the *query* is what fails
     expect(isDatabaseUnreachable(bufferingTimedOut())).toBe(true);
   });
 
@@ -281,8 +261,6 @@ describe("connectDB — the state the tests could not see", () => {
     vi.restoreAllMocks();
   });
 
-  // Never once executed by a test before: readyState was pinned to 1 in every setup, so the branch
-  // that throws away a cached connection was dead code as far as the suite was concerned
   it("drops a cached connection the driver has given up on, and connects again", async () => {
     const { connectDB } = await freshModule();
     connect.mockResolvedValue({ ok: true });
@@ -308,8 +286,6 @@ describe("connectDB — the state the tests could not see", () => {
     );
   });
 
-  // Without the cooldown each request in a burst pays the connect timeout in full — the price of no
-  // longer serving a cached rejection, which is worth paying once and not eight times
   it("answers a burst from one attempt rather than attempting per request", async () => {
     vi.useFakeTimers();
     const { connectDB } = await freshModule();
@@ -348,8 +324,6 @@ describe("connectDB — the state the tests could not see", () => {
     expect(isDatabaseUnreachable(thrown)).toBe(true);
   });
 
-  // The flag used to be module-local while the cache it describes was on global, so one outage was
-  // announced twice and the next went unlogged from the instance that saw it
   it("keeps its outage bookkeeping with the connection, across module instances", async () => {
     const first = await freshModule();
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -359,8 +333,6 @@ describe("connectDB — the state the tests could not see", () => {
     await first.connectDB().catch(() => {});
     expect(error).toHaveBeenCalledTimes(1);
 
-    // A second instance of the module — instrumentation's graph is not a route's, and a dev reload
-    // makes a third — sharing the one cache on global
     const second = await freshModule();
     await second.connectDB().catch(() => {});
     expect(error).toHaveBeenCalledTimes(1);
@@ -376,9 +348,6 @@ describe("connectDB — the state the tests could not see", () => {
   });
 });
 
-// The client a reconnect leaves behind. `mongoose.connect` assigns its MongoClient to the
-// connection before awaiting `connect()`, and the next call overwrites that reference — so an
-// outage used to strand the old client with its topology monitor still polling.
 describe("connectDB — the client a reconnect abandons", () => {
   beforeEach(() => {
     process.env.MONGODB_URI = "mongodb://127.0.0.1:27017/test";
@@ -396,8 +365,6 @@ describe("connectDB — the client a reconnect abandons", () => {
   });
 
   it("closes the one it gave up on, once the replacement has been opened", async () => {
-    // Each connect brings a client of its own, so the assertion is about *which* client was closed
-    // and not merely that something was
     const clients: { close: ReturnType<typeof vi.fn> }[] = [];
     const order: string[] = [];
     connect.mockImplementation(async () => {
@@ -415,16 +382,10 @@ describe("connectDB — the client a reconnect abandons", () => {
     connection.readyState = 0;
     await connectDB();
 
-    // Closing before the reconnect would end the requests still holding that client, while nothing
-    // else is connected yet: readyState 0 is the driver marking the server unknown, and the client
-    // goes on answering for seconds after it
     expect(order).toEqual(["connect #0", "connect #1", "close #0"]);
     expect(clients[1].close).not.toHaveBeenCalled();
   });
 
-  // `openUri` returns the existing connection untouched when the monitor has meanwhile marked the
-  // server usable again. Closing then would close the live client — the one every later request
-  // depends on — over a reconnect that never happened.
   it("does not close the client the reconnect handed back", async () => {
     const { connectDB } = await freshModule();
     connect.mockImplementation(async () => {
@@ -459,8 +420,6 @@ describe("connectDB — the client a reconnect abandons", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  // The control: a healthy connection is handed back, and closing the client under it would end
-  // every request the process had left
   it("closes nothing while the connection is the one in use", async () => {
     const { connectDB } = await freshModule();
     connect.mockResolvedValue({ ok: true });
@@ -472,9 +431,6 @@ describe("connectDB — the client a reconnect abandons", () => {
     expect(close).not.toHaveBeenCalled();
   });
 
-  // A connect that never succeeded leaves a topology the driver has already closed — measured
-  // against a real mongod, five failed connects left five closed topologies and no socket. Closing
-  // there would release nothing and would race the cooldown-free configuration branch.
   it("closes nothing when a connect fails with no connection to replace", async () => {
     const { connectDB } = await freshModule();
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -485,8 +441,6 @@ describe("connectDB — the client a reconnect abandons", () => {
     expect(close).not.toHaveBeenCalled();
   });
 
-  // The close is chained onto the promise the caller awaits, so a close that throws would be
-  // handed to the request as the answer to `connectDB()` — the one thing it must never be
   it("reconnects even when the close fails, rather than answering with that failure", async () => {
     connect.mockImplementation(async () => {
       connection.client = {
@@ -519,7 +473,6 @@ describe("connectDB — the client a reconnect abandons", () => {
     expect(
       (globalThis as { mongooseCache?: { promise: unknown } }).mongooseCache?.promise
     ).toBeNull();
-    // And the next request tries again rather than being served the rejection
     vi.advanceTimersByTime(1_500);
     connect.mockResolvedValue({ ok: true });
     await expect(connectDB()).resolves.toEqual({ ok: true });
@@ -543,8 +496,6 @@ describe("connectDB — the client a reconnect abandons", () => {
 
     await expect(first).resolves.toEqual({ ok: true });
     await expect(second).resolves.toEqual({ ok: true });
-    // One reconnect between them: the second caller waits on the promise the first one put in the
-    // cache, rather than opening a client of its own
     expect(order).toEqual(["connect", "connect", "close"]);
   });
 });

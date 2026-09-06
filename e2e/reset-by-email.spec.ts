@@ -3,16 +3,6 @@ import { createHash, randomBytes } from "crypto";
 import mongoose from "mongoose";
 import { E2E_MONGODB_URI, MEMBER_ID, MEMBER_PASSWORD, MEMBER_USERNAME, seed } from "./seed";
 
-/**
- * BP-281, slice 3. The reset itself.
- *
- * CI has no mail server, so the link is planted in the database exactly as a delivered email would
- * leave it — a row holding the hash, and the raw token in hand. That is not a shortcut around the
- * thing under test: what has to be proven here is that a link works once, stops working after the
- * hour, and cannot be used twice. Delivery is the previous slice's problem and was driven against
- * a real SMTP server locally.
- */
-
 const HOUR = 60 * 60 * 1000;
 
 async function db() {
@@ -22,7 +12,6 @@ async function db() {
   return handle;
 }
 
-/** What the app would have stored when it emailed somebody a link. */
 async function plantLink(overrides: Record<string, unknown> = {}) {
   const token = `cpr_${randomBytes(32).toString("hex")}`;
   const handle = await db();
@@ -39,7 +28,6 @@ async function plantLink(overrides: Record<string, unknown> = {}) {
 
 async function setNewPassword(page: Page, token: string, password: string) {
   await page.goto(`/reset?token=${token}`);
-  // exact, because "New password" is a substring of "Confirm new password"
   await page.getByLabel("New password", { exact: true }).fill(password);
   await page.getByLabel("Confirm new password").fill(password);
   await page.getByRole("button", { name: "Set the password" }).click();
@@ -52,7 +40,6 @@ async function signIn(page: Page, username: string, password: string) {
   await page.getByRole("button", { name: "Sign In" }).click();
 }
 
-// seed() empties every collection, tokens and audit rows included
 test.beforeEach(async () => {
   await seed();
 });
@@ -80,8 +67,6 @@ test("the old password stops working once the link is used", async ({ page, requ
   await setNewPassword(page, token, "chosen-after-the-email");
   await expect(page.getByText("Your password is set")).toBeVisible();
 
-  // The status, not the words: the sign-in screen prints "Invalid credentials" for any failed
-  // response, so asserting the text would pass just as happily on a 500
   const refused = await request.post("/api/auth/login", {
     headers: { "Sec-Fetch-Site": "same-origin" },
     data: { username: MEMBER_USERNAME, password: MEMBER_PASSWORD },
@@ -90,8 +75,6 @@ test("the old password stops working once the link is used", async ({ page, requ
   expect(refused.status()).toBe(401);
 });
 
-// The headline criterion. A link that still works after it has been spent is a spare key left in
-// an inbox — and inboxes are exactly what gets read by somebody else later.
 test("a link works once and never again", async ({ page }) => {
   const token = await plantLink();
   await setNewPassword(page, token, "the-first-password");
@@ -100,7 +83,6 @@ test("a link works once and never again", async ({ page }) => {
   await setNewPassword(page, token, "a-second-password-attempt");
 
   await expect(page.getByText("This link has already been used. Ask for a new one.")).toBeVisible();
-  // And the password really is the first one, not the second
   await signIn(page, MEMBER_USERNAME, "the-first-password");
   await expect(page).toHaveURL(/\/projects/);
 });
@@ -121,8 +103,6 @@ test("a token nobody issued is refused", async ({ page }) => {
   await expect(page.getByText("This link is not valid. Ask for a new one.")).toBeVisible();
 });
 
-// Whoever knew the old password may be reading over the account's shoulder right now; that is
-// usually why somebody resets one
 test("the reset ends a session the account already had", async ({ browser }) => {
   const memberContext = await browser.newContext();
   const resetContext = await browser.newContext();
@@ -150,11 +130,7 @@ test("the sign-in screen offers the way in when a password is forgotten", async 
   await expect(page.getByRole("heading", { name: "Forgot your password?" })).toBeVisible();
 });
 
-// CI has no mail server, which is the state a self-hosted instance starts in. Somebody left
-// waiting for a message that was never coming is the failure this wording exists to prevent.
 test("an instance with no mail server says so instead of promising a link", async ({ page }) => {
-  // Stated rather than assumed: a developer with SMTP_HOST in their shell would otherwise see this
-  // fail for a reason that has nothing to do with the code
   test.skip(!!process.env.SMTP_HOST, "this asserts the unconfigured state");
 
   await page.goto("/forgot");
@@ -162,7 +138,6 @@ test("an instance with no mail server says so instead of promising a link", asyn
   await page.getByRole("button", { name: "Send the link" }).click();
 
   await expect(page.getByText(/cannot send email/)).toBeVisible();
-  // The heading only changes on success, so this is what proves nothing was promised
   await expect(page.getByRole("heading", { name: "Forgot your password?" })).toBeVisible();
 });
 
@@ -174,17 +149,10 @@ test("a mistyped confirmation is caught before anything is spent", async ({ page
   await page.getByRole("button", { name: "Set the password" }).click();
 
   await expect(page.getByText("The passwords do not match")).toBeVisible();
-  // And the link is still good afterwards, which is the part worth proving
   await setNewPassword(page, token, "the-password-that-sticks");
   await expect(page.getByText("Your password is set")).toBeVisible();
 });
 
-// Not about the reset, but it is what this slice tripped over and nothing else guards it. The
-// throttle records a failure with an aggregation pipeline, which mongoose 9 refuses without an
-// option nobody had passed — so every wrong password answered 500 and the counter stayed empty.
-// The unit tests use an in-memory stand-in for that model and cannot see it, and the sign-in
-// screen prints "Invalid credentials" for any failed response, so a 500 looked exactly like a
-// refusal on screen. Only the status tells them apart.
 test("a wrong password is refused, and the refusal is counted", async ({ request }) => {
   const wrong = () =>
     request.post("/api/auth/login", {

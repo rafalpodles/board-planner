@@ -5,11 +5,9 @@ import { Input } from "./Input";
 import { Button } from "./Button";
 
 interface SecretFieldProps {
-  /** The masked value from the API. The real one never reaches the client. */
   masked: string;
   label: string;
   placeholder?: string;
-  /** Return false to refuse: the field keeps what was typed */
   onReplace: (value: string) => boolean | void | Promise<boolean | void>;
   disabled?: boolean;
 }
@@ -29,7 +27,6 @@ export function SecretField({
     if (!value.trim()) return;
     setBusy(true);
     try {
-      // Clearing regardless threw away the URL whenever the caller refused
       if ((await onReplace(value.trim())) !== false) {
         setValue("");
         setReplacing(false);
@@ -51,7 +48,6 @@ export function SecretField({
         <Button
           variant="secondary"
           size="sm"
-          // One of these per row, and "Replace" alone is the same word on every one of them
           aria-label={`Replace ${label}`}
           disabled={disabled}
           onClick={() => setReplacing(true)}

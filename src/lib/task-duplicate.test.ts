@@ -2,8 +2,6 @@ import { describe, it, expect } from "vitest";
 import { duplicatePayload, undoneChecklist } from "./task-duplicate";
 import { ApiTask } from "@/types";
 
-// Everything a copy could carry is set, so a dropped field is a decision this test can see rather
-// than a null the fixture never had
 const task = {
   title: "Water the plants",
   description: "Every window sill",
@@ -38,9 +36,6 @@ describe("duplicatePayload", () => {
     ]);
   });
 
-  // BP-526: "Copy of " prepended with no clamp pushed a title past TASK_TITLE_MAX_LENGTH (200) for
-  // any original 193 characters or longer — a length the product had already accepted — and the
-  // server's own titleOrRefusal then refused the duplicate outright.
   it("clamps the copy's title to the cap instead of letting the prefix push it over", () => {
     const longTitle = "A".repeat(193);
     const payload = duplicatePayload({ ...task, title: longTitle } as unknown as ApiTask);
@@ -48,10 +43,6 @@ describe("duplicatePayload", () => {
     expect(payload.title).toBe(`Copy of ${longTitle}`.slice(0, 200));
   });
 
-  // A plain slice at the cap can land between the two halves of a surrogate pair. Placed so the
-  // emoji's high surrogate is the 200th character of "Copy of " + title, a naive slice keeps it
-  // alone — the clamp must drop it rather than hand back a string that serialises with a
-  // trailing U+FFFD.
   it("drops a trailing lone surrogate instead of a mangled character", () => {
     const longTitle = `${"A".repeat(191)}😀${"A".repeat(10)}`;
     const payload = duplicatePayload({ ...task, title: longTitle } as unknown as ApiTask);
@@ -59,7 +50,6 @@ describe("duplicatePayload", () => {
     expect(payload.title.charCodeAt(payload.title.length - 1)).toBeLessThan(0xd800);
   });
 
-  // The three the product deliberately leaves behind, plus the status the server picks itself
   it("names neither the status, the assignee, the sprint nor the agent", () => {
     const payload = duplicatePayload({
       ...task,
@@ -75,8 +65,6 @@ describe("duplicatePayload", () => {
 });
 
 describe("undoneChecklist", () => {
-  // The ids go too: checklistOrRefusal keeps one when it is sent, which left a copy's items
-  // carrying the original task's subdocument ids
   it("takes the items' own ids with the ticks", () => {
     const stored = [{ _id: "c1", text: "One", done: true }];
     expect(undoneChecklist(stored)).toEqual([{ text: "One", done: false }]);

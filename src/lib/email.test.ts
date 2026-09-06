@@ -20,8 +20,6 @@ beforeEach(() => {
 });
 
 describe("the two ways to send", () => {
-  // Notifications are fire-and-forget: a mail server having a bad afternoon must not take a task
-  // update down with it. This is why the failure is invisible, and why the test-send exists.
   it("sendEmail swallows the failure and answers false", async () => {
     sendMail.mockRejectedValueOnce(new Error("535 authentication failed"));
 
@@ -39,8 +37,6 @@ describe("the two ways to send", () => {
     await expect(sendEmailOrThrow(MESSAGE)).resolves.toBeUndefined();
 
     expect(sendMail).toHaveBeenCalledTimes(2);
-    // The payload, not just the call count: sending `{from: undefined, to: undefined}` twice would
-    // satisfy a count, and the recipient is the one field that must never be lost
     expect(sendMail.mock.calls[0][0]).toEqual(sendMail.mock.calls[1][0]);
     expect(sendMail).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -71,9 +67,6 @@ describe("addresses", () => {
     }
   });
 
-  // These deliver to somebody else's mailbox while being a different string to the unique index,
-  // so uniqueness would let one person quietly claim another's inbox — and, from slice 3, receive
-  // a genuine reset link addressed to them
   it("rejects the forms that reach one mailbox under two names", () => {
     for (const squat of [
       "<victim@corp.com>",
@@ -93,8 +86,6 @@ describe("addresses", () => {
       "rafal+board@example.co.uk",
       "r.podles@spyro-soft.com",
       "rafal_1@sub.domain.example.org",
-      // Ordinary on the company network this product is self-hosted on. Demanding a dot would lock
-      // those deployments out of their own email.
       "admin@intranet",
       "user@localhost",
     ]) {

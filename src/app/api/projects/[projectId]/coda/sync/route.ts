@@ -60,13 +60,9 @@ export const POST = withProjectOwner(async (_request, { params }) => {
     .lean();
 
   const columnLabels = new Map(getProjectColumns(project).map((c) => [c.id, c.label]));
-  // Difficulty is a project field since CP-213; the Coda table still has a column
-  // for it, so it is read from the field rather than left blank
   const difficultyField = (project.customFields || []).find(
     (f: { name: string }) => f.name.toLowerCase() === "difficulty"
   );
-  // Mongoose hands customFieldValues back as a Map; a lean or raw read gives a
-  // plain object, and both shapes reach this route depending on the caller
   const fieldValue = (values: unknown, id: string): string => {
     if (values instanceof Map) return String(values.get(id) ?? "");
     const record = values as Record<string, unknown> | undefined;
@@ -100,7 +96,6 @@ export const POST = withProjectOwner(async (_request, { params }) => {
       synced: true,
       tasksPushed: result.pushed,
       requests: result.requests,
-      // Coda queues writes; a false here means they were accepted but not yet applied
       allApplied: result.allApplied,
     });
   } catch (err) {

@@ -75,8 +75,6 @@ describe("useApi dead session", () => {
   });
 });
 
-// The one code path that can clear a live session, and until now nothing pinned it to 401 alone:
-// widening it to `|| res.status >= 500` left all 2403 tests green, which is BP-362 re-shipped
 describe("useApi during an outage", () => {
   const outage = () =>
     response(503, "Service Unavailable", {
@@ -115,8 +113,6 @@ describe("useApi during an outage", () => {
     expect(onUnauthorized).not.toHaveBeenCalled();
   });
 
-  // Somebody already signed in is never re-asked who they are, so this is the only way the shell
-  // learns the instance is in trouble instead of each screen reporting its own failure
   it("reports every status to the auth context, so the shell can say what is happening", async () => {
     vi.mocked(fetch).mockResolvedValue(outage());
     const { result } = renderHook(() => useApi());

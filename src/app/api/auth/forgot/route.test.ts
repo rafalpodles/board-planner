@@ -62,8 +62,6 @@ describe("POST /api/auth/forgot", () => {
     );
   });
 
-  // A sign-in screen that refuses to say whether an account exists is pointless if this one will.
-  // Every outcome below has to be indistinguishable from the one above.
   it.each([
     ["no such account", null],
     ["an account with no address", { _id: "u1", username: "rafal", email: "" }],
@@ -94,8 +92,6 @@ describe("POST /api/auth/forgot", () => {
     );
   });
 
-  // Both lookups run every time, in parallel: doing the second only on a miss makes the miss path
-  // slower than the hit path, which is the enumeration oracle read backwards
   it("looks for the address and the username, always, and normalises both", async () => {
     await POST(post("  Rafal@Example.COM "));
 
@@ -108,8 +104,6 @@ describe("POST /api/auth/forgot", () => {
     );
   });
 
-  // Said plainly, and not a leak: it is a fact about the deployment, not about any account. The
-  // alternative is somebody waiting for a message that was never coming.
   it("says so when the instance cannot send email at all", async () => {
     isEmailConfigured.mockReturnValue(false);
 
@@ -131,8 +125,6 @@ describe("POST /api/auth/forgot", () => {
     expect(sendEmail).not.toHaveBeenCalled();
   });
 
-  // Mail costs money and reputation, and the recipient is not chosen by the sender — one caller
-  // must not be able to fill somebody's inbox
   it("stops answering a source that keeps asking", async () => {
     for (let i = 0; i < 10; i++) {
       expect((await POST(post())).status).toBe(200);
@@ -160,12 +152,6 @@ describe("POST /api/auth/forgot", () => {
     expect((await POST(post(42))).status).toBe(400);
   });
 
-  /**
-   * BP-322. The throttle moved above the body read, and nothing said so: reverting the reorder left
-   * every test on this route and every end-to-end test green. An oversized body is what tells the
-   * two orders apart — 429 means the throttle ran first, 413 means the server read 70 KB from a
-   * caller it had already decided to refuse.
-   */
   describe("the order the checks run in", () => {
     const oversized = () =>
       new Request("http://x/api/auth/forgot", {

@@ -68,8 +68,6 @@ describe("decide", () => {
     expect(decide(p, "owner", "access", P)).toBe(true);
   });
 
-  // The regression the spec is built around: applyTokenScope downgrades an instance admin to
-  // member, and instance admins hold no grant rows, so a naive lookup strips all their access.
   it("keeps an instance admin's scoped token working inside its scope", () => {
     const p = principal({ tokenScoped: true, tokenScope: [P], instanceAdminBeforeScope: true });
     expect(decide(p, null, "access", P)).toBe(true);
@@ -202,16 +200,11 @@ describe("accessibleProjectIds", () => {
   });
 });
 
-// The mocks below are filter-aware on purpose. An earlier version returned a fixed list and
-// ignored the query, which meant the tests passed with `object`, `objectType` or `role` deleted
-// from it — including the mutation that treats every recipient as an instance admin and turns the
-// whole access filter into a no-op. Found by an independent review of this branch.
 describe("recipientsWithAccess", () => {
   const MEMBER = "507f1f77bcf86cd799439011";
   const REMOVED = "507f1f77bcf86cd799439012";
   const ADMIN = "507f1f77bcf86cd799439013";
 
-  /** subject id -> the grant rows that exist for them, whatever project or object type. */
   let grantRows: { subject: string; relation: string; objectType: string; object: string }[] = [];
   let roles: Record<string, string> = {};
 
@@ -263,9 +256,6 @@ describe("recipientsWithAccess", () => {
     expect(await recipientsWithAccess([MEMBER, REMOVED], P)).toEqual([MEMBER]);
   });
 
-  // An instance admin reaches every board without a Grant row ever being written, so a filter
-  // written as "has a grant" would silently stop notifying them — a regression wearing the
-  // costume of a security fix.
   it("keeps an instance admin who holds no grant at all", async () => {
     expect(await recipientsWithAccess([ADMIN], P)).toEqual([ADMIN]);
   });
@@ -275,10 +265,6 @@ describe("recipientsWithAccess", () => {
     expect(await recipientsWithAccess([MEMBER], P)).toEqual([]);
   });
 
-  /**
-   * BP-400. Assignment asks the same question delivery has asked since BP-328, so that a task
-   * cannot be handed to somebody who will never be told about it and cannot open it.
-   */
   describe("canBeAssigned", () => {
     it("accepts somebody who holds a grant on this board", async () => {
       grant(MEMBER);
@@ -294,21 +280,10 @@ describe("recipientsWithAccess", () => {
       expect(await canBeAssigned(MEMBER, P)).toBe(false);
     });
 
-    /**
-     * The acceptance case, and the one a naive "must hold a grant" rule breaks: an instance admin
-     * reaches every board from their role and never has a row written for them. On an instance with
-     * one admin, refusing this takes the only person who can see everything out of every picker.
-     */
     it("accepts an instance admin who holds no grant at all", async () => {
       expect(await canBeAssigned(ADMIN, P)).toBe(true);
     });
 
-    /**
-     * `pm` is stored as an ordinary member with no grants, and the ticket asked whether it needed a
-     * carve-out. It does not: nothing in the codebase ever assigns a task TO the PM account — it
-     * appears only as the actor of a turn — so refusing it costs nothing that works today. This
-     * pins that decision, and fails the moment somebody special-cases a username here.
-     */
     it("refuses the pm service account like any other member without a grant", async () => {
       const PM = "507f1f77bcf86cd799439014";
       roles[PM] = "member";

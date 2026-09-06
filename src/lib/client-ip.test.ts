@@ -15,9 +15,6 @@ afterEach(() => {
   process.env = { ...ORIGINAL };
 });
 
-// BP-318: the header was read unconditionally, so on the deployment the README documents — compose
-// publishing the port directly — every request named its own throttle bucket and the only
-// brute-force control counted to one and reset.
 describe("getClientIp with no proxy configured", () => {
   it("ignores the header entirely, however plausible it looks", () => {
     expect(getClientIp(request({ "x-forwarded-for": "203.0.113.9" }))).toBeNull();
@@ -56,8 +53,6 @@ describe("getClientIp behind the configured number of proxies", () => {
     expect(ip).toBe("203.0.113.9");
   });
 
-  // Fewer entries than configured means the request did not come through those proxies, so nothing
-  // in the header is the address the operator promised — taking what is there is trusting the caller
   it("refuses a header with fewer entries than the configured hops", () => {
     process.env.TRUSTED_PROXY_HOPS = "2";
 
@@ -91,8 +86,6 @@ describe("trustedProxyHops", () => {
     expect(trustedProxyHops()).toBe(0);
   });
 
-  // Silently reading it as 0 would leave an operator who meant to be behind a proxy with a throttle
-  // keyed on nothing and no sign of it
   it.each(["one", "-1", "1.5", "true", "0x1", "1e2", "٣"])("refuses to start on %o", (value) => {
     process.env.TRUSTED_PROXY_HOPS = value;
 

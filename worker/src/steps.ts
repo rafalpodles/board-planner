@@ -13,16 +13,12 @@ export type StepOutcome =
   | { kind: "error"; message: string };
 
 export interface RunState {
-  /** Whether any step has committed yet — an exit after one must not destroy the worktree. */
   committed: boolean;
-  /** Every sha this run created, oldest first. The only thing that commits here is commitAll. */
   commits: string[];
-  /** What has already reached the remote, so an interrupted run can say where the work is. */
   pushed: boolean;
   prUrl: string;
   merged: boolean;
   summary: string;
-  /** A gate's context takes one result and a composed agent produces several; the last is the honest one. */
   lastResult: ExecutionResult;
 }
 
@@ -38,13 +34,10 @@ export interface StepContext {
   signal?: AbortSignal;
   onEvent?: (event: StreamEvent) => void;
   baseSha: string;
-  /** See Worktree.configBaseline — what the config said before the agent ran (BP-346). */
   configBaseline?: readonly string[] | null;
   runner: Runner;
 }
 
-// A push or a merge that throws must not reach the pipeline's outer catch: that requeues and
-// destroys the worktree, and after a failed push the worktree is the only copy of the work.
 async function runWorkerAction(
   entry: SnapshotEntry,
   ctx: StepContext,
@@ -89,8 +82,6 @@ async function deliver(
       return { kind: "ok" };
 
     case "merge":
-      // agentProblems refuses this shape on save, but a snapshot taken before that rule existed
-      // still has to fail loudly rather than merge nothing and report a delivery
       if (!ctx.state.prUrl) {
         return {
           kind: "error",
@@ -109,7 +100,6 @@ async function deliver(
   }
 }
 
-/** One position in the sequence: a call to the model, or something the worker does itself. */
 export async function runStep(
   entry: SnapshotEntry,
   ctx: StepContext,
@@ -141,17 +131,12 @@ export async function runStep(
   ctx.state.summary = outcome.result.summary || ctx.state.summary;
   ctx.state.lastResult = outcome.result;
 
-  // Only a step that could write has anything to commit. A commit that fails is the step's failure:
-  // letting it throw would reach the pipeline's outer catch, which destroys the worktree holding the
-  // only copy of the work.
   if (entry.capability === "edit") {
     try {
       const sha = await ctx.commit(
         `${ctx.task.taskKey}: ${entry.name.toLowerCase()}`,
       );
       if (sha) ctx.state.commits.push(sha);
-      // Sticky, not overwritten: a later edit step that finds nothing to commit must not erase what
-      // an earlier one already did.
       ctx.state.committed = ctx.state.committed || sha !== "";
     } catch (error) {
       return { kind: "error", message: String(error) };

@@ -13,7 +13,6 @@ function DefaultBadge() {
   );
 }
 
-/** The right-hand line on a row: what this block is set to, in the words of its own form. */
 export function blockSummary(block: ApiAgentBlock): string {
   if (block.kind === "step") {
     if (block.deterministic) return "no model";

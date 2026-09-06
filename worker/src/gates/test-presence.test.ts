@@ -129,9 +129,6 @@ describe("testPresenceGate", () => {
     expect(result.ok).toBe(true);
   });
 
-  // BP-333. `.toml` was in the no-test-expected list and the exception list named only package.json
-  // and .github/, so a change touching nothing but a build backend was waved through as needing no
-  // test — in exactly the repositories none of these gates can otherwise check.
   it.each([
     "pyproject.toml",
     "Cargo.toml",
@@ -146,8 +143,6 @@ describe("testPresenceGate", () => {
     expect(result.reason).toMatch(/no test file/);
   });
 
-  // The one place this gate and protected-paths deliberately disagree: a resolver output is not a
-  // decision somebody has to write a test for, while the manifest beside it is
   it.each(["poetry.lock", "Gemfile.lock", "Cargo.lock", "go.sum", "pnpm-lock.yaml"])(
     "still accepts a %s bump with no test",
     async (file) => {
@@ -155,7 +150,6 @@ describe("testPresenceGate", () => {
     }
   );
 
-  // Documentation and assets are the reason the exemption exists at all — it has to keep working
   it("still accepts a docs-only change", async () => {
     const result = await testPresenceGate().run(
       context({ changedFiles: ["README.md", "docs/guide.mdx", "public/logo.svg"], patch: "" })

@@ -67,9 +67,6 @@ beforeEach(() => {
   sprintFind.mockReturnValue({ select: () => ({ lean: () => Promise.resolve([]) }) });
 });
 
-// null from accessibleProjectIds means "no restriction", not "no projects". Collapsing this to
-// an unconditional {} shows every project to every member, and `?? []` hides every project from
-// an instance admin — both are one-line mistakes the contract invites.
 describe("GET /api/projects", () => {
   it("queries without a filter when the grant layer reports no restriction", async () => {
     accessibleProjectIds.mockResolvedValue(null);
@@ -87,8 +84,6 @@ describe("GET /api/projects", () => {
     expect(projectFind).toHaveBeenCalledWith({ _id: { $in: ["p1"] } });
   });
 
-  // canAdmin gates every project-admin section of the settings page, so it has to be the grant
-  // layer's answer and not a constant
   it("reports canAdmin from the grant layer, per project", async () => {
     accessibleProjectIds.mockResolvedValue(["p1"]);
     check.mockResolvedValue(true);
@@ -100,9 +95,6 @@ describe("GET /api/projects", () => {
   });
 });
 
-// Nothing authorises from project.createdBy — it is informational. The creator's power over the
-// new board comes from the owner grant, so a board created without one is a board nobody but an
-// instance admin can administer.
 describe("POST /api/projects", () => {
   it("grants the creator ownership of the board it just created", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
@@ -127,7 +119,6 @@ describe("POST /api/projects", () => {
     expect(projectCreate.mock.calls[0][0].createdBy).toBe(ADMIN._id);
   });
 
-  // Swallowing this leaves a board with no owner at all — worse than no board
   it("deletes the project and propagates when the owner grant cannot be written", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
     grantCreate.mockRejectedValue(new Error("duplicate key"));
@@ -138,11 +129,6 @@ describe("POST /api/projects", () => {
   });
 });
 
-/**
- * The key is interpolated into a task URL and from there into Slack and Discord message markup,
- * where `>` closes a link and `#` opens a heading. Escaping at each sink was tried three times and
- * missed something every time; this asserts the value never gets that far (BP-401).
- */
 describe("the key a project may be given", () => {
   it.each([
     ["a Slack link closer", "A><HTTPS://PHISH.EXAMPLE|RESET YOUR PASSWORD"],
@@ -159,7 +145,6 @@ describe("the key a project may be given", () => {
     expect(projectCreate).not.toHaveBeenCalled();
   });
 
-  // Without this the refusals above would pass just as well on a route that refuses everything
   it("accepts an ordinary key, and stores what it will be stored as", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
 

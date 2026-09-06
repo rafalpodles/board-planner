@@ -19,7 +19,6 @@ interface Run {
   items: { hit: SearchHit; index: number }[];
 }
 
-/** Indices stay flat across runs, so ↑↓ walk the whole list without knowing about groups */
 function runsOf(hits: SearchHit[], currentProjectRef?: string): Run[] {
   const numbered = hits.map((hit, index) => ({ hit, index }));
   if (!currentProjectRef) return [{ group: "all", label: null, items: numbered }];
@@ -51,7 +50,6 @@ function useSearchShortcut(onOpen: () => void, onClose: () => void, open: boolea
         e.key === "/" && !e.metaKey && !e.ctrlKey && !e.altKey && !isTypingTarget(e.target);
       if (!cmdK && !slash) return;
       e.preventDefault();
-      // On the way in only: the open palette is a layer itself, and ⌘K has to keep closing it
       if (!open && openLayerCount() > 0) return;
       if (open && cmdK) onClose();
       else if (!open) onOpen();
@@ -119,7 +117,6 @@ export function SearchLayer({ open, onOpen, onClose }: SearchLayerProps) {
     }
   }
 
-  // z-[60], not z-50: the PM FAB is z-50 and would float over the mobile sheet
   return (
     <div
       className="fixed inset-0 z-[60] flex items-start justify-center bg-black/60 sm:pt-[12vh]"
@@ -135,8 +132,6 @@ export function SearchLayer({ open, onOpen, onClose }: SearchLayerProps) {
         tabIndex={-1}
         className="flex h-dvh w-full flex-col overflow-hidden bg-bg-card sm:h-auto sm:max-h-[70vh] sm:w-[640px] sm:rounded-xl sm:border sm:border-border sm:shadow-2xl"
       >
-        {/* No focus-ring class on the input: it is focused from the moment the layer
-            opens and the caret marks it, where a 2px box would read as a validation error */}
         <div className="flex shrink-0 items-center gap-3 border-b border-border px-4">
           <svg
             className="h-5 w-5 shrink-0 text-text-muted"

@@ -31,8 +31,6 @@ export function useProjectsProvider(): ProjectsState {
   const [isLoading, setIsLoading] = useState(true);
   const appliedSeq = useRef(0);
 
-  // A read carries the order of the moment it was answered, so one overtaken by a later read or by
-  // a reorder applies nothing rather than undoing it (BP-551)
   const reload = useCallback(async () => {
     const seq = ++appliedSeq.current;
     try {
@@ -40,7 +38,6 @@ export function useProjectsProvider(): ProjectsState {
       if (seq !== appliedSeq.current) return;
       setProjects(list);
     } catch {
-      // The shell must still render if this fails; pages surface their own errors
       if (seq !== appliedSeq.current) return;
       setProjects([]);
     } finally {
@@ -57,8 +54,6 @@ export function useProjectsProvider(): ProjectsState {
     reload();
   }, [user, reload]);
 
-  // Applied locally first so the row lands where it was dropped; a failed write
-  // snaps back rather than leaving the sidebar disagreeing with the database
   const reorder = useCallback(
     async (orderedIds: string[]) => {
       const previous = projects;
@@ -73,8 +68,6 @@ export function useProjectsProvider(): ProjectsState {
       try {
         await api.put("/api/projects/reorder", { order: orderedIds });
       } catch {
-        // `previous` is the order this drop replaced, so restoring it over a later drop would put
-        // back something older still
         if (seq !== appliedSeq.current) return;
         setProjects(previous);
       }

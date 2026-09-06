@@ -7,8 +7,6 @@ describe("projectForUpload", () => {
   });
 
   it("is null when nothing was recorded, so the file cannot be read", () => {
-    // Legacy files are stamped by scripts/migrate-upload-projects.ts, never resolved per request:
-    // the search that recovers an owner is attacker-controlled, so it belongs offline
     expect(projectForUpload({ metadata: {} })).toBeNull();
     expect(projectForUpload({})).toBeNull();
   });

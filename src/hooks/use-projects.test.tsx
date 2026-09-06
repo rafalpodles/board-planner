@@ -9,8 +9,6 @@ const { api, auth } = vi.hoisted(() => ({
   auth: { user: null as { username: string } | null },
 }));
 
-// useApi must hand back a stable object: use-projects depends on it, and a fresh
-// identity per render would re-run the fetch effect forever
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/hooks/use-auth", () => ({ useAuth: () => auth }));
 
@@ -66,7 +64,6 @@ describe("useProjects", () => {
     expect(screen.getByTestId("count").textContent).toBe("0");
   });
 
-  // A rejected request must not leave the shell stuck rendering a spinner forever
   it("clears loading when the request fails", async () => {
     api.get.mockRejectedValue(new Error("boom"));
 
@@ -91,7 +88,6 @@ describe("useProjects", () => {
     expect(api.get).toHaveBeenCalledTimes(2);
   });
 
-  // Every page now assumes the shell mounted the provider, so the failure has to be loud
   it("throws when used outside the provider", () => {
     const silence = vi.spyOn(console, "error").mockImplementation(() => {});
     expect(() => render(<Probe />)).toThrow(/must be used within ProjectsProvider/);
@@ -99,8 +95,6 @@ describe("useProjects", () => {
   });
 });
 
-// The sidebar must show the row where it was dropped, not where it was a
-// round-trip ago — and must not keep a position the server refused
 describe("useProjects reorder", () => {
   const three = [{ _id: "a" }, { _id: "b" }, { _id: "c" }];
 
@@ -141,7 +135,6 @@ describe("useProjects reorder", () => {
     await waitFor(() => expect(screen.getByTestId("order").textContent).toBe("a,b,c"));
   });
 
-  // A truncated or padded list would drop or duplicate a project on screen
   it("refuses an order that is not a permutation of what it holds", async () => {
     api.get.mockResolvedValue(three);
     renderProvider(["a", "b"]);
@@ -153,12 +146,9 @@ describe("useProjects reorder", () => {
   });
 });
 
-// BP-551: what a request applies depends on what happened while it was in flight, not on when it
-// happens to come back
 describe("useProjects overtaken requests", () => {
   const three = [{ _id: "a" }, { _id: "b" }, { _id: "c" }];
 
-  /** A `get` that is answered only when the returned callback is called. */
   function heldGet() {
     let deliver: (value: unknown) => void = () => {};
     api.get.mockReturnValueOnce(new Promise((resolve) => (deliver = resolve)));
@@ -192,7 +182,6 @@ describe("useProjects overtaken requests", () => {
     await act(async () => screen.getByText("reorder").click());
     expect(screen.getByTestId("order").textContent).toBe("c,a,b");
 
-    // The order the server held when that read was answered, arriving after the drop
     await act(async () => deliverStale(three));
     expect(screen.getByTestId("order").textContent).toBe("c,a,b");
   });
@@ -221,9 +210,6 @@ describe("useProjects overtaken requests", () => {
     expect(screen.getByTestId("order").textContent).toBe("b,c,a");
   });
 
-  // The counter is bumped by the reorder, so a read issued AFTER one must still win. Without this
-  // a guard that simply stopped reading once a drag had happened would pass every test above,
-  // and the sidebar would stop showing renames and new boards for the rest of the session
   it("applies a read issued after a reorder", async () => {
     api.get.mockResolvedValue(three);
     renderProvider(["c", "a", "b"]);
@@ -237,8 +223,6 @@ describe("useProjects overtaken requests", () => {
     expect(screen.getByTestId("order").textContent).toBe("b,c,a");
   });
 
-  // The failure path needs the guard as much as the success path: a stale read that rejects —
-  // aborted on navigation, say — would otherwise blank a sidebar a later read had already filled
   it("does not blank the list when an overtaken read fails", async () => {
     api.get.mockResolvedValue(three);
     renderProvider();
@@ -255,8 +239,6 @@ describe("useProjects overtaken requests", () => {
     expect(screen.getByTestId("count").textContent).toBe("3");
   });
 
-  // Nothing can be reordered before the first read lands, and letting it through would advance the
-  // counter with no request behind it — leaving that read discarded and the shell loading for ever
   it("refuses to reorder a list it has not loaded yet", async () => {
     const deliver = heldGet();
 

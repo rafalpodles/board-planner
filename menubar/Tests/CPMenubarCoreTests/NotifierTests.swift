@@ -32,7 +32,6 @@ import Testing
     #expect(notification(for: .quota(Quota(status: "rejected")))?.title == "Usage limit reached")
 }
 
-// Four notifications, and only four. Anything else and the operator turns them off.
 @Test func staysSilentOnAWarningThatIsNotYetALimit() {
     #expect(notification(for: .quota(Quota(status: "allowed_warning", utilization: 0.9))) == nil)
 }
@@ -54,8 +53,6 @@ import Testing
     #expect(notification(for: .outcome(Outcome(outcome: "failed", taskKey: "CP-1"))) == nil)
 }
 
-// With autoMerge off, "delivered" is what a successful run ends as — and the operator has to act
-// on it, so it is exactly the kind of thing worth interrupting them for.
 @Test func notifiesWhenAPullRequestIsWaiting() {
     let request = notification(
         for: .outcome(Outcome(outcome: "delivered", taskKey: "CP-3", detail: "https://x/pull/7")))

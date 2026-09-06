@@ -29,8 +29,6 @@ const request = (body: unknown) =>
 
 describe("PATCH /api/notifications/read", () => {
   beforeEach(() => {
-    // Braced, not an arrow returning the reset: vitest treats a returned function as teardown and
-    // would call the mock after every test.
     getAuthUser.mockReset();
     findOneAndUpdate.mockReset();
     updateMany.mockReset();
@@ -61,28 +59,20 @@ describe("PATCH /api/notifications/read", () => {
     expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 
-  // BP-433. `id` reached the query uncast: an object picked an arbitrary row of the caller's own,
-  // and a string that is not an id threw a CastError out of the route as a 500.
   it.each([
     ["an operator object", { $ne: null }],
     ["a string that is not an id", "nope"],
     ["a number", 7],
-    // Falsy, and therefore the pair that a `if (id)` branch check would wave through into a
-    // mark-all — silently reading every row the caller has instead of the one they named.
     ["an empty string", ""],
     ["null", null],
   ])("refuses %s rather than querying with it", async (_label, id) => {
     const res = await PATCH(request({ id }), noParams);
 
     expect(res.status).toBe(400);
-    // The refusal has to happen before the query, not instead of its result: a route that queried
-    // and then answered 400 would still have written.
     expect(findOneAndUpdate).not.toHaveBeenCalled();
     expect(updateMany).not.toHaveBeenCalled();
   });
 
-  // The control for the refusals above: without it, "nothing was queried" equally describes a
-  // route that refuses everything, and the mark-all branch is one edit away from being one.
   it("still reaches the mark-all branch for a body carrying no id at all", async () => {
     await PATCH(request({ somethingElse: true }), noParams);
 

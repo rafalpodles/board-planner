@@ -17,11 +17,6 @@ function MagnifierIcon() {
   );
 }
 
-/**
- * The phone's way into search. A page rather than the palette: the overlay covers the whole
- * screen at this width anyway, so it reads as a page that lost its back button — Notifications
- * and My Tasks are the shape a person expects here.
- */
 export function SearchPageLink() {
   return (
     <Link href="/search" aria-label="Search tasks and projects" className={TRIGGER_CLASS}>

@@ -17,7 +17,6 @@ export const POST = withProjectOwner(async (request, { params }) => {
     return NextResponse.json({ error: `No OAuth connection named "${name}"` }, { status: 404 });
   }
 
-  // Keep the client registration and endpoints; drop only the tokens
   server.oauth.accessToken = "";
   server.oauth.refreshToken = "";
   server.oauth.expiresAt = null;

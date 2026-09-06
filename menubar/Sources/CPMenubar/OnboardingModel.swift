@@ -2,17 +2,12 @@ import AppKit
 import Foundation
 import CPMenubarCore
 
-// One object per step of the state machine, so re-entering a step is calling its function again
-// rather than replaying a sequence of side effects that half happened. Everything it decides is
-// persisted before the side effect, never after.
 @Observable
 @MainActor
 final class OnboardingModel {
     private(set) var state: OnboardingState
     private(set) var preflight: PreflightReport?
     private(set) var repositoryProblems: [RepositoryProblem] = []
-    /// The account the worker will push and open pull requests as, and the accounts it could use
-    /// instead. Empty until preflight has run, which is also when gh is first asked.
     private(set) var githubAccount = ""
     private(set) var githubAccounts: [PreflightReport.GithubAccount] = []
     private(set) var busy = false
@@ -34,8 +29,6 @@ final class OnboardingModel {
 
     private func persist() { Onboarding.save(state) }
 
-    // Nothing else is offered until this passes: a machine that cannot do the work should never
-    // reach the fleet console looking healthy.
     func runPreflight(checkout: String) {
         busy = true
         message = ""
@@ -58,10 +51,6 @@ final class OnboardingModel {
         }
     }
 
-    // `gh auth switch` is global machine state — any terminal on this box can flip it mid-run — so
-    // the choice is written down and the worker resolves that login's token by name. Re-running
-    // preflight is not a formality here: it is what turns "pinned to an account gh does not have"
-    // into a red row now instead of a 403 half an hour into a run.
     func pinGithubAccount(_ login: String) {
         do {
             try GithubAccountFile(path: GithubAccountFile.path(in: stateDirectory)).write(login)
@@ -78,8 +67,6 @@ final class OnboardingModel {
         (try? GithubAccountFile(path: GithubAccountFile.path(in: stateDirectory)).read()) ?? ""
     }
 
-    // Refused here rather than after enrolment, where the same pick surfaces as a string in the
-    // fleet console once it is already too late to be useful
     func chooseFolder(_ path: String) {
         repositoryProblems = RepositoryCheck.problems(at: path, RepositoryCheck.inspect(path))
         guard repositoryProblems.isEmpty else { return }
@@ -126,8 +113,6 @@ final class OnboardingModel {
                 case .pending:
                     continue
                 case .finished:
-                    // Refused, expired, or already collected — the folder stays chosen, so trying
-                    // again costs one click rather than the whole flow
                     state = Onboarding.approvalAbandoned(state)
                     persist()
                     message = "That enrolment ended without a credential. Try connecting again."
@@ -142,8 +127,6 @@ final class OnboardingModel {
         }
     }
 
-    // The credential goes where registration would have put it, so a worker enrolled by the app is
-    // indistinguishable from one enrolled by hand — which is what keeps the launchd path alive.
     private func adopt(
         workerID: String, credential: String, heartbeatMs: Int,
         repositoryURL: String, projectKey: String
@@ -158,12 +141,7 @@ final class OnboardingModel {
         state = Onboarding.approved(state, workerID: workerID)
         persist()
 
-        // Registration handed back a credential before anything was cloned, so a worker exists on
-        // the board that cannot yet do a thing. It is not started until the clone is there and a
-        // push has been shown to work — there is never one that looks ready and is not.
         message = "Cloning \(repositoryURL)…"
-        // The probe pushes as the account the worker will push as, not as whichever one gh has
-        // active — otherwise it proves access this machine will never use.
         switch WorkerProcess.cloneStep(
             toolPath: state.toolPath,
             githubToken: WorkerProcess.githubToken(
@@ -177,13 +155,10 @@ final class OnboardingModel {
             grantLocally(path)
             startWorker()
         case .failed(let reason):
-            // The credential is kept: the enrolment succeeded, only the clone did not, and redoing
-            // the approval would spend a second one for nothing.
             message = reason
         }
     }
 
-    // repos.json is what grants this directory locally, and it stays the only thing that can
     private func grantLocally(_ path: String) {
         do {
             let file = ReposFile(path: ReposFile.path(in: stateDirectory))
@@ -206,8 +181,6 @@ final class OnboardingModel {
         }
     }
 
-    /// Run when the app comes up, so an already-onboarded machine has a worker rather than a panel
-    /// retrying a socket forever.
     func resumeWorker(listening: () async -> Bool = OnboardingModel.somethingIsListening) async {
         guard
             WorkerResume.shouldStart(
@@ -225,14 +198,6 @@ final class OnboardingModel {
         return (try? await client.status()) != nil
     }
 
-
-    // Pointing this machine at a different board. Not startAgain(): the checkouts folder and the
-    // resolved tool paths describe the machine, and asking for them again is asking the operator to
-    // redo a setup that is still true.
-    //
-    // The worker is stopped first and its credential dropped, in that order. A credential minted by
-    // one board is refused by every other, so leaving either behind means a process still polling
-    // the old server, or a restart presenting a credential the new one will not take.
     func changeBoard() {
         poller?.cancel()
         RunningWorker.shared.stop()

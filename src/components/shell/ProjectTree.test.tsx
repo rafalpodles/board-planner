@@ -60,7 +60,6 @@ describe("ProjectTree", () => {
     renderTree();
     expect(screen.getByText("Board")).toBeTruthy();
     expect(screen.getByText("Dashboard")).toBeTruthy();
-    // Only one sub-nav is open, so each entry appears exactly once
     expect(screen.getAllByText("Board").length).toBe(1);
   });
 
@@ -88,7 +87,6 @@ describe("ProjectTree", () => {
     expect(container.querySelector(".bg-success")).toBeNull();
   });
 
-  // The activity dot and the active-sprint dot looked alike; only the former went
   it("still marks a project with an active sprint", () => {
     const { container } = renderTree({
       projects: [project({ _id: "1", key: "TP", hasActiveSprint: true })],
@@ -122,13 +120,6 @@ describe("ProjectTree", () => {
     expect(screen.getByText("PM agent")).toBeTruthy();
   });
 
-  /**
-   * Until BP-371 this link was admin-only, and rightly: the page held nothing else. It now holds
-   * each member's own notification settings for the board — `access: "member"` — so hiding the
-   * only route to them would have left the feature reachable by typed URL alone. The page decides
-   * what each person may open, and tells a non-admin in as many words that the rest needs access;
-   * the sub-nav no longer decides it a second time.
-   */
   it("shows Settings to everyone, because everyone has something on that page", () => {
     renderTree();
     expect(screen.getByText("Settings")).toBeTruthy();
@@ -171,7 +162,6 @@ describe("ProjectTree", () => {
     expect(screen.queryByLabelText("New project")).toBeNull();
   });
 
-  // Import/export was deleted in CP-205; the sub-nav is links only now
   it("offers no import or export entry", async () => {
     renderTree();
     expect(screen.queryByText("Import")).toBeNull();
@@ -199,8 +189,6 @@ describe("ProjectTree", () => {
 });
 
 describe("ProjectTree reordering", () => {
-  // The drag itself belongs to dnd-kit and needs real pointer geometry, which this
-  // environment cannot provide; the order a drop produces is covered in reorder.test
   function sortableRows(container: HTMLElement) {
     return [...container.querySelectorAll('[aria-roledescription="sortable"]')];
   }
@@ -215,7 +203,6 @@ describe("ProjectTree reordering", () => {
     expect(sortableRows(container)).toHaveLength(0);
   });
 
-  // One project cannot be reordered against anything
   it("makes nothing sortable with a single project", () => {
     const { container } = renderTree({
       projects: [project({ _id: "1", key: "TP" })],

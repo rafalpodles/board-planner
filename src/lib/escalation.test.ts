@@ -31,8 +31,6 @@ describe("escalationColumnId", () => {
     );
   });
 
-  // The three readers disagreed on this: task-service and the worker only ever looked at
-  // review columns, while the PM trigger fired on any flagged column whatever its role
   it("ignores a flagged column that is not a review column", () => {
     const columns = [col("todo", "approved", true), col("in_review", "review")];
     expect(escalationColumnId(columns)).toBe("in_review");
@@ -44,8 +42,6 @@ describe("escalationColumnId", () => {
 });
 
 describe("explicitEscalationColumnId", () => {
-  // A PM trigger is opt-in. The falling-back resolver turned zero flags into "the first
-  // review column", so every routine move into review would queue a turn against the cap
   it("is undefined when no column carries the flag", () => {
     expect(
       explicitEscalationColumnId(BOARD.map((c) => ({ ...c, triggersPmReview: false })))

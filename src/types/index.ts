@@ -1,16 +1,11 @@
 import { Types } from "mongoose";
 
-// Difficulty levels
 export type Difficulty = "S" | "M" | "L" | "XL";
 
-// Task categories
-// Project-defined since CP-127; the old fixed values remain the per-project defaults
 export type Category = string;
 
-// Task priority
 export type Priority = "low" | "medium" | "high" | "urgent";
 
-// Task statuses for Kanban columns
 export type TaskStatus =
   | "planned"
   | "todo"
@@ -48,7 +43,6 @@ export const PRIORITY_LABELS: Record<Priority, string> = {
   urgent: "Urgent",
 };
 
-// Ascending = most urgent first
 export const PRIORITY_ORDER: Record<string, number> = {
   urgent: 0,
   high: 1,
@@ -56,15 +50,9 @@ export const PRIORITY_ORDER: Record<string, number> = {
   low: 3,
 };
 
-// Semantic column roles (CP-128) — automation keys on the role, not the display name
 export const COLUMN_ROLES = ["backlog", "approved", "active", "review", "blocked", "done"] as const;
 export type ColumnRole = (typeof COLUMN_ROLES)[number];
 
-/**
- * What each role means, in the words of someone arranging a board rather than reading
- * the enum. Every automation keys on the role and never on the column's name, so this
- * is the only place the two vocabularies are reconciled for a human.
- */
 export const ROLE_LABELS: Record<ColumnRole, { label: string; hint: string }> = {
   backlog: {
     label: "Ideas & backlog",
@@ -112,8 +100,6 @@ export interface ApiProjectColumn {
   triggersPmReview: boolean;
 }
 
-// Column ids intentionally equal the legacy TaskStatus values so existing
-// task documents and the MCP/Claude-Code automation contract stay valid
 export const DEFAULT_PROJECT_COLUMNS: Omit<IProjectColumn, "_id">[] = [
   { id: "planned", label: "Planned", color: "#6b7280", role: "backlog", order: 0, triggersPmReview: false },
   { id: "todo", label: "To Do", color: "#3b82f6", role: "approved", order: 1, triggersPmReview: false },
@@ -134,40 +120,25 @@ export const STATUS_LABELS: Record<TaskStatus, string> = {
   done: "Done",
 };
 
-// User roles
 export type UserRole = "admin" | "member";
 
-// Document interfaces (what Mongoose returns)
 export interface IUser {
   _id: Types.ObjectId;
   username: string;
   password: string;
   fullName: string;
   email: string;
-  /** @deprecated Superseded by `notifications`. Kept as the fallback for accounts that predate it. */
   emailNotifications: boolean;
   emailDigest: boolean;
   notifications?: UserNotificationPrefs;
   lastDigestDay: string;
   collapseEmptyColumns: boolean;
   role: UserRole;
-  // A worker's identity is a user record so authorship, mentions, avatars and history keep
-  // working unchanged — but it is not a person, so it stays out of the lists where people are
-  // invited, permissioned or picked as an assignee.
   kind: "human" | "machine";
-  // Runtime-only, set for project-scoped tokens — a scoped token never gets project-admin
   tokenScoped?: boolean;
-  // Runtime-only, set for project-scoped tokens — the projects the token narrowed to
   tokenScope?: Types.ObjectId[];
-  // Runtime-only. An instance admin's role is downgraded to member by applyTokenScope, and
-  // instance admins hold no grants — without this their scoped tokens would resolve to no access.
   instanceAdminBeforeScope?: boolean;
-  // Runtime-only, set for every API and OAuth token. Distinct from tokenScoped, which answers only
-  // whether project access was narrowed: an unscoped admin token is still a machine credential, and
-  // acts that need a person at a keyboard must key on this instead.
   viaMachineCredential?: boolean;
-  // Runtime-only, set for browser sessions — the Session row this request authenticated with, so a
-  // handler can spare the calling session when it revokes the rest.
   sessionId?: Types.ObjectId;
   createdAt: Date;
 }
@@ -321,13 +292,11 @@ export interface IWebhook {
   lastError: string;
 }
 
-// The URL never reaches a client: it is a credential, so the API returns only a mask
 export interface ApiWebhook {
   _id: string;
   urlMasked: string;
   events: WebhookEvent[];
   enabled: boolean;
-  /** Single-shot delivery (BP-407) — this is the outcome of the one attempt, not a retry count. */
   lastAttemptAt: string | null;
   lastStatus: "ok" | "failed" | null;
   lastError: string;
@@ -355,7 +324,6 @@ export interface ApiNotificationChannel {
   enabled: boolean;
 }
 
-// Custom field types
 export type CustomFieldType =
   | "text"
   | "number"
@@ -373,10 +341,8 @@ export const CUSTOM_FIELD_TYPES: CustomFieldType[] = [
   "checkbox",
 ];
 
-/** The types whose values are option ids rather than a literal */
 export const OPTION_FIELD_TYPES: CustomFieldType[] = ["dropdown", "multiselect"];
 
-/** The type picker used to print the union members; these are what a human calls them. */
 export const FIELD_TYPE_LABELS: Record<CustomFieldType, { label: string; hint: string }> = {
   dropdown: { label: "Choice", hint: "Pick one from a list you define" },
   multiselect: { label: "Multi-choice", hint: "Pick any number from a list you define" },
@@ -388,8 +354,6 @@ export const FIELD_TYPE_LABELS: Record<CustomFieldType, { label: string; hint: s
 
 export const DEFAULT_OPTION_COLOR = "#64748b";
 
-// Values store `id`, never `value`, so renaming an option keeps it attached to
-// every task that had it
 export interface ICustomFieldOption {
   id: string;
   value: string;
@@ -407,7 +371,6 @@ export interface ICustomField {
   showOnCard: boolean;
   showInList: boolean;
   filterable: boolean;
-  /** Replaces deletion for a field that is already in use: pickers drop it, values survive */
   archived: boolean;
 }
 
@@ -487,7 +450,6 @@ export interface IPmConfig {
   contextNotes: string;
   links: IPmLink[];
   dailyTurnCap?: number;
-  /** Tokens per project per day; 0 is no ceiling (BP-284) */
   dailyTokenCap?: number;
   mcpServers?: IPmMcpServer[];
   autonomy?: IPmAutonomy;
@@ -503,15 +465,12 @@ export const PROJECT_ICONS: string[] = [
   "🏥", "🎬", "🎵", "✈️", "🏠", "🌱", "⏰", "🏆",
 ];
 
-// Facts about a machine. Everything describing a repository or the work lives on the project.
 export interface WorkerPolicy {
   pollIntervalMs: number;
 }
 
 export interface ProjectWorkerPolicy {
   autoMerge: boolean;
-  // The second model that reads the diff with no memory of writing it. Turning it off is what
-  // separates "write code" from "write and review"; autoMerge may not outlive it.
   reviewGate: boolean;
   baseBranch: string;
   taskTimeoutMs: number;
@@ -523,14 +482,12 @@ export interface ProjectWorkerPolicy {
 }
 
 export interface ProjectWorkerConfig {
-  // An ObjectId in the document, a string once it has been through JSON. Both readers stringify.
   agent?: string | Types.ObjectId | null;
   enabled: boolean;
   policy: ProjectWorkerPolicy;
   policyOverrides: string[];
 }
 
-// What a worker says it has on disk. Reported upward only — the server never sends a path back.
 export interface WorkerRepo {
   remote: string;
   path: string;
@@ -542,12 +499,8 @@ export interface WorkerPreflightCheck {
   detail: string;
 }
 
-// Whether the machine can actually do the work: the four binaries the worker shells out to, the
-// session `claude` and `gh` need, and what the gates require of the bound repository. Reported by
-// the worker, never set here — null until a worker old enough to compute it has checked in.
 export interface WorkerPreflight {
   ok: boolean;
-  // Which account `claude` is signed into. Empty when the CLI is too old to answer.
   account: string;
   checks: WorkerPreflightCheck[];
   reportedAt: Date;
@@ -557,8 +510,6 @@ export interface ApiWorkerPreflight extends Omit<WorkerPreflight, "reportedAt"> 
   reportedAt: string;
 }
 
-// An enrolment in progress: the app holds the device code, the person at the machine confirms the
-// user code in a browser, and the credential is handed back exactly once.
 export interface IDeviceEnrolment {
   _id: Types.ObjectId;
   deviceCodeHash: string;
@@ -567,7 +518,6 @@ export interface IDeviceEnrolment {
   machineName: string;
   machineHost: string;
   status: "pending" | "approved" | "denied";
-  // Who confirmed it, which is who the machine then belongs to
   enrolledBy: Types.ObjectId | null;
   project: Types.ObjectId | null;
   worker: Types.ObjectId | null;
@@ -577,8 +527,6 @@ export interface IDeviceEnrolment {
   createdAt: Date;
 }
 
-// A single-use, short-lived credential whose only power is to register one worker. Deliberately
-// not an ApiToken: an ApiToken can be used repeatedly and carries its owner's access.
 export interface IEnrolmentToken {
   _id: Types.ObjectId;
   prefix: string;
@@ -602,22 +550,12 @@ export interface IWorker {
   credentialHash: string;
   repos: WorkerRepo[];
   policy: WorkerPolicy;
-  // Which policy fields an operator actually set; everything else follows the default
   policyOverrides: string[];
   enabled: boolean;
   lockedByInstance: boolean;
   lastSeenAt: Date | null;
-  // The person this machine belongs to, and the only thing that decides what it may reach: null
-  // for a worker enrolled before BP-358, which claims nothing until it is enrolled again
   owner?: Types.ObjectId | IUser | null;
-  // Which projects the operator picked for this machine, from the browser screen that lists them.
-  // Stored because it cannot be derived: what a machine HAS is its reported checkouts, and what
-  // somebody WANTS it to have is a different question — the gap between the two is exactly the
-  // work the app then does (clone the missing, remove the unwanted). Empty means nobody has ever
-  // used that screen, which is not the same as "wants nothing" and must not be read as a request
-  // to remove everything.
   desiredProjects?: Types.ObjectId[];
-  // The user this machine acts as — see src/lib/worker-user.ts
   identity: Types.ObjectId | null;
   bindingError: string;
   preflight: WorkerPreflight | null;
@@ -636,7 +574,6 @@ export interface ApiWorker {
   version: string;
   protocolVersion: number;
   repos: WorkerRepo[];
-  // Whose machine this is. Null is not cosmetic: such a worker reaches no project at all.
   owner: ApiUserSummary | null;
   policy: WorkerPolicy;
   policyOverrides: string[];
@@ -651,8 +588,6 @@ export interface ApiWorker {
   createdAt: string;
   updatedAt: string;
   stale: boolean;
-  // The task this worker holds right now, if any. Phase lives on the task, not the worker, so the
-  // route has to join — a worker document alone cannot answer "what is it doing".
   currentTask?: ApiWorkerTask;
 }
 
@@ -670,11 +605,7 @@ export interface ITaskExecution {
   attempts: number;
   startedAt: Date | null;
   lastError: string;
-  // Whether the claim is what assigned the task, which decides whether releasing it may clear the
-  // assignee again. Absent on anything claimed before the field existed, where it means true.
   assignedByRun?: boolean;
-  // Absent until the run that holds the task reports one, and unset again the moment it leaves
-  // the active column — so "no phase" is a missing field, never a stale one
   phase?: string;
   phaseAt?: Date | null;
   phaseSeq?: number;
@@ -684,7 +615,6 @@ export interface IProject {
   _id: Types.ObjectId;
   name: string;
   key: string;
-  /** Keys this project used to have, so a rename does not orphan its pull requests */
   formerKeys: string[];
   description: string;
   icon: string;
@@ -692,18 +622,13 @@ export interface IProject {
   columns: IProjectColumn[];
   taskTemplates: ITaskTemplate[];
   customFields: ICustomField[];
-  // Which custom field's numeric value sums as this project's estimate. "" means the
-  // project does not estimate. Must always name a live number field — cleared by the
-  // custom-fields route the moment that field is archived or deleted.
   estimateFieldId: string;
   webhooks: IWebhook[];
   notificationChannels: INotificationChannel[];
   worker: ProjectWorkerConfig;
   repositoryUrl: string;
-  /** @deprecated superseded by repositoryUrl; read only as a migration fallback */
   githubRepo: string;
   githubToken: string;
-  /** @deprecated superseded by repositoryUrl; read only as a migration fallback */
   gitlabRepo: string;
   gitlabHost: string;
   gitlabToken: string;
@@ -734,14 +659,11 @@ export interface PmMessageTrigger {
   taskKey?: string;
 }
 
-/** What one PM turn cost, summed over its round-trips (BP-284) */
 export interface IPmUsage {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
-  /** Round-trips to the model — the number `dailyTurnCap` was mistaken for */
   calls: number;
-  /** The turn stopped because it ran out of steps, not because it was finished */
   hitStepLimit: boolean;
 }
 
@@ -809,7 +731,6 @@ export interface ApiChecklistItem {
   done: boolean;
 }
 
-// Sprint statuses
 export type SprintStatus = "planned" | "active" | "completed";
 
 export const SPRINT_STATUSES: SprintStatus[] = ["planned", "active", "completed"];
@@ -842,7 +763,6 @@ export interface ApiSprint {
   status: SprintStatus;
   taskCount?: number;
   doneCount?: number;
-  // Present only when the project designates an estimate field
   estimateTotal?: number;
   estimateDone?: number;
   createdAt: string;
@@ -856,9 +776,7 @@ export const RECURRENCE_FREQUENCIES: RecurrenceFrequency[] = ["daily", "weekly",
 export interface IRecurrence {
   frequency: RecurrenceFrequency;
   interval: number;
-  /** The day the series stops after. Null — and absent, on a task stored before BP-463 — is a series with no end. */
   endDate?: Date | null;
-  /** The day of the month a monthly series was set to, so a short month's clamp is not permanent (BP-486). Server-side; no client sends it. */
   anchorDay?: number | null;
 }
 
@@ -872,7 +790,6 @@ export interface ITask {
   category: Category;
   status: TaskStatus;
   assignee: Types.ObjectId | IUser | null;
-  // Who set assignee; absent on a task assigned before BP-358
   assignedBy?: Types.ObjectId | null;
   pmAssignedFor?: Types.ObjectId | null;
   dueDate: Date | null;
@@ -908,7 +825,6 @@ export interface IComment {
   updatedAt: Date;
 }
 
-// API response types (serialized, no ObjectId)
 export interface ApiUser {
   _id: string;
   username: string;
@@ -921,17 +837,12 @@ export interface ApiUser {
   createdAt: string;
 }
 
-/** What GET /api/projects/:id/assignable-users returns: enough to name someone and assign them */
 export interface ApiUserSummary {
   _id: string;
   username: string;
   fullName: string;
 }
 
-// Enough to NAME the agent a task carries. `/api/agents` answers only with agents the reader may
-// choose, so a personal agent belonging to somebody else is absent from that list — and a picker
-// that cannot resolve the id renders its empty state, which says "No agent" over a task that has
-// one. The name has to travel with the task itself.
 export interface ApiAgentSummary {
   _id: string;
   name: string;
@@ -957,9 +868,6 @@ export interface ApiProject {
   _id: string;
   name: string;
   key: string;
-  // Every key this board has answered to. Renaming a project renames all its task keys at once
-  // while the text people already wrote keeps the old prefix, so recognising a written reference
-  // needs both — see remarkTaskReferences.
   formerKeys?: string[];
   description: string;
   icon: string;
@@ -971,7 +879,6 @@ export interface ApiProject {
   webhooks: ApiWebhook[];
   notificationChannels: ApiNotificationChannel[];
   repositoryUrl: string;
-  // Which of the two integrations that URL's host resolves to, "" when neither
   repositoryProvider: "github" | "gitlab" | "";
   githubTokenSet: boolean;
   gitlabHost?: string;
@@ -982,7 +889,6 @@ export interface ApiProject {
   codaTokenSet?: boolean;
   taskCounter: number;
   sortOrder?: number;
-  // Sidebar badges, computed by the list endpoint only
   taskCount?: number;
   hasActiveSprint?: boolean;
   pm?: ApiPmConfig;
@@ -1026,7 +932,6 @@ export interface ApiPmConfig {
   contextNotes: string;
   links: IPmLink[];
   dailyTurnCap?: number;
-  /** Tokens per project per day; 0 is no ceiling (BP-284) */
   dailyTokenCap?: number;
   mcpServers?: ApiPmMcpServer[];
   autonomy?: IPmAutonomy;
@@ -1062,7 +967,6 @@ export interface ApiPmMessage {
 export const RELATION_TYPES = ["relates", "duplicates", "parent_of"] as const;
 export type RelationType = (typeof RELATION_TYPES)[number];
 
-// Every dependency kind the UI can add, including the one stored as blockedBy
 export const DEPENDENCY_TYPES = ["blocked_by", ...RELATION_TYPES] as const;
 export type DependencyType = (typeof DEPENDENCY_TYPES)[number];
 
@@ -1101,9 +1005,6 @@ export interface ApiTask {
   category: Category;
   status: TaskStatus;
   assignee: ApiUser | null;
-  // Who set the assignee, and the only thing that says whether a machine may act on it: a task is
-  // run unattended when its assignee handed it to themselves. Absent on anything assigned before
-  // BP-358, where the answer is not recorded anywhere and is deliberately not guessed.
   assignedBy?: ApiUserSummary | string | null;
   pmAssignedFor?: ApiUserSummary | string | null;
   dueDate: string | null;
@@ -1115,8 +1016,6 @@ export interface ApiTask {
   relatedFrom: ApiTaskRelation[];
   watchers: string[];
   sprint: string | null;
-  // Populated where the task is read whole, a bare id where a writer echoes back what it sent —
-  // the same union `assignedBy` above carries, and for the same reason
   agent?: ApiAgentSummary | string | null;
   customFieldValues: Record<string, unknown>;
   recurrence: ApiRecurrence | null;
@@ -1128,11 +1027,6 @@ export interface ApiTask {
   execution?: ApiTaskExecution;
 }
 
-// Only what a reader needs. lastError is deliberately absent — task-service writes it as "" and
-// never anything else — and so is attempts, which is decremented on refund and therefore counts
-// remaining budget, not the attempt number.
-// Returned with a 409 when a status change would take a task off the worker running it, so the
-// caller can name who holds it and offer to take it anyway
 export interface RunConflict {
   workerId: string;
   workerName?: string;
@@ -1146,8 +1040,6 @@ export interface ApiTaskExecution {
   phase?: string;
   phaseAt?: string | null;
   startedAt?: string | null;
-  // the server's clock when this was serialised, so ages can be measured against it rather than
-  // against the reader's, which may be minutes off in either direction
   asOf?: string;
 }
 
@@ -1166,7 +1058,6 @@ export interface ApiComment {
   updatedAt: string;
 }
 
-// Sort options for board columns
 export type SortField =
   | "manual"
   | "key"
@@ -1181,8 +1072,6 @@ export type SortField =
   | "sprint";
 export type SortDir = "asc" | "desc";
 
-/** A sort key is a built-in field or a project field's id (CP-212). The `string & {}`
- * keeps editor completion for the built-ins instead of collapsing to plain string. */
 export type SortKey = SortField | (string & {});
 
 export const SORT_OPTIONS: { value: SortField; label: string; defaultDir: SortDir }[] = [
@@ -1199,8 +1088,6 @@ export const SORT_OPTIONS: { value: SortField; label: string; defaultDir: SortDi
   { value: "sprint", label: "Sprint", defaultDir: "asc" },
 ];
 
-// The board already groups by status and shows no assignee, sprint or component
-// column, so those four read as nonsense in its dropdown. The list offers all.
 export const BOARD_SORT_FIELDS: SortField[] = [
   "manual",
   "key",
@@ -1218,7 +1105,6 @@ export function defaultSortDir(field: SortKey): SortDir {
   return SORT_OPTIONS.find((o) => o.value === field)?.defaultDir ?? "asc";
 }
 
-// Activity log
 export type ActivityAction =
   | "created"
   | "updated"
@@ -1249,7 +1135,6 @@ export interface ApiActivityLog {
   createdAt: string;
 }
 
-// Project audit log
 export type ProjectAuditAction =
   | "settings_updated"
   | "component_added"
@@ -1267,9 +1152,6 @@ export type ProjectAuditAction =
   | "bulk_move"
   | "worker_updated";
 
-// The kill switch first, because "who stopped this machine" is the question this log exists to
-// answer. Separate verbs rather than one worker_updated with a detail column: an operator scanning
-// the list should not have to read the next column to find out what happened.
 export const INSTANCE_AUDIT_ACTIONS = [
   "worker_locked",
   "worker_unlocked",
@@ -1286,18 +1168,9 @@ export const INSTANCE_AUDIT_ACTIONS = [
   "worker_command_sent",
   "user_password_reset",
   "user_email_changed",
-  // Distinct from the admin action above, because the audit page has to name the right actor: an
-  // account moving its own recovery address is the borrowed-session case, and a row reading
-  // "changed by an admin" would send an investigator looking at the wrong person (BP-354)
   "user_email_changed_self",
   "user_password_reset_by_email",
-  // A display name is not authority — it is never matched on, and the username it sits beside is.
-  // It is what a comment is signed with, though, so this row is the only place the change is
-  // recorded at all (BP-410)
   "user_full_name_changed_self",
-  // The account's own life. A display name was already worth a row (above); being made an
-  // administrator, and being deleted, are the two that decide what an account can do and whether
-  // it exists — and neither was recorded anywhere at all.
   "user_created",
   "user_deleted",
   "user_role_changed",
@@ -1307,11 +1180,7 @@ export type InstanceAuditAction = (typeof INSTANCE_AUDIT_ACTIONS)[number];
 
 export interface IInstanceAuditLog {
   _id: Types.ObjectId;
-  // Absent when a machine did it: a worker spends its enrolment token with no session behind it
   user: Types.ObjectId | IUser | null;
-  // The actor's username as it was at the time, for the same reason `target` is denormalised: the
-  // reference above resolves to null once that account is deleted, which used to rewrite every row
-  // they ever wrote as "system" — the word this log reserves for a machine
   actorUsername: string;
   action: InstanceAuditAction;
   target: string;
@@ -1322,8 +1191,6 @@ export interface IInstanceAuditLog {
 export interface ApiInstanceAuditLog {
   _id: string;
   user: { _id: string; username: string; fullName: string } | null;
-  // Optional because `/api/admin/audit` reads with `.lean()`, which applies no schema default: a
-  // row written before this field existed comes back without the key at all
   actorUsername?: string;
   action: InstanceAuditAction;
   target: string;
@@ -1349,7 +1216,6 @@ export interface ApiProjectAuditLog {
   createdAt: string;
 }
 
-// In-app notification types
 export type NotificationType =
   | "task_assigned"
   | "status_changed"
@@ -1357,9 +1223,6 @@ export type NotificationType =
   | "mentioned"
   | "task_created";
 
-// The order the settings grid renders them in. task_created is last because it is the only row
-// whose recipients are not derived from a task: the other four filter a list the system already
-// computed from an assignee and watchers, this one selects people by the tick itself.
 export const NOTIFICATION_TYPES: NotificationType[] = [
   "task_assigned",
   "mentioned",
@@ -1371,7 +1234,6 @@ export const NOTIFICATION_TYPES: NotificationType[] = [
 export const PERSONAL_CHAT_KINDS = ["slack", "discord"] as const;
 export type PersonalChatKind = (typeof PERSONAL_CHAT_KINDS)[number];
 
-/** One row of the grid: where a single event is allowed to go. */
 export interface NotificationChannels {
   inApp: boolean;
   email: boolean;
@@ -1387,7 +1249,6 @@ export interface ProjectNotificationOverride {
 
 export interface UserNotificationPrefs {
   defaults?: NotificationMatrix;
-  /** A row here IS the override switch for that project — there is no separate flag to disagree with. */
   projects: ProjectNotificationOverride[];
   chat: { kind: PersonalChatKind | ""; webhookUrl: string };
 }
@@ -1402,10 +1263,7 @@ export interface INotification {
   title: string;
   body: string;
   read: boolean;
-  /** Whether the bell shows this row. The document is stored either way, because the digest is
-   *  assembled from these and hiding one must not empty tomorrow's mail. */
   inApp: boolean;
-  /** Set only on hidden rows, which nothing can mark read — it is what expires them. */
   hiddenAt?: Date;
   createdAt: Date;
 }
@@ -1423,7 +1281,6 @@ export interface ApiNotification {
   createdAt: string;
 }
 
-// Parsed markdown task for import
 export interface ParsedTask {
   title: string;
   category: Category;
@@ -1434,10 +1291,6 @@ export interface ParsedTask {
   acceptanceCriteria?: string;
 }
 
-// ---------------------------------------------------------------------------
-// Agents: what a worker does between claiming a task and delivering it. Until
-// BP-331 this was a hardcoded array in worker/src.
-
 export const AGENT_BUCKETS = ["analysis", "implementation", "verification", "delivery"] as const;
 export type AgentBucket = (typeof AGENT_BUCKETS)[number];
 
@@ -1447,24 +1300,16 @@ export type AgentScope = (typeof AGENT_SCOPES)[number];
 export const BLOCK_KINDS = ["step", "gate"] as const;
 export type BlockKind = (typeof BLOCK_KINDS)[number];
 
-// What a step may touch. The worker owns these; the server names one and never composes a tool list.
 export const STEP_CAPABILITIES = ["read-only", "edit"] as const;
 export type StepCapability = (typeof STEP_CAPABILITIES)[number];
 
-/**
- * One position in a sequence. A block says what it does; an entry says how it does it *here* —
- * which is why this is an object and not the key alone. Two Size gates with different limits, or a
- * step told something extra for this agent only, need somewhere to put it that is not the catalog.
- */
 export interface CompositionEntry {
   key: string;
-  /** Overrides the block's own parameters, for this position only. */
   params?: Record<string, string>;
 }
 
 export type AgentComposition = Record<AgentBucket, CompositionEntry[]>;
 
-/** What a stored composition may look like: entries, or the bare keys written before entries. */
 export type StoredComposition = Partial<Record<AgentBucket, (CompositionEntry | string)[]>>;
 
 export interface IAgentBlock {
@@ -1474,15 +1319,12 @@ export interface IAgentBlock {
   name: string;
   description: string;
   builtIn: boolean;
-  /** gate only — the worker implementation this configures */
   gateKind: string;
   params: Record<string, string>;
-  /** step only */
   prompt: string;
   capability: StepCapability;
   model: string;
   fallbackModel: string;
-  /** a worker action rather than a model call */
   deterministic: boolean;
   createdBy: Types.ObjectId | IUser | null;
   createdAt: Date;
@@ -1529,7 +1371,6 @@ export interface ApiAgent {
   builtIn: boolean;
 }
 
-// A run that finished, kept after the task's own execution fields are cleared.
 export const AGENT_RUN_OUTCOMES = [
   "delivered",
   "merged",
@@ -1571,7 +1412,6 @@ export interface ApiAgentRun {
   finishedAt: string;
 }
 
-/** A run read from the fleet console, where the project and the machine are not implied. */
 export interface ApiFleetRun extends ApiAgentRun {
   projectKey: string;
   projectName: string;

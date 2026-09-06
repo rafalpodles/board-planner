@@ -2,8 +2,6 @@ import { describe, it, expect, vi } from "vitest";
 import { ApiClient } from "./api.js";
 import { CommandDeps, CommandHandlers, createCommandHandlers, createRunGuard } from "./commands.js";
 
-// These exercise the server channel, whose commands carry the server's clock and are ordered by
-// the recency guard. The socket's local entry point deliberately bypasses that — see local-server.
 const remoteHandlers = (deps: CommandDeps): CommandHandlers => createCommandHandlers(deps).remote;
 import { connectControl } from "./control.js";
 import { createLoop, Loop } from "./loop.js";
@@ -36,10 +34,6 @@ function heartbeatDeps(
 
   return {
     apiBaseUrl: "https://app.example.com",
-    // apiToken belongs to WorkerConfig, not here — it was never read from these deps. What this
-    // type wants is the enrolment token, and empty is the honest value: the store below already
-    // holds a credential, so this worker is registered and registration.ts takes the "no token"
-    // branch exactly as it would in production
     enrolmentToken: "",
     registration: { name: "worker-1", host: "host-1", platform: "darwin", version: "1.0.0" },
     store: {
@@ -170,7 +164,6 @@ describe("the same command over both transports", () => {
     expect(abort).toHaveBeenCalledTimes(1);
   });
 
-  // The other half: dedupe on the command name alone would swallow this and leave a run going
   it("applies a re-issued stop, because the issuance is newer even though the name is not", async () => {
     const abort = vi.fn();
     const handlers = remoteHandlers({ loop: idleLoop(), runs: { abort }, ack: vi.fn() });
@@ -189,8 +182,6 @@ describe("the same command over both transports", () => {
     expect(abort).toHaveBeenCalledTimes(2);
   });
 
-  // Recency, not equality: a heartbeat request that was already in flight when the stop was
-  // written resolves later carrying the resume it read before that write landed.
   it("ignores a resume whose issuance predates a stop that already landed", () => {
     const abort = vi.fn();
     const loop = idleLoop();
@@ -219,9 +210,6 @@ describe("the same command over both transports", () => {
 });
 
 describe("a command with no issuance", () => {
-  // issuedAt is absent or fails Date.parse, so recency cannot order it against what already
-  // applied. Pause and stop are safe to apply anyway — worst case, a worker sits idle. Resume is
-  // not: applying it blind could un-pause a worker a dated stop just silenced.
   it("ignores a resume with no issuance, so a malformed command cannot resurrect a stopped worker", () => {
     const loop = idleLoop();
     const handlers = remoteHandlers({ loop, runs: { abort: vi.fn() }, ack: vi.fn() });

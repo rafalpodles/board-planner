@@ -10,8 +10,6 @@ interface InlineTitleProps {
 }
 
 export function InlineTitle({ value, onChange }: InlineTitleProps) {
-  // A textarea rather than contenteditable — it wraps like the heading it replaces
-  // while staying an ordinary controlled input
   const ref = useRef<HTMLTextAreaElement>(null);
   useAutoGrow(ref, value);
 

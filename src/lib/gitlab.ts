@@ -29,9 +29,6 @@ export async function fetchMergeRequests(
   return readBoundedJson(res, MAX_RESPONSE_BYTES);
 }
 
-// Same matching rules as GitHub PRs: project key + number in branch or title, and the keys the
-// project used to have — renaming a project renames every task at once, while the branches and MR
-// titles already on GitLab keep the prefix they were created with.
 export function matchMRsToTasks(
   mrs: GitLabMR[],
   projectKey: string,
@@ -103,8 +100,6 @@ async function gitlabGet<T>(url: string, token: string): Promise<T> {
   return readBoundedJson(res, MAX_RESPONSE_BYTES);
 }
 
-// Branch search on GitLab is case-sensitive, so the whole (capped) page is filtered
-// locally with the same key pattern the MR matcher uses
 export async function fetchTaskBranches(
   host: string,
   projectPath: string,
@@ -145,8 +140,6 @@ export async function fetchTaskCommits(
   }));
 }
 
-// "CP-5" also matches "cp-5/slug" and "CP 5". Split on the LAST hyphen so a
-// hyphenated project key ("MY-PROJ-5") keeps its number instead of matching every branch.
 function taskKeyPattern(taskKey: string): RegExp {
   const separator = taskKey.lastIndexOf("-");
   const key = escapeRegex(taskKey.slice(0, separator));
@@ -154,7 +147,6 @@ function taskKeyPattern(taskKey: string): RegExp {
   return new RegExp(`${key}[- ]?${number}(?![0-9])`, "i");
 }
 
-// Accepts "group/project" or a full URL on the configured host
 export function parseGitlabRepo(gitlabRepo: string): string | null {
   const trimmed = gitlabRepo.trim().replace(/\.git$/, "").replace(/\/+$/, "");
   if (!trimmed) return null;

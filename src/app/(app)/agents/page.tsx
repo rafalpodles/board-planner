@@ -38,12 +38,8 @@ export default function AgentsPage() {
   });
 
   const current = TABS.find((t) => t.id === tab) ?? TABS[0];
-  // A step block's prompt is what runs on somebody's machine, so authoring one is instance-admin
-  // (BP-345). Composing an agent out of blocks that already exist is open to everyone, so the
-  // action is only withheld on the two tabs where it would 403.
   const mayAct = tab === "agents" || isAdmin;
 
-  // role="tablist" promises arrow-key navigation to assistive tech, so it has to work
   function handleKeyDown(e: KeyboardEvent<HTMLButtonElement>) {
     const order = TABS.map((t) => t.id);
     const i = order.indexOf(tab);

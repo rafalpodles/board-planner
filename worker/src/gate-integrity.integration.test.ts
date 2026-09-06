@@ -12,15 +12,6 @@ import { createWorkspace } from "./workspace.js";
 import { hardenedGitConfig } from "./delivery.js";
 import { WorkerConfig } from "./config.js";
 
-/**
- * The headline attack this task is about: the agent advances refs/heads/<baseBranch> to its own
- * commit, so its earlier work — the one thing a diff against the true base would show — drops out
- * of the range entirely. workspace.ts resolves baseSha once, before the agent runs, exactly so a
- * later rewrite of the ref cannot narrow what collectDiff (called with that sha, not the ref name)
- * reports. Real createWorkspace, real collectDiff, real protectedPathsGate, against real git — a
- * mocked runner could only show that the arguments were spelled correctly.
- */
-
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, {
     cwd,
@@ -29,8 +20,6 @@ function git(cwd: string, ...args: string[]): string {
   }).toString();
 }
 
-// What an agent with Write can do to the shared config: every URL git sees, including one given
-// literally on the command line, is rewritten by this — and repos.ts's scan never looks for it.
 function plantRedirect(repoPath: string, from: string, to: string): void {
   const configPath = join(repoPath, ".git", "config");
   appendFileSync(configPath, `[url "${to}"]\n\tinsteadOf = ${from}\n`);
@@ -42,8 +31,6 @@ describe("a run's own diff cannot be narrowed from inside the worktree", () => {
   let origin: string;
   let trueMain: string;
 
-  // No default for remoteUrl: passing an explicit `undefined` selects the default instead of the
-  // value, which is how a test here once asserted the opposite of its own name.
   function workspaceFor(remoteUrl: string = origin) {
     return createWorkspace(
       { repoPath: parent, worktreeRoot: join(dir, "wt"), baseBranch: "main" } as WorkerConfig,
@@ -55,8 +42,6 @@ describe("a run's own diff cannot be narrowed from inside the worktree", () => {
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "bp382-gate-integrity-"));
-    // A real remote, because the base is now resolved off the wire rather than from the clone's
-    // own ref store — which is the thing an agent of any earlier run can rewrite.
     origin = join(dir, "origin.git");
     execFileSync("git", ["init", "--quiet", "--bare", "-b", "main", origin], { stdio: "pipe" });
 
@@ -92,9 +77,6 @@ describe("a run's own diff cannot be narrowed from inside the worktree", () => {
     git(worktree.path, "commit", "--quiet", "-m", "payload");
     const payload = git(worktree.path, "rev-parse", "HEAD").trim();
 
-    // The attack, with nothing but a file write: a linked worktree's .git file names the common
-    // dir, so the shared ref store is an ordinary path. A loose ref shadows packed-refs, so
-    // writing the loose file lands whether or not this branch happens to be packed.
     writeFileSync(join(parent, ".git", "refs", "heads", "main"), `${payload}\n`);
 
     writeFileSync(join(worktree.path, "README.md"), "# t\nnotes\n");
@@ -108,9 +90,6 @@ describe("a run's own diff cannot be narrowed from inside the worktree", () => {
     expect(verdict.ok).toBe(false);
   });
 
-  // The control the attack tests need to mean anything: an ordinary run's diff is exactly the
-  // run's own change — not everything since the beginning of the repository, which would satisfy
-  // "the payload is visible" while telling a reviewer nothing.
   it("reports exactly the run's own change when nothing is tampered with", async () => {
     const runner = createRunner();
     const worktree = await workspaceFor().create("BP-1", "worker");
@@ -127,9 +106,6 @@ describe("a run's own diff cannot be narrowed from inside the worktree", () => {
     expect(verdict.ok).toBe(true);
   });
 
-  // The cross-run half. An agent cannot poison the base of the run it is inside — that sha is
-  // captured first — but the ref store it writes outlives the run, so without a fetch the NEXT
-  // run, an innocent one, would build on and deliver whatever it was left pointing at.
   it("ignores a base ref an earlier run's agent left poisoned before this run started", async () => {
     const runner = createRunner();
 
@@ -156,9 +132,6 @@ describe("a run's own diff cannot be narrowed from inside the worktree", () => {
     expect(git(worktree.path, "show", "HEAD:package.json")).not.toContain("postinstall");
   });
 
-  // url.<x>.insteadOf rewrites even a URL passed literally in argv, and no GIT_CONFIG_* variable
-  // disables it — so "we pass the URL, not the remote name" was never the boundary it claimed to
-  // be. Running the call that decides the base outside any repository is.
   it("resolves the base from the pinned remote even when the clone's own config redirects that URL", async () => {
     const evil = join(dir, "evil");
     execFileSync("git", ["init", "--quiet", "-b", "main", evil], { stdio: "pipe" });
@@ -180,9 +153,6 @@ describe("a run's own diff cannot be narrowed from inside the worktree", () => {
     expect(git(worktree.path, "show", "HEAD:package.json")).not.toContain("postinstall");
   });
 
-  // The fetch itself still runs inside the clone, so it can be redirected or simply broken. What
-  // must not happen is a quiet fall back to the local ref — that ref is the vulnerability, and an
-  // agent that can break the fetch would otherwise be choosing which path the next run takes.
   it("fails the run rather than falling back to the local ref when the fetch cannot complete", async () => {
     plantRedirect(parent, origin, join(dir, "nowhere"));
 
@@ -195,10 +165,6 @@ describe("a run's own diff cannot be narrowed from inside the worktree", () => {
     );
   });
 
-  // The agent is handed TMPDIR (env.ts's allowlist) and can write there, and what it writes
-  // outlives the run. A `.git` planted in that directory is honoured by anything git run from it —
-  // GIT_CEILING_DIRECTORIES cannot help, because git never excludes the working directory itself.
-  // The first attempt at this fix used os.tmpdir() directly and was poisonable exactly this way.
   it("resolves the base even when a repository is planted in the temp directory itself", async () => {
     const evil = join(dir, "evil");
     execFileSync("git", ["init", "--quiet", "-b", "main", evil], { stdio: "pipe" });
@@ -230,10 +196,6 @@ describe("a run's own diff cannot be narrowed from inside the worktree", () => {
     }
   });
 
-  // Nothing else here ever gives the fetch something to do: the fixture pushes to origin once and
-  // clones, so every object is already local and deleting the fetch outright leaves the rest of
-  // this file green. With origin ahead, the fetch is the only way the base can be reached — and
-  // `^{commit}` is the only thing that would notice if it had not been.
   it("fetches a base the checkout does not have yet", async () => {
     const ahead = join(dir, "ahead");
     execFileSync("git", ["clone", "--quiet", origin, ahead], { stdio: "pipe" });
@@ -245,7 +207,6 @@ describe("a run's own diff cannot be narrowed from inside the worktree", () => {
     git(ahead, "push", "--quiet", "origin", "HEAD:refs/heads/main");
     const newMain = git(ahead, "rev-parse", "HEAD").trim();
 
-    // the clone has never seen it
     expect(() => git(parent, "cat-file", "-e", `${newMain}^{commit}`)).toThrow();
 
     const worktree = await workspaceFor().create("BP-1", "worker");
@@ -255,9 +216,6 @@ describe("a run's own diff cannot be narrowed from inside the worktree", () => {
     expect(git(worktree.path, "show", "HEAD:README.md")).toContain("moved on");
   });
 
-  // `--` is what keeps a value beginning with a dash out of git's option slots. Asserting the
-  // spelling of the argv proves only the spelling; this runs a real git against a URL that would
-  // execute a program if the guard were not there.
   it("does not execute a program named by a dash-leading remote URL", async () => {
     const marker = join(dir, "executed");
     const program = join(dir, "upload-pack.sh");
@@ -271,22 +229,6 @@ describe("a run's own diff cannot be narrowed from inside the worktree", () => {
   });
 });
 
-/**
- * The fetch that freshens the base runs in `config.repoPath`, whose config a previous run's agent
- * can write — and a transport is not configuration git can be talked out of afterwards: an
- * `[url "ext::<program> %S"] insteadOf = <the pinned URL>` hands the URL to that program. Measured
- * on git 2.50.1 against this fixture: the plain fetch RAN the program, and the same fetch under
- * `protocol.ext.allow=never` answered `transport 'ext' not allowed` and ran nothing.
- *
- * The describe above builds its workspace with `() => ({})`, which is not an environment
- * production ever passes, so it could not have caught the loss of the hardening. This one uses
- * what wiring.ts composes. It needs a `git://` remote to do it: hardenedGitConfig also refuses the
- * `file` transport, so a local-path origin would fail at ls-remote and never reach the fetch this
- * test is about.
- */
-
-// Mirrors wiring.ts's remoteFetchEnv, minus the operator's token, which a daemon does not want.
-// That function is private to wiring.ts; hardenedGitConfig is the part of it under test.
 const productionRemoteEnv = (): NodeJS.ProcessEnv => ({ ...hardenedGitConfig() });
 
 const freePort = (): Promise<number> =>
@@ -362,8 +304,6 @@ describe("the base lookup runs with the environment production gives it", () => 
       remoteUrl
     );
 
-    // Named rather than "it rejects": the message proves ls-remote answered and the fetch is where
-    // this stopped, so the refusal is the transport's and not the run failing somewhere earlier.
     await expect(workspace.create("BP-1", "worker")).rejects.toThrow(/transport 'ext' not allowed/);
     expect(existsSync(marker)).toBe(false);
   });

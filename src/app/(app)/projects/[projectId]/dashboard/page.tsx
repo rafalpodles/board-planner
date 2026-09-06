@@ -130,8 +130,6 @@ function BarChart({
   if (!data.some((d) => d.value > 0)) return <EmptyChart message={emptyMessage} />;
 
   const max = Math.max(...data.map((d) => d.value), 1);
-  // px, not %: each column sizes to its content, and a percentage height against
-  // an auto-height parent resolves to zero — every bar then collapsed to its minimum
   const barHeight = (value: number) =>
     value > 0 ? Math.max(Math.round((value / max) * BAR_TRACK_PX), MIN_VISIBLE_BAR_PX) : 0;
 
@@ -239,12 +237,6 @@ function CreatedVsCompletedChart({ data }: { data: Stats["createdOverTime"] }) {
   );
 }
 
-/**
- * The refusal in words, from the status the API already reports. The server's own text is
- * deliberately unhelpful for two of these — `withProjectAccess` answers "Forbidden" or "Project
- * not found" and the split between them is a security decision, not a message (`middleware.ts`),
- * so the sentence a reader gets is made here rather than echoed.
- */
 function whyItFailed(reason: unknown): string {
   const { status, message } = (reason ?? {}) as { status?: number; message?: string };
   if (status === 403) return "You do not have access to this board.";
@@ -265,22 +257,11 @@ export default function DashboardPage() {
   const [failure, setFailure] = useState("");
   const [settingsFailed, setSettingsFailed] = useState(false);
 
-  /**
-   * Which load is the current one. Retry is a button, so two can be in flight at once and
-   * `use-api` takes no AbortSignal — without this, pressing it while the server is still broken
-   * and again after it recovers lets the slow rejection land last and put the banner back over
-   * charts that had already rendered.
-   */
   const generation = useRef(0);
 
   const load = useCallback(() => {
     const mine = (generation.current += 1);
     setLoading(true);
-    /**
-     * Settled rather than all. `Promise.all` rejects on the first failure, so a perfectly good
-     * `/stats` was thrown away because the *project* request failed — and the project is only the
-     * subtitle and the column names. Each answer is now taken on its own (BP-448).
-     */
     Promise.allSettled([
       api.get(`/api/projects/${projectId}/stats`),
       api.get(`/api/projects/${projectId}`),
@@ -308,10 +289,6 @@ export default function DashboardPage() {
     );
   }
 
-  /**
-   * `loading` going false while `stats` stayed null used to leave the old guard holding, so the
-   * page showed a toast for three seconds and then span for ever. Nothing said what happened.
-   */
   if (!stats) {
     return (
       <div className="max-w-7xl mx-auto w-full">
@@ -331,9 +308,6 @@ export default function DashboardPage() {
 
   const completionPct = stats.total > 0 ? Math.round((stats.done / stats.total) * 100) : 0;
 
-  // The board's own columns decide what every chart is called and painted, so the dashboard and
-  // the board cannot disagree about the same column. The seeded maps above stay as the fallback
-  // for a project whose document predates column seeding.
   const columns = effectiveColumns(project?.columns);
   const columnLabels = Object.fromEntries(columns.map((c) => [c.id, c.label]));
   const columnColors = {
@@ -344,18 +318,6 @@ export default function DashboardPage() {
     ...CATEGORY_COLORS,
     ...Object.fromEntries((project?.categories ?? []).map((c) => [c.name, c.color])),
   };
-  /**
-   * The only figure on the page this component computes rather than reads: `statusBreakdown` is
-   * keyed by the board's OWN column ids, so without the board there is no way to know which of
-   * them are in flight. The defaults would answer 0 for any board that renamed its active column
-   * — a wrong number sitting in a row of right ones, which is worse than no number.
-   *
-   * Plural: a board may carry more than one column in flight, and task-service already sums them.
-   *
-   * A board with NO such column cannot express "in progress" at all, so its answer is not 0 but
-   * none: 0 would be a statement about the tasks when it is one about the board — the sprint
-   * header's own reasoning for a board with no Done column (BP-311, BP-512).
-   */
   const activeIds = project ? columnIdsWithRole(project, "active") : null;
   const noActiveColumn = activeIds !== null && activeIds.length === 0;
   const inFlight =
@@ -392,7 +354,6 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
         <div className="bg-bg-card border border-border rounded-lg p-4">
           <p className="text-sm text-text-muted">Total Tasks</p>
@@ -412,7 +373,6 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Charts */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 mb-8">
         <div className="bg-bg-card border border-border rounded-lg p-4">
           <h2 className="font-semibold mb-4">Status Breakdown</h2>

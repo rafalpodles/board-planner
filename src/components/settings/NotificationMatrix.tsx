@@ -7,11 +7,9 @@ const ROW_LABEL: Record<NotificationType, string> = {
   mentioned: "Somebody mentions you",
   status_changed: "A task you follow changes column",
   comment_added: "A task you follow gets a comment",
-  // Replaced on the project screen, where "a board" has an answer — see PROJECT_ROW_LABEL
   task_created: "Anybody creates a task on a board",
 };
 
-/** The rows whose wording depends on which screen the grid is on. */
 const PROJECT_ROW_LABEL: Partial<Record<NotificationType, string>> = {
   task_created: "Anybody creates a task on this board",
 };
@@ -33,10 +31,8 @@ export function NotificationMatrixEditor({
   value: NotificationMatrix;
   onChange: (next: NotificationMatrix) => void;
   disabled?: boolean;
-  /** No personal webhook configured: ticking the column would deliver nowhere, which fails silently */
   chatDisabled?: boolean;
   chatDisabledHint?: string;
-  /** Which board the grid is being read against, for the rows that say "a board" otherwise */
   scope?: "global" | "project";
 }) {
   const labelOf = (type: NotificationType) =>

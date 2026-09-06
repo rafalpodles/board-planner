@@ -5,14 +5,11 @@ import { withProjectAccess } from "@/lib/middleware";
 import { Task } from "@/models/task";
 import { DEPENDENCY_TYPES, DependencyType, RelationType } from "@/types";
 
-// Add a dependency. "blocked_by" lands in blockedBy (the relation that drives
-// cycle detection); the rest go into the typed relations array.
 export const POST = withProjectAccess(async (request, { params }) => {
   const { projectId, taskId } = await params;
   await connectDB();
 
   const body = await request.json();
-  // blockedByTaskId is the pre-CP-143 field name, still accepted
   const targetTaskId: unknown = body.taskId || body.blockedByTaskId;
   const type: DependencyType = body.type || "blocked_by";
 
@@ -33,7 +30,6 @@ export const POST = withProjectAccess(async (request, { params }) => {
     );
   }
 
-  // Verify both tasks exist in the same project
   const [task, other] = await Promise.all([
     Task.findOne({ _id: taskId, project: projectId }),
     Task.findOne({ _id: targetTaskId, project: projectId }),
@@ -43,8 +39,6 @@ export const POST = withProjectAccess(async (request, { params }) => {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });
   }
 
-  // "parent_of" is the one relation with a direction that must stay acyclic,
-  // and a task gets a single parent so the hierarchy stays a tree
   if (type === "parent_of") {
     const parented = await Task.find(
       { project: projectId, "relations.type": "parent_of" },
@@ -86,8 +80,6 @@ export const POST = withProjectAccess(async (request, { params }) => {
     return NextResponse.json({ message: "Dependency added" });
   }
 
-  // Non-blocking kinds carry no ordering, so a cycle among them is meaningless.
-  // One pair of tasks holds one relation, so picking a different type replaces it.
   if (type !== "blocked_by") {
     await Task.updateOne({ _id: taskId }, { $pull: { relations: { task: targetTaskId } } });
     await Task.updateOne(
@@ -97,13 +89,11 @@ export const POST = withProjectAccess(async (request, { params }) => {
     return NextResponse.json({ message: "Dependency added" });
   }
 
-  // Check for circular dependency using in-memory BFS (single query)
   const allTasks = await Task.find(
     { project: projectId, blockedBy: { $exists: true, $ne: [] } },
     "_id blockedBy"
   ).lean();
 
-  // Build reverse graph: task → tasks that depend on it
   const dependentsMap = new Map<string, string[]>();
   for (const t of allTasks) {
     for (const blocker of t.blockedBy) {
@@ -133,7 +123,6 @@ export const POST = withProjectAccess(async (request, { params }) => {
     }
   }
 
-  // Add if not already present
   await Task.findByIdAndUpdate(taskId, {
     $addToSet: { blockedBy: targetTaskId },
   });
@@ -141,7 +130,6 @@ export const POST = withProjectAccess(async (request, { params }) => {
   return NextResponse.json({ message: "Dependency added" });
 });
 
-// Remove a dependency of any kind
 export const DELETE = withProjectAccess(async (request, { params }) => {
   const { projectId, taskId } = await params;
   await connectDB();

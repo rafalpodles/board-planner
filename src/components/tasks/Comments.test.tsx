@@ -42,7 +42,6 @@ describe("Comments", () => {
     await waitFor(() => expect(screen.getByText("Kasia Nowak")).toBeTruthy());
   });
 
-  // typeof null === "object", so a deleted author used to take the populated branch and throw
   it("renders a comment whose author was deleted", async () => {
     serve([{ ...comment, author: null }]);
     render(<Comments projectId="TP" taskId="t1" />);
@@ -54,14 +53,10 @@ describe("Comments", () => {
     serve([{ ...comment, reactions: [{ emoji: "👍", user: null }] }]);
     render(<Comments projectId="TP" taskId="t1" />);
     await waitFor(() => expect(screen.getByText("A remark")).toBeTruthy());
-    // The pill carries the reactor's name in its title; a deleted user reads as Unknown
     expect(screen.getByTitle(/Unknown/)).toBeTruthy();
   });
 });
 
-// BP-254. Written before the autocomplete was pulled out of this component and given a second
-// trigger for task keys — so the refactor has something to break. Every assertion here describes
-// behaviour that already shipped, not behaviour being added.
 describe("mentioning a person", () => {
   const people = [
     { _id: "u2", username: "kasia", fullName: "Kasia Nowak" },
@@ -94,7 +89,6 @@ describe("mentioning a person", () => {
 
     await waitFor(() => expect(screen.getByText("Kasia Nowak")).toBeTruthy());
     expect(screen.getByText("Karol Wisniewski")).toBeTruthy();
-    // Filtered, not merely listed
     expect(screen.queryByText("Tomek Zielinski")).toBeNull();
   });
 
@@ -146,7 +140,6 @@ describe("mentioning a person", () => {
     expect(box.value).toBe("@ka");
   });
 
-  // Enter is how a comment gets sent in some editors, so the list must own the key only while open
   it("leaves Enter alone once the list is closed", async () => {
     const box = await composer();
 
@@ -203,8 +196,6 @@ describe("referring to another task", () => {
     );
   });
 
-  // The key is stored as plain text; the link is made when it is rendered, so a project renamed
-  // later keeps working without migrating every description
   it("inserts the key itself, not a markdown link", async () => {
     const box = await composer();
 
@@ -215,7 +206,6 @@ describe("referring to another task", () => {
     await waitFor(() => expect(box.value).toBe("blocked by TP-1 "));
   });
 
-  // The guard before the key has to be zero-width: consuming it would take the space with it
   it("keeps the character before the key", async () => {
     const box = await composer();
 

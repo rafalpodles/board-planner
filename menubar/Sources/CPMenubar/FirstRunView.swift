@@ -2,8 +2,6 @@ import AppKit
 import SwiftUI
 import CPMenubarCore
 
-// What an app with no identity offers instead of "Can't reach the worker": the three things that
-// have to happen, in order, with the one that failed saying why.
 struct FirstRunView: View {
     @Bindable var onboarding: OnboardingModel
 
@@ -52,8 +50,6 @@ struct FirstRunView: View {
                 Spacer()
                 Button("Choose…") { chooseFolder() }
             }
-            // Refused at the picker, with the fix, rather than as a string in the fleet console
-            // after this machine has already been enrolled
             ForEach(onboarding.repositoryProblems, id: \.summary) { problem in
                 VStack(alignment: .leading, spacing: 1) {
                     Text(problem.summary).font(.caption).foregroundStyle(.red)
@@ -72,7 +68,6 @@ struct FirstRunView: View {
                         .foregroundStyle(check.ok ? .green : .red)
                     VStack(alignment: .leading, spacing: 0) {
                         Text(check.name).font(.caption).bold()
-                        // Already a plain sentence with the fix in it, written once in the worker
                         Text(check.detail).font(.caption2).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -81,14 +76,10 @@ struct FirstRunView: View {
         }
     }
 
-    // Offered only where there is a choice to make. On a machine with one account the row would be
-    // a picker with one entry, which is a decision nobody has.
     private var githubAccount: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Which GitHub account it pushes as").font(.subheadline).bold()
             Picker("", selection: accountBinding) {
-                // Not the same as picking the account that happens to be active today: this one
-                // follows `gh auth switch`, and the named ones deliberately do not.
                 Text("Whichever gh has active").tag("")
                 ForEach(onboarding.githubAccounts) { account in
                     Text(account.login).tag(account.login)
@@ -134,8 +125,6 @@ struct FirstRunView: View {
                 }
                 Text(LoginItem.statusDescription).font(.caption).foregroundStyle(.secondary)
                 HStack {
-                    // "Start at login" lives in Preferences → Advanced now, reachable at any time
-                    // rather than only while this view is on screen
                     Button("Start again") { onboarding.startAgain() }
                 }
             }
@@ -165,8 +154,6 @@ struct FirstRunView: View {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
-        // NSOpenPanel hides this by default, unlike NSSavePanel — so someone who has not already
-        // made the folder has nowhere to go but Finder and back
         panel.canCreateDirectories = true
         panel.message = "Choose the folder where this machine keeps its checkouts. The worker clones its own copy inside it."
         panel.prompt = "Keep checkouts here"

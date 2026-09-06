@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-// A category name lands in the PM's SYSTEM prompt, and any member can write one (BP-321)
 import { hasControlCharacters } from "@/lib/identifiers";
 import { withProjectAccess, withProjectOwner } from "@/lib/middleware";
 import { Project } from "@/models/project";
@@ -87,9 +86,6 @@ export const PATCH = withProjectAccess(async (request, { params, user }) => {
   if (!current) {
     return NextResponse.json({ error: "Category not found" }, { status: 404 });
   }
-  // Nothing here can tell this request's own half-finished rename from somebody else's
-  // category, and guessing wrong merges two categories and destroys one. Refuse. A
-  // failure part-way leaves a spare category to delete by hand, which is recoverable.
   if (
     renaming &&
     categories.some((c) => c.name !== name && c.name.toLowerCase() === target.toLowerCase())
@@ -104,11 +100,6 @@ export const PATCH = withProjectAccess(async (request, { params, user }) => {
     return NextResponse.json(project.categories);
   }
 
-  // Tasks store the category by name and are validated against this list, so a rename
-  // that is not carried across them does not orphan those tasks quietly — it makes them
-  // fail to save. There are no transactions here, so the rename runs through a state
-  // where BOTH names are valid: whichever write fails, every task still holds a name the
-  // project offers, and re-running the request finishes the job.
   categories.push({
     name: target,
     color: color || current.color,

@@ -84,9 +84,6 @@ describe("POST /api/projects/:projectId/webhooks", () => {
     expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 
-  // The $push is atomic and single-round-trip on purpose (BP-407): the old load→mutate→save()
-  // shape re-sent the whole array on every write, which raced dispatchWebhooks recording a
-  // delivery outcome on a different webhook in the same project and silently dropped it.
   it("never loads the project into memory first", async () => {
     await POST(request("POST", { url: "https://hooks.example.com/b" }), ctx());
 
@@ -102,7 +99,6 @@ describe("POST /api/projects/:projectId/webhooks", () => {
   });
 });
 
-// BP-304: the POST path parsed the url, the PUT path assigned it straight from the body
 describe("PUT /api/projects/:projectId/webhooks", () => {
   it("refuses a non-string url, without writing anything", async () => {
     const res = await PUT(request("PUT", { webhookId: "w1", url: { $ne: null } }), ctx());

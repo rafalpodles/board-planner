@@ -50,8 +50,6 @@ describe("DELETE /api/oauth/connections", () => {
     expect(findOneAndDelete).not.toHaveBeenCalled();
   });
 
-  // BP-444: the same family as the token endpoint's. `request.json()` throws on a body it cannot
-  // parse, and an uncaught throw here is a 500 for what is a 400.
   it("refuses a body that is not JSON instead of throwing", async () => {
     const res = await DELETE(
       new Request("https://app.example.com/api/oauth/connections", {

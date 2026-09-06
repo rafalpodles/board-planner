@@ -60,7 +60,6 @@ function savePersistedState(
   try {
     localStorage.setItem(`board-filters:${projectId}`, JSON.stringify(state));
   } catch {
-    // localStorage full or unavailable
   }
 }
 
@@ -72,19 +71,14 @@ interface BoardFiltersProps {
   currentUsername?: string;
   projectCategories?: ApiProjectCategory[];
   extraControls?: React.ReactNode;
-  /** Sort is owned above this component so the list view's column headers and
-      this dropdown drive the same value */
   sortField: SortKey;
   sortDir: SortDir;
   onSortChange: (field: SortKey, dir: SortDir) => void;
-  /** Which fields the dropdown offers; the current value is always included */
   sortFields?: SortField[];
   sortContext?: SortContext;
   hiddenColumns?: ListColumnId[];
   customFields?: ApiCustomField[];
   onHiddenColumnsChange?: (hidden: ListColumnId[]) => void;
-  /** Separate from the handler above: the board has no columns to pick, but it still
-      has to hydrate the stored set, or the next load writes an empty one back */
   showColumnPicker?: boolean;
   onFilter: (filtered: ApiTask[]) => void;
 }
@@ -111,12 +105,9 @@ export function BoardFilters({
   const [initialized, setInitialized] = useState(false);
   const [filters, setFilters] = useState<Filters>({ search: "", ...EMPTY_FILTERS });
   const [showFilters, setShowFilters] = useState(false);
-  // Where this panel opens depends on whether the wrapping toolbar put its button at the left or
-  // the right edge, which no breakpoint can express — see the hook (BP-501)
   const filtersPanel = usePanelClamp(showFilters);
   const popoverRef = useRef<HTMLDivElement>(null);
 
-  // Reading localStorage during render produces an SSR/client hydration mismatch
   useEffect(() => {
     let raw: unknown = null;
     try {
@@ -125,8 +116,6 @@ export function BoardFilters({
     } catch {
       raw = null;
     }
-    // Empty means the project's categories have not loaded, not that it has none —
-    // passing [] here would clear everyone's category filter on every first render
     const state = migratePersistedFilters(
       raw,
       currentUsername,
@@ -138,8 +127,6 @@ export function BoardFilters({
     onHiddenColumnsChange?.(state.hiddenColumns);
     setShowFilters(state.showFilters);
     setInitialized(true);
-    // onSortChange is the owner's setter; re-running on its identity would
-    // re-hydrate over whatever the user has since chosen
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, currentUsername]);
 
@@ -191,7 +178,6 @@ export function BoardFilters({
       const q = filters.search.toLowerCase().trim();
       result = result.filter((t) => {
         if (t.title.toLowerCase().includes(q)) return true;
-        // Task-key search: "cp-128", "CP-128" and bare "128" all match CP-128
         const key = `${projectKey ?? ""}-${t.taskNumber}`.toLowerCase();
         return key.includes(q) || String(t.taskNumber).startsWith(q);
       });
@@ -260,9 +246,6 @@ export function BoardFilters({
     setFilters((f) => ({ ...f, [key]: "" }));
   }
 
-  // An option field with no options renders a picker whose only entry is "All", so it
-  // filters nothing. Every other type carries its own values — a checkbox is yes/no,
-  // and text, number and date are typed in.
   const filterableFields = sortedFields(activeFields(customFields)).filter(
     (f) => f.filterable && (!isOptionField(f) || orderedOptions(f).length > 0)
   );
@@ -322,7 +305,6 @@ export function BoardFilters({
     });
   }
 
-  // Field chips carry the field's name, because "5" on its own says nothing
   for (const field of filterableFields) {
     const filter = filters.fields?.[field._id];
     if (!isFieldFilterSet(filter)) continue;
@@ -341,10 +323,6 @@ export function BoardFilters({
 
   return (
     <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-3 py-1.5 md:gap-2.5 md:px-6 md:py-2.5">
-      {/* Basis below the target width so the row fits before anything wraps;
-          it grows back up to 200px whenever there is room.
-          Hidden on a phone: the header's magnifier opens the same search, and this is the widest
-          thing in the row — keeping both spends a third of the screen on one job twice. */}
       <div className="relative hidden min-w-0 max-w-[200px] flex-[1_1_120px] md:block">
         <svg
           className="pointer-events-none absolute left-2.5 top-1/2 h-[15px] w-[15px] -translate-y-1/2 text-text-muted"
@@ -403,12 +381,6 @@ export function BoardFilters({
             style={filtersPanel.style}
             role="dialog"
             aria-label="Filters"
-            // `right-0` below sm put a 340px panel 242px past the left edge of every phone — the
-            // Filters button is the FIRST visible item in the row (the search box and its separator
-            // are md:block), so it stands about 20px from the left and a right-anchored panel opens
-            // off the screen. `max-w-[calc(100vw-1.5rem)]` never applied: 340 is already under that
-            // at 375. The clamp is what actually keeps it on screen; the anchors below only decide
-            // where it starts from.
             className="absolute right-0 top-full z-40 mt-1 w-[340px] max-w-[calc(100vw-1.5rem)] rounded-xl border border-border bg-bg-card p-3 shadow-lg sm:left-0 sm:right-auto"
           >
             {chips.length > 0 && (
@@ -491,7 +463,6 @@ export function BoardFilters({
                 </select>
               </Field>
 
-
               <Field label="Updated">
                 <select
                   value={filters.dateRange}
@@ -514,8 +485,6 @@ export function BoardFilters({
                   {filterableFields.map((field) => (
                     <Field key={field._id} label={field.name}>
                       {field.fieldType === "number" || field.fieldType === "date" ? (
-                        // From/to rather than one box: a range is what people want from
-                        // a number, and one input cannot express it
                         <div className="flex items-center gap-1">
                           <input
                             type={field.fieldType === "date" ? "date" : "number"}
@@ -602,8 +571,6 @@ export function BoardFilters({
         </select>
         <div className="h-full w-px bg-border" />
         <button
-          // Manual order is the order people dragged the rows into; reversing it
-          // would also invert what a drag means, since the list reindexes on drop
           disabled={sortField === "manual"}
           onClick={() => onSortChange(sortField, sortDir === "asc" ? "desc" : "asc")}
           title={
@@ -655,8 +622,6 @@ function FilterChip({
   isAssignee?: boolean;
   onRemove: () => void;
 }) {
-  // A project category carries its own colour as data, the way column.color does;
-  // everything else uses theme tokens
   const tinted = colour
     ? {
         backgroundColor: `color-mix(in srgb, ${colour} 15%, transparent)`,

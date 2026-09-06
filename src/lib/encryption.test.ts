@@ -31,8 +31,6 @@ describe("encryptSecret", () => {
     expect(decryptSecret(sealed)).toBe("ghp_supersecret");
   });
 
-  // BP-282: with no key it used to return the plaintext, which was then stored as-is.
-  // A deployment that forgot the variable was indistinguishable from an encrypted one.
   it("refuses to hand back plaintext when no key is configured", async () => {
     const { encryptSecret } = await load();
 
@@ -48,8 +46,6 @@ describe("encryptSecret", () => {
 });
 
 describe("assertEncryptionConfig", () => {
-  // BP-282: a wrong-length key yielded null and was treated as "no key", so it failed
-  // open in exactly the same silent way as a missing one
   it("refuses a key that is not 32 bytes rather than treating it as absent", async () => {
     process.env.ENCRYPTION_KEY = "too-short";
 
@@ -93,8 +89,6 @@ describe("rotation", () => {
     expect(after.decryptSecret(sealed)).toBe("gitlab-token");
   });
 
-  // Without the key id this was the whole failure mode: every stored secret threw at
-  // use time, inside a sync or a token refresh rather than at deploy
   it("names the missing key id when the key that wrote a secret is gone", async () => {
     process.env.ENCRYPTION_KEY = KEY_A;
     const before = await load();

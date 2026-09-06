@@ -1,21 +1,12 @@
 import Foundation
 
-// Work settings describe a project, not this machine, so there is no single model or diff limit to
-// show. Reporting one would put a number on screen that no run is using.
 public struct ProjectConfig: Decodable, Sendable {
     public let project: String
-    // autoMerge stood here and the worker has not sent it since the flag was retired — an agent
-    // merges because its sequence carries a Merge step. A required field nothing sends made the
-    // whole response undecodable, and `try?` at the call site turned that into a config of nil:
-    // every value in Preferences read "—", the policy pane was empty, and the reason was invisible.
     public let baseBranch: String
     public let model: String
     public let reviewModel: String
     public let maxDiffLines: Int
     public let taskTimeoutMs: Int
-    // Why this project is not being claimed from — the checkout failing the gates' checks, or the
-    // board refusing the claim outright — or empty when it is. Optional so a worker older than
-    // this field still decodes, for the reason autoMerge's comment above gives (BP-512).
     public let blocked: String?
 }
 
@@ -25,7 +16,6 @@ public struct GithubAccountChoice: Decodable, Sendable, Identifiable, Equatable 
     public var id: String { login }
 }
 
-// A project this machine could serve once it has a checkout. What the app offers to set up.
 public struct ProjectOffer: Decodable, Sendable, Identifiable, Equatable {
     public let project: String
     public let key: String
@@ -40,8 +30,6 @@ public struct ProjectOffer: Decodable, Sendable, Identifiable, Equatable {
         self.repositoryUrl = repositoryUrl
     }
 
-    /// What an operator recognises it by. A project with neither is still worth listing by its
-    /// repository — anything is better than a blank row.
     public var label: String {
         if !name.isEmpty && !key.isEmpty { return "\(name) · \(key)" }
         if !name.isEmpty { return name }
@@ -56,8 +44,6 @@ public struct ConfigResponse: Decodable, Sendable {
     public let projectCount: Int
     public let pollIntervalMs: Int
     public let projects: [ProjectConfig]
-    // Optional so a worker built before BP-373 still decodes: an app that refuses to read the
-    // config would show "—" for everything, which reads as a dead worker rather than an old one.
     public let githubAccount: String?
     public let githubAccounts: [GithubAccountChoice]?
     public let offers: [ProjectOffer]?
@@ -160,7 +146,6 @@ public struct SocketClient: Sendable {
                             buffer.removeAll()
                         }
                         for payload in sseEvents(from: &events) {
-                            // One unparseable frame must not end a stream the panel depends on
                             if let event = try? decoder.decode(TelemetryEvent.self, from: payload) {
                                 continuation.yield(event)
                             }

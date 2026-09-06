@@ -21,13 +21,10 @@ export function SprintSelector({ sprints, selectedId, onSelect }: SprintSelector
   const { active, planned, recentCompleted, olderCompleted } = groupSprints(sprints);
   const firstOlderRef = useRef<HTMLButtonElement | null>(null);
 
-  // The disclosure button unmounts the moment it is activated, which would otherwise
-  // drop focus to <body>; send it to the row it just revealed instead.
   useEffect(() => {
     if (showOlder) firstOlderRef.current?.focus();
   }, [showOlder]);
 
-  // Below lg the sprint name in SprintHeader is the picker; this column has nothing to add.
   if (!isWide) return null;
 
   const completed = showOlder ? [...recentCompleted, ...olderCompleted] : recentCompleted;

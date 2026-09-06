@@ -10,17 +10,6 @@ import {
   seedRenamedColumn,
 } from "./seed";
 
-/**
- * BP-502. `?assignee=rpo` was written straight into `filter.assignee`, which is an ObjectId on the
- * model, so Mongoose threw a CastError and the route answered **500** — every time, reproduced over
- * the hosted MCP endpoint. MCP is this parameter's only caller and its only documentation; the
- * browser never sends it, which is why it stood.
- *
- * Driven against the real route and a real database on purpose. The unit tests beside this one
- * mock Mongoose, so they can prove the filter's *shape* and nothing at all about the crash — the
- * cast is the defect, and only a real cast can show it is gone.
- */
-
 test.beforeEach(seed);
 
 const list = (request: APIRequestContext, query: string) =>
@@ -36,16 +25,12 @@ test("the assignee filter takes a username, which is what it is documented to ta
   });
 
   await test.step("and it filters, rather than merely not crashing", async () => {
-    // The seed leaves every task unassigned, so without this the filter would answer [] and the
-    // assertions below would hold for a route that filtered on nothing at all
     const handed = await request.put(`/api/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_ID}`, {
       headers: ADMIN_AUTH,
       data: { assignee: ADMIN_USERNAME },
     });
     expect(handed.status(), await handed.text()).toBe(200);
 
-    // The premise both assertions below rest on: the board holds more tasks than this person has,
-    // so "filtered" and "everything" are different answers
     const everything = await (await list(request, "")).json();
     const assigned = await (await list(request, `?assignee=${ADMIN_USERNAME}`)).json();
 
@@ -57,7 +42,6 @@ test("the assignee filter takes a username, which is what it is documented to ta
   });
 
   await test.step("and an id still works, against a real cast", async () => {
-    // The unit tests mock Mongoose, so "an id still works" is exactly the claim they cannot make
     const res = await list(request, `?assignee=${String(ADMIN_ID)}`);
 
     expect(res.status(), await res.text()).toBe(200);
@@ -83,16 +67,11 @@ test("the neighbouring filters answer a typo rather than swallowing it", async (
   expect(priority.status()).toBe(400);
   expect((await priority.json()).error).toMatch(/one of: low, medium, high, urgent/);
 
-  // The controls, in the same run: a real value of each still filters, so the refusals above are
-  // the parameter being judged and not the endpoint being broken
   const bug = await list(request, "?category=bug");
   expect(bug.status(), await bug.text()).toBe(200);
   const high = await list(request, "?priority=high");
   expect(high.status(), await high.text()).toBe(200);
 
-  // The third answer, settled by BP-511: this filter is comma-separated, so it refuses only when
-  // NONE of the ids it was given exists — a real column beside an unknown one is a narrower
-  // request, not a typo
   const status = await list(request, "?status=no-such-column");
   expect(status.status()).toBe(400);
   expect((await status.json()).error).toMatch(/project columns:/);
@@ -101,12 +80,6 @@ test("the neighbouring filters answer a typo rather than swallowing it", async (
   expect(narrowed.status(), await narrowed.text()).toBe(200);
 });
 
-/**
- * The claim the refusal above rests on, and the one the fixture cannot make on its own: it is the
- * BOARD's columns that decide, not the built-in seven. Reading a project without its `columns`
- * falls back to those seven silently, which refuses a renamed board its own real ids — worse than
- * the empty list this change exists to remove, and green against every other test in the suite.
- */
 test("the columns that decide are the board's own", async ({ request }) => {
   await seedRenamedColumn();
 

@@ -48,12 +48,6 @@ function put(body: Record<string, unknown>) {
   );
 }
 
-/**
- * Authoring a block became instance-admin in BP-345, and editing one is authoring its prompt again
- * — the field a worker executes on somebody's machine. Ownership was the old bar, which left two
- * ways past it: blocks a member created before that change still name them as createdBy, and a
- * block whose createdBy is empty was editable by anyone at all.
- */
 describe("changing a block", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -94,8 +88,6 @@ describe("changing a block", () => {
   });
 });
 
-// Mongoose's own caster, over the real schema. It needs no connection, and it is the only thing
-// that answers "would this query have 500ed" without guessing which shapes are illegal (BP-460).
 const { agentSchema } = await vi.importActual<typeof import("@/models/agent")>("@/models/agent");
 const CastProbe = mongoose.model("AgentCastProbe", agentSchema);
 
@@ -124,7 +116,6 @@ describe("deleting a block", () => {
     ).not.toThrow();
   });
 
-  // Not decoration: nothing migrates the pre-object shape, so agents stored that way are live.
   it("searches every bucket for the pre-object shape as well", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
     blockFindById.mockResolvedValue(block());
@@ -159,8 +150,6 @@ describe("deleting a block", () => {
     expect(doc.deleteOne).not.toHaveBeenCalled();
   });
 
-  // A built-in block is implemented by the worker, so removing it would leave every agent naming it
-  // referring to nothing — refused for everyone, admin included
   it("refuses a built-in even for an admin", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
     blockFindById.mockResolvedValue(block({ builtIn: true }));

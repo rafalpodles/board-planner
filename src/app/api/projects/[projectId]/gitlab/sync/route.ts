@@ -26,8 +26,6 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
     );
   }
 
-  // A self-hosted GitLab has no telling hostname, so this is where the project's own gitlabHost
-  // does the classifying — see src/lib/repository.ts
   if (repositoryProvider(project) !== "gitlab") {
     return NextResponse.json(
       { error: `${repositoryUrl} is not a GitLab repository. A self-hosted one also needs its GitLab host set.` },
@@ -77,7 +75,6 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
       updatedAt: mr.updatedAt,
     }));
 
-    // Replace only this provider's entries; GitHub links stay untouched
     const others = (task.linkedPRs || []).filter((pr) => (pr.provider ?? "github") !== "gitlab");
     task.linkedPRs = [...others, ...mrDocs] as typeof task.linkedPRs;
     linked += mrs.length;

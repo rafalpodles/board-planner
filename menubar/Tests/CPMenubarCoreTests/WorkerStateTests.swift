@@ -26,7 +26,6 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
     #expect(state.currentPhase == nil)
 }
 
-// Only "blocked" means a human has to do something; a requeue is the worker's own business.
 @Test func aBlockedOutcomeIsTheOneThatNeedsAHuman() {
     var state = WorkerState()
     state.apply(.outcome(Outcome(outcome: "blocked", taskKey: "CP-1", detail: "ambiguous")), at: t0)
@@ -94,7 +93,6 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
     #expect(WorkerState().title(now: t0) == nil)
 }
 
-// A silent agent is the normal case mid-run; going amber here would cry wolf every long edit.
 @Test func aQuietRunStillReadsAsWorking() {
     var state = WorkerState()
     state.apply(.progress(Progress(phase: "agent")), at: t0)
@@ -134,7 +132,6 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
     #expect(rows.first { $0.phase == "merge" }?.state == .pending)
 }
 
-// Every gate collapses onto one row: the pipeline's gate count is project policy, not a fixed shape.
 @Test func anyGatePhaseLandsOnTheSingleGatesStep() {
     var state = WorkerState()
     state.apply(.progress(Progress(phase: "gates:test-presence")), at: t0)

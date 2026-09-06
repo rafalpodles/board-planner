@@ -7,8 +7,6 @@ import type { ApiUser } from "@/types";
 
 const { nav, auth } = vi.hoisted(() => ({
   nav: { replace: vi.fn() },
-  // Annotated, so a field added to AuthState fails here instead of reaching the component as
-  // undefined with the suite green
   auth: {
     user: null as ApiUser | null,
     isAdmin: false,
@@ -19,8 +17,6 @@ const { nav, auth } = vi.hoisted(() => ({
     refreshUser: vi.fn(),
     onUnauthorized: vi.fn(),
     noteApiStatus: vi.fn(),
-    // satisfies, not `as`: this checks the mock is still a whole AuthState while leaving the
-    // members their mock types, so `refreshUser.mockClear()` still type-checks
   } satisfies AuthState,
 }));
 
@@ -73,9 +69,6 @@ describe("AuthGuard", () => {
     );
   });
 
-  // The whole point of BP-362: during an outage the server never said anything about the session,
-  // so there is nothing to redirect on — and the sign-in page it would land on is served by the
-  // same instance that cannot reach its database
   it("does not redirect while the instance cannot answer", () => {
     auth.outage = true;
 
@@ -117,8 +110,6 @@ describe("AuthGuard", () => {
     });
     expect(auth.refreshUser).toHaveBeenCalledTimes(1);
 
-    // Backed off, not every 10 s: /api/auth/me can take seconds to fail during an outage, and a
-    // fixed interval left several in flight at once on a tab nobody was watching
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10_100);
     });
@@ -172,8 +163,6 @@ describe("AuthGuard", () => {
   });
 });
 
-// Nobody already signed in is sent back through /api/auth/me, so the panel above can never appear
-// for them. Without this they saw only each screen failing to load, for its own invented reason.
 describe("AuthGuard while signed in", () => {
   beforeEach(() => {
     nav.replace.mockClear();
@@ -195,7 +184,6 @@ describe("AuthGuard while signed in", () => {
 
     expect(screen.getByText(/having trouble reaching its database/i)).toBeTruthy();
     expect(screen.getByText(/still signed in/i)).toBeTruthy();
-    // The board stays: a transient 500 must not blank what somebody is working on
     expect(screen.getByTestId("app")).toBeTruthy();
     expect(nav.replace).not.toHaveBeenCalled();
   });

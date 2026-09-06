@@ -19,16 +19,12 @@ const { POST } = await import("./route");
 
 const EVERY_PROJECT = [{ _id: "p1" }, { _id: "p2" }];
 
-// The filter is the whole point of these tests, so the fake collection honours it rather than
-// answering the same list whatever it is asked
 function matching(filter: { _id?: { $in?: string[] } }) {
   const wanted = filter?._id?.$in;
   if (wanted === undefined) return EVERY_PROJECT;
   return EVERY_PROJECT.filter((p) => (wanted ?? []).includes(p._id));
 }
 
-// A token scoped to p1. Deriving the mintable set from anything but the grant layer's
-// already-intersected answer is how a p1 token mints itself a p2 token.
 const SCOPED_TO_P1 = {
   _id: "u1",
   role: "member",

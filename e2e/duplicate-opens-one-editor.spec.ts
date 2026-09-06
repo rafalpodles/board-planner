@@ -15,21 +15,6 @@ import {
 import { ADMIN_AUTH } from "./api";
 import { signIn } from "./session";
 
-/**
- * BP-521. Opening a task from a page that is already a task used to draw it twice — once as the
- * page, once in the intercepting modal over it — because `router.push` is a soft navigation, so
- * `@modal` intercepts while the `children` slot re-renders for the new param.
- *
- * The second assertion in each test is the one that costs something to get right. A soft
- * navigation keeps an unmatched slot's state (Next's parallel-routes docs say so outright), so
- * merely hiding that modal leaves the task parked in the slot, to reappear over the board the
- * moment the reader closes the one they are on. Every test here therefore leaves the task after
- * arriving at it, and looks at what is on the screen then.
- *
- * The board→modal test is the control: that surface was always correct, and it is what a fix
- * that suppressed the modal too eagerly would break.
- */
-
 const COPY_TITLE = `Copy of ${SIBLING_TASK_TITLE}`;
 const EDITED_TITLE = "Edited a moment before leaving";
 
@@ -112,8 +97,6 @@ test("duplicating from the board's modal leaves one editor, still in the modal",
   await expect(page.getByLabel("Task title")).toHaveCount(1);
   await expect(page.getByRole("dialog")).toHaveCount(1);
 
-  // Closing a modal is a step back through history, so it lands on the task this copy was made
-  // from — still a modal, still one of them, with the board underneath it and no ghost.
   await page.getByRole("button", { name: "Close task" }).click();
   await expect(page).toHaveURL(new RegExp(`/tasks/${SIBLING_TASK_NUMBER}$`));
   await expect(dialog.getByLabel("Task title")).toHaveValue(SIBLING_TASK_TITLE);
@@ -124,18 +107,8 @@ test("duplicating from the board's modal leaves one editor, still in the modal",
   await expect(page.getByRole("dialog")).toHaveCount(0);
 });
 
-/**
- * The autosave flushes a pending edit from React's unmount cleanup, which a document load does
- * not run — so leaving the page for the copy would drop whatever was typed in the 700ms before
- * the click, silently, under a status line still reading "All changes saved". The modal is the
- * control: it unmounts, so it was always safe.
- */
 test.describe("an edit still in the debounce window", () => {
   test("survives leaving the page for the copy", async ({ page }) => {
-    // The debounce is the other way this edit could reach the server, and whether it wins is a
-    // race against how long the dev server takes to answer the new document. `install` alone does
-    // not stop it — a 700ms timer still fires under it; `pauseAt` is what holds the clock still,
-    // and with it a green here is the flush and nothing else.
     await page.clock.install();
     await page.clock.pauseAt(Date.now());
     await openTaskPage(page, SIBLING_TASK_NUMBER, SIBLING_TASK_TITLE);

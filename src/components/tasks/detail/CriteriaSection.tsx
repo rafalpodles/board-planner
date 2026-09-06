@@ -11,17 +11,13 @@ import { MarkdownContent } from "@/components/ui/MarkdownContent";
 interface CriteriaSectionProps {
   items: ChecklistDraftItem[];
   onChange: (items: ChecklistDraftItem[]) => void;
-  /** Same autocomplete the description and comments have; criteria refer to other tasks too */
   triggers?: Trigger[];
-  /** The board, so a key written in a criterion renders as a link to that task */
   scope?: ReferenceScope | null;
 }
 
-// Stable identity, so a criteria list without triggers does not rebuild them every render
 const EMPTY: Trigger[] = [];
 
 export function CriteriaSection({ items, onChange, triggers, scope }: CriteriaSectionProps) {
-  // One at a time: a criterion shows its rendered text until somebody asks to change it
   const [editing, setEditing] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
   const done = items.filter((i) => i.done).length;
@@ -87,15 +83,11 @@ export function CriteriaSection({ items, onChange, triggers, scope }: CriteriaSe
                 }`}
               />
             ) : (
-              // Rendered, so a task key written here is a link like it is everywhere else. A
-              // textarea can only ever show it as text, which is what made this the one place the
-              // reference did not work.
               <div
                 role="button"
                 tabIndex={0}
                 aria-label={`Criterion ${i + 1}`}
                 onClick={(e) => {
-                  // A link is the reader going somewhere, not asking to edit
                   if ((e.target as HTMLElement).closest("a")) return;
                   setEditing(i);
                 }}

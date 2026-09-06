@@ -50,8 +50,6 @@ describe("DELETE /api/oauth/clients", () => {
     expect(clientDeleteOne).toHaveBeenCalledWith({ _id: VALID_ID });
   });
 
-  // BP-304: admin-only, so lower severity — but findById({"$ne": null}) still picks an
-  // arbitrary client and cascade-deletes its tokens, codes and consents.
   it("refuses a Mongo operator in place of an id", async () => {
     const res = await DELETE(request({ id: { $ne: null } }), ctx());
 
@@ -61,8 +59,6 @@ describe("DELETE /api/oauth/clients", () => {
     expect(clientDeleteOne).not.toHaveBeenCalled();
   });
 
-  // BP-444: `request.json()` throws on a body it cannot parse, and an uncaught throw is a 500 for
-  // what the caller should be told is a 400.
   it("refuses a body that is not JSON instead of throwing", async () => {
     const res = await DELETE(
       new Request("https://app.example.com/api/oauth/clients", {

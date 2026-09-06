@@ -10,8 +10,6 @@ interface GitHubPR {
   updated_at: string;
 }
 
-// A key stored before BP-401 constrained the format may still be one like "C(", which must not
-// blow up the matcher
 export { escapeRegex };
 
 export interface ParsedPR {
@@ -24,9 +22,6 @@ export interface ParsedPR {
   matchedTaskNumber: number;
 }
 
-/**
- * Fetch PRs from GitHub API (open + recently closed).
- */
 export async function fetchPullRequests(
   owner: string,
   repo: string,
@@ -53,26 +48,17 @@ async function fetchPage(url: string, headers: Record<string, string>): Promise<
   return res.json();
 }
 
-/**
- * Match PRs to task numbers by scanning branch name and PR title.
- * Pattern: project key (case-insensitive) followed by - and number.
- * E.g. "cp-5/some-slug" or "CP-5 add feature" → task number 5.
- */
 export function matchPRsToTasks(
   prs: GitHubPR[],
   projectKey: string,
   formerKeys: string[] = []
 ): ParsedPR[] {
-  // Former keys count: a task key is built from the project's current key, so renaming it
-  // renames every task at once — while the branches and PR titles already on GitHub keep
-  // the prefix they were created with, and would otherwise all stop matching.
   const keys = [projectKey, ...formerKeys].filter(Boolean);
   const pattern = new RegExp(`(?:${keys.map(escapeRegex).join("|")})[- ](\\d+)`, "i");
 
   const results: ParsedPR[] = [];
 
   for (const pr of prs) {
-    // Try branch name first, then title
     const branchMatch = pr.head.ref.match(pattern);
     const titleMatch = pr.title.match(pattern);
     const match = branchMatch || titleMatch;
@@ -94,11 +80,7 @@ export function matchPRsToTasks(
   return results;
 }
 
-/**
- * Parse "owner/repo" from githubRepo string.
- */
 export function parseRepoString(githubRepo: string): { owner: string; repo: string } | null {
-  // Accept "owner/repo" or "https://github.com/owner/repo"
   const match = githubRepo.match(/(?:github\.com\/)?([^/]+)\/([^/]+?)(?:\.git)?$/);
   if (!match) return null;
   return { owner: match[1], repo: match[2] };

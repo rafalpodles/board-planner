@@ -16,21 +16,12 @@ export const GET = withProjectAccess(async (_request, { params }) => {
     .sort({ startDate: -1 })
     .lean();
 
-  // Attach task counts
   const sprintIds = sprints.map((s) => s._id);
   if (sprintIds.length === 0) return NextResponse.json([]);
 
-  // Resolved once for the whole list rather than per sprint: every sprint here belongs to the same
-  // project, so they share a board
   const project = await Project.findById(projectId, "columns estimateFieldId").lean();
   const doneIds = columnIdsWithRole(project, "done");
   const estimateFieldId = project?.estimateFieldId || "";
-  // This pipeline runs on the board's poll, so one legacy value must not be able to throw and
-  // take the poll down with it (onError) — and a bare $sum would instead silently ignore a
-  // value stored as a string and produce a total that looks right and is wrong (onNull covers
-  // the same case for a task that never got a value at all). The schema doesn't constrain this
-  // field, so a non-hex value is treated as no designation rather than trusted into the $convert
-  // path, where a leading "$" would parse as an operator and throw before onError ever applies.
   const estimate = estimateFieldId && isObjectIdSegment(estimateFieldId)
     ? {
         $convert: {

@@ -2,7 +2,6 @@ import XCTest
 @testable import CPMenubarCore
 
 final class WorkerLauncherTests: XCTestCase {
-    // What a Finder launch actually gives you, and what makes this whole task necessary
     private let finderEnvironment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
 
     private func state() -> OnboardingState {
@@ -16,8 +15,6 @@ final class WorkerLauncherTests: XCTestCase {
         )
     }
 
-    // The failure this exists to prevent: preflight finds claude through a login shell, the app
-    // spawns a worker that inherits Finder's PATH, and every task fails with the check still green.
     func testTheSpawnedWorkerGetsThePathPreflightResolved() {
         let plan = WorkerLauncher.plan(
             nodePath: "/Users/rpo/.nvm/versions/node/v22/bin/node",
@@ -40,8 +37,6 @@ final class WorkerLauncherTests: XCTestCase {
         XCTAssertNotEqual(plan.environment["PATH"], finderEnvironment["PATH"])
     }
 
-    // Only ever an addition. A worker with no resolved PATH must keep whatever it was given rather
-    // than being handed an empty one, which would be worse than the problem.
     func testAnUnresolvedPathIsLeftAlone() {
         var bare = state()
         bare.toolPath = ""
@@ -53,8 +48,6 @@ final class WorkerLauncherTests: XCTestCase {
         XCTAssertEqual(plan.environment["PATH"], finderEnvironment["PATH"])
     }
 
-    // The app is a convenience over the launchd contract, never a replacement — so it sets exactly
-    // the variables the plist sets, and the worker cannot tell which one started it
     func testItSetsTheSameVariablesThePlistDoes() {
         let plan = WorkerLauncher.plan(
             nodePath: "/n", workerEntry: "/e", state: state(),
@@ -65,10 +58,6 @@ final class WorkerLauncherTests: XCTestCase {
         XCTAssertEqual(plan.environment["CP_STATE_DIR"], "/Users/rpo/.boardplanner")
     }
 
-    // Shipped once. The worker registered, cloned, started and then never reported, and the fleet
-    // console said "stale" — because Node's fetch rejects a scheme-less URL outright while every
-    // Swift-side client had quietly normalised it first. The old test used a fixture that already
-    // carried https://, so it passed throughout.
     func testTheWorkerIsHandedSomethingFetchCanParse() {
         for typed in ["localhost:3973", "board.example.com", "127.0.0.1:3000", "shed.local:8080"] {
             var typedByHand = state()
@@ -110,7 +99,6 @@ final class WorkerLauncherTests: XCTestCase {
         }
     }
 
-    // CP-237 removed it as a boot requirement, and the app must not quietly reintroduce one
     func testItDoesNotInventAnApiToken() {
         let plan = WorkerLauncher.plan(
             nodePath: "/n", workerEntry: "/e", state: state(),
@@ -120,9 +108,6 @@ final class WorkerLauncherTests: XCTestCase {
         XCTAssertNil(plan.environment["CP_ENROLMENT_TOKEN"])
     }
 
-    // The app has to carry its own worker. A distributed app cannot read one out of the operator's
-    // checkout, because that checkout is *their* project — only a Board Planner clone has worker/.
-    // This looked fine right up until the app would have left the machine that built it.
     func testItPrefersTheWorkerShippedInsideTheApp() throws {
         let bundled = try temporaryFile(named: "main.js")
         defer { try? FileManager.default.removeItem(atPath: bundled) }
@@ -141,8 +126,6 @@ final class WorkerLauncherTests: XCTestCase {
             (checkout as NSString).appendingPathComponent("worker/dist/main.js"))
     }
 
-    // Someone else's project, and no worker in the app: saying so beats spawning a path that is
-    // not there and reporting whatever node says about it
     func testItAnswersNothingWhenNeitherExists() {
         XCTAssertNil(WorkerLauncher.entryPoint(bundledAt: "/nope/main.js", checkout: "/Users/rpo/their-project"))
     }

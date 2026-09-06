@@ -30,10 +30,6 @@ import { MAX_RECURRENCE_INTERVAL, clampInterval } from "@/lib/recurrence";
 import { activeFields, sortedFields, orderedOptions } from "@/lib/custom-fields";
 import type { GeneratedTask } from "@/lib/ai";
 
-/**
- * Creates a task. An existing one is edited in place by the detail view, which owns
- * the autosave — see `detail/useTaskEditor`.
- */
 interface TaskFormProps {
   projectId: string;
   projectKey?: string;
@@ -41,11 +37,9 @@ interface TaskFormProps {
   columns?: ApiProjectColumn[];
   taskTemplates?: ApiTaskTemplate[];
   sprints?: ApiSprint[];
-  /** Pre-selects a sprint on the new task */
   defaultSprint?: string;
   customFields?: ApiCustomField[];
   onSaved: () => void;
-  // When set, the created task is linked as this task's child
   parentTaskId?: string;
   onCancel: () => void;
 }
@@ -173,8 +167,6 @@ export function TaskForm({
             type: "parent_of",
           });
         } catch {
-          // The task exists by now; reporting a plain failure would invite a
-          // second submit and a duplicate
           toast("Task created, but linking it to the parent failed", "error");
         }
       }

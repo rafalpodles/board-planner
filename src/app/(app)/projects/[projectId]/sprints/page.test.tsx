@@ -8,12 +8,8 @@ const { api, toast, router, query, pathname, headerCalls } = vi.hoisted(() => ({
   api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn() },
   toast: vi.fn(),
   router: { push: vi.fn(), replace: vi.fn() },
-  // Stands in for the address bar: a test writes it and rerenders, as a navigation would
   query: { current: "" },
   pathname: { current: "/projects/p1/sprints" },
-  // Every commit calls SprintHeader again, including ones a single act() flush discards
-  // before the test can read the DOM — this is the only way to see a render that never
-  // survives to be read back with screen.getByTestId
   headerCalls: [] as Array<{
     name: string;
     doneCount: number;
@@ -70,8 +66,6 @@ const project = {
   taskTemplates: [],
 } as unknown as ApiProject;
 
-// doneCount/taskCount disagree with the task list on purpose: they are what the sprint
-// list reports, and the header must prefer what the tasks actually say
 const sprints = [
   {
     _id: "s1",
@@ -122,10 +116,6 @@ const completedOnly = [
   },
 ] as ApiSprint[];
 
-// Two completed sprints, both with a nonzero estimateDone: the minimum fixture that can
-// tell "the chart renders" apart from "the chart renders null" — no other fixture in this
-// file has two completed sprints, which is exactly how the chart's own wiring on this page
-// went untested.
 const twoCompletedSprints = [
   {
     _id: "s5",
@@ -153,7 +143,6 @@ const twoCompletedSprints = [
   },
 ] as ApiSprint[];
 
-// Four of eight in a column whose role is "done", under an id nothing hardcodes
 const sprintTasks = Array.from({ length: 8 }, (_, i) => ({
   _id: `t${i + 1}`,
   taskNumber: i + 1,
@@ -172,16 +161,11 @@ const projectWithEstimate = {
   customFields: [{ _id: "f1", name: "Story points", fieldType: "number" }],
 } as unknown as ApiProject;
 
-// Done tasks (i < 4) carry 2 points each, the rest 3 — done=8, total=20, distinct from
-// doneCount/totalCount (4/8) so a test can't pass by accident on a copied number
 const sprintTasksWithEstimate = sprintTasks.map((t, i) => ({
   ...t,
   customFieldValues: { f1: i < 4 ? 2 : 3 },
 })) as ApiTask[];
 
-// A designation reachable through a migration, a bulk import, or a direct database edit —
-// never through the API, which clears estimateFieldId along with the field itself — so a
-// task can still carry a leftover value under the id the project no longer has a field for.
 const projectWithDanglingEstimate = {
   ...project,
   estimateFieldId: "gone",
@@ -213,7 +197,6 @@ async function renderSprints(
   await screen.findByRole("heading", { name: "Sprints" });
   if (data.length > 0) {
     await screen.findByRole("navigation", { name: "Sprint list" });
-    // The scoped task list is a second round trip after the sprint is resolved
     if (tasks.length > 0) {
       await screen.findByText("TP-1");
     } else {
@@ -254,7 +237,6 @@ describe("Sprints tab", () => {
 
   it("lists every sprint in the selector, grouped", async () => {
     await renderSprints();
-    // Scoped to the selector: the header's status badge says "Active" too
     const selector = within(screen.getByRole("navigation", { name: "Sprint list" }));
     expect(selector.getByRole("button", { name: /Sprint 13/ })).toBeTruthy();
     expect(selector.getByText("Active")).toBeTruthy();
@@ -284,24 +266,13 @@ describe("Sprints tab", () => {
     expect(router.push).not.toHaveBeenCalled();
   });
 
-  // Opening a task pushes to /tasks/7 and unmounts this page, but React Testing Library's
-  // rerender simulates the transition render that happens first: the route has already
-  // moved, but this component (and its effect) is still on screen for one more commit.
-  // Without a pathname guard, the effect sees `requested` as null (the task route carries
-  // no ?sprint=) and replaces the address bar right back to the sprints tab.
   it("does not pull the user back to the sprints tab once a task navigation is underway", async () => {
     const { rerender } = await renderSprints();
 
-    // Commit a render with the address bar as it actually reads after the earlier
-    // replace landed — `requested` has to actually transition through "s1" for the
-    // effect's dependency array to notice it later moving to null.
     query.current = "sprint=s1";
     rerender(<SprintsPage />);
     router.replace.mockReset();
 
-    // A card click pushes to the task route first; both hooks report the new location
-    // before this component unmounts, same as during a real App Router transition — the
-    // destination carries no ?sprint=, so `requested` goes back to null.
     pathname.current = "/projects/p1/tasks/7";
     query.current = "";
     rerender(<SprintsPage />);
@@ -309,8 +280,6 @@ describe("Sprints tab", () => {
     expect(router.replace).not.toHaveBeenCalled();
   });
 
-  // GET /tasks?sprint=<x> assigns straight into a Mongoose filter, so an id the project
-  // does not have is a 500 and not a fallback. It must never leave the page.
   it("never asks for a sprint the URL named but the project does not have", async () => {
     query.current = "sprint=deadbeef";
     await renderSprints();
@@ -322,25 +291,17 @@ describe("Sprints tab", () => {
 
   it("reads the sprint list once, from the board", async () => {
     await renderSprints();
-    // Both come from the hook's one batch, so a page-side /sprints fetch breaks the tie
     const count = (path: string) =>
       api.get.mock.calls.filter(([url]) => url === path).length;
     expect(count("/api/projects/p1/sprints")).toBe(count("/api/projects/p1"));
   });
 
-  // Board.test.tsx and ProjectBoardView.test.tsx pin readOnly's effect once it is passed
-  // through; this pins that the page actually passes it, not merely that the components
-  // honour it when told to.
   it("keeps a completed sprint's board undraggable, not just its header", async () => {
     await renderSprints(completedOnly);
     const card = screen.getByRole("link", { name: /Task 1/i });
     expect(card.getAttribute("draggable")).toBe("false");
   });
 
-  // readOnly is about not fumbling a finished sprint, not an integrity boundary — the
-  // server enforces nothing about completed sprints either. Reopening one (Activate) stays
-  // undecided and withheld, along with Complete; Edit and Delete are ordinary metadata
-  // edits and stay offered.
   it("withholds Activate and Complete on a completed sprint, but not Edit and Delete", async () => {
     await renderSprints(completedOnly);
     expect(screen.queryByRole("button", { name: "Activate" })).toBeNull();
@@ -375,8 +336,6 @@ describe("Sprints tab", () => {
     expect(screen.queryByRole("button", { name: "Create Task" })).toBeNull();
   });
 
-  // Previously the only Create Task control lived inside the zero-task empty state, so a
-  // sprint that already had cards offered no visible way to add another
   it("offers a Create Task action in the header even when the sprint already has cards", async () => {
     await renderSprints();
     await click(screen.getByRole("button", { name: "Create Task" }));
@@ -388,8 +347,6 @@ describe("Sprints tab", () => {
     expect(screen.queryByRole("button", { name: "Create Task" })).toBeNull();
   });
 
-  // ProjectBoardView's own New Task modal is not mounted in Planning; Create Task must
-  // work there too rather than silently doing nothing until the next switch to Board
   it("opens the new task modal from Planning, not just Board", async () => {
     query.current = "sprint=s1&view=planning";
     await renderSprints();
@@ -402,15 +359,12 @@ describe("Sprints tab", () => {
     expect(screen.getByTestId("sprint-progress").textContent).toBe("0/0");
   });
 
-  // The window this pins is a request long: without it the tab shows Sprint 12's cards and
-  // Sprint 12's done/total under Sprint 13's name, which is the page stating something untrue
   it("never shows the previous sprint's tasks under the sprint just selected", async () => {
     const { rerender } = await renderSprints();
     expect(screen.getByText("TP-1")).toBeTruthy();
 
     api.get.mockImplementation((url: string) => {
       if (url === "/api/projects/p1") return Promise.resolve(project);
-      // Sprint 13's tasks stay in flight, so the tab sits in the window under test
       if (url === "/api/projects/p1/tasks?sprint=s2") return new Promise(() => {});
       if (url.startsWith("/api/projects/p1/tasks")) return Promise.resolve(sprintTasks);
       if (url === "/api/projects/p1/sprints") return Promise.resolve(sprints);
@@ -422,15 +376,10 @@ describe("Sprints tab", () => {
     rerender(<SprintsPage />);
 
     await screen.findByRole("heading", { name: "Sprint 13" });
-    // The page's own chrome survives the switch — a naive "spin the whole page whenever
-    // tasks are loading" fix would take the title and selector off screen too
     expect(screen.getByRole("heading", { name: "Sprints" })).toBeTruthy();
     expect(screen.getByRole("navigation", { name: "Sprint list" })).toBeTruthy();
     expect(screen.queryByText("TP-1")).toBeNull();
     expect(screen.getByTestId("sprint-progress").textContent).toBe("0/0");
-    // Sprint 13's tasks are still in flight, so this is the spinner a screen reader
-    // must be able to name — it is ProjectBoardView's own, scoped to the task area,
-    // not the page-level one
     expect(screen.getByRole("status", { name: "Loading tasks" })).toBeTruthy();
     expect(screen.queryByRole("status", { name: "Loading sprint" })).toBeNull();
   });
@@ -450,7 +399,6 @@ describe("Sprints tab", () => {
 
     render(<SprintsPage />);
 
-    // The sprint has resolved to s1 and its tasks are in flight — the window this test targets
     await waitFor(() =>
       expect(api.get).toHaveBeenCalledWith("/api/projects/p1/tasks?sprint=s1")
     );
@@ -470,8 +418,6 @@ describe("Sprints tab", () => {
   });
 });
 
-// The wiring from each header button to its endpoint is new code, and swapping any two of
-// them leaves every other test in this file green
 describe("Sprint lifecycle from the header", () => {
   it("activates a planned sprint", async () => {
     api.put.mockResolvedValue({});
@@ -552,16 +498,12 @@ describe("Board / Planning toggle", () => {
     expect(router.push).toHaveBeenCalledWith("/projects/p1/sprints?sprint=s1&view=planning");
   });
 
-  // The URL has two writers now: the sprint-scope normalizer (BP-200) and this toggle.
-  // Order 1 — a view already in the address bar must survive the normalizer's own replace.
   it("keeps a view already chosen in the URL when the sprint scope gets normalized into it", async () => {
     query.current = "view=planning";
     await renderSprints();
     expect(router.replace).toHaveBeenCalledWith("/projects/p1/sprints?sprint=s1&view=planning");
   });
 
-  // Order 2 — the toggle must push the sprint the page actually settled on, not the stale
-  // or invalid one still sitting in `requested` at the moment of the click.
   it("switches to Planning using the sprint the page already settled on, not a stale URL value", async () => {
     query.current = "sprint=deadbeef";
     await renderSprints();
@@ -572,9 +514,6 @@ describe("Board / Planning toggle", () => {
     expect(router.push).toHaveBeenCalledWith("/projects/p1/sprints?sprint=s1&view=planning");
   });
 
-  // board.applySprintChange only ever drops a task out of board.tasks, never adds one in,
-  // so the header must be fed from something else once a backlog task is pulled into the
-  // sprint — this is the one place a planner is actually looking at the number.
   it("moves the header's counts when a planning move happens, not just the panes'", async () => {
     const backlogTasks = [
       {
@@ -610,8 +549,6 @@ describe("Board / Planning toggle", () => {
     await screen.findByText("TP-1");
     expect(screen.getByTestId("sprint-progress").textContent).toBe("4/8");
 
-    // Simulates the navigation the Planning button's router.push would have caused —
-    // router.push is a spy here and does not itself move the mocked address bar.
     query.current = "sprint=s1&view=planning";
     rerender(<SprintsPage />);
     await screen.findByText("Backlog task");
@@ -623,10 +560,6 @@ describe("Board / Planning toggle", () => {
     );
   });
 
-  // applySprintChange can only ever drop a task out of board.tasks, never insert one, so a
-  // task pulled in from the backlog exists only in PlanningView's own overlay — which is
-  // component state and dies the moment the view unmounts. Without a reload on the success
-  // path, switching to Board drops the card and switching back loses it from both panes.
   it("keeps a task added in Planning once the view switches to Board", async () => {
     const backlogTasks = [
       {
@@ -643,8 +576,6 @@ describe("Board / Planning toggle", () => {
       },
     ] as ApiTask[];
 
-    // The server-side truth: a PUT actually moving b1 into the sprint is reflected on the
-    // next GET, the way a real backend (not a static fixture) would behave.
     let movedIn = false;
     api.get.mockImplementation((url: string) => {
       if (url === "/api/projects/p1") return Promise.resolve(project);
@@ -683,9 +614,6 @@ describe("Board / Planning toggle", () => {
     expect(await screen.findByText("TP-20")).toBeTruthy();
   });
 
-  // Proves the optimistic drop itself, not board.reload() eventually converging: api.put
-  // never resolves here, so if applySprintChange were not called from PlanningView's
-  // applyLocally, board.tasks — and the header reading it — would never move.
   it("moves the header's count down immediately on a planning removal, before the server answers", async () => {
     api.get.mockImplementation((url: string) => {
       if (url === "/api/projects/p1") return Promise.resolve(project);
@@ -713,9 +641,6 @@ describe("Board / Planning toggle", () => {
     expect(screen.getByTestId("sprint-progress").textContent).toBe("4/7");
   });
 
-  // PlanningView reports on every render, including the ones before its own tasksLoaded
-  // is true for the new sprint — those report an empty array, which is truthy, so it used
-  // to beat the selected?.doneCount fallback and paint "0/0" for one window per switch.
   it("never shows 0/0 while switching sprints with Planning open", async () => {
     const planningSprints = [
       sprints[0],
@@ -737,7 +662,6 @@ describe("Board / Planning toggle", () => {
         return Promise.resolve(sprintTasks.map((t) => ({ ...t })));
       }
       if (url === "/api/projects/p1/tasks?sprint=backlog") return Promise.resolve([]);
-      // Sprint 13's tasks never arrive, keeping the mid-switch window open under test
       if (url === "/api/projects/p1/tasks?sprint=s2") return new Promise(() => {});
       if (url === "/api/projects/p1/sprints") return Promise.resolve(planningSprints);
       if (url.endsWith("/assignable-users")) return Promise.resolve([]);
@@ -756,16 +680,9 @@ describe("Board / Planning toggle", () => {
     });
 
     expect(screen.getByRole("heading", { name: "Sprint 13", level: 2 })).toBeTruthy();
-    // Sprint 13's own doneCount/taskCount (2/5) is the fallback while its tasks are still
-    // in flight — never "0/0", which is what an empty, "loaded" report would produce
     expect(screen.getByTestId("sprint-progress").textContent).toBe("2/5");
   });
 
-  // Milder than the 0/0 case above but the same bug: planningTasks from Sprint 12 outlives
-  // the render where the header already reads Sprint 13's name off `selected`. Checking only
-  // the settled DOM (as the test above does) can't see it — the stale render commits and
-  // reverts within the same act() flush. Reading every SprintHeader call, not just the last
-  // one still standing, is what catches it.
   it("never renders a sprint's counts under a different sprint's name", async () => {
     const planningSprints = [
       sprints[0],
@@ -787,7 +704,6 @@ describe("Board / Planning toggle", () => {
         return Promise.resolve(sprintTasks.map((t) => ({ ...t })));
       }
       if (url === "/api/projects/p1/tasks?sprint=backlog") return Promise.resolve([]);
-      // Sprint 13's tasks never arrive, keeping the mid-switch window open under test
       if (url === "/api/projects/p1/tasks?sprint=s2") return new Promise(() => {});
       if (url === "/api/projects/p1/sprints") return Promise.resolve(planningSprints);
       if (url.endsWith("/assignable-users")) return Promise.resolve([]);
@@ -809,17 +725,12 @@ describe("Board / Planning toggle", () => {
     expect(screen.getByRole("heading", { name: "Sprint 13", level: 2 })).toBeTruthy();
     expect(screen.getByTestId("sprint-progress").textContent).toBe("2/5");
 
-    // Sprint 13's only valid counts, ever, are its own (2/5) — never Sprint 12's
-    // leftover 4/8 painted under Sprint 13's name for one frame along the way
     const mislabeled = headerCalls.filter(
       (call) => call.name === "Sprint 13" && (call.doneCount !== 2 || call.totalCount !== 5)
     );
     expect(mislabeled).toEqual([]);
   });
 
-  // page.tsx:153 clamps the view back to "board" whenever the selected sprint is
-  // read-only, even if the URL already asked for Planning — this exercises that guard
-  // for a completed sprint reached with ?view=planning already set.
   it("clamps a completed sprint back to the board even when the URL already asks for Planning", async () => {
     query.current = "sprint=s3&view=planning";
     await renderSprints(completedOnly);
@@ -864,10 +775,6 @@ describe("Sprint header estimate", () => {
     expect(screen.getByTestId("sprint-estimate-progress").textContent).toBe("8/20 Story points");
   });
 
-  // Same regression the sprint header's own doneCount/totalCount hit twice already
-  // (see "never renders a sprint's counts under a different sprint's name" above):
-  // the estimate figures must move through the exact same branches, or they can paint
-  // one sprint's numbers under another sprint's name for a frame during a switch.
   it("never carries one sprint's estimate under a different sprint's name mid-switch", async () => {
     const planningSprintsWithEstimate = [
       { ...sprints[0], estimateTotal: 20, estimateDone: 8 },
@@ -891,7 +798,6 @@ describe("Sprint header estimate", () => {
         return Promise.resolve(sprintTasksWithEstimate.map((t) => ({ ...t })));
       }
       if (url === "/api/projects/p1/tasks?sprint=backlog") return Promise.resolve([]);
-      // Sprint 13's tasks never arrive, keeping the mid-switch window open under test
       if (url === "/api/projects/p1/tasks?sprint=s2") return new Promise(() => {});
       if (url === "/api/projects/p1/sprints") return Promise.resolve(planningSprintsWithEstimate);
       if (url.endsWith("/assignable-users")) return Promise.resolve([]);
@@ -913,8 +819,6 @@ describe("Sprint header estimate", () => {
     expect(screen.getByRole("heading", { name: "Sprint 13", level: 2 })).toBeTruthy();
     expect(screen.getByTestId("sprint-estimate-progress").textContent).toBe("6/13 Story points");
 
-    // Sprint 13's only valid estimate, ever, is its own (6/13) — never Sprint 12's
-    // leftover 8/20 painted under Sprint 13's name for one frame along the way
     const mislabeled = headerCalls.filter(
       (call) =>
         call.name === "Sprint 13" && (call.estimate?.done !== 6 || call.estimate?.total !== 13)
@@ -923,14 +827,10 @@ describe("Sprint header estimate", () => {
   });
 });
 
-// The chart moved out of the page's flex column into a dialog opened from a header
-// button (BP-208 follow-up): it no longer takes any of the board's height, on any
-// sprint or view, and the button is what "findable" now means for these fixtures.
 describe("Velocity", () => {
   it("offers a Velocity button once two completed sprints exist and the project designates an estimate field", async () => {
     await renderSprints(twoCompletedSprints, { tasks: [], project: projectWithEstimate });
     expect(screen.getByRole("button", { name: "Velocity" })).toBeTruthy();
-    // Nothing is drawn until asked for — the chart lives in a dialog, not the page
     expect(screen.queryByRole("heading", { name: "Velocity" })).toBeNull();
   });
 
@@ -941,7 +841,6 @@ describe("Velocity", () => {
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByRole("heading", { name: "Velocity", level: 2 })).toBeTruthy();
     expect(within(dialog).getByText("Sprint 9")).toBeTruthy();
-    // The page underneath is still there — this is a dialog over the tab, not a navigation
     expect(screen.getByRole("heading", { name: "Sprints" })).toBeTruthy();
 
     await click(screen.getByRole("button", { name: "Close dialog" }));
@@ -963,9 +862,6 @@ describe("Velocity", () => {
     expect(screen.queryByRole("button", { name: "Velocity" })).toBeNull();
   });
 
-  // The report this fixed named this exact case: a planned sprint has no velocity of its
-  // own, but the project-wide history behind the button is unrelated to which sprint (or
-  // view) happens to be selected.
   it("still offers the Velocity button on a planned sprint that has no velocity of its own, in Planning too", async () => {
     query.current = "sprint=s2&view=planning";
     await renderSprints([...twoCompletedSprints, sprints[1]], {

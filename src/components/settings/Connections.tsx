@@ -15,10 +15,6 @@ interface Definition {
   blurb: string;
   isConfigured: (project: ApiProject) => boolean;
   summary: (project: ApiProject) => string;
-  /**
-   * True when the repository URL already implies this connection. Such a row is never
-   * offered in the picker — pasting the URL is what adds it.
-   */
   impliedByRepository?: (project: ApiProject) => boolean;
 }
 
@@ -55,8 +51,6 @@ export const INTEGRATIONS: Definition[] = [
     id: "channels",
     brand: "slack",
     name: "Team channels",
-    // Named apart from the personal grid under Notifications, which also says "Slack": this one
-    // posts to a shared room and does not care who is watching what
     blurb: "Post board events to a shared Slack or Discord channel",
     isConfigured: (p) => (p.notificationChannels?.length ?? 0) > 0,
     summary: (p) => {
@@ -81,7 +75,6 @@ export const INTEGRATIONS: Definition[] = [
 
 interface Props {
   project: ApiProject;
-  /** Rows the user added by hand this session; the rest are derived from the project */
   opened: IntegrationId[];
   expanded: IntegrationId | null;
   onExpand: (id: IntegrationId | null) => void;
@@ -90,11 +83,6 @@ interface Props {
   renderBody: (id: IntegrationId) => React.ReactNode;
 }
 
-/**
- * One list. A row expands where it sits, so the thing you just added is under the button
- * you pressed — the previous shape put the summary in one card and the vendor's form in
- * another below it, and the two disagreed about what was connected.
- */
 export function Connections({
   project,
   opened,
@@ -112,8 +100,6 @@ export function Connections({
       i.impliedByRepository?.(project) ||
       opened.includes(i.id),
   );
-  // A repository URL adds GitHub or GitLab on its own, but they stay in the picker anyway:
-  // dropping them meant someone looking for "GitHub" found nothing and concluded it was gone
   const available = INTEGRATIONS.filter(
     (i) => !visible.some((v) => v.id === i.id),
   );
@@ -164,8 +150,6 @@ export function Connections({
                   {connected ? "Connected" : "Not set up"}
                 </span>
 
-                {/* An implied row cannot be removed here — clearing the repository URL is
-                    what removes it, and a button that silently did nothing would be worse */}
                 {!implied && !connected && (
                   <button
                     type="button"
@@ -205,8 +189,6 @@ export function Connections({
 
       {available.length > 0 && (
         <div className="border-t border-border px-4 py-3">
-          {/* On an empty project the options are the fastest thing to show, so they are
-              already open rather than hidden behind a button */}
           {picking || visible.length === 0 ? (
             <div className="grid gap-2 sm:grid-cols-2">
               {available.map((integration) => (

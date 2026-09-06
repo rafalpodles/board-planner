@@ -22,8 +22,6 @@ describe("scrollbars are hidden app-wide", () => {
     expect(css).toMatch(/^\*::-webkit-scrollbar\s*\{[^}]*display:\s*none/m);
   });
 
-  // Hiding the bar is the default; a container that had to ask for it would be a
-  // container new code has to remember to opt in
   it("leaves no per-component opt-in utility to forget", () => {
     expect(css).not.toContain("no-scrollbar");
     const users = sourceFiles(SRC).filter((file) =>
@@ -32,8 +30,6 @@ describe("scrollbars are hidden app-wide", () => {
     expect(users.map((f) => f.replace(`${SRC}/`, ""))).toEqual([]);
   });
 
-  // The bar is the only visual hint that an area scrolls, so hiding it must not
-  // come with an overflow value that stops it scrolling at all
   it("does not touch overflow anywhere in the global rules", () => {
     const globalRules = css.match(/^\*[^{]*\{[^}]*\}/gm) ?? [];
     expect(globalRules).not.toHaveLength(0);

@@ -9,31 +9,8 @@ import { join } from "node:path";
 import { createDelivery, hardenedGitConfig } from "./delivery.js";
 import { CommandResult, createRunner, Runner } from "./exec.js";
 
-/**
- * Delivery carries the operator's credentials and runs `git push` inside the worktree the agent
- * just wrote. Everything git treats as "run this program" — hooks, credential.helper, askpass,
- * receivepack — and everything that decides *where* the push goes is therefore attacker-controlled.
- * A linked worktree shares config and hooks with the main clone, so what is planted outlives the run.
- *
- * Real git against real repositories, over a real transport: the question is what git does with a
- * config file, and a mocked runner could only show that the flags were spelled correctly.
- *
- * The remote is `git://` rather than a local path, because delivery refuses local transports — a
- * local push runs git-receive-pack as its own child, and the destination's post-receive hook would
- * then hold delivery's credentials. Under git:// that hook runs inside the daemon instead, which
- * the agent could start but which never sees our environment.
- */
-
-// Refuses the push as well as marking that it ran: with `exit 0` an unhardened push still reaches
-// the remote, so an assertion that the branch landed could not tell the two apart
 const HOOK = (marker: string) => `#!/bin/sh\ntouch ${JSON.stringify(marker)}\nexit 1\n`;
 
-// refuseIfPlanted reads `git config --list --show-scope --no-includes` through the runner before
-// the push (BP-346 widened it from `--local --list`). Where the
-// subject is an override rather than the guard, that one read is blinded: the planted key stays on
-// disk, so the real git still meets it, and only delivery's own look at the config comes back
-// empty. Without this the guard fires first, the push never runs, and every assertion below would
-// be green whether the overrides worked or not.
 function pastTheGuard(): Runner {
   const real = createRunner();
   const clean: CommandResult = { code: 0, stdout: "", stderr: "", timedOut: false };
@@ -121,7 +98,6 @@ describe("delivery does not execute what the agent left in the repository", () =
     git(work, "commit", "-m", "first");
     git(work, "checkout", "-b", "feature");
 
-    // Answers 401, which is what makes git go looking for a program to get a password from
     challenge = httpServer((_req, res) => {
       res.writeHead(401, { "WWW-Authenticate": 'Basic realm="git"' });
       res.end();
@@ -136,17 +112,12 @@ describe("delivery does not execute what the agent left in the repository", () =
     rmSync(dir, { recursive: true, force: true });
   });
 
-  // Hardening that also stopped the branch reaching the remote would be found in production
   it("still pushes the branch", async () => {
     await createDelivery(createRunner()).push(work, "feature", headSha());
 
     expect(pushedRefs()).toContain("refs/heads/feature");
   });
 
-  // The property this whole task adds, proved over a real transport rather than a mocked runner:
-  // refs/heads/feature is rewritten to point at a second commit the run never verified, and the
-  // worktree is left detached at the first — the same shape a compromised agent leaves the worktree
-  // in. What reaches the remote is the sha delivery was given, not whatever the ref store says now.
   it("pushes the commit it was given, not whatever the branch ref was rewritten to point at", async () => {
     const first = headSha();
     writeFileSync(join(work, "b.txt"), "second\n");
@@ -164,8 +135,6 @@ describe("delivery does not execute what the agent left in the repository", () =
     expect(refs).not.toContain(second);
   });
 
-  // A gate rejection pushes too, so a planted hook must neither run nor keep the branch back. The
-  // hook refuses the push, which is what makes the second assertion bite.
   it("pushes past a pre-push hook the agent planted, without running it", async () => {
     plantHook(join(work, ".git", "hooks", "pre-push"));
 
@@ -185,8 +154,6 @@ describe("delivery does not execute what the agent left in the repository", () =
     expect(pushedRefs()).toContain("refs/heads/feature");
   });
 
-  // core.hooksPath alone, with no --no-verify in sight: the two mechanisms would otherwise mask
-  // each other, and dropping either would leave every other test here green
   it("blocks hooks through the config alone, without --no-verify", () => {
     plantHook(join(work, ".git", "hooks", "pre-push"));
 
@@ -199,8 +166,6 @@ describe("delivery does not execute what the agent left in the repository", () =
     expect(existsSync(marker)).toBe(false);
   });
 
-  // git keeps the *first* receivepack it is given, not the last, so config cannot override this
-  // one — it has to be won on the command line
   it("does not run a receive-pack program the agent set", async () => {
     const planted = writeProgram(
       join(dir, "planted-receive-pack"),
@@ -236,8 +201,6 @@ describe("delivery does not execute what the agent left in the repository", () =
     expect(existsSync(marker)).toBe(false);
   });
 
-  // The way through was the transport, not the configuration: ext:: hands the URL to a program.
-  // Three ways to rewrite where the push goes, one chokepoint that stops all of them.
   it.each([
     ["remote.origin.pushurl", (p: string) => ["config", "remote.origin.pushurl", `ext::${p}`]],
     ["remote.origin.url", (p: string) => ["config", "remote.origin.url", `ext::${p}`]],
@@ -254,11 +217,6 @@ describe("delivery does not execute what the agent left in the repository", () =
     expect(existsSync(marker)).toBe(false);
   });
 
-  // The receivepack quirk one layer along: git keeps the *first* gitProxy entry it finds, so the
-  // repository's outranks any config override — `none`, `none for *` and the empty string were
-  // each tried and each lost. The environment is where it is won. Both assertions bite: the proxy
-  // is what carries this transport, so emptying it wrongly would stop the branch as surely as
-  // running the planted program would.
   it("does not run a proxy command the agent set, and still pushes over it", async () => {
     git(work, "config", "core.gitProxy", plantProgram("planted-proxy"));
 
@@ -268,13 +226,6 @@ describe("delivery does not execute what the agent left in the repository", () =
     expect(pushedRefs()).toContain("refs/heads/feature");
   });
 
-  // A local push runs git-receive-pack as delivery's own child, so the destination's post-receive
-  // hook would hold delivery's credentials. Refusing the transport is what stops it — asserted,
-  // because the first version of this fix assumed the hooksPath override covered it, and it does not.
-  // The guard standing in front of all of the above: delivery reads the checkout's config before it
-  // pushes and refuses outright if the agent wrote an executable key at all — including one the
-  // override list never named. This is the only place it is the subject; everywhere else it is
-  // blinded, or nothing above would be testing an override.
   describe("and refuses the push outright when it can see one", () => {
     it.each([
       ["core.hooksPath", () => git(work, "config", "core.hooksPath", join(dir, "elsewhere"))],
@@ -293,7 +244,6 @@ describe("delivery does not execute what the agent left in the repository", () =
       expect(pushedRefs()).not.toContain("refs/heads/feature");
     });
 
-    // An unreadable config is not a clean one: it is a config this cannot clear either
     it("refuses when it cannot read the config at all", async () => {
       const runner: Runner = {
         run: (command, args, opts) =>

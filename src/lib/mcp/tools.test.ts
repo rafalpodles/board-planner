@@ -8,9 +8,6 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 type Handler = (args: Record<string, unknown>, extra: unknown) => Promise<unknown>;
 
-// The registration is the only export, so the tools are reached by capturing what it registers.
-// This calls the callbacks directly and so skips the SDK's parse step — tools.strict.test.ts is
-// the one that drives the real transport.
 function registered() {
   const tools = new Map<string, { schema: z.ZodObject<z.ZodRawShape>; handler: Handler }>();
   const server = {
@@ -34,12 +31,6 @@ beforeEach(() => {
   });
 });
 
-/**
- * BP-358: a claim requires a named agent, so a task assigned over MCP with no way to name one is
- * structurally unclaimable — and this repo's own workflow runs through MCP. Resolved by name
- * because an agent id appears in no MCP response, so demanding one would leave the parameter
- * unreachable from a conversation.
- */
 describe("update_task and the agent that runs it", () => {
   function callUpdate(args: Record<string, unknown>) {
     return registered().get("update_task")!.handler({ taskKey: "BP-1", ...args }, extra);
@@ -70,8 +61,6 @@ describe("update_task and the agent that runs it", () => {
     expect(update).toHaveBeenCalledWith("p1", "t1", { agent: "a1" });
   });
 
-  // Sending the name through unresolved would reach an ObjectId ref as a string and come back as
-  // "that agent cannot run on this project" — a refusal about the wrong thing
   it("refuses a name no agent has, without writing anything", async () => {
     vi.spyOn(PlannerClient.prototype, "listAgents").mockResolvedValue([{ _id: "a1", name: "Default" }]);
     const update = vi.spyOn(PlannerClient.prototype, "updateTask").mockResolvedValue({});
@@ -80,12 +69,6 @@ describe("update_task and the agent that runs it", () => {
     expect(update).not.toHaveBeenCalled();
   });
 
-  /**
-   * BP-496: `/api/agents` sends the project agents of every project the caller can reach, not just
-   * this task's — an instance admin sees all of them. Resolution has to filter by the task's own
-   * project the way PropertyRail's picker does, or a namesake belonging to another board either
-   * gets chosen silently or reaches the write only to be refused by `agentUsableOnProject`.
-   */
   it("resolves a project-scoped agent only against the task's own project, never a namesake elsewhere", async () => {
     vi.spyOn(PlannerClient.prototype, "listAgents").mockResolvedValue([
       { _id: "elsewhere", name: "Runner", scope: "project", projectId: "p2" },
@@ -108,8 +91,6 @@ describe("update_task and the agent that runs it", () => {
     expect(update).not.toHaveBeenCalled();
   });
 
-  // The control: a global agent carries no project of its own, so it must keep resolving
-  // everywhere exactly as before this fix
   it("resolves a global agent regardless of project", async () => {
     vi.spyOn(PlannerClient.prototype, "listAgents").mockResolvedValue([
       { _id: "g1", name: "Default", scope: "global", projectId: null },
@@ -121,10 +102,6 @@ describe("update_task and the agent that runs it", () => {
     expect(update).toHaveBeenCalledWith("p1", "t1", { agent: "g1" });
   });
 
-  // A second control, distinct from the global one above: a personal agent also carries no
-  // project of its own (the filter only gates `scope === "project"`), so it must resolve
-  // regardless of project too — this pins that down against a fix that narrowed the check to
-  // `scope === "global"` instead of `scope !== "project"`, which would wrongly exclude it
   it("resolves a personal (user-scope) agent regardless of project too", async () => {
     vi.spyOn(PlannerClient.prototype, "listAgents").mockResolvedValue([
       { _id: "u1", name: "Admin's own", scope: "user", projectId: null },
@@ -136,8 +113,6 @@ describe("update_task and the agent that runs it", () => {
     expect(update).toHaveBeenCalledWith("p1", "t1", { agent: "u1" });
   });
 
-  // Null, not "": an empty string is not a value an ObjectId ref can hold, and only updateTask's
-  // own normalisation stands between the two
   it("sends null for the empty string, which means nobody runs it", async () => {
     const update = vi.spyOn(PlannerClient.prototype, "updateTask").mockResolvedValue({});
     const agents = vi.spyOn(PlannerClient.prototype, "listAgents").mockResolvedValue([]);
@@ -148,7 +123,6 @@ describe("update_task and the agent that runs it", () => {
     expect(agents).not.toHaveBeenCalled();
   });
 
-  // The gate is on the field, not the request: an ordinary edit must not start needing an admin
   it("leaves the field out entirely when the caller says nothing about it", async () => {
     const update = vi.spyOn(PlannerClient.prototype, "updateTask").mockResolvedValue({});
     const agents = vi.spyOn(PlannerClient.prototype, "listAgents").mockResolvedValue([]);
@@ -159,8 +133,6 @@ describe("update_task and the agent that runs it", () => {
     expect(agents).not.toHaveBeenCalled();
   });
 
-  // BP-518: the description told an AI client this needed an instance admin, when since BP-358
-  // the choice belongs to whoever may edit the task — see task-service.ts's agentUsableOnProject.
   it("tells the caller who may actually choose an agent, not the retired instance-admin rule", () => {
     const description = registered().get("update_task")!.schema.shape.agent.description;
 
@@ -168,26 +140,14 @@ describe("update_task and the agent that runs it", () => {
     expect(description).toMatch(/a project agent may be chosen by anyone who can edit the task/i);
   });
 
-  // The standalone package ships its own copy of this description (mcp-server/src/tools.ts) and
-  // nothing else here reads it, so a fix applied to one side and not the other compiles clean and
-  // says nothing — the same drift api-client-drift.test.ts guards for the HTTP client pair.
   it("keeps the standalone copy (mcp-server/src/tools.ts) in sync", () => {
     const source = readFileSync(join(process.cwd(), "mcp-server/src/tools.ts"), "utf8");
 
-    // A shorter marker than the in-app assertion above: the concatenated string is one line here,
-    // but split across "+"-joined literals in the raw source, so a phrase spanning two of them
-    // would never match the file's text even though it matches fine once JS has joined them.
     expect(source).not.toMatch(/instance admin/i);
     expect(source).toMatch(/anyone who can edit the task/i);
   });
 });
 
-/**
- * BP-400. Both tools resolved a username against the whole instance's roster before this branch;
- * now they resolve it against listAssignableUsers, which is scoped to the board. Nothing above
- * exercises the assignee branch at all, so this is new coverage rather than an update to existing
- * coverage — the "typo" and "no access" cases were previously indistinguishable and untested here.
- */
 describe("resolving an assignee through the board's own roster", () => {
   function callCreate(args: Record<string, unknown>) {
     return registered().get("create_task")!.handler({ project: "BP", title: "x", ...args }, extra);
@@ -217,8 +177,6 @@ describe("resolving an assignee through the board's own roster", () => {
     expect(create).toHaveBeenCalledWith("p1", expect.objectContaining({ assignee: "kuba" }));
   });
 
-  // Whoever calls this cannot tell a typo from somebody genuinely without access, on purpose —
-  // splitting the two would mean confirming an account exists elsewhere on the instance
   it("create_task refuses a username the board's roster does not contain", async () => {
     vi.spyOn(PlannerClient.prototype, "listAssignableUsers").mockResolvedValue([]);
     const create = vi.spyOn(PlannerClient.prototype, "createTask").mockResolvedValue({});
@@ -251,7 +209,6 @@ describe("resolving an assignee through the board's own roster", () => {
     expect(update).not.toHaveBeenCalled();
   });
 
-  // "" unassigns, same as the agent field — it must not be resolved against the roster at all
   it("update_task still unassigns on an empty string without consulting the roster", async () => {
     const listUsers = vi.spyOn(PlannerClient.prototype, "listAssignableUsers");
     const update = vi.spyOn(PlannerClient.prototype, "updateTask").mockResolvedValue({});

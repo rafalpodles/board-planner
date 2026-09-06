@@ -61,8 +61,6 @@ final class DeviceEnrolmentTests: XCTestCase {
         XCTAssertEqual(result, .approved(workerID: "w1", credential: "cpw_secret", heartbeatMs: 60000, repositoryURL: "https://github.com/o/r", projectKey: "TP"))
     }
 
-    // Refused, expired, or already collected all answer 410 — the server does not distinguish them
-    // on purpose, so neither does this: start again.
     func testAFinishedExchangeIsOneOutcome() async throws {
         let sut = client(status: 410, body: #"{"state":"expired"}"#)
 
@@ -107,7 +105,6 @@ final class DeviceEnrolmentTests: XCTestCase {
     }
 }
 
-/// Small mutable box so a capture closure can hand a value back out of a `@Sendable` context.
 final class SendableBox<T>: @unchecked Sendable {
     var value: T
     init(_ value: T) { self.value = value }

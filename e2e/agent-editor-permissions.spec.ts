@@ -3,12 +3,6 @@ import mongoose from "mongoose";
 import { E2E_MONGODB_URI, seed } from "./seed";
 import { signIn } from "./session";
 
-/**
- * BP-459. The palette, the drag handles, the remove buttons and Save were rendered to everybody,
- * while `mayEdit` on the server wants an instance admin for a global agent. A member could open
- * the shipped Default, rearrange its gates, and learn on pressing Save that it was never theirs.
- */
-
 async function db() {
   if (mongoose.connection.readyState === 0) await mongoose.connect(E2E_MONGODB_URI);
   const handle = mongoose.connection.db;
@@ -21,12 +15,6 @@ let agentId: string;
 test.beforeEach(async () => {
   await seed();
   const handle = await db();
-  /**
-   * The block catalog is seeded once at server start and `seed()` empties the database, so
-   * without this `lookup` resolves nothing and every bucket renders empty — which is exactly how
-   * the first version of this spec passed: its "control" matched the bucket heading
-   * *Implementation*, not the block.
-   */
   await handle.collection("agentblocks").insertMany([
     {
       key: "implement",
@@ -56,8 +44,6 @@ test.beforeEach(async () => {
       updatedAt: new Date(),
     },
   ]);
-  // A global agent that is not one of the shipped three, so nothing else in the suite depends on
-  // the name and the Rename affordance is offered to somebody who may use it
   const inserted = await handle.collection("agents").insertOne({
     name: "A global one",
     description: "Composed by an instance admin",
@@ -90,9 +76,6 @@ test("a member is shown the composition and none of the controls that edit it", 
   await signIn(page, "member");
   await openAgent(page);
 
-  // The control, and it has to be exact: `getByText("Implement")` also matches the bucket
-  // heading *Implementation*, which is on screen whether or not the composition resolved — the
-  // first version of this test passed against completely empty buckets that way.
   await expect(page.getByText("Implement", { exact: true })).toBeVisible();
   await expect(page.getByText("Push", { exact: true })).toBeVisible();
 

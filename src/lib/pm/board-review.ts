@@ -17,7 +17,6 @@ const MAX_TASKS_SCANNED = 500;
 const MAX_ITEMS_PER_FINDING = 10;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-// Short and shared between the two languages this board is written in
 const STOPWORDS = new Set([
   "the", "and", "for", "with", "from", "into", "that", "this", "when", "what", "not", "add", "new",
   "oraz", "dla", "przez", "kiedy", "jest", "jako", "nie", "aby", "nowy", "nowa", "nowe",
@@ -169,8 +168,6 @@ export async function buildBoardDigest(projectId: string): Promise<BoardDigest |
   };
 }
 
-// The thread (and every later turn's replayed history) keeps this line instead of the
-// full scan, which would otherwise repeat in the context once per review
 export function digestHeadline(digest: BoardDigest): string {
   const findings = [
     digest.gaps.length && `${digest.gaps.length} missing acceptance criteria or description`,

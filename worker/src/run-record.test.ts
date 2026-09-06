@@ -10,7 +10,6 @@ const task = {
 } as unknown as ClaimedTask;
 
 describe("recordFor", () => {
-  // An agent can be renamed or deleted; a record of what ran must not change when it is
   it("carries the agent by name as well as by id", () => {
     expect(recordFor(task, "delivered", "", 0, 1000, 0.5)).toMatchObject({
       agentId: "a1",
@@ -18,8 +17,6 @@ describe("recordFor", () => {
     });
   });
 
-  // A report reads "refused by size-strict", so the key belongs in its own field rather than buried
-  // in prose a query cannot group by
   it("names the block that refused, and leaves the detail empty", () => {
     expect(recordFor(task, "gateRejected", "size-strict", 0, 1000, 0)).toMatchObject({
       outcome: "refused",
@@ -36,8 +33,6 @@ describe("recordFor", () => {
     });
   });
 
-  // The list the server accepts is asserted against its source in catalog-contract.test.ts — the
-  // worker is a separate package, and importing the app's types here would drag its whole graph in
   it("maps every worker outcome onto one the server accepts", () => {
     const accepted = ["delivered", "merged", "refused", "blocked", "failed", "requeued", "released"];
     const kinds: OutcomeKind[] = [

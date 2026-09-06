@@ -10,9 +10,6 @@ import {
 } from "./seed";
 import { signIn as arriveSignedIn } from "./session";
 
-// BP-417. The project name in the task header used to be a plain <span> — these specs would fail
-// against that version because there is no link with this name to find at all.
-
 const TASK_URL = `${BASE_URL}/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`;
 const BOARD_URL = `${BASE_URL}/projects/${PROJECT_KEY}`;
 const TASK_KEY = `${PROJECT_KEY}-${SIBLING_TASK_NUMBER}`;
@@ -33,7 +30,6 @@ test("the project name is a real link to the board; the task key beside it is no
 
   await expect(projectLink(page)).toHaveAttribute("href", `/projects/${PROJECT_KEY}`);
 
-  // Control: the task key sits right next to it, same font, same row — it must stay plain text.
   await expect(bar(page).getByRole("link", { name: TASK_KEY, exact: true })).toHaveCount(0);
 });
 

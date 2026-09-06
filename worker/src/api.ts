@@ -15,9 +15,6 @@ export interface StatusIds {
   done: string;
 }
 
-// What the run is doing, addressed by the task and the run that holds it. `seq` is not here: the
-// client stamps it as the call is made, so ordering follows the order events were reported rather
-// than the order the network happened to deliver them in.
 export interface PhaseEvent {
   taskId: string;
   runId: string;
@@ -31,16 +28,10 @@ export interface ApiClient {
   release(projectId: string, taskId: string, options?: { refund?: boolean }): Promise<void>;
   statusIds(projectId: string): Promise<StatusIds>;
   columnIds(projectId: string): Promise<string[]>;
-  // `applied` is the server's answer to "did this land": false when it wrote nothing, because the
-  // run no longer holds the task or a newer event got there first
   postEvent(event: PhaseEvent): Promise<{ applied: boolean }>;
-  /** What a run leaves behind once execution.runId is cleared and nothing else remembers it. */
   postRun(projectId: string, record: RunRecord): Promise<void>;
 }
 
-// A task key is server-controlled text that the worker turns into a directory name under its own
-// worktree root and into a positional git argument. Refused here rather than sanitised: a key this
-// worker cannot name safely is one it must not run under some other name nobody chose.
 const SAFE_TASK_KEY = /^[A-Za-z0-9][A-Za-z0-9_-]*-\d+$/;
 
 function isSafeTaskKey(taskKey: string): boolean {
@@ -86,8 +77,6 @@ function parseEntry(value: unknown): SnapshotEntry | null {
   };
 }
 
-// A malformed entry fails the whole snapshot rather than being dropped: dropping one runs a shorter
-// agent than the one somebody composed, and a missing check looks exactly like a check that passed.
 function parseAgent(value: unknown): AgentSnapshot | null {
   if (typeof value !== "object" || value === null) return null;
   const raw = value as Record<string, unknown>;
@@ -110,7 +99,6 @@ interface BoardColumn {
   triggersPmReview: boolean;
 }
 
-// The board the server itself falls back to for a project stored with no columns of its own
 const SEEDED_BOARD: BoardColumn[] = [
   { id: "planned", role: "backlog", order: 0, triggersPmReview: false },
   { id: "todo", role: "approved", order: 1, triggersPmReview: false },
@@ -131,8 +119,6 @@ function statusIdsFrom(columns: BoardColumn[]): StatusIds {
   };
 }
 
-// The status kept on the error rather than flattened into its message, so a caller can act on one
-// answer without parsing text
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -144,9 +130,6 @@ export class ApiError extends Error {
   }
 }
 
-// The board refused the claim as a whole — nothing wrong with the queue or with this machine — in
-// the server's own words. The loop says it once and the menubar shows it, instead of a failed
-// cycle being logged on every poll (BP-512).
 export class ClaimRefused extends Error {
   constructor(reason: string) {
     super(reason);
@@ -154,7 +137,6 @@ export class ClaimRefused extends Error {
   }
 }
 
-// One line, bounded: the reason goes into the log and onto the menubar as the server wrote it
 const MAX_REASON_CHARS = 300;
 
 function reasonIn(detail: string): string {
@@ -163,15 +145,12 @@ function reasonIn(detail: string): string {
     const body = JSON.parse(detail) as { error?: unknown };
     if (typeof body.error === "string") reason = body.error;
   } catch {
-    // not JSON — a proxy's page, say; the raw text is the best there is
     reason = detail;
   }
   reason = reason.replace(/\s+/g, " ").trim().slice(0, MAX_REASON_CHARS);
   return reason || "the board refused the claim without saying why";
 }
 
-// Only an explicit `false` is a refusal. The caller ends the run on one, so a body that will not
-// parse — a proxy's error page, a server that predates the field — must not read as one.
 async function appliedFrom(response: Response): Promise<boolean> {
   try {
     const body = (await response.json()) as { applied?: unknown };
@@ -193,14 +172,6 @@ function toColumn(value: unknown): BoardColumn | null {
   };
 }
 
-// The claim credential lives at <stateDir>/worker.json, written by registration.ts. Read fresh on
-// every worker-credentialed call rather than cached at construction time, so a credential that
-// registration.ts refreshes (first registration, or re-registration after a 401) takes effect on
-// the very next call without restarting the process.
-//
-// Same mode discipline as config.ts's readSecretFile and repos.ts's createAllowlistReader: a copy
-// readable by group or others is refused, not silently trusted. writeFileSync's mode option only
-// applies at file creation, so an existing loose file would otherwise stay loose forever.
 function fileIdentityReader(stateDir: string): Pick<Store, "read"> {
   const path = join(stateDir, "worker.json");
   return {
@@ -217,9 +188,6 @@ function fileIdentityReader(stateDir: string): Pick<Store, "read"> {
   };
 }
 
-// A worker may hold assignments to several projects, so the base URL is no longer fixed at
-// construction — it is built per call from the project the call concerns. One client is built
-// once, from Bootstrap alone, before any assignment or repository is known.
 export function createApiClient(
   config: Bootstrap,
   fetchImpl: Fetch = fetch,
@@ -242,12 +210,6 @@ export function createApiClient(
     return identity;
   }
 
-  // Path from the api root, so a call can address /api/workers/... as readily as a project
-  // One credential for everything. A second, project-scoped API token cannot work here: a worker's
-  // grant is recomputed every heartbeat from the checkouts it reports crossed with every enabled
-  // project, while a minted token carries a list fixed at mint time. Enable a second project and
-  // the claim would travel on the worker credential while the report 403s on the API one, leaving
-  // the task in the active column until its lease expired — silently, to every project added.
   async function request(path: string, method: string, body?: unknown): Promise<Response> {
     const identity = identityOrThrow();
     const headers: Record<string, string> = {
@@ -290,8 +252,6 @@ export function createApiClient(
   const projectKeys = new Map<string, string>();
   let eventSeq = 0;
 
-  // The assignment addresses a project by its ObjectId, and the route accepts a key as readily
-  // as an id — so the key a task is named by has to come from the project itself
   async function keyForTasks(projectId: string): Promise<string> {
     const cached = projectKeys.get(projectId);
     if (cached) return cached;
@@ -303,7 +263,6 @@ export function createApiClient(
         return key;
       }
     } catch {
-      // The task is claimed by the time this runs; the id used to claim it keeps it moving
     }
     return projectId;
   }
@@ -314,8 +273,6 @@ export function createApiClient(
       try {
         response = await send(projectId, "/tasks/claim", "POST", { runId });
       } catch (error) {
-        // 409 is the server saying the BOARD cannot claim — no column to take from or move into —
-        // which is neither an empty queue nor this machine failing (BP-512)
         if (error instanceof ApiError && error.status === 409) {
           throw new ClaimRefused(reasonIn(error.detail));
         }
@@ -326,9 +283,6 @@ export function createApiClient(
       const raw = (await response.json()) as RawTask;
       const taskKey = `${await keyForTasks(projectId)}-${raw.taskNumber}`;
       if (!isSafeTaskKey(taskKey)) {
-        // Handed back with the attempt charged, not refunded: no later attempt can name this key
-        // either, so charging is what eventually parks the task for a human instead of claiming
-        // and refusing it again on every poll.
         await send(projectId, `/tasks/${raw._id}/release`, "POST", { refund: false }).catch(
           () => {}
         );
@@ -339,16 +293,6 @@ export function createApiClient(
 
       const agent = parseAgent(raw.agent);
       if (!agent) {
-        // Returning null alone would hold the task for the full EXECUTION_LEASE_MS — two hours in
-        // the active column with nothing on the board to say why.
-        //
-        // Charged, not refunded, for the same reason the key check above charges: nothing about
-        // the next poll is different, so a refund makes this task claim and release itself every
-        // thirty seconds for good — at the head of the column, where every other claimable task on
-        // the project waits behind it. The server's own claim route made the same correction
-        // (BP-358). What reaches here is an agent this worker cannot parse — a block kind it does
-        // not know, which is version skew between a machine and the server it polls — and that
-        // needs a person, which is what spending the attempts eventually gets.
         await send(projectId, `/tasks/${raw._id}/release`, "POST", { refund: false }).catch(
           () => {}
         );
@@ -367,8 +311,6 @@ export function createApiClient(
           .filter((item): item is { text: string } => typeof item.text === "string")
           .map((item) => item.text),
         attempts: raw.execution?.attempts ?? 0,
-        // The run stored on the task wins over the one this call proposed: the server is what
-        // every later event is checked against
         runId:
           typeof raw.execution?.runId === "string" && raw.execution.runId
             ? raw.execution.runId
@@ -377,8 +319,6 @@ export function createApiClient(
     },
 
     async postRun(projectId, record) {
-      // The machine is added here rather than travelling in the record: this is where the identity
-      // already is, and "which machine ran this" is the first question a bad run raises.
       await send(projectId, "/runs", "POST", {
         ...record,
         workerId: identityOrThrow().workerId,
@@ -406,17 +346,10 @@ export function createApiClient(
       return (await readColumns(projectId)).map((column) => column.id);
     },
 
-    // A role no column carries resolves to "", which resolveStatusIds refuses at run start. It used
-    // to fall back to the seeded id per role, so a board that had demoted its Done column while
-    // keeping the id `done` resolved done -> "done": a column that still existed, now meaning
-    // review, and finished work was delivered into it (BP-512). The seeded board is only for a
-    // project with no columns of its own, which readColumns already handles.
     async statusIds(projectId) {
       return statusIdsFrom(await readColumns(projectId));
     },
 
-    // The worker id in the path comes from the same identity that signs the request, so the two
-    // cannot disagree — the server 403s a path that names anyone else
     async postEvent(event) {
       const { workerId } = identityOrThrow();
       eventSeq += 1;

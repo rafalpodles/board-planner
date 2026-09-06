@@ -33,12 +33,9 @@ beforeEach(() => {
   getAuthUser.mockResolvedValue(USER);
   resolveProjectId.mockResolvedValue(PROJECT_ID);
   check.mockResolvedValue(true);
-  // Nothing past the gate is under test, and an unconfigured PM is the first thing beyond it
   isPmAvailable.mockReturnValue(false);
 });
 
-// This route streams SSE, so it authenticates by hand and sits behind no middleware — the one
-// project gate in the codebase that a change to withProjectAccess would not carry with it
 describe("POST /api/projects/:projectId/pm/chat", () => {
   it("refuses a project the grant layer does not allow", async () => {
     check.mockResolvedValue(false);

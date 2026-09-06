@@ -28,9 +28,6 @@ interface EnrolmentView {
   existingWorker: { mine: boolean } | null;
 }
 
-// A machine sent you here, so the page carries no sidebar, no search and no chat: nothing inviting
-// you elsewhere mid-decision, and nothing that makes granting a credential look like an ordinary
-// page of the app.
 function ConsentScreen({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-dvh items-center justify-center px-4 py-10">
@@ -135,8 +132,6 @@ function Enrol({ params }: { params: Promise<{ userCode: string }> }) {
 
   const usable = enrolment.projects.filter((p) => p.repositoryUrl);
   const chosen = usable.find((p) => p._id === projectId);
-  // A project with machines switched off takes the enrolment and then runs nothing, and nothing on
-  // the machine can say why. Said here, before the click, and only where this person cannot fix it.
   const willStaySwitchedOff = !!chosen && !chosen.workersEnabled && !chosen.canEnable;
 
   return (
@@ -174,8 +169,6 @@ function Enrol({ params }: { params: Promise<{ userCode: string }> }) {
 
         <section className="mt-8">
           <h2 className="text-sm font-medium text-text">Which repository should it set up first?</h2>
-          {/* Where a scope list would be, so it is read as one: this pick is a first checkout, and
-              the machine's reach is this account's, whatever is ticked here. */}
           <p className="mt-1 text-sm text-text-muted">
             Not a limit on what it may work on — the machine acts under your account and reaches
             every project you can.
@@ -233,7 +226,6 @@ function Enrol({ params }: { params: Promise<{ userCode: string }> }) {
         </div>
       </div>
 
-      {/* The machine belongs to whoever connects it, so say whose name it will carry */}
       {user && (
         <p className="mt-4 text-center text-xs text-text-muted">
           Connecting as {user.fullName || user.username}. The machine acts under this account.

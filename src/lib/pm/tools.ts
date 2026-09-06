@@ -21,27 +21,15 @@ export interface PmToolContext {
   projectId: string;
   projectKey: string;
   pmUserId: string;
-  /** The user whose turn this is. Equal to pmUserId when nobody is driving it. */
   triggeredByUserId: string;
 }
 
-/**
- * The person on whose instruction the PM is assigning, or null when nobody is.
- *
- * BP-419 made a PM assignment claimable, and the claim's own filter pairs this with
- * `assignee: <machine owner>` — so a machine runs a PM hand-over only when the person who asked
- * for it is the person receiving it. Without this, the PM chat is reachable by any project member
- * (`check(user, projectId, "access")`), and asking it to assign a task to a colleague would start
- * a run on that colleague's machine, carrying text the member wrote. The old filter refused every
- * PM assignment, so that path did not exist before this change and must not be opened by it.
- */
 function onWhoseInstruction(ctx: PmToolContext): string | null {
   return ctx.triggeredByUserId && ctx.triggeredByUserId !== ctx.pmUserId
     ? ctx.triggeredByUserId
     : null;
 }
 
-/** createTask, carrying whose instruction the PM is acting on — see onWhoseInstruction */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function createTaskOnInstruction(ctx: PmToolContext, body: any) {
   return createTask(ctx.projectId, ctx.pmUserId, body, onWhoseInstruction(ctx));
@@ -76,11 +64,6 @@ async function resolveTask(ctx: PmToolContext, taskKey: unknown): Promise<{ task
   return { task };
 }
 
-/**
- * Project fields arrive from the model keyed by name; the API only stores ids.
- * Difficulty and Component are ordinary fields since CP-213, so this is the only
- * way the PM can set them.
- */
 async function fieldValuesFor(
   projectId: string,
   fields: unknown
@@ -111,12 +94,6 @@ function str(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
 }
 
-/**
- * BP-500. The tools whitelist the fields they apply and used to drop the rest without a word, which
- * is the shape BP-497 fixed on the two MCP servers: a model that names `status` here is told the
- * update succeeded and reads its own intention back. The schema the model is given now says
- * `additionalProperties: false`, and this is the half that enforces it.
- */
 const PM_TOOL_HINTS: Record<string, string> = {
   status: "the change_status tool",
   assignee: "the assign_task tool",
@@ -134,19 +111,6 @@ export function refuseUndeclaredArgs(tool: PmTool, args: Record<string, unknown>
   return stray.length ? unknownParameterMessage(stray, PM_TOOL_HINTS, tool.write) : null;
 }
 
-
-/**
- * Why nothing will run this task, or "" when nothing about it is in the way.
- *
- * BP-419 made the PM's assignment a real hand-over, but not every hand-over completes: a task
- * naming no agent is one a person is doing, and a project not enabled for workers runs nothing at
- * all. Those have to be said where the PM says it assigned the work — the Agent row on the task
- * detail is a view nobody reopens after reading "BP-x → @rafal" in the chat.
- *
- * Deliberately not a promise of the opposite. The claim also weighs open blockers, spent attempts
- * and whether that person owns a live machine at all, none of which is knowable here, so "" means
- * "no reason found", never "it will run".
- */
 async function whyItWillNotRun(
   projectId: string,
   task: { agent?: unknown; assignee?: unknown; assignedBy?: unknown; status?: unknown }
@@ -158,13 +122,6 @@ async function whyItWillNotRun(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handover = handoverOf(task as any, getProjectColumns(project));
   if (handover.runs) return "";
-  // A switch with no fall-through on purpose: the first version of this returned "" for the three
-  // reasons it did not name, and two of them are reachable *immediately after a successful
-  // assignment* — `updateTask` stamps `assignedBy` only when the assignee actually moves, so
-  // re-assigning a legacy task to the person who already holds it leaves the assigner unrecorded,
-  // and re-assigning a task somebody else handed over leaves theirs. Both then answered
-  // "BP-x → @rpo" with no caveat and were never claimed: the exact silence this ticket exists to
-  // end, reproduced inside the feature written to end it.
   switch (handover.reason) {
     case "no-agent":
       return "no agent is named on it, so nothing will run it — a task naming none is one a person is doing";
@@ -201,9 +158,6 @@ export const PM_TOOLS: Record<string, PmTool> = {
     async execute(args, ctx) {
       const filter: Record<string, unknown> = { project: ctx.projectId };
       if (args.status !== undefined) {
-        // This tool queries Mongo directly, so the route's refusal does not cover it. Columns are
-        // project-defined, and an id the board has not got answered `[]` — which a model reports
-        // as "there is nothing to do" (BP-511).
         const project = await Project.findById(ctx.projectId, "columns").lean();
         const columnIds = getProjectColumns(project).map((c) => c.id);
         if (!columnIds.includes(String(args.status))) {
@@ -371,8 +325,6 @@ export const PM_TOOLS: Record<string, PmTool> = {
         acceptanceCriteria: str(args.acceptanceCriteria),
         ...(createFields as Record<string, unknown>),
         assignee: args.assignee,
-        // status omitted on purpose: task-service defaults to the backlog-role
-        // column, and the PM must never create outside the backlog
       });
       if (!result.ok) return { result: { error: result.error } };
       const key = `${ctx.projectKey}-${result.data.taskNumber}`;
@@ -416,8 +368,6 @@ export const PM_TOOLS: Record<string, PmTool> = {
       const updates = await fieldValuesFor(ctx.projectId, args.fields);
       if ("error" in updates) return { result: { error: updates.error as string } };
       if (Object.keys(updates).length) {
-        // customFieldValues is replaced wholesale, so the task's other values are
-        // merged back in rather than cleared by naming a single field
         const current = (resolved.task.customFieldValues || {}) as Record<string, unknown>;
         const merged = current instanceof Map ? Object.fromEntries(current) : { ...current };
         body.customFieldValues = { ...merged, ...updates };
@@ -508,7 +458,6 @@ export const PM_TOOLS: Record<string, PmTool> = {
         };
       }
 
-      // Said in the same breath as the assignment, rather than left to a view nobody reopens
       const blocked = await whyItWillNotRun(ctx.projectId, result.data);
       return {
         result: blocked

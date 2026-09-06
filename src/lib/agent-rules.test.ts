@@ -37,22 +37,15 @@ const BLOCKS: ApiAgentBlock[] = [
   block({ key: "security-review", gateKind: "review" }),
   block({ key: "diff-size", gateKind: "diff-size" }),
   block({ key: "protected-paths", gateKind: "protected-paths" }),
-  // A second block of the same kind, as POST /api/agent-blocks would create it: the key comes from
-  // the name, so nothing keyed on the literal "protected-paths" would recognise this one
   block({ key: "protected-files-strict", gateKind: "protected-paths" }),
   block({ key: "polish", kind: "step", capability: "edit" }),
   block({ key: "build", gateKind: "build" }),
   block({ key: "test-run", gateKind: "test-run" }),
-  // The only block here whose display name differs from its key. `block()` defaults `name` to the
-  // key, so every other one is a fixture in which "speaks in keys" and "speaks in names" produce
-  // the same string — and an assertion over them could not tell the two apart.
   block({ key: "tests-pass", gateKind: "test-run", name: "Tests pass" }),
 ];
 
 const lookup = (key: string) => BLOCKS.find((b) => b.key === key);
 
-// Written as bare keys on purpose: that is the shape stored before entries existed, so every
-// assertion below also exercises the coercion that reads it.
 function composition(over: StoredComposition = {}): AgentComposition {
   return normaliseComposition(over);
 }
@@ -65,7 +58,6 @@ describe("sequenceOf", () => {
     expect(seq).toEqual(["implement", "review", "push"]);
   });
 
-  // An agent stored before a bucket existed comes back without it, and every rule indexes by bucket
   it("survives a bucket the stored agent does not have", () => {
     expect(keysOf(composition({ implementation: ["implement"] }))).toEqual(["implement"]);
   });
@@ -98,7 +90,6 @@ describe("agentProblems", () => {
     expect(problems[0].severity).toBe("risky");
   });
 
-  // The gate is recognised by what it does, not by the key somebody gave it
   it("accepts any review-kind gate as the reviewer, not just the one named review", () => {
     const problems = agentProblems(
       composition({
@@ -155,8 +146,6 @@ describe("agentProblems", () => {
     expect(problems[0].severity).toBe("broken");
   });
 
-  // The point of the rule is the writing, not the pushing: an agent that only reads has nothing
-  // to send and must not be nagged for it
   it("says nothing about push when the agent never writes", () => {
     const problems = agentProblems(
       composition({ analysis: ["analyse"], verification: ["diff-size", "review"] }),
@@ -184,7 +173,6 @@ describe("agentProblems", () => {
 });
 
 describe("brokenProblems", () => {
-  // The operator chose to allow this one; refusing it on save would take the choice back
   it("leaves an unreviewed merge to the operator", () => {
     const broken = brokenProblems(
       composition({
@@ -206,8 +194,6 @@ describe("brokenProblems", () => {
 });
 
 describe("rules the shape of the old pipeline used to guarantee", () => {
-  // worker/src/gates/index.ts said it outright: the static gates run first because build runs npm
-  // on a tree the agent just wrote, executing its content before any gate has read it
   it("refuses a build that runs on written code before protected-paths has read it", () => {
     const problems = agentProblems(
       composition({
@@ -221,8 +207,6 @@ describe("rules the shape of the old pipeline used to guarantee", () => {
     expect(problems.find((p) => /before .*protected/i.test(p.message))?.severity).toBe("broken");
   });
 
-  // build was the only executing gate any composition here used, so dropping test-run from the set
-  // was undetectable — and a Tests pass gate runs the suite over files the agent just wrote
   it("refuses a test-run that comes before protected-paths, exactly as it refuses a build", () => {
     const problems = agentProblems(
       composition({
@@ -235,7 +219,6 @@ describe("rules the shape of the old pipeline used to guarantee", () => {
     expect(problems.some((p) => p.severity === "broken" && /protected/i.test(p.message))).toBe(true);
   });
 
-  // One gate standing after one write is not the property. The second write is unread.
   it("refuses a second write that no protected-paths gate stands between and the build", () => {
     const problems = agentProblems(
       composition({
@@ -260,7 +243,6 @@ describe("rules the shape of the old pipeline used to guarantee", () => {
     expect(problems).toEqual([]);
   });
 
-  // Keyed on the kind, like the worker: a block created from the catalog gets a key from its name
   it("accepts any protected-paths-kind gate as the guard, not just the one named protected-paths", () => {
     const problems = agentProblems(
       composition({
@@ -273,8 +255,6 @@ describe("rules the shape of the old pipeline used to guarantee", () => {
     expect(problems).toEqual([]);
   });
 
-  // Anything after a merge judges a change that has already landed: it cannot stop it, and the
-  // board would say the merge was blocked for work that is on the base branch
   it("refuses a gate placed after Merge", () => {
     const problems = agentProblems(
       composition({
@@ -287,8 +267,6 @@ describe("rules the shape of the old pipeline used to guarantee", () => {
     expect(problems.some((p) => p.severity === "broken" && /not last/i.test(p.message))).toBe(true);
   });
 
-  // BP-459: it listed the raw keys, so the banner read "…: protected-paths, test-run runs after…"
-  // beside blocks the rest of the product calls Protected files and Tests pass.
   it("names the blocks after Merge the way the rest of the product does", () => {
     const problems = agentProblems(
       composition({
@@ -328,7 +306,6 @@ describe("rules the shape of the old pipeline used to guarantee", () => {
     expect(problems).toEqual([]);
   });
 
-  // Nothing was written, so there is nothing whose content the build could execute
   it("says nothing about ordering when no step writes", () => {
     const problems = agentProblems(
       composition({ verification: ["build", "protected-paths"] }),
@@ -337,7 +314,6 @@ describe("rules the shape of the old pipeline used to guarantee", () => {
     expect(problems).toEqual([]);
   });
 
-  // The review has to judge the finished work, not an empty tree in an earlier bucket
   it("refuses a review that ran before the last thing that wrote", () => {
     const problems = agentProblems(
       composition({
@@ -363,7 +339,6 @@ describe("rules the shape of the old pipeline used to guarantee", () => {
     expect(problems).toEqual([]);
   });
 
-  // A composition can carry the same block twice, so a rule reading the first occurrence is wrong
   it("reads the last push, not the first, when the agent pushes twice", () => {
     const problems = agentProblems(
       composition({
@@ -375,8 +350,6 @@ describe("rules the shape of the old pipeline used to guarantee", () => {
     expect(problems).toEqual([]);
   });
 
-  // Every agent is empty between "New agent" and the first block dragged in, so an empty one is a
-  // draft. isRunnable is what the project-default route asks before pointing a worker at it.
   it("treats an empty agent as a draft rather than a broken composition", () => {
     expect(agentProblems(composition(), lookup)).toEqual([]);
     expect(isRunnable(composition())).toBe(false);
@@ -385,7 +358,6 @@ describe("rules the shape of the old pipeline used to guarantee", () => {
 });
 
 describe("composition entries", () => {
-  // The shape change that makes per-position configuration possible at all
   it("carries parameters set on a position, not only on the block", () => {
     const composed = normaliseComposition({
       verification: [{ key: "diff-size", params: { maxLines: "50" } }, "review"],

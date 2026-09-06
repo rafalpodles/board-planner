@@ -29,7 +29,6 @@ function json(value: unknown) {
 }
 
 export function registerPlannerTools(server: McpServer): void {
-  // --- Projects ---
 
   server.registerTool(
     "list_projects",
@@ -60,17 +59,12 @@ export function registerPlannerTools(server: McpServer): void {
     }
   );
 
-  // --- Tasks ---
-
   server.registerTool(
     "list_tasks",
     {
       description: "List tasks in a project with optional filters",
       inputSchema: strictInput({
         project: z.string().describe("Project key (e.g. 'CP')"),
-        // The same lie the category description carried, and a worse one: columns have been
-        // project-defined since CP-128, so an agent on a renamed board asked for `todo` and was
-        // answered an empty list it reported as "nothing to do" (BP-511).
         status: z
           .string()
           .optional()
@@ -78,9 +72,6 @@ export function registerPlannerTools(server: McpServer): void {
             "Filter by status (comma-separated): the project's column ids — get_project lists them (defaults: planned, todo, in_progress, in_review, needs_human_review, ready_to_test, done)"
           ),
         assignee: z.string().optional().describe("Filter by assignee username"),
-        // Project-defined, and since BP-502 an unknown one is refused rather than silently matched
-        // — so a description naming the seeded four as closed would *produce* 400s on a board that
-        // renamed them. The sibling package already words it this way.
         category: z
           .string()
           .optional()
@@ -159,10 +150,6 @@ export function registerPlannerTools(server: McpServer): void {
       }
 
       if (assignee) {
-        // Scoped to the board, not the instance. A username that is not on this list may be a typo
-        // or somebody with no access, and the two are deliberately NOT told apart: doing so would
-        // mean answering "does this account exist elsewhere", which is the instance-wide roster
-        // BP-400 removed.
         const users = (await client.listAssignableUsers(proj._id)) as { username: string }[];
         const user = users.find((u) => u.username === assignee.toLowerCase());
         if (!user) {
@@ -215,8 +202,6 @@ export function registerPlannerTools(server: McpServer): void {
       }, { hints: UPDATE_TASK_HINTS, writes: true }),
     },
     async ({ taskKey, title, description, priority, category, assignee, agent, acceptanceCriteria, fields }, extra) => {
-      // Before the lookup, so a call that changes nothing costs nothing and the refusal is the
-      // first thing that happens rather than the last
       if (
         ![title, description, priority, category, assignee, agent, acceptanceCriteria].some(
           (v) => v !== undefined
@@ -237,8 +222,6 @@ export function registerPlannerTools(server: McpServer): void {
       if (acceptanceCriteria !== undefined) data.acceptanceCriteria = acceptanceCriteria;
 
       if (fields && Object.keys(fields).length) {
-        // customFieldValues is replaced wholesale by the API, so naming one field
-        // would otherwise clear every other value on the task
         const project = await client.getProject(projectId);
         const task = (await client.getTask(projectId, taskId)) as {
           customFieldValues?: Record<string, unknown>;
@@ -251,7 +234,6 @@ export function registerPlannerTools(server: McpServer): void {
 
       if (assignee !== undefined) {
         if (assignee) {
-          // See create_task: the roster is the board's, and a miss is not split into typo vs no-access.
           const users = (await client.listAssignableUsers(projectId)) as { username: string }[];
           const user = users.find((u) => u.username === assignee.toLowerCase());
           if (!user) {
@@ -265,17 +247,10 @@ export function registerPlannerTools(server: McpServer): void {
         }
       }
 
-      // Resolved by name here rather than asking a caller for an ObjectId, the same way assignee
-      // is: the id appears in no MCP response, so demanding one would make the parameter
-      // unreachable from a conversation.
       if (agent !== undefined) {
         if (agent) {
           const agents = (await client.listAgents()) as
             { _id: string; name: string; scope: string; projectId: string | null }[];
-          // Scoped to this task's own project, the same predicate the browser's picker filters by
-          // (PropertyRail.tsx) — otherwise a name belonging to another board either steals that
-          // board's agent silently (two boards sharing a name) or reaches the write only to be
-          // refused by `agentUsableOnProject`, a 400 naming a rule the caller cannot see.
           const named = agents.filter((a) => a.name.toLowerCase() === agent.toLowerCase());
           const match = named.find((a) => a.scope !== "project" || a.projectId === projectId);
           if (!match) {
@@ -291,8 +266,6 @@ export function registerPlannerTools(server: McpServer): void {
         }
       }
 
-      // Backstop for a call that named `fields` but no field in it. The refusal above catches
-      // everything else, before the lookup
       if (Object.keys(data).length === 0) throw new Error(`update_task ${NOTHING_TO_CHANGE}`);
 
       return json(await client.updateTask(projectId, taskId, data));
@@ -314,8 +287,6 @@ export function registerPlannerTools(server: McpServer): void {
       return json(await client.changeTaskStatus(projectId, taskId, status));
     }
   );
-
-  // --- Sprints ---
 
   server.registerTool(
     "list_sprints",
@@ -381,8 +352,6 @@ export function registerPlannerTools(server: McpServer): void {
       return json(await client.updateSprint(proj._id, sprintId, updates));
     }
   );
-
-  // --- Comments ---
 
   server.registerTool(
     "add_comment",

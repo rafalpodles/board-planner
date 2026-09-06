@@ -1,14 +1,3 @@
-/**
- * An in-memory stand-in for the RateLimit collection, for tests that exercise a throttled route
- * without a database.
- *
- * It implements the three operations `rate-limit.ts` actually uses, including the `resetAt` filter
- * — a fake that ignored it would make every windowing test pass regardless of what the real query
- * says, which is the shape of fixture this codebase has already been bitten by twice.
- *
- * Lives in src/lib rather than a test file because five suites need it, and a copy per suite is a
- * copy that can drift from the query it stands in for.
- */
 type Row = { _id: string; count: number; resetAt: Date };
 type Filter = { _id?: string; resetAt?: { $gt: Date } };
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -17,11 +6,6 @@ type Update =
   | { $inc?: { count: number }; $set?: { count: number; resetAt: Date } }
   | Array<{ $set: Record<string, Expr> }>;
 
-/**
- * Just enough of the aggregation expression language for the operators `rate-limit.ts` uses. A
- * field path resolves against the document as it stands after the earlier stages, which is what
- * makes `$cond` on `$resetAt` mean what Mongo means by it.
- */
 function evaluate(expr: Expr, doc: Record<string, unknown>): unknown {
   if (typeof expr === "string" && expr.startsWith("$")) return doc[expr.slice(1)];
   if (!expr || typeof expr !== "object" || expr instanceof Date) return expr;
@@ -32,8 +16,6 @@ function evaluate(expr: Expr, doc: Record<string, unknown>): unknown {
   }
   if ("$gt" in expr) {
     const [left, right] = (expr.$gt as [Expr, Expr]).map((side) => evaluate(side, doc));
-    // Mongo compares BSON types before values, and a missing field sorts below a date — so an
-    // absent resetAt is not "greater than now", which is what makes the upsert branch fire
     if (!(left instanceof Date) || !(right instanceof Date)) return false;
     return left.getTime() > right.getTime();
   }
@@ -66,9 +48,6 @@ export function inMemoryRateLimitModel() {
       const existing = [...rows.values()].find((r) => matches(r, filter));
 
       if (Array.isArray(update)) {
-        // An update pipeline computes the new document from the stored one, so the fake evaluates
-        // the expressions the code actually sends rather than assuming what they mean. Nothing here
-        // is a second implementation of the rule under test.
         const before = existing ?? (options?.upsert ? { _id: filter._id as string } : undefined);
         if (!before) return { matchedCount: 0, upsertedCount: 0 };
         const after = { ...before } as Record<string, unknown>;
@@ -98,10 +77,6 @@ export function inMemoryRateLimitModel() {
       if (filter._id !== undefined) rows.delete(filter._id);
       return { deletedCount: 1 };
     },
-    // Honours an `_id` range, because `clearAccountAttempts` deletes by prefix and a fake that
-    // cleared everything regardless of the filter could not fail the case that matters: clearing one
-    // account's counters must leave another account's, the source dimension's and other scopes'
-    // alone. An empty filter still means everything, which is what resetRateLimits asks for.
     async deleteMany(filter?: Filter) {
       const range = filter?._id as { $gte?: string; $lt?: string } | string | undefined;
       if (range && typeof range === "object" && ("$gte" in range || "$lt" in range)) {

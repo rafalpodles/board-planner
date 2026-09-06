@@ -2,8 +2,6 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const safeFetch = vi.fn();
 
-// Only the fetch is stubbed. readBoundedJson stays real — it is the thing under test here, and a
-// mock of it would assert my own arrangement.
 vi.mock("@/lib/safe-fetch", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/safe-fetch")>()),
   safeFetch,
@@ -51,8 +49,6 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-// BP-317: one event without a separator grew this buffer forever, so a hostile MCP server could
-// hold the connection open and stream until the process died. No test file existed for this module.
 describe("reading a streamed MCP response", () => {
   it("reads a well-formed event and returns its result", async () => {
     safeFetch.mockResolvedValue(
@@ -63,7 +59,6 @@ describe("reading a streamed MCP response", () => {
   });
 
   it("refuses a stream that never completes an event, rather than buffering it", async () => {
-    // Well past the cap, and no separator anywhere in it
     const filler = "data: " + "x".repeat(1024 * 1024);
     safeFetch.mockResolvedValue(sse([filler, filler, filler, filler, filler]));
 
@@ -82,8 +77,6 @@ describe("reading a streamed MCP response", () => {
     expect(cancelled).toHaveBeenCalled();
   });
 
-  // The cap must not bite on an ordinary payload — a tool result of a few hundred kilobytes is
-  // large but real, and refusing it would be a worse bug than the one this closes
   it("still accepts an event that is big but finite", async () => {
     const big = { jsonrpc: "2.0", id: 1, result: { tools: [{ name: "x".repeat(500_000) }] } };
     safeFetch.mockResolvedValue(sse([`data: ${JSON.stringify(big)}\n\n`]));
@@ -92,8 +85,6 @@ describe("reading a streamed MCP response", () => {
   });
 });
 
-// The bound went on the streaming branch and not on the one beside it — and the *server* picks
-// which it gets, with a content-type header (BP-317 review).
 describe("reading a non-streamed MCP response", () => {
   it("reads an ordinary JSON result", async () => {
     safeFetch.mockResolvedValue(
@@ -111,7 +102,6 @@ describe("reading a non-streamed MCP response", () => {
     safeFetch.mockResolvedValue(response);
 
     await expect(client().listTools()).rejects.toThrow();
-    // 4 MB budget over 1 KB chunks: bounded well below the 10 MB the server was willing to send
     expect(pulled.count).toBeLessThanOrEqual(4097);
     expect(pulled.count).toBeLessThan(10_000);
   });

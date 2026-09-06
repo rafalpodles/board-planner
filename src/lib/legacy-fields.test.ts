@@ -28,15 +28,12 @@ describe("legacyFieldSeeds", () => {
     ]);
   });
 
-  // Alphabetically this would be L, M, S, XL — which would silently change what
-  // sorting by difficulty means
   it("orders difficulty S, M, L, XL rather than alphabetically", () => {
     const difficulty = legacyFieldSeeds(project)[1];
     expect(difficulty.options.map((o) => o.value)).toEqual(["S", "M", "L", "XL"]);
     expect(difficulty.options.map((o) => o.order)).toEqual([0, 1, 2, 3]);
   });
 
-  // This is what lets task.labels carry across with no data rewrite at all
   it("reuses each label's own id as the option id, and keeps its colour", () => {
     const labels = legacyFieldSeeds(project)[2];
     expect(labels.fieldType).toBe("multiselect");
@@ -79,8 +76,6 @@ describe("migratedValuesFor", () => {
 });
 
 describe("withValuesInUse", () => {
-  // A task can hold a component that was deleted from the project's list; seeding
-  // only the current list would clear that task's value on its next save
   it("adds an option for a value still in use but missing from the list", () => {
     const [component] = legacyFieldSeeds(project);
     const widened = withValuesInUse(component, ["ui", "legacy-thing"]);

@@ -19,9 +19,6 @@ const MAX_ATTACHMENTS = 4;
 const MAX_INPUT_HEIGHT = 200;
 
 const RECOVERY_INTERVAL_MS = 3000;
-// Two phases, because the turn may well still be running: the route is allowed maxDuration = 300
-// and the agent loop runs up to MAX_STEPS completions with no per-call timeout. Blocking the
-// composer for that long is the wedge again, and giving up at 30s abandons answers that land.
 const RECOVERY_BLOCK_MS = 30_000;
 const RECOVERY_WINDOW_MS = 300_000;
 
@@ -72,20 +69,13 @@ export function PmChat({
   const [stopping, setStopping] = useState(false);
   const [errorState, setErrorState] = useState("");
   const [lastFailedInput, setLastFailedInput] = useState("");
-  // Separate from the text: a refused image-only send has nothing typed, and `lastFailedInput`
-  // alone is falsy there, which is why no Retry appeared (BP-451).
   const [retryable, setRetryable] = useState(false);
   const optimisticSeq = useRef(0);
   const recoveryStartedAt = useRef(0);
-  // The answer this send is waiting for is whichever assistant message is NOT this one. Without it
-  // the poll accepts any trailing assistant message with content — including the previous turn's,
-  // which ends recovery instantly while the real turn is still running.
   const answerBefore = useRef("");
   const [loading, setLoading] = useState(true);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
-  // Height is measured, not declared: `auto` first so shrinking is possible, then
-  // the content height capped, past which the textarea scrolls on its own
   useEffect(() => {
     const field = inputRef.current;
     if (!field) return;
@@ -101,7 +91,6 @@ export function PmChat({
       for (const t of tasks) map[`${proj.key}-${t.taskNumber}`] = t._id;
       setTaskIdByKey(map);
     } catch {
-      // non-critical: chips fall back to non-links
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, project]);
@@ -133,10 +122,7 @@ export function PmChat({
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [messages, liveActions, working]);
 
-  // Stream lost mid-turn: poll history until the assistant message is finalized (BP-452).
   const recoveryPoll = useCallback(async () => {
-    // A deadline rather than a count. usePollWhileVisible fires once on mount and again on every
-    // return to the tab, so an attempt counter is spent by alt-tabbing rather than by time.
     const elapsed = Date.now() - recoveryStartedAt.current;
     try {
       const msgs = await loadMessages();
@@ -152,7 +138,6 @@ export function PmChat({
         return;
       }
     } catch {
-      // a failed load still counts against the deadline
     }
     if (elapsed >= RECOVERY_WINDOW_MS) {
       setRecovering(false);
@@ -163,8 +148,6 @@ export function PmChat({
       return;
     }
     if (elapsed >= RECOVERY_BLOCK_MS) {
-      // Stop blocking, keep watching. The turn may still be running, and the answer lands here on
-      // its own when it does.
       setWorking(false);
       setStopping(false);
       setWorkingStatus("");
@@ -184,8 +167,6 @@ export function PmChat({
     try {
       await api.post(`/api/projects/${projectId}/pm/interrupt`, {});
     } catch (error) {
-      // Keyed on what the route said, not on the status: withProjectAccess answers 404 for a
-      // project it cannot resolve, and reading that as "the turn finished" leaves Stop dead.
       const { status, body } = error as { status?: number; body?: { error?: string } };
       const finishedOnItsOwn =
         status === 404 && body?.error === "No PM turn is running for this project";
@@ -203,11 +184,7 @@ export function PmChat({
   async function addFiles(files: File[]) {
     const images = files.filter((f) => f.type.startsWith("image/"));
     if (images.length === 0) return;
-    // This writes the shared banner, and a Retry left over from an earlier failure would render
-    // beside a sentence about attachments and resend that older message.
     setRetryable(false);
-    // `pending` is read from this closure while the uploads below append to it one at a time, so a
-    // second call landing mid-batch would compute its room against a count still growing.
     if (uploading) {
       setErrorState("Still attaching — try that again in a moment.");
       return;
@@ -268,8 +245,6 @@ export function PmChat({
     const message = text.trim();
     if ((!message && pending.length === 0) || working || uploading) return;
     setErrorState("");
-    // Written on every failure and never cleared, so a later, unrelated banner offered Retry for
-    // whatever had failed last — including the give-up above, which must not spend a second turn.
     setLastFailedInput("");
     setRetryable(false);
     answerBefore.current =
@@ -300,20 +275,11 @@ export function PmChat({
       },
     ]);
 
-    // The thumbnails come back rather than being cleared on the way out: the upload survives in
-    // GridFS but nothing on screen could reach it (BP-451).
-    /**
-     * `worthRetrying` is about the refusal, not the message: a 400 is decided by the bytes in the
-     * request, so the same Retry produces the same 400 for ever.
-     */
     function unsend(reason: string, worthRetrying: boolean) {
       setWorking(false);
       setWorkingStatus("");
       setMessages((prev) => prev.filter((m) => m._id !== optimisticId));
       setInput(message);
-      // Merged rather than overwritten, because onDrop is not gated on `working` and anything added
-      // mid-flight would otherwise be discarded with its upload orphaned. Clamped, because nothing
-      // else clamps this one: `addFiles` is no longer the only writer.
       setPending((now) => [...sentPending, ...now].slice(0, MAX_ATTACHMENTS));
       setErrorState(reason);
       setLastFailedInput(message);
@@ -331,15 +297,11 @@ export function PmChat({
       return;
     }
 
-    // Nothing is persisted before the stream opens, so a refusal on any status is a turn that did
-    // not run. A 409 in particular is not one to recover: the lock is per project and owner-blind,
-    // so it may even be this reader's own turn from another tab (BP-452).
     if (!response.ok) {
       const err = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
       if (response.status === 503) {
         unsend("PM is not configured on the server (OPENROUTER_API_KEY missing).", false);
       } else {
-        // A 400 is deterministic in the request; a 409 or 429 is about the moment
         unsend(err.error || "Request failed.", response.status !== 400);
       }
       return;
@@ -374,10 +336,6 @@ export function PmChat({
             if (eventLine === "error" && data.error) {
               setErrorState(data.error);
               setLastFailedInput(message);
-              // Not `unsend`: this turn ran, so its attachments are on the persisted message and
-              // resending them would upload the same image twice. Which leaves nothing honest to
-              // offer when the send carried one — a Retry there resends the text without the
-              // picture, and with nothing typed it calls send("") and does nothing at all.
               setRetryable(message.length > 0 && sentAttachments.length === 0);
             }
           }
@@ -385,7 +343,6 @@ export function PmChat({
       }
 
       if (!finished) {
-        // Stream ended without done/error — recover via polling
         setRecovering(true);
         setWorkingStatus("Connection lost — recovering the answer…");
         return;
@@ -437,9 +394,6 @@ export function PmChat({
             <Link
               key={i}
               href={href}
-              // The widget is mounted in the shell, so a chip can be clicked from the task page,
-              // where a soft navigation draws the task twice (BP-533). Modified clicks are left
-              // to the browser — a new tab is a document of its own.
               onClick={(e) => {
                 if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
                 e.preventDefault();
@@ -476,7 +430,6 @@ export function PmChat({
               ? `${pmDisabledReason(project?.pm)} — it cannot be re-enabled from project settings.`
               : "The PM agent is disabled for this project — enable it in settings."}
         </p>
-        {/* Project settings cannot clear an instance lock, so sending someone there is a dead end */}
         {!locked && (
           <Link href={`/projects/${projectId}/settings`} className="text-primary text-sm hover:underline">
             Go to settings
@@ -532,7 +485,6 @@ export function PmChat({
                       aria-label="Expand image"
                       className="cursor-pointer"
                     >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={`/api/uploads/${a.fileId}`}
                         alt="Attached screenshot"
@@ -580,7 +532,6 @@ export function PmChat({
         <div className="flex flex-wrap gap-2 pt-2">
           {pending.map((p) => (
             <div key={p.fileId} className="relative">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={p.previewUrl}
                 alt="Attachment preview"
@@ -628,8 +579,6 @@ export function PmChat({
             e.target.value = "";
           }}
         />
-        {/* Inside the field, pinned to its bottom edge: the field grows with the
-            message, so a centred icon would drift away from the caret */}
         <div className="relative flex-1">
           <button
             onClick={() => fileInputRef.current?.click()}
@@ -655,7 +604,6 @@ export function PmChat({
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             onPaste={(e) => {
-              // How people actually attach a screenshot
               const files = [...e.clipboardData.files];
               if (files.some((f) => f.type.startsWith("image/"))) {
                 e.preventDefault();

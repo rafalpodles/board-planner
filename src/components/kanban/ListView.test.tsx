@@ -72,7 +72,6 @@ describe("ListView columns", () => {
 });
 
 describe("ListView truncated cells", () => {
-  // Every capped column clips its text, so the full value has to stay reachable on hover
   it("keeps the whole title reachable", () => {
     renderList();
     expect(screen.getByTitle(tasks[0].title).textContent).toBe(tasks[0].title);
@@ -83,7 +82,6 @@ describe("ListView truncated cells", () => {
     expect(screen.getByTitle("CP-191").textContent).toBe("CP-191");
   });
 
-  // The cell shows initials to save width, so the name has to survive on the title
   it("keeps the whole assignee name reachable", () => {
     renderList();
     expect(screen.getByTitle("Rafał Podleś-Wojciechowski")).toBeTruthy();
@@ -105,8 +103,6 @@ describe("ListView truncated cells", () => {
     expect(screen.getByTitle("To Do").textContent).toBe("To Do");
   });
 
-  // Was an assertion on tagName === "SELECT"; the control is a combobox now, and the
-  // full label still has to survive on a title because the trigger truncates
   it("keeps the whole status label reachable as a picker", () => {
     renderList({ onStatusChange: () => {} });
     expect(screen.getByTitle("To Do").textContent).toBe("To Do");
@@ -116,8 +112,6 @@ describe("ListView truncated cells", () => {
   });
 });
 
-// A row's status picker announced only its value, so nine of them on a page were
-// nine identical "To Do" controls with no way to tell which task they belonged to
 describe("ListView accessible names", () => {
   it("names the status picker by task and field", () => {
     renderList({ onStatusChange: () => {} });
@@ -136,8 +130,6 @@ describe("ListView accessible names", () => {
   });
 });
 
-// The list used to re-sort its rows with private state, silently discarding the
-// order the filter bar had just produced — the filter-bar sort control was inert
 describe("ListView sort ownership", () => {
   const three = [3, 1, 2].map(
     (n) => ({ ...tasks[0], _id: `t${n}`, taskNumber: n, title: `Task ${n}` }) as ApiTask
@@ -221,7 +213,6 @@ describe("ListView column visibility", () => {
     const { container } = renderList({ hiddenColumns: ["assignee", "sprint"] });
     expect(headers()).not.toContain("Assignee");
     expect(headers()).not.toContain("Sprint");
-    // header row plus one body row, both narrowed by the same two columns
     const bodyCells = container.querySelectorAll("tbody tr:first-child td").length;
     expect(bodyCells).toBe(container.querySelectorAll("thead th").length);
   });
@@ -232,7 +223,6 @@ describe("ListView column visibility", () => {
     expect(headers()).toContain("Key");
   });
 
-  // Hiding a column also removes its sort control, so the two must not disagree
   it("removes the sort control along with its column", () => {
     renderList({ hiddenColumns: ["priority"], onSortChange: () => {} });
     expect(screen.queryByLabelText("Sort by Priority")).toBeNull();
@@ -258,8 +248,6 @@ function optionLabels() {
   return openAssignee().map((o) => o.textContent?.replace("✓", "").trim());
 }
 
-// The save settles in a microtask after the click, so the act block has to be async
-// or React reports the disabled-state update as unwrapped
 async function pick(label: string) {
   const option = openAssignee().find((o) => o.textContent?.replace("✓", "").trim() === label);
   if (!option) throw new Error(`no option ${label}`);
@@ -275,8 +263,6 @@ describe("ListView inline assignee", () => {
     expect(screen.getByText("RP")).toBeTruthy();
   });
 
-  // A member's user-list fetch 403s today, and an empty dropdown that silently
-  // unassigns people is worse than the read-only cell they have now
   it("stays a read-only avatar when the roster failed to load", () => {
     renderList({ assignableUsers: [], onAssigneeChange: vi.fn() });
     expect(screen.queryByRole("combobox", { name: /^Assignee for/ })).toBeNull();
@@ -310,8 +296,6 @@ describe("ListView inline assignee", () => {
     expect(onAssigneeChange).toHaveBeenCalledWith("t1", "");
   });
 
-  // Losing project access does not unassign you, and a select whose value is not
-  // among its options renders as the first one — quietly showing the wrong person
   it("keeps an assignee who is no longer in the roster", () => {
     renderList({ assignableUsers: [roster[1]], onAssigneeChange: vi.fn() });
     expect(optionLabels()).toContain("rpo");
@@ -319,8 +303,6 @@ describe("ListView inline assignee", () => {
     expect(selected).toHaveLength(1);
   });
 
-  // The roster fallback keyed off "not in the list", which an unassigned task also
-  // satisfies — it appended a second, blank-labelled empty option below Unassigned
   it("offers exactly one empty option when nobody is assigned", () => {
     render(
       <ListView
@@ -358,8 +340,6 @@ describe("ListView reordering", () => {
     { ...tasks[0], _id: "t3", taskNumber: 3, title: "Third" },
   ] as unknown as ApiTask[];
 
-  // The drag itself belongs to dnd-kit and needs real pointer geometry, which this
-  // environment cannot provide; the order a drop produces is covered in reorder.test
   function handles() {
     return screen.queryAllByLabelText(/^Reorder /);
   }
@@ -383,13 +363,11 @@ describe("ListView reordering", () => {
     expect(handles()).toHaveLength(0);
   });
 
-  // Any other sort recomputes the order on the next render, throwing the drop away
   it("offers no handle under any other sort", () => {
     renderList({ tasks: many, sortField: "priority", onReorder: () => {} });
     expect(handles()).toHaveLength(0);
   });
 
-  // Descending manual reverses the rows, so a drop would reindex them backwards
   it("offers no handle under descending manual order", () => {
     renderList({ tasks: many, sortDir: "desc", onReorder: () => {} });
     expect(handles()).toHaveLength(0);
@@ -401,9 +379,6 @@ describe("ListView reordering", () => {
   });
 });
 
-// The stored value is the option's id, and since CP-211 that id is a generated
-// "<slug>-<random>" — nothing like the label. Sending the label is a 400 from
-// validateCustomFieldValues, and legacy string options hide it because id === value.
 describe("ListView custom field picker", () => {
   const field = {
     _id: "f1",
@@ -447,8 +422,6 @@ describe("ListView custom field picker", () => {
   });
 });
 
-// CP-235 follow-up. The list showed nothing at all: the only way to learn a worker held a task
-// was to try to move it and be refused.
 describe("ListView, a task a worker is running", () => {
   const asOf = "2026-08-01T12:00:00Z";
   const secondsAgo = (s: number) => new Date(Date.parse(asOf) - s * 1000).toISOString();

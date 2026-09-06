@@ -8,18 +8,11 @@ import { SprintStatus, SPRINT_STATUSES } from "@/types";
 import { Project } from "@/models/project";
 import { columnIdsWithRole } from "@/lib/columns";
 
-// A board may define more than one done column, and a project that renamed its board has none
-// called "done" at all. Resolved per request from the project's own columns.
 async function doneColumnIds(projectId: string): Promise<string[]> {
   const project = await Project.findById(projectId, "columns").lean();
   return columnIdsWithRole(project, "done");
 }
 
-// `withProjectAccess` authorises the projectId in the path and nothing else — `withResolvedIds`
-// special-cases taskId and hands sprintId through raw. So every handler here has to establish
-// that the sprint is this project's before it touches anything, and every task query has to say
-// `project` as well as `sprint`. Without that a member of any board could act on a sprint id
-// belonging to a board they cannot read (BP-314).
 async function ownedSprintId(
   projectId: string,
   sprintId: string
@@ -56,8 +49,6 @@ export const PUT = withProjectAccess(async (request, { params }) => {
   const { projectId, sprintId } = await params;
   await connectDB();
 
-  // Before any write. The task moves below used to run first and the ownership check second,
-  // so a refused request still emptied somebody else's sprint and answered 404 (BP-314).
   if (!isValidObjectId(sprintId)) {
     return NextResponse.json({ error: "Invalid sprint id" }, { status: 400 });
   }
@@ -81,7 +72,6 @@ export const PUT = withProjectAccess(async (request, { params }) => {
     return NextResponse.json({ error: "Invalid sprint status" }, { status: 400 });
   }
 
-  // If activating, deactivate other active sprints in this project
   if (updates.status === "active") {
     await Sprint.updateMany(
       { project: projectId, status: "active", _id: { $ne: sprintId } },
@@ -89,14 +79,7 @@ export const PUT = withProjectAccess(async (request, { params }) => {
     );
   }
 
-  // Unfinished means "not in a done-role column", not "not literally called done". Keyed on the
-  // id, a project whose board was renamed had every finished task look unfinished and get dragged
-  // into the next sprint — the one case in this ticket that moves somebody's work without asking.
   if (updates.status === "completed" && (body.moveIncompleteToBacklog || body.moveIncompleteToSprint)) {
-    // Every refusal ahead of every write. The destination is a caller-supplied id like the one in
-    // the path, so it gets the same ownership check — and it gets it *here*, because validating it
-    // inside the second branch let the first branch's sweep commit before the 400. That is the same
-    // write-then-refuse shape this whole change exists to remove.
     let destination: string | null = null;
     if (body.moveIncompleteToSprint) {
       destination = await ownedSprintId(projectId, String(body.moveIncompleteToSprint));
@@ -105,15 +88,12 @@ export const PUT = withProjectAccess(async (request, { params }) => {
       }
     }
 
-    // `project` as well as `sprint`: the sprint id is owned by this project, but a task carrying
-    // it may not be — nothing stopped a cross-project reference being written until BP-314
     const unfinished = {
       project: projectId,
       sprint: sprintId,
       status: { $nin: await doneColumnIds(projectId) },
     };
 
-    // Exclusive: a body carrying both used to run the sweep and then the move over the top of it
     if (destination) {
       await Task.updateMany(unfinished, { $set: { sprint: destination } });
     } else if (body.moveIncompleteToBacklog) {
@@ -151,7 +131,6 @@ export const DELETE = withProjectAccess(async (_request, { params }) => {
     return NextResponse.json({ error: "Sprint not found" }, { status: 404 });
   }
 
-  // Move all tasks in this sprint back to backlog
   await Task.updateMany(
     { project: projectId, sprint: sprintId },
     { $set: { sprint: null } }

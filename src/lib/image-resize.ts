@@ -1,5 +1,3 @@
-// A retina screenshot is several megabytes and costs roughly width*height/750 tokens on
-// every turn it stays in history, so it is shrunk in the browser before it is ever stored
 export const MAX_IMAGE_DIMENSION = 1568;
 
 export interface ResizedImage {

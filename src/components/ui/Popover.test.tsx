@@ -34,9 +34,6 @@ function mouseDownOn(target: Node) {
   });
 }
 
-// From inside the popover, the way a real key press arrives: dispatching on
-// document itself puts every listener in the at-target phase, where capture and
-// bubble no longer order against each other
 function pressEscape() {
   const from = screen.queryByText("pick") ?? screen.getByText("open");
   act(() => {
@@ -59,8 +56,6 @@ describe("Popover", () => {
     expect(screen.queryByText("pick")).toBeNull();
   });
 
-  // The trigger lives inside the anchor, so a naive outside-click check would
-  // reopen it: close on mousedown, reopen on the click that follows
   it("stays put for a click on its own panel", async () => {
     renderPopover();
     await open();
@@ -75,8 +70,6 @@ describe("Popover", () => {
     expect(screen.queryByText("pick")).toBeNull();
   });
 
-  // A dialog holding the popover listens for Escape on document too. Two listeners
-  // on the same target ignore stopPropagation, so one Escape used to close both.
   it("keeps Escape from reaching a dialog's own document listener", async () => {
     const dialogEscape = vi.fn();
     document.addEventListener("keydown", dialogEscape);
@@ -88,7 +81,6 @@ describe("Popover", () => {
       expect(screen.queryByText("pick")).toBeNull();
       expect(dialogEscape).not.toHaveBeenCalled();
 
-      // …and once the popover is gone, Escape is the dialog's again
       pressEscape();
       expect(dialogEscape).toHaveBeenCalledTimes(1);
     } finally {

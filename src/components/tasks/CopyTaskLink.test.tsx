@@ -59,8 +59,6 @@ describe("CopyTaskLink", () => {
     expect(button.getAttribute("title")).toBe("Copy link to TP-7");
   });
 
-  // A browser can refuse the clipboard outright (insecure context, denied permission);
-  // silence would read as a successful copy the user then pastes nothing from
   it("says so when the browser refuses the clipboard", async () => {
     stubClipboard(vi.fn().mockRejectedValue(new Error("denied")));
     const button = renderButton();
@@ -75,7 +73,6 @@ describe("CopyTaskLink", () => {
     expect(button.getAttribute("title")).toBe("Copy failed");
   });
 
-  // The button sits inside a card and a row that both open the task on click
   it("does not let the click reach the card or row underneath", async () => {
     stubClipboard(vi.fn().mockResolvedValue(undefined));
     const outer = vi.fn();
@@ -86,8 +83,6 @@ describe("CopyTaskLink", () => {
     expect(event.defaultPrevented).toBe(true);
   });
 
-  // The board's Enter handler listens on the node React delegates from, which a
-  // synthetic stopPropagation never reaches
   it("keeps Enter away from the board's own handler", async () => {
     stubClipboard(vi.fn().mockResolvedValue(undefined));
     const button = renderButton();

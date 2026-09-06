@@ -37,7 +37,6 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
         const after = textarea.value.substring(end);
         const newValue = before + text + after;
 
-        // Trigger React onChange
         const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
           window.HTMLTextAreaElement.prototype,
           "value"
@@ -45,7 +44,6 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
         nativeInputValueSetter?.call(textarea, newValue);
         textarea.dispatchEvent(new Event("input", { bubbles: true }));
 
-        // Set cursor after inserted text
         requestAnimationFrame(() => {
           textarea.selectionStart = textarea.selectionEnd = start + text.length;
           textarea.focus();

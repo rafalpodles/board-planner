@@ -19,9 +19,6 @@ vi.mock("@/lib/auth", () => ({
 vi.mock("@/lib/grants", () => ({ accessibleProjectIds, check: vi.fn() }));
 vi.mock("@/models/user", () => ({ User: {} }));
 vi.mock("@/models/task", () => ({ Task: {} }));
-// The filter is honoured rather than discarded. A stub that answers every query with the same rows
-// makes `find({_id: {$in: wanted}})` look like it returned projects the route had already refused —
-// which is a failing assertion about the stub, not about the code.
 vi.mock("@/models/project", () => ({
   Project: {
     find: (query?: { _id?: { $in?: string[] } }) => ({
@@ -103,8 +100,6 @@ describe("GET the picker's own view", () => {
     ]);
   });
 
-  // The screen has to know before it renders whether a switched-off project is tickable here or
-  // only somewhere else, or it promises something the PUT will not do.
   it("says whether this person can switch workers on while they are here", async () => {
     expect((await (await GET(getRequest(), ctx())).json()).canEnableWorkers).toBe(false);
 
@@ -130,7 +125,6 @@ describe("PUT the selection", () => {
     );
   });
 
-  // This is the whole reason the screen lives in a browser rather than in the app
   it("switches workers on for a picked project when an instance admin is confirming", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
 
@@ -146,8 +140,6 @@ describe("PUT the selection", () => {
     expect(json.leftDisabled).toEqual([]);
   });
 
-  // A machine picked for a project nobody committed to machines would sit idle with nothing on it
-  // to say why. Naming them is what lets the screen say it instead.
   it("names the projects it left switched off when the person cannot switch them", async () => {
     const json = await (await PUT(putRequest({ projects: [SERVED, OFF] }), ctx())).json();
 
@@ -164,8 +156,6 @@ describe("PUT the selection", () => {
     expect(json.refused).toEqual([OFF]);
   });
 
-  // Recording a project the machine's owner cannot reach would be recorded as wanted and refused
-  // on every claim — a machine that looks configured and does nothing.
   it("refuses a project the machine's owner cannot reach, even for an admin who can", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
     ownerReachableProjectIds.mockResolvedValue([SERVED]);
@@ -190,8 +180,6 @@ describe("PUT the selection", () => {
     expect(workerUpdateOne).not.toHaveBeenCalled();
   });
 
-  // The choice is a person's, and a machine credential is exactly what this route must not accept:
-  // the app holds one, and the app is the thing that would otherwise be able to widen its own reach.
   it("refuses a machine credential", async () => {
     getAuthUser.mockResolvedValue({ ...OWNER, viaMachineCredential: true });
 

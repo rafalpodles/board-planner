@@ -50,7 +50,6 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     [removeToast]
   );
 
-  // Cleanup on unmount
   useEffect(() => {
     const timers = timersRef.current;
     return () => {

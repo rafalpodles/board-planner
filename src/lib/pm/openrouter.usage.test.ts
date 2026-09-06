@@ -1,11 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { chatCompletion } from "./openrouter";
 
-/**
- * BP-284. The provider reports what each round-trip cost and the client threw it away. Everything
- * downstream mocks `chatCompletion`, so nothing exercised this parsing — removing it from the text
- * arm left the whole PM suite green, which is why this file exists at all.
- */
 const call = () => chatCompletion({ model: "m", messages: [], tools: [] });
 
 function respondWith(body: unknown) {
@@ -42,17 +37,12 @@ describe("what chatCompletion reports about the call's cost", () => {
     });
   });
 
-  // The arm a working turn spends most of its calls on
   it("carries it back from a tool-call answer too", async () => {
     respondWith({ ...TOOLS, usage: USAGE });
 
     expect(await call()).toMatchObject({ type: "tool_calls", usage: { totalTokens: 1500 } });
   });
 
-  /**
-   * Absent is not zero. A provider that reports nothing must leave the number unknown, so the
-   * day's total does not quietly read as free — the calls are still counted upstream.
-   */
   it("reports no usage rather than zero when the response carries none", async () => {
     respondWith(TEXT);
 
@@ -68,7 +58,6 @@ describe("what chatCompletion reports about the call's cost", () => {
     expect(await call()).toMatchObject({ usage: { totalTokens: 42 } });
   });
 
-  // The control: a malformed usage block must not become NaN in a number the operator reads
   it("ignores a usage block that carries no numbers at all", async () => {
     respondWith({ ...TEXT, usage: { prompt_tokens: "lots" } });
 

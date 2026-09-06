@@ -1,12 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-/**
- * BP-322. This route had no test at any level, and the ticket's own claim — that the throttle runs
- * before the body — was untestable without one. An oversized body is what tells the orders apart:
- * 429 means the caller was refused before the server read it, 413 means it read 70 KB from a caller
- * it had already decided to turn away.
- */
-
 const startDeviceEnrolment = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -76,8 +69,6 @@ describe("POST /api/workers/enrolment/device", () => {
   });
 
   it("charges the budget for a request it refused, not only for one it understood", async () => {
-    // Ten oversized requests are ten requests. Counting only the ones that parse would leave the
-    // cheapest way to spend the server's time as the one way that costs the caller nothing.
     for (let i = 0; i < 11; i++) await POST(oversized());
 
     expect((await POST(post({ name: "MacBook" }))).status).toBe(429);

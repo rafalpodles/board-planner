@@ -7,11 +7,8 @@ const createNotifications = vi.fn();
 const WATCHER = "507f1f77bcf86cd799439051";
 const REVIEW_COLUMN = { id: "needs_human_review", label: "Needs a human", role: "review", order: 4 };
 
-/** The task the trigger is about. Null stands for one deleted between the turn and the mail. */
 let reviewed: Record<string, unknown> | null = null;
 
-// Projection-aware, because runPmTrigger asks for the pm config and the notification asks for the
-// board's identity. One answer for both leaves the mail's project name and key untestable.
 vi.mock("@/models/project", () => ({
   Project: {
     findById: (_id: unknown, projection?: string) => ({
@@ -39,7 +36,6 @@ vi.mock("./pm-user", () => ({ getPmUser: async () => ({ _id: "pm-user-id" }) }))
 vi.mock("./agent", () => ({ runPmTurn }));
 vi.mock("./turn-cap", () => ({
   isOverDailyTurnCap: async () => ({ over: false, cap: 100 }),
-  // The token ceiling is off by default, which is what an unconfigured project answers (BP-284)
   dailyPmSpend: async () => ({ over: false, cap: 0, tokens: 0, calls: 0, stepLimitHits: 0 }),
 }));
 vi.mock("./turn-lock", () => ({
@@ -66,16 +62,11 @@ beforeEach(() => {
   };
 });
 
-// BP-301: this turn is unattended and its prompt is built from board text, so it must
-// run with the same withholding the scheduled review uses.
 describe("runPmTrigger", () => {
   it("withholds assign_task and change_status from the turn", async () => {
     await runPmTrigger(trigger);
 
     expect(runPmTurn).toHaveBeenCalledWith(
-      // `autonomous` as well as the name list, and they are not the same guarantee: the list is
-      // matched by exact name and MCP tools are `mcp_<server>_<tool>`, so nothing in it could ever
-      // withhold one. Dropping this flag leaves every other assertion in this file green (BP-321).
       expect.objectContaining({
         disallowedTools: NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS,
         autonomous: true,
@@ -96,12 +87,6 @@ describe("runPmTrigger", () => {
   });
 });
 
-/**
- * The turn runs with nobody watching, so this mail is the whole of how its verdict reaches a
- * person. Nothing here fired it: the fixture's task was null, so the notification returned before
- * it was assembled — deleting the notifyWatchers call left every test in the file green, and the
- * mock did not even export the assigneeIdOf the path calls.
- */
 describe("what an autonomous PM review tells the watchers", () => {
   it("names the task, the column it is sitting in and what the PM concluded", async () => {
     runPmTurn.mockResolvedValue({ ok: true, message: { content: "Blocked on the OIDC redirect" } });
@@ -131,8 +116,6 @@ describe("what an autonomous PM review tells the watchers", () => {
     });
   });
 
-  // The control: a turn that produced no verdict has nothing to announce, and the trigger is
-  // retried rather than settled
   it("says nothing when the turn itself failed", async () => {
     runPmTurn.mockResolvedValue({ ok: false, error: "the model refused" });
 

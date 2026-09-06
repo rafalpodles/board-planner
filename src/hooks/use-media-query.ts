@@ -2,8 +2,6 @@
 
 import { useEffect, useState } from "react";
 
-// Starts false so the server render and the first client render agree; the real
-// value arrives in the effect. Callers must treat false as "not yet known".
 export function useMediaQuery(query: string): boolean {
   const [matches, setMatches] = useState(false);
 

@@ -182,8 +182,6 @@ describe("Modal focus trap", () => {
   });
 });
 
-// The task detail keeps both tab panels mounted and hides the inactive one, so the
-// trap has to end at the last control the user can actually see
 describe("Modal focus trap, against controls that are not on screen", () => {
   function renderTaskDetailShape() {
     return render(
@@ -384,8 +382,6 @@ describe("Stacked modals", () => {
     expect(document.body.style.overflow).toBe("hidden");
   });
 
-  // Two dialogs side by side share z-50, so the one further down the DOM is the one
-  // on screen — whichever order they happened to be opened in
   it("gives Escape to the sibling painted in front, not the one opened last", () => {
     const onFirstClose = vi.fn();
     const onSecondClose = vi.fn();
@@ -411,8 +407,6 @@ describe("Stacked modals", () => {
   });
 });
 
-// The task detail draws its own top bar — breadcrumb, status, close — so the
-// modal's header would be a second one sitting above it
 describe("Modal, bare", () => {
   it("drops its header but stays a labelled dialog", () => {
     render(
@@ -449,8 +443,6 @@ describe("Modal, bare", () => {
   });
 });
 
-// The task detail is a whole page of content; on a phone a backdrop around it
-// costs height for nothing, so a bare dialog takes the screen
 describe("Modal, bare on a narrow screen", () => {
   function frame() {
     render(

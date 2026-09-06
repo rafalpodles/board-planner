@@ -49,9 +49,6 @@ let project: {
   markModified: ReturnType<typeof vi.fn>;
 };
 
-// A snapshot taken when save() runs, not read afterwards — the mock's estimateFieldId
-// reflects the final in-memory state either way, so only this tells "cleared before the
-// save that persists it" apart from "cleared only after".
 let savedEstimateFieldId: string | undefined;
 
 beforeEach(() => {

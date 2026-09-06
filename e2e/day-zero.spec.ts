@@ -1,23 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
 import { ADMIN_USERNAME, seed, wipe } from "./seed";
 
-/**
- * BP-268. The login page rendered "First time? Create Account" with no condition on it, so every
- * visitor to a populated instance was invited to fill in a username and a password and answered
- * 403 by POST /api/users — a path that existed only to end in a refusal.
- *
- * Both arms, because "hides the toggle" and "the login page is broken" look identical with only
- * one of them.
- */
-
 const TOGGLE = "First time? Create Account";
 
-/**
- * `/login` is statically prerendered and the toggle starts hidden, so `toHaveCount(0)` is satisfied
- * before the page has asked anything — the first version of the two absence assertions below passed
- * with the endpoint mutated to answer `unclaimed: true` unconditionally, which is the whole server
- * half of the fix removed. Waiting for the answer is what makes the absence mean something.
- */
 async function afterTheInstanceAnswers(page: Page, act: () => Promise<unknown>) {
   const answered = page.waitForResponse((res) => res.url().includes("/api/auth/instance"));
   await act();
@@ -31,8 +16,6 @@ test.describe("an instance nobody has claimed", () => {
     page,
     request,
   }) => {
-    // The server's own answer, asserted before the page is read: if this were false the toggle's
-    // absence below would be correct rather than a bug
     const instance = await request.get("/api/auth/instance");
     expect(await instance.json()).toEqual({ unclaimed: true });
 
@@ -51,10 +34,6 @@ test.describe("an instance nobody has claimed", () => {
     expect((await created).status()).toBe(201);
     await expect(page).not.toHaveURL(/\/login/);
 
-    // The role is the point of the bootstrap and the login page never shows it. Read through the
-    // browser's own session rather than off the 201 body: the page signs in and navigates, and a
-    // response body read across that navigation hangs. Without this assertion the test's title was
-    // the only thing claiming the role, and minting "member" instead left the whole suite green.
     const me = await page.request.get("/api/auth/me");
     expect(await me.json()).toMatchObject({ username: "firstadmin", role: "admin" });
 
@@ -65,10 +44,6 @@ test.describe("an instance nobody has claimed", () => {
     await page.goto("/login");
     await expect(page.getByRole("button", { name: TOGGLE })).toBeVisible();
 
-    // Claimed by somebody else, through the same endpoint the page uses. `sec-fetch-site: none`
-    // is what a request typed straight at the address bar carries, and checkProvenance accepts it
-    // — without it this is refused by the provenance check before the bootstrap rule is reached,
-    // which would have made the assertion below pass for a reason it does not name.
     const claimed = await request.post("/api/users", {
       headers: { "sec-fetch-site": "none" },
       data: { username: "someoneelse", password: "test1234", fullName: "Someone Else" },
@@ -83,9 +58,6 @@ test.describe("an instance nobody has claimed", () => {
 test.describe("an instance that already has users", () => {
   test.beforeEach(seed);
 
-  /**
-   * The control. Without it, a page that rendered nothing at all would satisfy the arm above.
-   */
   test("offers no account creation, and signing in still works", async ({ page }) => {
     await afterTheInstanceAnswers(page, () => page.goto("/login"));
 
@@ -99,14 +71,6 @@ test.describe("an instance that already has users", () => {
     await expect(page).not.toHaveURL(/\/login/);
   });
 
-  /**
-   * The endpoint is the whole control: hiding the toggle is about what is offered.
-   *
-   * The 403 here comes from the "must be an authenticated admin" arm, reached *because* the user
-   * count is non-zero — `provenanceRefusal` is only called on the bootstrap branch. Asserted by
-   * mutation: forcing `isBootstrap` true turns this red with a 201. The `sec-fetch-site` header is
-   * inert on this path and kept only so the request is the same shape as the one above.
-   */
   test("refuses a bootstrap posted straight at the endpoint", async ({ request }) => {
     const res = await request.post("/api/users", {
       headers: { "sec-fetch-site": "none" },

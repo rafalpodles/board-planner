@@ -35,9 +35,6 @@ function idleLoop(): Loop {
   });
 }
 
-// One populated project, not none: the disclosure test below reads this body, and a credential or a
-// checkout path would leak from a *project* row. With projects empty there were no rows to inspect,
-// so adding `checkout: repoPath` to the view left that test green.
 const SOME_CONFIG: LocalConfigView = {
   apiUrl: "http://localhost:3000",
   workerName: "test-worker",
@@ -63,7 +60,6 @@ const SOME_CONFIG: LocalConfigView = {
 async function serve(
   opts: {
     handlers?: CommandChannels;
-    // /status reads current() too, so a stub standing in for the real telemetry has to have it
     telemetry?: Pick<Telemetry, "subscribe" | "recent" | "current">;
     socketPath?: string;
     config?: () => LocalConfigView;
@@ -121,9 +117,6 @@ function openStream(socketPath: string): Promise<{ frames: string[]; close: () =
   });
 }
 
-// A worker killed with SIGKILL never unlinks; the inode it bound stays on disk and the next bind()
-// at that path fails with EADDRINUSE. process.exit() from the listen callback reproduces exactly
-// that, since it skips the close path that would otherwise remove the file.
 function leaveStaleSocket(socketPath: string): void {
   execFileSync(process.execPath, [
     "-e",
@@ -181,8 +174,6 @@ describe("the route list", () => {
   it("404s everything outside it, including the log route the worker cannot serve", async () => {
     const { socketPath } = await serve();
 
-    // No log route: the worker writes to console.error and thence to launchd, and has no file to
-    // hand over. A route it has no source for would have to invent one.
     expect((await call(socketPath, "GET", "/logs")).status).toBe(404);
     expect((await call(socketPath, "GET", "/")).status).toBe(404);
     expect((await call(socketPath, "GET", "/../status")).status).toBe(404);
@@ -238,11 +229,6 @@ describe("commands over the socket", () => {
     expect(stop).not.toHaveBeenCalled();
   });
 
-  // The guard commands.ts owns orders by issuance, so a local command has to carry one — an undated
-  // command would leave lastAppliedAt untouched and let a superseded server command back in.
-  // The board's stop is the emergency brake. It is stamped by the server's clock, so a local pause
-  // that entered the same guard would let a laptop running fast discard it — and the run would
-  // carry on to merge while the operator was told it had stopped.
   it("never lets a local command discard a later stop issued by the board", async () => {
     const { socketPath, loop, abort, channels } = await serve();
 
@@ -287,9 +273,6 @@ describe("the progress stream", () => {
     stream.close();
   });
 
-  // wiring.ts awaits close() during shutdown, and closing a server only stops it accepting new
-  // connections — an attached menubar would otherwise hold the process open until launchd escalates
-  // to SIGKILL. The client here deliberately never disconnects.
   it("closes down promptly with a client still attached", async () => {
     const { socketPath, server } = await serve();
     await openStream(socketPath);
@@ -302,9 +285,6 @@ describe("the progress stream", () => {
     ).resolves.toBeUndefined();
   });
 
-  // Reversed in part C, deliberately. The stream used to drop quota, which left the operator with
-  // no local source for the one notification that explains why a run stopped. /status still replays
-  // progress only — the ring is what stays progress-shaped, not the stream.
   it("puts quota on the stream, so a client can say why the run stopped", async () => {
     const telemetry = createTelemetry();
     const { socketPath } = await serve({ telemetry });
@@ -341,9 +321,6 @@ describe("the progress stream", () => {
     expect(body.recent).toEqual([{ phase: "push" }]);
   });
 
-  // The live rig showed a worker reporting current: {phase: "push"} six hours after its run ended,
-  // because /status served the last phase ever emitted. A client reading that shows "working" for
-  // as long as the worker stays up.
   it("stops reporting a current phase once the run has settled", async () => {
     const telemetry = createTelemetry();
     const { socketPath } = await serve({ telemetry });
@@ -357,10 +334,6 @@ describe("the progress stream", () => {
   });
 
   it("serves the effective config the worker is actually running under", async () => {
-    // The shape wiring.ts really serves: the per-run settings live under each project, because a
-    // worker binds several and they do not share a model. Asserted here in that shape after this
-    // test spent its life checking that a top-level `model` — which nothing ever produces — came
-    // back out of the object it had just put in (BP-334).
     const { socketPath } = await serve({
       config: () => ({
         apiUrl: "http://localhost:3991",
@@ -411,8 +384,6 @@ describe("the progress stream", () => {
     });
   });
 
-  // No route on this socket may disclose a credential or a repository binding — the agent runs at
-  // this same uid and can reach it. See the header comment on local-server.ts.
   it("discloses no credential and no repository path", async () => {
     const { socketPath } = await serve();
 
@@ -421,8 +392,6 @@ describe("the progress stream", () => {
     expect(body).not.toMatch(/cpw_|token|credential|repoPath|worktreeRoot/i);
   });
 
-  // Policy arrives from the server over SSE and changes under a running worker; a value captured at
-  // startup would go stale the first time an operator edits it in the console.
   it("reads the config afresh on every request", async () => {
     let model = "opus";
     const { socketPath } = await serve({
@@ -463,8 +432,6 @@ describe("the progress stream", () => {
     const { socketPath } = await serve({
       telemetry: {
         recent: telemetry.recent,
-        // Passed through: this test counts subscriptions, and wrapping only subscribe would leave
-        // /status unable to answer while the stream is open
         current: telemetry.current,
         subscribe: (listener) => {
           live += 1;

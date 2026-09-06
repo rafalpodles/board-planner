@@ -1,9 +1,6 @@
 import mongoose, { Schema, Model } from "mongoose";
 import { AGENT_BUCKETS, AGENT_SCOPES, IAgent } from "@/types";
 
-// One position in the sequence. The key says which block; params override that block's own, for
-// this position only — which is what lets one agent carry two Size gates with different limits
-// without two rows in the catalog.
 const entrySchema = new Schema(
   {
     key: { type: String, required: true },
@@ -12,8 +9,6 @@ const entrySchema = new Schema(
   { _id: false }
 );
 
-// Buckets stay separate arrays rather than one list so a bucket's meaning survives an empty one:
-// an agent with nothing in analysis still says where analysis would go.
 const compositionSchema = new Schema(
   {
     analysis: { type: [entrySchema], default: [] },
@@ -29,8 +24,6 @@ export const agentSchema = new Schema<IAgent>(
     name: { type: String, required: true, trim: true },
     description: { type: String, default: "" },
     scope: { type: String, enum: AGENT_SCOPES, required: true },
-    // Exactly one of these is set, by scope: a user agent has an owner, a project agent a project,
-    // a global one neither.
     owner: { type: Schema.Types.ObjectId, ref: "User", default: null },
     project: { type: Schema.Types.ObjectId, ref: "Project", default: null },
     composition: { type: compositionSchema, default: () => ({}) },
@@ -39,16 +32,6 @@ export const agentSchema = new Schema<IAgent>(
   { timestamps: true }
 );
 
-/**
- * Entries used to be bare key strings. `normaliseComposition` reads either shape, but only on the
- * `.lean()` paths — a hydrated document is cast against `entrySchema` first, and a string cannot
- * become a subdocument. Mongoose empties the bucket, stamps an init ValidationError on the
- * document, and every later `save()` throws it: renaming a legacy agent answered 500 (BP-481).
- *
- * `pre("init")` is the one place that sees the raw row before the cast. It does not rewrite the
- * stored row — nothing marks the path modified — so the database keeps the old shape until
- * something saves a composition, which is the lazy story `normaliseComposition` already tells.
- */
 agentSchema.pre("init", function (raw: Record<string, unknown>) {
   const composition = raw?.composition as Record<string, unknown> | undefined;
   if (!composition) return;

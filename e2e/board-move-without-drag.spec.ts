@@ -3,13 +3,6 @@ import { ADMIN_AUTH } from "./api";
 import { PROJECT_KEY, DECOY_TASK_NUMBER, seed } from "./seed";
 import { signIn as arriveSignedIn } from "./session";
 
-/**
- * BP-492. The board moves cards with native HTML5 drag, which a touch browser never starts —
- * so a phone had no way to move a task at all, while the list view (dnd-kit) did.
- *
- * The card's actions button opens the same menu right-click opens on a desktop.
- */
-
 test.beforeEach(seed);
 
 const signIn = arriveSignedIn;
@@ -46,8 +39,6 @@ test.describe("moving a card on a phone", () => {
     const target = page.getByRole("button", { name: "To Do", exact: true });
     await expect(target).toBeVisible();
 
-    // The board renders the move optimistically, so the rendered column proves nothing about
-    // whether it landed — wait for the write itself
     const written = page.waitForResponse(
       (r) => r.request().method() === "PATCH" && r.url().includes("/tasks/") && r.ok(),
     );
@@ -64,8 +55,6 @@ test("on a desktop the card keeps drag and right-click, and grows no extra butto
   await signIn(page);
   await page.goto(`/projects/${PROJECT_KEY}`);
 
-  // The control: the same card is on screen, so a hidden button is a decision and not an
-  // absent card
   await expect(page.getByText(`${PROJECT_KEY}-${DECOY_TASK_NUMBER}`).first()).toBeVisible();
   await expect(
     page.getByRole("button", { name: `Actions for ${PROJECT_KEY}-${DECOY_TASK_NUMBER}` }),

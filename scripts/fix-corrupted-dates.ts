@@ -1,13 +1,3 @@
-/**
- * One-time migration: repair corrupted Extended JSON dates
- * ({ $date: '...' } objects) into native Date values across all collections.
- *
- * Usage: MONGODB_URI=... npx tsx scripts/fix-corrupted-dates.ts
- *
- * Previously ran on every server start (instrumentation.ts); moved here so it
- * no longer adds latency to cold starts or re-runs on each boot.
- */
-
 import mongoose from "mongoose";
 
 const MONGODB_URI = process.env.MONGODB_URI;

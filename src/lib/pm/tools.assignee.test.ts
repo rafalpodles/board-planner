@@ -38,13 +38,6 @@ beforeEach(() => {
   taskCountDocuments.mockResolvedValue(0);
 });
 
-/**
- * BP-511. The route's status filter was taught to refuse a column id the board has not got, and
- * this tool goes nowhere near the route — it queries Mongo directly. It is also the one surface
- * this product runs unattended, so the empty list the ticket describes ("asked for `todo`, was
- * answered nothing, reported that there was nothing to do") landed here rather than in a chat
- * somebody was reading.
- */
 describe("the PM's list_tasks and a column id the board has not got", () => {
   it("refuses it, naming the columns the board does have", async () => {
     const { result } = await PM_TOOLS.list_tasks.execute({ status: "todo" }, ctx);
@@ -53,8 +46,6 @@ describe("the PM's list_tasks and a column id the board has not got", () => {
     expect(taskFind, "the query ran anyway").not.toHaveBeenCalled();
   });
 
-  // The control: a tool that refused every filter, or one whose fixture never loaded, would
-  // satisfy the assertion above
   it("takes one the board does have", async () => {
     const { result } = await PM_TOOLS.list_tasks.execute({ status: "doing" }, ctx);
 
@@ -69,7 +60,6 @@ describe("the PM's list_tasks and a column id the board has not got", () => {
     expect(taskFind.mock.calls[0][0]).not.toHaveProperty("status");
   });
 
-  // It reaches a model as a tool result, so it is not a place to echo an unbounded argument back
   it("does not echo an unbounded status back into the refusal", async () => {
     const { result } = await PM_TOOLS.list_tasks.execute({ status: "x".repeat(5000) }, ctx);
 
@@ -77,12 +67,6 @@ describe("the PM's list_tasks and a column id the board has not got", () => {
   });
 });
 
-/**
- * `assign_task` used to carry its own guard, reporting the damage after the fact — "User 'x' not
- * found — task BP-9 is now unassigned" — because the writer had already cleared the assignee. The
- * writer refuses before writing now, and this is what says the refusal still reaches the model
- * rather than being swallowed on the way.
- */
 describe("the PM's assign_task and a username the writer refuses", () => {
   beforeEach(() => {
     taskFindOne.mockResolvedValue({ _id: "t1", taskNumber: 9 });
@@ -98,7 +82,6 @@ describe("the PM's assign_task and a username the writer refuses", () => {
     const { result } = await PM_TOOLS.assign_task.execute({ taskKey: "BP-9", username: "rafa" }, ctx);
 
     expect(result).toMatchObject({ error: expect.stringContaining("rafa") });
-    // Nothing that reads as a success beside it — the old guard reported the assignment as done
     expect(result).not.toHaveProperty("task");
   });
 

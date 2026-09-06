@@ -15,7 +15,6 @@ import { SettingRow } from "@/components/settings/SettingRow";
 import { useDirtyGroup } from "@/components/settings/settings-context";
 import { SectionProps } from "./types";
 
-// Matches the API, which refuses anything shorter
 const MIN_QUERY = 2;
 
 export function GeneralSection({ projectId, project, replaceProject, stats }: SectionProps) {

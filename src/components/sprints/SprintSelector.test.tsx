@@ -17,7 +17,6 @@ function sprint(over: Partial<ApiSprint> & { _id: string }): ApiSprint {
   } as ApiSprint;
 }
 
-// Five completed sprints, so three are recent and two are older
 const many: ApiSprint[] = [
   sprint({ _id: "a", name: "Sprint 1", endDate: "2026-01-15T00:00:00Z" }),
   sprint({ _id: "b", name: "Sprint 2", endDate: "2026-02-15T00:00:00Z" }),
@@ -54,7 +53,6 @@ describe("SprintSelector", () => {
   it("keeps completed sprints past the third behind a toggle", () => {
     render(<SprintSelector sprints={many} selectedId="f" onSelect={() => {}} />);
 
-    // Sorted by end date descending, so 5, 4 and 3 are the recent three
     expect(screen.getByRole("button", { name: /Sprint 5/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Sprint 3/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Sprint 2/ })).toBeNull();
@@ -79,8 +77,6 @@ describe("SprintSelector", () => {
     ).toBe("false");
   });
 
-  // The toggle unmounts itself on activation; without a focus target that drops
-  // keyboard focus to <body>, silently, for anyone tabbing through the list
   it("sends focus to the newly revealed row instead of dropping it", async () => {
     render(<SprintSelector sprints={many} selectedId="f" onSelect={() => {}} />);
 

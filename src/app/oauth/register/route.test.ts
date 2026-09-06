@@ -9,7 +9,6 @@ vi.mock("@/models/rateLimit", async () => {
 });
 
 vi.mock("@/models/oauthClient", () => ({ OAuthClient: { create } }));
-// Partial: `isValidRedirectUri` is the rule these tests are about, so it stays real.
 vi.mock("@/lib/oauth", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/oauth")>()),
   newClientId: () => "cpc_generated",
@@ -29,7 +28,6 @@ function request(body: unknown, ip = "203.0.113.7") {
 beforeEach(async () => {
   vi.clearAllMocks();
   await resetRateLimits();
-  // X-Forwarded-For counts only where the operator says a proxy writes it (BP-318)
   process.env.TRUSTED_PROXY_HOPS = "1";
   create.mockResolvedValue({});
 });
@@ -48,7 +46,6 @@ describe("POST /oauth/register", () => {
     );
   });
 
-  // RFC 8252 permits http only for loopback, which is what a local MCP client needs
   it.each([
     "http://127.0.0.1:6274/callback",
     "http://localhost:8080/callback",
@@ -59,8 +56,6 @@ describe("POST /oauth/register", () => {
     expect(res.status).toBe(201);
   });
 
-  // BP-302: plain http to any host was accepted, so the authorization code travelled
-  // in cleartext to a host the user never saw
   it.each([
     "http://attacker.example/callback",
     "http://127.0.0.1.attacker.example/callback",
@@ -97,8 +92,6 @@ describe("POST /oauth/register", () => {
     expect(create.mock.calls[0][0].clientName).toHaveLength(80);
   });
 
-  // Unauthenticated and advertised publicly, so nothing else bounds how far the
-  // client collection can be grown
   it("throttles registrations from one address", async () => {
     const body = { redirect_uris: ["https://example.com/cb"] };
     for (let i = 0; i < 10; i++) {
@@ -120,9 +113,6 @@ describe("POST /oauth/register", () => {
     expect(res.status).toBe(201);
   });
 
-  // With no proxy configured every caller shares one key, so the per-address figure would be a
-  // lever: ten requests per quarter hour, from anywhere, would close registration for the whole
-  // instance — and with it the documented MCP onboarding (BP-318 review)
   it("does not let one anonymous caller close registration for everybody", async () => {
     delete process.env.TRUSTED_PROXY_HOPS;
     const body = { redirect_uris: ["https://example.com/cb"] };
@@ -148,8 +138,6 @@ describe("POST /oauth/register", () => {
     expect(refusedAt).toBeLessThan(400);
   });
 
-  // A rejected registration still costs the collection nothing, but it must still count:
-  // otherwise the throttle is skipped by sending a body that fails validation
   it("counts a refused registration against the throttle", async () => {
     const bad = { redirect_uris: ["http://attacker.example/cb"] };
     for (let i = 0; i < 10; i++) await POST(request(bad));

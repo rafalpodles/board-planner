@@ -3,16 +3,6 @@ export interface PaletteColour {
   name: string;
 }
 
-/**
- * The colours anything in a project may be tinted with — columns, categories, field
- * options. A fixed set rather than a free hex: the value is used as foreground text
- * (`ListView`, `BoardFilters`, the category chip), so an unconstrained picker lets
- * someone choose white and make their own label invisible.
- *
- * Seeded from the hues already shipped in DEFAULT_PROJECT_COLUMNS, extended to a full
- * wheel. Every entry is a Tailwind 500-weight, which clears 4.5:1 against both themes'
- * card backgrounds.
- */
 export const PALETTE: PaletteColour[] = [
   { hex: "#64748b", name: "Slate" },
   { hex: "#6b7280", name: "Gray" },
@@ -47,7 +37,6 @@ export function isPaletteColour(hex: string | undefined): boolean {
   return !!hex && BY_HEX.has(hex.toLowerCase());
 }
 
-/** Cycles the palette so a new row does not arrive the same colour as the one above. */
 export function nextColour(used: string[]): string {
   const taken = new Set(used.map((c) => c.toLowerCase()));
   return (PALETTE.find((c) => !taken.has(c.hex.toLowerCase()) ) ?? PALETTE[used.length % PALETTE.length]).hex;

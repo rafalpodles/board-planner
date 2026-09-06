@@ -5,19 +5,14 @@ import { describe, it, expect, vi, afterAll } from "vitest";
 import { ClaimRefused, createApiClient } from "./api.js";
 import { Bootstrap } from "./config.js";
 
-// Spreadable, unlike `as never`: three tests build a variant of it with their own stateDir
 const config = {
   apiBaseUrl: "https://app.example.com",
   apiToken: "cp_token",
   workerId: "worker-a",
 } as unknown as Bootstrap;
 
-// A stored identity, injected in place of the real <stateDir>/worker.json so claim() (the only
-// method that needs one) can authenticate without touching the filesystem
 const identityStore = { read: () => JSON.stringify({ workerId: "6a7c686f70ed274cf658b1b3", credential: "cpw_secret" }) };
 
-// Every claim now carries the agent the server resolved; a claim without one is not runnable and
-// is handed straight back, so a fixture that omits it tests the refusal rather than the mapping.
 const agent = {
   agentId: "a1",
   name: "Default",
@@ -52,8 +47,6 @@ describe("createApiClient", () => {
 
     const task = await api.claim("CP", "run-1");
 
-    // Every optional field of an entry is filled in, so nothing downstream has to decide what an
-    // absent capability or model means
     expect(task?.agent.sequence[0]).toEqual({
       key: "implement",
       kind: "step",
@@ -137,8 +130,6 @@ describe("createApiClient", () => {
     expect(task?.agent.sequence[1].params).toEqual({ maxLines: "400" });
   });
 
-  // A claim that cannot be run must be handed back. Returning null alone holds the task until
-  // EXECUTION_LEASE_MS expires — two hours in the active column with nothing to say why.
   it("releases the task when the claim carries no agent", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -151,13 +142,6 @@ describe("createApiClient", () => {
     expect(String(fetchMock.mock.calls.at(-1)?.[0])).toContain("/tasks/t1/release");
   });
 
-  /**
-   * BP-358. Refunding made this unbounded: nothing about the next poll is different, so the task
-   * claims and releases itself every thirty seconds for good — at the head of the approved column,
-   * where every other claimable task on the project waits behind it, with attempts never
-   * accumulating so nothing ever escalates. The server's own claim route made the same correction;
-   * this is the worker's half of it.
-   */
   it("charges the attempt for an agent it cannot run, so the task eventually escalates", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -173,8 +157,6 @@ describe("createApiClient", () => {
     expect(JSON.parse(release?.[1].body)).toEqual({ refund: false });
   });
 
-  // Skipping the bad entry would run a shorter agent than the one somebody composed, and a missing
-  // check looks exactly like a check that passed
   it("refuses the whole agent when one entry is malformed, rather than dropping it", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -197,11 +179,9 @@ describe("createApiClient", () => {
     const api = createApiClient(config, fetchMock as never, identityStore);
 
     await expect(api.claim("CP", "run-1")).resolves.toBeNull();
-    // Handed back, like the no-agent case: returning null alone holds it for the whole lease
     expect(String(fetchMock.mock.calls.at(-1)?.[0])).toContain("/tasks/t1/release");
   });
 
-  // The route is src/app/api/projects/[projectId]/runs; it takes the worker from the body
   it("posts a run record to the project's own runs endpoint, naming this machine", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 201, json: async () => ({}) });
     const api = createApiClient(config, fetchMock as never, identityStore);
@@ -234,9 +214,6 @@ describe("createApiClient", () => {
     expect(url).toBe("https://app.example.com/api/projects/CP/tasks/claim");
   });
 
-  // CP-237: one credential for everything. A project-scoped API token could not follow a grant
-  // that is recomputed every heartbeat, so a second project silently 403'd the report while the
-  // claim succeeded.
   it("reports status on the worker credential, never a separate api token", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     const api = createApiClient(config, fetchMock as never, identityStore);
@@ -373,9 +350,6 @@ describe("createApiClient", () => {
     expect(await api.columnIds("CP")).toEqual(["ready", "doing"]);
   });
 
-  // A project stored before the seeding migration carries no columns of its own, and the server
-  // routes it on the built-in seven. A worker that read that as "no columns" would refuse to work
-  // on a board the server handles perfectly well
   it("reads a board with no columns of its own as the seeded seven", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ columns: [] }) });
     const api = createApiClient(config, fetchMock as never, identityStore);
@@ -493,9 +467,6 @@ describe("createApiClient", () => {
     expect((await api.statusIds("CP")).review).toBe("early");
   });
 
-  // A role the board does not carry is left unresolved, for resolveStatusIds to refuse at run
-  // start. It used to be filled in from the seeded board per role, and an id guessed that way can
-  // name a column the board still has under another role (BP-512, below).
   it("leaves a role no column carries unresolved rather than guessing a seeded id", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -507,9 +478,6 @@ describe("createApiClient", () => {
     expect(await api.statusIds("CP")).toEqual({ approved: "", review: "", done: "" });
   });
 
-  // The ticket's shape: the Done column demoted to review, keeping its id. The seeded fallback
-  // resolved done -> "done", resolveStatusIds saw a column by that id and passed, and finished work
-  // was delivered into a review column.
   it("does not route done to a column called done that no longer means it", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -527,9 +495,6 @@ describe("createApiClient", () => {
     expect((await api.statusIds("CP")).done).toBe("");
   });
 
-  // 409 is the board saying it cannot claim at all — no column to take from or move into — which the
-  // loop treats differently from a failed cycle. Everything else stays what it was: a failure, with
-  // the status in the message.
   it("turns a 409 on the claim into a refusal carrying the server's reason", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
@@ -553,9 +518,6 @@ describe("createApiClient", () => {
     await expect(claim).rejects.toThrow(/failed: 500 boom/);
   });
 
-  // A proxy in front of the server answers 409 with its own page, not the app's JSON. Asserted as
-  // a ClaimRefused with exactly that text: the old client threw an Error whose message merely
-  // CONTAINED it, so a substring match here was green before the change and proved nothing.
   it("keeps a refusal's raw text when the body is not the server's JSON", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 409, text: async () => "<html>conflict</html>" });
     const api = createApiClient(config, fetchMock as never, identityStore);
@@ -574,7 +536,6 @@ describe("createApiClient", () => {
     await expect(claim).rejects.toThrow(/^the board refused the claim without saying why$/);
   });
 
-  // The reason is logged and shown as one line, so the server's text is flattened and bounded
   it("bounds a refusal to one line of at most 300 characters", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
@@ -616,8 +577,6 @@ describe("createApiClient", () => {
     expect((await api.statusIds("CP")).done).toBe("shipped");
   });
 
-  // Was misnamed "...a worker token can reach" — it is the api token, like every other
-  // project-scoped call; only claim() uses the worker credential
   it("reads columns on the worker credential", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -680,8 +639,6 @@ describe("createApiClient", () => {
     expect(init.headers["X-CP-Protocol"]).toBe("1");
   });
 
-  // The one thing the run can learn from a phase post: the server wrote nothing, because the task
-  // is no longer this run's. Discarding the answer is what let a detached run keep working.
   it("returns what the server did with the event", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -695,8 +652,6 @@ describe("createApiClient", () => {
     });
   });
 
-  // The caller ends the run on a refusal, so anything short of an explicit false — a proxy's error
-  // page, a server with no such field — has to read as applied
   it("treats a body it cannot read as applied rather than as a refusal", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -712,8 +667,6 @@ describe("createApiClient", () => {
     });
   });
 
-  // The server keeps the highest seq it has seen and drops the rest, so the order events were
-  // reported in has to survive a network that reorders them
   it("stamps each event with a seq that only goes up", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     const api = createApiClient(config, fetchMock as never, identityStore);
@@ -785,7 +738,6 @@ describe("createApiClient — more than one project", () => {
     expect((await api.claim("A", "run-1"))?.taskKey).toBe("ALPHA-1");
     expect((await api.claim("B", "run-1"))?.taskKey).toBe("BETA-1");
 
-    // Reading each project's key once, however many tasks are claimed from it
     await api.claim("A", "run-2");
     const projectReads = fetchMock.mock.calls.filter(([url]) => !String(url).endsWith("/tasks/claim"));
     expect(projectReads).toHaveLength(2);
@@ -819,9 +771,6 @@ describe("createApiClient — more than one project", () => {
   });
 });
 
-// No identitySource override here — these exercise the real, file-backed reader the constructor
-// falls back to, the same as production. The same mode discipline as config.test.ts's secret-file
-// tests and repos.test.ts's createAllowlistReader tests.
 describe("createApiClient's default identity file", () => {
   const dir = mkdtempSync(join(tmpdir(), "cp-api-test-"));
 
@@ -844,8 +793,6 @@ describe("createApiClient's default identity file", () => {
   });
 
   it("refuses a worker.json readable by group or others, the same as config.ts's secret file", async () => {
-    // Its own subdirectory: fileIdentityReader always looks for <stateDir>/worker.json, so this
-    // case cannot share a directory with the mode-0600 happy path above
     const looseDir = join(dir, "loose");
     mkdirSync(looseDir);
     const path = join(looseDir, "worker.json");
@@ -874,10 +821,6 @@ describe("createApiClient's default identity file", () => {
   });
 });
 
-// The one test that notices the seam. worker/tsconfig.json excludes src/**/*.test.ts and vitest
-// transpiles without typechecking, so a ClaimedTask.runId that is never populated raises no error
-// anywhere: every other fixture would simply carry `undefined` and every server-side test would
-// still pass on its own hand-written value.
 describe("the run identity, from claim through to postEvent", () => {
   it("posts the run the server recorded on the task, not the one the claim proposed", async () => {
     const fetchMock = vi.fn().mockImplementation(async (url: string) => {

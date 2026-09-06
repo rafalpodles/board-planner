@@ -39,16 +39,11 @@ const taskSchema = new Schema<ITask>(
       ref: "User",
       default: null,
     },
-    // Who set the assignee. A machine runs its owner's work, and "I assigned this to myself" has to
-    // be distinguishable from "somebody handed this to my machine".
     assignedBy: {
       type: Schema.Types.ObjectId,
       ref: "User",
       default: null,
     },
-    // Whose instruction the PM assigned this on, when the PM is the assigner. Null everywhere
-    // else, including an unattended PM turn — and the claim pairs it with the assignee, so a PM
-    // hand-over runs only on the machine of the person who asked for it (BP-419).
     pmAssignedFor: {
       type: Schema.Types.ObjectId,
       ref: "User",
@@ -99,7 +94,6 @@ const taskSchema = new Schema<ITask>(
       ref: "Sprint",
       default: null,
     },
-    // Overrides the project's default for this one task. Null means nobody takes the task.
     agent: {
       type: Schema.Types.ObjectId,
       ref: "Agent",
@@ -113,16 +107,8 @@ const taskSchema = new Schema<ITask>(
     recurrence: {
       type: {
         frequency: { type: String, enum: RECURRENCE_FREQUENCIES, required: true },
-        // No `max` here, deliberately. The bound is enforced by `normaliseRecurrence`, which is the
-        // only way a client reaches this field. Putting it on the schema as well breaks the tasks
-        // stored back when a pasted 400 was accepted end to end: `createNextRecurrence` copies the
-        // parent's recurrence verbatim into `Task.create`, full-document validation refuses it, and
-        // the whole call is fire-and-forget — so the series would end with nothing on screen and
-        // nothing in the log. That is the exact failure BP-463 exists to remove.
         interval: { type: Number, required: true, min: 1 },
         endDate: { type: Date, default: null },
-        // Server-side only: which day of the month the series was set to, so a monthly rhythm a
-        // short month has clamped climbs back to it. See BP-486.
         anchorDay: { type: Number, min: 1, max: 31, default: null },
       },
       default: null,
@@ -140,13 +126,9 @@ const taskSchema = new Schema<ITask>(
       runId: { type: String, default: "" },
       workerId: { type: String, default: "" },
       attempts: { type: Number, default: 0 },
-      // No default: absent means the claim set the assignee, which is what every task claimed
-      // before this field existed did — see CLEAR_WORKER_ASSIGNEE in task-service.ts
       assignedByRun: { type: Boolean },
       startedAt: { type: Date, default: null },
       lastError: { type: String, default: "" },
-      // No defaults: the phase trio is written by a live run and unset when it ends, so a task
-      // that is not running carries no phase fields at all
       phase: { type: String },
       phaseAt: { type: Date },
       phaseSeq: { type: Number },
@@ -157,8 +139,6 @@ const taskSchema = new Schema<ITask>(
       required: true,
     },
   },
-  // customFieldValues is a Map, and JSON.stringify turns a Map into {} — every
-  // custom field value was silently absent from every API response without this
   { timestamps: true, toJSON: { flattenMaps: true }, toObject: { flattenMaps: true } }
 );
 
@@ -166,13 +146,8 @@ taskSchema.index({ project: 1, taskNumber: 1 }, { unique: true });
 taskSchema.index({ project: 1, status: 1 });
 taskSchema.index({ assignee: 1 });
 taskSchema.index({ sprint: 1 });
-// Same shape as the two above, and the only thing the agent refusal has to ask: without it both
-// the count and the candidate read are collection scans (BP-482 review).
 taskSchema.index({ agent: 1 });
-// The fleet console polls the worker join every 5s; unindexed, each poll scans the collection
 taskSchema.index({ "execution.workerId": 1 });
-// Closing a recurring task asks whether it already has a successor; unindexed that is a scan of
-// every task in every project, and the usual answer — no — is the one that scans to the end
 taskSchema.index({ recurringParentId: 1 });
 
 export const Task: Model<ITask> =

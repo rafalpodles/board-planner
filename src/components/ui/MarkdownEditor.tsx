@@ -13,15 +13,10 @@ interface MarkdownEditorProps {
   onFileUpload?: (file: File) => Promise<string>;
   placeholder?: string;
   minHeight?: number;
-  // Show the rendered text first; click to edit, blur to go back
   previewFirst?: boolean;
-  /** Autocomplete triggers — `@` for people, the board's key for tasks. Optional: the PM chat and
-      anywhere without a project has nothing to suggest. */
   triggers?: Trigger[];
 }
 
-// A stable identity, so the hook does not see a new trigger list on every render of a caller that
-// has none to give
 const EMPTY_TRIGGERS: Trigger[] = [];
 
 type Action =
@@ -103,7 +98,6 @@ export function MarkdownEditor({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const pendingSelection = useRef<[number, number] | null>(null);
   const autocomplete = useTriggerAutocomplete(triggers ?? EMPTY_TRIGGERS, textareaRef, onChange);
-  // Nothing to render means nothing to preview, so an empty field opens for typing
   const [preview, setPreview] = useState(() => previewFirst && value.trim().length > 0);
   const focusOnEdit = useRef(false);
 
@@ -113,8 +107,6 @@ export function MarkdownEditor({
     textareaRef.current?.focus();
   }, [preview]);
 
-  // The caret has to be restored after the new value has actually rendered,
-  // otherwise the browser parks it at the end and formats cannot be chained
   useEffect(() => {
     const range = pendingSelection.current;
     const textarea = textareaRef.current;
@@ -143,8 +135,6 @@ export function MarkdownEditor({
         cursorStart = start + action.before.length;
         cursorEnd = cursorStart + text.length;
       } else {
-        // Line-based actions prefix every selected line, so a multi-line
-        // selection becomes a list rather than one long item
         const lines = (selected || action.placeholder).split("\n");
         replacement = lines
           .map((line, i) => (action.kind === "ordered" ? `${i + 1}. ${line}` : `${action.prefix}${line}`))
@@ -160,16 +150,12 @@ export function MarkdownEditor({
   );
 
   function handlePreviewClick(e: React.MouseEvent<HTMLDivElement>) {
-    // Links and GFM task-list checkboxes stay clickable instead of being
-    // swallowed as "start editing"
     if ((e.target as HTMLElement).closest("a, input, button")) return;
     focusOnEdit.current = true;
     setPreview(false);
   }
 
   function handleBlur(e: React.FocusEvent<HTMLTextAreaElement>) {
-    // Focus moving to the attach-file button (or any control of this editor) is
-    // not leaving the field — collapsing here would unmount it before its click
     if (containerRef.current?.contains(e.relatedTarget)) return;
     if (value.trim()) setPreview(true);
   }
@@ -197,8 +183,6 @@ export function MarkdownEditor({
             type="button"
             title={item.title}
             disabled={preview}
-            // Without this the button takes focus on mousedown and the textarea
-            // selection is gone by the time the click handler runs
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => apply(item.action)}
             className="w-7 h-7 flex items-center justify-center rounded text-text-muted
@@ -251,8 +235,6 @@ export function MarkdownEditor({
             autocomplete.detect(e.target.value, e.target.selectionStart);
           }}
           onKeyDown={(e) => {
-            // The list first: while it is open the arrows and Enter belong to it, and the editor's
-            // own shortcuts would otherwise steal the key that picks a suggestion
             autocomplete.onKeyDown(e);
             if (e.defaultPrevented) return;
             handleKeyDown(e);

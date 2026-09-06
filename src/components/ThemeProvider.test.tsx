@@ -12,8 +12,6 @@ import {
 let prefersDark = false;
 let listeners: Array<() => void> = [];
 
-// `matches` has to be a getter: the real MediaQueryList stays live after the
-// provider captures it, and a static property would pass a broken implementation
 function mockMatchMedia() {
   window.matchMedia = ((query: string) => ({
     get matches() {
@@ -120,8 +118,6 @@ describe("ThemeProvider", () => {
     expect(document.documentElement.getAttribute("data-theme")).toBe("light");
   });
 
-  // The bug this replaces: the old provider stored the *resolved* theme, so the
-  // first visit froze whatever the OS said into an explicit choice for ever
   it("stores the preference rather than the theme it resolved to", () => {
     prefersDark = true;
     render(

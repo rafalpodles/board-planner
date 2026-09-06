@@ -31,7 +31,6 @@ describe("ShortcutHelp structure", () => {
     expect(within(anywhere).getByText("Search tasks and projects")).toBeTruthy();
     expect(within(anywhere).queryByText("Create new task")).toBeNull();
 
-    // Still documented — just not under a heading that also covers card/row interactions
     const board = screen.getByRole("heading", { name: "Board" }).closest("section")!;
     expect(within(board).getByText("Create new task")).toBeTruthy();
     const cards = screen.getByRole("heading", { name: "Cards" }).closest("section")!;

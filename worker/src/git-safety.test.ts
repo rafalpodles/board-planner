@@ -21,8 +21,6 @@ describe("gitArgs", () => {
     ]);
   });
 
-  // The split from deliveryGitArgs is the whole point of the module, and only one half of it was
-  // asserted: removing this from SAFE_CONFIG left every test green
   it("clears the credential helper on every call that is not delivery", () => {
     expect(gitArgs(["status"])).toContain("credential.helper=");
   });
@@ -31,8 +29,6 @@ describe("gitArgs", () => {
     expect(GIT_SAFE_ENV.GIT_CONFIG_NOSYSTEM).toBe("1");
   });
 
-  // BP-327. `--` is where a caller says "everything after this is a positional", so it is the one
-  // place the rule can be applied once for every call site rather than at each sink.
   it("refuses an option-shaped argument after the -- separator", () => {
     expect(() => gitArgs(["push", "--", "--receive-pack=touch /tmp/pwned"])).toThrow(
       /leading dash/i
@@ -45,8 +41,6 @@ describe("gitArgs", () => {
   });
 });
 
-// The same shape as child-env.contract.test.ts. Keyed on the env rather than on the literal "git",
-// because delivery.ts passes the command as a variable and is the one call carrying GH_TOKEN.
 describe("every git invocation is hardened", () => {
   it("names the shared helper wherever it names GIT_CONFIG_NOSYSTEM", () => {
     const dir = join(import.meta.dirname, ".");

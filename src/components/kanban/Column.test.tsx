@@ -79,7 +79,6 @@ describe("Column, collapsed to a rail", () => {
     expect(onToggleCollapsed).toHaveBeenCalledTimes(1);
   });
 
-  // Clicking anywhere in an open column would collapse it out from under a card click
   it("does not toggle when the open column body is clicked", async () => {
     const onToggleCollapsed = vi.fn();
     const { container } = renderColumn({ collapsed: false, onToggleCollapsed });
@@ -99,14 +98,11 @@ describe("Column, collapsed to a rail", () => {
     expect(onToggleCollapsed).toHaveBeenCalledTimes(1);
   });
 
-  // A column holding tasks never becomes a rail, so a collapse control would lie
   it("offers no collapse control once the column holds a task", () => {
     renderColumn({ collapsed: false, tasks: oneTask, onToggleCollapsed: () => {} });
     expect(screen.queryByLabelText("Collapse Needs Human Review")).toBeNull();
   });
 
-  // The rail stays a div because it is also the drop target, so it has to borrow
-  // the keyboard contract a button would have given it for free
   it("is reachable and operable from the keyboard", async () => {
     const onToggleCollapsed = vi.fn();
     const { container } = renderColumn({ collapsed: true, onToggleCollapsed });
@@ -131,7 +127,6 @@ describe("Column, collapsed to a rail", () => {
     expect(root.getAttribute("tabindex")).toBeNull();
   });
 
-  // Without this there is nowhere to drop a card into an empty column
   it("reports a drag entering and leaving so the board can expand it", async () => {
     const onDragOverColumn = vi.fn();
     const { container } = renderColumn({ collapsed: true, onDragOverColumn });

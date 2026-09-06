@@ -19,7 +19,6 @@ interface TaskTopBarProps {
   taskKey: string;
   taskNumber: number;
   title: string;
-  /** The body's own heading has scrolled away, so the bar carries the title instead */
   showTitle: boolean;
   columns: Column[];
   status: string;
@@ -54,10 +53,6 @@ export function TaskTopBar({
   const ghost =
     "focus-ring rounded-lg border border-border px-2.5 py-1.5 text-xs text-text-muted transition-colors hover:bg-bg-hover hover:text-text";
 
-  // Not sticky, deliberately: a sticky header is still part of the scrolled content, so it
-  // travels the length of any padding above it before it engages, loses the card's border and
-  // corner when it does, and an elastic overscroll drags it along with everything else. The
-  // task scrolls in a box below this bar instead.
   return (
     <div
       data-testid="task-top-bar"
@@ -78,9 +73,6 @@ export function TaskTopBar({
         <Link
           href={projectPath(projectRef)}
           onClick={(e) => {
-            // A plain click goes back to the board exactly as the Close button does, which
-            // restores its scroll/filter state; a modified click (new tab, etc.) needs the
-            // real href instead, so only intercept the plain case
             if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
             e.preventDefault();
             onClose();
@@ -98,11 +90,6 @@ export function TaskTopBar({
 
       <StatusPill columns={columns} status={status} onChange={onStatusChange} />
 
-      {/* Always laid out, only faded: revealing it by adding an element would reflow the bar
-          mid-scroll, which is the one thing a pinned header must never do. The bar's own width
-          decides whether it appears, not the viewport's — the same viewport gives this bar
-          ~500px behind the sidebar and ~1240px in the modal. Under 600px the key, the status
-          pill and the actions already fill the row, and the key carries the context alone. */}
       <span
         data-testid="task-top-bar-title"
         aria-hidden={!showTitle}
@@ -122,9 +109,6 @@ export function TaskTopBar({
         Duplicate
       </button>
 
-      {/* Everything in here has its own control once there is room — Watch and Duplicate
-          above, Add subtask in the linked-work section, Delete at the foot of the property
-          rail. The rail itself only appears at lg, so this menu carries them until then. */}
       <div className="lg:hidden">
         <Popover
           label="More actions"

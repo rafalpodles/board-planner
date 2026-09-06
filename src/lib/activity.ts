@@ -20,7 +20,6 @@ export async function logActivity(
       newValue: newValue || "",
     });
   } catch {
-    // Activity logging should never break the main operation
     console.warn("Failed to log activity");
   }
 }

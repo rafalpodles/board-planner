@@ -22,7 +22,6 @@ describe("childEnv", () => {
     });
   });
 
-  // The whole point: a denylist would have to name every secret that will ever exist
   it("carries no secret from the parent, including ones nobody thought to name", () => {
     const env = childEnv([], parent);
 

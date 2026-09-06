@@ -2,30 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import crypto from "crypto";
 import { SIGNATURE_HEADER, TIMESTAMP_HEADER } from "./webhook-signature";
 
-/**
- * Split from `webhooks.test.ts`, which covers what a delivery *records* — the outcome written back
- * onto the webhook row. This file covers what a delivery *is*: who gets one, what it carries, and
- * which destinations are refused.
- *
- * They cannot share a file. That one mocks `url-validation` so `isAllowedWebhookUrl` always
- * allows, which is right for its subject and fatal for this one: the destination branches are
- * exactly what these tests exist to exercise, and `vi.mock` is per module, not per test.
- *
- * BP-396. `signWebhook` had a test; *dispatch* had none — so nothing established that a delivery
- * carries the signature at all, that only an enabled webhook subscribed to this event is sent one,
- * or that the destination guard is applied per webhook rather than once for the list.
- *
- * This is the only level at which the signature can be asserted: a delivery cannot be received in
- * the e2e run, because `safeFetch` takes https and a public address only (BP-408). `safe-fetch` is
- * the seam, so everything above it — selection, body, headers — is the real module.
- *
- * It is also the only level at which `isAllowedWebhookUrl`'s own branches are covered.
- * `safe-fetch.test.ts` exercises `assertPublicDestination`, which is the *second* gate; the first
- * is this module's, and with `safeFetch` mocked here there is no socket and no TLS to confuse a
- * refusal with a failed handshake — which is why the e2e spec cannot make this assertion and this
- * file can.
- */
-
 const safeFetch = vi.fn();
 const findById = vi.fn();
 const updateOne = vi.fn().mockResolvedValue({});
@@ -59,7 +35,6 @@ function hook(over: Record<string, unknown> = {}) {
   };
 }
 
-/** Every delivery, as (url, RequestInit) pairs. */
 function deliveries(): [string, RequestInit][] {
   return safeFetch.mock.calls.map((call) => [call[0] as string, call[1] as RequestInit]);
 }
@@ -91,18 +66,12 @@ describe("dispatchWebhooks", () => {
 
     const timestamp = headerOf(init, TIMESTAMP_HEADER);
     const signature = headerOf(init, SIGNATURE_HEADER);
-    // Recomputed from the body that went out, rather than pattern-matched: a signature over a
-    // different body, or over a timestamp other than the one the header states, is the whole
-    // failure mode the header exists to prevent (BP-306)
     const expected = crypto
       .createHmac("sha256", SECRET)
       .update(`${timestamp}.${String(init.body)}`)
       .digest("hex");
     expect(signature).toBe(`t=${timestamp},v1=${expected}`);
 
-    // The timestamp is read from the header, so the assertion above establishes only that the two
-    // agree. What the value *is* matters as much: a delivery stamped t=0 verifies perfectly and
-    // sits outside every receiver's replay window — the decoration webhook-signature.ts warns of.
     expect(Math.abs(Date.now() - Number(timestamp) * 1000)).toBeLessThan(60_000);
 
     const body = JSON.parse(String(init.body));
@@ -120,9 +89,6 @@ describe("dispatchWebhooks", () => {
       "https://example.com/hook",
       "https://elsewhere.example/hook",
     ]);
-    // Recomputed for each rather than shape-matched: two `toMatch(/^t=\d+,v1=…/)` assertions are
-    // satisfied by a second delivery carrying the first one's header object, which is the mistake
-    // worth catching here
     for (const [, init] of sent) {
       const timestamp = headerOf(init, TIMESTAMP_HEADER);
       const expected = crypto
@@ -143,8 +109,6 @@ describe("dispatchWebhooks", () => {
     await dispatchWebhooks("p1", "task_created", PAYLOAD);
 
     const [[, init]] = deliveries();
-    // An instance that never configured a secret has receivers that do not check; dropping their
-    // deliveries would be the worse bug
     expect(headerOf(init, SIGNATURE_HEADER)).toBeUndefined();
     expect(headerOf(init, TIMESTAMP_HEADER)).toBeUndefined();
     expect(init.body).toContain("task_created");
@@ -164,9 +128,6 @@ describe("dispatchWebhooks", () => {
 
   it("judges the destination per webhook, so one bad row does not take the others with it", async () => {
     project([
-      // One row per branch of isAllowedWebhookUrl. The name is not a duplicate of the literal:
-      // `localhost` is not an address, so `isPrivateAddress` says nothing about it and only
-      // `isInternalName` refuses it — a branch nothing else in the repository covers.
       hook({ url: "http://plain.example/hook" }),
       hook({ url: "https://localhost/hook" }),
       hook({ url: "https://127.0.0.1/hook" }),
@@ -178,9 +139,6 @@ describe("dispatchWebhooks", () => {
     expect(deliveries().map(([url]) => url)).toEqual(["https://fine.example/hook"]);
   });
 
-  // Deliberately not "the failure is caught": dispatchWebhooks does not await its own fetch, so a
-  // resolved call says nothing about the `.catch()` being there, and vitest has already handled a
-  // mocked rejection. What this does establish is that the caller is not made to wait.
   it("does not wait for the receiver", async () => {
     project([hook()]);
     let land!: (value: Response) => void;
@@ -190,7 +148,6 @@ describe("dispatchWebhooks", () => {
 
     expect(deliveries()).toHaveLength(1);
     land(new Response("{}", { status: 200 }));
-    // Nothing retries a failure and nothing records that an attempt happened — BP-407
   });
 
   it("says nothing to anybody when the project has no webhooks", async () => {

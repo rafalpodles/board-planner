@@ -15,18 +15,8 @@ const AUTOSAVE_DEBOUNCE_MS = 700;
 
 export type AutoSaveState = "idle" | "saving" | "saved" | "error";
 
-/** A criterion the user just typed has no id until the server assigns one */
 export type ChecklistDraftItem = { _id?: string; text: string; done: boolean };
 
-/**
- * Everything the detail view edits in place. `status` is absent because moving a task is its own
- * act with its own endpoint, not a field edit that autosaves under you.
- *
- * It used to be absent for a second reason — the status endpoint was the only path that ran the
- * transition side effects, so PUTting a status here would have silently skipped recurrence,
- * webhooks and notifications. BP-253 moved those behind one helper both paths call, so that is
- * no longer true and this omission is no longer load-bearing.
- */
 export interface TaskDraft {
   title: string;
   description: string;
@@ -41,7 +31,6 @@ export interface TaskDraft {
   customFieldValues: Record<string, unknown>;
 }
 
-/** Seeds the draft and doubles as the server snapshot, so the two can never disagree */
 export function draftFromTask(task: ApiTask): TaskDraft {
   return {
     title: task.title || "",
@@ -52,8 +41,6 @@ export function draftFromTask(task: ApiTask): TaskDraft {
       (task.assignee && typeof task.assignee === "object" ? task.assignee.username : "") || null,
     dueDate: (task.dueDate ? task.dueDate.substring(0, 10) : "") || null,
     checklist: task.checklist || [],
-    // The id, never the populated document: it is the picker's value and the thing compared
-    // against the draft, and an object would make the field read as permanently edited.
     agent: refIdOf(task.agent),
     sprint: task.sprint || null,
     recurrence: task.recurrence
@@ -73,19 +60,12 @@ export function useTaskEditor(projectId: string, task: ApiTask) {
   const api = useApi();
   const [draft, setDraft] = useState<TaskDraft>(() => draftFromTask(task));
   const [autoSaveState, setAutoSaveState] = useState<AutoSaveState>("idle");
-  // Why the last save was refused. `use-api` puts the server's own message on the Error, and a
-  // refusal a person can act on — "Title is required" — is the whole difference from "Save failed".
   const [autoSaveError, setAutoSaveError] = useState<string | null>(null);
 
-  // What the server last told us each field holds. A field counts as edited only when it
-  // differs from this, and auto-save sends edited fields alone — so a concurrent change to
-  // a field this view never touched (a PM status move, say) is not written back over.
   const serverValues = useRef<TaskDraft>(draftFromTask(task));
   const localValues = useRef(draft);
   localValues.current = draft;
 
-  // The task was reloaded: adopt whatever changed underneath us, but only for fields the
-  // user has not edited — their in-progress edits win and stay pending.
   useEffect(() => {
     const next = draftFromTask(task);
     const previous = serverValues.current;
@@ -136,8 +116,6 @@ export function useTaskEditor(projectId: string, task: ApiTask) {
     return () => clearTimeout(timer);
   }, [signature, persist]);
 
-  // Closing within the debounce window used to drop the edit on the floor: the
-  // cleanup above also runs on unmount. Now the pending edit goes out on the way.
   const pendingRef = useRef("{}");
   pendingRef.current = signature;
   useEffect(() => {
@@ -153,9 +131,6 @@ export function useTaskEditor(projectId: string, task: ApiTask) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [task._id, projectId]);
 
-  // And a document load is not an unmount, so the cleanup above never runs for it: closing the
-  // tab, following a task key out of a description, or leaving the page for another task
-  // (BP-521). `keepalive` is what lets the write outlive the document it started in.
   useEffect(() => {
     const taskId = task._id;
     const flush = () => {
@@ -178,12 +153,6 @@ export function useTaskEditor(projectId: string, task: ApiTask) {
 
   const retry = useCallback(() => persist(editedFields()), [persist, editedFields]);
 
-  /**
-   * Writes a field whatever the diff says. Everything else here sends only what changed, which is
-   * what a view showing one task among several concurrent writers has to do — but it also means
-   * re-picking the value already on the task sends nothing, and re-assigning is the product's
-   * documented repair for a task whose assigner was never recorded.
-   */
   const resend = useCallback(
     <K extends keyof TaskDraft>(key: K, value: TaskDraft[K]) =>
       persist({ [key]: value } as Partial<TaskDraft>),

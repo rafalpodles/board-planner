@@ -1,9 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// The consent screen's inline script was shipped with nothing asserting it, and a dead click on the
-// disabled checkbox survived two readings because of it (BP-383 review). This drives the real
-// rendered page rather than a copy of the script.
 const resolveSession = vi.fn();
 const projects = [
   { _id: "p1", name: "Orbit", key: "ORB" },
@@ -59,8 +56,6 @@ async function renderConsentPage(): Promise<void> {
     response_type: "code",
     scope: "mcp",
   });
-  // A DOM environment's Request drops Cookie — it is a forbidden header in a browser — so the
-  // route gets the two things it reads rather than a real Request.
   const cookie = `${sessionCookieName()}=cps_live-token`;
   const req = {
     url: `http://localhost/oauth/authorize?${query.toString()}`,
@@ -73,8 +68,6 @@ async function renderConsentPage(): Promise<void> {
   expect(html).toContain("Grant access");
   document.documentElement.innerHTML = html.replace(/^[\s\S]*?<html>|<\/html>[\s\S]*$/g, "");
 
-  // Scripts written through innerHTML never run, so the page's own script is taken from the markup
-  // it was rendered into and executed here — a copy in the test would not catch a renamed id.
   for (const script of Array.from(document.querySelectorAll("script"))) {
     new Function(script.textContent ?? "")();
   }
@@ -116,9 +109,6 @@ describe("the consent screen's inline script", () => {
     expect(state()).toEqual({ ignored: "false", disabled: [false, false], limited: true });
   });
 
-  // The escape hatch: a click on the deactivated list comes back to the narrow grant. In a real
-  // browser the checkbox square only reaches this listener because CSS takes it out of hit-testing
-  // while it is disabled — assert the rule is present, since the DOM here does no hit-testing.
   it("comes back to the narrow grant when the deactivated list is clicked", () => {
     pick("all");
 
@@ -127,8 +117,6 @@ describe("the consent screen's inline script", () => {
     expect(state()).toEqual({ ignored: "false", disabled: [false, false], limited: true });
   });
 
-  // Implicit submission — Enter — activates the FIRST submit button in tree order, so the
-  // destructive one must not be it. Putting Deny on the left is CSS's job.
   it("makes Authorize the button Enter presses, with Deny still on the left", () => {
     const form = document.getElementById("consent") as HTMLFormElement;
     const buttons = Array.from(form.querySelectorAll("button"));
@@ -144,8 +132,6 @@ describe("the consent screen's inline script", () => {
     expect(css).toContain(".projects[data-ignored=true] input{pointer-events:none}");
   });
 
-  // A history restore reinstates the radios without firing "change", so a script that synced only
-  // at parse time came back with the wide grant picked and the list live again.
   it("re-syncs when the page is restored from history", () => {
     pick("all");
     const restored = document.querySelector<HTMLInputElement>(

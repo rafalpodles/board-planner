@@ -5,7 +5,6 @@ import { interruptTurn } from "@/lib/pm/turn-lock";
 export const POST = withProjectAccess(async (_request, { params, user }) => {
   const { projectId } = await params;
 
-  // Conversations are private, so stopping one is too — an admin may still override
   const outcome = interruptTurn(projectId, String(user._id), user.role === "admin");
 
   if (outcome === "not-running") {

@@ -1,15 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { readJsonBody, readFormBody, MAX_JSON_BODY_BYTES } from "./request-body";
 
-/**
- * BP-322. The point of the cap is what does NOT happen: an oversized body must be refused without
- * being buffered or parsed. Asserting the 413 alone would pass against a handler that read all
- * 500 MB first and then complained, so the tests below count what the server actually pulled off
- * the stream.
- */
-
-// A stream that reports how much of it was consumed — the only way to tell a refusal that saved
-// the allocation from one that made it and then apologised.
 function countingBody(totalBytes: number, chunkBytes = 16 * 1024) {
   const chunk = new Uint8Array(chunkBytes).fill(0x61); // "a"
   let sent = 0;
@@ -34,7 +25,6 @@ function request(body: BodyInit | null, headers: Record<string, string> = {}) {
     method: "POST",
     headers: { "content-type": "application/json", ...headers },
     body,
-    // Required by undici for a streaming body
     ...(body instanceof ReadableStream ? { duplex: "half" } : {}),
   } as RequestInit);
 }
@@ -61,15 +51,10 @@ describe("readJsonBody", () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.response.status).toBe(413);
-    // undici pulls one chunk of its own accord shortly after a streaming Request is constructed, so
-    // zero is not assertable — but reading the body would take five chunks to reach the cap, so one
-    // is still the difference between refusing on the header and refusing on the stream. Written as
-    // a ceiling rather than a before/after delta, which needed a sleep and raced the event loop.
     expect(state.pulled).toBeLessThanOrEqual(16 * 1024);
   });
 
   it("stops mid-stream when Content-Length is absent, which is the case that matters", async () => {
-    // A chunked request carries no length, so the header check cannot be the whole control.
     const oversize = MAX_JSON_BODY_BYTES * 8;
     const { stream, state } = countingBody(oversize);
     const result = await readJsonBody(request(stream));
@@ -86,8 +71,6 @@ describe("readJsonBody", () => {
     const result = await readJsonBody(request(stream, { "content-length": "10" }));
 
     expect(result.ok).toBe(false);
-    // Named, because 512 KB of "a" is not valid JSON either: without this the refusal could be the
-    // 400 and the test would read the same.
     if (!result.ok) expect(result.response.status).toBe(413);
     expect(state.pulled).toBeLessThan(MAX_JSON_BODY_BYTES * 8);
   });
@@ -100,7 +83,6 @@ describe("readJsonBody", () => {
   });
 
   it("turns a body that is not an object into one, so a field read is not a 500", async () => {
-    // A null passes the typeof check, so that check on its own does not catch this one.
     for (const scalar of ["null", "5", "true", '"a string"']) {
       const result = await readJsonBody(request(scalar));
       expect(result.ok, scalar).toBe(true);
@@ -124,11 +106,6 @@ describe("readJsonBody", () => {
   });
 });
 
-/**
- * A Content-Length check is not a cap on its own: omit the header and it has nothing to read. That
- * is how the upload limit was walked past — the same envelope answered 413 with a length and 200
- * without one, storing the file. So the body is counted through a stream.
- */
 describe("readFormBody", () => {
   async function multipart(fields: Record<string, string>) {
     const form = new FormData();
@@ -180,8 +157,6 @@ describe("readFormBody", () => {
   });
 
   it("refuses the same body when it declares no length at all", async () => {
-    // The bypass: a chunked request carries no Content-Length, so a header check sees nothing to
-    // refuse and the parser allocates the whole thing.
     const { bytes, contentType } = await multipart({ padding: "p".repeat(200 * 1024) });
     const result = await readFormBody(streamed(bytes, contentType, false).request, 64 * 1024);
 

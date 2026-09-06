@@ -12,9 +12,6 @@ import { ApiAgentBlock } from "@/types";
 
 const MINE = "mine";
 
-// Owns the failure, so every dialog that uses it gets one. Each onCreate awaits a write and then
-// closes; without a catch here a refusal was an unhandled rejection — the dialog stayed open with
-// the typed prompt still in it, the button re-enabled, and nothing said why (BP-345 review).
 function Footer({
   onCancel,
   onCreate,
@@ -297,10 +294,6 @@ export function NewStepDialog({
   );
 }
 
-/**
- * Editing never touches the key. The key is what an agent's composition names and what the worker
- * resolves against its own source, so a rename here changes the label and nothing else.
- */
 export function EditBlockDialog({
   block,
   onClose,
@@ -316,7 +309,6 @@ export function EditBlockDialog({
   const [params, setParams] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
 
-  // A dialog keyed on the row it edits: the fields reset when a different block opens it
   useEffect(() => {
     if (!block) return;
     setName(block.name);

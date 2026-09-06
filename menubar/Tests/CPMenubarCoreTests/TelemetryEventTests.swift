@@ -13,7 +13,6 @@ private func decode(_ json: String) throws -> TelemetryEvent {
                                         tool: ToolActivity(name: "Read", target: "src/a.ts"))))
 }
 
-// A gates:<name> phase is open-ended by construction, so nothing may enumerate it.
 @Test func decodesAnOpenEndedGatePhase() throws {
     #expect(try decode(#"{"phase":"gates:build","taskKey":"CP-1"}"#)
             == .progress(Progress(phase: "gates:build", taskKey: "CP-1")))

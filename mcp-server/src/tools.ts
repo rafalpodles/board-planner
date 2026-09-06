@@ -11,13 +11,7 @@ import {
 
 const APP_NAME = "Board Planner";
 
-/**
- * Separated from the stdio bootstrap so the tools can be driven by a test. index.ts connects a
- * transport at import time, which made this half of BP-497's fix assertable only by reading its
- * source text — and a local shim named strictInput would have passed that scan (BP-497 review).
- */
 export function registerTools(server: McpServer, client: ApiClient): void {
-  // --- Project tools ---
 
   server.registerTool(
     "list_projects",
@@ -47,8 +41,6 @@ export function registerTools(server: McpServer, client: ApiClient): void {
       return { content: [{ type: "text", text: JSON.stringify(project, null, 2) }] };
     }
   );
-
-  // --- Task tools ---
 
   server.registerTool(
     "list_tasks",
@@ -96,10 +88,6 @@ export function registerTools(server: McpServer, client: ApiClient): void {
     archived?: boolean;
   };
 
-  /**
-   * Maps { "Difficulty": "L" } onto { <fieldId>: <optionId> }. Callers name fields and
-   * options the way they read them; the API only ever stores ids.
-   */
   function resolveFieldsByName(
     input: Record<string, unknown>,
     definitions: FieldDef[]
@@ -175,9 +163,6 @@ export function registerTools(server: McpServer, client: ApiClient): void {
       }
 
       if (assignee) {
-        // Scoped to the board, not the instance. A username that is not on this list may be a typo or
-        // somebody with no access, and the two are deliberately NOT told apart: doing so would mean
-        // answering "does this account exist elsewhere", which is the instance-wide roster BP-400 removed.
         const users = await client.listAssignableUsers(proj._id) as { _id: string; username: string }[];
         const user = users.find(u => u.username === assignee.toLowerCase());
         if (!user) throw new Error(`"${assignee}" is not someone this board can be assigned to — only people with access to it are.`);
@@ -224,8 +209,6 @@ export function registerTools(server: McpServer, client: ApiClient): void {
       }, { hints: UPDATE_TASK_HINTS, writes: true }),
     },
     async ({ taskKey, title, description, priority, category, assignee, agent, acceptanceCriteria, fields }) => {
-      // Before the lookup, so a call that changes nothing costs nothing and the refusal is the
-      // first thing that happens rather than the last
       if (
         ![title, description, priority, category, assignee, agent, acceptanceCriteria].some(
           (v) => v !== undefined
@@ -244,8 +227,6 @@ export function registerTools(server: McpServer, client: ApiClient): void {
       if (category !== undefined) data.category = category;
       if (acceptanceCriteria !== undefined) data.acceptanceCriteria = acceptanceCriteria;
       if (fields && Object.keys(fields).length) {
-        // customFieldValues is replaced wholesale, so the task's other values are
-        // merged back in rather than cleared by naming a single field
         const project = await client.getProject(projectId) as { customFields?: FieldDef[] };
         const current = ((task as { customFieldValues?: Record<string, unknown> }).customFieldValues) || {};
         data.customFieldValues = { ...current, ...resolveFieldsByName(fields, project.customFields || []) };
@@ -253,7 +234,6 @@ export function registerTools(server: McpServer, client: ApiClient): void {
 
       if (assignee !== undefined) {
         if (assignee) {
-          // See create_task: the roster is the board's, and a miss is not split into typo vs no-access.
           const users = await client.listAssignableUsers(projectId) as { _id: string; username: string }[];
           const user = users.find(u => u.username === assignee.toLowerCase());
           if (!user) throw new Error(`"${assignee}" is not someone this board can be assigned to — only people with access to it are.`);
@@ -263,16 +243,9 @@ export function registerTools(server: McpServer, client: ApiClient): void {
         }
       }
 
-      // Resolved by name here rather than asking a caller for an ObjectId, the same way assignee is:
-      // the id appears in no MCP response, so demanding one would make the parameter unreachable
-      // from a conversation.
       if (agent !== undefined) {
         if (agent) {
           const agents = await client.listAgents() as { _id: string; name: string; scope: string; projectId: string | null }[];
-          // Scoped to this task's own project, the same predicate the browser's picker filters by
-          // (PropertyRail.tsx) — otherwise a name belonging to another board either steals that
-          // board's agent silently (two boards sharing a name) or reaches the write only to be
-          // refused by `agentUsableOnProject`, a 400 naming a rule the caller cannot see.
           const named = agents.filter(a => a.name.toLowerCase() === agent.toLowerCase());
           const match = named.find(a => a.scope !== "project" || a.projectId === projectId);
           if (!match) {
@@ -288,8 +261,6 @@ export function registerTools(server: McpServer, client: ApiClient): void {
         }
       }
 
-      // Backstop for a call that named `fields` but no field in it. The refusal above catches
-      // everything else, before the lookup
       if (Object.keys(data).length === 0) throw new Error(`update_task ${NOTHING_TO_CHANGE}`);
 
       const updated = await client.updateTask(projectId, (task as { _id: string })._id, data);
@@ -312,8 +283,6 @@ export function registerTools(server: McpServer, client: ApiClient): void {
       return { content: [{ type: "text", text: JSON.stringify(updated, null, 2) }] };
     }
   );
-
-  // --- Sprint tools ---
 
   server.registerTool(
     "list_sprints",
@@ -380,8 +349,6 @@ export function registerTools(server: McpServer, client: ApiClient): void {
     }
   );
 
-  // --- Comment tools ---
-
   server.registerTool(
     "add_comment",
     {
@@ -410,8 +377,6 @@ export function registerTools(server: McpServer, client: ApiClient): void {
       return { content: [{ type: "text", text: JSON.stringify(comments, null, 2) }] };
     }
   );
-
-  // --- Helper ---
 
   async function resolveTaskKey(taskKey: string): Promise<{ projectId: string; task: unknown }> {
     const match = taskKey.match(/^([A-Z]+)-(\d+)$/);

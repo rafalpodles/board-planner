@@ -55,7 +55,6 @@ export function IntegrationsSection({
     codaToken: "",
   });
 
-  // A new row carries a real URL; an existing one only ever has the mask
   const channels = useDraft<{ channels: ChannelDraft[] }>({
     channels: project.notificationChannels || [],
   });
@@ -63,15 +62,11 @@ export function IntegrationsSection({
     webhooks: project.webhooks || [],
   });
 
-  // Rows have no _id until they are saved, and undefined === undefined, so without this
-  // removing one unsaved row removed every unsaved row
   const nextTempId = useRef(0);
   const makeTempId = () => `new-${(nextTempId.current += 1)}`;
   const rowKey = (r: { _id?: string; tempId?: string }) =>
     r._id || r.tempId || "";
 
-  // What each row calls itself to a screen reader. Computed across the whole list rather than per
-  // row, because whether a name needs its position appended is a question about its neighbours.
   const channelRowNames = distinctRowNames(
     channels.value.channels.map((ch) => ch.name)
   );
@@ -283,10 +278,6 @@ export function IntegrationsSection({
               webhookId,
             });
           }
-          // commit, not rebase: on success the server's answer is the whole truth, and the rows
-          // it just created carry ids the draft has never seen. Moving the baseline alone would
-          // leave those as a difference, so the counter would stay dirty and the next Save would
-          // re-issue a diff that had already been applied.
           patchProject({ webhooks: saved });
           webhooks.commit({ webhooks: saved });
           toast("Webhooks saved", "success");
@@ -337,7 +328,6 @@ export function IntegrationsSection({
     );
   }
 
-  /** Rotating a credential is an action with a verb, so it happens now, not on save. */
   async function replaceWebhookUrl(webhookId: string, url: string) {
     if (webhooks.count > 0) {
       toast("Save or discard your webhook changes before replacing a URL", "error");
@@ -395,8 +385,6 @@ export function IntegrationsSection({
   }
 
   async function replaceChannelUrl(channelId: string, webhookUrl: string) {
-    // Rotating commits the server's answer over the whole draft, which would swallow any
-    // row staged but not saved. Ask for that to be settled rather than losing it silently.
     if (channels.count > 0) {
       toast("Save or discard your channel changes before replacing a URL", "error");
       return false;
@@ -421,8 +409,6 @@ export function IntegrationsSection({
       : [...current, event];
   }
 
-  // A vendor's form appears once it is configured, or once it is picked from the
-  // catalogue — not merely because the vendor exists
   const [opened, setOpened] = useState<IntegrationId[]>([]);
   const [expanded, setExpanded] = useState<IntegrationId | null>(null);
 
@@ -437,7 +423,6 @@ export function IntegrationsSection({
     <>
       <SettingsCard
         title="Where the code lives"
-        // Only once something is typed: an empty field is not a failure to recognise
         status={
           repository.value.repositoryUrl.trim()
             ? {
@@ -784,8 +769,6 @@ export function IntegrationsSection({
                   </p>
                   <div className="space-y-3">
                     {channels.value.channels.map((ch, i) => {
-                      // Nothing stops two channels sharing a name, so the shared one is not on
-                      // its own enough to tell the rows apart — see distinctRowNames
                       const rowName = channelRowNames[i];
                       return (
                       <div
@@ -809,10 +792,6 @@ export function IntegrationsSection({
                           </div>
                           <div className="flex items-center gap-2">
                             <button
-                              // The visible word is the state, so on its own it was the whole
-                              // accessible name: it said nothing about what pressing does, and
-                              // nothing about which channel. aria-pressed carries the state
-                              // instead, and the name stays put while the state changes.
                               aria-label={`Enabled for ${rowName}`}
                               aria-pressed={ch.enabled}
                               onClick={() =>
@@ -940,10 +919,6 @@ export function IntegrationsSection({
                   </p>
                   <div className="space-y-3">
                     {webhooks.value.webhooks.map((wh, i) => {
-                      // A webhook has no name of its own, so the masked URL is what tells one row
-                      // from another on screen — and the only thing that can do it in a name. The
-                      // mask is lossy, so two endpoints can arrive here identical (see
-                      // distinctRowNames).
                       const rowName = webhookRowNames[i];
                       return (
                       <div

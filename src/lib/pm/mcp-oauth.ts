@@ -3,7 +3,6 @@ import { isAllowedMcpServerUrl } from "@/lib/url-validation";
 import { safeFetch, readBoundedJson, MAX_RESPONSE_BYTES, readBoundedText } from "@/lib/safe-fetch";
 import { selfOrigin, ORIGIN_REQUIRED } from "@/lib/session";
 
-// Mirrors the carve-out isAllowedMcpServerUrl makes for local MCP servers outside production
 const MCP_DESTINATION = { allowLoopback: process.env.NODE_ENV !== "production" };
 
 const DISCOVERY_TIMEOUT_MS = 10_000;
@@ -43,8 +42,6 @@ async function fetchJson(url: string, init?: RequestInit): Promise<Record<string
   }
 }
 
-// RFC 8414 / RFC 9728 path-aware well-known URL: the suffix goes between the
-// origin and the path component of the identifier.
 function wellKnownUrls(identifier: string, suffix: string): string[] {
   const u = new URL(identifier);
   const urls = [];
@@ -77,7 +74,6 @@ async function probeResourceMetadataUrl(mcpUrl: string): Promise<string | null> 
 }
 
 export async function discoverOauthConfig(mcpUrl: string): Promise<McpOauthConfig> {
-  // 1. Protected resource metadata (RFC 9728): WWW-Authenticate hint, then well-known fallbacks
   const candidates: string[] = [];
   const hinted = await probeResourceMetadataUrl(mcpUrl);
   if (hinted) candidates.push(hinted);
@@ -97,13 +93,11 @@ export async function discoverOauthConfig(mcpUrl: string): Promise<McpOauthConfi
       break;
     }
   }
-  // Last resort: assume the MCP origin is its own authorization server
   if (!authServerIssuer) {
     authServerIssuer = new URL(mcpUrl).origin;
   }
   assertAllowedUrl(authServerIssuer, "Authorization server");
 
-  // 2. AS metadata (RFC 8414, OIDC fallback)
   const metadataCandidates = [
     ...wellKnownUrls(authServerIssuer, "oauth-authorization-server"),
     ...wellKnownUrls(authServerIssuer, "openid-configuration"),
@@ -286,15 +280,6 @@ export function refreshTokens(opts: {
   });
 }
 
-// requestBaseUrl is gone: it derived this app's own origin from x-forwarded-host, which is
-// client-supplied on a proxy-less deployment. The redirect_uri built from it was registered with
-// a third-party authorization server, and the unauthenticated callback redirected to it (BP-316).
-
-/**
- * The address a third-party authorization server sends the user back to. It is registered with
- * that server and must be stable, so it comes from configuration — never from the request that
- * happens to be starting the flow.
- */
 export function getPmOauthRedirectUri(): string {
   const base = selfOrigin();
   if (!base) throw new Error(ORIGIN_REQUIRED);

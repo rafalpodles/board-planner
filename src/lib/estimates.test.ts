@@ -131,9 +131,6 @@ describe("resolveEstimateField", () => {
     expect(resolveEstimateField({ estimateFieldId: "", customFields: fields })).toBeUndefined();
   });
 
-  // Reachable through a migration, a bulk import, or a direct database edit — never through
-  // the API, which keeps estimateFieldId and customFields in sync — but the client must not
-  // trust the pointer just because it is non-empty.
   it("is undefined when the designated field id no longer names any field on the project", () => {
     const fields = [field({ _id: "f1", name: "Story points" })];
     expect(resolveEstimateField({ estimateFieldId: "gone", customFields: fields })).toBeUndefined();

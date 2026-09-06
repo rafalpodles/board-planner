@@ -28,7 +28,6 @@ export default function UsersPage() {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
-  // Edit user state
   const [editUser, setEditUser] = useState<ApiUser | null>(null);
   const [editRole, setEditRole] = useState<"admin" | "member">("member");
   const [editEmail, setEditEmail] = useState("");
@@ -38,7 +37,6 @@ export default function UsersPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [passwordError, setPasswordError] = useState("");
 
-  // Delete state
   const [confirmDeleteUser, setConfirmDeleteUser] = useState<ApiUser | null>(
     null
   );
@@ -61,8 +59,6 @@ export default function UsersPage() {
       .catch(() => toast("Failed to load data", "error"))
       .finally(() => setLoading(false));
 
-    // Whether the notice below the password field is a promise or a lie: an instance with no mail
-    // server sends nothing, and the admin has to know that before they walk away from the screen
     api
       .get("/api/admin/email")
       .then((settings: { configured?: boolean }) => setMailWorks(!!settings.configured))
@@ -100,8 +96,6 @@ export default function UsersPage() {
     setUsername("");
     setPassword("");
     setFullName("");
-    // Cleared on cancel too, not only on success: an address typed for one person and abandoned
-    // would otherwise sit four fields down, optional and unnoticed, when the form is next opened
     setNewUserEmail("");
     setError("");
   }
@@ -135,8 +129,6 @@ export default function UsersPage() {
     try {
       await api.put(`/api/users/${editUser._id}`, {
         role: editRole,
-        // Only when it actually changed: the value was read when the list loaded, and sending it
-        // back on every save would quietly undo an address its owner edited in the meantime
         ...(editEmail !== (editUser.email ?? "") ? { email: editEmail } : {}),
         ...(passwordWasSet ? { password: newPassword } : {}),
       });
@@ -152,8 +144,6 @@ export default function UsersPage() {
     } catch (err) {
       const status = (err as { status?: number })?.status;
       const message = err instanceof Error ? err.message : "Failed to update user";
-      // Beside the field it belongs to, not in a toast that clears after three seconds and leaves
-      // the offending address sitting there unmarked
       if (status === 409 || message.includes("email address")) {
         setEmailError(message);
       } else {
@@ -197,9 +187,6 @@ export default function UsersPage() {
         <Button onClick={() => setShowNew(true)}>New User</Button>
       </div>
 
-      {/* auto-fill rather than a fixed 1/2/3: at this content width three columns left each card
-          145px for a name and its role pill, which needs 165px, so every ordinary name truncated
-          while a whole empty column sat beside it (BP-351) */}
       <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-4">
         {users.map((u) => (
           <Card
@@ -232,7 +219,6 @@ export default function UsersPage() {
         ))}
       </div>
 
-      {/* Create User Modal */}
       <Modal
         open={showNew}
         onClose={closeNew}
@@ -289,7 +275,6 @@ export default function UsersPage() {
         </form>
       </Modal>
 
-      {/* Edit User Modal */}
       <Modal
         open={!!editUser}
         onClose={closeEdit}
@@ -378,8 +363,6 @@ export default function UsersPage() {
                       placeholder={`At least ${MIN_PASSWORD_LENGTH} characters`}
                       error={passwordError}
                     />
-                    {/* Generating shows it in the same move: a password nobody can read is one
-                        nobody can pass on, and this one only exists to be passed on */}
                     <Button
                       type="button"
                       variant="secondary"
@@ -392,8 +375,6 @@ export default function UsersPage() {
                     >
                       Generate
                     </Button>
-                    {/* Read out over the phone more often than typed twice, so showing it beats a
-                        confirm field: a typo here locks the account out of every session it had */}
                     <Button
                       type="button"
                       variant="secondary"

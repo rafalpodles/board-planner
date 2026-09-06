@@ -1,6 +1,4 @@
 import { test, expect, type APIRequestContext, type Locator, type Page } from "@playwright/test";
-// The board's own threshold, so the quiet fixture below cannot drift away from the rule it is
-// meant to cross — a hard-coded five minutes here would keep passing if the source changed
 import { QUIET_MS } from "@/components/tasks/ExecutionPanel";
 import { ADMIN_AUTH, MEMBER_AUTH } from "./api";
 import {
@@ -40,60 +38,38 @@ import {
 import { signIn as arriveSignedIn, signInThroughForm } from "./session";
 import { dragTo } from "./drag";
 
-// Per test, not once per run: the flow ends with the run released, so a retry or a second
-// iteration would otherwise start from a task no worker is holding
 test.beforeEach(seed);
 
 const cardHref = (taskNumber: number) => `/projects/${PROJECT_KEY}/tasks/${taskNumber}`;
 const heldCardHref = cardHref(HELD_TASK_NUMBER);
 
-/** The column by its board id, which is stable across markup changes in a way its heading is not. */
 function boardColumn(page: Page, columnId: string): Locator {
   return page.getByTestId(`column-${columnId}`);
 }
 
-/**
- * The right-click menu, reached through its own "Move to" label: it carries no role and no test
- * id, and its column buttons are named after columns — text the board headings use too.
- */
 function moveMenu(page: Page): Locator {
   return page.getByTestId("task-context-menu");
 }
 
-/** The badge a card shows while a run holds it, live or gone quiet. */
 function runBadge(scope: Locator | Page): Locator {
   return scope.locator('[data-testid="card-run-live"], [data-testid="card-run-quiet"]');
 }
 
-/**
- * The list's status picker for one row. Named after the row rather than located by position:
- * every row has one, and they are identical but for this label.
- */
 function listStatus(page: Page, taskKey: string, title: string): Locator {
   return page.getByRole("combobox", { name: `Status for ${taskKey}: ${title}` });
 }
 
-/** Swaps the board for the list. The same page owns both, so nothing reloads. */
 async function showList(page: Page) {
   const tab = page.getByRole("button", { name: "List", exact: true });
   await tab.click();
   await expect(tab).toHaveAttribute("aria-current", "true");
 }
 
-/**
- * Every toast this page has raised, whether or not it is still on screen.
- *
- * Polling for the element loses them twice over: a toast clears itself after three seconds, and a
- * Fast Refresh — which the dev server runs whenever anything under the repo is saved, this suite
- * included — remounts the provider and takes any open toast with it before the poll comes round.
- * That is a real failure this test hit, with the board otherwise in exactly the right state.
- */
 async function recordToasts(page: Page) {
   await page.evaluate(() => {
     const seen: string[] = ((window as unknown as { __toasts?: string[] }).__toasts = []);
     const collect = (node: Node) => {
       if (!(node instanceof HTMLElement)) return;
-      // The first toast arrives inside its container; later ones are added on their own
       const added = node.matches("[data-testid=\"toast\"]")
         ? [node]
         : Array.from(node.querySelectorAll("[data-testid=\"toast\"]"));
@@ -112,9 +88,6 @@ function expectToast(page: Page, message: string) {
 }
 
 async function signIn(page: Page, username = ADMIN_USERNAME, password = ADMIN_PASSWORD) {
-  // Anything that is not one of the two seeded sessions goes through the form. On this board a
-  // caller silently running as the instance admin would pass every refusal assertion for the
-  // wrong reason.
   if (username === ADMIN_USERNAME) await arriveSignedIn(page);
   else if (username === MEMBER_USERNAME) await arriveSignedIn(page, "member");
   else await signInThroughForm(page, username, password);
@@ -135,18 +108,10 @@ async function readTask(
   return res.json();
 }
 
-/**
- * Moves a card by dragging it. The docblock that stood here said Playwright's mouse cannot drive a
- * native drag because Chromium runs it on the OS. That is measurably untrue — see e2e/drag.ts — and
- * the hand-dispatched events it justified tested the app's handlers against themselves.
- */
 async function dragCardToColumn(page: Page, card: Locator, column: Locator) {
   const body = column.locator("[data-column-body]");
 
   await dragTo(page, card, body, {
-    // The insertion marker is proof the column computed a drop index. Without one the drop falls
-    // through to the status endpoint instead — a different code path, and not the one under test.
-    // Read with the button still down, which is the only time it exists.
     duringDrag: async () => {
       await expect(column.locator("[data-column-body] > div.h-0\\.5")).toBeAttached();
     },
@@ -158,9 +123,6 @@ test("a task a worker is running cannot be dragged away without confirming", asy
   request,
 }) => {
   await test.step("the server is talking to the e2e database", async () => {
-    // A project keyed TP exists in the development database too. This runs before the browser
-    // touches anything, so a dev server that ignored MONGODB_URI fails here rather than writing
-    // into whatever the developer is using.
     const res = await request.get(`/api/projects/${PROJECT_KEY}`, { headers: ADMIN_AUTH });
     expect(res.status()).toBe(200);
     const project = await res.json();
@@ -235,8 +197,6 @@ test("the same refusal reaches the person through the right-click menu", async (
   await expect(runBadge(heldCard)).toContainText(RUN_PHASE);
 
   await test.step("moving it from the menu is refused by the status endpoint", async () => {
-    // The menu goes through PATCH .../status while a drag goes through PUT on the task. Both
-    // answer 409, so without pinning the endpoint this test would pass on the path already covered.
     const refusal = page.waitForResponse(
       (res) =>
         res.url().endsWith(`/tasks/${HELD_TASK_ID}/status`) &&
@@ -299,9 +259,6 @@ test("dragging a held card inside its own column reorders it and keeps the run",
     await expect(cards.nth(1)).toHaveAttribute("href", cardHref(SIBLING_TASK_NUMBER));
   });
 
-  // The board writes the order back with PUT and omits the status when it has not changed. The
-  // response code is what separates a reorder from a takeover: the same endpoint answers 409 when
-  // the status genuinely moves, which is what the first test in this file drives.
   const reorder = page.waitForResponse(
     (res) => res.url().endsWith(`/tasks/${HELD_TASK_ID}`) && res.request().method() === "PUT"
   );
@@ -324,8 +281,6 @@ test("dragging a held card inside its own column reorders it and keeps the run",
 
     const task = await readTask(request, HELD_TASK_NUMBER);
     expect(task.status).toBe(SOURCE_COLUMN.id);
-    // Present at all only while a runId still holds the task — toApiExecution returns nothing
-    // once the run is released, so this is the assertion that a reorder did not detach the worker
     expect(task.execution?.phase).toBe(RUN_PHASE);
     expect(task.execution?.workerName).toBe(WORKER_NAME);
   });
@@ -341,7 +296,6 @@ test("a bulk move takes what it can and leaves the task a worker is running", as
   const target = boardColumn(page, TARGET_COLUMN.id);
 
   await test.step("select the running task and a free one", async () => {
-    // Exact: the per-card checkboxes are named "Select TP-1", which a substring match also finds
     await page.getByRole("button", { name: "Select", exact: true }).click();
     await page.getByRole("button", { name: `Select ${HELD_TASK_KEY}`, exact: true }).click();
     await page.getByRole("button", { name: `Select ${SIBLING_TASK_KEY}`, exact: true }).click();
@@ -349,13 +303,11 @@ test("a bulk move takes what it can and leaves the task a worker is running", as
   });
 
   await test.step("the move is partial, and the toast names what stayed", async () => {
-    // Right-clicking inside the selection is what makes the menu act on all of it
     await source.locator(`a[href="${heldCardHref}"]`).click({ button: "right" });
     await expect(moveMenu(page)).toContainText("2 tasks selected");
     await moveMenu(page).getByRole("button", { name: TARGET_COLUMN.label, exact: true }).click();
 
     await expectToast(page, `Moved 1 of 2. ${HELD_TASK_KEY} being executed by a worker.`);
-    // A bulk move reports rather than asks: one refusal among many has no single retry to offer
     await expect(page.getByRole("dialog")).toHaveCount(0);
   });
 
@@ -382,8 +334,6 @@ test("a task whose run has already finished moves without being questioned", asy
   request,
 }) => {
   await test.step("the fixture still carries the worker that ran it", async () => {
-    // The API never publishes this, so nothing else in the test can tell a released run from a
-    // task that was never executed — and without it the absence of a dialog proves nothing
     const execution = await storedExecution(FINISHED_TASK_ID);
     expect(execution?.workerId).toBeTruthy();
     expect(execution?.runId).toBeFalsy();
@@ -419,16 +369,11 @@ test("a project member, holding a grant and nothing else, meets the same refusal
   request,
 }) => {
   await test.step("the account is a member of this project and nothing on the instance", async () => {
-    // Every other test here signs in as an instance admin, and withProjectAccess answers on
-    // that check before it ever looks for a grant. Without this step the test would re-run the
-    // admin path under a second username and call it coverage.
     const me = await request.get("/api/auth/me", { headers: MEMBER_AUTH });
     expect(me.status()).toBe(200);
     expect((await me.json()).role).toBe("member");
 
-    // An instance-admin route turns them away...
     expect((await request.get("/api/users", { headers: MEMBER_AUTH })).status()).toBe(403);
-    // ...while the project does not, which for a non-admin only the grant explains
     expect(
       (await request.get(`/api/projects/${PROJECT_KEY}`, { headers: MEMBER_AUTH })).status()
     ).toBe(200);
@@ -443,8 +388,6 @@ test("a project member, holding a grant and nothing else, meets the same refusal
   await expect(runBadge(heldCard)).toContainText(RUN_PHASE);
 
   await test.step("their drag is refused by the server, and they get the same dialog", async () => {
-    // The refusal has to come back over the wire: a member who was quietly filtered out of the
-    // move somewhere in the client would produce the same dialog with nothing behind it
     const refusal = page.waitForResponse(
       (res) =>
         res.url().endsWith(`/tasks/${HELD_TASK_ID}`) &&
@@ -471,7 +414,6 @@ test("a project member, holding a grant and nothing else, meets the same refusal
     await expect(source.locator(`a[href="${heldCardHref}"]`)).toHaveCount(0);
     await expect(runBadge(page)).toHaveCount(0);
 
-    // Read back on the member's own credentials, so the grant answers once more
     const task = await readTask(request, HELD_TASK_NUMBER, MEMBER_AUTH);
     expect(task._id).toBe(String(HELD_TASK_ID));
     expect(task.status).toBe(TARGET_COLUMN.id);
@@ -507,7 +449,6 @@ test("the list view refuses the same move, and confirming there releases the run
       `${HELD_TASK_KEY} is being executed by ${WORKER_NAME} (phase ${RUN_PHASE})`
     );
 
-    // The row still reads In Progress: this path applies nothing before the server agrees
     await expect(status).toContainText(SOURCE_COLUMN.label);
   });
 
@@ -540,8 +481,6 @@ test("a bulk move names every task it had to leave behind", async ({ page, reque
 
   await test.step("select all three", async () => {
     await page.getByRole("button", { name: "Select", exact: true }).click();
-    // This order is the order the toast reports them in: the selection is a Set, and the board
-    // reads it back the way it was filled
     await page.getByRole("button", { name: `Select ${HELD_TASK_KEY}`, exact: true }).click();
     await page.getByRole("button", { name: `Select ${SECOND_HELD_TASK_KEY}`, exact: true }).click();
     await page.getByRole("button", { name: `Select ${SIBLING_TASK_KEY}`, exact: true }).click();
@@ -553,8 +492,6 @@ test("a bulk move names every task it had to leave behind", async ({ page, reque
     await expect(moveMenu(page)).toContainText("3 tasks selected");
     await moveMenu(page).getByRole("button", { name: TARGET_COLUMN.label, exact: true }).click();
 
-    // Both keys, joined by ", ": one refusal is a sentence and two is a list, and the list is
-    // what tells the person which cards to go back to
     await expectToast(
       page,
       `Moved 1 of 3. ${HELD_TASK_KEY}, ${SECOND_HELD_TASK_KEY} being executed by a worker.`
@@ -589,7 +526,6 @@ test("a bulk move names every task it had to leave behind", async ({ page, reque
 });
 
 test("a run that has gone quiet still holds its task", async ({ page, request }) => {
-  // Twice the threshold, so the card cannot be reading it as live because the margin was thin
   await seedQuietTask(2 * QUIET_MS);
   await signIn(page);
 
@@ -602,8 +538,6 @@ test("a run that has gone quiet still holds its task", async ({ page, request })
     await expect(quietCard).toBeVisible();
     await expect(quietCard.getByTestId("card-run-quiet")).toContainText(RUN_PHASE);
     await expect(quietCard.getByTestId("card-run-live")).toHaveCount(0);
-    // The live one is still on the board, so the assertion above is about this card rather
-    // than about a board that stopped rendering badges altogether
     await expect(source.locator(`a[href="${heldCardHref}"]`).getByTestId("card-run-live")).toBeVisible();
   });
 
@@ -639,24 +573,14 @@ test("a run that has gone quiet still holds its task", async ({ page, request })
   });
 });
 
-/**
- * BP-337. Three writers refuse to take a task off a running worker; delete was the fourth and
- * asked nothing, while reaching a stronger outcome than any of them — the task is not moved, it is
- * gone, with the comments the run was writing into it. The worker's next call 404s mid-run with the
- * branch already pushed, and nothing tells it the task was deleted rather than the server broken.
- */
 test("deleting a task a worker is running is refused, and confirming takes it anyway", async ({
   page,
   request,
 }) => {
   await signIn(page);
   await page.goto(cardHref(HELD_TASK_NUMBER));
-  // The property rail's own control, not the overflow menu: that menu is lg:hidden, so at this
-  // viewport it does not exist. The component test reaches it because jsdom applies no CSS.
   const deleteTask = page.getByRole("button", { name: "Delete task" });
   await expect(deleteTask).toBeVisible();
-  // Again after the navigation: signIn installs the observer on the board, and going to the task
-  // replaces the document with it — the first version of this asserted against an undefined array
   await recordToasts(page);
 
   async function askToDelete() {
@@ -665,8 +589,6 @@ test("deleting a task a worker is running is refused, and confirming takes it an
   }
 
   await test.step("the delete endpoint refuses it", async () => {
-    // Waiting for the response rather than for the dialog's text: the board renders optimistically,
-    // and the whole question here is what the server did
     const refusal = page.waitForResponse(
       (res) =>
         res.url().endsWith(`/tasks/${HELD_TASK_ID}`) &&
@@ -683,8 +605,6 @@ test("deleting a task a worker is running is refused, and confirming takes it an
       `${HELD_TASK_KEY} is being executed by ${WORKER_NAME} (phase ${RUN_PHASE})`
     );
 
-    // Still there, which is the point: a refusal that had already deleted it would read the same
-    // on screen until the next load
     expect((await readTask(request, HELD_TASK_NUMBER)).taskNumber).toBe(HELD_TASK_NUMBER);
   });
 
@@ -708,10 +628,6 @@ test("deleting a task a worker is running is refused, and confirming takes it an
   });
 });
 
-/**
- * The control, and without it "refuses held tasks" and "delete is broken" are the same observation.
- * The unheld task is the one every ordinary board click takes.
- */
 test("deleting a task no worker is running still goes through on the first ask", async ({
   page,
   request,
@@ -732,7 +648,6 @@ test("deleting a task no worker is running still goes through on the first ask",
   await page.getByRole("button", { name: "Delete", exact: true }).click();
   await deleted;
 
-  // No second question was asked
   await expect(page.getByRole("heading", { name: "This task is being executed" })).toHaveCount(0);
 
   const gone = await request.get(`/api/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`, {

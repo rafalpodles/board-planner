@@ -1,14 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { isPrivateAddress, isInternalName, unbracket } from "./private-address";
 
-// The hostnames are what `new URL()` hands back, brackets and all — the old check
-// compared against "::1" and so could never fire (BP-303).
 function hostOf(url: string): string {
   return new URL(url).hostname;
 }
 
 describe("isPrivateAddress — the cases measured in BP-303", () => {
-  // Every one of these was allowed through before
   it.each([
     ["https://[::1]:8443/x", "[::1]"],
     ["https://[::ffff:169.254.169.254]/", "[::ffff:a9fe:a9fe]"],
@@ -22,7 +19,6 @@ describe("isPrivateAddress — the cases measured in BP-303", () => {
     expect(isPrivateAddress(hostOf(url))).toBe(true);
   });
 
-  // Credit where due: these were already handled, and must stay handled
   it.each([
     "https://2130706433/", // decimal 127.0.0.1
     "https://0x7f000001/", // hex
@@ -65,8 +61,6 @@ describe("isPrivateAddress — the cases measured in BP-303", () => {
     expect(isPrivateAddress(hostOf(url))).toBe(false);
   });
 
-  // A name is not an address: answering "public" here is what makes the DNS step
-  // load-bearing rather than optional
   it("does not claim a hostname is public or private", () => {
     expect(isPrivateAddress("localtest.me")).toBe(false);
     expect(isPrivateAddress("example.com")).toBe(false);
@@ -94,8 +88,6 @@ describe("unbracket", () => {
   });
 });
 
-// The table the BP-317 audit measured against the shipped module. Every row here was *allowed*
-// before the fix, so this is the regression rather than a restatement of the rule.
 describe("the forms the first table missed", () => {
   it.each([
     ["::127.0.0.1", "IPv4-compatible, deprecated but still routed to loopback by some stacks"],
@@ -113,14 +105,10 @@ describe("the forms the first table missed", () => {
     expect(isPrivateAddress(host)).toBe(true);
   });
 
-  // The whole ::/96 range goes, not only the embedded-private part: RFC 4291 deprecated the form,
-  // so a public-looking address inside it is not a destination anybody legitimately configures
   it("refuses an IPv4-compatible address even when the embedded v4 is public", () => {
     expect(isPrivateAddress("::93.184.216.34")).toBe(true);
   });
 
-  // Every row above probes the base of its range, so a mask narrowed to an exact match keeps them
-  // all green. These sit inside the range but away from its base, which is what pins the width.
   it.each([
     ["2001:1ff::1", "the far end of 2001::/23"],
     ["2001:2::1", "inside 2001::/23, not the base"],
@@ -140,7 +128,6 @@ describe("the forms the first table missed", () => {
     expect(isPrivateAddress(host)).toBe(true);
   });
 
-  // And these sit just outside, so a mask widened the other way fails too
   it.each([
     ["2001:200::1", "just past 2001::/23"],
     ["2001:db9::1", "just past the documentation prefix"],
@@ -155,7 +142,6 @@ describe("the forms the first table missed", () => {
     expect(isPrivateAddress(host)).toBe(false);
   });
 
-  // Without this the additions above could be a blanket "refuse IPv6" and every test would pass
   it.each([
     "2606:4700:4700::1111",
     "2a00:1450:4001:80f::200e",
