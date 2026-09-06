@@ -245,6 +245,8 @@ export function TaskLinks({
           </select>
           <input
             type="text"
+            // A placeholder is not a name, and it is gone the moment somebody types
+            aria-label="Search tasks"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search tasks..."

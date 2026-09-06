@@ -795,6 +795,12 @@ export function IntegrationsSection({
                           </div>
                           <div className="flex items-center gap-2">
                             <button
+                              // The visible word is the state, so on its own it was the whole
+                              // accessible name: it said nothing about what pressing does, and
+                              // nothing about which channel. aria-pressed carries the state
+                              // instead, and the name stays put while the state changes.
+                              aria-label={`Enabled for ${ch.name}`}
+                              aria-pressed={ch.enabled}
                               onClick={() =>
                                 updateChannel(rowKey(ch), {
                                   enabled: !ch.enabled,
@@ -809,6 +815,7 @@ export function IntegrationsSection({
                               {ch.enabled ? "Active" : "Disabled"}
                             </button>
                             <button
+                              aria-label={`Delete ${ch.name}`}
                               onClick={() => removeChannel(rowKey(ch))}
                               className="text-xs text-text-muted hover:text-danger"
                             >
@@ -835,6 +842,8 @@ export function IntegrationsSection({
                           {WEBHOOK_EVENTS.map((evt) => (
                             <button
                               key={evt}
+                              aria-label={`${evt.replace(/_/g, " ")} for ${ch.name}`}
+                              aria-pressed={ch.events.includes(evt)}
                               onClick={() =>
                                 updateChannel(rowKey(ch), {
                                   events: toggleEvent(ch.events, evt),
@@ -878,6 +887,7 @@ export function IntegrationsSection({
                         ))}
                       </select>
                       <Input
+                        aria-label="New channel name"
                         value={newChannelName}
                         onChange={(e) => setNewChannelName(e.target.value)}
                         placeholder="Channel name..."
@@ -885,6 +895,7 @@ export function IntegrationsSection({
                     </div>
                     <div className="flex gap-2">
                       <Input
+                        aria-label="New channel webhook URL"
                         value={newChannelUrl}
                         onChange={(e) => setNewChannelUrl(e.target.value)}
                         placeholder={
@@ -913,7 +924,11 @@ export function IntegrationsSection({
                     Raw HTTP POST to your own endpoint when an event fires.
                   </p>
                   <div className="space-y-3">
-                    {webhooks.value.webhooks.map((wh) => (
+                    {webhooks.value.webhooks.map((wh, i) => {
+                      // A webhook has no name of its own, so the masked URL is what tells one row
+                      // from another on screen — and the only thing that can do it in a name
+                      const rowName = wh.urlMasked || `Webhook ${i + 1}`;
+                      return (
                       <div
                         key={rowKey(wh)}
                         className="rounded-lg border border-border p-3"
@@ -922,7 +937,7 @@ export function IntegrationsSection({
                           <div className="min-w-0 max-w-[380px] flex-1">
                             <SecretField
                               disabled={!wh._id}
-                              label="Webhook URL"
+                              label={`URL for ${rowName}`}
                               masked={wh.urlMasked}
                               placeholder="https://example.com/hooks/board"
                               onReplace={(url) =>
@@ -932,6 +947,8 @@ export function IntegrationsSection({
                           </div>
                           <div className="flex items-center gap-2">
                             <button
+                              aria-label={`Enabled for ${rowName}`}
+                              aria-pressed={wh.enabled}
                               onClick={() =>
                                 updateWebhook(rowKey(wh), {
                                   enabled: !wh.enabled,
@@ -946,6 +963,7 @@ export function IntegrationsSection({
                               {wh.enabled ? "Active" : "Disabled"}
                             </button>
                             <button
+                              aria-label={`Delete ${rowName}`}
                               onClick={() => removeWebhook(rowKey(wh))}
                               className="text-xs text-text-muted hover:text-danger"
                             >
@@ -957,6 +975,8 @@ export function IntegrationsSection({
                           {WEBHOOK_EVENTS.map((evt) => (
                             <button
                               key={evt}
+                              aria-label={`${evt.replace(/_/g, " ")} for ${rowName}`}
+                              aria-pressed={wh.events.includes(evt)}
                               onClick={() =>
                                 updateWebhook(rowKey(wh), {
                                   events: toggleEvent(wh.events, evt),
@@ -982,7 +1002,8 @@ export function IntegrationsSection({
                           </p>
                         )}
                       </div>
-                    ))}
+                      );
+                    })}
                     {webhooks.value.webhooks.length === 0 && (
                       <EmptyState>
                         No webhooks yet. Add a URL to receive board events as
@@ -992,6 +1013,7 @@ export function IntegrationsSection({
                   </div>
                   <div className="flex gap-2">
                     <Input
+                      aria-label="New webhook URL"
                       value={newWebhookUrl}
                       onChange={(e) => setNewWebhookUrl(e.target.value)}
                       placeholder="https://example.com/webhook"

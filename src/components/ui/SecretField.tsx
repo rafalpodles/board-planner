@@ -48,7 +48,14 @@ export function SecretField({
         >
           {masked || "Not set"}
         </code>
-        <Button variant="secondary" size="sm" disabled={disabled} onClick={() => setReplacing(true)}>
+        <Button
+          variant="secondary"
+          size="sm"
+          // One of these per row, and "Replace" alone is the same word on every one of them
+          aria-label={`Replace ${label}`}
+          disabled={disabled}
+          onClick={() => setReplacing(true)}
+        >
           Replace
         </Button>
       </div>

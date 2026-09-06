@@ -63,6 +63,8 @@ function draftFrom(project: ApiProject): Draft {
 export function WorkersSection({ projectId, project, replaceProject, isAdmin }: SectionProps) {
   // A <p> beside a control is not its name (BP-498)
   const defaultAgentId = useId();
+  // One useId for the whole policy list; the field name makes each row's id unique
+  const policyFieldId = useId();
   const store = useStore();
   const agentApi = useApi();
   const [defaultAgent, setDefaultAgent] = useState(String(project.worker?.agent ?? ""));
@@ -240,25 +242,30 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
         <div className="space-y-3">
           {FIELDS.map((field) => {
             const value = draft.value[field];
+            const label = LABELS[field] ?? field;
+            const fieldId = `${policyFieldId}-${field}`;
             // What the row will mean once saved, not what is stored right now
             const inherits = unpinned.has(field) || (!pinned.has(field) && !draft.isDirty(field));
             return (
               <div key={field} className="flex items-center gap-3">
                 {/* A boolean carries its own label, so the shared one would say it twice */}
                 {typeof value !== "boolean" && (
-                  <span className="w-52 text-sm">{LABELS[field] ?? field}</span>
+                  <label htmlFor={fieldId} className="w-52 text-sm">
+                    {label}
+                  </label>
                 )}
                 {typeof value === "boolean" ? (
                   <Switch
                     checked={value}
                     disabled={!isAdmin}
                     onChange={(v) => editField(field, v)}
-                    label={LABELS[field] ?? field}
+                    label={label}
                   />
                 ) : (
                   <Input
                     // Controlled: an uncontrolled input keeps showing the old number after a reset
                     // or a discard, under a label that has already changed
+                    id={fieldId}
                     value={String(value)}
                     className="flex-1"
                     disabled={!isAdmin}
@@ -278,6 +285,9 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
                     disabled={!isAdmin}
                     onClick={() => resetField(field)}
                     className="text-xs text-primary hover:underline w-24 text-left disabled:text-text-muted disabled:no-underline"
+                    // One per pinned field, and "set · reset" is the same on every one of them.
+                    // `title` is a tooltip, not a name — text content wins.
+                    aria-label={`Reset ${label} to the default`}
                     title="Follow the default again"
                   >
                     set · reset
