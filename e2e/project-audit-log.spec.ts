@@ -85,11 +85,13 @@ test("a member is not shown the log at all", async ({ page }) => {
   await signIn(page, "member");
   await page.goto(`${SETTINGS}?section=audit`);
 
-  // The section is projectAdmin's; a member asking for it by URL gets one they may have
-  await expect(page.getByRole("heading", { name: "Audit log", exact: true })).toHaveCount(0);
-  await expect(rows(page)).toHaveCount(0);
+  // The control, and it has to come first: this screen renders a bare spinner while it loads, so
+  // every assertion below would pass against a page that had not arrived yet. Asking for a section
+  // this reader may not have falls back to the first one they may
+  await expect(page.getByRole("heading", { name: "Task fields", exact: true })).toBeVisible();
 
-  // The control: this reader does reach the settings screen, so the absence above is the section
-  // being withheld rather than the page failing to load
-  await expect(page.getByRole("heading", { name: "Settings", exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Audit log", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Audit log" })).toHaveCount(0);
+  await expect(page.getByText("Recent changes")).toHaveCount(0);
+  await expect(rows(page)).toHaveCount(0);
 });

@@ -1,8 +1,10 @@
 import { test, expect, type Page } from "@playwright/test";
 import {
+  NEWEST_PROJECT_ID,
   NEWEST_PROJECT_KEY,
   PROJECT_KEY,
   SECOND_PROJECT_KEY,
+  grantMemberOn,
   seed,
   seedNewestProject,
   seedSecondProject,
@@ -106,12 +108,16 @@ test("a board dragged down the sidebar stays there, for everybody, after a reloa
 test("a member has no rows to drag, and reordering is refused if they ask anyway", async ({
   page,
 }) => {
+  // Two boards, because the tree hides its handles when there is only one row to move: on a
+  // one-board sidebar this test would pass with the gate removed
+  await grantMemberOn(NEWEST_PROJECT_ID);
+
   await signIn(page, "member");
   await page.goto("/projects");
   await expect(page.getByRole("heading", { name: "Projects", exact: true })).toBeVisible();
+  await expect(page.locator('aside a[href^="/projects/"]')).toHaveCount(2);
 
-  // The sidebar renders their one board as a plain row: no sortable attributes, so no drag to make
-  await expect(page.locator('aside a[href^="/projects/"]')).not.toHaveCount(0);
+  // Two rows they may open and neither carries the sortable attributes dnd-kit needs
   await expect(sortableRows(page)).toHaveCount(0);
 
   const refused = await page.request.put("/api/projects/reorder", {
