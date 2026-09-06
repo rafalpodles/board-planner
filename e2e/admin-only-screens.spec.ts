@@ -1,6 +1,8 @@
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
-import { ADMIN_AUTH, MEMBER_AUTH } from "./api";
+import mongoose from "mongoose";
+import { ADMIN_AUTH, MEMBER_AUTH, SAME_ORIGIN } from "./api";
 import {
+  E2E_MONGODB_URI,
   MEMBER_ID,
   MEMBER_USERNAME,
   PROJECT_ID,
@@ -41,6 +43,19 @@ const SCREENS: Screen[] = [
   { path: "/settings/workers/runs", heading: "Run history", api: "/api/admin/runs" },
   { path: "/settings/audit", heading: "Instance audit log", api: "/api/admin/audit" },
 ];
+
+/**
+ * The session rows an account is holding. Nothing the browser can be shown distinguishes "the
+ * account is gone" from "the account is gone AND its sessions were revoked" — the cookie is
+ * refused either way, because resolving it ends at a user that no longer exists. The route's own
+ * revoke is only observable here.
+ */
+async function sessionsOf(userId: mongoose.Types.ObjectId) {
+  if (mongoose.connection.readyState === 0) await mongoose.connect(E2E_MONGODB_URI);
+  const handle = mongoose.connection.db;
+  if (!handle) throw new Error("no database handle");
+  return handle.collection("sessions").find({ user: userId }).toArray();
+}
 
 /** The desktop sidebar. The pill row below md carries the same links and is display:none here. */
 const nav = (page: Page) => page.getByRole("navigation", { name: "Settings sections" });
@@ -208,6 +223,8 @@ test.describe("deleting a user", () => {
     const member = await memberBrowser(browser);
     await member.page.goto("/projects");
     await expect(member.page.getByRole("heading", { name: "Projects" })).toBeVisible();
+    // The control for the row count below: there is a session here to end
+    expect(await sessionsOf(MEMBER_ID)).toHaveLength(1);
 
     await signIn(page, "admin");
     await page.goto("/settings/users");
@@ -227,8 +244,14 @@ test.describe("deleting a user", () => {
     await expect(page.getByText("@member")).toHaveCount(0);
     await expect(page.getByText("@admin")).toBeVisible();
 
-    // Their session goes with the account, or the page they are on keeps working until it happens
-    // to reload — which is the shape of every "deleted user is still signed in" report
+    // The row, not only the refusal: an account that no longer exists cannot be resolved from a
+    // cookie whatever happened to its sessions, so the browser below is bounced either way and
+    // proves nothing about the revoke. Deleting `revokeUserSessions` from the route leaves every
+    // other assertion in this test green — measured.
+    expect(await sessionsOf(MEMBER_ID)).toHaveLength(0);
+
+    // And what the person holding that session sees: the app, not a screen that keeps working
+    // until it happens to reload
     await member.page.goto("/projects");
     await expect(member.page).toHaveURL(/\/login/);
     await member.context.close();
@@ -253,19 +276,25 @@ test.describe("deleting a user", () => {
     );
     expect(commented.status(), await commented.text()).toBe(201);
 
-    const gone = await request.delete(`/api/users/${MEMBER_ID}`, { headers: ADMIN_AUTH });
-    expect(gone.status(), await gone.text()).toBe(200);
-
+    // Through the browser's cookie session rather than the admin Bearer above. The Bearer is
+    // accepted here today, which is BP-537 — a machine credential may delete an account though the
+    // same route refuses it a role, a password or an address. This spec must not be the thing that
+    // goes red when that is closed.
     await signIn(page, "admin");
+    // SAME_ORIGIN because the provenance check is fail-closed: an APIRequestContext sends neither
+    // Origin nor Sec-Fetch-Site, and a state-changing request carrying neither is refused 403
+    const gone = await page.request.delete(`/api/users/${MEMBER_ID}`, { headers: SAME_ORIGIN });
+    expect(gone.status(), await gone.text()).toBe(200);
 
     await page.goto(`/projects/${PROJECT_KEY}`);
     await expect(page.getByText(SIBLING_TASK_TITLE)).toBeVisible();
 
     await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
-    await expect(page.getByText("Said before the account went")).toBeVisible();
-    // Named rather than merely present: the author is what the populated branch would have thrown
-    // on, and "Unknown" is the fallback the fix put there
-    await expect(page.getByText("Unknown")).toBeVisible();
+    const comment = page.locator("div.group", { hasText: "Said before the account went" });
+    await expect(comment).toBeVisible();
+    // Inside the comment rather than anywhere on the page: "Unknown" is the fallback several
+    // surfaces use, and an unscoped match would be satisfied by any of them
+    await expect(comment.getByText("Unknown")).toBeVisible();
 
     await page.goto("/settings/audit");
     await expect(page.getByRole("heading", { name: "Instance audit log" })).toBeVisible();
