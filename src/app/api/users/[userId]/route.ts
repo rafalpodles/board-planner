@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isValidObjectId } from "mongoose";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
 import { MIN_PASSWORD_LENGTH, PASSWORD_COST_FACTOR } from "@/lib/auth";
@@ -244,6 +245,13 @@ export const DELETE = withAdmin(async (_request, { params, user: admin }) => {
     );
   }
 
+  // Answered rather than thrown: `findById` on something that is not an id rejects with a
+  // CastError, which leaves this handler as a 500 about nothing. A caller who guessed a malformed
+  // id gets the same answer as one who guessed a wrong one.
+  if (!isValidObjectId(userId)) {
+    return NextResponse.json({ error: "User not found" }, { status: 404 });
+  }
+
   const user = await User.findById(userId);
   if (!user) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
@@ -285,7 +293,13 @@ export const DELETE = withAdmin(async (_request, { params, user: admin }) => {
     }
   }
 
-  await User.findByIdAndDelete(user._id);
+  // The delete's own answer, not a discarded one: two administrators deleting the same account
+  // otherwise both hear that they did it, and the checks above are read-then-write.
+  const deleted = await User.findByIdAndDelete(user._id);
+  if (!deleted) {
+    return NextResponse.json({ error: "User not found" }, { status: 404 });
+  }
+
   await revokeUserSessions(user._id);
 
   return NextResponse.json({ message: "User deleted" });

@@ -471,14 +471,29 @@ describe("DELETE /api/users/:id", () => {
     userFindByIdAndDelete.mockResolvedValue(person());
   });
 
-  it("deletes an account and ends its sessions", async () => {
+  it("deletes the account it was asked about, and ends that account's sessions", async () => {
     found(person());
 
     const res = await DELETE(...del(TARGET_HEX));
 
     expect(res.status).toBe(200);
-    expect(userFindByIdAndDelete).toHaveBeenCalled();
-    expect(revokeUserSessions).toHaveBeenCalled();
+    // Which account, not merely that one was deleted: both of these read an id out of scope, and
+    // the caller's own is in the same scope
+    expect(userFindByIdAndDelete).toHaveBeenCalledWith(TARGET_HEX);
+    expect(revokeUserSessions).toHaveBeenCalledWith(TARGET_HEX);
+  });
+
+  // The fix's own thesis, at the two places it is spent: the document's id is what the delete and
+  // the revoke are given, so a request spelled in upper case still acts on the account the
+  // database resolved rather than on the string that arrived.
+  it("acts on the id the database resolved, not the one that was typed", async () => {
+    found(person());
+
+    const res = await DELETE(...del(TARGET_HEX.toUpperCase()));
+
+    expect(res.status).toBe(200);
+    expect(userFindByIdAndDelete).toHaveBeenCalledWith(TARGET_HEX);
+    expect(revokeUserSessions).toHaveBeenCalledWith(TARGET_HEX);
   });
 
   // The refusal its siblings on this route already make. Sharper here than for any of them: this is
@@ -527,7 +542,23 @@ describe("DELETE /api/users/:id", () => {
     const res = await DELETE(...del(TARGET_HEX));
 
     expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "Cannot delete the last admin" });
+    // The filter, because a count of everybody never reaches 1 on an instance that has anybody
+    expect(userCountDocuments).toHaveBeenCalledWith({ role: "admin" });
     expect(userFindByIdAndDelete).not.toHaveBeenCalled();
+  });
+
+  // The other half of that guard. Without this, `if (user.role === "admin")` could be dropped and
+  // every fresh instance — which has exactly one administrator — would refuse to delete any member
+  // at all, with the message above.
+  it("still deletes a member on an instance with a single administrator", async () => {
+    found(person({ role: "member" }));
+    userCountDocuments.mockResolvedValue(1);
+
+    const res = await DELETE(...del(TARGET_HEX));
+
+    expect(res.status).toBe(200);
+    expect(userFindByIdAndDelete).toHaveBeenCalledWith(TARGET_HEX);
   });
 
   it("still deletes an admin while another one remains", async () => {
@@ -548,6 +579,11 @@ describe("DELETE /api/users/:id", () => {
     const res = await DELETE(...del(TARGET_HEX));
 
     expect(res.status).toBe(400);
+    // The wording, because it is what the screen shows the person who tried: these two refusals
+    // are otherwise interchangeable and mean entirely different things
+    expect(await res.json()).toMatchObject({
+      error: "A machine account is released under Settings → Workers, not deleted here",
+    });
     expect(userFindByIdAndDelete).not.toHaveBeenCalled();
   });
 
@@ -561,5 +597,79 @@ describe("DELETE /api/users/:id", () => {
     expect(res.status).toBe(404);
     expect(userFindByIdAndDelete).not.toHaveBeenCalled();
     expect(revokeUserSessions).not.toHaveBeenCalled();
+  });
+
+  // The gap between the check and the write. Two administrators on the same account: the loser
+  // used to be told they had deleted it, because the delete's own answer was thrown away.
+  it("answers 404 when the account goes between the checks and the delete", async () => {
+    found(person());
+    userFindByIdAndDelete.mockResolvedValue(null);
+
+    const res = await DELETE(...del(TARGET_HEX));
+
+    expect(res.status).toBe(404);
+    expect(revokeUserSessions).not.toHaveBeenCalled();
+  });
+
+  // An id that is not an id: `findById` rejects with a CastError, which used to leave this handler
+  // as a 500 about nothing. The same answer a wrong guess gets, so neither says which ids exist.
+  it("answers 404 for an id that is not an id, rather than throwing", async () => {
+    const res = await DELETE(...del("not-an-object-id"));
+
+    expect(res.status).toBe(404);
+    expect(userFindById).not.toHaveBeenCalled();
+  });
+
+  // The order of the first two, which is the difference between "you may not ask" and an answer
+  // about who exists: a machine credential is refused before the account is looked up.
+  it("refuses a machine credential before it says whether the account exists", async () => {
+    getAuthUser.mockResolvedValue({ ...ADMIN_DOC, viaMachineCredential: true });
+    found(null);
+
+    const res = await DELETE(...del(TARGET_HEX));
+
+    expect(res.status).toBe(403);
+    expect(userFindById).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The precedent the DELETE guards are built on, and neither half of it had a test.
+ */
+describe("PUT /api/users/:id — the guards that keep an administrator standing", () => {
+  it("refuses to demote the last admin", async () => {
+    const target = targetDoc({ _id: "target-1", role: "admin" });
+    found(target);
+    userCountDocuments.mockResolvedValue(1);
+
+    const res = await PUT(put({ role: "member" }), ctx());
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "Cannot demote the last admin" });
+    expect(target.save).not.toHaveBeenCalled();
+  });
+
+  it("demotes an admin while another one remains", async () => {
+    const target = targetDoc({ role: "admin" });
+    found(target);
+    userCountDocuments.mockResolvedValue(2);
+
+    const res = await PUT(put({ role: "member" }), ctx());
+
+    expect(res.status).toBe(200);
+    expect(target.role).toBe("member");
+  });
+
+  // Not the same refusal: this one is about the caller, and it fires however many admins there are
+  it("refuses to change your own role", async () => {
+    const target = targetDoc({ _id: "admin-1", role: "admin" });
+    found(target);
+    userCountDocuments.mockResolvedValue(5);
+
+    const res = await PUT(put({ role: "member" }), ctx());
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "Cannot change your own role" });
+    expect(target.save).not.toHaveBeenCalled();
   });
 });
