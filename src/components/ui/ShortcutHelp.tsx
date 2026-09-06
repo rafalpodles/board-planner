@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 interface ShortcutHelpProps {
   open: boolean;
@@ -42,17 +42,21 @@ const SHORTCUT_GROUPS = [
 ];
 
 export function ShortcutHelp({ open, onClose }: ShortcutHelpProps) {
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
     if (!open) return;
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape" || e.key === "?") {
-        e.preventDefault();
-        onClose();
-      }
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      onCloseRef.current();
     }
+    // BP-522: a dep on onClose resubscribes mid-dispatch, and a listener added during a
+    // dispatch never sees that event. `?` is the board's, so one listener owns each key
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 
