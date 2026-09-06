@@ -439,3 +439,58 @@ test("a dialog that never overflows gets no extra tab stop", async ({ page }) =>
   await page.keyboard.press("Tab");
   await expect(focused(page)).toHaveAccessibleName("Cancel");
 });
+
+/**
+ * BP-560. The board's handler was gated in BP-543; the search palette's own listener was not.
+ * `useSearchShortcut` checked `/` against the event target being a text field and ⌘K against
+ * nothing at all, and a dialog's container is a DIV — so either key opened Search over any
+ * `aria-modal` dialog, and a hit picked from it navigated away from under a form nobody closed.
+ *
+ * Measured before the fix, with the help open: `/` and ⌘K each put a second dialog named
+ * "Search" on the page, with focus on its input.
+ */
+const searchLayer = (page: Page) => page.getByRole("dialog", { name: "Search" });
+
+for (const [label, key] of [
+  ["/", "/"],
+  ["⌘K", "ControlOrMeta+k"],
+] as const) {
+  test(`${label} does not open Search over the help`, async ({ page }) => {
+    await openBoard(page);
+
+    await page.keyboard.press("?");
+    await expect(help(page)).toBeVisible();
+    // The premise: focus sits on the help's own container, a DIV, which is why a text-field
+    // check on the event target cannot be the guard
+    await expect.poll(() => activeElementIsInsideTheHelp(page)).toBe(true);
+
+    await page.keyboard.press(key);
+    // No settle wait, for the same reason as the `v` test above: opening the palette is one
+    // synchronous state write with no network hop, so a leak is already in the DOM when this
+    // round-trips back from the browser. Then where focus *is*, not only what is absent — the
+    // palette takes focus the moment it opens, so a leak fails both
+    await expect(searchLayer(page)).toHaveCount(0);
+    await expect.poll(() => activeElementIsInsideTheHelp(page)).toBe(true);
+    await expect(help(page)).toBeVisible();
+
+    // The control: the same key opens Search once the help is gone
+    await page.keyboard.press("Escape");
+    await expect(help(page)).toBeHidden();
+    await page.keyboard.press(key);
+    await expect(searchLayer(page)).toBeVisible();
+  });
+}
+
+/**
+ * The palette registers a layer of its own the moment it opens, so a guard that only counted
+ * open layers — the fix's obvious shape — would leave ⌘K unable to close it.
+ */
+test("⌘K still closes the Search it opened", async ({ page }) => {
+  await openBoard(page);
+
+  await page.keyboard.press("ControlOrMeta+k");
+  await expect(searchLayer(page)).toBeVisible();
+
+  await page.keyboard.press("ControlOrMeta+k");
+  await expect(searchLayer(page)).toBeHidden();
+});
