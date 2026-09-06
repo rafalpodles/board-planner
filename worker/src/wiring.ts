@@ -232,7 +232,14 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   function quarantineProject(projectId: string, reason: string): void {
     const checkout = checkoutOf(projectId);
     if (quarantined.has(checkout)) return;
-    quarantined.set(checkout, reason);
+    // Stored as the sentence, not as the bare finding. This map answers the cockpit's `blocked`
+    // field as well as the preflight check, and next to the gates' detail sentences and the
+    // board's own refusal a bare `filter.z.smudge (local)` says neither that the machine stopped
+    // on purpose nor what to do about it.
+    quarantined.set(
+      checkout,
+      `${checkout}: its git config carries ${reason}. Remove the key, then restart this worker.`
+    );
     deps.logError(
       `quarantining ${checkout}: its git config carries ${reason}. ` +
         `Nothing on this machine will claim for any project on that checkout again until the key ` +
@@ -246,10 +253,10 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // Without it the console reads `ready`, the menubar reads idle, and the sole account of it is a
   // line on the worker's own stderr.
   const quarantineChecks = (): PreflightCheck[] =>
-    [...quarantined.entries()].map(([checkout, reason]) => ({
+    [...quarantined.entries()].map(([checkout, detail]) => ({
       name: "checkout quarantined",
       ok: false,
-      detail: `${checkout}: its git config carries ${reason}. Remove the key, then restart this worker.`,
+      detail,
     }));
 
   function configFor(projectId: string): WorkerConfig | null {
@@ -649,8 +656,10 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
         // Empty when the project is claimable. Non-empty is the answer to "why is this machine
         // sitting on a project and doing nothing", which otherwise has no answer anywhere — a
         // poisoned checkout, the checkout failing the gates' own checks, or the board refusing the
-        // claim outright. Quarantine first: a quarantined checkout is dropped from assignments(),
-        // so the board is never asked again and whatever it last refused for is stale by then.
+        // claim outright. Quarantine first because it is the one that needs a person at this
+        // machine, and the only one of the three a rebind does not lift. The board's refusal is
+        // still true when it is outranked here — nothing on this machine repairs that board's
+        // columns — it is just not the thing to go and do first.
         blocked:
           quarantineReasonFor(project) ?? unusable.get(project) ?? loop.unclaimable(project),
         baseBranch: repo.config.baseBranch,

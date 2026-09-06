@@ -56,10 +56,13 @@ export class PoisonedCheckoutError extends Error {
   readonly kind: "planted" | "unreadable";
 
   constructor(finding: string) {
-    // Phrased to fit both of plantedConfig's answers, the way commitAll's is: "sets an unreadable
-    // git config" is nonsense for the second.
+    // Branched rather than phrased to fit both: this message is the only account of the failure
+    // that reaches the board, and "an unreadable git config is in the git config" sends a person
+    // looking for a planted key that was never found.
     super(
-      `refusing to check out: ${JSON.stringify(finding)} is in the shared checkout's git config, and a checkout is where git runs one`
+      finding === UNREADABLE_CONFIG
+        ? "refusing to check out: the shared checkout's git config could not be read, so nothing can vouch for what a checkout would run"
+        : `refusing to check out: ${JSON.stringify(finding)} is in the shared checkout's git config, and a checkout is where git runs one`
     );
     this.name = "PoisonedCheckoutError";
     this.finding = finding;
@@ -320,7 +323,14 @@ export function createWorkspace(
    * date, and the machine scopes it would unlock are neutralised on these calls instead.
    */
   async function refuseIfPoisoned(): Promise<void> {
-    const planted = await plantedConfig(runner, config.repoPath);
+    // The same neutralised global config the checkout below runs with. A scan judging a config git
+    // will not read answers a different question from the one asked, in both directions: it would
+    // refuse over an operator's own credential helper, and — measured — one malformed line in
+    // `~/.gitconfig` makes `--local --list` exit 128, which is read as unreadable and refuses
+    // every project on the machine until somebody notices.
+    const planted = await plantedConfig(runner, config.repoPath, undefined, {
+      GIT_CONFIG_GLOBAL: "/dev/null",
+    });
     if (planted) throw new PoisonedCheckoutError(planted);
   }
 

@@ -349,7 +349,15 @@ export async function runTask(
       if (error.kind === "planted") {
         deps.quarantineProject(task.projectId, error.finding);
       }
-      settle("released", "the checkout's git config carries an executable key");
+      // Said separately for each kind. The detail is what the AgentRun record keeps and what the
+      // menubar's notification shows, and it outlives the run — so it must not claim a key was
+      // found when the finding was that nothing could be read.
+      settle(
+        "released",
+        error.kind === "planted"
+          ? "the checkout's git config carries an executable key"
+          : "the checkout's git config could not be read"
+      );
       await reporter.released(task, String(error));
       return "machine-fault";
     }

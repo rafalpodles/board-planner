@@ -1286,7 +1286,15 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       it("says on the socket why the project is not being worked on", async () => {
         const run = await runOneTask(undefined, undefined, { scopedConfig: PLANTED });
 
-        expect(run.localConfig?.().projects[0].blocked).toContain("filter.z.smudge");
+        const blocked = run.localConfig?.().projects[0].blocked;
+        expect(blocked).toContain("filter.z.smudge");
+        // The whole sentence, not the bare finding. This field sits in the menubar next to the
+        // gates' detail sentences and the board's own refusal, where `filter.z.smudge (worktree)`
+        // on its own says neither that the machine stopped on purpose nor what to do about it.
+        expect(blocked).toContain(REPO);
+        expect(blocked, "the way out is not on the screen a person is looking at").toContain(
+          "restart"
+        );
       });
 
       /**

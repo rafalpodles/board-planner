@@ -123,11 +123,11 @@ function dangerousConfigEntry(listOutput: string): string | null {
   return null;
 }
 
-function git(runner: Runner, cwd: string, args: string[]) {
+function git(runner: Runner, cwd: string, args: string[], extraEnv?: NodeJS.ProcessEnv) {
   return runner.run("git", gitArgs(args), {
     cwd,
     timeoutMs: GIT_TIMEOUT_MS,
-    env: { ...childEnv(), ...GIT_SAFE_ENV },
+    env: { ...childEnv(), ...GIT_SAFE_ENV, ...extraEnv },
   });
 }
 
@@ -254,20 +254,30 @@ export async function configBaseline(
  */
 export const UNREADABLE_CONFIG = "an unreadable git config";
 
+/**
+ * `extraEnv` exists so a caller can be judged against the config git will actually use. The
+ * checkout in `workspace.create` runs with `GIT_CONFIG_GLOBAL=/dev/null`, and a scan that reads
+ * `~/.gitconfig` when the command it guards does not is answering a different question: measured,
+ * a single malformed line in the operator's global config makes `--local --list` exit 128, which
+ * this reads as unreadable and refuses — for every project on the machine, for ever, against
+ * checkouts `git worktree add` would have handled without complaint. Callers that DO pass a
+ * baseline want the machine scopes read, and pass nothing here.
+ */
 export async function plantedConfig(
   runner: Runner,
   cwd: string,
   baseline?: readonly string[] | null,
+  extraEnv?: NodeJS.ProcessEnv,
 ): Promise<string> {
   // Two questions, two calls. `--local --list` fails outside a checkout and `--list` does not — it
   // answers with the machine's global config instead — so widening the scan would have turned
   // "this is not a repository" into "this repository is clean" without anything going red.
   // Measured: exit 128 became exit 0 (BP-346).
-  const readable = await git(runner, cwd, ["config", "--local", "--list"]);
+  const readable = await git(runner, cwd, ["config", "--local", "--list"], extraEnv);
   if (readable.code !== 0 || readable.timedOut)
     return UNREADABLE_CONFIG;
 
-  const result = await git(runner, cwd, CONFIG_LIST_ARGS);
+  const result = await git(runner, cwd, CONFIG_LIST_ARGS, extraEnv);
   // Unreadable is not the same as clean: a config this cannot read is one it cannot clear either.
   if (result.code !== 0 || result.timedOut) return UNREADABLE_CONFIG;
 
