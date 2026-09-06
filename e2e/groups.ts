@@ -41,6 +41,7 @@ export const GROUPS = {
     "sprints-ui.spec.ts",
     "focus-ring.spec.ts",
     "ios-focus-zoom.spec.ts",
+    "dialog-buttons-on-a-phone.spec.ts",
     "board-toolbar-geometry.spec.ts",
     "board-panels-on-the-screen.spec.ts",
     "board-move-without-drag.spec.ts",
