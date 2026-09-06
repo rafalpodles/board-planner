@@ -251,13 +251,12 @@ test("with nothing assigned, and with nothing left to do, the page says which", 
 });
 
 /**
- * The two below assert what the product does today and name the ticket that says it is wrong, so
- * each turns red on the day it is fixed — which is the signal to rewrite it as the assertion it
- * should have been. Neither is `test.fail`-marked: that would make *any* failure a pass.
+ * The two below were written against the defects BP-524 and BP-525 named, and now assert the
+ * behaviour that replaced them. Each carries the control that tells a working page from a page
+ * showing nothing at all.
  */
 
-// TODO(BP-524): a task whose project row is gone should cost that row, not the screen
-test("a task whose board is gone takes the whole page down", async ({ page }) => {
+test("a task whose board is gone costs that row, not the page", async ({ page }) => {
   await seedSecondProject();
   await seedMyTasks();
 
@@ -266,21 +265,65 @@ test("a task whose board is gone takes the whole page down", async ({ page }) =>
   // and that shape is `project: null`.
   await deleteProjectRow(SECOND_PROJECT_ID);
 
-  await signIn(page);
-  await page.goto("/my-tasks");
+  // Through the helper, which waits for the heading: the page renders a spinner and nothing else
+  // until the fetch lands, so a one-shot read of the rows would find none of them
+  await openMyTasks(page);
 
-  await expect(page.getByText("Something went wrong")).toBeVisible();
-  // Named, not merely "something threw": the boundary is the root one, so any client error at all
-  // would produce the other two signals. Scoped to the boundary's own <pre>, because the dev
-  // server paints its overlay over the same message.
-  await expect(page.locator("pre").filter({ hasText: /reading '_id'/ })).toBeVisible();
-  // The whole shell, not one row: the reader's other five tasks are gone with it
-  await expect(page.locator("main")).toHaveCount(0);
-  await expect(page.getByText(MINE_ACTIVE_TITLE)).toHaveCount(0);
+  // The control: every task on the board that still exists is here, so a page that rendered
+  // nothing at all could not pass for a surviving one
+  await expect(keysOnScreen(page)).resolves.toEqual([
+    key(PROJECT_KEY, MINE_ACTIVE_NUMBER),
+    key(PROJECT_KEY, MINE_BLOCKED_NUMBER),
+    key(PROJECT_KEY, MINE_APPROVED_NUMBER),
+    key(PROJECT_KEY, MINE_ORPHAN_NUMBER),
+  ]);
+  await expect(page.getByText("4 tasks", { exact: true })).toBeVisible();
+
+  await expect(page.getByText("Something went wrong")).toHaveCount(0);
+  await expect(page.getByText(MINE_OTHER_BOARD_TITLE)).toHaveCount(0);
+
+  // The control the four assertions above rest on: the row really is still being sent, and sent
+  // with no project. Without it, an endpoint that quietly stopped returning it — or a fixture that
+  // stopped producing it — would leave this test green over an unguarded page.
+  const mine = await page.request.get("/api/tasks/mine");
+  expect(mine.status()).toBe(200);
+  const orphan = ((await mine.json()) as { title: string; project: unknown }[]).find(
+    (task) => task.title === MINE_OTHER_BOARD_TITLE
+  );
+  expect(orphan?.project ?? null).toBeNull();
 });
 
-// TODO(BP-525): a load that failed should not read as an account with no work
-test("a failed load says so once, then reads as an empty account", async ({ page }) => {
+test("a failure that arrives after a later load has succeeded does not replace the list", async ({
+  page,
+}) => {
+  await seedSecondProject();
+  await seedMyTasks();
+  await signIn(page);
+
+  // The page fetches twice on mount under StrictMode. Holding the first request and failing it
+  // late, while the second answers at once, is the ordering a retry also produces — and the one
+  // that used to leave a rendered list replaced by a failure panel.
+  const LATE_FAILURE_MS = 3_000;
+  let seen = 0;
+  await page.route("**/api/tasks/mine", async (route) => {
+    seen += 1;
+    if (seen > 1) return route.continue();
+    await new Promise((settle) => setTimeout(settle, LATE_FAILURE_MS));
+    await route.abort();
+  });
+
+  await page.goto("/my-tasks");
+  await expect(page.getByText(MINE_ACTIVE_TITLE)).toBeVisible();
+
+  await expect.poll(() => seen, { timeout: 30_000 }).toBeGreaterThan(1);
+  await page.waitForTimeout(LATE_FAILURE_MS + 1_000);
+
+  await expect(page.getByText("Failed to load your tasks.")).toHaveCount(0);
+  await expect(page.getByText(MINE_ACTIVE_TITLE)).toBeVisible();
+  await expect(page.getByText("5 tasks", { exact: true })).toBeVisible();
+});
+
+test("a failed load says so, and the retry loads the list", async ({ page }) => {
   await seedSecondProject();
   await seedMyTasks();
   await signIn(page);
@@ -288,16 +331,15 @@ test("a failed load says so once, then reads as an empty account", async ({ page
   await page.route("**/api/tasks/mine", (route) => route.abort());
   await page.goto("/my-tasks");
 
-  // The honest half, and the only half: a toast that goes away on its own. `.first()` because the
-  // dev server renders under StrictMode, which runs the page's fetch effect — and so this toast —
-  // twice.
-  await expect(page.getByTestId("toast").filter({ hasText: "Failed to load tasks" }).first()).toBeVisible();
+  await expect(page.getByText("Failed to load your tasks.")).toBeVisible();
+  // The claim this replaced: a request that never answered says nothing about this person's work
+  await expect(page.getByText("No tasks assigned to you")).toHaveCount(0);
+  await expect(page.getByText("0 tasks", { exact: true })).toHaveCount(0);
 
-  // What is left behind is the empty state, which is a statement about this person's work rather
-  // than about the request
-  await expect(page.getByText("No tasks assigned to you")).toBeVisible();
-  await expect(page.getByText("0 tasks", { exact: true })).toBeVisible();
-  // And nothing to act on: a fix that leaves the sentence and adds a retry beside it would
-  // otherwise leave this green
-  await expect(page.getByRole("button", { name: /try again|retry/i })).toHaveCount(0);
+  await page.unroute("**/api/tasks/mine");
+  await page.getByRole("button", { name: "Retry" }).click();
+
+  await expect(page.getByText(MINE_ACTIVE_TITLE)).toBeVisible();
+  await expect(page.getByText("5 tasks", { exact: true })).toBeVisible();
+  await expect(page.getByText("Failed to load your tasks.")).toHaveCount(0);
 });
