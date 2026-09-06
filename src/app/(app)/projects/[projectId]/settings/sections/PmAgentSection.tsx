@@ -14,7 +14,7 @@ import { Switch } from "@/components/ui/Switch";
 import { firstReviewHour, reviewHoursOfDay } from "@/lib/pm/autonomy";
 import { SettingsCard, EmptyState, ListRow } from "@/components/settings/SettingsCard";
 import { useDirtyGroup } from "@/components/settings/settings-context";
-import { McpToolPicker, carriedTools } from "@/components/settings/McpToolPicker";
+import { McpToolPicker, carriedTools, parseAllowlist } from "@/components/settings/McpToolPicker";
 import type { McpCatalogTool } from "@/components/settings/McpToolPicker";
 import { assessToolBudget, describeToolBudget } from "@/lib/pm/tool-budget";
 import { catalogKey } from "@/lib/pm/catalog-key";
@@ -205,7 +205,12 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
           // The allowlist and allowWrites belong in the de-dup key even though they are not part
           // of a catalogue's identity: what is being summed is what each ROW contributes, and two
           // rows sharing a host but narrowed differently contribute different numbers (BP-574).
-          key: [catalogKey(s), s.toolAllowlist, s.allowWrites].join("|"),
+          // The allowlist parsed and ordered, not the raw string: `carriedTools` parses it, so
+          // "a, b" and "b,a" produce the same count and must produce the same key or one
+          // catalogue is counted twice (BP-574 review).
+          key: [catalogKey(s), parseAllowlist(s.toolAllowlist).sort().join(","), s.allowWrites].join(
+            "|"
+          ),
           // The RAW catalogue, the same list the picker's own counter uses, so the two cannot
           // print different numbers for one server
           count: transient[catalogKey(s)]?.catalog
@@ -230,7 +235,13 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
     // `catalogKey` reduces the token to whether one exists, so rotating a stored token to another
     // one does not move the key and the catalogue found with the old credential would stay on
     // screen — a narrower token then sees fewer tools than the ticks claim (BP-574).
-    if ("authToken" in patch && before.hasAuthToken && patch.authToken !== before.authToken) {
+    // A stored token OR one typed but not yet saved: the unsaved case is the same defect, and
+    // restricting to `hasAuthToken` excluded it. Emptying the field is exempt — the placeholder
+    // says an empty field keeps the stored token, so the catalogue still describes it (BP-574
+    // review).
+    const hadToken = before.hasAuthToken || Boolean(before.authToken);
+    const keepsStored = patch.authToken === "" && before.hasAuthToken;
+    if ("authToken" in patch && hadToken && !keepsStored && patch.authToken !== before.authToken) {
       setTransientAt(catalogKey(before), { catalog: undefined, testResult: "" });
     }
     draft.set(
@@ -405,10 +416,26 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
       // the whole live draft adopted every unsaved edit in the section as saved — the Save bar
       // vanished with nothing sent (BP-574). Matched by name rather than by index, because value
       // and baseline hold different rows once one has been added or removed.
-      const disconnected = (row: McpServerDraft) =>
-        row.name.trim() === name ? { ...row, oauthStatus: "unconfigured" } : row;
-      draft.set("mcpServers", servers.map(disconnected));
-      draft.rebase({ ...draft.baseline, mcpServers: draft.baseline.mcpServers.map(disconnected) });
+      // Both writes are updaters, never the arrays captured at click time: this awaits a network
+      // round trip, and rewinding to a click-time copy would swallow anything typed during it —
+      // the same data loss one round trip narrower — or roll back a save that landed meanwhile
+      // (BP-574 review).
+      //
+      // The value is matched by INDEX and the baseline by name: the click knows which row it came
+      // from, while the baseline may hold a different set of rows. Name-matching the value would
+      // also stamp any row that momentarily shares the name while it is being typed.
+      draft.setValue((prev) => ({
+        ...prev,
+        mcpServers: prev.mcpServers.map((s, i) =>
+          i === index ? { ...s, oauthStatus: "unconfigured" } : s
+        ),
+      }));
+      draft.rebase((prev) => ({
+        ...prev,
+        mcpServers: prev.mcpServers.map((s) =>
+          s.name.trim() === name ? { ...s, oauthStatus: "unconfigured" } : s
+        ),
+      }));
       // `discoverMcpTools` refuses an oauth server with no token, so the catalogue on screen now
       // describes a turn that would carry nothing from it
       setTransientAt(catalogKey(servers[index]), { catalog: undefined, testResult: "" });
