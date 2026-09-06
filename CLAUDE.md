@@ -116,6 +116,8 @@ Practicalities that cost real time to rediscover:
 
 - Run one spec with `npx playwright test e2e/<name>.spec.ts`. Machines here are shared, so give a run
   its own ports and database: `E2E_PORT=…  PM_STUB_PORT=…  E2E_MONGODB_URI=mongodb://localhost:27017/<name>_e2e`.
+  A run owns `E2E_PORT` through `E2E_PORT+5` — the model stubs, the webhook receiver and the Mongo proxy
+  all derive from it — so keep concurrent runs at least ten apart.
   The fixture refuses any database whose name does not end in `_e2e`, deliberately.
 - A git worktree needs its own `npm ci`. A symlinked `node_modules` fails: Turbopack refuses a symlink
   pointing outside the project root, and the dev server dies before the first test runs.
@@ -134,7 +136,7 @@ Practicalities that cost real time to rediscover:
 - Task keys: `BP-1`, `BP-2` — use these when referencing tasks. Pull requests opened under the old `CP-` prefix still link, because the project keeps its former keys.
 - **Project-defined fields go through the generic `fields` parameter**, keyed by field name: `fields: { "Difficulty": "L", "Component": "ui" }`. CP-214 removed the `difficulty` and `component` parameters that used to exist alongside it, and since BP-497 a client still passing them is refused, with the refusal naming the parameter and pointing at `fields`. That holds for any parameter a tool does not declare: the input schemas are strict, so a stray key is an error rather than a key quietly dropped from an otherwise successful write. `get_project` lists the field names a project actually has.
 - Assignees use **usernames** (not IDs). `claude` = Claude Code, `rpo` = you. Routing keys on the assignee, so a task meant to run on your machine is assigned to `rpo`, not to `claude`.
-- **Handing work to a machine is `update_task`'s `agent` parameter**, named rather than by id — the id appears in no MCP response. Instance admins only, and refused for an agent nobody has composed yet.
+- **Handing work to a machine is `update_task`'s `agent` parameter**, named rather than by id — the id appears in no MCP response. A project agent may be chosen by anyone who can edit the task; a personal agent only by its owner, and only onto their own task (refused otherwise, dropped again when the task is handed on); a global agent isn't scoped to either, so the same anyone-who-can-edit-the-task rule covers it too; an agent with no steps is refused.
 - Branch naming: `bp-<number>/<short-slug>` (e.g. `bp-3/dropdown-menu`)
 
 ### GitHub — always the `rafalpodles` account
@@ -147,6 +149,18 @@ the wrong identity.
 ```bash
 gh api user -q .login            # must print rafalpodles
 gh auth switch --user rafalpodles
+```
+
+**Commits too.** The author on every commit here is `Rafał Podleś <rafalpodles@gmail.com>` — the
+address the `rafalpodles` account is registered under, so the commit links to it. The global git
+config on this machine is the work account (`podlesrafal`, a graviteesource.com address), which is
+what a fresh clone or worktree inherits. The repo-local config overrides it and is shared by every
+worktree of this checkout; check it before the first commit and set it if it is not there:
+
+```bash
+git config user.name             # must print Rafał Podleś
+git config user.email            # must print rafalpodles@gmail.com
+git config user.name "Rafał Podleś" && git config user.email rafalpodles@gmail.com
 ```
 
 `gh auth switch` is global machine state shared with every other session, so **the active account can
@@ -251,7 +265,7 @@ mcp-server/           # Standalone MCP server (stdio transport)
   the run. Staleness is **not** judged by silence: `agent` reports on tool use rather than on a
   clock, so a worker thinking for minutes is indistinguishable from a dead one. A genuinely
   abandoned run is reclaimed after `EXECUTION_LEASE_MS` (2 h) with attempt accounting.
-- **PM autonomy**: Opt-in per project (Settings → PM Agent → Autonomy). Board reviews run from `pm.autonomy.reviewHour` every `pm.autonomy.reviewIntervalHours` in the project's own timezone; each slot is claimed atomically via `pm.autonomy.lastReviewSlot` (`YYYY-MM-DDTHH`) so it runs at most once. A review gets a server-computed digest (missing acceptance criteria, tasks stuck in a column, duplicate titles — `src/lib/pm/board-review.ts`) and runs with `change_status`/`create_task` withheld. Tasks entering `needs_human_review` are queued in `pmtriggers` and reviewed automatically. Autonomous turns count against `pm.dailyTurnCap` and are attributed to the `pm` user. See `docs/superpowers/specs/2026-07-28-pm-phase2-autonomous-triggers.md`.
+- **PM autonomy**: Opt-in per project (Settings → PM Agent → Autonomy). Board reviews run from `pm.autonomy.reviewHour` every `pm.autonomy.reviewIntervalHours` in the project's own timezone; each slot is claimed atomically via `pm.autonomy.lastReviewSlot` (`YYYY-MM-DDTHH`) so it runs at most once. A review gets a server-computed digest (missing acceptance criteria, tasks stuck in a column, duplicate titles — `src/lib/pm/board-review.ts`) and runs with `change_status`/`create_task` withheld. Tasks entering `needs_human_review` are queued in `pmtriggers` and reviewed automatically. Autonomous turns count against `pm.dailyTurnCap` and are attributed to the `pm` user.
 
 ## Environment variables
 ```

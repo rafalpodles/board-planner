@@ -14,7 +14,9 @@ import { isValidEmail, normaliseEmail } from "@/lib/email";
 import { duplicateKeyField } from "@/lib/mongo-errors";
 import { ProvenanceError, provenanceRefusal } from "@/lib/session";
 import { withAdmin } from "@/lib/middleware";
+import { logInstanceAudit } from "@/lib/instanceAudit";
 import { User } from "@/models/user";
+import { IUser } from "@/types";
 
 // Machines are excluded: worker identities are accounts, but not people to invite, permission or
 // delete from here, and a team that connects five machines would otherwise have a user list that is
@@ -77,11 +79,14 @@ export async function POST(request: Request) {
   const userCount = await User.countDocuments();
   const isBootstrap = userCount === 0;
 
+  // Declared out here because the audit row below names who did this, and on the bootstrap path
+  // that is nobody: the first account on an instance is made by whoever reaches the login screen.
+  let authUser: IUser | null = null;
+
   if (isBootstrap) {
     const refusal = provenanceRefusal(request);
     if (refusal) return refusal;
   } else {
-    let authUser;
     try {
       authUser = await getAuthUser(request);
     } catch (e) {
@@ -114,6 +119,19 @@ export async function POST(request: Request) {
       email,
       role: isBootstrap ? "admin" : "member",
     });
+    // The account's own beginning, which nothing recorded: the log knew that somebody's display
+    // name changed and not that the account existed. `target` is the username because this row has
+    // to still name them after the account is gone.
+    void logInstanceAudit({
+      action: "user_created",
+      user: authUser?._id ?? null,
+      actorUsername: authUser?.username ?? "",
+      target: user.username,
+      detail: isBootstrap
+        ? "the first account on this instance, made an administrator"
+        : "a member",
+    });
+
     return NextResponse.json(user, { status: 201 });
   } catch (err: unknown) {
     const conflict = duplicateKeyField(err);

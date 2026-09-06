@@ -16,6 +16,7 @@ import {
   PRIORITIES,
 } from "@/types";
 import { getColumnIds, defaultStatusFor, roleOf, getProjectColumns, columnIdsWithRole } from "@/lib/columns";
+import { BoardCannotClaim, ROLES_A_RUN_NEEDS } from "@/lib/claim-refusal";
 import { escalationColumnId } from "@/lib/escalation";
 import { isRunnable, normaliseComposition } from "@/lib/agent-rules";
 import { taskKeyOf } from "@/lib/task-key";
@@ -479,10 +480,11 @@ function castsToDate(value: unknown): boolean {
  * Only the keys actually present are judged: an update writes what it names and nothing else.
  */
 function schemaValuesOrRefusal(values: Body): TaskServiceResult | null {
+  // Both refusals below are sliced: they reach a model as a tool result, same as noSuchAccount.
   if ("priority" in values && !PRIORITIES.includes(values.priority)) {
     return {
       ok: false,
-      error: `Invalid priority "${values.priority}" — must be one of: ${PRIORITIES.join(", ")}`,
+      error: `Invalid priority "${String(values.priority).slice(0, 64)}" — must be one of: ${PRIORITIES.join(", ")}`,
       status: 400,
     };
   }
@@ -491,7 +493,7 @@ function schemaValuesOrRefusal(values: Body): TaskServiceResult | null {
   // does an explicit one — refusing it here would be stricter than the schema this stands in for.
   const dueDate = values.dueDate;
   if ("dueDate" in values && dueDate !== null && dueDate !== "" && !castsToDate(dueDate)) {
-    return { ok: false, error: `Invalid due date "${dueDate}"`, status: 400 };
+    return { ok: false, error: `Invalid due date "${String(dueDate).slice(0, 64)}"`, status: 400 };
   }
 
   // Both go straight to the write, so a shape the cast throws on left the route as a 500 — and on
@@ -556,10 +558,11 @@ export async function createTask(
   const category =
     body.category ??
     (categoryNames.includes("user-story") ? "user-story" : categoryNames[0] ?? "user-story");
+  // Both refusals below are sliced: they reach a model as a tool result, same as noSuchAccount.
   if (categoryNames.length > 0 && !categoryNames.includes(category)) {
     return {
       ok: false,
-      error: `Invalid category "${category}" — project categories: ${categoryNames.join(", ")}`,
+      error: `Invalid category "${String(category).slice(0, 64)}" — project categories: ${categoryNames.join(", ")}`,
       status: 400,
     };
   }
@@ -569,7 +572,7 @@ export async function createTask(
   if (!columnIds.includes(status)) {
     return {
       ok: false,
-      error: `Invalid status "${status}" — project columns: ${columnIds.join(", ")}`,
+      error: `Invalid status "${String(status).slice(0, 64)}" — project columns: ${columnIds.join(", ")}`,
       status: 400,
     };
   }
@@ -787,13 +790,7 @@ export async function changeStatus(
     }
   }
 
-  const task = await Task.findOneAndUpdate(
-    { _id: taskId, project: projectId },
-    leavesColumn
-      ? [{ $set: { status, ...CLEAR_WORKER_ASSIGNEE } }, { $unset: RUN_FIELDS }]
-      : [{ $set: { status } }],
-    { returnDocument: "after", updatePipeline: true }
-  ).populate([
+  const CHANGE_STATUS_POPULATE = [
     { path: "assignee", select: "username fullName" },
     { path: "createdBy", select: "username fullName" },
     // `assignedBy` too, though nothing feeds this response to the Agent row today: handoverOf tells
@@ -801,9 +798,30 @@ export async function changeStatus(
     // "somebody else assigned it" printed over a task the machine is about to take. One line, and
     // it removes the whole class rather than documenting it.
     { path: "assignedBy", select: "username fullName" },
-  ]);
+  ];
+
+  const task = await Task.findOneAndUpdate(
+    // Guarded on the status just read, whenever the write means to leave it: two overlapping
+    // requests reading the same oldTask (a double-click, the board and the detail view, two
+    // workers) can then not both land. The loser's precondition stops matching the instant the
+    // winner's write commits, so only one of them ever reaches announceStatusChange below and
+    // mints a recurring task's next occurrence (BP-489).
+    { _id: taskId, project: projectId, ...(leavesColumn ? { status: oldTask.status } : {}) },
+    leavesColumn
+      ? [{ $set: { status, ...CLEAR_WORKER_ASSIGNEE } }, { $unset: RUN_FIELDS }]
+      : [{ $set: { status } }],
+    { returnDocument: "after", updatePipeline: true }
+  ).populate(CHANGE_STATUS_POPULATE);
 
   if (!task) {
+    if (leavesColumn) {
+      // Lost the race rather than deleted: report the state another request already put this
+      // task into, instead of a 404 for a task that plainly still exists.
+      const current = await Task.findOne({ _id: taskId, project: projectId }).populate(
+        CHANGE_STATUS_POPULATE
+      );
+      if (current) return { ok: true, data: current as ITask };
+    }
     return { ok: false, error: "Task not found", status: 404 };
   }
 
@@ -989,6 +1007,7 @@ export async function updateTask(
   // until the assignee this update leaves behind is known.
   if (updates.agent === "") updates.agent = null;
 
+  // Both refusals below are sliced: they reach a model as a tool result, same as noSuchAccount.
   if (updates.category !== undefined || updates.status !== undefined) {
     const proj = await Project.findById(projectId, "categories columns").lean();
     if (updates.category !== undefined) {
@@ -996,7 +1015,7 @@ export async function updateTask(
       if (names.length > 0 && !names.includes(String(updates.category))) {
         return {
           ok: false,
-          error: `Invalid category "${updates.category}" — project categories: ${names.join(", ")}`,
+          error: `Invalid category "${String(updates.category).slice(0, 64)}" — project categories: ${names.join(", ")}`,
           status: 400,
         };
       }
@@ -1006,7 +1025,7 @@ export async function updateTask(
       if (!columnIds.includes(String(updates.status))) {
         return {
           ok: false,
-          error: `Invalid status "${updates.status}" — project columns: ${columnIds.join(", ")}`,
+          error: `Invalid status "${String(updates.status).slice(0, 64)}" — project columns: ${columnIds.join(", ")}`,
           status: 400,
         };
       }
@@ -1205,13 +1224,23 @@ export async function updateTask(
   }
 
   const task = await Task.findOneAndUpdate(
-    { _id: taskId, project: projectId },
+    // Same guard as changeStatus, and for the same reason: the edit form reaches this path too,
+    // so a status leaving its column has to be guarded here as well or the race just moves to
+    // the writer nobody was watching (BP-489).
+    { _id: taskId, project: projectId, ...(leavesColumn ? { status: oldTask.status } : {}) },
     // One `$set`, so nothing decided after `setFields` was built can reach one arm and not the other
     { $set: setFields, ...(leavesColumn ? { $unset: UNSET_RUN } : {}) },
     { returnDocument: "after", runValidators: true, timestamps: !onlyOrder && !writesNothing }
   ).populate(taskPopulateFields);
 
   if (!task) {
+    if (leavesColumn) {
+      // Lost the race rather than deleted: see the identical branch in changeStatus.
+      const current = await Task.findOne({ _id: taskId, project: projectId }).populate(
+        taskPopulateFields
+      );
+      if (current) return { ok: true, data: current as ITask };
+    }
     return { ok: false, error: "Task not found", status: 404 };
   }
 
@@ -1660,9 +1689,15 @@ export async function claimNextTask(
 
   const project = await Project.findById(projectId, "columns").lean();
   const columns = getProjectColumns(project);
+  // Thrown, not null: null is the empty queue, and a board that cannot claim at all looked exactly
+  // like one with nothing to claim (BP-512). Every role the run will need, in the order it needs
+  // them, not only the two this claim writes — see BoardCannotClaim for what claiming onto a board
+  // that cannot route the outcome did.
+  for (const role of ROLES_A_RUN_NEEDS) {
+    if (!columns.some((c) => c.role === role)) throw new BoardCannotClaim(role);
+  }
   const approved = columns.filter((c) => c.role === "approved").map((c) => c.id);
-  const activeStatus = columns.find((c) => c.role === "active")?.id;
-  if (approved.length === 0 || !activeStatus) return null;
+  const activeStatus = columns.find((c) => c.role === "active")!.id;
 
   // Explicit about presence, not just format: isValid(null | undefined | "") already happens to
   // return false in this bson version, but that is the library's choice, not a guarantee — a
@@ -1671,9 +1706,8 @@ export async function claimNextTask(
 
   // Finished is the done role, not a status called "done": a board that renamed its last column
   // would otherwise read every shipped blocker as still open. A board with NO done-role column
-  // cannot express "finished" at all, so it cannot express "blocked" either — gating on it would
-  // freeze every dependent for good with nothing on the task or in any log saying why, so the gate
-  // is skipped there rather than deadlocking the queue.
+  // cannot express "finished" at all, so it cannot express "blocked" either — such a board is
+  // refused above, before anything is read, rather than having this gate freeze every dependent.
   //
   // Read before the claim rather than joined inside it, because MongoDB cannot join in an update.
   // The claim itself stays the one atomic findOneAndUpdate it was, so two workers still cannot take
@@ -1690,8 +1724,7 @@ export async function claimNextTask(
   // Closing the last two means keeping an open-blocker count on the task itself, maintained by
   // every link and status writer, so the gate can live inside the atomic filter. That is a much
   // larger change than this one.
-  const done = columnIdsWithRole(project, "done");
-  const openBlockers = done.length > 0 ? await openBlockersFor(projectId, approved, done) : [];
+  const openBlockers = await openBlockersFor(projectId, approved, columnIdsWithRole(project, "done"));
 
   // Looked up rather than upserted: a poll must not be what creates the PM account on an instance
   // that has never run one, and an instance without it simply has no PM assignments to honour.

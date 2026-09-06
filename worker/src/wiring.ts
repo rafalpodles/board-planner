@@ -647,11 +647,12 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       projects: [...bound.entries()].map(([project, repo]) => ({
         project,
         // Empty when the project is claimable. Non-empty is the answer to "why is this machine
-        // sitting on a project and doing nothing", which otherwise has no answer anywhere.
-        // Quarantine first, and nothing pins that order: a project failing its own gate checks is
-        // never claimed from (BP-379), so it never reaches the run that quarantines, and the two
-        // cannot both be set today. This is what it should say if that ever changes.
-        blocked: quarantineReasonFor(project) ?? unusable.get(project) ?? "",
+        // sitting on a project and doing nothing", which otherwise has no answer anywhere — a
+        // poisoned checkout, the checkout failing the gates' own checks, or the board refusing the
+        // claim outright. Quarantine first: a quarantined checkout is dropped from assignments(),
+        // so the board is never asked again and whatever it last refused for is stale by then.
+        blocked:
+          quarantineReasonFor(project) ?? unusable.get(project) ?? loop.unclaimable(project),
         baseBranch: repo.config.baseBranch,
         model: repo.config.model,
         reviewModel: repo.config.reviewModel,

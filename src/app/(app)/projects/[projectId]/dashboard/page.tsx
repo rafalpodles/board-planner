@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
-import { ApiProject, STATUS_LABELS, TaskStatus } from "@/types";
+import { ApiProject, ROLE_LABELS, STATUS_LABELS, TaskStatus } from "@/types";
 import { columnIdsWithRole, effectiveColumns } from "@/lib/columns";
 import { Button } from "@/components/ui/Button";
 import { PageHeader } from "@/components/shell/PageHeader";
@@ -351,17 +351,31 @@ export default function DashboardPage() {
    * — a wrong number sitting in a row of right ones, which is worse than no number.
    *
    * Plural: a board may carry more than one column in flight, and task-service already sums them.
+   *
+   * A board with NO such column cannot express "in progress" at all, so its answer is not 0 but
+   * none: 0 would be a statement about the tasks when it is one about the board — the sprint
+   * header's own reasoning for a board with no Done column (BP-311, BP-512).
    */
-  const inFlight = project
-    ? columnIdsWithRole(project, "active").reduce(
-        (n, id) => n + (stats.statusBreakdown[id] || 0),
-        0
-      )
-    : null;
+  const activeIds = project ? columnIdsWithRole(project, "active") : null;
+  const noActiveColumn = activeIds !== null && activeIds.length === 0;
+  const inFlight =
+    activeIds && activeIds.length > 0
+      ? activeIds.reduce((n, id) => n + (stats.statusBreakdown[id] || 0), 0)
+      : null;
 
   return (
     <div className="max-w-7xl mx-auto w-full">
       <PageHeader title="Dashboard" subtitle={projectName} />
+
+      {noActiveColumn && (
+        <div
+          data-testid="dashboard-no-active-column"
+          className="mb-4 rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm"
+        >
+          This board has no column meaning {ROLE_LABELS.active.label}, so In Progress cannot be
+          counted. Give a column that role in Settings → Board.
+        </div>
+      )}
 
       {settingsFailed && (
         <div

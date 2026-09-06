@@ -94,8 +94,14 @@ export async function resolveStatusIds(
   const unroutable = ROLES.filter((role) => !columns.has(statusIds[role]));
   if (unroutable.length === 0) return statusIds;
 
+  // An empty id is a role no column carries at all, which is a different repair from a column that
+  // was deleted from under an id the board once had
   const detail = unroutable
-    .map((role) => `${role} -> "${statusIds[role]}"`)
+    .map((role) =>
+      statusIds[role]
+        ? `${role} -> "${statusIds[role]}"`
+        : `${role} (no column carries that role)`,
+    )
     .join(", ");
   throw new Error(
     `the board has no column for ${detail}, so a run could not be routed out of it`,
@@ -307,7 +313,12 @@ export async function runTask(
         scrub(`Returned to the queue: ${String(error)}`),
       ),
     );
-    await quietly(() => deps.api.release(task.projectId, task.taskId));
+    // Charged, not refunded. Refunded, the task went back to the head of the queue, and the loop —
+    // which does not sleep after a run — claimed it again at once: a comment on the task every
+    // iteration, without a poll interval, for ever. Three charged attempts park it for a person
+    // instead (BP-512). The claim now refuses such a board before anything is taken, so this is
+    // for columns edited between the claim and the run, and for a server older than that rule.
+    await quietly(() => deps.api.release(task.projectId, task.taskId, { refund: false }));
     // settle, like every other exit: without it the menubar shows the run parked in "claiming"
     // for ever and no AgentRun is written for a task that was genuinely claimed and handed back.
     settle("released", "the board could not route the outcome");

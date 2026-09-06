@@ -10,7 +10,11 @@ const { api, auth } = vi.hoisted(() => ({
 
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/hooks/use-auth", () => ({ useAuth: () => auth }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), back: vi.fn() }) }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), back: vi.fn() }),
+  // useOpenTask asks where the reader is before it decides how to leave (BP-540)
+  usePathname: () => "/projects/TP",
+}));
 vi.mock("@/lib/board-refresh", () => ({
   subscribeBoardRefresh: () => () => {},
   emitBoardRefresh: vi.fn(),

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   CRITERION_TEXT_MAX_LENGTH,
   FULL_NAME_MAX_LENGTH,
+  PROJECT_KEY_MAX_LENGTH,
   TASK_TITLE_MAX_LENGTH,
   isValidCriterionText,
   isValidFullName,
@@ -39,8 +40,8 @@ describe("a project key", () => {
   it("refuses the empty string, a leading digit and anything too long", () => {
     expect(isValidProjectKey("")).toBe(false);
     expect(isValidProjectKey("1BP")).toBe(false);
-    expect(isValidProjectKey("A".repeat(21))).toBe(false);
-    expect(isValidProjectKey("A".repeat(20))).toBe(true);
+    expect(isValidProjectKey("A".repeat(PROJECT_KEY_MAX_LENGTH + 1))).toBe(false);
+    expect(isValidProjectKey("A".repeat(PROJECT_KEY_MAX_LENGTH))).toBe(true);
   });
 });
 

@@ -2,7 +2,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { describe, it, expect, vi, afterAll } from "vitest";
-import { createApiClient } from "./api.js";
+import { ClaimRefused, createApiClient } from "./api.js";
 import { Bootstrap } from "./config.js";
 
 // Spreadable, unlike `as never`: three tests build a variant of it with their own stateDir
@@ -493,7 +493,10 @@ describe("createApiClient", () => {
     expect((await api.statusIds("CP")).review).toBe("early");
   });
 
-  it("falls back to the seeded ids when a role is absent", async () => {
+  // A role the board does not carry is left unresolved, for resolveStatusIds to refuse at run
+  // start. It used to be filled in from the seeded board per role, and an id guessed that way can
+  // name a column the board still has under another role (BP-512, below).
+  it("leaves a role no column carries unresolved rather than guessing a seeded id", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -501,11 +504,88 @@ describe("createApiClient", () => {
     });
     const api = createApiClient(config, fetchMock as never, identityStore);
 
-    expect(await api.statusIds("CP")).toEqual({
-      approved: "todo",
-      review: "needs_human_review",
-      done: "done",
+    expect(await api.statusIds("CP")).toEqual({ approved: "", review: "", done: "" });
+  });
+
+  // The ticket's shape: the Done column demoted to review, keeping its id. The seeded fallback
+  // resolved done -> "done", resolveStatusIds saw a column by that id and passed, and finished work
+  // was delivered into a review column.
+  it("does not route done to a column called done that no longer means it", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        columns: [
+          { id: "todo", role: "approved", order: 1 },
+          { id: "in_progress", role: "active", order: 2 },
+          { id: "done", role: "review", order: 3 },
+        ],
+      }),
     });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+
+    expect((await api.statusIds("CP")).done).toBe("");
+  });
+
+  // 409 is the board saying it cannot claim at all — no column to take from or move into — which the
+  // loop treats differently from a failed cycle. Everything else stays what it was: a failure, with
+  // the status in the message.
+  it("turns a 409 on the claim into a refusal carrying the server's reason", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      text: async () =>
+        JSON.stringify({ error: "This board has no column meaning In progress, so nothing moves." }),
+    });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+
+    const claim = api.claim("CP", "run-1");
+    await expect(claim).rejects.toBeInstanceOf(ClaimRefused);
+    await expect(claim).rejects.toThrow("This board has no column meaning In progress, so nothing moves.");
+  });
+
+  it("does not read any other failed claim as a refusal", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500, text: async () => "boom" });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+
+    const claim = api.claim("CP", "run-1");
+    await expect(claim).rejects.not.toBeInstanceOf(ClaimRefused);
+    await expect(claim).rejects.toThrow(/failed: 500 boom/);
+  });
+
+  // A proxy in front of the server answers 409 with its own page, not the app's JSON. Asserted as
+  // a ClaimRefused with exactly that text: the old client threw an Error whose message merely
+  // CONTAINED it, so a substring match here was green before the change and proved nothing.
+  it("keeps a refusal's raw text when the body is not the server's JSON", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 409, text: async () => "<html>conflict</html>" });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+
+    const claim = api.claim("CP", "run-1");
+    await expect(claim).rejects.toBeInstanceOf(ClaimRefused);
+    await expect(claim).rejects.toThrow(/^<html>conflict<\/html>$/);
+  });
+
+  it("says so when a refusal carries no reason at all", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 409, text: async () => "" });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+
+    const claim = api.claim("CP", "run-1");
+    await expect(claim).rejects.toBeInstanceOf(ClaimRefused);
+    await expect(claim).rejects.toThrow(/^the board refused the claim without saying why$/);
+  });
+
+  // The reason is logged and shown as one line, so the server's text is flattened and bounded
+  it("bounds a refusal to one line of at most 300 characters", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      text: async () => JSON.stringify({ error: `first\n\n  second ${"x".repeat(1000)}` }),
+    });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+
+    const claim = api.claim("CP", "run-1");
+    await expect(claim).rejects.toThrow(/^first second x+$/);
+    await claim.catch((error: Error) => expect(error.message.length).toBe(300));
   });
 
   it("falls back for a board that predates column seeding", async () => {

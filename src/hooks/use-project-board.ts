@@ -37,6 +37,7 @@ export interface ProjectBoard {
   bulkDeleting: boolean;
   confirmContextDelete: string | null;
   setConfirmContextDelete: (taskId: string | null) => void;
+  deleting: boolean;
   heldMove: { retry: () => Promise<unknown>; conflict: RunConflict; taskKey: string } | null;
   setHeldMove: (held: ProjectBoard["heldMove"]) => void;
   forceHeldMove: () => Promise<void>;
@@ -106,6 +107,7 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
   const [heldMove, setHeldMove] = useState<ProjectBoard["heldMove"]>(null);
   const [heldDelete, setHeldDelete] = useState<ProjectBoard["heldDelete"]>(null);
   const [confirmContextDelete, setConfirmContextDelete] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const [viewMode, setViewModeState] = useState<"board" | "list">(() => {
     if (typeof window === "undefined") return "board";
@@ -213,20 +215,28 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
 
   async function handleBulkSprint(sprintId: string | null) {
     const ids = Array.from(selectedTasks);
-    try {
-      await Promise.all(
-        ids.map((id) =>
-          api.put(`/api/projects/${projectId}/tasks/${id}`, { sprint: sprintId })
-        )
-      );
-      applySprintChange(ids, sprintId);
-      setSelectedTasks(new Set());
-      const target = sprintId
-        ? sprints.find((s) => s._id === sprintId)?.name ?? "sprint"
-        : "backlog";
+    // Settled, not all — the same lesson handleBulkMove and handleBulkDelete already carry: one
+    // task's PUT failing used to hide every move that had already landed server-side, and left
+    // the selection as if nothing had happened.
+    const outcomes = await Promise.allSettled(
+      ids.map((id) => api.put(`/api/projects/${projectId}/tasks/${id}`, { sprint: sprintId }))
+    );
+
+    const movedIds = ids.filter((_, i) => outcomes[i].status === "fulfilled");
+    applySprintChange(movedIds, sprintId);
+    setSelectedTasks(new Set());
+
+    const target = sprintId
+      ? sprints.find((s) => s._id === sprintId)?.name ?? "sprint"
+      : "backlog";
+
+    // No `held` branch here unlike the siblings above: updateTask only refuses on a run-held
+    // task when `status` changes (leavesColumn, task-service.ts), and this body only ever sends
+    // `sprint` — so that refusal is not reachable through this call.
+    if (movedIds.length === ids.length) {
       toast(`Moved ${ids.length} task${ids.length === 1 ? "" : "s"} to ${target}`, "success");
-    } catch {
-      toast("Failed to move tasks to sprint", "error");
+    } else {
+      toast(`Moved ${movedIds.length} of ${ids.length} to ${target}`, "error");
     }
   }
 
@@ -468,6 +478,7 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
         `/api/projects/${projectId}/tasks/${taskId}`,
         asForce ? { force: true } : undefined
       );
+    setDeleting(true);
     try {
       await remove(force);
       setTasks((prev) => prev.filter((t) => t._id !== taskId));
@@ -489,6 +500,7 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
       }
       toast("Failed to delete task", "error");
     } finally {
+      setDeleting(false);
       setConfirmContextDelete(null);
     }
   }
@@ -529,6 +541,7 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
     bulkDeleting,
     confirmContextDelete,
     setConfirmContextDelete,
+    deleting,
     heldMove,
     heldDelete,
     setHeldDelete,

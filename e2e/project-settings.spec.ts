@@ -1,11 +1,15 @@
 import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 import { ADMIN_AUTH } from "./api";
 import {
+  FINISHED_TASK_KEY,
   HELD_TASK_KEY,
+  HELD_TASK_TITLE,
+  demoteActiveColumn,
   demoteDoneColumn,
   PROJECT_ID,
   PROJECT_KEY,
   SIBLING_TASK_KEY,
+  SIBLING_TASK_TITLE,
   seed,
   seedSecondEscalationColumn,
   seedWebhookDeliveryOutcomes,
@@ -82,11 +86,24 @@ async function storedColumns(request: APIRequestContext): Promise<StoredColumn[]
  * saving and got the board as it was — passing the click and failing the read.
  *
  * The success toast is emitted after the whole save chain has resolved, which for categories is
- * several requests, so it is the one signal that means "the server is done".
+ * several requests, so it is the one signal that means "the server is done". A test that saves
+ * twice cannot rely on the toast alone, though: its text repeats, so a lingering toast from the
+ * previous save can satisfy the wait before the new request has even landed, or both can be on
+ * screen together. Columns saves are a single PUT, so this gates on that response directly and
+ * only then reads the toast — with `.last()`, not `.first()`: toasts append in order, so the
+ * oldest match is the previous save's, still fading, and asserting on it would never actually
+ * confirm this save's own toast fired. Categories has no single response to gate on and stays
+ * toast-only — fine while no categories test saves twice, and the same trap the moment one does.
  */
 async function save(page: Page, saved: "Columns saved" | "Categories saved") {
+  const written =
+    saved === "Columns saved"
+      ? page.waitForResponse((res) => res.request().method() === "PUT" && res.url().endsWith("/columns"))
+      : null;
   await saveButton(page).click();
-  await expect(page.getByText(saved)).toBeVisible();
+  const response = await written;
+  if (response && !response.ok()) expect(response.status(), await response.text()).toBe(200);
+  await expect(page.getByText(saved).last()).toBeVisible();
   await expect(saveButton(page)).toBeHidden();
 }
 
@@ -202,7 +219,112 @@ test.describe("Board · the Done role", () => {
     await roleOf(page, "Done").selectOption("review");
 
     await expect(warning).toBeVisible();
-    await expect(page.getByText(/worker stops enforcing task dependencies/)).toBeVisible();
+    await expect(page.getByText(/a worker will not take a task from this board/)).toBeVisible();
+  });
+});
+
+/**
+ * BP-512. The `active` role is the twin of `done`: the claim moves a task into the column that
+ * carries it, and a board with none answered every claim the way an empty queue does. Same rule,
+ * same shape — a transition refused, a state left repairable — and the same four proofs as above,
+ * because a rule copied from Done can be copied wrong in exactly the ways those catch.
+ */
+test.describe("Board · the In-progress role", () => {
+  async function putColumns(request: APIRequestContext, columns: unknown[]) {
+    return request.put(`/api/projects/${PROJECT_ID}/columns`, {
+      headers: ADMIN_AUTH,
+      data: { columns },
+    });
+  }
+
+  test("a board cannot be saved out of having one", async ({ request }) => {
+    const before = await storedColumns(request);
+    const active = before.find((c) => c.role === "active");
+    expect(active, "the seeded board has no In-progress column, so this proves nothing").toBeDefined();
+
+    const res = await putColumns(
+      request,
+      before.map((c) => (c.role === "active" ? { ...c, role: "review" } : c))
+    );
+
+    expect(res.status()).toBe(400);
+    expect((await res.json()).error).toMatch(/needs a column meaning In progress/);
+    expect((await storedColumns(request)).find((c) => c.role === "active")?.id).toBe(active!.id);
+  });
+
+  // The control: moving the role to ANOTHER column is the legitimate edit, and it has to save
+  test("and moving the role to another column still saves", async ({ request }) => {
+    const before = await storedColumns(request);
+
+    const res = await putColumns(
+      request,
+      before.map((c) => {
+        if (c.role === "active") return { ...c, role: "review" };
+        if (c.label === "In Review") return { ...c, role: "active" };
+        return c;
+      })
+    );
+
+    expect(res.status(), await res.text()).toBe(200);
+    expect((await storedColumns(request)).find((c) => c.role === "active")?.label).toBe("In Review");
+  });
+
+  // The transition-not-state half, which is what keeps this from locking a board out of the screen
+  // where it is repaired — see the Done block above for why a state rule passes every other test
+  test("a board that already has none keeps saving unrelated changes, and can be repaired", async ({
+    request,
+  }) => {
+    await demoteActiveColumn();
+    expect((await storedColumns(request)).some((c) => c.role === "active")).toBe(false);
+
+    await test.step("an edit that does not mention In progress still saves", async () => {
+      const unrelated = await putColumns(
+        request,
+        (await storedColumns(request)).map((c) =>
+          c.role === "backlog" ? { ...c, label: "Someday" } : c
+        )
+      );
+
+      expect(unrelated.status(), await unrelated.text()).toBe(200);
+      expect((await storedColumns(request)).map((c) => c.label)).toContain("Someday");
+    });
+
+    await test.step("and the board can be given the role back", async () => {
+      const repaired = await putColumns(
+        request,
+        (await storedColumns(request)).map((c) =>
+          c.label === "In Progress" ? { ...c, role: "active" } : c
+        )
+      );
+
+      expect(repaired.status(), await repaired.text()).toBe(200);
+      expect((await storedColumns(request)).some((c) => c.role === "active")).toBe(true);
+    });
+  });
+
+  test("pressing Save on a draft without one says why, and keeps the work", async ({ page }) => {
+    await signIn(page);
+    await openSection(page, "Board");
+
+    await roleOf(page, "In Progress").selectOption("review");
+    await saveButton(page).click();
+
+    await expect(page.getByText(/needs a column meaning In progress/)).toBeVisible();
+    await expect(saveButton(page)).toBeVisible();
+    await expect(roleOf(page, "In Progress")).toHaveValue("review");
+  });
+
+  test("the settings screen says what such a board loses", async ({ page }) => {
+    await signIn(page);
+    await openSection(page, "Board");
+
+    const warning = page.getByText(/No column means In progress/i);
+    await expect(warning).toHaveCount(0);
+
+    await roleOf(page, "In Progress").selectOption("review");
+
+    await expect(warning).toBeVisible();
+    await expect(page.getByText(/nowhere to move a task it takes/)).toBeVisible();
   });
 });
 
@@ -366,6 +488,137 @@ test.describe("Board · Columns", () => {
   });
 });
 
+/**
+ * BP-536. A column's id is handed out before the de-duplication that protects it, so a *new*
+ * column processed earlier can take an id a *staying* column is about to ask for. The staying
+ * one — the real owner, with tasks standing in it — is pushed to `<id>_2`.
+ *
+ * The guard twenty lines below never fires, and that is the sharp part: `removed` is
+ * `current.filter((c) => !usedIds.has(c.id))`, and the stolen id **is** in `usedIds` — claimed by
+ * the thief. So "still has tasks" is not merely bypassed for a column being dropped; it is
+ * bypassed for a column that is *staying* and losing its identity, which is the case it exists to
+ * catch. The role rule passes too, because the displaced column keeps carrying the role.
+ *
+ * The label here slugifies onto `in_progress` while reading differently on screen, so the two
+ * columns can be told apart in an assertion. A person doing this by hand would more likely type
+ * the same label twice; the mechanism is identical and the test would then be unable to say which
+ * column it had found.
+ */
+test.describe("Board · a new column that wants an id somebody is standing in", () => {
+  test("cannot take it, and the tasks stay under the column they were in", async ({
+    page,
+    request,
+  }) => {
+    await signIn(page);
+    await openSection(page, "Board");
+
+    // The premise, from the server: In Progress owns `in_progress` and two tasks stand in it
+    const before = await storedColumns(request);
+    expect(before.find((c) => c.label === "In Progress")?.id).toBe("in_progress");
+
+    await page.getByPlaceholder("New column name...").fill("In-Progress");
+    await page.getByRole("button", { name: "Add column" }).click();
+
+    // Up from the end to index 2, so the newcomer is processed before the column it collides
+    // with — the whole bug is an ordering one, and appended-last it never triggers
+    for (let from = 7; from > 2; from--) {
+      await page.getByRole("button", { name: "Move column up" }).nth(from).click();
+    }
+    expect(
+      (await labelsInOrder(page, 8)).slice(1, 4),
+      "the newcomer did not end up above In Progress on screen"
+    ).toEqual(["To Do", "In-Progress", "In Progress"]);
+
+    await save(page, "Columns saved");
+
+    const stored = await storedColumns(request);
+    expect(stored.find((c) => c.label === "In Progress")?.id).toBe("in_progress");
+    expect(stored.find((c) => c.label === "In-Progress")?.id).toBe("in_progress_2");
+    // The role went with the id, not with the position
+    expect(stored.find((c) => c.id === "in_progress")?.role).toBe("active");
+
+    // Where a person meets it: the two cards keep `status: "in_progress"` whatever happens here,
+    // so the question is only which column that id now names — and the heading over them says it
+    await page.goto(`/projects/${PROJECT_KEY}`);
+    const column = page.getByTestId("column-in_progress");
+    await expect(column.getByRole("heading", { name: "In Progress", exact: true })).toBeVisible();
+    await expect(column.getByText(HELD_TASK_TITLE)).toBeVisible();
+    await expect(column.getByText(SIBLING_TASK_TITLE)).toBeVisible();
+  });
+
+  /**
+   * The other door. Here the removal is deliberate and the guard has to refuse it — but the
+   * newcomer's slug filled the vacancy, so the departing column no longer looked absent and the
+   * check skipped it. That is why "removed" cannot be read off the final ids.
+   *
+   * To Do rather than In Progress, deliberately: `addColumn` hard-codes the backlog role, so
+   * removing the board's only In-progress column is refused by the role rule instead, and the
+   * spec would go red on unfixed source for a reason that is not this bug. `approved` is not
+   * load-bearing, so unfixed source really does accept this one — and TP-4, approved for work,
+   * lands in a backlog column with nobody told.
+   */
+  test("and taking the id of one being removed does not excuse it from the task check", async ({
+    page,
+    request,
+  }) => {
+    await signIn(page);
+    await openSection(page, "Board");
+
+    await page.getByRole("button", { name: "Remove To Do" }).click();
+    await page.getByPlaceholder("New column name...").fill("Todo");
+    await page.getByRole("button", { name: "Add column" }).click();
+    await saveButton(page).click();
+
+    await expect(
+      page.getByText(new RegExp(`still has tasks: ${FINISHED_TASK_KEY}(?![0-9])`))
+    ).toBeVisible();
+    // Refused whole, so the board still has the column and its task is where it was
+    const stored = await storedColumns(request);
+    expect(stored.find((c) => c.label === "To Do")?.id).toBe("todo");
+    expect(stored.map((c) => c.label)).not.toContain("Todo");
+  });
+
+  /**
+   * The editor cannot send this — its rows come from the stored board, one draft each — so this
+   * one is driven at the endpoint, which any API token can reach. Naming one existing column
+   * twice is meaningless, and the interesting part is where the second copy goes: it keeps its
+   * own id at the first candidate, and the suffix then walks it onto the id of a *different*
+   * live column. Guarding on "is this a newcomer" instead of "is this still its own id" let that
+   * through, which is how the first version of this fix still stole an id.
+   */
+  test("nor by naming one column twice, so the suffix lands on a third", async ({ request }) => {
+    const putColumns = (columns: unknown[]) =>
+      request.put(`/api/projects/${PROJECT_ID}/columns`, {
+        headers: ADMIN_AUTH,
+        data: { columns },
+      });
+
+    // The collision target, built by the product's own rule: a second In Progress becomes `in_progress_2`
+    const twin = await putColumns([
+      ...(await storedColumns(request)),
+      { label: "In-Progress", role: "backlog" },
+    ]);
+    expect(twin.status(), await twin.text()).toBe(200);
+    const withTwin = await storedColumns(request);
+    expect(withTwin.find((c) => c.label === "In-Progress")?.id).toBe("in_progress_2");
+
+    // Two entries now claim `in_progress`. Served rather than refused, the loser walks off its
+    // own id and onto `in_progress_2` — which belongs to the twin, and carries whatever stands
+    // in it. There is no reading of a contradictory payload worth guessing at.
+    const res = await putColumns(
+      withTwin.map((c) => (c.id === "planned" ? { ...c, id: "in_progress" } : c))
+    );
+    expect(res.status()).toBe(400);
+    expect((await res.json()).error).toMatch(/cannot claim the same id/);
+
+    // Refused whole: every column still holds exactly what it held
+    const after = await storedColumns(request);
+    expect(after.map((c) => `${c.id}:${c.label}`)).toEqual(
+      withTwin.map((c) => `${c.id}:${c.label}`)
+    );
+  });
+});
+
 test.describe("Board · Hand-off to the PM agent", () => {
   test("the escalation column is the one chosen here, after a reload", async ({
     page,
@@ -522,10 +775,11 @@ test.describe("Integrations · the save bar", () => {
     await expect(picker.or(anyWebhookShape).first()).toBeVisible();
     if (await picker.isVisible()) await picker.click();
 
-    // The row's accessible name has three forms — "Webhook Webhooks POST board events to any URL"
-    // before anything is configured, "Webhooks 1 endpoint" after, and a separate "Configure
-    // Webhooks" button beside it. Matching the first thing containing "Webhooks" survives all of
-    // them; anchoring on any one description works exactly once and then rots.
+    // The row's accessible name has three forms — "Webhooks POST board events to any URL" before
+    // anything is configured, "Webhooks 1 endpoint" after, and a separate "Configure Webhooks"
+    // button beside it. Matching the first thing containing "Webhooks" survives all of them;
+    // anchoring on any one description works exactly once and then rots. (The vendor prefix the
+    // first form used to carry left with BP-510, which made the brand icon decorative.)
     const input = page.getByPlaceholder("https://example.com/webhook");
     await expect(input.or(anyWebhookShape).first()).toBeVisible();
     if (!(await input.isVisible())) {

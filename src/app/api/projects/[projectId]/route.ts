@@ -264,7 +264,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
   }
 
   for (const entry of workerAudit) {
-    void logInstanceAudit({ ...entry, user: String(user._id) });
+    void logInstanceAudit({ ...entry, user: String(user._id), actorUsername: user.username });
   }
 
   const changedFields = Object.keys(updates)

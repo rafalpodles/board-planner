@@ -1,5 +1,5 @@
 import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
-import { ADMIN_AUTH } from "./api";
+import { ADMIN_AUTH, MEMBER_AUTH } from "./api";
 import { PROJECT_ID, PROJECT_KEY, seed } from "./seed";
 import { signIn } from "./session";
 import { PM_STUB_URL } from "../playwright.config";
@@ -161,4 +161,16 @@ test("a ceiling set through the product is stored, and then refuses a turn", asy
     // The sentence the ticket is about
     expect(error).toMatch(/up to 15 calls/);
   });
+});
+
+/**
+ * BP-562. The settings screen only offers this inside its `projectAdmin` section — same shape
+ * as BP-549 for the audit log — so a member must be refused by the route itself, not just hidden
+ * from it on screen.
+ */
+test("a member is refused — this is spend, not something every board member should read", async ({
+  request,
+}) => {
+  const res = await request.get(`/api/projects/${PROJECT_ID}/pm/usage`, { headers: MEMBER_AUTH });
+  expect(res.status()).toBe(403);
 });
