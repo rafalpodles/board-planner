@@ -288,6 +288,17 @@ test.describe("a settings row says which row it is", () => {
     // The word alone is what it announced before, on both rows at once
     await expect(page.getByRole("button", { name: "Delete", exact: true })).toHaveCount(0);
 
+    // These two names are already unambiguous, so they stay bare. Asserted exactly, because a
+    // `getByRole` name is a SUBSTRING match: disambiguating every row rather than only the
+    // colliding ones would make this "Delete alpha-room (1)" and every locator above would still
+    // have matched it. The mutation battery found that hole; this is what closes it.
+    await expect(page.getByRole("button", { name: `Delete ${CHANNEL_A}` })).toHaveAccessibleName(
+      `Delete ${CHANNEL_A}`
+    );
+    await expect(
+      page.getByRole("button", { name: `Enabled for ${CHANNEL_B}` })
+    ).toHaveAccessibleName(`Enabled for ${CHANNEL_B}`);
+
     await expect(
       page.getByRole("button", { name: `task created for ${CHANNEL_A}` })
     ).toHaveCount(1);
@@ -352,6 +363,20 @@ test.describe("a settings row says which row it is", () => {
       page.getByRole("button", { name: `Replace URL for ${WEBHOOK_A_MASKED}` })
     ).toHaveCount(1);
     await expect(page.getByRole("button", { name: "Replace", exact: true })).toHaveCount(0);
+
+    // SecretField's Save/Cancel are the same defect one level down: each row owns its own
+    // `replacing` state, so pressing Replace on two rows would put two bare "Save" and two bare
+    // "Cancel" buttons on screen. Opening both rows' editors at once is what proves the name is
+    // per-row rather than merely present.
+    await page.getByRole("button", { name: `Replace URL for ${WEBHOOK_A_MASKED}` }).click();
+    await page.getByRole("button", { name: `Replace URL for ${WEBHOOK_B_MASKED}` }).click();
+    await expect(page.getByRole("button", { name: `Save URL for ${WEBHOOK_A_MASKED}` })).toHaveCount(1);
+    await expect(page.getByRole("button", { name: `Save URL for ${WEBHOOK_B_MASKED}` })).toHaveCount(1);
+    await expect(page.getByRole("button", { name: "Save", exact: true })).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: `Cancel URL for ${WEBHOOK_A_MASKED}` })
+    ).toHaveCount(1);
+    await expect(page.getByRole("button", { name: "Cancel", exact: true })).toHaveCount(0);
   });
 
   /**
