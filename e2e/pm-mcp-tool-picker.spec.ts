@@ -316,4 +316,81 @@ test.describe("choosing an MCP server's tools", () => {
 
     await expect(page.getByTestId("mcp-tool-budget-warning")).toContainText("48 MCP tools");
   });
+
+  /**
+   * BP-574. Disconnect committed the whole live draft, and `useDraft.commit` moves the baseline
+   * too — so every unsaved edit in the section was adopted as saved with nothing sent. The Save
+   * bar disappeared while the typed text stayed on screen, which reads as saved and is not.
+   *
+   * There was no test of any kind on this branch, which is how an unreviewed rewrite of it reached
+   * main.
+   */
+  test("disconnecting OAuth does not swallow an unsaved edit", async ({ page }) => {
+    await connectServers([
+      server("narrow", "/narrow"),
+      {
+        ...(server("linked", "/wide") as object),
+        authType: "oauth",
+        // Not a state the app produces — the callback always writes a token alongside
+        // status:"connected". Forced here because e2e runs without ENCRYPTION_KEY, and safe
+        // because both consumers read `oauth.status` and `!server.oauth`, never the token.
+        oauth: { status: "connected", clientId: "e2e-client", accessToken: "", refreshToken: "" },
+      },
+    ]);
+    await signIn(page, "admin");
+    await page.goto(SETTINGS_URL);
+    await expect(page.getByRole("button", { name: "Disconnect linked" })).toBeVisible();
+
+    await page.getByLabel("Tool allowlist for narrow").fill("list_narrow_alpha");
+
+    const disconnected = page.waitForResponse((r) => r.url().includes("/pm/mcp-oauth/disconnect"));
+    await page.getByRole("button", { name: "Disconnect linked" }).click();
+    await disconnected;
+
+    // Not "the text is still on screen": under the bug it is, which is exactly what made a lost
+    // edit look saved. Not the bar's summary text either — SaveBar deliberately keeps the last
+    // one while it slides away, and its container is hidden by an overflow clip that Playwright
+    // still counts as visible. The button's enabled state is the signal that discriminates
+    // (BP-574 review 2).
+    const save = page.getByRole("button", { name: "Save changes" });
+    await expect(save).toBeEnabled();
+
+    // and it reaches the database when actually saved
+    const saved = page.waitForResponse(
+      (r) => r.request().method() === "PUT" && r.url().endsWith(`/api/projects/${PROJECT_KEY}`)
+    );
+    await save.click();
+    await saved;
+    expect(await storedAllowlist("narrow")).toEqual(["list_narrow_alpha"]);
+  });
+
+  /**
+   * The other direction, and the one the broken code cannot fake at any timing: with the baseline
+   * moved onto the edits, Discard has nothing to rewind to and leaves them on screen.
+   */
+  test("Discard still rewinds an edit made before a disconnect", async ({ page }) => {
+    await connectServers([
+      server("narrow", "/narrow"),
+      {
+        ...(server("linked", "/wide") as object),
+        authType: "oauth",
+        oauth: { status: "connected", clientId: "e2e-client", accessToken: "", refreshToken: "" },
+      },
+    ]);
+    await signIn(page, "admin");
+    await page.goto(SETTINGS_URL);
+    await expect(page.getByRole("button", { name: "Disconnect linked" })).toBeVisible();
+
+    await page.getByLabel("Tool allowlist for narrow").fill("list_narrow_alpha");
+
+    const disconnected = page.waitForResponse((r) => r.url().includes("/pm/mcp-oauth/disconnect"));
+    await page.getByRole("button", { name: "Disconnect linked" }).click();
+    await disconnected;
+
+    await page.getByRole("button", { name: "Discard" }).click();
+
+    await expect(page.getByLabel("Tool allowlist for narrow")).toHaveValue("");
+    // and the disconnect itself is not rewound — the connection is gone on the server
+    await expect(page.getByRole("button", { name: "Disconnect linked" })).toHaveCount(0);
+  });
 });

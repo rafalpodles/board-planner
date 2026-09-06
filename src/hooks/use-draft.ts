@@ -36,8 +36,16 @@ export function useDraft<T extends Record<string, unknown>>(initial: T) {
    * Moves the baseline without touching what the user has typed — for a save that failed
    * part-way. The retry then re-diffs against what actually landed instead of repeating
    * it, and the edits that did not land are still on screen.
+   *
+   * Takes an updater as well as a value, because every caller reaching this after an await holds
+   * a baseline from the render it started in — and a save completing during that flight would
+   * otherwise be rolled back by a stale copy (BP-574 review).
    */
-  const rebase = useCallback((next: T) => setBaseline(next), []);
+  const rebase = useCallback(
+    (next: T | ((prev: T) => T)) =>
+      setBaseline((prev) => (typeof next === "function" ? (next as (p: T) => T)(prev) : next)),
+    []
+  );
 
   // Exposed because a list reconciles on save by diffing against what it started from.
   // Diffing against the live source instead lets a row that arrived underneath — from

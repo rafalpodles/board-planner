@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { PmAgentSection } from "./PmAgentSection";
 import { SettingsProvider } from "@/components/settings/settings-context";
 import { ApiProject } from "@/types";
@@ -58,9 +58,14 @@ function project(over: Partial<ApiProject> = {}): ApiProject {
   } as ApiProject;
 }
 
+const register = vi.fn();
+
+/** What the Save bar has been told: the newest registration's dirty-field count. */
+const dirtyCount = () => register.mock.calls.at(-1)?.[0]?.count;
+
 function renderSection(isAdmin: boolean, over: Partial<ApiProject> = {}) {
   return render(
-    <SettingsProvider register={vi.fn()} unregister={vi.fn()}>
+    <SettingsProvider register={register} unregister={vi.fn()}>
       <PmAgentSection
         projectId="p1"
         project={project(over)}
@@ -74,6 +79,7 @@ function renderSection(isAdmin: boolean, over: Partial<ApiProject> = {}) {
 }
 
 beforeEach(() => {
+  register.mockClear();
   api.post.mockReset();
   api.put.mockReset();
   toast.mockReset();
@@ -198,5 +204,236 @@ describe("the turn-cap hint", () => {
     renderSection(true, { pm: { ...project().pm!, ...withZone(undefined) } });
 
     expect(screen.getByText(/Resets at midnight in Europe\/Warsaw/)).toBeTruthy();
+  });
+});
+
+/**
+ * BP-574. Disconnect committed the WHOLE live draft, and `useDraft.commit` moves the baseline as
+ * well as the value — so every unsaved edit in the PM section was adopted as saved. Nothing had
+ * been sent: the Save bar disappeared, the typed text stayed on screen looking saved, and Discard
+ * could no longer rewind it because the baseline was now the edits.
+ */
+describe("disconnecting an OAuth server", () => {
+  const notes = () => screen.getByLabelText(/Project context/i);
+
+  it("leaves an unrelated unsaved edit dirty and still on screen", async () => {
+    renderSection(true);
+    api.post.mockResolvedValue({ ok: true });
+
+    fireEvent.change(notes(), { target: { value: "something the admin typed" } });
+    expect(dirtyCount()).toBe(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect notion" }));
+
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("OAuth connection removed", "success"));
+    expect(dirtyCount()).toBe(1);
+    expect((notes() as HTMLTextAreaElement).value).toBe("something the admin typed");
+  });
+
+  /**
+   * The other half, and the reason the broken line was written: the connection is already gone on
+   * the server, so the status must not be a dirty edit Discard can undo.
+   */
+  it("does not itself make the form dirty", async () => {
+    renderSection(true);
+    api.post.mockResolvedValue({ ok: true });
+
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect notion" }));
+
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("OAuth connection removed", "success"));
+    expect(dirtyCount()).toBe(0);
+  });
+
+  // The control: a refused disconnect changes nothing at all
+  it("leaves the row alone when the server refuses", async () => {
+    renderSection(true);
+    api.post.mockRejectedValue(new Error("nope"));
+
+    fireEvent.change(notes(), { target: { value: "typed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect notion" }));
+
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("nope", "error"));
+    expect(dirtyCount()).toBe(1);
+    expect(screen.getByRole("button", { name: "Disconnect notion" })).toBeTruthy();
+  });
+});
+
+/**
+ * BP-574. The budget's de-duplication searched the unfiltered row list, so a disabled row sharing
+ * an identity with an enabled one made the enabled row's contribution vanish — and with it the
+ * flood warning, which is the whole point of the feature.
+ */
+describe("the flood warning's arithmetic", () => {
+  const twins = (first: Partial<Record<string, unknown>>, second: Partial<Record<string, unknown>>) =>
+    ({
+      pm: {
+        enabled: true,
+        model: "",
+        contextNotes: "",
+        links: [],
+        dailyTurnCap: 0,
+        mcpServers: [
+          {
+            name: "notion",
+            url: "https://mcp.notion.example/mcp",
+            authType: "none",
+            allowWrites: true,
+            toolAllowlist: [],
+            hasAuthToken: false,
+            ...first,
+          },
+          {
+            name: "notion",
+            url: "https://mcp.notion.example/mcp",
+            authType: "none",
+            allowWrites: true,
+            toolAllowlist: [],
+            hasAuthToken: false,
+            ...second,
+          },
+        ],
+      },
+    }) as unknown as Partial<ApiProject>;
+
+  const tools = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ name: `list_thing_${i}`, description: "d", readSafe: true }));
+
+  async function warningAfterProbe(over: Partial<ApiProject>) {
+    api.post.mockResolvedValue({ count: 45, tools: tools(45) });
+    renderSection(true, over);
+    await waitFor(() => expect(api.post).toHaveBeenCalled());
+    return screen.queryByTestId("mcp-tool-budget-warning");
+  }
+
+  it("is not silenced by a disabled row that shares an enabled row's identity", async () => {
+    const warning = await warningAfterProbe(twins({ enabled: false }, { enabled: true }));
+
+    await waitFor(() => expect(screen.getByTestId("mcp-tool-budget-warning")).toBeTruthy());
+    expect(warning ?? screen.getByTestId("mcp-tool-budget-warning")).toBeTruthy();
+  });
+
+  // The control: two ENABLED twins really do share one catalogue and must be counted once, which
+  // is what the de-duplication was added for
+  it("counts one catalogue once when two enabled rows share it", async () => {
+    await warningAfterProbe(twins({ enabled: true }, { enabled: true }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("mcp-tool-budget-warning").textContent).toContain("45 MCP tools")
+    );
+  });
+});
+
+/**
+ * The narrower window the first fix left open: a disconnect awaits a round trip, and the writes
+ * that follow it must not rewind to the arrays captured when the button was clicked (BP-574
+ * review).
+ */
+describe("editing while a disconnect is in flight", () => {
+  it("keeps what was typed during the round trip", async () => {
+    renderSection(true);
+    let land: (value: unknown) => void = () => {};
+    api.post.mockImplementation(() => new Promise((resolve) => (land = resolve)));
+
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect notion" }));
+    fireEvent.change(screen.getByLabelText("Tool allowlist for jira"), {
+      target: { value: "typed_during_the_flight" },
+    });
+
+    land({ ok: true });
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("OAuth connection removed", "success"));
+
+    expect((screen.getByLabelText("Tool allowlist for jira") as HTMLInputElement).value).toBe(
+      "typed_during_the_flight"
+    );
+    expect(dirtyCount()).toBe(1);
+  });
+});
+
+/**
+ * The half of the behaviour `rebase` exists for, and which the dirty-count test alone cannot see:
+ * the connection is destroyed server-side, so Discard must not put "Connected" back.
+ */
+describe("Discard after a disconnect", () => {
+  // Regression guard rather than a red test: the old `commit` moved the baseline too, so this
+  // held before the fix as well. Kept because `rebase` is the only thing holding it now.
+  it("does not resurrect the connection", async () => {
+    renderSection(true);
+    api.post.mockResolvedValue({ ok: true });
+
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect notion" }));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("OAuth connection removed", "success"));
+    expect(screen.queryByRole("button", { name: "Disconnect notion" })).toBeNull();
+
+    register.mock.calls.at(-1)?.[0]?.discard?.();
+
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Disconnect notion" })).toBeNull()
+    );
+    // The control: Connect is what an unconfigured row offers, so the row is still there
+    expect(screen.getByRole("button", { name: "Connect notion" })).toBeTruthy();
+  });
+});
+
+/**
+ * The two windows the round trip opens, neither of which the first fixes covered (BP-574 review 2).
+ */
+describe("the rows moving under a disconnect", () => {
+  it("disconnects the row it was asked about, not whoever took its position", async () => {
+    renderSection(true, {
+      pm: {
+        enabled: true,
+        model: "",
+        contextNotes: "",
+        links: [],
+        dailyTurnCap: 0,
+        mcpServers: [
+          { name: "spare", url: "https://a.example/mcp", authType: "none", allowWrites: false, toolAllowlist: [], enabled: true, hasAuthToken: false },
+          { name: "notion", url: "https://n.example/mcp", authType: "oauth", allowWrites: false, toolAllowlist: [], enabled: true, hasAuthToken: false, oauthStatus: "connected", oauthClientId: "" },
+          { name: "linear", url: "https://l.example/mcp", authType: "oauth", allowWrites: false, toolAllowlist: [], enabled: true, hasAuthToken: false, oauthStatus: "connected", oauthClientId: "" },
+        ],
+      },
+    } as unknown as Partial<ApiProject>);
+
+    let land: (value: unknown) => void = () => {};
+    api.post.mockImplementation(() => new Promise((resolve) => (land = resolve)));
+
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect notion" }));
+    // The row above it goes away while the request is in flight, so every later index shifts
+    fireEvent.click(screen.getByRole("button", { name: "Remove spare" }));
+
+    land({ ok: true });
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("OAuth connection removed", "success"));
+
+    expect(screen.queryByRole("button", { name: "Disconnect notion" })).toBeNull();
+    // The control: linear, which took notion's old position, is untouched and still connected
+    expect(screen.getByRole("button", { name: "Disconnect linear" })).toBeTruthy();
+  });
+
+  it("does not roll back a save that landed during the round trip", async () => {
+    renderSection(true);
+    let landDisconnect: (value: unknown) => void = () => {};
+    api.post.mockImplementation(() => new Promise((resolve) => (landDisconnect = resolve)));
+
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect notion" }));
+    fireEvent.change(screen.getByLabelText(/Project context/i), { target: { value: "saved text" } });
+    expect(dirtyCount()).toBe(1);
+
+    // A save completes while the disconnect is still out
+    api.put.mockResolvedValue({
+      _id: "p1",
+      key: "TP",
+      name: "Test Project",
+      canAdmin: true,
+      pmAvailable: true,
+      pm: { enabled: true, model: "", contextNotes: "saved text", links: [], dailyTurnCap: 0, mcpServers: [] },
+    });
+    await register.mock.calls.at(-1)![0].save();
+    await waitFor(() => expect(dirtyCount()).toBe(0));
+
+    landDisconnect({ ok: true });
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("OAuth connection removed", "success"));
+
+    // A baseline captured before the save would come back here and make every saved field dirty
+    expect(dirtyCount()).toBe(0);
   });
 });
