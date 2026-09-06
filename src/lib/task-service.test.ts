@@ -2453,6 +2453,59 @@ describe("createTask and a foreign sprint", () => {
 });
 
 /**
+ * BP-515. Sibling of BP-511's `assignee` fix, raised by that ticket's independent review:
+ * `createTask` and `updateTask` interpolated `category`/`status` into their refusal with no
+ * bound, and reached a model as a tool result the same way `noSuchAccount` does — the comment on
+ * that function says why it is sliced. The GET route's four refusals already slice to 64; these
+ * did not.
+ *
+ * Widened twice past what the ticket named, both times because the same interpolation exists a
+ * second place: `updateTask` carries an identical category/status pair the ticket did not quote,
+ * and `schemaValuesOrRefusal` — called by both writers — does the same to `priority` and
+ * `dueDate` (caught by this file's own independent review). Same root cause each time, fixed
+ * together rather than filed as near-duplicate tickets.
+ *
+ * `.not.toContain("y".repeat(65))` rather than a loose `error.length` bound: the review that
+ * found the widened scope also found that `toBeLessThan(500)` passes for a slice at 400, so it
+ * does not actually pin the 64 this ticket is about.
+ */
+describe("createTask and updateTask do not echo an unbounded value into their refusals", () => {
+  const board = { categories: [{ name: "bug" }], ...customBoard };
+  const UNBOUNDED = "y".repeat(5000);
+  const NOT_SLICED = "y".repeat(65);
+
+  beforeEach(() => {
+    findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+  });
+
+  describe.each([
+    ["category", "createTask", (v: unknown) => createTask("p1", "actor", { title: "x", category: v })],
+    ["status", "createTask", (v: unknown) => createTask("p1", "actor", { title: "x", status: v })],
+    ["category", "updateTask", (v: unknown) => updateTask("p1", "t1", { category: v }, "actor")],
+    ["status", "updateTask", (v: unknown) => updateTask("p1", "t1", { status: v }, "actor")],
+    ["priority", "createTask", (v: unknown) => createTask("p1", "actor", { title: "x", priority: v })],
+    ["priority", "updateTask", (v: unknown) => updateTask("p1", "t1", { priority: v }, "actor")],
+    ["dueDate", "createTask", (v: unknown) => createTask("p1", "actor", { title: "x", dueDate: v })],
+    ["dueDate", "updateTask", (v: unknown) => updateTask("p1", "t1", { dueDate: v }, "actor")],
+  ] as const)("%s, via %s", (_field, _writer, call) => {
+    it("bounds an unbounded value in its refusal", async () => {
+      const result = await call(UNBOUNDED);
+
+      expect(result).toMatchObject({ ok: false, status: 400 });
+      expect((result as { error: string }).error).not.toContain(NOT_SLICED);
+    });
+
+    // The control: a short invalid value still names itself, so the bound has not swallowed the
+    // information an honest caller needs to fix their request.
+    it("still names a short invalid value", async () => {
+      const result = await call("not-real");
+
+      expect(result).toMatchObject({ error: expect.stringContaining("not-real") });
+    });
+  });
+});
+
+/**
  * Choosing the agent chooses what runs on the operator's machine, under bypassPermissions, in
  * their own checkout. BP-345 held it to instance admins because, at the time, choosing one could
  * arm a machine belonging to somebody else. Since BP-358 a claim takes only what its own owner

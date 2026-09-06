@@ -480,10 +480,11 @@ function castsToDate(value: unknown): boolean {
  * Only the keys actually present are judged: an update writes what it names and nothing else.
  */
 function schemaValuesOrRefusal(values: Body): TaskServiceResult | null {
+  // Both refusals below are sliced: they reach a model as a tool result, same as noSuchAccount.
   if ("priority" in values && !PRIORITIES.includes(values.priority)) {
     return {
       ok: false,
-      error: `Invalid priority "${values.priority}" — must be one of: ${PRIORITIES.join(", ")}`,
+      error: `Invalid priority "${String(values.priority).slice(0, 64)}" — must be one of: ${PRIORITIES.join(", ")}`,
       status: 400,
     };
   }
@@ -492,7 +493,7 @@ function schemaValuesOrRefusal(values: Body): TaskServiceResult | null {
   // does an explicit one — refusing it here would be stricter than the schema this stands in for.
   const dueDate = values.dueDate;
   if ("dueDate" in values && dueDate !== null && dueDate !== "" && !castsToDate(dueDate)) {
-    return { ok: false, error: `Invalid due date "${dueDate}"`, status: 400 };
+    return { ok: false, error: `Invalid due date "${String(dueDate).slice(0, 64)}"`, status: 400 };
   }
 
   // Both go straight to the write, so a shape the cast throws on left the route as a 500 — and on
@@ -557,10 +558,11 @@ export async function createTask(
   const category =
     body.category ??
     (categoryNames.includes("user-story") ? "user-story" : categoryNames[0] ?? "user-story");
+  // Both refusals below are sliced: they reach a model as a tool result, same as noSuchAccount.
   if (categoryNames.length > 0 && !categoryNames.includes(category)) {
     return {
       ok: false,
-      error: `Invalid category "${category}" — project categories: ${categoryNames.join(", ")}`,
+      error: `Invalid category "${String(category).slice(0, 64)}" — project categories: ${categoryNames.join(", ")}`,
       status: 400,
     };
   }
@@ -570,7 +572,7 @@ export async function createTask(
   if (!columnIds.includes(status)) {
     return {
       ok: false,
-      error: `Invalid status "${status}" — project columns: ${columnIds.join(", ")}`,
+      error: `Invalid status "${String(status).slice(0, 64)}" — project columns: ${columnIds.join(", ")}`,
       status: 400,
     };
   }
@@ -1005,6 +1007,7 @@ export async function updateTask(
   // until the assignee this update leaves behind is known.
   if (updates.agent === "") updates.agent = null;
 
+  // Both refusals below are sliced: they reach a model as a tool result, same as noSuchAccount.
   if (updates.category !== undefined || updates.status !== undefined) {
     const proj = await Project.findById(projectId, "categories columns").lean();
     if (updates.category !== undefined) {
@@ -1012,7 +1015,7 @@ export async function updateTask(
       if (names.length > 0 && !names.includes(String(updates.category))) {
         return {
           ok: false,
-          error: `Invalid category "${updates.category}" — project categories: ${names.join(", ")}`,
+          error: `Invalid category "${String(updates.category).slice(0, 64)}" — project categories: ${names.join(", ")}`,
           status: 400,
         };
       }
@@ -1022,7 +1025,7 @@ export async function updateTask(
       if (!columnIds.includes(String(updates.status))) {
         return {
           ok: false,
-          error: `Invalid status "${updates.status}" — project columns: ${columnIds.join(", ")}`,
+          error: `Invalid status "${String(updates.status).slice(0, 64)}" — project columns: ${columnIds.join(", ")}`,
           status: 400,
         };
       }

@@ -23,6 +23,7 @@ export const GROUPS = {
     "task-recurrence.spec.ts",
     "task-filters.spec.ts",
     "assignee-writers.spec.ts",
+    "task-write-refusal-echo.spec.ts",
     "picker-stays-open.spec.ts",
   ],
   "task-fields": [
