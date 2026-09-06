@@ -138,12 +138,10 @@ test("changing worker policy without changing whether they run records nothing",
   await page.goto(SETTINGS);
   await page.getByRole("button", { name: "Workers", exact: true }).first().click();
 
-  // Any policy field does: the row has no label association, so it is found by the row it shares
-  // with its own text rather than by an accessible label
-  await page
-    .locator("xpath=//span[normalize-space()='Base branch']/..")
-    .getByRole("textbox")
-    .fill("develop");
+  // Any policy field does. Reached by its label since BP-510 gave these rows one — the xpath this
+  // replaces existed only because the text beside the input was a <span> with no `for`.
+  // `exact` because the reset button in the same row is named after the field too.
+  await page.getByLabel("Base branch", { exact: true }).fill("develop");
   await Promise.all([
     page.waitForResponse(
       (r) => r.url().includes("/api/projects/") && r.request().method() === "PUT"
