@@ -553,6 +553,47 @@ test.describe("sprints from the card menu", () => {
     await expect(page.getByRole("button", { name: "Select", exact: true })).toBeVisible();
   });
 
+  /**
+   * BP-528, continued. The unscoped test above cannot tell whether applySprintChange received
+   * the fulfilled ids or the rejected ones — an unscoped board renders identically either way.
+   * Scoped to the sprint the two disagree: only a task that actually left it may vanish.
+   */
+  test("on a board scoped to the sprint, only the task whose PUT actually landed leaves it", async ({
+    page,
+    request,
+  }) => {
+    await signIn(page);
+    await page.goto(scopedUrl);
+    await expect(page.getByRole("heading", { name: PROJECT_NAME })).toBeVisible();
+    await expect(page.locator(CARDS)).toHaveCount(2);
+    await recordToasts(page);
+
+    await select(page, [PLANNING_SPRINT_TASK_NUMBER, PLANNING_SPRINT_DONE_TASK_NUMBER]);
+    await page.route(`**/api/projects/*/tasks/${PLANNING_SPRINT_DONE_TASK_ID}`, (route) => {
+      if (route.request().method() !== "PUT") return route.continue();
+      return route.fulfill({ status: 500, body: "{}" });
+    });
+
+    const succeeded = taskWrite(page, "PUT", PLANNING_SPRINT_TASK_ID);
+    const failed = taskWrite(page, "PUT", PLANNING_SPRINT_DONE_TASK_ID);
+    const menu = await openMenuOn(page, PLANNING_SPRINT_DONE_TASK_NUMBER);
+    await menu.getByRole("button", { name: "Remove from sprint" }).click();
+    expect((await succeeded).status()).toBe(200);
+    expect((await failed).status()).toBe(500);
+
+    await expectToast(page, "Moved 1 of 2 to backlog");
+    // Tight on purpose: the board's own ten-second poll would eventually drop the succeeded
+    // card too, which would let a wrong id slip past this assertion unnoticed
+    await expect(card(page, PLANNING_SPRINT_TASK_NUMBER)).toHaveCount(0, { timeout: 1_000 });
+    await expect(card(page, PLANNING_SPRINT_DONE_TASK_NUMBER)).toBeVisible();
+
+    expect((await readTask(request, PLANNING_SPRINT_TASK_NUMBER)).body.sprint).toBeNull();
+    expect((await readTask(request, PLANNING_SPRINT_DONE_TASK_NUMBER)).body.sprint).toBe(
+      String(PLANNING_SPRINT_ID)
+    );
+    await expect(page.getByRole("button", { name: "Select", exact: true })).toBeVisible();
+  });
+
   test("on a board scoped to the sprint, a card removed from it leaves the board", async ({
     page,
     request,

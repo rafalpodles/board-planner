@@ -230,6 +230,9 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
       ? sprints.find((s) => s._id === sprintId)?.name ?? "sprint"
       : "backlog";
 
+    // No `held` branch here unlike the siblings above: updateTask only refuses on a run-held
+    // task when `status` changes (leavesColumn, task-service.ts), and this body only ever sends
+    // `sprint` — so that refusal is not reachable through this call.
     if (movedIds.length === ids.length) {
       toast(`Moved ${ids.length} task${ids.length === 1 ? "" : "s"} to ${target}`, "success");
     } else {
