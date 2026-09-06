@@ -72,8 +72,8 @@ async function dragFirstRowDown(
 
   // The press is retried because an arrow can still be swallowed while dnd-kit is between ticks,
   // and a lost keystroke is indistinguishable from a broken drag until the announcement names the
-  // row it is now over. Retried only while the row is still where it started, though: pressing
-  // again after a press that landed but announced slowly walks it past the target, and from the
+  // row it is now over. Retried only while the announcement still names the starting droppable,
+  // though: pressing again after a press that landed walks the row past the target, and from the
   // bottom of the list no further press can bring it back
   await expect(async () => {
     const over = await announced(page).textContent();

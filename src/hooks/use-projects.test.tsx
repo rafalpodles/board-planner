@@ -258,8 +258,7 @@ describe("useProjects overtaken requests", () => {
   // Nothing can be reordered before the first read lands, and letting it through would advance the
   // counter with no request behind it — leaving that read discarded and the shell loading for ever
   it("refuses to reorder a list it has not loaded yet", async () => {
-    let deliver: (value: unknown) => void = () => {};
-    api.get.mockReturnValueOnce(new Promise((resolve) => (deliver = resolve)));
+    const deliver = heldGet();
 
     renderProvider(["c", "a", "b"]);
     expect(screen.getByTestId("loading").textContent).toBe("true");

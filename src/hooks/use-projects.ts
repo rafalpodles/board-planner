@@ -32,8 +32,7 @@ export function useProjectsProvider(): ProjectsState {
   const appliedSeq = useRef(0);
 
   // A read carries the order of the moment it was answered, so one overtaken by a later read or by
-  // a reorder applies nothing — landing late it would undo them, which is how a drag came to revert
-  // itself on screen while the server kept it (BP-551)
+  // a reorder applies nothing rather than undoing it (BP-551)
   const reload = useCallback(async () => {
     const seq = ++appliedSeq.current;
     try {
