@@ -413,4 +413,43 @@ describe("SearchLayer", () => {
       screen.getByRole("link", { name: "See all results" }).getAttribute("href")
     ).toBe("/search?q=login%20bug");
   });
+  /**
+   * BP-577. A search that never answered was swallowed into an empty result, and the layer then
+   * said "No matches" — a claim about every task on the instance, on no evidence, with no toast.
+   */
+  describe("a search that fails", () => {
+    it("says so instead of reporting no matches, and offers Retry", async () => {
+      api.get.mockImplementation(() => Promise.reject(new Error("network")));
+      renderLayer();
+      await act(async () => void type("login"));
+
+      await waitFor(() => expect(screen.getByText("The search failed.")).toBeTruthy());
+      expect(screen.queryByText("No matches")).toBeNull();
+      expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+    });
+
+    it("searches again on Retry", async () => {
+      api.get
+        .mockImplementationOnce(() => Promise.reject(new Error("network")))
+        .mockImplementation(() => Promise.resolve([]));
+      renderLayer();
+      await act(async () => void type("login"));
+      await waitFor(() => expect(screen.getByText("The search failed.")).toBeTruthy());
+
+      await act(async () => {
+        screen.getByRole("button", { name: "Retry" }).click();
+      });
+
+      await waitFor(() => expect(screen.getByText("No matches")).toBeTruthy());
+    });
+
+    // Without this control the failure line could be rendering whenever nothing matched
+    it("still reports no matches when the search answers with none", async () => {
+      renderLayer();
+      await act(async () => void type("login"));
+
+      await waitFor(() => expect(screen.getByText("No matches")).toBeTruthy());
+      expect(screen.queryByText("The search failed.")).toBeNull();
+    });
+  });
 });

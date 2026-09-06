@@ -234,3 +234,39 @@ describe("referring to another task", () => {
     await waitFor(() => expect(screen.queryByText("TP-1")).toBeNull());
   });
 });
+
+/**
+ * BP-577. A failed read left the list at [] and the panel said "No comments yet" — a claim about
+ * the discussion on this task. The toast clears after three seconds; the sentence did not.
+ */
+describe("Comments when the read fails", () => {
+  it("says the read failed instead of claiming there are none", async () => {
+    api.get.mockImplementation(() => Promise.reject(new Error("network")));
+    render(<Comments projectId="TP" taskId="t1" />);
+
+    await waitFor(() => expect(screen.getByTestId("comments-error")).toBeTruthy());
+    expect(screen.queryByText("No comments yet")).toBeNull();
+  });
+
+  it("reads again on Retry", async () => {
+    api.get
+      .mockImplementationOnce(() => Promise.reject(new Error("network")))
+      .mockImplementation(() => Promise.resolve([comment]));
+    render(<Comments projectId="TP" taskId="t1" />);
+    await waitFor(() => expect(screen.getByTestId("comments-error")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => expect(screen.getByText("Kasia Nowak")).toBeTruthy());
+    expect(screen.queryByTestId("comments-error")).toBeNull();
+  });
+
+  // Without this control the failure branch could be rendering whenever the list is empty
+  it("still says there are none when the read answers with none", async () => {
+    serve([]);
+    render(<Comments projectId="TP" taskId="t1" />);
+
+    await waitFor(() => expect(screen.getByText("No comments yet")).toBeTruthy());
+    expect(screen.queryByTestId("comments-error")).toBeNull();
+  });
+});
