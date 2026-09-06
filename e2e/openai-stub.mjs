@@ -1,4 +1,4 @@
-import { createServer } from "node:http";
+import { readBody, serve } from "./stub-guard.mjs";
 
 /**
  * A stand-in for OpenAI, so AI task generation runs end to end without a model, a network call or
@@ -34,31 +34,33 @@ function json(res, body, status = 200) {
   res.end(payload);
 }
 
-const server = createServer((req, res) => {
-  if (req.url === "/health") {
-    res.writeHead(200, { "Content-Type": "text/plain" }).end("ok");
-    return;
-  }
+serve({
+  name: "openai stub",
+  port: PORT,
+  host: LOOPBACK,
+  handler: async (req, res) => {
+    if (req.url === "/health") {
+      res.writeHead(200, { "Content-Type": "text/plain" }).end("ok");
+      return;
+    }
 
-  if (req.url === "/last-request") {
-    json(res, lastRequest ?? {});
-    return;
-  }
+    if (req.url === "/last-request") {
+      json(res, lastRequest ?? {});
+      return;
+    }
 
-  if (req.url === "/reset") {
-    lastRequest = null;
-    json(res, { ok: true });
-    return;
-  }
+    if (req.url === "/reset") {
+      lastRequest = null;
+      json(res, { ok: true });
+      return;
+    }
 
-  if (!req.url?.endsWith("/chat/completions")) {
-    res.writeHead(404).end();
-    return;
-  }
+    if (!req.url?.endsWith("/chat/completions")) {
+      res.writeHead(404).end();
+      return;
+    }
 
-  let raw = "";
-  req.on("data", (chunk) => (raw += chunk));
-  req.on("end", () => {
+    const raw = await readBody(req);
     let request = {};
     try {
       request = JSON.parse(raw);
@@ -84,7 +86,5 @@ const server = createServer((req, res) => {
       choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content } }],
       usage: { prompt_tokens: system.length, completion_tokens: content.length, total_tokens: 0 },
     });
-  });
+  },
 });
-
-server.listen(PORT, LOOPBACK, () => console.log(`openai stub listening on ${PORT}`));

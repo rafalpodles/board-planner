@@ -1,5 +1,6 @@
 import { createServer as createControl } from "node:http";
 import { connect, createServer } from "node:net";
+import { guard, keepAlive } from "./stub-guard.mjs";
 
 /**
  * Sits between the dev server and MongoDB so a test can take the database away and give it back.
@@ -23,6 +24,10 @@ import { connect, createServer } from "node:net";
 // Loopback only, like the other stubs: on a machine several agents share, a control endpoint on
 // every interface would let anybody on the network take this run's database away
 const LOOPBACK = "127.0.0.1";
+
+// Named for the crash log, which is the only place this process speaks when something throws.
+const NAME = "mongo proxy";
+keepAlive(NAME);
 
 const PORT = Number(process.env.MONGO_PROXY_PORT ?? 3991);
 const CONTROL_PORT = Number(process.env.MONGO_PROXY_CONTROL_PORT ?? 3992);
@@ -74,7 +79,7 @@ function json(res, status, body) {
   res.end(payload);
 }
 
-const control = createControl((req, res) => {
+const control = createControl(guard(NAME, async (req, res) => {
   if (req.url === "/health") {
     res.writeHead(200, { "Content-Type": "text/plain" }).end("ok");
     return;
@@ -103,7 +108,7 @@ const control = createControl((req, res) => {
     return;
   }
   json(res, 404, { error: "unknown control" });
-});
+}));
 
 // The health check answers only once both are listening: a dev server started against a control
 // port that was up before the proxy port would fail its first query and read as an outage

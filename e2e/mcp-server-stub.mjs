@@ -1,4 +1,4 @@
-import { createServer } from "node:http";
+import { readBody, serve } from "./stub-guard.mjs";
 
 /**
  * An external MCP server the PM agent connects OUT to, which is the opposite direction from
@@ -24,17 +24,18 @@ const narrowTools = [
 
 const CATALOGUES = { wide: wideTools, narrow: narrowTools };
 
-const server = createServer((req, res) => {
-  if (req.url === "/health") {
-    res.writeHead(200, { "Content-Type": "text/plain" }).end("ok");
-    return;
-  }
+serve({
+  name: "mcp server stub",
+  port: PORT,
+  handler: async (req, res) => {
+    if (req.url === "/health") {
+      res.writeHead(200, { "Content-Type": "text/plain" }).end("ok");
+      return;
+    }
 
-  const which = req.url?.startsWith("/narrow") ? "narrow" : "wide";
+    const which = req.url?.startsWith("/narrow") ? "narrow" : "wide";
 
-  let raw = "";
-  req.on("data", (chunk) => (raw += chunk));
-  req.on("end", () => {
+    const raw = await readBody(req);
     let message = {};
     try {
       message = JSON.parse(raw);
@@ -68,7 +69,5 @@ const server = createServer((req, res) => {
 
     // notifications/initialized and anything else: acknowledged, nothing to say
     res.writeHead(202).end();
-  });
+  },
 });
-
-server.listen(PORT, "127.0.0.1", () => console.log(`mcp server stub on ${PORT}`));
