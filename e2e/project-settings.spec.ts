@@ -12,6 +12,7 @@ import {
   seed,
   seedSecondEscalationColumn,
   seedWebhookDeliveryOutcomes,
+  storedProjectColumns,
   stripStoredColumns,
 } from "./seed";
 import { signIn } from "./session";
@@ -68,7 +69,11 @@ interface StoredColumn {
   triggersPmReview: boolean;
 }
 
-/** The columns as the server holds them, which is the only reader that settles a save. */
+/**
+ * The board as the server answers it — `effectiveColumns`, the same view every reader gets,
+ * so for an ordinary board this is what is stored. Where the difference matters, read the
+ * document itself with `storedProjectColumns`.
+ */
 async function storedColumns(request: APIRequestContext): Promise<StoredColumn[]> {
   const response = await request.get(`/api/projects/${PROJECT_ID}/columns`, {
     headers: ADMIN_AUTH,
@@ -394,9 +399,9 @@ test.describe("Board · Columns", () => {
 
     await save(page, "Columns saved");
 
-    // `order` is the field, and neither reader here would notice it being destroyed: GET returns
-    // the array unsorted, so its sequence is incidental, and `effectiveColumns` sorts stably, so a
-    // column of zeroes keeps insertion order and the reload agrees with itself
+    // `order` is the field, and neither reader here would notice it being destroyed: both GET and
+    // the page sort by it through `effectiveColumns`, which sorts stably, so a column of zeroes
+    // keeps insertion order and the reload agrees with itself
     const stored = await storedColumns(request);
     expect([...stored].sort((a, b) => a.order - b.order).map((c) => c.id).slice(0, 3)).toEqual([
       "todo",
@@ -490,6 +495,11 @@ test.describe("Board · Columns", () => {
  * holding tasks is refused" above must keep passing unchanged. The premise assertion in the first
  * test is the other half — a `stripStoredColumns` that silently did nothing would otherwise make
  * both tests here pass by testing the control twice.
+ *
+ * GET on the same route answers through `effectiveColumns` too, so it cannot tell this board
+ * apart from one storing the seven — which is the point, and is what lets a caller that is not
+ * this app's own editor learn the ids to send back. So the assertions about what is *stored*
+ * read the document directly, with `storedProjectColumns`.
  */
 test.describe("Board · a board stored before its columns were", () => {
   test.beforeEach(stripStoredColumns);
@@ -498,8 +508,18 @@ test.describe("Board · a board stored before its columns were", () => {
     page,
     request,
   }) => {
-    // The premise: this board really is stored empty, and the editor shows the seven regardless
-    expect(await storedColumns(request), "the board still has its columns stored").toEqual([]);
+    // The premise: this board really is stored empty, while the API answers it the seven — the
+    // two readings the endpoint used to disagree about
+    expect(await storedProjectColumns(), "the board still has its columns stored").toEqual([]);
+    expect((await storedColumns(request)).map((c) => c.id)).toEqual([
+      "planned",
+      "todo",
+      "in_progress",
+      "in_review",
+      "needs_human_review",
+      "ready_to_test",
+      "done",
+    ]);
 
     await signIn(page);
     await openSection(page, "Board");
@@ -518,7 +538,7 @@ test.describe("Board · a board stored before its columns were", () => {
     await columnNames(page).nth(0).fill("Icebox");
     await save(page, "Columns saved");
 
-    const stored = [...(await storedColumns(request))].sort((a, b) => a.order - b.order);
+    const stored = await storedProjectColumns();
     expect(stored.map((c) => c.id)).toEqual([
       "planned",
       "todo",
@@ -530,16 +550,18 @@ test.describe("Board · a board stored before its columns were", () => {
     ]);
     expect(stored.find((c) => c.id === "planned")?.label).toBe("Icebox");
 
-    // The harm, where a person meets it: TP-4 stands in `todo`, and a column called `to_do` is
-    // one it is not in, so the card is on no board at all
+    // The harm, where a person meets it. Named by column and not merely "on the page": the
+    // board groups strictly by id (`Board.tsx`), so a stranded card renders nowhere — but the
+    // list view falls back to the raw status (`ListView.tsx`) and would show it, labelled `todo`,
+    // in a column that does not exist. Which of the two renders is a localStorage default this
+    // spec does not set, so `getByText` alone would be one preference away from vacuous.
     await page.goto(`/projects/${PROJECT_KEY}`);
-    await expect(page.getByText(FINISHED_TASK_TITLE)).toBeVisible();
+    await expect(
+      page.getByTestId("column-todo").getByText(FINISHED_TASK_TITLE)
+    ).toBeVisible();
   });
 
-  test("removing a column that still holds tasks is refused here too", async ({
-    page,
-    request,
-  }) => {
+  test("removing a column that still holds tasks is refused here too", async ({ page }) => {
     await signIn(page);
     await openSection(page, "Board");
 
@@ -550,8 +572,22 @@ test.describe("Board · a board stored before its columns were", () => {
       page.getByText(new RegExp(`still has tasks: ${FINISHED_TASK_KEY}(?![0-9])`))
     ).toBeVisible();
     // Refused, not partially applied — and on this board that means still stored empty
-    expect(await storedColumns(request)).toEqual([]);
+    expect(await storedProjectColumns()).toEqual([]);
     await expect(saveButton(page)).toBeVisible();
+  });
+
+  // The third decision. It read the effective board before this change too, so this pins
+  // behaviour rather than fixing it — but nothing held it there for a board of this shape, and
+  // all three now share one array, which is exactly the sort of thing a later edit unpicks.
+  test("and it still cannot be saved out of its Done column", async ({ page }) => {
+    await signIn(page);
+    await openSection(page, "Board");
+
+    await roleOf(page, "Done").selectOption("review");
+    await saveButton(page).click();
+
+    await expect(page.getByText(/needs a column meaning Done/)).toBeVisible();
+    expect(await storedProjectColumns()).toEqual([]);
   });
 });
 

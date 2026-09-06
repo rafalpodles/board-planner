@@ -33,7 +33,11 @@ export const GET = withProjectOwner(async (_request, { params }) => {
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
-  return NextResponse.json(project.columns || []);
+  // The same board the PUT below judges a save against. Answering the raw array here left a
+  // caller that is not this app's own editor unable to learn a legacy board's ids at all — no
+  // other endpoint carries them — so its only possible PUT described the seven by label, which
+  // the PUT reads as removing `todo` and adding `to_do` (BP-523).
+  return NextResponse.json(effectiveColumns(project.columns));
 });
 
 export const PUT = withProjectOwner(async (request, { params, user }) => {

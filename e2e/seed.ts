@@ -1847,6 +1847,13 @@ export async function deleteProjectRow(projectId: mongoose.Types.ObjectId) {
  * nothing anybody can see. That is the point: the difference is entirely in what the endpoint
  * reads.
  */
+export async function storedProjectColumns(): Promise<{ id: string; label: string }[]> {
+  const db = (await connect()).db!;
+  const row = await db.collection("projects").findOne({ _id: PROJECT_ID }, { projection: { columns: 1 } });
+  await mongoose.disconnect();
+  return (row?.columns ?? []) as { id: string; label: string }[];
+}
+
 export async function stripStoredColumns() {
   const db = (await connect()).db!;
   const result = await db
