@@ -30,16 +30,17 @@ vi.mock("@/lib/password-reset", () => ({ invalidateResetTokens }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/lib/security-mail", () => ({ notifyPasswordChanged, notifyAddressChanged }));
 vi.mock("bcryptjs", () => ({ default: { hash } }));
+const userFindByIdAndDelete = vi.fn();
 vi.mock("@/models/user", () => ({
   User: {
     findById: userFindById,
     countDocuments: userCountDocuments,
     exists: userExists,
-    findByIdAndDelete: vi.fn(),
+    findByIdAndDelete: userFindByIdAndDelete,
   },
 }));
 
-const { PUT } = await import("./route");
+const { PUT, DELETE } = await import("./route");
 const { resetRateLimits, lockoutKey, recordFailedAttempt, isRateLimited, ANONYMOUS_ACCOUNT_ATTEMPTS } =
   await import("@/lib/rate-limit");
 
@@ -438,5 +439,127 @@ describe("PUT /api/users/:id — an admin repoints the address", () => {
     await PUT(put({ email: "target@example.com" }), ctx());
 
     expect(notifyAddressChanged).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * BP-546 and BP-537. The handler nothing tested at all.
+ *
+ * The ids here are real hex because one of these tests is about their case. Mongo resolves a
+ * 24-character hex id case-insensitively, so `User.findById` answering with the same document for
+ * either spelling is not a convenience of the mock — it is what the database does, and it is the
+ * whole bug.
+ */
+describe("DELETE /api/users/:id", () => {
+  const ADMIN_HEX = "6a9d0f0b5d781bded2cb9759";
+  const TARGET_HEX = "6a9d0f0b5d781bded2cb975a";
+  const ADMIN_DOC = { _id: ADMIN_HEX, role: "admin", username: "rafal", kind: "human" };
+
+  const del = (id: string) =>
+    [
+      new Request(`http://x/api/users/${id}`, { method: "DELETE" }),
+      { params: Promise.resolve({ userId: id }) },
+    ] as const;
+
+  function person(overrides: Record<string, unknown> = {}) {
+    return { _id: TARGET_HEX, username: "target", role: "member", kind: "human", ...overrides };
+  }
+
+  beforeEach(() => {
+    getAuthUser.mockResolvedValue({ ...ADMIN_DOC, viaMachineCredential: false });
+    userCountDocuments.mockResolvedValue(2);
+    userFindByIdAndDelete.mockResolvedValue(person());
+  });
+
+  it("deletes an account and ends its sessions", async () => {
+    found(person());
+
+    const res = await DELETE(...del(TARGET_HEX));
+
+    expect(res.status).toBe(200);
+    expect(userFindByIdAndDelete).toHaveBeenCalled();
+    expect(revokeUserSessions).toHaveBeenCalled();
+  });
+
+  // The refusal its siblings on this route already make. Sharper here than for any of them: this is
+  // the one write that cannot be undone, and the only one an unattended credential could make.
+  it("refuses a machine credential", async () => {
+    getAuthUser.mockResolvedValue({ ...ADMIN_DOC, viaMachineCredential: true });
+    found(person());
+
+    const res = await DELETE(...del(TARGET_HEX));
+
+    expect(res.status).toBe(403);
+    expect(userFindByIdAndDelete).not.toHaveBeenCalled();
+    expect(revokeUserSessions).not.toHaveBeenCalled();
+  });
+
+  it("refuses the caller their own account", async () => {
+    found(person({ _id: ADMIN_HEX, role: "admin" }));
+
+    const res = await DELETE(...del(ADMIN_HEX));
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "Cannot delete yourself" });
+    expect(userFindByIdAndDelete).not.toHaveBeenCalled();
+  });
+
+  // BP-546. The same account, spelled the way BSON also accepts. Comparing the path segment let
+  // this through, and with no last-admin guard behind it the instance was left with no
+  // administrator and no way to make one.
+  it("refuses it in upper case too, because that is the same account", async () => {
+    found(person({ _id: ADMIN_HEX, role: "admin" }));
+
+    const res = await DELETE(...del(ADMIN_HEX.toUpperCase()));
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "Cannot delete yourself" });
+    expect(userFindByIdAndDelete).not.toHaveBeenCalled();
+  });
+
+  // The second lock on that door, and unreachable while the first one holds: an admin cannot be
+  // looking at the only admin unless they are looking at themselves. It is here because the first
+  // lock did not hold, and the state it leaves behind cannot be undone from the product at all.
+  it("refuses the last administrator", async () => {
+    found(person({ role: "admin" }));
+    userCountDocuments.mockResolvedValue(1);
+
+    const res = await DELETE(...del(TARGET_HEX));
+
+    expect(res.status).toBe(400);
+    expect(userFindByIdAndDelete).not.toHaveBeenCalled();
+  });
+
+  it("still deletes an admin while another one remains", async () => {
+    found(person({ role: "admin" }));
+    userCountDocuments.mockResolvedValue(2);
+
+    const res = await DELETE(...del(TARGET_HEX));
+
+    expect(res.status).toBe(200);
+    expect(userFindByIdAndDelete).toHaveBeenCalled();
+  });
+
+  // A machine's account is not a person. The Users list does not offer one, and deleting it takes
+  // the fleet's identity with it — every worker call then fails with "no identity yet".
+  it("refuses a machine account", async () => {
+    found(person({ kind: "machine" }));
+
+    const res = await DELETE(...del(TARGET_HEX));
+
+    expect(res.status).toBe(400);
+    expect(userFindByIdAndDelete).not.toHaveBeenCalled();
+  });
+
+  // Load first, refuse second: it is what makes a 404 mean the account is not there rather than
+  // "it was there a moment ago and has just gone".
+  it("answers 404 for an account that is not there, without deleting anything", async () => {
+    found(null);
+
+    const res = await DELETE(...del(TARGET_HEX));
+
+    expect(res.status).toBe(404);
+    expect(userFindByIdAndDelete).not.toHaveBeenCalled();
+    expect(revokeUserSessions).not.toHaveBeenCalled();
   });
 });
