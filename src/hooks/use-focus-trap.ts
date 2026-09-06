@@ -1,6 +1,6 @@
 "use client";
 
-import { RefObject, useEffect } from "react";
+import { RefObject, useEffect, useRef } from "react";
 import {
   cycleTabWithin,
   openLayerCount,
@@ -25,6 +25,12 @@ export function useFocusTrap({
   returnFocusTo,
   lockScroll = true,
 }: FocusTrapOptions) {
+  // BP-530: every caller passes an inline arrow, so a dep on it re-subscribes the keydown listener
+  // whenever another handler writes state during the same dispatch — and a listener added during a
+  // dispatch never sees that event. BP-522 is that bug one layer up
+  const onEscapeRef = useRef(onEscape);
+  onEscapeRef.current = onEscape;
+
   useEffect(() => {
     if (!active) return;
     const container = containerRef.current!;
@@ -56,7 +62,7 @@ export function useFocusTrap({
       const container = containerRef.current;
       if (!container || topmostLayer() !== container) return;
       if (e.key === "Escape") {
-        onEscape();
+        onEscapeRef.current();
         return;
       }
       if (e.key !== "Tab") return;
@@ -64,5 +70,5 @@ export function useFocusTrap({
     }
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
-  }, [active, containerRef, onEscape]);
+  }, [active, containerRef]);
 }
