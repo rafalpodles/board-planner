@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { readFileSync } from "fs";
+import { join } from "path";
 import { z } from "zod";
 import { registerPlannerTools } from "./tools";
 import { PlannerClient } from "./planner-client";
@@ -155,6 +157,28 @@ describe("update_task and the agent that runs it", () => {
 
     expect(update).toHaveBeenCalledWith("p1", "t1", { title: "renamed" });
     expect(agents).not.toHaveBeenCalled();
+  });
+
+  // BP-518: the description told an AI client this needed an instance admin, when since BP-358
+  // the choice belongs to whoever may edit the task — see task-service.ts's agentUsableOnProject.
+  it("tells the caller who may actually choose an agent, not the retired instance-admin rule", () => {
+    const description = registered().get("update_task")!.schema.shape.agent.description;
+
+    expect(description).not.toMatch(/instance admin/i);
+    expect(description).toMatch(/a project agent may be chosen by anyone who can edit the task/i);
+  });
+
+  // The standalone package ships its own copy of this description (mcp-server/src/tools.ts) and
+  // nothing else here reads it, so a fix applied to one side and not the other compiles clean and
+  // says nothing — the same drift api-client-drift.test.ts guards for the HTTP client pair.
+  it("keeps the standalone copy (mcp-server/src/tools.ts) in sync", () => {
+    const source = readFileSync(join(process.cwd(), "mcp-server/src/tools.ts"), "utf8");
+
+    // A shorter marker than the in-app assertion above: the concatenated string is one line here,
+    // but split across "+"-joined literals in the raw source, so a phrase spanning two of them
+    // would never match the file's text even though it matches fine once JS has joined them.
+    expect(source).not.toMatch(/instance admin/i);
+    expect(source).toMatch(/anyone who can edit the task/i);
   });
 });
 

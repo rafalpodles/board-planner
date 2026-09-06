@@ -207,7 +207,11 @@ export function registerTools(server: McpServer, client: ApiClient): void {
             "Which agent runs this task on a machine, by name. Choosing one is the hand-over: the " +
               "machine belonging to the task's assignee takes it and runs that agent, and only when " +
               "that person assigned it to themselves. Empty string means nobody — the default, and " +
-              "what a task somebody is doing by hand looks like. Instance admins only."
+              "what a task somebody is doing by hand looks like. A project agent may be chosen by " +
+              "anyone who can edit the task; a personal agent only by its owner, and only onto their " +
+              "own task (refused otherwise, dropped again when the task is handed on); a global " +
+              "agent isn't scoped to either, so the same anyone-who-can-edit-the-task rule covers " +
+              "it too; an agent with no steps is refused."
           ),
         acceptanceCriteria: z.string().optional().describe("Acceptance criteria (markdown checklist, converted to structured checklist items)"),
         fields: z
