@@ -1,7 +1,6 @@
 // @vitest-environment happy-dom
 import { StrictMode } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
 import { render, screen, cleanup, act } from "@testing-library/react";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { NewTaskModal } from "@/components/tasks/NewTaskModal";
@@ -447,6 +446,9 @@ describe("a write whose list refresh fails", () => {
   /**
    * The write landed; only the list behind the dialog did not. Reported as the write failing, the
    * dialog stayed open over a record that already existed, with Create inviting a second one.
+   *
+   * BP-577 landed the answer in the store itself — `load` catches and raises its own banner rather
+   * than rejecting into whatever awaited it — so this holds that seam from the dialog's side.
    */
   it("NewAgentDialog does not call a failed refresh a failed create", async () => {
     const onClose = vi.fn();
@@ -473,10 +475,6 @@ describe("a write whose list refresh fails", () => {
 
     expect(screen.queryByText("network down")).toBeNull();
     expect(onClose).toHaveBeenCalledTimes(1);
-    expect(toast).toHaveBeenCalledWith(
-      LIST_REFRESH_FAILED,
-      "error"
-    );
   });
 
   /**
@@ -508,6 +506,5 @@ describe("a write whose list refresh fails", () => {
       await expect(save!()).resolves.toBeUndefined();
     });
     expect(api.put).toHaveBeenCalledWith("/api/agents/a1", { composition });
-    expect(toast).toHaveBeenCalledWith(LIST_REFRESH_FAILED, "error");
   });
 });

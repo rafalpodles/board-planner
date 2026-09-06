@@ -2,9 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
-import { useToast } from "@/components/ui/Toast";
 import { AgentComposition, ApiAgent, ApiAgentBlock } from "@/types";
-import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
 
 export interface NewAgent {
   name: string;
@@ -25,7 +23,6 @@ export interface NewBlock {
 
 export function useStore() {
   const api = useApi();
-  const { toast } = useToast();
   const [agents, setAgents] = useState<ApiAgent[]>([]);
   const [blocks, setBlocks] = useState<ApiAgentBlock[]>([]);
   const [loading, setLoading] = useState(true);
@@ -63,18 +60,6 @@ export function useStore() {
     load();
   }, [load]);
 
-  // The refresh that follows a write, whose failure is not the write's failure. Under the same
-  // `await` as the POST, a blipped GET arrived at the dialog as the write's own error — the fetch's
-  // message under the fields, over a record the server had already made, with Create inviting a
-  // second one (BP-565).
-  const refreshAfterWrite = useCallback(async () => {
-    try {
-      await load();
-    } catch {
-      toast(LIST_REFRESH_FAILED, "error");
-    }
-  }, [load, toast]);
-
   return {
     loading,
     failed,
@@ -85,37 +70,37 @@ export function useStore() {
 
     addAgent: async (agent: NewAgent) => {
       await api.post("/api/agents", agent);
-      await refreshAfterWrite();
+      await load();
     },
 
     addBlock: async (block: NewBlock) => {
       await api.post("/api/agent-blocks", block);
-      await refreshAfterWrite();
+      await load();
     },
 
     saveComposition: async (agentId: string, composition: AgentComposition) => {
       await api.put(`/api/agents/${agentId}`, { composition });
-      await refreshAfterWrite();
+      await load();
     },
 
     updateBlock: async (blockId: string, patch: Partial<NewBlock>) => {
       await api.put(`/api/agent-blocks/${blockId}`, patch);
-      await refreshAfterWrite();
+      await load();
     },
 
     removeAgent: async (agentId: string) => {
       await api.del(`/api/agents/${agentId}`);
-      await refreshAfterWrite();
+      await load();
     },
 
     removeBlock: async (blockId: string) => {
       await api.del(`/api/agent-blocks/${blockId}`);
-      await refreshAfterWrite();
+      await load();
     },
 
     renameAgent: async (agentId: string, name: string, description: string) => {
       await api.put(`/api/agents/${agentId}`, { name, description });
-      await refreshAfterWrite();
+      await load();
     },
 
     reload: load,
