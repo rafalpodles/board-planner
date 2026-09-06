@@ -38,15 +38,42 @@ Self-hosted, single instance, no tenants. `docker compose up` and it is yours.
 ## The part nobody else ships
 
 Plenty of tools can now make a machine write code. The interesting problem is not that — it is
-everything around it: **who approved the work, what the machine was allowed to touch, what had to
-pass before anything landed, and where it stops and gives the work back.** That is the part Board
-Planner is actually about, and it is a first-class product surface rather than a webhook you wire
-up yourself.
+everything around it: **who proposed the work, who approved it, what the machine was allowed to
+touch, what had to pass before anything landed, and where it stops and gives the work back.** That
+is the part Board Planner is actually about, and it is a first-class product surface rather than a
+webhook you wire up yourself.
+
+Two agents, at the two ends of that arc: a **PM agent** that proposes and writes things down, and
+an **execution worker** that takes an approved task and does it. Neither decides anything you did
+not let it decide.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/pipeline-dark.svg">
   <img src="docs/images/pipeline.svg" alt="A run: claim, worktree, agent, gates, push, pull request — then a wall, because the review column is where it stops and hands the task back to you" width="100%">
 </picture>
+
+### It starts as a question, not a queue of tickets
+
+The **PM agent** is a project manager that lives in the project. It reads the board, notices what
+is stuck, duplicated or missing, and brings you the decision — rather than filing a pile of tickets
+nobody asked for. It is good at the work nobody enjoys: writing the acceptance criteria a task was
+created without, finding the duplicate, saying where a sprint actually stands.
+
+<img src="docs/images/pm-agent.png" alt="The PM agent thread: asked to write acceptance criteria for ORB-9 without moving it, it writes four, explains the one worth arguing about, and says it left the task where it was" width="100%">
+
+Two things about that screenshot are the point. **The badge under the reply is the action** — the
+message and the write are one record, so you can see a reply also changed `ORB-9` rather than
+merely talking about it. And **it left the task where it was**, because it was told to. Board
+reviews run with `change_status` and `create_task` withheld, so the autonomous path can tell you
+something is wrong without quietly reorganising your board overnight.
+
+It is off by default, per project, and metered rather than trusted: a daily cap on turns and an
+optional cap on tokens, both spent by autonomous turns as well as yours, and an instance
+administrator can lock it off for a project in a way project settings cannot override. Without
+`OPENROUTER_API_KEY` the pages say so and the feature stays inert.
+
+📖 [PM agent](https://board-planner.com/docs/ai/pm-agent/) ·
+[Autonomous board reviews](https://board-planner.com/docs/ai/autonomous-board-reviews/)
 
 ### You hand it over the way you would hand it to a person
 
@@ -356,6 +383,7 @@ on merge, so a page there is never behind the product.
 | --- | --- |
 | [What is Board Planner](https://board-planner.com/docs/getting-started/what-is-board-planner/) | The idea, who it is for, what it is not |
 | [Quick start](https://board-planner.com/docs/getting-started/quick-start/) | First project, first task, first agent |
+| [PM agent](https://board-planner.com/docs/ai/pm-agent/) | Turning it on, what it may change, the caps it spends against |
 | [Claude Code and MCP](https://board-planner.com/docs/ai/claude-code-and-mcp/) | The twelve tools, scoped tokens, the OAuth connector |
 | [Agents](https://board-planner.com/docs/ai/agents/) | Steps, gates, and what a run actually does |
 | [Execution workers](https://board-planner.com/docs/ai/execution-workers/) | Enrolling a machine, which tasks get picked up, how to stop one |
