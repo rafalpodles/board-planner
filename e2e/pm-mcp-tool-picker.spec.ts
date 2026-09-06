@@ -207,7 +207,46 @@ test.describe("choosing an MCP server's tools", () => {
     // wide is the only server left and still shows its own catalogue, not narrow's
     await expect(page.getByLabel("list_wide_thing_0 for wide")).toBeVisible();
     await expect(page.getByLabel("list_narrow_alpha for wide")).toHaveCount(0);
-    expect(await storedAllowlist("narrow")).toEqual([]);
+
+    // Load-bearing: `storedAllowlist("narrow")` would answer [] whether or not anything worked,
+    // because the row is gone. Ticking after the save proves the surviving picker writes its own
+    // server's names (BP-569 review 5).
+    await page.getByLabel("list_wide_thing_0 for wide").check();
+    const savedAgain = page.waitForResponse(
+      (r) => r.request().method() === "PUT" && r.url().endsWith(`/api/projects/${PROJECT_KEY}`)
+    );
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await savedAgain;
+    expect(await storedAllowlist("wide")).toEqual(["list_wide_thing_0"]);
+  });
+
+  /**
+   * `authToken` was part of the catalogue's identity while `pmDraftFrom` blanks it on every
+   * commit, so a bearer server's catalogue — and its whole contribution to the flood warning —
+   * disappeared at the moment Save was pressed (BP-569 review 5).
+   */
+  test("saving does not make a server's tools, or the warning, disappear", async ({ page }) => {
+    await connectServers([
+      server("wide", "/wide", { authType: "bearer", authToken: "" }),
+      server("narrow", "/narrow"),
+    ]);
+    await signIn(page, "admin");
+    await page.goto(SETTINGS_URL);
+
+    const warning = page.getByTestId("mcp-tool-budget-warning");
+    await expect(warning).toContainText("48 MCP tools");
+
+    // Any save at all, made from an unrelated edit
+    await page.getByLabel("Tool allowlist for narrow").fill("list_narrow_alpha");
+    const saved = page.waitForResponse(
+      (r) => r.request().method() === "PUT" && r.url().endsWith(`/api/projects/${PROJECT_KEY}`)
+    );
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await saved;
+
+    // wide still shows its own catalogue, and the warning still names it
+    await expect(page.getByLabel("list_wide_thing_0 for wide")).toBeVisible();
+    await expect(warning).toContainText("wide (45)");
   });
 
   test("changing a server's url drops the catalogue that described the old one", async ({ page }) => {
@@ -246,5 +285,35 @@ test.describe("choosing an MCP server's tools", () => {
     await page.getByLabel("list_wide_thing_0 for wide").check();
     await expect(warning).toBeHidden();
     await expect(page.getByLabel("list_wide_thing_1 for wide")).toBeVisible();
+  });
+
+  /**
+   * The warning tells you to narrow a server's tool list, and only an instance admin has that
+   * control on this screen. Shown to a project owner it is an instruction they cannot follow, and
+   * it costs a round of outbound requests to produce (BP-569 review 5).
+   */
+  test("a project owner is neither warned nor charged for the probe", async ({ page }) => {
+    await connectServers([server("wide", "/wide"), server("narrow", "/narrow")]);
+
+    const probes: string[] = [];
+    page.on("request", (r) => {
+      if (r.url().includes("/pm/mcp-test")) probes.push(r.url());
+    });
+
+    await signIn(page, "owner");
+    await page.goto(SETTINGS_URL);
+    await expect(page.getByText("MCP connections")).toBeVisible();
+
+    await expect(page.getByTestId("mcp-tool-budget-warning")).toHaveCount(0);
+    expect(probes).toEqual([]);
+  });
+
+  // The control: the same board, the same servers, seen by the person who can act on it
+  test("an instance admin is", async ({ page }) => {
+    await connectServers([server("wide", "/wide"), server("narrow", "/narrow")]);
+    await signIn(page, "admin");
+    await page.goto(SETTINGS_URL);
+
+    await expect(page.getByTestId("mcp-tool-budget-warning")).toContainText("48 MCP tools");
   });
 });

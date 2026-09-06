@@ -374,3 +374,84 @@ describe("a ticked tool the server does not offer", () => {
     expect(screen.getByText(/0 carried per turn/)).toBeTruthy();
   });
 });
+
+/**
+ * `aria-disabled` announces; the guard refuses. The pair below covers the cap branch of `blocked`,
+ * which had only its attribute asserted — so pointing `toggle` at `unreachable` instead of
+ * `blocked` reopened the lost-save defect with every test still green (BP-569 review 5).
+ */
+describe("at the cap", () => {
+  const many = Array.from({ length: 60 }, (_, i) => ({
+    name: `list_thing_${i}`,
+    description: `Thing ${i}`,
+    readSafe: true,
+  }));
+  const fifty = many.slice(0, 50).map((t) => t.name).join(", ");
+
+  function atCap(allowlist = fifty) {
+    const onChange = vi.fn();
+    render(
+      <McpToolPicker
+        rowName="wide"
+        catalog={many}
+        allowlist={allowlist}
+        allowWrites
+        onChange={onChange}
+      />
+    );
+    return onChange;
+  }
+
+  it("refuses a fifty-first tick rather than letting the save be rejected", () => {
+    const onChange = atCap();
+
+    fireEvent.click(screen.getByLabelText("list_thing_55 for wide"));
+
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  // The control: unticking is the way back under the cap and must still work
+  it("still allows unticking", () => {
+    const onChange = atCap();
+
+    fireEvent.click(screen.getByLabelText("list_thing_0 for wide"));
+
+    expect(onChange).toHaveBeenCalled();
+    expect(onChange.mock.calls[0][0]).not.toContain("list_thing_0,");
+  });
+
+  it("says why on the tool itself, not only above a list that scrolls", () => {
+    atCap();
+
+    const box = screen.getByLabelText("list_thing_55 for wide");
+    const described = document.getElementById(box.getAttribute("aria-describedby") ?? "");
+    expect(described?.textContent).toContain("50-tool limit");
+  });
+});
+
+describe("the tool name a sighted reader sees", () => {
+  it("is rendered, not only used as the accessible name", () => {
+    setup("", CATALOG);
+
+    // Every other assertion in this file reaches tools through the aria-label, so deleting the
+    // visible name broke nothing (BP-569 review 5)
+    expect(screen.getByText("notion-search", { selector: "code" })).toBeTruthy();
+  });
+});
+
+describe("two pickers on one screen", () => {
+  it("do not share description ids, even for the same tool name", () => {
+    render(
+      <McpToolPicker rowName="one" catalog={CATALOG} allowlist="" allowWrites onChange={vi.fn()} />
+    );
+    render(
+      <McpToolPicker rowName="two" catalog={CATALOG} allowlist="" allowWrites onChange={vi.fn()} />
+    );
+
+    const first = screen.getByLabelText("notion-search for one").getAttribute("aria-describedby");
+    const second = screen.getByLabelText("notion-search for two").getAttribute("aria-describedby");
+
+    expect(first).not.toBe(second);
+    expect(document.querySelectorAll(`[id="${first}"]`)).toHaveLength(1);
+  });
+});

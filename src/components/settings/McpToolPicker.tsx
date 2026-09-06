@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { estimateToolTokens, MAX_TOOL_ALLOWLIST } from "@/lib/pm/tool-budget";
@@ -79,7 +79,11 @@ export function McpToolPicker({ rowName, catalog, allowlist, allowWrites, onChan
   // De-duplicated, because `savePm` de-duplicates before posting: counting raw entries warned
   // that a save would be refused when it would in fact succeed (BP-569 review 3).
   const listed = new Set(parseAllowlist(allowlist)).size;
-  const fieldId = `mcp-tools-${rowName.replace(/\s+/g, "-")}`;
+  const slug = (value: string) => value.replace(/[^A-Za-z0-9_-]/g, "-");
+  // From useId, not from the row's name: the name is draft text with no format guarantee until
+  // save, and `distinctRowNames` synthesises "alerts (2)" — so two pickers on one screen produced
+  // colliding, invalid ids and the descriptions resolved to the wrong row (BP-569 review 5).
+  const fieldId = useId();
   const overCap = listed > MAX_TOOL_ALLOWLIST;
   const atCap = selected.size >= MAX_TOOL_ALLOWLIST;
 
@@ -103,12 +107,18 @@ export function McpToolPicker({ rowName, catalog, allowlist, allowWrites, onChan
       />
       {/* The checkbox cap cannot see a pasted list, and the validator refuses the whole PM save
           rather than this field, so the count has to be said here (BP-569 review 2) */}
-      {overCap && (
-        <p role="status" id={`${fieldId}-cap`} className="text-xs text-danger">
-          {listed} tools listed. {MAX_TOOL_ALLOWLIST} is the most one server can have, and saving
-          will be refused until you remove some.
-        </p>
-      )}
+      {/* Rendered always, with its text varying. A live region inserted at the same moment as its
+          content is unreliably announced; this is the pattern CopyTaskLink and error.tsx use. */}
+      <p
+        role="status"
+        aria-live="polite"
+        id={`${fieldId}-cap`}
+        className={overCap ? "text-xs text-danger" : "sr-only"}
+      >
+        {overCap
+          ? `${listed} tools listed. ${MAX_TOOL_ALLOWLIST} is the most one server can have, and saving will be refused until you remove some.`
+          : ""}
+      </p>
 
       {tools.length > 0 && (
         <div className="rounded-md border border-border">
@@ -137,12 +147,17 @@ export function McpToolPicker({ rowName, catalog, allowlist, allowWrites, onChan
             </div>
           </div>
 
-          {atCap && (
-            <p role="status" className="border-b border-border p-2 text-xs text-warning">
-              {MAX_TOOL_ALLOWLIST} tools is the most one server can list. Untick something to
-              choose another.
-            </p>
-          )}
+          <p
+            role="status"
+            aria-live="polite"
+            className={
+              atCap ? "border-b border-border p-2 text-xs text-warning" : "sr-only"
+            }
+          >
+            {atCap
+              ? `${MAX_TOOL_ALLOWLIST} tools is the most one server can list. Untick something to choose another.`
+              : ""}
+          </p>
 
           {tools.length > 8 && (
             <div className="p-2">
@@ -155,11 +170,8 @@ export function McpToolPicker({ rowName, catalog, allowlist, allowWrites, onChan
             </div>
           )}
 
-          <ul
-            role="group"
-            aria-label={`Tools offered by ${rowName}`}
-            className="max-h-64 overflow-y-auto p-2"
-          >
+          <div role="group" aria-label={`Tools offered by ${rowName}`}>
+          <ul className="max-h-64 overflow-y-auto p-2">
             {visible.map((tool) => {
               const unreachable = !tool.readSafe && !allowWrites;
               const blocked = unreachable || (atCap && !selected.has(tool.name));
@@ -167,7 +179,7 @@ export function McpToolPicker({ rowName, catalog, allowlist, allowWrites, onChan
                 <li key={tool.name}>
                   <label
                     className={`flex items-start gap-2 rounded p-1 ${
-                      unreachable ? "opacity-60" : "cursor-pointer hover:bg-bg-hover"
+                      blocked ? "opacity-60" : "cursor-pointer hover:bg-bg-hover"
                     }`}
                   >
                     <input
@@ -180,9 +192,9 @@ export function McpToolPicker({ rowName, catalog, allowlist, allowWrites, onChan
                       aria-disabled={blocked}
                       onChange={() => toggle(tool.name, blocked)}
                       aria-label={`${tool.name} for ${rowName}`}
-                      aria-describedby={`${fieldId}-${tool.name}`}
+                      aria-describedby={`${fieldId}-${slug(tool.name)}`}
                     />
-                    <span className="min-w-0" id={`${fieldId}-${tool.name}`}>
+                    <span className="min-w-0" id={`${fieldId}-${slug(tool.name)}`}>
                       <span className="flex flex-wrap items-center gap-1 text-sm">
                         <code className="text-xs">{tool.name}</code>
                         {!tool.readSafe && (
@@ -193,6 +205,13 @@ export function McpToolPicker({ rowName, catalog, allowlist, allowWrites, onChan
                         {unreachable && (
                           <span className="text-[10px] text-text-muted">
                             needs Allow writes
+                          </span>
+                        )}
+                        {/* The cap notice sits above a scrolling list, so with 50 ticked it is
+                            the one thing not on screen when this state exists (review 5) */}
+                        {blocked && !unreachable && (
+                          <span className="text-[10px] text-text-muted">
+                            at the {MAX_TOOL_ALLOWLIST}-tool limit
                           </span>
                         )}
                       </span>
@@ -208,6 +227,7 @@ export function McpToolPicker({ rowName, catalog, allowlist, allowWrites, onChan
               <li className="p-1 text-xs text-text-muted">No tool matches that filter.</li>
             )}
           </ul>
+          </div>
         </div>
       )}
     </div>
