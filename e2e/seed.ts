@@ -1836,3 +1836,54 @@ export async function deleteProjectRow(projectId: mongoose.Types.ObjectId) {
   await db.collection("projects").deleteOne({ _id: projectId });
   await mongoose.disconnect();
 }
+
+/**
+ * BP-469. A third board, for the one claim the projects list makes that a two-board fixture
+ * cannot separate: the order.
+ *
+ * `/api/projects` sorts `{ sortOrder: 1, createdAt: -1 }`. This board is seeded last, so it is the
+ * newest of the three, and carries sortOrder 0 like the seeded board — which puts it first under
+ * the real rule and second under a sort that only reads createdAt (IB is newer than TP and would
+ * come between them).
+ *
+ * It also carries a description and an icon of its own, where IB has neither, so the card's two
+ * conditional halves both have a case.
+ */
+export const NEWEST_PROJECT_ID = id("e2e00000000000000000c801");
+export const NEWEST_PROJECT_KEY = "NB";
+export const NEWEST_PROJECT_NAME = "E2E Newest Board";
+export const NEWEST_PROJECT_DESCRIPTION = "Seeded last, and dragged to the top";
+export const NEWEST_PROJECT_ICON = "🚀";
+
+export async function seedNewestProject() {
+  const db = (await connect()).db!;
+  const now = new Date();
+
+  await db.collection("projects").insertOne({
+    _id: NEWEST_PROJECT_ID,
+    name: NEWEST_PROJECT_NAME,
+    key: NEWEST_PROJECT_KEY,
+    description: NEWEST_PROJECT_DESCRIPTION,
+    icon: NEWEST_PROJECT_ICON,
+    categories: CATEGORIES,
+    columns: COLUMNS,
+    taskTemplates: [],
+    customFields: [],
+    webhooks: [],
+    notificationChannels: [],
+    worker: { enabled: false, policy: {}, policyOverrides: [] },
+    repositoryUrl: "",
+    githubRepo: "",
+    githubToken: "",
+    gitlabRepo: "",
+    gitlabHost: "https://gitlab.com",
+    gitlabToken: "",
+    taskCounter: 0,
+    sortOrder: 0,
+    createdBy: ADMIN_ID,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  await mongoose.disconnect();
+}
