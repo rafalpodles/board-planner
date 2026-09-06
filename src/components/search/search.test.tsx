@@ -229,7 +229,7 @@ describe("SearchLayer", () => {
 
   // Chrome and Firefox bind Ctrl/⌘K themselves, and Firefox binds / to its find bar. A press the
   // guard lets through unhandled would move focus out of the aria-modal dialog into the browser's
-  // own chrome — which no e2e can see, so this is the one place that pins it
+  // own chrome — which the headless e2e cannot see, so this is the one place that pins it
   it("eats the key under another open layer rather than passing it to the browser", () => {
     renderLayer(false);
     const unregister = registerLayer(document.createElement("div"));

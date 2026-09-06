@@ -209,19 +209,10 @@ test("? still closes the help after a reload has reordered the listeners", async
 const helpDialog = (page: Page) => page.getByRole("dialog", { name: "Keyboard Shortcuts" });
 
 const activeElementIsInsideTheHelp = (page: Page) =>
-  page.evaluate(() => {
-    const active = document.activeElement;
-    // The help by its accessible name, not the first dialog in DOM order — with Search leaked
-    // open over it, that would be whichever of the two rendered first
-    const dialog = Array.from(document.querySelectorAll('[role="dialog"]')).find((el) => {
-      const labelledBy = el.getAttribute("aria-labelledby");
-      return (
-        labelledBy !== null &&
-        document.getElementById(labelledBy)?.textContent?.trim() === "Keyboard Shortcuts"
-      );
-    });
-    return active !== null && dialog !== undefined && dialog.contains(active);
-  });
+  helpDialog(page).evaluate((el) => el.contains(document.activeElement));
+
+// Written by the same effect that registers a layer, so polling this is polling the registry
+const scrollLock = (page: Page) => page.evaluate(() => document.body.style.overflow);
 
 const collapseSidebar = (page: Page) =>
   page.getByRole("button", { name: /(Collapse|Expand) sidebar/ });
@@ -270,11 +261,11 @@ test("the page behind the help does not scroll, and scrolls again once it closes
 
   await page.keyboard.press("?");
   await expect(help(page)).toBeVisible();
-  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("hidden");
+  await expect.poll(() => scrollLock(page)).toBe("hidden");
 
   await page.keyboard.press("Escape");
   await expect(help(page)).toBeHidden();
-  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("");
+  await expect.poll(() => scrollLock(page)).toBe("");
 });
 
 test("Escape closes the help without also clearing the selection underneath it", async ({
@@ -458,14 +449,10 @@ test("a dialog that never overflows gets no extra tab stop", async ({ page }) =>
  * "Search" on the page, with focus on its input.
  *
  * What none of these can see: a press the guard swallows still has to be `preventDefault`ed, or
- * the browser's own Ctrl/⌘K binding takes focus out of the dialog into its chrome — invisible
- * from inside the page, so `search.test.tsx` pins that half.
+ * the browser's own Ctrl/⌘K binding takes focus out of the dialog into its chrome — which the
+ * headless Chromium here has none of, so `search.test.tsx` pins that half.
  */
 const searchLayer = (page: Page) => page.getByRole("dialog", { name: "Search" });
-
-// The effect that registers a layer sets this and the cleanup that unregisters it lifts it —
-// a task after the DOM has changed, either way
-const scrollLock = (page: Page) => page.evaluate(() => document.body.style.overflow);
 
 for (const [label, key] of [
   ["/", "/"],
