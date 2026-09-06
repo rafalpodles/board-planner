@@ -14,7 +14,7 @@ import { Switch } from "@/components/ui/Switch";
 import { firstReviewHour, reviewHoursOfDay } from "@/lib/pm/autonomy";
 import { SettingsCard, EmptyState, ListRow } from "@/components/settings/SettingsCard";
 import { useDirtyGroup } from "@/components/settings/settings-context";
-import { McpToolPicker, carriedTools } from "@/components/settings/McpToolPicker";
+import { McpToolPicker, carriedTools, parseAllowlist } from "@/components/settings/McpToolPicker";
 import type { McpCatalogTool } from "@/components/settings/McpToolPicker";
 import { assessToolBudget, describeToolBudget } from "@/lib/pm/tool-budget";
 import { catalogKey } from "@/lib/pm/catalog-key";
@@ -202,7 +202,19 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
         .map((s, i) => ({
           name: serverRowNames[i],
           enabled: s.enabled,
-          key: catalogKey(s),
+          // The allowlist and allowWrites belong in the de-dup key even though they are not part
+          // of a catalogue's identity: what is being summed is what each ROW contributes, and two
+          // rows sharing a host but narrowed differently contribute different numbers (BP-574).
+          // The allowlist parsed and ordered, not the raw string: `carriedTools` parses it, so
+          // "a, b" and "b,a" produce the same count and must produce the same key or one
+          // catalogue is counted twice (BP-574 review).
+          key: [
+            catalogKey(s),
+            // De-duplicated and ordered the way `carriedTools` reads it — it compares against a
+            // Set, so "a, b" and "a, a, b" contribute the same count and must share a key
+            [...new Set(parseAllowlist(s.toolAllowlist))].sort().join(","),
+            s.allowWrites,
+          ].join("|"),
           // The RAW catalogue, the same list the picker's own counter uses, so the two cannot
           // print different numbers for one server
           count: transient[catalogKey(s)]?.catalog
@@ -210,8 +222,12 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
             : 0,
         }))
         // Two draft rows can share an identity while one of them is still being typed, and they
-        // then share one catalogue — counting both reported it twice (BP-569 review 5)
-        .filter((s, i, all) => s.enabled && all.findIndex((o) => o.key === s.key) === i),
+        // then share one catalogue — counting both reported it twice (BP-569 review 5). The search
+        // is over ENABLED rows only: landing on a disabled twin dropped the enabled row's whole
+        // contribution, and the flood warning with it (BP-574).
+        .filter(
+          (s, i, all) => s.enabled && all.findIndex((o) => o.enabled && o.key === s.key) === i
+        ),
       undefined,
       // A server nobody could reach contributes an unknown number, so the total is a floor
       enabledServers.some((s) => !transient[catalogKey(s)]?.catalog)
@@ -219,6 +235,18 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
   );
 
   function updateServer(index: number, patch: Partial<McpServerDraft>) {
+    const before = servers[index];
+    // `catalogKey` reduces the token to whether one exists, so rotating a stored token to another
+    // one does not move the key and the catalogue found with the old credential would stay on
+    // screen — a narrower token then sees fewer tools than the ticks claim (BP-574).
+    // A stored token OR one typed but not yet saved: the unsaved case is the same defect, and
+    // restricting to `hasAuthToken` excluded it. No exemption for emptying the field: erasing a
+    // token that was typed and tested falls back to the STORED one, which is a different
+    // credential from the one the catalogue was discovered with (BP-574 review 2).
+    const hadToken = before.hasAuthToken || Boolean(before.authToken);
+    if ("authToken" in patch && hadToken && patch.authToken !== before.authToken) {
+      setTransientAt(catalogKey(before), { catalog: undefined, testResult: "" });
+    }
     draft.set(
       "mcpServers",
       servers.map((s, i) => (i === index ? { ...s, ...patch } : s))
@@ -383,17 +411,41 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
   }
 
   async function disconnectOauth(index: number) {
+    const row = servers[index];
+    const name = row.name.trim();
     try {
-      await api.post(`/api/projects/${projectId}/pm/mcp-oauth/disconnect`, {
-        name: servers[index].name.trim(),
-      });
-      // The connection is gone on the server, so this must not be a dirty edit Discard can rewind
-      // — and `discoverMcpTools` refuses an oauth server with no token, so the catalogue on screen
-      // now describes a turn that would carry nothing from it (BP-569 review 5).
-      const cleared = servers.map((s, i) =>
-        i === index ? { ...s, oauthStatus: "unconfigured" } : s
-      );
-      draft.commit({ ...draft.value, mcpServers: cleared });
+      await api.post(`/api/projects/${projectId}/pm/mcp-oauth/disconnect`, { name });
+      // The connection is gone on the server, so this must not be a dirty edit Discard can rewind.
+      // `rebase`, not `commit`: commit moves the baseline to whatever it is given, and giving it
+      // the whole live draft adopted every unsaved edit in the section as saved — the Save bar
+      // vanished with nothing sent (BP-574). Matched by name rather than by index, because value
+      // and baseline hold different rows once one has been added or removed.
+      // Both writes are updaters, never the arrays captured at click time: this awaits a network
+      // round trip, and rewinding to a click-time copy would swallow anything typed during it —
+      // the same data loss one round trip narrower — or roll back a save that landed meanwhile
+      // (BP-574 review).
+      //
+      // The value is matched by OBJECT IDENTITY. An index captured before the await is the very
+      // staleness these updaters exist to remove — a row removed during the flight shifts it onto
+      // a neighbour, and the disconnect is then stamped on a server that is still connected while
+      // the one that was disconnected keeps offering Disconnect. `map`/`filter` preserve untouched
+      // row references, so identity survives a reorder and cannot be forged by another row being
+      // typed. If a save landed meanwhile the reference is gone and nothing is stamped, which is
+      // the safe direction: that save already re-read the row from the server (BP-574 review 2).
+      draft.setValue((prev) => ({
+        ...prev,
+        mcpServers: prev.mcpServers.map((s) =>
+          s === row ? { ...s, oauthStatus: "unconfigured" } : s
+        ),
+      }));
+      draft.rebase((prev) => ({
+        ...prev,
+        mcpServers: prev.mcpServers.map((s) =>
+          s.name.trim() === name ? { ...s, oauthStatus: "unconfigured" } : s
+        ),
+      }));
+      // `discoverMcpTools` refuses an oauth server with no token, so the catalogue on screen now
+      // describes a turn that would carry nothing from it
       setTransientAt(catalogKey(servers[index]), { catalog: undefined, testResult: "" });
       toast("OAuth connection removed", "success");
     } catch (err) {
