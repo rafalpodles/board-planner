@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { PmAgentSection } from "./PmAgentSection";
 import { SettingsProvider } from "@/components/settings/settings-context";
 import { ApiProject } from "@/types";
@@ -58,9 +58,14 @@ function project(over: Partial<ApiProject> = {}): ApiProject {
   } as ApiProject;
 }
 
+const register = vi.fn();
+
+/** What the Save bar has been told: the newest registration's dirty-field count. */
+const dirtyCount = () => register.mock.calls.at(-1)?.[0]?.count;
+
 function renderSection(isAdmin: boolean, over: Partial<ApiProject> = {}) {
   return render(
-    <SettingsProvider register={vi.fn()} unregister={vi.fn()}>
+    <SettingsProvider register={register} unregister={vi.fn()}>
       <PmAgentSection
         projectId="p1"
         project={project(over)}
@@ -74,6 +79,7 @@ function renderSection(isAdmin: boolean, over: Partial<ApiProject> = {}) {
 }
 
 beforeEach(() => {
+  register.mockClear();
   api.post.mockReset();
   api.put.mockReset();
   toast.mockReset();
@@ -198,5 +204,121 @@ describe("the turn-cap hint", () => {
     renderSection(true, { pm: { ...project().pm!, ...withZone(undefined) } });
 
     expect(screen.getByText(/Resets at midnight in Europe\/Warsaw/)).toBeTruthy();
+  });
+});
+
+/**
+ * BP-574. Disconnect committed the WHOLE live draft, and `useDraft.commit` moves the baseline as
+ * well as the value — so every unsaved edit in the PM section was adopted as saved. Nothing had
+ * been sent: the Save bar disappeared, the typed text stayed on screen looking saved, and Discard
+ * could no longer rewind it because the baseline was now the edits.
+ */
+describe("disconnecting an OAuth server", () => {
+  const notes = () => screen.getByLabelText(/Project context/i);
+
+  it("leaves an unrelated unsaved edit dirty and still on screen", async () => {
+    renderSection(true);
+    api.post.mockResolvedValue({ ok: true });
+
+    fireEvent.change(notes(), { target: { value: "something the admin typed" } });
+    expect(dirtyCount()).toBe(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect notion" }));
+
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("OAuth connection removed", "success"));
+    expect(dirtyCount()).toBe(1);
+    expect((notes() as HTMLTextAreaElement).value).toBe("something the admin typed");
+  });
+
+  /**
+   * The other half, and the reason the broken line was written: the connection is already gone on
+   * the server, so the status must not be a dirty edit Discard can undo.
+   */
+  it("does not itself make the form dirty", async () => {
+    renderSection(true);
+    api.post.mockResolvedValue({ ok: true });
+
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect notion" }));
+
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("OAuth connection removed", "success"));
+    expect(dirtyCount()).toBe(0);
+  });
+
+  // The control: a refused disconnect changes nothing at all
+  it("leaves the row alone when the server refuses", async () => {
+    renderSection(true);
+    api.post.mockRejectedValue(new Error("nope"));
+
+    fireEvent.change(notes(), { target: { value: "typed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect notion" }));
+
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("nope", "error"));
+    expect(dirtyCount()).toBe(1);
+    expect(screen.getByRole("button", { name: "Disconnect notion" })).toBeTruthy();
+  });
+});
+
+/**
+ * BP-574. The budget's de-duplication searched the unfiltered row list, so a disabled row sharing
+ * an identity with an enabled one made the enabled row's contribution vanish — and with it the
+ * flood warning, which is the whole point of the feature.
+ */
+describe("the flood warning's arithmetic", () => {
+  const twins = (first: Partial<Record<string, unknown>>, second: Partial<Record<string, unknown>>) =>
+    ({
+      pm: {
+        enabled: true,
+        model: "",
+        contextNotes: "",
+        links: [],
+        dailyTurnCap: 0,
+        mcpServers: [
+          {
+            name: "notion",
+            url: "https://mcp.notion.example/mcp",
+            authType: "none",
+            allowWrites: true,
+            toolAllowlist: [],
+            hasAuthToken: false,
+            ...first,
+          },
+          {
+            name: "notion",
+            url: "https://mcp.notion.example/mcp",
+            authType: "none",
+            allowWrites: true,
+            toolAllowlist: [],
+            hasAuthToken: false,
+            ...second,
+          },
+        ],
+      },
+    }) as unknown as Partial<ApiProject>;
+
+  const tools = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ name: `list_thing_${i}`, description: "d", readSafe: true }));
+
+  async function warningAfterProbe(over: Partial<ApiProject>) {
+    api.post.mockResolvedValue({ count: 45, tools: tools(45) });
+    renderSection(true, over);
+    await waitFor(() => expect(api.post).toHaveBeenCalled());
+    return screen.queryByTestId("mcp-tool-budget-warning");
+  }
+
+  it("is not silenced by a disabled row that shares an enabled row's identity", async () => {
+    const warning = await warningAfterProbe(twins({ enabled: false }, { enabled: true }));
+
+    await waitFor(() => expect(screen.getByTestId("mcp-tool-budget-warning")).toBeTruthy());
+    expect(warning ?? screen.getByTestId("mcp-tool-budget-warning")).toBeTruthy();
+  });
+
+  // The control: two ENABLED twins really do share one catalogue and must be counted once, which
+  // is what the de-duplication was added for
+  it("counts one catalogue once when two enabled rows share it", async () => {
+    await warningAfterProbe(twins({ enabled: true }, { enabled: true }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("mcp-tool-budget-warning").textContent).toContain("45 MCP tools")
+    );
   });
 });
