@@ -185,3 +185,43 @@ describe("the cap the validator enforces", () => {
     expect((screen.getByLabelText("list_thing_1 for wide") as HTMLInputElement).disabled).toBe(false);
   });
 });
+
+/**
+ * The checkbox cap cannot see a list that was pasted, and `validatePmConfig` refuses the WHOLE PM
+ * save rather than this one field — so an admin pasting sixty names loses every unrelated edit on
+ * the screen to a toast that does not name the cause (BP-569 review 2).
+ */
+describe("a hand-typed list over the cap", () => {
+  const sixty = Array.from({ length: 60 }, (_, i) => `list_thing_${i}`).join(", ");
+
+  it("says so before Save is pressed", () => {
+    setup(sixty, null);
+
+    expect(screen.getByText(/60 tools listed/)).toBeTruthy();
+    expect(screen.getByText(/50 is the most one server can have/)).toBeTruthy();
+  });
+
+  // The control: a list within the cap says nothing
+  it("stays quiet at the cap itself", () => {
+    setup(Array.from({ length: 50 }, (_, i) => `list_thing_${i}`).join(", "), null);
+
+    expect(screen.queryByText(/tools listed/)).toBeNull();
+  });
+});
+
+/**
+ * `discoverMcpTools` keeps a name offered twice as two tools under a `_2` suffix, so counting the
+ * de-duplicated render list under-reports what the turn actually carries (BP-569 review 2).
+ */
+describe("a duplicated name", () => {
+  const twice = [...CATALOG, { name: "notion-search", description: "again", readSafe: true }];
+
+  it("is rendered once but counted twice, because the turn carries it twice", () => {
+    render(
+      <McpToolPicker rowName="notion" catalog={twice} allowlist="" allowWrites onChange={vi.fn()} />
+    );
+
+    expect(screen.getAllByLabelText("notion-search for notion")).toHaveLength(1);
+    expect(screen.getByText(/4 carried per turn/)).toBeTruthy();
+  });
+});

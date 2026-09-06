@@ -90,7 +90,12 @@ describe("a server that contributes nothing", () => {
     expect(describeToolBudget(verdict)).not.toContain("jira");
   });
 
-  it("does not tip an otherwise fine project over the budget", () => {
-    expect(assessToolBudget([{ name: "a", count: 40 }, { name: "b", count: 0 }]).over).toBe(false);
+  // Not "adding a zero does not change the total" — that was true before this filter existed and
+  // could never have failed (BP-569 review 2). What the filter decides is the blame list.
+  it("leaves a project with nothing but empty servers with no verdict to give", () => {
+    const verdict = assessToolBudget([{ name: "a", count: 0 }, { name: "b", count: 0 }]);
+
+    expect(verdict.heaviest).toEqual([]);
+    expect(describeToolBudget(verdict)).toBe("");
   });
 });

@@ -71,7 +71,10 @@ export function McpToolPicker({ rowName, catalog, allowlist, allowWrites, onChan
     );
   }, [tools, filter]);
 
-  const carried = carriedTools(tools, allowlist, allowWrites);
+  // The raw catalogue, not the de-duplicated render list: `discoverMcpTools` keeps a name offered
+  // twice as two tools, so counting the de-duplicated list under-reports what the turn carries.
+  const carried = carriedTools(catalog, allowlist, allowWrites);
+  const overCap = parseAllowlist(allowlist).length > MAX_TOOL_ALLOWLIST;
   const atCap = selected.size >= MAX_TOOL_ALLOWLIST;
 
   function toggle(name: string) {
@@ -89,6 +92,14 @@ export function McpToolPicker({ rowName, catalog, allowlist, allowWrites, onChan
         onChange={(e) => onChange(e.target.value)}
         placeholder="Tool allowlist, comma-separated (empty = all)"
       />
+      {/* The checkbox cap cannot see a pasted list, and the validator refuses the whole PM save
+          rather than this field, so the count has to be said here (BP-569 review 2) */}
+      {overCap && (
+        <p className="text-xs text-danger">
+          {parseAllowlist(allowlist).length} tools listed. {MAX_TOOL_ALLOWLIST} is the most one
+          server can have, and saving will be refused until you remove some.
+        </p>
+      )}
 
       {tools.length > 0 && (
         <div className="rounded-md border border-border">

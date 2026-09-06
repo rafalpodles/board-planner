@@ -1,4 +1,4 @@
-import { McpToolDef } from "./mcp-client";
+import type { McpToolDef } from "./mcp-client";
 
 const READ_SAFE_NAME_RE = /^(search|list|get|read|fetch|query|describe|find)/i;
 /**

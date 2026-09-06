@@ -113,6 +113,11 @@ test.describe("choosing an MCP server's tools", () => {
       }, { timeout: 30_000 })
       .toBeGreaterThan(0);
 
+    // The turn must be FINISHED before this test ends, not merely started. Returning while it runs
+    // leaves the next spec's seed() emptying collections underneath a live turn, and the turn lock
+    // held — which surfaces as an unrelated pm-chat test failing on a 409 it did not expect.
+    await expect(page.getByText("Hi.", { exact: true })).toBeVisible({ timeout: 30_000 });
+
     // The narrowed server contributed exactly what was ticked
     expect(offered.filter((n) => n.includes("narrow")).sort()).toEqual([
       "mcp_narrow_list_narrow_alpha",
@@ -134,12 +139,46 @@ test.describe("choosing an MCP server's tools", () => {
     await signIn(page, "admin");
     await page.goto(SETTINGS_URL);
 
+    // Both probes must have landed before the removal, or wide's answer arriving afterwards is
+    // itself the race this test is about and the failure would be indistinguishable
     await expect(page.getByLabel("list_narrow_alpha for narrow")).toBeVisible();
+    await expect(page.getByLabel("list_wide_thing_0 for wide")).toBeVisible();
+
     await page.getByRole("button", { name: "Remove narrow" }).click();
 
-    // wide is now the only row, and it must be showing its OWN tools
+    // wide is now the only row, and it must still be showing its OWN tools — asserting only that
+    // narrow's are absent would pass against an empty picker, which is a different bug
     await expect(page.getByLabel("list_wide_thing_0 for wide")).toBeVisible();
     await expect(page.getByLabel("list_narrow_alpha for wide")).toHaveCount(0);
+  });
+
+  /**
+   * A test-connection answering after its row was removed used to write its catalogue and green
+   * success line onto whichever row had taken that array index (BP-569 review 2).
+   */
+  test("a test that answers after its row is gone lands on nothing", async ({ page }) => {
+    await connectServers([server("narrow", "/narrow"), server("wide", "/wide")]);
+    await signIn(page, "admin");
+    await page.goto(SETTINGS_URL);
+    await expect(page.getByLabel("list_wide_thing_0 for wide")).toBeVisible();
+
+    // Hold narrow's answer, ask for it, then remove the row while it is in flight
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route("**/pm/mcp-test", async (route) => {
+      if (route.request().postDataJSON()?.name === "narrow") await held;
+      await route.continue();
+    });
+
+    await testButton(page, "narrow").click();
+    await page.getByRole("button", { name: "Remove narrow" }).click();
+    release();
+
+    // wide is the only row left and keeps its own tools and its own Test button
+    await expect(page.getByLabel("list_wide_thing_0 for wide")).toBeVisible();
+    await expect(page.getByLabel("list_narrow_alpha for wide")).toHaveCount(0);
+    await expect(testButton(page, "wide")).toBeEnabled();
+    await expect(page.getByText(/Connected — 3 tools offered/)).toHaveCount(0);
   });
 
   test("changing a server's url drops the catalogue that described the old one", async ({ page }) => {
@@ -173,8 +212,10 @@ test.describe("choosing an MCP server's tools", () => {
     await expect(warning).toContainText("wide (45)");
 
     // The control: narrowing the offender clears the warning, so it is keyed on the count rather
-    // than on merely having servers
+    // than on merely having servers. The catalogue must still be on screen — `toBeHidden` is also
+    // satisfied by a warning that vanished because the count fell to zero (BP-569 review 2).
     await page.getByLabel("list_wide_thing_0 for wide").check();
     await expect(warning).toBeHidden();
+    await expect(page.getByLabel("list_wide_thing_1 for wide")).toBeVisible();
   });
 });
