@@ -4,6 +4,7 @@ import { render, screen, cleanup, act, waitFor } from "@testing-library/react";
 import { matchProjects, toHits, groupOf, sortByGroup } from "./use-search";
 import { SearchLayer } from "./SearchLayer";
 import { ApiProject, ApiTask } from "@/types";
+import { openLayerCount, registerLayer } from "@/lib/focus-trap";
 
 function project(over: Partial<ApiProject> & { _id: string; key: string }): ApiProject {
   return { name: `Project ${over.key}`, icon: "📋", ...over } as ApiProject;
@@ -186,6 +187,64 @@ describe("SearchLayer", () => {
     editable.remove();
 
     expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  // BP-560: a dialog moves focus onto its own container DIV, which no typing-target check sees.
+  // The guard is the layer registry, and it applies on the way in only — see the next test
+  it("does not open over another open layer, and does again once that layer is gone", () => {
+    const { onOpen } = renderLayer(false);
+    const unregister = registerLayer(document.createElement("div"));
+    try {
+      act(() => {
+        document.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true })
+        );
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "/", bubbles: true }));
+      });
+    } finally {
+      unregister();
+    }
+    expect(onOpen).not.toHaveBeenCalled();
+
+    act(() => {
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true })
+      );
+    });
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  // The open palette is a layer of its own, so a guard on the count alone would leave ⌘K
+  // unable to close it
+  it("⌘K still closes the palette, which is an open layer itself", () => {
+    const { onClose } = renderLayer(true);
+    expect(openLayerCount()).toBe(1);
+    act(() => {
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true })
+      );
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  // Chrome and Firefox bind Ctrl/⌘K themselves, and Firefox binds / to its find bar. A press the
+  // guard lets through unhandled would move focus out of the aria-modal dialog into the browser's
+  // own chrome — which the headless e2e cannot see, so this is the one place that pins it
+  it("eats the key under another open layer rather than passing it to the browser", () => {
+    renderLayer(false);
+    const unregister = registerLayer(document.createElement("div"));
+    const presses = [
+      new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true, cancelable: true }),
+      new KeyboardEvent("keydown", { key: "/", bubbles: true, cancelable: true }),
+    ];
+    try {
+      act(() => {
+        for (const press of presses) document.dispatchEvent(press);
+      });
+    } finally {
+      unregister();
+    }
+    expect(presses.map((press) => press.defaultPrevented)).toEqual([true, true]);
   });
 
   it("asks for a longer query before it searches", () => {
