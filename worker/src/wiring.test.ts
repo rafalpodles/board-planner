@@ -1217,6 +1217,37 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         }
       });
 
+      /**
+       * And it is only the poisoned checkout. Every test above proves the quarantine reaches far
+       * enough — siblings on the same path, a second poisoned path — and none of them proved it
+       * stops there: quarantining every bound checkout on the machine the moment one is poisoned
+       * left the whole suite green. A machine with two repositories would go silent on both, and
+       * the second one is not compromised.
+       */
+      it("leaves a clean checkout on the same machine claimable", async () => {
+        const run = await runOneTask(undefined, undefined, {
+          repos: [REPO, OTHER_REPO],
+          assignments: [
+            { project: "p1", remote: REMOTE },
+            { project: "p2", remote: OTHER_REMOTE },
+          ],
+          scopedConfig: { [REPO]: PLANTED },
+          tasks: [CLAIMED, { ...CLAIMED, projectId: "p2", taskId: "t2" }],
+          passes: 2,
+        });
+
+        const projects = run.localConfig?.().projects ?? [];
+        expect(projects.find((project) => project.project === "p1")?.blocked).toContain(
+          "filter.z.smudge"
+        );
+        expect(
+          projects.find((project) => project.project === "p2")?.blocked,
+          "the clean checkout was quarantined along with the poisoned one"
+        ).toBe("");
+        // And not only on the screen: it is still claimed for.
+        expect(run.api.claim.mock.calls.map((call) => call[0])).toContain("p2");
+      });
+
       // And it is per checkout rather than per machine: a second poisoned repository is quarantined
       // on its own, so "the first one wins" cannot pass for this.
       it("quarantines a second poisoned checkout too", async () => {
@@ -1343,6 +1374,24 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
           projects.find((project) => project.project === "p1")?.blocked,
           "the sibling was blocked too, so the refusal above is not the only thing at work"
         ).toBe("");
+      });
+
+      // Once per checkout, not once per pass. The map's early return is the only thing making it
+      // so, and an operator reading stderr for the reason a machine went quiet should find one
+      // line rather than a line every poll interval for as long as the worker runs.
+      it("says it once, however many passes go by", async () => {
+        const run = await runOneTask(undefined, undefined, {
+          scopedConfig: PLANTED,
+          tasks: [CLAIMED, CLAIMED],
+          passes: 3,
+          clockJumpOnSleepMs: 60_000,
+        });
+
+        const quarantineLines = run.logError.mock.calls
+          .map((call) => String(call[0]))
+          .filter((line) => line.startsWith("quarantining "));
+        expect(run.rebinds, "no rebind happened, so this proves nothing").toBeGreaterThan(1);
+        expect(quarantineLines).toHaveLength(1);
       });
 
       it("says it in the worker's own log too, with the finding and what an operator has to do", async () => {
