@@ -72,8 +72,11 @@ export function useOpenTask() {
     (href: string) => {
       const here = projectRefFromPathname(pathname);
       const there = projectRefFromPathname(href);
-      // A key against an id is the same board spelled two ways, and canonicalisation settles it
-      // a moment later; only two names that are both keys can disagree meaningfully
+      // An id against a key cannot be told from two different boards, so a disagreement takes the
+      // heavier way out. That costs a needless document load on the four routes which keep an
+      // ObjectId in the address — /sprints, /dashboard, /settings, /pm, the ones `useCanonicalUrl`
+      // does not rewrite — and it is the safe direction: the other way round would push a
+      // genuinely cross-board task into the modal of the board being left, which is the bug.
       const anotherBoard = !!here && !!there && here.toLowerCase() !== there.toLowerCase();
 
       if (isTaskPath(href) && (fromTaskPage || anotherBoard)) window.location.assign(href);

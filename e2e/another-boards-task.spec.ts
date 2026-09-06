@@ -46,13 +46,14 @@ test("a hit on another board opens that board's task, not this board's", async (
   await expect(page).toHaveURL(
     new RegExp(`/projects/${OTHER_PROJECT_KEY}/tasks/${OTHER_HIT_NUMBER}$`)
   );
+  // First, because this is the line the navigation layer has to earn: as its own page, not an
+  // overlay on the board being left. Left further down it never fires — the modal's own guard
+  // draws the right task, but TP's board stays underneath with TP-1's card on it, so the title
+  // assertions below go red first and say nothing about which layer failed.
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.getByLabel("Task title")).toHaveValue(OTHER_HIT_TITLE);
   await expect(page.getByText(HELD_TASK_TITLE)).toHaveCount(0);
   await expect(page.getByText(OTHER_HIT_KEY).first()).toBeVisible();
-  // As its own page, not an overlay on the board being left: the intercepting route belongs to
-  // that board, and this task does not. This is the assertion the navigation itself has to earn —
-  // the modal's own guard would satisfy every line above it.
-  await expect(page.getByRole("dialog")).toHaveCount(0);
 });
 
 test("a hit on this board still opens as the modal it always did", async ({ page }) => {
