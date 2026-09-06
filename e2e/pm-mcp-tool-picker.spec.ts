@@ -123,6 +123,41 @@ test.describe("choosing an MCP server's tools", () => {
     expect(offered.filter((n) => n.startsWith("mcp_wide_")).length).toBe(45);
   });
 
+  /**
+   * `transient` is keyed by array position. Removing a row slid every later row onto the previous
+   * row's catalogue, so the picker under one server listed another's tools and an allowlist saved
+   * from them matched nothing at turn time — the "ticked on screen, denied by the agent" outcome
+   * this change exists to prevent (BP-569 review).
+   */
+  test("removing a server does not slide its catalogue onto the next one", async ({ page }) => {
+    await connectServers([server("narrow", "/narrow"), server("wide", "/wide")]);
+    await signIn(page, "admin");
+    await page.goto(SETTINGS_URL);
+
+    await expect(page.getByLabel("list_narrow_alpha for narrow")).toBeVisible();
+    await page.getByRole("button", { name: "Remove narrow" }).click();
+
+    // wide is now the only row, and it must be showing its OWN tools
+    await expect(page.getByLabel("list_wide_thing_0 for wide")).toBeVisible();
+    await expect(page.getByLabel("list_narrow_alpha for wide")).toHaveCount(0);
+  });
+
+  test("changing a server's url drops the catalogue that described the old one", async ({ page }) => {
+    await connectServers([server("narrow", "/narrow")]);
+    await signIn(page, "admin");
+    await page.goto(SETTINGS_URL);
+
+    await expect(page.getByLabel("list_narrow_alpha for narrow")).toBeVisible();
+    await page.getByLabel("URL for narrow").fill(`${MCP_SERVER_STUB_URL}/wide`);
+
+    // The old catalogue is gone rather than left describing a host no longer addressed
+    await expect(page.getByLabel("list_narrow_alpha for narrow")).toHaveCount(0);
+
+    // The control: testing again repopulates it, with the new host's tools
+    await testButton(page, "narrow").click();
+    await expect(page.getByLabel("list_wide_thing_0 for narrow")).toBeVisible();
+  });
+
   test("warns when the connected servers flood every call, naming who is responsible", async ({
     page,
   }) => {
@@ -130,9 +165,8 @@ test.describe("choosing an MCP server's tools", () => {
     await signIn(page, "admin");
     await page.goto(SETTINGS_URL);
 
-    await testButton(page, "wide").click();
-    await testButton(page, "narrow").click();
-
+    // No Test connection click: the catalogues are fetched when the screen opens, or the warning
+    // would be invisible to exactly the operator whose project is already flooded.
     // Not getByRole("status"): dnd-kit mounts its own live region with that role on this page
     const warning = page.getByTestId("mcp-tool-budget-warning");
     await expect(warning).toContainText("48 MCP tools");

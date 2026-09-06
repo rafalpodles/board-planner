@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
-import { estimateToolTokens } from "@/lib/pm/tool-budget";
+import { estimateToolTokens, MAX_TOOL_ALLOWLIST } from "@/lib/pm/tool-budget";
 
 export interface McpCatalogTool {
   name: string;
@@ -15,6 +15,7 @@ interface Props {
   rowName: string;
   catalog?: McpCatalogTool[];
   allowlist: string;
+  allowWrites: boolean;
   onChange: (value: string) => void;
 }
 
@@ -26,34 +27,59 @@ export function parseAllowlist(value: string): string[] {
 }
 
 /**
+ * What a turn will actually carry from one server: an empty allowlist means every tool, and a
+ * server without `allowWrites` silently drops its mutating tools at discovery. Both callers of
+ * this — the picker's own counter and the settings banner — have to agree with `discoverMcpTools`
+ * or they describe a turn that does not happen (BP-569 review).
+ */
+export function carriedTools(
+  catalog: McpCatalogTool[] | undefined,
+  allowlist: string,
+  allowWrites: boolean
+): string[] {
+  const reachable = (catalog ?? []).filter((t) => allowWrites || t.readSafe);
+  const ticked = parseAllowlist(allowlist);
+  if (ticked.length === 0) return reachable.map((t) => t.name);
+  const byName = new Set(reachable.map((t) => t.name));
+  // A name typed by hand against a server that was never tested has no catalogue to check, so it
+  // counts — refusing it would make the free-text fallback read as zero.
+  return catalog ? ticked.filter((name) => byName.has(name)) : ticked;
+}
+
+/**
  * Picking tools used to mean typing their names into a bare text field, which only works if you
  * already know the catalogue — and "Test connection" answered with 86 names on one line and no
  * descriptions (BP-569). The stored shape is unchanged: a comma-separated list, so an allowlist
  * written before this still loads and can still be edited by hand when the server is unreachable.
  */
-export function McpToolPicker({ rowName, catalog, allowlist, onChange }: Props) {
+export function McpToolPicker({ rowName, catalog, allowlist, allowWrites, onChange }: Props) {
   const [filter, setFilter] = useState("");
   const selected = useMemo(() => new Set(parseAllowlist(allowlist)), [allowlist]);
 
+  // First name wins. A server offering the same name twice would otherwise share one React key,
+  // one label and one checkbox between two rows, so ticking either flipped both.
+  const tools = useMemo(() => {
+    const seen = new Set<string>();
+    return (catalog ?? []).filter((t) => !seen.has(t.name) && seen.add(t.name));
+  }, [catalog]);
+
   const visible = useMemo(() => {
-    if (!catalog) return [];
     const needle = filter.trim().toLowerCase();
-    if (!needle) return catalog;
-    return catalog.filter(
+    if (!needle) return tools;
+    return tools.filter(
       (t) => t.name.toLowerCase().includes(needle) || t.description.toLowerCase().includes(needle)
     );
-  }, [catalog, filter]);
+  }, [tools, filter]);
+
+  const carried = carriedTools(tools, allowlist, allowWrites);
+  const atCap = selected.size >= MAX_TOOL_ALLOWLIST;
 
   function toggle(name: string) {
     const next = new Set(selected);
     if (next.has(name)) next.delete(name);
-    else next.add(name);
+    else if (!atCap) next.add(name);
     onChange([...next].join(", "));
   }
-
-  // An empty allowlist means every tool the server offers, so the count shown has to be the
-  // catalogue size — reading it as zero is exactly the misunderstanding that let 86 through.
-  const effectiveCount = selected.size > 0 ? selected.size : (catalog?.length ?? 0);
 
   return (
     <div className="flex flex-col gap-2">
@@ -64,29 +90,37 @@ export function McpToolPicker({ rowName, catalog, allowlist, onChange }: Props) 
         placeholder="Tool allowlist, comma-separated (empty = all)"
       />
 
-      {catalog && catalog.length > 0 && (
+      {tools.length > 0 && (
         <div className="rounded-md border border-border">
           <div className="flex flex-wrap items-center gap-2 border-b border-border p-2">
             <span className="text-xs text-text-muted">
               {selected.size > 0
-                ? `${selected.size} of ${catalog.length} selected`
-                : `All ${catalog.length} tools — none ticked`}
-              {" · roughly "}
-              {estimateToolTokens(effectiveCount).toLocaleString()} tokens per model call
+                ? `${selected.size} of ${tools.length} ticked`
+                : `Nothing ticked, so all ${tools.length} tools are sent`}
+              {` · ${carried.length} carried per turn, roughly ${estimateToolTokens(carried.length)} tokens per model call`}
             </span>
             <div className="ml-auto flex gap-2">
-              <Button
-                variant="secondary"
-                size="sm"
-                aria-label={`Clear tool selection for ${rowName}`}
-                onClick={() => onChange("")}
-              >
-                Clear
-              </Button>
+              {selected.size > 0 && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  aria-label={`Use every tool from ${rowName}`}
+                  onClick={() => onChange("")}
+                >
+                  Use all tools
+                </Button>
+              )}
             </div>
           </div>
 
-          {catalog.length > 8 && (
+          {atCap && (
+            <p className="border-b border-border p-2 text-xs text-warning">
+              {MAX_TOOL_ALLOWLIST} tools is the most one server can list. Untick something to
+              choose another.
+            </p>
+          )}
+
+          {tools.length > 8 && (
             <div className="p-2">
               <Input
                 aria-label={`Filter tools for ${rowName}`}
@@ -98,32 +132,45 @@ export function McpToolPicker({ rowName, catalog, allowlist, onChange }: Props) 
           )}
 
           <ul className="max-h-64 overflow-y-auto p-2">
-            {visible.map((tool) => (
-              <li key={tool.name}>
-                <label className="flex cursor-pointer items-start gap-2 rounded p-1 hover:bg-bg-hover">
-                  <input
-                    type="checkbox"
-                    className="mt-1"
-                    checked={selected.has(tool.name)}
-                    onChange={() => toggle(tool.name)}
-                    aria-label={`${tool.name} for ${rowName}`}
-                  />
-                  <span className="min-w-0">
-                    <span className="flex flex-wrap items-center gap-1 text-sm">
-                      <code className="text-xs">{tool.name}</code>
-                      {!tool.readSafe && (
-                        <span className="rounded border border-warning px-1 text-[10px] uppercase text-warning">
-                          writes
-                        </span>
+            {visible.map((tool) => {
+              const unreachable = !tool.readSafe && !allowWrites;
+              return (
+                <li key={tool.name}>
+                  <label
+                    className={`flex items-start gap-2 rounded p-1 ${
+                      unreachable ? "opacity-60" : "cursor-pointer hover:bg-bg-hover"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      className="mt-1"
+                      checked={selected.has(tool.name)}
+                      disabled={unreachable || (atCap && !selected.has(tool.name))}
+                      onChange={() => toggle(tool.name)}
+                      aria-label={`${tool.name} for ${rowName}`}
+                    />
+                    <span className="min-w-0">
+                      <span className="flex flex-wrap items-center gap-1 text-sm">
+                        <code className="text-xs">{tool.name}</code>
+                        {!tool.readSafe && (
+                          <span className="rounded border border-warning px-1 text-[10px] uppercase text-warning">
+                            writes
+                          </span>
+                        )}
+                        {unreachable && (
+                          <span className="text-[10px] text-text-muted">
+                            needs Allow writes
+                          </span>
+                        )}
+                      </span>
+                      {tool.description && (
+                        <span className="block text-xs text-text-muted">{tool.description}</span>
                       )}
                     </span>
-                    {tool.description && (
-                      <span className="block text-xs text-text-muted">{tool.description}</span>
-                    )}
-                  </span>
-                </label>
-              </li>
-            ))}
+                  </label>
+                </li>
+              );
+            })}
             {visible.length === 0 && (
               <li className="p-1 text-xs text-text-muted">No tool matches that filter.</li>
             )}

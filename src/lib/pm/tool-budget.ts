@@ -15,6 +15,13 @@
 export const MCP_TOOL_BUDGET = 40;
 
 /**
+ * Ceiling on one server's stored allowlist. Lives here rather than in `config.ts` so the picker
+ * can stop at the same number the validator refuses at, instead of letting an admin tick 51 tools
+ * and lose the whole PM save to a 400 (BP-569 review).
+ */
+export const MAX_TOOL_ALLOWLIST = 50;
+
+/**
  * Rough tokens one tool definition adds to every call of a turn. From the same BP-569 measurement:
  * 86 tools cost 45-68k per call, 13 cost 18,747 including system prompt and history. It is an
  * order of magnitude, not an invoice, and it is labelled as such wherever it is shown.
@@ -41,12 +48,15 @@ export function assessToolBudget(
   servers: ServerToolCount[],
   budget: number = MCP_TOOL_BUDGET
 ): ToolBudgetVerdict {
-  const total = servers.reduce((sum, s) => sum + s.count, 0);
+  // A server contributing nothing is not responsible for a flood, and naming it in the blame list
+  // was the difference between the UI's count and the agent's (BP-569 review).
+  const contributing = servers.filter((s) => s.count > 0);
+  const total = contributing.reduce((sum, s) => sum + s.count, 0);
   return {
     budget,
     total,
     over: total > budget,
-    heaviest: [...servers].sort((a, b) => b.count - a.count),
+    heaviest: [...contributing].sort((a, b) => b.count - a.count),
   };
 }
 

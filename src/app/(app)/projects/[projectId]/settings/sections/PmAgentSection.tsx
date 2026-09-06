@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { isValidTimezone } from "@/lib/time";
 import { useDraft } from "@/hooks/use-draft";
@@ -14,7 +14,7 @@ import { Switch } from "@/components/ui/Switch";
 import { firstReviewHour, reviewHoursOfDay } from "@/lib/pm/autonomy";
 import { SettingsCard, EmptyState, ListRow } from "@/components/settings/SettingsCard";
 import { useDirtyGroup } from "@/components/settings/settings-context";
-import { McpToolPicker, parseAllowlist } from "@/components/settings/McpToolPicker";
+import { McpToolPicker, carriedTools } from "@/components/settings/McpToolPicker";
 import type { McpCatalogTool } from "@/components/settings/McpToolPicker";
 import { assessToolBudget, describeToolBudget } from "@/lib/pm/tool-budget";
 import { distinctRowNames } from "@/lib/row-names";
@@ -175,31 +175,55 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
     setTransient((prev) => ({ ...prev, [index]: { ...prev[index], ...patch } }));
   }
 
-  // Counted per enabled server the way a turn counts it: the ticked names when there are any,
-  // and otherwise everything the server offered — which is only knowable once Test connection has
-  // run, so a server nobody tested contributes nothing rather than a guess.
+  // Counted the way `discoverMcpTools` counts: ticked names when there are any, otherwise the
+  // whole catalogue, and never a tool a server without `allowWrites` will drop anyway. A server
+  // nobody has tested contributes nothing rather than a guess.
   const budgetWarning = describeToolBudget(
     assessToolBudget(
       servers
         // Mapped before filtering: `transient` is keyed by a server's position in the unfiltered
         // list, so narrowing first would read another row's catalogue.
-        .map((s, i) => {
-          const ticked = parseAllowlist(s.toolAllowlist).length;
-          return {
-            name: s.name || "(unnamed)",
-            enabled: s.enabled,
-            count: ticked || transient[i]?.catalog?.length || 0,
-          };
-        })
-        .filter((s) => s.enabled && s.count > 0)
+        .map((s, i) => ({
+          name: serverRowNames[i],
+          enabled: s.enabled,
+          count: transient[i]?.catalog
+            ? carriedTools(transient[i]?.catalog, s.toolAllowlist, s.allowWrites).length
+            : 0,
+        }))
+        .filter((s) => s.enabled)
     )
   );
 
+  // Which server a catalogue came from is decided by these four fields. Changing any of them
+  // leaves the tools on screen describing a host that is no longer addressed, and ticking them
+  // writes an allowlist that matches nothing at turn time (BP-569 review).
+  const CATALOG_IDENTITY: (keyof McpServerDraft)[] = ["url", "name", "authType", "authToken"];
+
   function updateServer(index: number, patch: Partial<McpServerDraft>) {
+    const before = servers[index];
+    if (CATALOG_IDENTITY.some((key) => key in patch && patch[key] !== before[key])) {
+      setTransientAt(index, { catalog: undefined, testResult: "" });
+    }
     draft.set(
       "mcpServers",
       servers.map((s, i) => (i === index ? { ...s, ...patch } : s))
     );
+  }
+
+  // `transient` is keyed by array position, so removing a row would otherwise slide every later
+  // row onto the catalogue of the one before it — the picker under one server listing another
+  // server's tools, and an allowlist saved from them matching nothing (BP-569 review).
+  function removeServer(index: number) {
+    draft.set("mcpServers", servers.filter((_, i) => i !== index));
+    setTransient((prev) => {
+      const next: Record<number, McpTransient> = {};
+      for (const [key, value] of Object.entries(prev)) {
+        const i = Number(key);
+        if (i < index) next[i] = value;
+        else if (i > index) next[i - 1] = value;
+      }
+      return next;
+    });
   }
 
   async function savePm(options?: { silent?: boolean }): Promise<boolean> {
@@ -261,6 +285,40 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
     { id: "pm-agent", section: "pm", label: "PM agent", count: draft.count },
     { save: async () => void (await savePm()), discard: draft.discard }
   );
+
+  /**
+   * Catalogue sizes for the servers already connected, fetched once when the screen opens.
+   *
+   * Without this the flood warning is invisible to exactly the operator who needs it: the project
+   * that motivated BP-569 had two servers, empty allowlists and 86 tools, and would have shown
+   * nothing at all until somebody thought to press Test connection on each row. Silent by design —
+   * a server that is down is the Test button's story to tell, not a banner on page load.
+   */
+  const probed = useRef(false);
+  useEffect(() => {
+    // Keyed on the SAVED servers, never on the draft. Watching the draft fires a discovery request
+    // per keystroke while a url is being typed, and — worse — silently re-fills a catalogue the
+    // edit was supposed to invalidate, so a stale list is indistinguishable from a fresh one.
+    if (!project.canAdmin || probed.current) return;
+    const saved = project.pm?.mcpServers ?? [];
+    if (saved.length === 0) return;
+    probed.current = true;
+    saved.forEach((server, index) => {
+      if (!server.enabled || !server.url?.trim()) return;
+      void (async () => {
+        try {
+          const res = await api.post(`/api/projects/${projectId}/pm/mcp-test`, {
+            name: server.name.trim(),
+            url: server.url.trim(),
+            authType: server.authType,
+          });
+          setTransientAt(index, { catalog: res?.tools ?? [] });
+        } catch {
+          // A server that is down is the Test button's story to tell, not a banner on page load
+        }
+      })();
+    });
+  }, [api, projectId, project]);
 
   async function testServer(index: number) {
     const server = servers[index];
@@ -599,9 +657,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                     />
                     <button
                       type="button"
-                      onClick={() =>
-                        draft.set("mcpServers", servers.filter((_, idx) => idx !== i))
-                      }
+                      onClick={() => removeServer(i)}
                       className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded text-danger hover:opacity-80 sm:h-6 sm:w-auto sm:px-1"
                       aria-label={`Remove ${rowName}`}
                     >
@@ -710,6 +766,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                     rowName={rowName}
                     catalog={transient[i]?.catalog}
                     allowlist={server.toolAllowlist}
+                    allowWrites={server.allowWrites}
                     onChange={(value) => updateServer(i, { toolAllowlist: value })}
                   />
                 )}
