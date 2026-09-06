@@ -14,6 +14,7 @@ import { Switch } from "@/components/ui/Switch";
 import { firstReviewHour, reviewHoursOfDay } from "@/lib/pm/autonomy";
 import { SettingsCard, EmptyState, ListRow } from "@/components/settings/SettingsCard";
 import { useDirtyGroup } from "@/components/settings/settings-context";
+import { distinctRowNames } from "@/lib/row-names";
 import { SectionProps } from "./types";
 
 interface McpServerDraft {
@@ -119,6 +120,12 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
   const [newLinkUrl, setNewLinkUrl] = useState("");
 
   const servers = draft.value.mcpServers;
+  // What each server row calls itself to a screen reader. `config.ts` refuses a duplicate name at
+  // save time, but the DRAFT being typed into has no such guard — an admin naming a second server
+  // the same as an existing one puts two rows on screen sharing a name before either save fires.
+  const serverRowNames = distinctRowNames(
+    servers.map((s, i) => s.name || `Server ${i + 1}`)
+  );
   /**
    * The same two refusals `validatePmConfig` gives, asked here so they reach the field rather
    * than arriving as a toast after the save — with the draft still dirty and nothing saying which
@@ -538,8 +545,9 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
           <div className="space-y-3">
             {servers.map((server, i) => {
               // Every control in the row is named through this one value, so a reader with three
-              // servers hears which of them they are on rather than the same word three times
-              const rowName = server.name || `Server ${i + 1}`;
+              // servers hears which of them they are on rather than the same word three times.
+              // Disambiguated across the whole list — see serverRowNames above.
+              const rowName = serverRowNames[i];
               return (
               <div key={i} className="space-y-2 rounded-lg border border-border p-3">
                 {isAdmin ? (

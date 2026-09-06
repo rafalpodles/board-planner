@@ -42,12 +42,19 @@ import { signIn } from "./session";
  * The reset button, whose visible text does not change, keeps `set · reset` at the front of its
  * name and satisfies both.
  *
- * **What this does not cover.** The per-server `Enabled` and `Allow writes` switches still
- * announce identically across rows. `Switch` takes its name from its visible label and offers no
- * way to add the row's name without either changing what is on screen or widening the component,
- * so they were left alone — and `namelessControls` cannot see them either, since they are named,
- * just not apart. Asserted as the known limit in the last test, so the day somebody fixes them
- * this spec goes red and gets updated rather than silently over-claiming.
+ * **What this does not cover, on the surfaces it touches.** The per-server `Enabled` and `Allow
+ * writes` switches still announce identically across rows. `Switch` takes its name from its
+ * visible label and offers no way to add the row's name without either changing what is on
+ * screen or widening the component, so they were left alone — and `namelessControls` cannot see
+ * them either, since they are named, just not apart. Asserted as the known limit in the last
+ * test, so the day somebody fixes them this spec goes red and gets updated rather than silently
+ * over-claiming.
+ *
+ * **What this does not cover, at all.** BP-510 named four surfaces; other settings screens carry
+ * the identical shape of defect and were never in scope here — `TaskFieldsSection.tsx` names its
+ * per-row category and template inputs `Category name` / `Template name` with nothing to tell one
+ * row from another, and its Delete buttons are bare. Left alone because the ticket didn't name
+ * them, not because they are fine.
  */
 
 test.beforeEach(seed);
@@ -125,6 +132,13 @@ async function withCollidingRows() {
     { _id: PROJECT_ID },
     {
       $set: {
+        // Persisted duplicates are refused (`config.ts`), but that is a save-time check — the
+        // DRAFT an admin is midway through typing has no such guard, so two rows sharing a typed
+        // name is a state the screen has to render correctly, not one the server prevents seeding
+        "pm.mcpServers": [
+          { name: "acme", url: "https://acme.example/mcp", authType: "none" },
+          { name: "acme", url: "https://acme-two.example/mcp", authType: "none" },
+        ],
         notificationChannels: [
           {
             _id: oid(),
@@ -430,6 +444,24 @@ test.describe("a settings row says which row it is", () => {
     await expect(
       page.getByRole("button", { name: `status changed for ${masked} (2)` })
     ).toHaveCount(1);
+  });
+
+  /**
+   * The third row type this ticket names, and the one the independent review of this fix found
+   * still unguarded: `PmAgentSection` computed each server's name inline rather than through
+   * `distinctRowNames`, so two rows typed to the same name recreated BP-510 on the list carrying
+   * the Remove button — the destructive one.
+   */
+  test("two MCP servers sharing a name are still told apart", async ({ page }) => {
+    await withCollidingRows();
+    await signIn(page);
+    await page.goto(`/projects/${PROJECT_KEY}/settings?section=pm`);
+
+    await expect(page.getByLabel("Name for acme (1)")).toHaveValue("acme");
+    await expect(page.getByLabel("Name for acme (2)")).toHaveValue("acme");
+    await expect(page.getByRole("button", { name: "Remove acme (1)" })).toHaveCount(1);
+    await expect(page.getByRole("button", { name: "Remove acme (2)" })).toHaveCount(1);
+    await expect(page.getByRole("button", { name: "Remove acme", exact: true })).toHaveCount(0);
   });
 
   test("each policy field names itself, and so does the button that resets it", async ({

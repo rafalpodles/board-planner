@@ -286,9 +286,10 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
                     onClick={() => resetField(field)}
                     className="text-xs text-primary hover:underline w-24 text-left disabled:text-text-muted disabled:no-underline"
                     // One per pinned field, and "set · reset" is the same on every one of them.
-                    // `title` is a tooltip, not a name — text content wins. The visible text stays
-                    // at the FRONT of the name: WCAG 2.5.3 asks that what a voice-control user can
-                    // see is what they can say, so "click set reset" still reaches this button.
+                    // `title` is a tooltip, not a name — the aria-label below is what wins, and it
+                    // keeps the visible text at the FRONT: WCAG 2.5.3 asks that what a
+                    // voice-control user can see is what they can say, so "click set reset" still
+                    // reaches this button.
                     aria-label={`set · reset ${label}`}
                     title="Follow the default again"
                   >
