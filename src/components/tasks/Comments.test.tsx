@@ -295,7 +295,11 @@ describe("Comments when the read fails", () => {
   // The out-of-order half: the previous task's read is still in flight when the new one answers
   it("ignores the previous task's read when it lands late", async () => {
     const pending: ((rows: unknown[]) => void)[] = [];
-    api.get.mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
+    api.get.mockImplementation((url: string) =>
+      url.includes("/comments")
+        ? new Promise((resolve) => pending.push(resolve))
+        : Promise.resolve([])
+    );
     const view = render(<Comments projectId="TP" taskId="t1" />);
 
     view.rerender(<Comments projectId="TP" taskId="t2" />);
@@ -311,8 +315,10 @@ describe("Comments when the read fails", () => {
 
   it("does not let the previous task's failure claim the new task's discussion", async () => {
     const pending: { resolve: (rows: unknown[]) => void; reject: (e: Error) => void }[] = [];
-    api.get.mockImplementation(
-      () => new Promise((resolve, reject) => pending.push({ resolve, reject }))
+    api.get.mockImplementation((url: string) =>
+      url.includes("/comments")
+        ? new Promise((resolve, reject) => pending.push({ resolve, reject }))
+        : Promise.resolve([])
     );
     const view = render(<Comments projectId="TP" taskId="t1" />);
 
@@ -324,6 +330,25 @@ describe("Comments when the read fails", () => {
 
     expect(screen.queryByTestId("comments-error")).toBeNull();
     expect(screen.getByText("Kasia Nowak")).toBeTruthy();
+  });
+
+  // The third exit: a superseded read must not tear the spinner down and let "No comments yet"
+  // stand as a claim about a task whose own read is still running
+  it("keeps the spinner when the previous task's read answers first", async () => {
+    const pending: ((rows: unknown[]) => void)[] = [];
+    api.get.mockImplementation((url: string) =>
+      url.includes("/comments")
+        ? new Promise((resolve) => pending.push(resolve))
+        : Promise.resolve([])
+    );
+    const view = render(<Comments projectId="TP" taskId="t1" />);
+    view.rerender(<Comments projectId="TP" taskId="t2" />);
+
+    // t1 answers while t2 is still in flight
+    await act(async () => pending[0]([]));
+
+    expect(screen.queryByText("No comments yet")).toBeNull();
+    expect(screen.getByText("Loading the comments")).toBeTruthy();
   });
 
   // The tab badge is fed from here, and 3 is the count of a task nobody is looking at any more
