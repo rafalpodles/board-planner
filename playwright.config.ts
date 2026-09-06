@@ -37,6 +37,12 @@ const MONGO_PROXY_PORT = Number(process.env.MONGO_PROXY_PORT ?? PORT + 4);
 const MONGO_PROXY_CONTROL_PORT = Number(process.env.MONGO_PROXY_CONTROL_PORT ?? PORT + 5);
 export const MONGO_PROXY_CONTROL_URL = `http://127.0.0.1:${MONGO_PROXY_CONTROL_PORT}`;
 
+// An external MCP server the PM connects out to, so a spec can drive a real catalogue of tools
+// rather than a fixture of one (BP-569). This widens a run's block to E2E_PORT+6; the "keep
+// concurrent runs ten apart" rule already covers it.
+const MCP_SERVER_STUB_PORT = Number(process.env.MCP_SERVER_STUB_PORT ?? PORT + 6);
+export const MCP_SERVER_STUB_URL = `http://127.0.0.1:${MCP_SERVER_STUB_PORT}`;
+
 /** The seeded database's URI with its host swapped for the proxy's; credentials and options ride along. */
 function throughMongoProxy(uri: string): string {
   // One host, plain scheme: the proxy is a single TCP pipe, so a host list or an SRV record has
@@ -134,6 +140,15 @@ export default defineConfig({
       stdout: "pipe",
       stderr: "pipe",
       env: { AI_STUB_PORT: String(AI_STUB_PORT) },
+    },
+    {
+      command: `node e2e/mcp-server-stub.mjs`,
+      url: `${MCP_SERVER_STUB_URL}/health`,
+      reuseExistingServer: false,
+      timeout: 30_000,
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { MCP_SERVER_STUB_PORT: String(MCP_SERVER_STUB_PORT) },
     },
     {
       command: `node e2e/webhook-receiver.mjs`,

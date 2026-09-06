@@ -14,6 +14,9 @@ import { Switch } from "@/components/ui/Switch";
 import { firstReviewHour, reviewHoursOfDay } from "@/lib/pm/autonomy";
 import { SettingsCard, EmptyState, ListRow } from "@/components/settings/SettingsCard";
 import { useDirtyGroup } from "@/components/settings/settings-context";
+import { McpToolPicker, parseAllowlist } from "@/components/settings/McpToolPicker";
+import type { McpCatalogTool } from "@/components/settings/McpToolPicker";
+import { assessToolBudget, describeToolBudget } from "@/lib/pm/tool-budget";
 import { distinctRowNames } from "@/lib/row-names";
 import { SectionProps } from "./types";
 
@@ -35,6 +38,7 @@ interface McpTransient {
   testing?: boolean;
   testResult?: string;
   connecting?: boolean;
+  catalog?: McpCatalogTool[];
 }
 
 const REVIEW_INTERVALS = [
@@ -171,6 +175,26 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
     setTransient((prev) => ({ ...prev, [index]: { ...prev[index], ...patch } }));
   }
 
+  // Counted per enabled server the way a turn counts it: the ticked names when there are any,
+  // and otherwise everything the server offered — which is only knowable once Test connection has
+  // run, so a server nobody tested contributes nothing rather than a guess.
+  const budgetWarning = describeToolBudget(
+    assessToolBudget(
+      servers
+        // Mapped before filtering: `transient` is keyed by a server's position in the unfiltered
+        // list, so narrowing first would read another row's catalogue.
+        .map((s, i) => {
+          const ticked = parseAllowlist(s.toolAllowlist).length;
+          return {
+            name: s.name || "(unnamed)",
+            enabled: s.enabled,
+            count: ticked || transient[i]?.catalog?.length || 0,
+          };
+        })
+        .filter((s) => s.enabled && s.count > 0)
+    )
+  );
+
   function updateServer(index: number, patch: Partial<McpServerDraft>) {
     draft.set(
       "mcpServers",
@@ -248,12 +272,10 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
         authType: server.authType,
         authToken: server.authToken,
       });
-      const names = (res.tools || [])
-        .map((t: { name: string; readSafe: boolean }) => `${t.name}${t.readSafe ? "" : " (write)"}`)
-        .join(", ");
       setTransientAt(index, {
         testing: false,
-        testResult: `✓ Connected — ${res.count} tools: ${names || "(none)"}`,
+        catalog: res.tools || [],
+        testResult: `✓ Connected — ${res.count} tools offered. Tick the ones the agent should get.`,
       });
     } catch (err) {
       setTransientAt(index, {
@@ -542,6 +564,15 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
               : "External MCP servers the agent may read at the start of a turn. The instance admin manages which servers exist — you can connect, disconnect and test what's already set up."
           }
         >
+          {budgetWarning && (
+            <p
+              role="status"
+              data-testid="mcp-tool-budget-warning"
+              className="mb-3 rounded-md border border-warning p-2 text-xs text-warning"
+            >
+              {budgetWarning}
+            </p>
+          )}
           <div className="space-y-3">
             {servers.map((server, i) => {
               // Every control in the row is named through this one value, so a reader with three
@@ -675,11 +706,11 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                   </div>
                 )}
                 {isAdmin && (
-                  <Input
-                    aria-label={`Tool allowlist for ${rowName}`}
-                    value={server.toolAllowlist}
-                    onChange={(e) => updateServer(i, { toolAllowlist: e.target.value })}
-                    placeholder="Tool allowlist, comma-separated (empty = all)"
+                  <McpToolPicker
+                    rowName={rowName}
+                    catalog={transient[i]?.catalog}
+                    allowlist={server.toolAllowlist}
+                    onChange={(value) => updateServer(i, { toolAllowlist: value })}
                   />
                 )}
                 <div className="flex flex-wrap items-center gap-4 text-sm">
