@@ -22,6 +22,7 @@ describe("logInstanceAudit", () => {
 
     expect(create).toHaveBeenCalledWith({
       user: "admin-1",
+      actorUsername: "",
       action: "worker_locked",
       target: "rig-laptop",
       detail: "Kill switch on",
@@ -35,10 +36,27 @@ describe("logInstanceAudit", () => {
 
     expect(create).toHaveBeenCalledWith({
       user: null,
+      actorUsername: "",
       action: "enrolment_token_spent",
       target: "rig-laptop",
       detail: "",
     });
+  });
+
+  // BP-539. The reference stops naming anybody the moment that account is deleted, which used to
+  // rewrite every row they wrote as "system" — the word this log reserves for a machine. Stored
+  // beside it, so the row outlives its actor the way it already outlives its subject.
+  it("stores the actor's username beside the reference", async () => {
+    await logInstanceAudit({
+      action: "user_deleted",
+      target: "someone",
+      user: "admin-1",
+      actorUsername: "rafal",
+    });
+
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ user: "admin-1", actorUsername: "rafal" })
+    );
   });
 
   // The property the callers depend on to write `void logInstanceAudit(...)` without a catch of

@@ -16,6 +16,14 @@ export const ADMIN_PASSWORD = "test1234";
 export const MEMBER_USERNAME = "member";
 export const MEMBER_PASSWORD = "test1234";
 
+// A genuine project owner: reaches "admin"-need routes through a Grant `relation: "owner"`, with
+// no standing on the instance at all (role "member", same as MEMBER_USERNAME). "admin" sign-in
+// bypasses the grant lookup entirely via `principal.instanceAdmin` in src/lib/grants.ts, so it
+// cannot tell this path apart from the instance-admin one — every `withProjectOwner` route's own
+// test mocks `check()` rather than composing this persona, which is what this fills in.
+export const OWNER_USERNAME = "owner";
+export const OWNER_PASSWORD = "test1234";
+
 export const PROJECT_KEY = "TP";
 // Deliberately not "Test Project": a project keyed TP also exists in the development database,
 // so the name is what proves which one the server is actually reading.
@@ -38,6 +46,7 @@ export const MEMBER_API_TOKEN = "cp_e2e00002deadbeefdeadbeefdeadbeef";
 // them unavoidable. Specs whose subject IS signing in keep the form — see e2e/session.ts.
 export const ADMIN_SESSION_TOKEN = "cps_e2e00003deadbeefdeadbeefdeadbeef";
 export const MEMBER_SESSION_TOKEN = "cps_e2e00004deadbeefdeadbeefdeadbeef";
+export const OWNER_SESSION_TOKEN = "cps_e2e00005deadbeefdeadbeefdeadbeef";
 export const RUN_PHASE = "agent";
 
 export const HELD_TASK_NUMBER = 1;
@@ -83,13 +92,16 @@ const ADMIN_PASSWORD_HASH = bcrypt.hashSync(ADMIN_PASSWORD, 10);
 const MEMBER_PASSWORD_HASH = bcrypt.hashSync(MEMBER_PASSWORD, 10);
 const API_TOKEN_HASH = bcrypt.hashSync(API_TOKEN, 10);
 const MEMBER_API_TOKEN_HASH = bcrypt.hashSync(MEMBER_API_TOKEN, 10);
+const OWNER_PASSWORD_HASH = bcrypt.hashSync(OWNER_PASSWORD, 10);
 const WORKER_CREDENTIAL_HASH = bcrypt.hashSync(WORKER_CREDENTIAL, 10);
 
 export const ADMIN_ID = id("e2e00000000000000000a001");
 export const MEMBER_ID = id("e2e00000000000000000a002");
+export const OWNER_ID = id("e2e00000000000000000a008");
 export const PROJECT_ID = id("e2e00000000000000000c001");
 export const WORKER_ID = id("e2e00000000000000000b001");
 export const GRANT_ID = id("e2e00000000000000000e001");
+export const OWNER_GRANT_ID = id("e2e00000000000000000e004");
 export const HELD_TASK_ID = id("e2e00000000000000000d001");
 export const DECOY_TASK_ID = id("e2e00000000000000000d002");
 export const SIBLING_TASK_ID = id("e2e00000000000000000d003");
@@ -214,6 +226,46 @@ export async function seedSecondHeldTask() {
     },
     SECOND_HELD_TASK_NUMBER
   );
+}
+
+// BP-529. A sprint that closed with this task still in it, and never swept to the backlog — the
+// one situation where "Remove from sprint" is needed, and the board has no *open* sprint to pair
+// it with.
+export const STRANDED_SPRINT_ID = id("e2e00000000000000000c105");
+export const STRANDED_SPRINT_NAME = "Sprint 2";
+export const STRANDED_TASK_ID = id("e2e00000000000000000d007");
+export const STRANDED_TASK_NUMBER = 15;
+export const STRANDED_TASK_TITLE = "Left in a sprint that already closed";
+
+/** Adds a completed sprint and a task still carrying it, on a board with no open sprint. */
+export async function seedTaskInCompletedSprint() {
+  const db = (await connect()).db!;
+  const now = new Date();
+  await db.collection("sprints").insertOne({
+    _id: STRANDED_SPRINT_ID,
+    project: PROJECT_ID,
+    name: STRANDED_SPRINT_NAME,
+    goal: "",
+    status: "completed",
+    startDate: new Date(now.getTime() - 30 * 86_400_000),
+    endDate: new Date(now.getTime() - 16 * 86_400_000),
+    createdAt: now,
+    updatedAt: now,
+  });
+  await db.collection("tasks").insertOne(
+    taskFactory(now)({
+      _id: STRANDED_TASK_ID,
+      taskNumber: STRANDED_TASK_NUMBER,
+      title: STRANDED_TASK_TITLE,
+      status: SPARE_COLUMN.id,
+      sprint: STRANDED_SPRINT_ID,
+      order: 1,
+    })
+  );
+  await db
+    .collection("projects")
+    .updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: STRANDED_TASK_NUMBER } });
+  await mongoose.disconnect();
 }
 
 /**
@@ -664,6 +716,27 @@ export async function demoteDoneColumn() {
   }
 }
 
+/**
+ * Takes the `active` role off the board's only column that carries it, leaving the column in
+ * place, so a worker on this board has nowhere to move a task it takes (BP-512). Written straight
+ * to the database because the columns endpoint refuses to create this state — which is the point
+ * of the specs that use it.
+ */
+export async function demoteActiveColumn() {
+  const db = (await connect()).db!;
+  const result = await db
+    .collection("projects")
+    .updateOne(
+      { _id: PROJECT_ID },
+      { $set: { "columns.$[column].role": "review" } },
+      { arrayFilters: [{ "column.id": "in_progress" }] }
+    );
+  await mongoose.disconnect();
+  if (result.modifiedCount !== 1) {
+    throw new Error(`demoteActiveColumn changed ${result.modifiedCount} boards, expected 1`);
+  }
+}
+
 /** A sprint as the database holds it, for assertions the API's derived counts would blur. */
 export async function storedSprint(sprintId: mongoose.Types.ObjectId) {
   const db = (await connect()).db!;
@@ -785,18 +858,41 @@ async function seedBoard(withSessions: boolean) {
       // reach on this project it reaches through the grant below
       role: "member",
     }),
+    person({
+      _id: OWNER_ID,
+      username: OWNER_USERNAME,
+      password: OWNER_PASSWORD_HASH,
+      fullName: "E2E Owner",
+      // Same as MEMBER_ID: no instance standing. Only the grant below tells the two apart.
+      role: "member",
+    }),
   ]);
 
-  await db.collection("grants").insertOne({
-    _id: GRANT_ID,
-    subject: MEMBER_ID,
-    relation: "member",
-    objectType: "project",
-    object: PROJECT_ID,
-    createdBy: ADMIN_ID,
-    createdAt: now,
-    updatedAt: now,
-  });
+  // Before this grant, the board had no "owner" relation at all, so `ownerCount` (members/route.ts)
+  // was 0 and the "a board must keep at least one owner" refusal was unreachable on this fixture.
+  // It is now — a spec that promotes then demotes a grant will behave differently than on `main`.
+  await db.collection("grants").insertMany([
+    {
+      _id: GRANT_ID,
+      subject: MEMBER_ID,
+      relation: "member",
+      objectType: "project",
+      object: PROJECT_ID,
+      createdBy: ADMIN_ID,
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      _id: OWNER_GRANT_ID,
+      subject: OWNER_ID,
+      relation: "owner",
+      objectType: "project",
+      object: PROJECT_ID,
+      createdBy: ADMIN_ID,
+      createdAt: now,
+      updatedAt: now,
+    },
+  ]);
 
   await db.collection("projects").insertOne({
     _id: PROJECT_ID,
@@ -901,6 +997,7 @@ async function seedBoard(withSessions: boolean) {
       .insertMany([
         sessionRow(ADMIN_SESSION_TOKEN, ADMIN_ID),
         sessionRow(MEMBER_SESSION_TOKEN, MEMBER_ID),
+        sessionRow(OWNER_SESSION_TOKEN, OWNER_ID),
       ]);
   }
 
@@ -1024,7 +1121,7 @@ export async function seedRenamedColumn() {
   await mongoose.disconnect();
 }
 
-/** seed(), minus the two session rows — see seedBoard. */
+/** seed(), minus the session rows — see seedBoard. */
 export const seedWithoutSessions = () => seedBoard(false);
 
 // BP-386. Search answers differently depending on who is asking, so the corpus is two boards
@@ -1538,4 +1635,378 @@ export async function expireAccessToken(accessToken: string): Promise<boolean> {
   const still = await db.collection("oauthtokens").findOne({ accessTokenHash });
   await mongoose.disconnect();
   return !!still;
+}
+
+// BP-464. The two agents `update_task` resolves by name, and the two rules that resolution has to
+// keep: a project agent anybody who may edit a TP task may choose, and a personal one of the
+// admin's that only the admin's own tasks may carry. Both runnable — every agent is born empty,
+// and an empty one is a draft a task refuses to carry.
+export const PROJECT_AGENT_NAME = "Board Runner";
+export const PERSONAL_AGENT_NAME = "Admin's own";
+
+const RUNNABLE_COMPOSITION = {
+  analysis: [],
+  implementation: [{ key: "implement" }],
+  verification: [],
+  delivery: [{ key: "push" }],
+};
+
+export const PROJECT_AGENT_ID = id("e2e00000000000000000ab01");
+export const PERSONAL_AGENT_ID = id("e2e00000000000000000ab02");
+
+export async function seedAgents() {
+  const db = (await connect()).db!;
+  const now = new Date();
+  const agent = (over: Record<string, unknown>) => ({
+    description: "",
+    owner: null,
+    project: null,
+    builtIn: false,
+    composition: RUNNABLE_COMPOSITION,
+    createdAt: now,
+    updatedAt: now,
+    ...over,
+  });
+  await db.collection("agents").insertMany([
+    agent({ _id: PROJECT_AGENT_ID, name: PROJECT_AGENT_NAME, scope: "project", project: PROJECT_ID }),
+    agent({ _id: PERSONAL_AGENT_ID, name: PERSONAL_AGENT_NAME, scope: "user", owner: ADMIN_ID }),
+  ]);
+  await mongoose.disconnect();
+}
+
+/**
+ * A project-scoped agent that belongs to the second board and nowhere else, for BP-496: naming it
+ * from a task on the seeded board must be refused as belonging to another project, not treated as
+ * though no such agent existed at all. Requires seedSecondProject().
+ */
+export const FOREIGN_ONLY_AGENT_NAME = "Their Runner";
+export const FOREIGN_ONLY_AGENT_ID = id("e2e00000000000000000ab03");
+
+export async function seedForeignAgent() {
+  const db = (await connect()).db!;
+  const now = new Date();
+  await db.collection("agents").insertOne({
+    _id: FOREIGN_ONLY_AGENT_ID,
+    name: FOREIGN_ONLY_AGENT_NAME,
+    description: "",
+    owner: null,
+    project: SECOND_PROJECT_ID,
+    scope: "project",
+    builtIn: false,
+    composition: RUNNABLE_COMPOSITION,
+    createdAt: now,
+    updatedAt: now,
+  });
+  await mongoose.disconnect();
+}
+
+/**
+ * A sprint on the second board, for the cross-project reference BP-314 closed: named through TP,
+ * it has to be refused as if it did not exist. Requires seedSecondProject().
+ */
+export const FOREIGN_SPRINT_ID = id("e2e00000000000000000c701");
+export const FOREIGN_SPRINT_NAME = "Their sprint";
+
+export async function seedForeignSprint() {
+  const db = (await connect()).db!;
+  const now = new Date();
+  await db.collection("sprints").insertOne({
+    _id: FOREIGN_SPRINT_ID,
+    project: SECOND_PROJECT_ID,
+    name: FOREIGN_SPRINT_NAME,
+    startDate: now,
+    endDate: new Date(now.getTime() + 14 * 86_400_000),
+    goal: "",
+    status: "planned",
+    createdAt: now,
+    updatedAt: now,
+  });
+  await mongoose.disconnect();
+}
+
+/** A task on the seeded board as the database holds it, for the fields the API populates or renames. */
+export async function storedTask(taskNumber: number): Promise<Record<string, unknown>> {
+  const db = (await connect()).db!;
+  const row = await db.collection("tasks").findOne({ project: PROJECT_ID, taskNumber });
+  await mongoose.disconnect();
+  if (!row) throw new Error(`no task ${taskNumber} on the seeded board`);
+  return row as Record<string, unknown>;
+}
+
+// BP-469. The cross-board list on /my-tasks, which is the one screen whose whole subject is tasks
+// this reader has on boards that agree on nothing but their column roles.
+//
+// Requires seedSecondProject(): the second group's tasks live on that board, and a list that spans
+// exactly one project cannot tell grouping from a heading.
+export const MINE_ACTIVE_NUMBER = 200;
+export const MINE_ACTIVE_TITLE = "Painting the mooring mast";
+
+// Two columns this board invented, and both are discriminators.
+//
+// `Triage Desk` is what role ordering is proved against: keyed on column *ids* it sorts last
+// whatever it means, and keyed on the role it sits second. Its colour is the other half of that
+// same fix.
+//
+// `Shipped` is what the Hide done filter is proved against. The board's seeded done column is
+// called `done`, so a filter written as `status !== "done"` and one written on the column's role
+// agree on it exactly — and the page's filter is the client-side one this spec is about.
+export const MINE_CUSTOM_COLUMN = {
+  id: "triage_desk",
+  label: "Triage Desk",
+  color: "#8b5cf6",
+  role: "blocked",
+  order: 7,
+};
+export const MINE_DONE_COLUMN = {
+  id: "shipped",
+  label: "Shipped",
+  color: "#0f766e",
+  role: "done",
+  order: 8,
+};
+const EXTRA_COLUMNS = [MINE_CUSTOM_COLUMN, MINE_DONE_COLUMN].map((column) => ({
+  _id: new mongoose.Types.ObjectId(),
+  triggersPmReview: false,
+  ...column,
+}));
+
+export const MINE_BLOCKED_NUMBER = 201;
+export const MINE_BLOCKED_TITLE = "Waiting on the rivet order";
+
+export const MINE_APPROVED_NUMBER = 202;
+export const MINE_APPROVED_TITLE = "Ordering the gondola cable";
+
+export const MINE_DONE_NUMBER = 203;
+export const MINE_DONE_TITLE = "Riveting the keel, finished";
+
+// Left behind by a deleted column: no such id on the board, so the server can resolve neither role
+// nor label nor colour and the page has to show the row anyway.
+export const MINE_ORPHAN_STATUS = "mothballed";
+export const MINE_ORPHAN_NUMBER = 204;
+export const MINE_ORPHAN_TITLE = "Left in a column that is gone";
+
+// Assigned to the member, on the board the member can reach. Two jobs: the admin must not see it
+// (the assignee filter), and it is the member's own control against the one below.
+export const THEIRS_NUMBER = 205;
+export const THEIRS_TITLE = "The member's own rivets";
+
+// On the board the member holds no grant on. Assigned to them, so the only thing keeping it off
+// their list is the project filter — which is what this row is here to prove. The spec reads it
+// back as the admin, whose list carries no project clause, so that claim has a control.
+export const THEIRS_UNREACHABLE_NUMBER = 2;
+export const THEIRS_UNREACHABLE_TITLE = "On a board the member cannot reach";
+
+export const MINE_OTHER_BOARD_NUMBER = 3;
+export const MINE_OTHER_BOARD_TITLE = "A chore on the other board";
+
+/**
+ * `updatedAt` in minutes before now, per task.
+ *
+ * Deliberately the reverse of the order the page must put them in: the endpoint sorts on
+ * `updatedAt` descending, so a page that dropped its sort altogether would render this list
+ * backwards rather than in the order it happens to have been seeded in. Every value is distinct,
+ * so the secondary key is stated rather than left to Mongo's tie-break.
+ */
+const MINUTES_OLD: Record<number, number> = {
+  [MINE_ORPHAN_NUMBER]: 10,
+  [MINE_DONE_NUMBER]: 20,
+  [MINE_APPROVED_NUMBER]: 30,
+  [MINE_OTHER_BOARD_NUMBER]: 40,
+  [MINE_BLOCKED_NUMBER]: 50,
+  [MINE_ACTIVE_NUMBER]: 60,
+};
+
+export async function seedMyTasks() {
+  const db = (await connect()).db!;
+  const now = new Date();
+  const task = taskFactory(now);
+  const aged = (taskNumber: number) => ({
+    updatedAt: new Date(now.getTime() - (MINUTES_OLD[taskNumber] ?? 0) * 60_000),
+  });
+
+  await db
+    .collection<{ columns: unknown[] }>("projects")
+    .updateOne({ _id: PROJECT_ID }, { $push: { columns: { $each: EXTRA_COLUMNS } } });
+
+  await db.collection("tasks").insertMany([
+    task({
+      _id: id("e2e00000000000000000d501"),
+      taskNumber: MINE_ACTIVE_NUMBER,
+      title: MINE_ACTIVE_TITLE,
+      status: "in_progress",
+      assignee: ADMIN_ID,
+      priority: "high",
+      ...aged(MINE_ACTIVE_NUMBER),
+    }),
+    task({
+      _id: id("e2e00000000000000000d502"),
+      taskNumber: MINE_BLOCKED_NUMBER,
+      title: MINE_BLOCKED_TITLE,
+      status: MINE_CUSTOM_COLUMN.id,
+      assignee: ADMIN_ID,
+      ...aged(MINE_BLOCKED_NUMBER),
+    }),
+    task({
+      _id: id("e2e00000000000000000d503"),
+      taskNumber: MINE_APPROVED_NUMBER,
+      title: MINE_APPROVED_TITLE,
+      status: "todo",
+      assignee: ADMIN_ID,
+      ...aged(MINE_APPROVED_NUMBER),
+    }),
+    task({
+      _id: id("e2e00000000000000000d504"),
+      taskNumber: MINE_DONE_NUMBER,
+      title: MINE_DONE_TITLE,
+      status: MINE_DONE_COLUMN.id,
+      assignee: ADMIN_ID,
+      ...aged(MINE_DONE_NUMBER),
+    }),
+    task({
+      _id: id("e2e00000000000000000d505"),
+      taskNumber: MINE_ORPHAN_NUMBER,
+      title: MINE_ORPHAN_TITLE,
+      status: MINE_ORPHAN_STATUS,
+      assignee: ADMIN_ID,
+      ...aged(MINE_ORPHAN_NUMBER),
+    }),
+    task({
+      _id: id("e2e00000000000000000d506"),
+      taskNumber: THEIRS_NUMBER,
+      title: THEIRS_TITLE,
+      status: "in_progress",
+      assignee: MEMBER_ID,
+    }),
+    task({
+      _id: id("e2e00000000000000000d507"),
+      project: SECOND_PROJECT_ID,
+      taskNumber: THEIRS_UNREACHABLE_NUMBER,
+      title: THEIRS_UNREACHABLE_TITLE,
+      status: "in_progress",
+      assignee: MEMBER_ID,
+    }),
+    task({
+      _id: id("e2e00000000000000000d508"),
+      project: SECOND_PROJECT_ID,
+      taskNumber: MINE_OTHER_BOARD_NUMBER,
+      title: MINE_OTHER_BOARD_TITLE,
+      status: "todo",
+      assignee: ADMIN_ID,
+      ...aged(MINE_OTHER_BOARD_NUMBER),
+    }),
+  ]);
+
+  await db
+    .collection("projects")
+    .updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: THEIRS_NUMBER } });
+  await db
+    .collection("projects")
+    .updateOne({ _id: SECOND_PROJECT_ID }, { $max: { taskCounter: MINE_OTHER_BOARD_NUMBER } });
+
+  await mongoose.disconnect();
+}
+
+/**
+ * Everything this reader has, finished. The page has two empty states and they say different
+ * things — a fixture with no tasks at all can only reach the first. The board's own `Shipped`
+ * column comes with it, for the same reason seedMyTasks adds it.
+ */
+export const MINE_ONLY_DONE_NUMBER = 210;
+export const MINE_ONLY_DONE_TITLE = "The only thing left, and it is done";
+
+export async function seedMyTasksAllDone() {
+  const db = (await connect()).db!;
+  await db
+    .collection<{ columns: unknown[] }>("projects")
+    .updateOne({ _id: PROJECT_ID }, { $push: { columns: { $each: EXTRA_COLUMNS } } });
+  await mongoose.disconnect();
+
+  await addTask(
+    {
+      _id: id("e2e00000000000000000d510"),
+      title: MINE_ONLY_DONE_TITLE,
+      status: MINE_DONE_COLUMN.id,
+      assignee: ADMIN_ID,
+    },
+    MINE_ONLY_DONE_NUMBER
+  );
+}
+
+/** Deletes a project row and nothing else, which is a state the product itself never leaves. */
+export async function deleteProjectRow(projectId: mongoose.Types.ObjectId) {
+  const db = (await connect()).db!;
+  await db.collection("projects").deleteOne({ _id: projectId });
+  await mongoose.disconnect();
+}
+
+/**
+ * BP-469. A third board, for the one claim the projects list makes that a two-board fixture
+ * cannot separate: the order.
+ *
+ * `/api/projects` sorts `{ sortOrder: 1, createdAt: -1 }`. This board is seeded last, so it is the
+ * newest of the three, and carries sortOrder 0 like the seeded board — which puts it first under
+ * the real rule and second under a sort that only reads createdAt (IB is newer than TP and would
+ * come between them).
+ *
+ * It also carries a description and an icon of its own, where IB has neither, so the card's two
+ * conditional halves both have a case.
+ */
+export const NEWEST_PROJECT_ID = id("e2e00000000000000000c801");
+export const NEWEST_PROJECT_KEY = "NB";
+export const NEWEST_PROJECT_NAME = "E2E Newest Board";
+export const NEWEST_PROJECT_DESCRIPTION = "Seeded last, and dragged to the top";
+export const NEWEST_PROJECT_ICON = "🚀";
+
+export async function seedNewestProject() {
+  const db = (await connect()).db!;
+  const now = new Date();
+
+  await db.collection("projects").insertOne({
+    _id: NEWEST_PROJECT_ID,
+    name: NEWEST_PROJECT_NAME,
+    key: NEWEST_PROJECT_KEY,
+    description: NEWEST_PROJECT_DESCRIPTION,
+    icon: NEWEST_PROJECT_ICON,
+    categories: CATEGORIES,
+    columns: COLUMNS,
+    taskTemplates: [],
+    customFields: [],
+    webhooks: [],
+    notificationChannels: [],
+    worker: { enabled: false, policy: {}, policyOverrides: [] },
+    repositoryUrl: "",
+    githubRepo: "",
+    githubToken: "",
+    gitlabRepo: "",
+    gitlabHost: "https://gitlab.com",
+    gitlabToken: "",
+    taskCounter: 0,
+    sortOrder: 0,
+    createdBy: ADMIN_ID,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  await mongoose.disconnect();
+}
+
+/**
+ * BP-469. A grant for the seeded member on another board, so a test can put a second row in their
+ * sidebar. Without one the member reaches exactly one project, and `ProjectTree` hides its drag
+ * handles when there is nothing to reorder — which makes "a member cannot drag" pass whatever the
+ * gate does.
+ */
+export async function grantMemberOn(projectId: mongoose.Types.ObjectId) {
+  const db = (await connect()).db!;
+  const now = new Date();
+  await db.collection("grants").insertOne({
+    subject: MEMBER_ID,
+    relation: "member",
+    objectType: "project",
+    object: projectId,
+    createdBy: ADMIN_ID,
+    createdAt: now,
+    updatedAt: now,
+  });
+  await mongoose.disconnect();
 }

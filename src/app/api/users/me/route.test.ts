@@ -120,6 +120,7 @@ describe("PUT /api/users/me — changing the address that can reset the password
       expect.objectContaining({
         action: "user_email_changed_self",
         target: "rafal",
+        actorUsername: "rafal",
         detail: expect.stringContaining("old@example.com"),
       })
     );
@@ -353,6 +354,7 @@ describe("PUT /api/users/me — changing your own display name", () => {
       expect.objectContaining({
         action: "user_full_name_changed_self",
         target: "rafal",
+        actorUsername: "rafal",
         detail: "Rafal Podles → Rafał Podleś",
       })
     );

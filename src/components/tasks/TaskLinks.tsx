@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, useEffect, type CSSProperties, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { ApiTask, ApiTaskLink, DependencyType } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { taskPath } from "@/lib/urls";
+import { useOpenTask } from "@/hooks/use-open-task";
 
 const DEPENDENCY_LABELS: { value: DependencyType; label: string }[] = [
   { value: "blocked_by", label: "Blocked by" },
@@ -41,7 +41,7 @@ export function TaskLinks({
   actions,
 }: TaskLinksProps) {
   const api = useApi();
-  const router = useRouter();
+  const openTask = useOpenTask();
   const { toast } = useToast();
   const [allTasks, setAllTasks] = useState<ApiTaskLink[]>([]);
   const [showPicker, setShowPicker] = useState(false);
@@ -97,7 +97,7 @@ export function TaskLinks({
   }
 
   function navigateToTask(taskNumber: number) {
-    router.push(taskPath(projectId, taskNumber));
+    openTask(taskPath(projectId, taskNumber));
   }
 
   const blockedBy = task.blockedBy || [];
@@ -245,6 +245,11 @@ export function TaskLinks({
           </select>
           <input
             type="text"
+            // A placeholder is not a name, and it is gone the moment somebody types.
+            // "to link" rather than the placeholder's bare "Search tasks": the shell's own search
+            // is called "Search tasks and projects", and two boxes whose names are prefixes of
+            // each other are ambiguous by voice and to any substring locator.
+            aria-label="Search tasks to link"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search tasks..."

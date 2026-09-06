@@ -16,6 +16,7 @@ import { ListView } from "@/components/kanban/ListView";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { ShortcutHelp } from "@/components/ui/ShortcutHelp";
+import { openLayerCount } from "@/lib/focus-trap";
 import { taskPath } from "@/lib/urls";
 import { NewTaskModal } from "@/components/tasks/NewTaskModal";
 
@@ -62,6 +63,7 @@ export function ProjectBoardView({
     bulkDeleting,
     confirmContextDelete,
     setConfirmContextDelete,
+    deleting,
     heldMove,
     heldDelete,
     setHeldDelete,
@@ -117,6 +119,10 @@ export function ProjectBoardView({
     function handleKeyDown(e: KeyboardEvent) {
       const tag = (e.target as HTMLElement).tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      // BP-522/BP-543: an open layer owns every key but "?", Escape included — clearing the
+      // selection under the bulk-delete confirm used to relabel it "delete 0 tasks" and report
+      // success having deleted nothing
+      if (openLayerCount() > 0 && e.key !== "?") return;
 
       const noMod = !e.metaKey && !e.ctrlKey && !e.altKey;
 
@@ -146,8 +152,9 @@ export function ProjectBoardView({
         reload();
         return;
       }
-      // J/K navigation in list view
-      if (e.key === "j" && noMod) {
+      // J/K navigation in list view — the board draws no indicator for focusedTaskIndex (BP-544)
+      const isListView = viewMode === "list";
+      if (e.key === "j" && noMod && isListView) {
         e.preventDefault();
         setFocusedTaskIndex((prev) => {
           const max = filteredTasks.length - 1;
@@ -155,12 +162,12 @@ export function ProjectBoardView({
         });
         return;
       }
-      if (e.key === "k" && noMod) {
+      if (e.key === "k" && noMod && isListView) {
         e.preventDefault();
         setFocusedTaskIndex((prev) => Math.max(prev - 1, 0));
         return;
       }
-      if (e.key === "Enter" && noMod && focusedTaskIndex >= 0 && focusedTaskIndex < filteredTasks.length) {
+      if (e.key === "Enter" && noMod && isListView && focusedTaskIndex >= 0 && focusedTaskIndex < filteredTasks.length) {
         e.preventDefault();
         const task = filteredTasks[focusedTaskIndex];
         router.push(taskPath(projectId, task.taskNumber));
@@ -389,6 +396,7 @@ export function ProjectBoardView({
         title="Delete Task"
         message="Are you sure you want to delete this task? This action cannot be undone."
         confirmLabel="Delete"
+        loading={deleting}
       />
 
       {/* The delete was refused for the same reason, and asks separately because the cost is not
@@ -447,6 +455,8 @@ export function ProjectBoardView({
       <ShortcutHelp
         open={showShortcutHelp}
         onClose={() => setShowShortcutHelp(false)}
+        readOnly={readOnly}
+        pinViewMode={pinViewMode}
       />
 
       <ConfirmDialog

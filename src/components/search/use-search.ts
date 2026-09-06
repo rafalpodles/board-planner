@@ -1,10 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { ApiProject, ApiProjectColumn, ApiTask, DEFAULT_PROJECT_ICON, TaskStatus } from "@/types";
 import { useApi } from "@/hooks/use-api";
 import { projectPath, taskPath } from "@/lib/urls";
+import { useOpenTask } from "@/hooks/use-open-task";
 
 // Matches the API, which refuses anything shorter
 export const MIN_QUERY = 2;
@@ -104,7 +104,7 @@ export function useSearch(
   initialQuery = ""
 ) {
   const api = useApi();
-  const router = useRouter();
+  const openTask = useOpenTask();
   const [query, setQuery] = useState(initialQuery);
   const [tasks, setTasks] = useState<ApiTask[]>([]);
   const [loading, setLoading] = useState(false);
@@ -156,10 +156,10 @@ export function useSearch(
 
   const open = useCallback(
     (hit: SearchHit) => {
-      router.push(hit.href);
+      openTask(hit.href);
       reset();
     },
-    [router, reset]
+    [openTask, reset]
   );
 
   return {

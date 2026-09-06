@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs
 import { tmpdir } from "os";
 import { join } from "path";
 import { describe, expect, it, vi } from "vitest";
-import { ApiClient, PhaseEvent } from "./api.js";
+import { ApiClient, ClaimRefused, PhaseEvent } from "./api.js";
 import { ControlDeps } from "./control.js";
 import { Runner } from "./exec.js";
 import { LocalConfigView, LocalServer, LocalServerDeps } from "./local-server.js";
@@ -360,6 +360,8 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       stateFiles?: Record<string, string>;
       // Claimed in order, one per pass of the loop, then the queue runs dry
       tasks?: ClaimedTask[];
+      // The board refusing every claim outright, in the server's words (BP-512)
+      claimRefusal?: string;
       onAgentStart?: (nth: number) => void;
       // What the checkout's scoped git config says, for the tests about a planted key
       scopedConfig?: string | Record<string, string>;
@@ -406,7 +408,10 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     let localConfig: (() => LocalConfigView) | undefined;
 
     const api = {
-      claim: vi.fn<ApiClient["claim"]>(async () => queue[claims++] ?? null),
+      claim: vi.fn<ApiClient["claim"]>(async () => {
+        if (opts.claimRefusal) throw new ClaimRefused(opts.claimRefusal);
+        return queue[claims++] ?? null;
+      }),
       setStatus: vi.fn<ApiClient["setStatus"]>().mockResolvedValue(undefined),
       comment: vi.fn<ApiClient["comment"]>().mockResolvedValue(undefined),
       release: vi.fn<ApiClient["release"]>().mockResolvedValue(undefined),
@@ -1321,6 +1326,22 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
 
       expect(run.claimed).toBe(true);
       expect(run.localConfig?.().projects[0].blocked).toBe("");
+    });
+
+    // The other answer to the same question (BP-512): a checkout that is fine, on a board that
+    // refuses to claim at all. The cockpit has to show the board's reason in the same place.
+    it("says on the socket why the board itself refused the claim", async () => {
+      const run = await runOneTask(undefined, undefined, {
+        claimRefusal: "This board has no column meaning In progress, so nothing moves.",
+      });
+
+      expect(run.claimed).toBe(false);
+      expect(run.localConfig?.().projects[0].blocked).toBe(
+        "This board has no column meaning In progress, so nothing moves."
+      );
+      expect(run.logError).toHaveBeenCalledWith(
+        expect.stringContaining("not claiming for project p1: This board has no column meaning")
+      );
     });
 
     it("says nothing about a bound repository that has what the gates need", async () => {

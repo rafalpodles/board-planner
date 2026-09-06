@@ -14,6 +14,7 @@ import { Switch } from "@/components/ui/Switch";
 import { firstReviewHour, reviewHoursOfDay } from "@/lib/pm/autonomy";
 import { SettingsCard, EmptyState, ListRow } from "@/components/settings/SettingsCard";
 import { useDirtyGroup } from "@/components/settings/settings-context";
+import { distinctRowNames } from "@/lib/row-names";
 import { SectionProps } from "./types";
 
 interface McpServerDraft {
@@ -119,6 +120,12 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
   const [newLinkUrl, setNewLinkUrl] = useState("");
 
   const servers = draft.value.mcpServers;
+  // What each server row calls itself to a screen reader. `config.ts` refuses a duplicate name at
+  // save time, but the DRAFT being typed into has no such guard — an admin naming a second server
+  // the same as an existing one puts two rows on screen sharing a name before either save fires.
+  const serverRowNames = distinctRowNames(
+    servers.map((s, i) => s.name || `Server ${i + 1}`)
+  );
   /**
    * The same two refusals `validatePmConfig` gives, asked here so they reach the field rather
    * than arriving as a toast after the save — with the draft still dirty and nothing saying which
@@ -434,12 +441,14 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
           <div className="mt-2 flex gap-2">
             <div className="min-w-0 flex-1 sm:w-[160px] sm:flex-none sm:shrink-0">
               <Input
+                aria-label="New link label"
                 value={newLinkLabel}
                 onChange={(e) => setNewLinkLabel(e.target.value)}
                 placeholder="Label"
               />
             </div>
             <Input
+              aria-label="New link URL"
               value={newLinkUrl}
               onChange={(e) => setNewLinkUrl(e.target.value)}
               placeholder="https://..."
@@ -534,18 +543,25 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
           }
         >
           <div className="space-y-3">
-            {servers.map((server, i) => (
+            {servers.map((server, i) => {
+              // Every control in the row is named through this one value, so a reader with three
+              // servers hears which of them they are on rather than the same word three times.
+              // Disambiguated across the whole list — see serverRowNames above.
+              const rowName = serverRowNames[i];
+              return (
               <div key={i} className="space-y-2 rounded-lg border border-border p-3">
                 {isAdmin ? (
                   <div className="flex items-center gap-2">
                     <div className="min-w-0 flex-1 sm:w-[180px] sm:flex-none sm:shrink-0">
                       <Input
+                        aria-label={`Name for ${rowName}`}
                         value={server.name}
                         onChange={(e) => updateServer(i, { name: e.target.value })}
                         placeholder="name (slug, e.g. notion)"
                       />
                     </div>
                     <Input
+                      aria-label={`URL for ${rowName}`}
                       value={server.url}
                       onChange={(e) => updateServer(i, { url: e.target.value })}
                       placeholder="https://mcp.example.com/mcp"
@@ -556,20 +572,20 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                         draft.set("mcpServers", servers.filter((_, idx) => idx !== i))
                       }
                       className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded text-danger hover:opacity-80 sm:h-6 sm:w-auto sm:px-1"
-                      aria-label="Remove MCP server"
+                      aria-label={`Remove ${rowName}`}
                     >
                       ✕
                     </button>
                   </div>
                 ) : (
-                  <div className="text-sm font-medium">{server.name || `Server ${i + 1}`}</div>
+                  <div className="text-sm font-medium">{rowName}</div>
                 )}
                 <div className="flex flex-wrap items-center gap-2">
                   {isAdmin && (
                     <select
                       // Per row: several servers can be listed, and one name for all of them is
                       // ambiguous to a reader and a strict-mode collision to a test
-                      aria-label={`Authentication for ${server.name || `Server ${i + 1}`}`}
+                      aria-label={`Authentication for ${rowName}`}
                       value={server.authType}
                       onChange={(e) =>
                         updateServer(i, { authType: e.target.value as "none" | "bearer" | "oauth" })
@@ -584,6 +600,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                   {isAdmin && server.authType === "bearer" && (
                     <Input
                       type="password"
+                      aria-label={`Token for ${rowName}`}
                       value={server.authToken}
                       onChange={(e) => updateServer(i, { authToken: e.target.value })}
                       placeholder={server.hasAuthToken ? "Token set — leave empty to keep" : "Token"}
@@ -610,6 +627,13 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                         <Button
                           variant="secondary"
                           size="sm"
+                          aria-label={`${
+                            transient[i]?.connecting
+                              ? "Redirecting..."
+                              : server.oauthStatus === "connected"
+                                ? "Reconnect"
+                                : "Connect"
+                          } ${rowName}`}
                           disabled={transient[i]?.connecting || !server.name.trim()}
                           onClick={() => connectOauth(i)}
                         >
@@ -621,7 +645,12 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                         </Button>
                       )}
                       {project.canAdmin && server.oauthStatus === "connected" && (
-                        <Button variant="secondary" size="sm" onClick={() => disconnectOauth(i)}>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          aria-label={`Disconnect ${rowName}`}
+                          onClick={() => disconnectOauth(i)}
+                        >
                           Disconnect
                         </Button>
                       )}
@@ -631,12 +660,14 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                 {isAdmin && server.authType === "oauth" && (
                   <div className="flex gap-2">
                     <Input
+                      aria-label={`Client ID for ${rowName}`}
                       value={server.oauthClientId}
                       onChange={(e) => updateServer(i, { oauthClientId: e.target.value })}
                       placeholder="Client ID (optional — auto-registered when supported)"
                     />
                     <Input
                       type="password"
+                      aria-label={`Client secret for ${rowName}`}
                       value={server.oauthClientSecret}
                       onChange={(e) => updateServer(i, { oauthClientSecret: e.target.value })}
                       placeholder="Client secret (optional)"
@@ -645,6 +676,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                 )}
                 {isAdmin && (
                   <Input
+                    aria-label={`Tool allowlist for ${rowName}`}
                     value={server.toolAllowlist}
                     onChange={(e) => updateServer(i, { toolAllowlist: e.target.value })}
                     placeholder="Tool allowlist, comma-separated (empty = all)"
@@ -669,6 +701,9 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                     <Button
                       variant="secondary"
                       size="sm"
+                      aria-label={`${
+                        transient[i]?.testing ? "Testing..." : "Test connection"
+                      } for ${rowName}`}
                       disabled={transient[i]?.testing || !server.url.trim()}
                       onClick={() => testServer(i)}
                     >
@@ -680,7 +715,8 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                   <p className="whitespace-pre-wrap text-xs text-text-muted">{transient[i].testResult}</p>
                 )}
               </div>
-            ))}
+              );
+            })}
             {servers.length === 0 && (
               <EmptyState>
                 {isAdmin

@@ -4,6 +4,7 @@ import {
   ADMIN_SESSION_TOKEN,
   ADMIN_USERNAME,
   MEMBER_SESSION_TOKEN,
+  OWNER_SESSION_TOKEN,
 } from "./seed";
 
 /**
@@ -23,11 +24,16 @@ import {
  */
 const COOKIE_NAME = "__Host-bp_session";
 
-type Who = "admin" | "member";
+type Who = "admin" | "member" | "owner";
 
 const TOKENS: Record<Who, string> = {
   admin: ADMIN_SESSION_TOKEN,
   member: MEMBER_SESSION_TOKEN,
+  // A genuine project owner — a Grant `relation: "owner"` on the seeded board, with no standing
+  // on the instance at all. Distinct from "admin": that bypasses grant resolution entirely via
+  // `principal.instanceAdmin`, so it cannot exercise the `grant === "owner"` branch a
+  // `withProjectOwner` route actually depends on for anyone who isn't an instance admin.
+  owner: OWNER_SESSION_TOKEN,
 };
 
 export async function signIn(page: Page, who: Who = "admin"): Promise<void> {

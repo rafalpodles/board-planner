@@ -7,6 +7,7 @@ import {
   useEffect,
   useCallback,
   useMemo,
+  useRef,
 } from "react";
 import { ApiProject } from "@/types";
 import { useApi } from "@/hooks/use-api";
@@ -28,15 +29,22 @@ export function useProjectsProvider(): ProjectsState {
   const { user } = useAuth();
   const [projects, setProjects] = useState<ApiProject[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const appliedSeq = useRef(0);
 
+  // A read carries the order of the moment it was answered, so one overtaken by a later read or by
+  // a reorder applies nothing rather than undoing it (BP-551)
   const reload = useCallback(async () => {
+    const seq = ++appliedSeq.current;
     try {
-      setProjects(await api.get("/api/projects"));
+      const list = await api.get("/api/projects");
+      if (seq !== appliedSeq.current) return;
+      setProjects(list);
     } catch {
       // The shell must still render if this fails; pages surface their own errors
+      if (seq !== appliedSeq.current) return;
       setProjects([]);
     } finally {
-      setIsLoading(false);
+      if (seq === appliedSeq.current) setIsLoading(false);
     }
   }, [api]);
 
@@ -58,12 +66,16 @@ export function useProjectsProvider(): ProjectsState {
       const next = orderedIds
         .map((id) => byId.get(id))
         .filter((p): p is ApiProject => !!p);
-      if (next.length !== previous.length) return;
+      if (previous.length === 0 || next.length !== previous.length) return;
 
+      const seq = ++appliedSeq.current;
       setProjects(next);
       try {
         await api.put("/api/projects/reorder", { order: orderedIds });
       } catch {
+        // `previous` is the order this drop replaced, so restoring it over a later drop would put
+        // back something older still
+        if (seq !== appliedSeq.current) return;
         setProjects(previous);
       }
     },

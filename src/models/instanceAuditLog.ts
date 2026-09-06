@@ -14,6 +14,13 @@ const instanceAuditLogSchema = new Schema<IInstanceAuditLog>(
       ref: "User",
       default: null,
     },
+    // The same denormalisation as `target` below, applied to the other end of the row. Empty on
+    // every row written before it existed, and on the ones a machine writes, so the reader falls
+    // back to the reference and then to "system".
+    actorUsername: {
+      type: String,
+      default: "",
+    },
     action: {
       type: String,
       enum: INSTANCE_AUDIT_ACTIONS,

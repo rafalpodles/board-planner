@@ -56,6 +56,10 @@ async function storedTask(taskNumber: number): Promise<Record<string, unknown> |
   return withDb(async (db) => db.collection("tasks").findOne({ project: PROJECT_ID, taskNumber }));
 }
 
+async function storedTaskTitled(title: string): Promise<Record<string, unknown> | null> {
+  return withDb(async (db) => db.collection("tasks").findOne({ project: PROJECT_ID, title }));
+}
+
 /** Every task on the board, so a new occurrence can be told from the ones already there. */
 async function taskNumbers(): Promise<number[]> {
   return withDb(async (db) => {
@@ -585,6 +589,48 @@ test.describe("what happens when the task is closed", () => {
     expect(new Date(march.dueDate as Date).toISOString()).toBe("2026-03-31T00:00:00.000Z");
   });
 
+  // BP-489. Two overlapping closes — a double-click, or two workers racing each other — both used
+  // to read the same pre-write status and both mint a next occurrence. Driven through two
+  // concurrent API requests rather than two real clicks: a browser cannot reliably put two
+  // requests on the wire close enough together to reach a window measured in milliseconds, and the
+  // fixture is otherwise the same "closing a recurring task" every test above already sets up.
+  //
+  // Both PATCH .../status, not one of each writer: a PATCH raced against a PUT (the board vs. the
+  // detail view — updateTask does an extra Project.findById before its own read of oldTask, which
+  // tends to let the PATCH land first) reproduced the double mint on the unfixed code in only
+  // roughly 1 run in 3 across a larger sample — real, but too flaky to serve as this branch's
+  // proof. Two identical, identically-timed writers forces the window far more reliably. That
+  // narrows what THIS test exercises to changeStatus racing itself; updateTask's own guard is
+  // covered separately, and deterministically, by the unit tests next to it in task-service.test.ts.
+  test("two overlapping closes mint at most one occurrence", async ({ request }) => {
+    const due = BASE_DUE();
+    await giveDueDate(due);
+    await withDb(async (db) => {
+      await db
+        .collection("tasks")
+        .updateOne({ _id: SIBLING_TASK_ID }, { $set: { recurrence: { frequency: "weekly", interval: 1 } } });
+    });
+
+    const before = await taskNumbers();
+    const close = () =>
+      request.patch(`/api/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_ID}/status`, {
+        headers: ADMIN_AUTH,
+        data: { status: "done" },
+      });
+    const [first, second] = await Promise.all([close(), close()]);
+
+    // Neither request surfaces an error: the one that loses the race reports the state the
+    // winner already put the task into, not a 404 for a task that plainly still exists.
+    expect(first.status(), await first.text()).toBe(200);
+    expect(second.status(), await second.text()).toBe(200);
+
+    // The real assertion: exactly one next occurrence, not zero and not two. newOccurrence polls
+    // for a stable count of fresh task numbers, so a second mint (however delayed, since it is
+    // fire-and-forget) fails this rather than racing the assertion itself.
+    const created = await newOccurrence(before);
+    expect(new Date(created.dueDate as Date).getTime() - due.getTime()).toBe(7 * DAY_MS);
+  });
+
   test("a task with no rhythm leaves nothing behind", async ({ page, request }) => {
     // The control for all of the above, driven the same way — through the board rather than
     // through the API, which is the path `field-history` already covers.
@@ -672,7 +718,13 @@ test.describe("duplicating one of these", () => {
     });
   }
 
-  /** The task the POST created, read back from the database rather than from the response. */
+  /**
+   * The task the POST created, read back from the database rather than from the response.
+   *
+   * By title, and not by the taskNumber the response carries: duplicating from the task screen
+   * leaves the page for the copy (BP-521), and a response body cannot be read once the navigation
+   * that discards it has started. The status still can — it arrived with the headers.
+   */
   async function copyCreatedBy(page: Page, act: () => Promise<void>) {
     const posted = page.waitForResponse(
       (r) =>
@@ -681,8 +733,8 @@ test.describe("duplicating one of these", () => {
     );
     await act();
     const response = await posted;
-    expect(response.status(), await response.text()).toBe(201);
-    const created = await storedTask((await response.json()).taskNumber);
+    expect(response.status()).toBe(201);
+    const created = await storedTaskTitled(COPY_TITLE);
     if (!created) throw new Error("the duplicate was answered 201 and is not in the database");
     return created;
   }

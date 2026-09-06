@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import sift from "sift";
 import { Types } from "mongoose";
 import { CRITERION_TEXT_MAX_LENGTH, TASK_TITLE_MAX_LENGTH } from "@/lib/identifiers";
+import { BoardCannotClaim } from "@/lib/claim-refusal";
 
 // MongoDB's $cond treats only false, null, 0 and missing as false. An **empty string is true** —
 // the opposite of JavaScript. `execution.workerId` defaults to "", so an expression that leaned on
@@ -219,6 +220,19 @@ const customBoard = {
   ],
 };
 
+// What a claim needs on top of that: the run has to route its outcome, so a board missing the
+// review or done role is refused before anything is taken (BP-512). Kept apart from customBoard,
+// whose missing review column is what the release tests' "no escalation column" fallback rests on.
+// The finished column is called "shipped", so an implementation comparing against the literal
+// "done" fails every blocker test rather than one.
+const claimableBoard = {
+  columns: [
+    ...customBoard.columns,
+    { id: "checking", label: "Checking", role: "review", order: 3 },
+    { id: "shipped", label: "Shipped", role: "done", order: 4 },
+  ],
+};
+
 // The claim is an update pipeline, so $set and $unset arrive as stages rather than operators
 const claimStages = (call: unknown[]) => call[1] as Record<string, never>[];
 const claimSet = (call: unknown[]) => claimStages(call)[0].$set as unknown as Record<string, unknown>;
@@ -245,7 +259,7 @@ describe("claimNextTask", () => {
   beforeEach(() => {
     findOneAndUpdate.mockReset();
     findById.mockReset();
-    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    findById.mockReturnValue({ lean: () => Promise.resolve(claimableBoard) });
     find.mockReset();
     find.mockReturnValue({ lean: () => Promise.resolve([]) });
   });
@@ -254,12 +268,7 @@ describe("claimNextTask", () => {
   // never consulted. Judged through sift rather than by reading the filter, because what matters
   // is what MongoDB does with $nin over an array field, not that the source says "$nin".
   describe("blockers", () => {
-    // Every test here runs on a board whose finished column is called "shipped", so an
-    // implementation comparing against the literal "done" fails all of them rather than one
-    const shipping = {
-      ...customBoard,
-      columns: [...customBoard.columns, { id: "shipped", label: "Shipped", role: "done", order: 3 }],
-    };
+    const shipping = claimableBoard;
 
     // Real ObjectId hex, not readable labels: blockedBy holds refs, and the claim now refuses ids
     // it cannot cast — labels would make every fixture here vanish before the query saw it
@@ -366,16 +375,21 @@ describe("claimNextTask", () => {
     });
 
     // A board with no done column cannot express "finished", so it cannot express "blocked"
-    // either: every blocker would read as open and every dependent would be frozen for good, with
-    // nothing on the task or in any log saying why
-    it("skips the gate on a board with no done column instead of freezing every dependent", async () => {
-      findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    // either. It used to have the gate skipped — every blocker read as open would have frozen
+    // every dependent for good — and is now refused before the gate is consulted at all (BP-512):
+    // a run on such a board had nowhere to deliver, and the worker handed the task back and
+    // claimed it again on the next pass, for ever.
+    it("never consults the gate on a board with no done column, which is refused outright", async () => {
+      findById.mockReturnValue({
+        lean: () =>
+          Promise.resolve({ columns: claimableBoard.columns.filter((c) => c.role !== "done") }),
+      });
       find.mockReset();
 
-      const filter = await claimFilter();
+      await expect(claimNextTask("p1", "worker-a", "run-1", OWNER)).rejects.toThrow(/Done/);
 
       expect(find).not.toHaveBeenCalled();
-      expect(matches(filter, task({ blockedBy: [OPEN] }))).toBe(true);
+      expect(findOneAndUpdate).not.toHaveBeenCalled();
     });
   });
 
@@ -397,22 +411,60 @@ describe("claimNextTask", () => {
     expect(claimSet(findOneAndUpdate.mock.calls[0]).status).toBe("doing");
   });
 
-  it("returns null when the board has no active column to claim into", async () => {
+  // Refused, not null: null is what an empty queue answers, and for as long as a board with no
+  // column to claim into answered the same, the worker's poll read as idle rather than broken
+  // (BP-512). Asserted through the class AND the words, because the route hands the words to the
+  // worker and a message naming the wrong role would pass the class alone.
+  it("refuses, naming the role, when the board has no active column to claim into", async () => {
     findById.mockReturnValue({
       lean: () => Promise.resolve({ columns: [{ id: "ready", role: "approved", order: 1 }] }),
     });
 
-    expect(await claimNextTask("p1", "worker-a", "run-1")).toBeNull();
+    const claim = claimNextTask("p1", "worker-a", "run-1", OWNER);
+    await expect(claim).rejects.toBeInstanceOf(BoardCannotClaim);
+    await expect(claim).rejects.toThrow(/no column meaning In progress/);
     expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 
-  it("returns null when the board has no approved column to claim from", async () => {
+  it("refuses, naming the role, when the board has no approved column to claim from", async () => {
     findById.mockReturnValue({
       lean: () => Promise.resolve({ columns: [{ id: "doing", role: "active", order: 1 }] }),
     });
 
-    expect(await claimNextTask("p1", "worker-a", "run-1")).toBeNull();
+    const claim = claimNextTask("p1", "worker-a", "run-1", OWNER);
+    await expect(claim).rejects.toBeInstanceOf(BoardCannotClaim);
+    await expect(claim).rejects.toThrow(/no column meaning Ready to pick up/);
     expect(findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  // The two roles the claim itself never writes but the run needs to end. A task claimed onto a
+  // board without them was handed back at run start with the attempt refunded, and claimed again
+  // on the next pass without a poll interval — a comment on the task every iteration, for ever.
+  it("refuses a board with no review column, where a run could not put its result", async () => {
+    findById.mockReturnValue({
+      lean: () =>
+        Promise.resolve({
+          columns: claimableBoard.columns.filter((c) => c.role !== "review"),
+        }),
+    });
+
+    const claim = claimNextTask("p1", "worker-a", "run-1", OWNER);
+    await expect(claim).rejects.toBeInstanceOf(BoardCannotClaim);
+    await expect(claim).rejects.toThrow(/no column meaning Awaiting review/);
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("refuses a board with no done column, where a run could not deliver", async () => {
+    findById.mockReturnValue({
+      lean: () =>
+        Promise.resolve({ columns: claimableBoard.columns.filter((c) => c.role !== "done") }),
+    });
+
+    const claim = claimNextTask("p1", "worker-a", "run-1", OWNER);
+    await expect(claim).rejects.toBeInstanceOf(BoardCannotClaim);
+    await expect(claim).rejects.toThrow(/no column meaning Done/);
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+    expect(find).not.toHaveBeenCalled();
   });
 
   it("orders by board position, never lexicographically by priority", async () => {
@@ -1082,6 +1134,7 @@ describe("claiming by assignment", () => {
       { id: "ready", role: "approved", order: 1 },
       { id: "doing", role: "active", order: 2 },
       { id: "checking", role: "review", order: 3, triggersPmReview: true },
+      { id: "shipped", role: "done", order: 4 },
     ],
   };
 
@@ -1815,6 +1868,99 @@ describe("a status change announces the same things whichever path made it", () 
   });
 });
 
+// BP-489. Two overlapping closes of the same recurring task both used to read the same
+// `oldTask.status` before either write landed, so both minted a next occurrence. Guarding each
+// write with the status just read means only one of two overlapping requests can ever match it.
+describe("two overlapping closes of the same recurring task (BP-489)", () => {
+  const board = {
+    key: "TP",
+    columns: [
+      { id: "doing", label: "Doing", role: "active", order: 1 },
+      { id: "shipped", label: "Shipped", role: "done", order: 2 },
+    ],
+  };
+
+  function setup(over: Record<string, unknown> = {}) {
+    vi.clearAllMocks();
+    const before = { _id: "t1", taskNumber: 7, status: "doing", title: "x", ...over };
+    // Distinct from `before` only in status: whoever wins the race is what a refetch reads back.
+    const current = { ...before, status: "shipped" };
+    findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+    findOne.mockReturnValue({
+      lean: () => Promise.resolve(before),
+      // The shape a real Mongoose query has: `.populate(...).lean()` is updateTask's own oldTask
+      // read (still `before`), while awaited directly — no further `.lean()` — it is the
+      // refetch-on-lost-race path reading back whichever status actually won.
+      populate: () => ({
+        lean: () => Promise.resolve(before),
+        then: (resolve: (v: unknown) => void) => resolve(current),
+      }),
+    });
+    findOneAndUpdate.mockReturnValue({ populate: () => Promise.resolve(current) });
+    updateMany.mockResolvedValue({ modifiedCount: 0 });
+    return before;
+  }
+
+  it("changeStatus guards its write with the status it just read", async () => {
+    const before = setup();
+    await changeStatus("p1", "t1", "shipped", "actor");
+
+    expect(findOneAndUpdate.mock.calls[0][0]).toMatchObject({ status: before.status });
+  });
+
+  it("updateTask guards its write the same way when the edit form carries a status", async () => {
+    const before = setup();
+    await updateTask("p1", "t1", { status: "shipped" }, "actor");
+
+    expect(findOneAndUpdate.mock.calls[0][0]).toMatchObject({ status: before.status });
+  });
+
+  // Only a write that means to leave the column is guarded — an unrelated field edit resending
+  // the status it already had must not start refusing on account of somebody else's transition.
+  it("does not guard a write that stays in its column", async () => {
+    setup();
+    await updateTask("p1", "t1", { title: "renamed" }, "actor");
+
+    expect(findOneAndUpdate.mock.calls[0][0]).not.toHaveProperty("status");
+  });
+
+  it("reports the current task instead of a 404 when the guarded write loses the race", async () => {
+    setup({ recurrence: { frequency: "weekly", interval: 1 } });
+    // The guard firing: some other request's write already moved the status this one still
+    // thinks is current, so the precondition no longer matches anything.
+    findOneAndUpdate.mockReturnValue({ populate: () => Promise.resolve(null) });
+
+    const result = await changeStatus("p1", "t1", "shipped", "actor");
+
+    expect(result.ok).toBe(true);
+    expect(result.ok === true && result.data.status).toBe("shipped");
+  });
+
+  it("a lost race announces nothing and mints no second occurrence", async () => {
+    setup({ recurrence: { frequency: "weekly", interval: 1 } });
+    findOneAndUpdate.mockReturnValue({ populate: () => Promise.resolve(null) });
+
+    const result = await changeStatus("p1", "t1", "shipped", "actor");
+
+    // Without this, reverting the null-handling branch back to a bare 404 leaves this test
+    // green: a 404 never calls the webhook or Task.create either, for the wrong reason.
+    expect(result.ok).toBe(true);
+    expect(dispatchWebhooks).not.toHaveBeenCalled();
+    expect(taskCreate).not.toHaveBeenCalled();
+  });
+
+  it("updateTask's lost race is silent in exactly the same way", async () => {
+    setup({ recurrence: { frequency: "weekly", interval: 1 } });
+    findOneAndUpdate.mockReturnValue({ populate: () => Promise.resolve(null) });
+
+    const result = await updateTask("p1", "t1", { status: "shipped" }, "actor");
+
+    expect(result.ok).toBe(true);
+    expect(dispatchWebhooks).not.toHaveBeenCalled();
+    expect(taskCreate).not.toHaveBeenCalled();
+  });
+});
+
 /**
  * BP-463: what the next occurrence should be, and when there should not be one.
  *
@@ -2303,6 +2449,59 @@ describe("createTask and a foreign sprint", () => {
     await createTask("p1", "actor", { title: "x", sprint: OURS });
 
     expect(taskCreate.mock.calls.at(-1)?.[0].sprint).toBe(OURS);
+  });
+});
+
+/**
+ * BP-515. Sibling of BP-511's `assignee` fix, raised by that ticket's independent review:
+ * `createTask` and `updateTask` interpolated `category`/`status` into their refusal with no
+ * bound, and reached a model as a tool result the same way `noSuchAccount` does — the comment on
+ * that function says why it is sliced. The GET route's four refusals already slice to 64; these
+ * did not.
+ *
+ * Widened twice past what the ticket named, both times because the same interpolation exists a
+ * second place: `updateTask` carries an identical category/status pair the ticket did not quote,
+ * and `schemaValuesOrRefusal` — called by both writers — does the same to `priority` and
+ * `dueDate` (caught by this file's own independent review). Same root cause each time, fixed
+ * together rather than filed as near-duplicate tickets.
+ *
+ * `.not.toContain("y".repeat(65))` rather than a loose `error.length` bound: the review that
+ * found the widened scope also found that `toBeLessThan(500)` passes for a slice at 400, so it
+ * does not actually pin the 64 this ticket is about.
+ */
+describe("createTask and updateTask do not echo an unbounded value into their refusals", () => {
+  const board = { categories: [{ name: "bug" }], ...customBoard };
+  const UNBOUNDED = "y".repeat(5000);
+  const NOT_SLICED = "y".repeat(65);
+
+  beforeEach(() => {
+    findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+  });
+
+  describe.each([
+    ["category", "createTask", (v: unknown) => createTask("p1", "actor", { title: "x", category: v })],
+    ["status", "createTask", (v: unknown) => createTask("p1", "actor", { title: "x", status: v })],
+    ["category", "updateTask", (v: unknown) => updateTask("p1", "t1", { category: v }, "actor")],
+    ["status", "updateTask", (v: unknown) => updateTask("p1", "t1", { status: v }, "actor")],
+    ["priority", "createTask", (v: unknown) => createTask("p1", "actor", { title: "x", priority: v })],
+    ["priority", "updateTask", (v: unknown) => updateTask("p1", "t1", { priority: v }, "actor")],
+    ["dueDate", "createTask", (v: unknown) => createTask("p1", "actor", { title: "x", dueDate: v })],
+    ["dueDate", "updateTask", (v: unknown) => updateTask("p1", "t1", { dueDate: v }, "actor")],
+  ] as const)("%s, via %s", (_field, _writer, call) => {
+    it("bounds an unbounded value in its refusal", async () => {
+      const result = await call(UNBOUNDED);
+
+      expect(result).toMatchObject({ ok: false, status: 400 });
+      expect((result as { error: string }).error).not.toContain(NOT_SLICED);
+    });
+
+    // The control: a short invalid value still names itself, so the bound has not swallowed the
+    // information an honest caller needs to fix their request.
+    it("still names a short invalid value", async () => {
+      const result = await call("not-real");
+
+      expect(result).toMatchObject({ error: expect.stringContaining("not-real") });
+    });
   });
 });
 
@@ -3156,7 +3355,7 @@ describe("a machine claims its owner's work", () => {
   beforeEach(() => {
     findOneAndUpdate.mockReset();
     findById.mockReset();
-    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    findById.mockReturnValue({ lean: () => Promise.resolve(claimableBoard) });
   });
 
   async function claimFilterFor(ownerId: string | null) {
@@ -3296,7 +3495,7 @@ describe("what a member can and cannot arm by choosing an agent", () => {
   beforeEach(() => {
     findOneAndUpdate.mockReset();
     findById.mockReset();
-    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    findById.mockReturnValue({ lean: () => Promise.resolve(claimableBoard) });
     find.mockReset();
     find.mockReturnValue({ lean: () => Promise.resolve([]) });
   });
@@ -3365,7 +3564,7 @@ describe("whose machine choosing an agent can reach", () => {
 
   beforeEach(() => {
     findById.mockReset();
-    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    findById.mockReturnValue({ lean: () => Promise.resolve(claimableBoard) });
     find.mockReset();
     find.mockReturnValue({ lean: () => Promise.resolve([]) });
     findOne.mockReset();
@@ -3525,7 +3724,7 @@ describe("what a change of hands does to the agent already on the task", () => {
 
   beforeEach(() => {
     findById.mockReset();
-    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    findById.mockReturnValue({ lean: () => Promise.resolve(claimableBoard) });
     find.mockReset();
     find.mockReturnValue({ lean: () => Promise.resolve([]) });
     findOne.mockReset();

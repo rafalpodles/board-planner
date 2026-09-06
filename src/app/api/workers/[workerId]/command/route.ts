@@ -47,6 +47,7 @@ export const POST = withAdmin(async (request, { params, user }) => {
     action: "worker_command_sent",
     target: worker.name,
     user: String(user._id),
+    actorUsername: user.username,
     detail: command,
   });
 

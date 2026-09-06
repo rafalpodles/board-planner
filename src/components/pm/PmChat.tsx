@@ -12,6 +12,7 @@ import { timeAgo } from "@/lib/time";
 import { downscaleImage, estimateImageTokens } from "@/lib/image-resize";
 import { isPmLockedByInstance, isPmRunnable, pmDisabledReason } from "@/lib/pm/gate";
 import { taskPath } from "@/lib/urls";
+import { useOpenTask } from "@/hooks/use-open-task";
 import { Modal } from "@/components/ui/Modal";
 
 const MAX_ATTACHMENTS = 4;
@@ -56,6 +57,7 @@ export function PmChat({
   const [messages, setMessages] = useState<ApiPmMessage[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [taskIdByKey, setTaskIdByKey] = useState<Record<string, string>>({});
+  const openTask = useOpenTask();
   const [input, setInput] = useState("");
   const [working, setWorking] = useState(false);
   const [workingStatus, setWorkingStatus] = useState("");
@@ -430,8 +432,20 @@ export function PmChat({
               {a.summary}
             </span>
           );
+          const href = taskPath(projectId, a.taskKey!);
           return taskId ? (
-            <Link key={i} href={taskPath(projectId, a.taskKey!)}>
+            <Link
+              key={i}
+              href={href}
+              // The widget is mounted in the shell, so a chip can be clicked from the task page,
+              // where a soft navigation draws the task twice (BP-533). Modified clicks are left
+              // to the browser — a new tab is a document of its own.
+              onClick={(e) => {
+                if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                e.preventDefault();
+                openTask(href);
+              }}
+            >
               {chip}
             </Link>
           ) : (

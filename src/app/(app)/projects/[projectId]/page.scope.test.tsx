@@ -50,6 +50,7 @@ function baseBoard(overrides: Partial<ProjectBoard>): ProjectBoard {
     confirmBulkDelete: false,
     setConfirmBulkDelete: vi.fn(),
     bulkDeleting: false,
+    deleting: false,
     confirmContextDelete: null,
     setConfirmContextDelete: vi.fn(),
     heldMove: null,

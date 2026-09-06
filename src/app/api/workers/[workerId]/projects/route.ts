@@ -114,6 +114,7 @@ export const PUT = withAuth(async (request, { params, user }) => {
       action: "project_workers_enabled",
       target: project.key || String(project._id),
       user: String(user._id),
+      actorUsername: user.username,
       detail: `Picked for ${worker.name}`,
     });
   }

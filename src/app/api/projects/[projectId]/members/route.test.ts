@@ -227,6 +227,19 @@ describe("DELETE members", () => {
     });
   });
 
+  // BP-546's shape, one route over and found by the review of that fix: the last-owner check
+  // compared the raw query value while the stored subject is lower-case hex, so the same id
+  // shouted skipped the 409 — and `Grant.deleteOne` cast it back and removed the row, leaving a
+  // board with no owner at all.
+  it("refuses to remove the last owner however the id is spelled", async () => {
+    grantCountDocuments.mockResolvedValue(1);
+    grantFindLean.mockResolvedValue([{ subject: U2, relation: "owner" }]);
+    const url = `http://x/api/projects/${PROJECT}/members?userId=${U2.toUpperCase()}`;
+    const res = await DELETE(new Request(url, { method: "DELETE" }), { params });
+    expect(res.status).toBe(409);
+    expect(grantDeleteOne).not.toHaveBeenCalled();
+  });
+
   it("refuses to remove the last owner", async () => {
     grantCountDocuments.mockResolvedValue(1);
     grantFindLean.mockResolvedValue([{ subject: U2, relation: "owner" }]);

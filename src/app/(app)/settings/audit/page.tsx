@@ -6,41 +6,7 @@ import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/components/ui/Toast";
 import { ApiInstanceAuditLog } from "@/types";
-
-// Past tense, because every row is something that already happened. The identifiers are readable
-// enough to fall back on, but "worker_locked" is not a sentence.
-const LABELS: Record<string, string> = {
-  worker_locked: "Kill switch on",
-  worker_unlocked: "Kill switch cleared",
-  worker_enabled: "Worker enabled",
-  worker_disabled: "Worker disabled",
-  worker_renamed: "Worker renamed",
-  worker_released: "Worker released from its owner",
-  worker_poll_interval_changed: "Poll interval changed",
-  enrolment_token_minted: "Enrolment token minted",
-  enrolment_token_spent: "Enrolment token spent",
-  project_workers_enabled: "Workers enabled for project",
-  project_workers_disabled: "Workers disabled for project",
-  user_password_reset: "Password set by an admin",
-  user_email_changed: "Address changed by an admin",
-  user_email_changed_self: "Address changed by the account itself",
-  user_password_reset_by_email: "Password reset by email",
-  user_full_name_changed_self: "Name changed by the account itself",
-};
-
-// The actions worth spotting at a glance: one stops a machine, one hands out the credential that
-// lets a new one join, and one hands somebody a way into another person's account.
-const NOTABLE = new Set([
-  "worker_locked",
-  "enrolment_token_minted",
-  "enrolment_token_spent",
-  "user_password_reset",
-  "user_email_changed",
-  // Moving one's own recovery address is worth spotting for the same reason as the admin doing it:
-  // it decides where the next reset link lands, and it signs nobody out
-  "user_email_changed_self",
-  "user_password_reset_by_email",
-]);
+import { auditActionLabel, auditActor, auditIsNotable } from "@/lib/instance-audit-view";
 
 export default function InstanceAuditPage() {
   const api = useApi();
@@ -84,9 +50,10 @@ export default function InstanceAuditPage() {
         <h2 className="text-lg font-semibold mb-1">Instance audit log</h2>
         <p className="text-sm text-text-muted">
           Instance-wide actions: stopping a machine, enrolling one, committing a project to
-          workers, and anything that changes how an account is signed into — a password set for
-          somebody, a reset by email, or an address moved, whether by an administrator or by the
-          account itself. Each project keeps its own log of its own settings, under that project.
+          workers, an account created, made an administrator or deleted, and anything that changes
+          how an account is signed into — a password set for somebody, a reset by email, or an
+          address moved, whether by an administrator or by the account itself. Each project keeps
+          its own log of its own settings, under that project.
         </p>
       </div>
 
@@ -110,14 +77,14 @@ export default function InstanceAuditPage() {
                   {/* "system" for a machine, matching the project log — a worker spending its
                       enrolment token has no session to attribute the row to */}
                   <td className="align-top font-medium sm:table-cell sm:whitespace-nowrap sm:px-3 sm:py-2">
-                    {log.user?.username ?? "system"}
+                    {auditActor(log)}
                   </td>
                   <td
                     className={`w-full align-top sm:table-cell sm:w-auto sm:whitespace-nowrap sm:px-3 sm:py-2 ${
-                      NOTABLE.has(log.action) ? "text-danger" : "text-text-muted"
+                      auditIsNotable(log) ? "text-danger" : "text-text-muted"
                     }`}
                   >
-                    {LABELS[log.action] ?? log.action.replace(/_/g, " ")}
+                    {auditActionLabel(log)}
                   </td>
                   <td className="align-top sm:table-cell sm:whitespace-nowrap sm:px-3 sm:py-2">
                     {log.target}
