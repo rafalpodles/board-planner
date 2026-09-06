@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/Toast";
+import { Button } from "@/components/ui/Button";
 import { ApiProjectAuditLog } from "@/types";
 import { SettingsCard, EmptyState } from "@/components/settings/SettingsCard";
 
@@ -10,21 +11,58 @@ export function AuditSection({ projectId, active }: { projectId: string; active:
   const api = useApi();
   const { toast } = useToast();
   const [logs, setLogs] = useState<ApiProjectAuditLog[]>([]);
-  const [loaded, setLoaded] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+  const started = useRef(false);
+  const loadSeq = useRef(0);
 
-  useEffect(() => {
-    if (!active || loaded) return;
-    setLoaded(true);
+  const load = useCallback(() => {
+    // Single-flight is the render's doing today: the spinner takes the branch before the Retry
+    // button that could ask for a second read. This keeps a late answer harmless regardless.
+    const seq = ++loadSeq.current;
+    setLoading(true);
     api
       .get(`/api/projects/${projectId}/audit`)
-      .then(setLogs)
-      .catch(() => toast("Failed to load audit log", "error"));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, loaded, projectId]);
+      .then((rows: ApiProjectAuditLog[]) => {
+        if (seq !== loadSeq.current) return;
+        setLogs(rows);
+        setFailed(false);
+      })
+      .catch(() => {
+        if (seq !== loadSeq.current) return;
+        setFailed(true);
+        toast("Failed to load audit log", "error");
+      })
+      .finally(() => {
+        if (seq === loadSeq.current) setLoading(false);
+      });
+  }, [api, projectId, toast]);
+
+  useEffect(() => {
+    if (!active || started.current) return;
+    started.current = true;
+    load();
+  }, [active, load]);
 
   return (
     <SettingsCard title="Recent changes">
-      {logs.length === 0 ? (
+      {loading ? (
+        <div className="flex justify-center py-8" role="status" aria-label="Loading the audit log">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        </div>
+      ) : failed ? (
+        // Not the empty state: "nothing was ever changed here" is a claim about this board's
+        // history, and a read that never answered supports no claim about it at all. The toast
+        // fades; this stays until somebody has an answer
+        <div className="flex flex-col items-center justify-center gap-3 py-8 text-center">
+          <p role="alert" className="text-sm text-text-muted">
+            Failed to load the audit log.
+          </p>
+          <Button size="sm" onClick={load}>
+            Retry
+          </Button>
+        </div>
+      ) : logs.length === 0 ? (
         <EmptyState>No settings changes recorded yet.</EmptyState>
       ) : (
         // A table, so the columns line up across rows: separate flex rows each sized
