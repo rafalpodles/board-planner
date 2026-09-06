@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/Button";
 import { SecretField } from "@/components/ui/SecretField";
 import { SettingRow } from "@/components/settings/SettingRow";
 import { diffById } from "@/lib/row-diff";
+import { distinctRowNames } from "@/lib/row-names";
 import { SettingsCard, EmptyState } from "@/components/settings/SettingsCard";
 import { Connections, IntegrationId } from "@/components/settings/Connections";
 import { useDirtyGroup } from "@/components/settings/settings-context";
@@ -68,6 +69,15 @@ export function IntegrationsSection({
   const makeTempId = () => `new-${(nextTempId.current += 1)}`;
   const rowKey = (r: { _id?: string; tempId?: string }) =>
     r._id || r.tempId || "";
+
+  // What each row calls itself to a screen reader. Computed across the whole list rather than per
+  // row, because whether a name needs its position appended is a question about its neighbours.
+  const channelRowNames = distinctRowNames(
+    channels.value.channels.map((ch) => ch.name)
+  );
+  const webhookRowNames = distinctRowNames(
+    webhooks.value.webhooks.map((wh, i) => wh.urlMasked || `Webhook ${i + 1}`)
+  );
 
   const [githubSyncing, setGithubSyncing] = useState(false);
   const [codaSyncing, setCodaSyncing] = useState(false);
@@ -773,7 +783,11 @@ export function IntegrationsSection({
                     notifications addressed to you, see My notifications.
                   </p>
                   <div className="space-y-3">
-                    {channels.value.channels.map((ch) => (
+                    {channels.value.channels.map((ch, i) => {
+                      // Nothing stops two channels sharing a name, so the shared one is not on
+                      // its own enough to tell the rows apart — see distinctRowNames
+                      const rowName = channelRowNames[i];
+                      return (
                       <div
                         key={rowKey(ch)}
                         className="rounded-lg border border-border p-3"
@@ -799,7 +813,7 @@ export function IntegrationsSection({
                               // accessible name: it said nothing about what pressing does, and
                               // nothing about which channel. aria-pressed carries the state
                               // instead, and the name stays put while the state changes.
-                              aria-label={`Enabled for ${ch.name}`}
+                              aria-label={`Enabled for ${rowName}`}
                               aria-pressed={ch.enabled}
                               onClick={() =>
                                 updateChannel(rowKey(ch), {
@@ -815,7 +829,7 @@ export function IntegrationsSection({
                               {ch.enabled ? "Active" : "Disabled"}
                             </button>
                             <button
-                              aria-label={`Delete ${ch.name}`}
+                              aria-label={`Delete ${rowName}`}
                               onClick={() => removeChannel(rowKey(ch))}
                               className="text-xs text-text-muted hover:text-danger"
                             >
@@ -826,7 +840,7 @@ export function IntegrationsSection({
                         <div className="mb-2">
                           <SecretField
                             disabled={!ch._id}
-                            label={`Webhook URL for ${ch.name}`}
+                            label={`Webhook URL for ${rowName}`}
                             masked={ch.webhookUrlMasked}
                             placeholder={
                               ch.type === "slack"
@@ -842,7 +856,7 @@ export function IntegrationsSection({
                           {WEBHOOK_EVENTS.map((evt) => (
                             <button
                               key={evt}
-                              aria-label={`${evt.replace(/_/g, " ")} for ${ch.name}`}
+                              aria-label={`${evt.replace(/_/g, " ")} for ${rowName}`}
                               aria-pressed={ch.events.includes(evt)}
                               onClick={() =>
                                 updateChannel(rowKey(ch), {
@@ -860,7 +874,8 @@ export function IntegrationsSection({
                           ))}
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                     {channels.value.channels.length === 0 && (
                       <EmptyState>
                         No channels yet. Add one to get board updates in Slack
@@ -926,8 +941,10 @@ export function IntegrationsSection({
                   <div className="space-y-3">
                     {webhooks.value.webhooks.map((wh, i) => {
                       // A webhook has no name of its own, so the masked URL is what tells one row
-                      // from another on screen — and the only thing that can do it in a name
-                      const rowName = wh.urlMasked || `Webhook ${i + 1}`;
+                      // from another on screen — and the only thing that can do it in a name. The
+                      // mask is lossy, so two endpoints can arrive here identical (see
+                      // distinctRowNames).
+                      const rowName = webhookRowNames[i];
                       return (
                       <div
                         key={rowKey(wh)}

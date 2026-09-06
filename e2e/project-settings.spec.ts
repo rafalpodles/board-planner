@@ -762,10 +762,11 @@ test.describe("Integrations · the save bar", () => {
     await expect(picker.or(anyWebhookShape).first()).toBeVisible();
     if (await picker.isVisible()) await picker.click();
 
-    // The row's accessible name has three forms — "Webhook Webhooks POST board events to any URL"
-    // before anything is configured, "Webhooks 1 endpoint" after, and a separate "Configure
-    // Webhooks" button beside it. Matching the first thing containing "Webhooks" survives all of
-    // them; anchoring on any one description works exactly once and then rots.
+    // The row's accessible name has three forms — "Webhooks POST board events to any URL" before
+    // anything is configured, "Webhooks 1 endpoint" after, and a separate "Configure Webhooks"
+    // button beside it. Matching the first thing containing "Webhooks" survives all of them;
+    // anchoring on any one description works exactly once and then rots. (The vendor prefix the
+    // first form used to carry left with BP-510, which made the brand icon decorative.)
     const input = page.getByPlaceholder("https://example.com/webhook");
     await expect(input.or(anyWebhookShape).first()).toBeVisible();
     if (!(await input.isVisible())) {

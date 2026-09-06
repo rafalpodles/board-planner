@@ -29,6 +29,19 @@ import { signIn } from "./session";
  * per-control assertions are what protect the placeholder-only ones, and reverting any one of
  * them reddens the test that names it.
  *
+ * **So the sweep is a net for what comes next, not evidence for this change.** Of its four cards
+ * only the worker policy one goes red against the unfixed code; the other three were already
+ * fully named, by placeholder or by text content. What proves this change are the per-row tests
+ * in the first `describe` and the picker test below them.
+ *
+ * **One thing the fix gives up, deliberately.** The enable toggles show `Active`/`Disabled` and
+ * are now named `Enabled for <row>`, which contains neither word — so a voice-control user reading
+ * the screen cannot say what they see (WCAG 2.5.3). The two goals are incompatible while the
+ * visible text IS the state: a name that contains it is a name that changes with it, which is the
+ * defect BP-510 names and forbids. The ticket asks for the stable name, so that is what this does.
+ * The reset button, whose visible text does not change, keeps `set · reset` at the front of its
+ * name and satisfies both.
+ *
  * **What this does not cover.** The per-server `Enabled` and `Allow writes` switches still
  * announce identically across rows. `Switch` takes its name from its visible label and offers no
  * way to add the row's name without either changing what is on screen or widening the component,
@@ -98,6 +111,58 @@ async function withTwoOfEverything() {
 }
 
 /**
+ * The state the fix has to survive: rows the product lets you create whose human-readable identity
+ * is not unique. Two channels called `alerts` (nothing refuses a duplicate name), and two webhooks
+ * whose different URLs mask to one string — `maskSecretUrl` keeps the origin and the last four
+ * characters, so `/hooks/board` and `/hooks/second-board` both end `••••oard`.
+ */
+async function withCollidingRows() {
+  if (mongoose.connection.readyState === 0) await mongoose.connect(E2E_MONGODB_URI);
+  const db = mongoose.connection.db;
+  if (!db) throw new Error("no database handle");
+  const oid = () => new mongoose.Types.ObjectId();
+  await db.collection("projects").updateOne(
+    { _id: PROJECT_ID },
+    {
+      $set: {
+        notificationChannels: [
+          {
+            _id: oid(),
+            type: "slack",
+            name: "alerts",
+            webhookUrl: "https://hooks.slack.com/services/alerts",
+            events: ["task_created"],
+            enabled: true,
+          },
+          {
+            _id: oid(),
+            type: "discord",
+            name: "alerts",
+            webhookUrl: "https://discord.com/api/webhooks/alerts",
+            events: ["task_created"],
+            enabled: false,
+          },
+        ],
+        webhooks: [
+          {
+            _id: oid(),
+            url: "https://example.com/hooks/board",
+            events: ["task_created"],
+            enabled: true,
+          },
+          {
+            _id: oid(),
+            url: "https://example.com/hooks/second-board",
+            events: ["status_changed"],
+            enabled: false,
+          },
+        ],
+      },
+    }
+  );
+}
+
+/**
  * Playwright's own accessible-name computation rather than a second implementation of it in the
  * page: `ariaSnapshot` prints one line per node, and a control with a name carries it in quotes.
  * A DOM-level re-derivation would be a different algorithm that agrees with the real one most of
@@ -106,7 +171,17 @@ async function withTwoOfEverything() {
  * Returns the roles this cares about that came back with no name at all, and how many were seen —
  * a region that renders no controls must not read as a region with no unnamed ones.
  */
-const NAMED_ROLES = ["button", "textbox", "combobox", "checkbox", "switch", "link", "searchbox"];
+const NAMED_ROLES = [
+  "button",
+  "textbox",
+  "combobox",
+  "checkbox",
+  "switch",
+  "link",
+  "searchbox",
+  // `<input type="number">`, which the worker policy fields are one edit away from being
+  "spinbutton",
+];
 
 async function namelessControls(scope: Locator) {
   const snapshot = await scope.ariaSnapshot();
@@ -114,13 +189,24 @@ async function namelessControls(scope: Locator) {
   const examined: string[] = [];
   const nameless: string[] = [];
   for (const line of lines) {
-    // `- button "Delete alpha-room"` / `- textbox:` / `- button [disabled]`
-    const match = /^\s*-\s+([a-z]+)\b(.*)$/.exec(line);
+    /**
+     * `- button "Delete alpha-room": ✕` / `- textbox "URL for acme"` / `- textbox: acme`
+     *
+     * The quote group is anchored to the NAME slot rather than searched for anywhere after the
+     * role. Looking anywhere counted an anonymous box as named the moment its own *value* needed
+     * quoting — `- textbox: "#hash"` and `- textbox: "foo: bar"` both have quotes and no name —
+     * which is precisely the hole this sweep is supposed not to have.
+     *
+     * A role whose name itself contains `": "` is emitted as `- 'button "odd: name"': …`, which
+     * this deliberately does not match: such a line always HAS a name, so skipping it can shrink
+     * what is examined but can never turn an unnamed control into a pass.
+     */
+    const match = /^\s*-\s+([a-z]+)(\s+"(?:[^"\\]|\\.)*")?/.exec(line);
     if (!match) continue;
-    const [, role, rest] = match;
+    const [, role, name] = match;
     if (!NAMED_ROLES.includes(role)) continue;
     examined.push(line.trim());
-    if (!/"[^"]*\S[^"]*"/.test(rest)) nameless.push(line.trim());
+    if (!name || !name.slice(2, -1).trim()) nameless.push(line.trim());
   }
   return { examined, nameless };
 }
@@ -144,7 +230,14 @@ function card(page: Page, heading: string) {
 /** Opens one of the Connections rows by the name it announces, which is itself part of the fix. */
 async function openConnection(page: Page, name: RegExp) {
   await page.goto(`/projects/${PROJECT_KEY}/settings?section=integrations`);
-  await page.getByRole("button", { name }).click();
+  const card = page.getByRole("button", { name });
+  // Waited for rather than clicked straight after `goto`: Playwright's actionability checks pass
+  // against a rendered-but-not-yet-hydrated DOM, and the click is dispatched once and never
+  // retried — so a slow hydration swallows it and the failure lands on a later assertion with a
+  // misleading message. `aria-expanded` is React's, so it only exists once React is driving.
+  await expect(card).toHaveAttribute("aria-expanded", "false");
+  await card.click();
+  await expect(card).toHaveAttribute("aria-expanded", "true");
 }
 
 test.describe("a settings row says which row it is", () => {
@@ -261,6 +354,59 @@ test.describe("a settings row says which row it is", () => {
     await expect(page.getByRole("button", { name: "Replace", exact: true })).toHaveCount(0);
   });
 
+  /**
+   * The way the fix above comes undone. `notifications/route.ts` asks a channel name to be
+   * non-empty and nothing else, so the same room name on Slack and on Discord is an ordinary
+   * thing to have — and a per-row name taken from a name two rows share tells them apart no
+   * better than "Delete" did.
+   */
+  test("two channels sharing a name are still told apart", async ({ page }) => {
+    await withCollidingRows();
+    await signIn(page);
+    await openConnection(page, /^Team channels/);
+
+    // Both rows really do carry the same name on screen: the premise, not the assertion
+    await expect(page.getByText("alerts", { exact: true })).toHaveCount(2);
+
+    // Neither of these may be a strict-mode violation, and they must not be the same element
+    const first = page.getByRole("button", { name: "Delete alerts (1)" });
+    const second = page.getByRole("button", { name: "Delete alerts (2)" });
+    await expect(first).toHaveCount(1);
+    await expect(second).toHaveCount(1);
+    // Seeded enabled on one row and not the other, so this says which is which
+    await expect(page.getByRole("button", { name: "Enabled for alerts (1)" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+    await expect(page.getByRole("button", { name: "Enabled for alerts (2)" })).toHaveAttribute(
+      "aria-pressed",
+      "false"
+    );
+  });
+
+  /**
+   * The same hole on the other list, and a likelier one: a webhook has no name at all, so the row
+   * is identified by `maskSecretUrl`, which keeps the origin and the last four characters — two
+   * endpoints under one host collapse onto one string without being contrived.
+   */
+  test("two webhooks whose masks collide are still told apart", async ({ page }) => {
+    await withCollidingRows();
+    await signIn(page);
+    await openConnection(page, /^Webhooks/);
+
+    const masked = "https://example.com/••••oard";
+    await expect(page.getByText(masked, { exact: true })).toHaveCount(2);
+
+    await expect(page.getByRole("button", { name: `Delete ${masked} (1)` })).toHaveCount(1);
+    await expect(page.getByRole("button", { name: `Delete ${masked} (2)` })).toHaveCount(1);
+    await expect(
+      page.getByRole("button", { name: `Replace URL for ${masked} (1)` })
+    ).toHaveCount(1);
+    await expect(
+      page.getByRole("button", { name: `status changed for ${masked} (2)` })
+    ).toHaveCount(1);
+  });
+
   test("each policy field names itself, and so does the button that resets it", async ({
     page,
   }) => {
@@ -276,22 +422,20 @@ test.describe("a settings row says which row it is", () => {
       "1800000"
     );
 
+    // The visible text stays at the front of the name, so a voice-control user reading the screen
+    // can still say what they see (WCAG 2.5.3) — the field is what follows it
+    await expect(page.getByRole("button", { name: "set · reset Base branch" })).toHaveCount(1);
     await expect(
-      page.getByRole("button", { name: "Reset Base branch to the default" })
-    ).toHaveCount(1);
-    await expect(
-      page.getByRole("button", { name: "Reset Timeout for one step (ms) to the default" })
+      page.getByRole("button", { name: "set · reset Timeout for one step (ms)" })
     ).toHaveCount(1);
     // `title` is a tooltip and never became the name; the text content did, on both buttons
-    await expect(page.getByRole("button", { name: "set · reset" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "set · reset", exact: true })).toHaveCount(0);
 
     // It still resets the field it names, not its neighbour
-    await page.getByRole("button", { name: "Reset Base branch to the default" }).click();
-    await expect(page.getByRole("button", { name: "Reset Base branch to the default" })).toHaveCount(
-      0
-    );
+    await page.getByRole("button", { name: "set · reset Base branch" }).click();
+    await expect(page.getByRole("button", { name: "set · reset Base branch" })).toHaveCount(0);
     await expect(
-      page.getByRole("button", { name: "Reset Timeout for one step (ms) to the default" })
+      page.getByRole("button", { name: "set · reset Timeout for one step (ms)" })
     ).toHaveCount(1);
   });
 

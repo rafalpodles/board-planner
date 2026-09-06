@@ -81,12 +81,18 @@ export function SecretField({
           }
         }}
       />
-      <Button size="sm" disabled={busy || !value.trim()} onClick={submit}>
+      <Button
+        size="sm"
+        aria-label={`Save ${label}`}
+        disabled={busy || !value.trim()}
+        onClick={submit}
+      >
         Save
       </Button>
       <Button
         variant="ghost"
         size="sm"
+        aria-label={`Cancel ${label}`}
         disabled={busy}
         onClick={() => {
           setValue("");
