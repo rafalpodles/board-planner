@@ -202,7 +202,10 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
         .map((s, i) => ({
           name: serverRowNames[i],
           enabled: s.enabled,
-          key: catalogKey(s),
+          // The allowlist and allowWrites belong in the de-dup key even though they are not part
+          // of a catalogue's identity: what is being summed is what each ROW contributes, and two
+          // rows sharing a host but narrowed differently contribute different numbers (BP-574).
+          key: [catalogKey(s), s.toolAllowlist, s.allowWrites].join("|"),
           // The RAW catalogue, the same list the picker's own counter uses, so the two cannot
           // print different numbers for one server
           count: transient[catalogKey(s)]?.catalog
@@ -210,8 +213,12 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
             : 0,
         }))
         // Two draft rows can share an identity while one of them is still being typed, and they
-        // then share one catalogue — counting both reported it twice (BP-569 review 5)
-        .filter((s, i, all) => s.enabled && all.findIndex((o) => o.key === s.key) === i),
+        // then share one catalogue — counting both reported it twice (BP-569 review 5). The search
+        // is over ENABLED rows only: landing on a disabled twin dropped the enabled row's whole
+        // contribution, and the flood warning with it (BP-574).
+        .filter(
+          (s, i, all) => s.enabled && all.findIndex((o) => o.enabled && o.key === s.key) === i
+        ),
       undefined,
       // A server nobody could reach contributes an unknown number, so the total is a floor
       enabledServers.some((s) => !transient[catalogKey(s)]?.catalog)
@@ -219,6 +226,13 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
   );
 
   function updateServer(index: number, patch: Partial<McpServerDraft>) {
+    const before = servers[index];
+    // `catalogKey` reduces the token to whether one exists, so rotating a stored token to another
+    // one does not move the key and the catalogue found with the old credential would stay on
+    // screen — a narrower token then sees fewer tools than the ticks claim (BP-574).
+    if ("authToken" in patch && before.hasAuthToken && patch.authToken !== before.authToken) {
+      setTransientAt(catalogKey(before), { catalog: undefined, testResult: "" });
+    }
     draft.set(
       "mcpServers",
       servers.map((s, i) => (i === index ? { ...s, ...patch } : s))
@@ -383,17 +397,20 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
   }
 
   async function disconnectOauth(index: number) {
+    const name = servers[index].name.trim();
     try {
-      await api.post(`/api/projects/${projectId}/pm/mcp-oauth/disconnect`, {
-        name: servers[index].name.trim(),
-      });
-      // The connection is gone on the server, so this must not be a dirty edit Discard can rewind
-      // — and `discoverMcpTools` refuses an oauth server with no token, so the catalogue on screen
-      // now describes a turn that would carry nothing from it (BP-569 review 5).
-      const cleared = servers.map((s, i) =>
-        i === index ? { ...s, oauthStatus: "unconfigured" } : s
-      );
-      draft.commit({ ...draft.value, mcpServers: cleared });
+      await api.post(`/api/projects/${projectId}/pm/mcp-oauth/disconnect`, { name });
+      // The connection is gone on the server, so this must not be a dirty edit Discard can rewind.
+      // `rebase`, not `commit`: commit moves the baseline to whatever it is given, and giving it
+      // the whole live draft adopted every unsaved edit in the section as saved — the Save bar
+      // vanished with nothing sent (BP-574). Matched by name rather than by index, because value
+      // and baseline hold different rows once one has been added or removed.
+      const disconnected = (row: McpServerDraft) =>
+        row.name.trim() === name ? { ...row, oauthStatus: "unconfigured" } : row;
+      draft.set("mcpServers", servers.map(disconnected));
+      draft.rebase({ ...draft.baseline, mcpServers: draft.baseline.mcpServers.map(disconnected) });
+      // `discoverMcpTools` refuses an oauth server with no token, so the catalogue on screen now
+      // describes a turn that would carry nothing from it
       setTransientAt(catalogKey(servers[index]), { catalog: undefined, testResult: "" });
       toast("OAuth connection removed", "success");
     } catch (err) {
