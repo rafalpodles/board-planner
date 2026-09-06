@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, cleanup, waitFor, fireEvent, act } from "@testing-library/react";
 import { Comments } from "./Comments";
 
 const { api, auth } = vi.hoisted(() => ({
@@ -259,6 +259,20 @@ describe("Comments when the read fails", () => {
 
     await waitFor(() => expect(screen.getByText("Kasia Nowak")).toBeTruthy());
     expect(screen.queryByTestId("comments-error")).toBeNull();
+  });
+
+  // The same class of claim, one state earlier: a read still running is not an empty discussion
+  it("shows a spinner rather than the claim while the first read is in flight", async () => {
+    // The panel reads more than the comments, so every pending read has to be released
+    const pending: ((rows: unknown[]) => void)[] = [];
+    api.get.mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
+    render(<Comments projectId="TP" taskId="t1" />);
+
+    expect(screen.getByRole("status", { name: "Loading the comments" })).toBeTruthy();
+    expect(screen.queryByText("No comments yet")).toBeNull();
+
+    await act(async () => pending.forEach((resolve) => resolve([])));
+    await waitFor(() => expect(screen.getByText("No comments yet")).toBeTruthy());
   });
 
   // Without this control the failure branch could be rendering whenever the list is empty
