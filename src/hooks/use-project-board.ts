@@ -37,6 +37,7 @@ export interface ProjectBoard {
   bulkDeleting: boolean;
   confirmContextDelete: string | null;
   setConfirmContextDelete: (taskId: string | null) => void;
+  deleting: boolean;
   heldMove: { retry: () => Promise<unknown>; conflict: RunConflict; taskKey: string } | null;
   setHeldMove: (held: ProjectBoard["heldMove"]) => void;
   forceHeldMove: () => Promise<void>;
@@ -106,6 +107,7 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
   const [heldMove, setHeldMove] = useState<ProjectBoard["heldMove"]>(null);
   const [heldDelete, setHeldDelete] = useState<ProjectBoard["heldDelete"]>(null);
   const [confirmContextDelete, setConfirmContextDelete] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const [viewMode, setViewModeState] = useState<"board" | "list">(() => {
     if (typeof window === "undefined") return "board";
@@ -468,6 +470,7 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
         `/api/projects/${projectId}/tasks/${taskId}`,
         asForce ? { force: true } : undefined
       );
+    setDeleting(true);
     try {
       await remove(force);
       setTasks((prev) => prev.filter((t) => t._id !== taskId));
@@ -489,6 +492,7 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
       }
       toast("Failed to delete task", "error");
     } finally {
+      setDeleting(false);
       setConfirmContextDelete(null);
     }
   }
@@ -529,6 +533,7 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
     bulkDeleting,
     confirmContextDelete,
     setConfirmContextDelete,
+    deleting,
     heldMove,
     heldDelete,
     setHeldDelete,
