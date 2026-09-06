@@ -44,6 +44,10 @@ The database name must end in `_e2e`. A run owns `E2E_PORT` through `E2E_PORT+5`
 - Drag: dnd-kit in the list and sidebar, native HTML5 elsewhere. `page.mouse` drives both; synthetic events prove nothing.
 - Menu and drag take different paths (`changeStatus` vs `updateTask`). Test the gesture the ticket names.
 
+## The control
+
+Next to the case the fix must refuse, assert the case that is supposed to work. Otherwise a silence caused by a mis-wired fixture reads exactly like a silence caused by the fix. Skip the e2e only for work with no user-reachable surface at all (a build script, a type-only change, a refactor with no behavioural delta). "The unit tests cover it" is not a reason, and neither is "the flow is fiddly to drive"; the friction is where the bugs are.
+
 ## The red check
 
 1. Commit the fix first.

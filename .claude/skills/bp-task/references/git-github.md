@@ -18,6 +18,8 @@ cd ~/Documents/Projects/ClaudePlanner-worktrees/bp-<n> && npm ci && (cd mcp-serv
 git config user.name && git config user.email   # Rafał Podleś, rafalpodles@gmail.com
 ```
 
+The global git config is the work account and a fresh clone inherits it; the repo-local config is shared by every worktree of this checkout. If the check above prints anything else: `git config user.name "Rafał Podleś" && git config user.email rafalpodles@gmail.com`.
+
 - Outside the repo. Never under the scratchpad or `.claude/worktrees`: a dev server there serves main's code.
 - Never symlink `node_modules`, never borrow another worktree, never `git stash`.
 - Commit after every part; worktrees have vanished mid-session. Artefacts go to the scratchpad. Read `git diff --stat` before every commit. No `git add -A`.
@@ -77,7 +79,7 @@ git worktree remove ~/Documents/Projects/ClaudePlanner-worktrees/bp-<n>
 docker rm -f bp<n>-mongo
 ```
 
-Separate calls, never chained. `gh pr merge` exits 0 without merging when the branch is behind, and deleting the head branch closes the PR. A stacked PR keeps its dead base: `gh pr edit <n> --base main` first. Confirm on main afterwards: `git show origin/main:<path> | grep <symbol>`.
+Separate calls, never chained. `gh pr merge` exits 0 without merging when the branch is behind, and deleting the head branch closes the PR; the result reads as CLOSED with the commit only in the worktree and `main` untouched. Recovery: re-push the branch, `gh pr reopen <n>` (or a new PR if reopen is refused), merge. A stacked PR keeps its dead base: `gh pr edit <n> --base main` first. Confirm on main afterwards: `git show origin/main:<path> | grep <symbol>`.
 
 `main` auto-deploys to production.
 
