@@ -14,6 +14,9 @@ const { discoverMcpTools } = await import("./mcp-tools");
 const readTools = (prefix: string, n: number) =>
   Array.from({ length: n }, (_, i) => ({ name: `list_${prefix}_thing_${i}`, description: "d" }));
 
+const writeTools = (prefix: string, n: number) =>
+  Array.from({ length: n }, (_, i) => ({ name: `create_${prefix}_thing_${i}`, description: "d" }));
+
 const server = (name: string) =>
   ({ name, url: `https://${name}.example/mcp`, authType: "bearer", enabled: true, allowWrites: false, toolAllowlist: [] }) as never;
 
@@ -73,5 +76,36 @@ describe("discoverMcpTools warns when the servers flood the turn", () => {
 
     expect(runtime.tools.size).toBe(1);
     expect(warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes("MCP tools"))).toEqual([]);
+  });
+});
+
+/**
+ * Every server above offers only read-safe tools, so deleting the `allowWrites` filter from
+ * discovery changed none of their counts. That filter is what the picker's disabled checkboxes
+ * and the banner's numbers both rest on (BP-569 review 3).
+ */
+describe("tools a server may not use", () => {
+  beforeEach(() => {
+    McpClientMock.mockImplementation(() => ({
+      initialize: vi.fn().mockResolvedValue(undefined),
+      listTools: vi.fn().mockResolvedValue([...readTools("notion", 30), ...writeTools("notion", 30)]),
+    }));
+  });
+
+  it("are not counted against the budget when writes are off", async () => {
+    const runtime = await discoverMcpTools("p1", [server("notion")]);
+
+    expect(runtime.tools.size).toBe(30);
+    expect(warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes("MCP tools"))).toEqual([]);
+  });
+
+  // The control: with writes allowed the same server carries all sixty and trips the budget
+  it("are counted when writes are allowed", async () => {
+    const writable = { ...(server("notion") as object), allowWrites: true } as never;
+
+    const runtime = await discoverMcpTools("p1", [writable]);
+
+    expect(runtime.tools.size).toBe(60);
+    expect(warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes("MCP tools"))).toHaveLength(1);
   });
 });

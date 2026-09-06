@@ -170,15 +170,44 @@ test.describe("choosing an MCP server's tools", () => {
       await route.continue();
     });
 
+    const answered = page.waitForResponse((r) => r.url().includes("/pm/mcp-test"));
     await testButton(page, "narrow").click();
     await page.getByRole("button", { name: "Remove narrow" }).click();
     release();
+    // Without this the four assertions below are all satisfied by the DOM as it already stands and
+    // pass on their first poll, before the stale write could even arrive (BP-569 review 3)
+    await answered;
 
     // wide is the only row left and keeps its own tools and its own Test button
     await expect(page.getByLabel("list_wide_thing_0 for wide")).toBeVisible();
     await expect(page.getByLabel("list_narrow_alpha for wide")).toHaveCount(0);
     await expect(testButton(page, "wide")).toBeEnabled();
     await expect(page.getByText(/Connected — 3 tools offered/)).toHaveCount(0);
+  });
+
+  /**
+   * Saving is where the previous fix still broke: a row identity derived from array position was
+   * re-minted on every save, so the surviving row inherited the removed row's catalogue only
+   * after the PUT came back. Every earlier test stopped before Save (BP-569 review 3).
+   */
+  test("a removal that is saved leaves the surviving row its own tools", async ({ page }) => {
+    await connectServers([server("narrow", "/narrow"), server("wide", "/wide")]);
+    await signIn(page, "admin");
+    await page.goto(SETTINGS_URL);
+    await expect(page.getByLabel("list_narrow_alpha for narrow")).toBeVisible();
+    await expect(page.getByLabel("list_wide_thing_0 for wide")).toBeVisible();
+
+    await page.getByRole("button", { name: "Remove narrow" }).click();
+    const saved = page.waitForResponse(
+      (r) => r.request().method() === "PUT" && r.url().endsWith(`/api/projects/${PROJECT_KEY}`)
+    );
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await saved;
+
+    // wide is the only server left and still shows its own catalogue, not narrow's
+    await expect(page.getByLabel("list_wide_thing_0 for wide")).toBeVisible();
+    await expect(page.getByLabel("list_narrow_alpha for wide")).toHaveCount(0);
+    expect(await storedAllowlist("narrow")).toEqual([]);
   });
 
   test("changing a server's url drops the catalogue that described the old one", async ({ page }) => {

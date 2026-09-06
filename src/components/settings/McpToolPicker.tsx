@@ -38,12 +38,14 @@ export function carriedTools(
   allowWrites: boolean
 ): string[] {
   const reachable = (catalog ?? []).filter((t) => allowWrites || t.readSafe);
-  const ticked = parseAllowlist(allowlist);
-  if (ticked.length === 0) return reachable.map((t) => t.name);
-  const byName = new Set(reachable.map((t) => t.name));
-  // A name typed by hand against a server that was never tested has no catalogue to check, so it
-  // counts — refusing it would make the free-text fallback read as zero.
-  return catalog ? ticked.filter((name) => byName.has(name)) : ticked;
+  const ticked = new Set(parseAllowlist(allowlist));
+  if (ticked.size === 0) return reachable.map((t) => t.name);
+  // Catalogue ENTRIES matching a ticked name, not the ticked names themselves: a tool offered
+  // twice and ticked once is admitted twice by `discoverMcpTools`, under a `_2` suffix. Filtering
+  // the names instead collapsed that to one and under-reported the normal, post-picker state
+  // (BP-569 review 3). A name typed by hand against a server that was never tested has no
+  // catalogue to check, so it counts — refusing it would make the free-text fallback read zero.
+  return catalog ? reachable.filter((t) => ticked.has(t.name)).map((t) => t.name) : [...ticked];
 }
 
 /**
@@ -74,13 +76,19 @@ export function McpToolPicker({ rowName, catalog, allowlist, allowWrites, onChan
   // The raw catalogue, not the de-duplicated render list: `discoverMcpTools` keeps a name offered
   // twice as two tools, so counting the de-duplicated list under-reports what the turn carries.
   const carried = carriedTools(catalog, allowlist, allowWrites);
-  const overCap = parseAllowlist(allowlist).length > MAX_TOOL_ALLOWLIST;
+  // De-duplicated, because `savePm` de-duplicates before posting: counting raw entries warned
+  // that a save would be refused when it would in fact succeed (BP-569 review 3).
+  const listed = new Set(parseAllowlist(allowlist)).size;
+  const fieldId = `mcp-tools-${rowName.replace(/\s+/g, "-")}`;
+  const overCap = listed > MAX_TOOL_ALLOWLIST;
   const atCap = selected.size >= MAX_TOOL_ALLOWLIST;
 
-  function toggle(name: string) {
+  function toggle(name: string, blocked: boolean) {
+    // `aria-disabled` is an announcement, not an enforcement: this is what actually refuses
+    if (blocked && !selected.has(name)) return;
     const next = new Set(selected);
     if (next.has(name)) next.delete(name);
-    else if (!atCap) next.add(name);
+    else next.add(name);
     onChange([...next].join(", "));
   }
 
@@ -88,6 +96,7 @@ export function McpToolPicker({ rowName, catalog, allowlist, allowWrites, onChan
     <div className="flex flex-col gap-2">
       <Input
         aria-label={`Tool allowlist for ${rowName}`}
+        aria-describedby={overCap ? `${fieldId}-cap` : undefined}
         value={allowlist}
         onChange={(e) => onChange(e.target.value)}
         placeholder="Tool allowlist, comma-separated (empty = all)"
@@ -95,9 +104,9 @@ export function McpToolPicker({ rowName, catalog, allowlist, allowWrites, onChan
       {/* The checkbox cap cannot see a pasted list, and the validator refuses the whole PM save
           rather than this field, so the count has to be said here (BP-569 review 2) */}
       {overCap && (
-        <p className="text-xs text-danger">
-          {parseAllowlist(allowlist).length} tools listed. {MAX_TOOL_ALLOWLIST} is the most one
-          server can have, and saving will be refused until you remove some.
+        <p role="status" id={`${fieldId}-cap`} className="text-xs text-danger">
+          {listed} tools listed. {MAX_TOOL_ALLOWLIST} is the most one server can have, and saving
+          will be refused until you remove some.
         </p>
       )}
 
@@ -106,8 +115,12 @@ export function McpToolPicker({ rowName, catalog, allowlist, allowWrites, onChan
           <div className="flex flex-wrap items-center gap-2 border-b border-border p-2">
             <span className="text-xs text-text-muted">
               {selected.size > 0
-                ? `${selected.size} of ${tools.length} ticked`
-                : `Nothing ticked, so all ${tools.length} tools are sent`}
+                // Ticked names the server actually offers: counting the field verbatim printed
+                // "5 of 3 ticked" for names typed against a catalogue without them
+                ? `${tools.filter((t) => selected.has(t.name)).length} of ${tools.length} ticked`
+                // "offered", not "sent": with writes off, some of them never reach the turn, and
+                // the clause after this one says so in the same sentence
+                : `Nothing ticked, so every tool this server offers is used`}
               {` · ${carried.length} carried per turn, roughly ${estimateToolTokens(carried.length)} tokens per model call`}
             </span>
             <div className="ml-auto flex gap-2">
@@ -125,7 +138,7 @@ export function McpToolPicker({ rowName, catalog, allowlist, allowWrites, onChan
           </div>
 
           {atCap && (
-            <p className="border-b border-border p-2 text-xs text-warning">
+            <p role="status" className="border-b border-border p-2 text-xs text-warning">
               {MAX_TOOL_ALLOWLIST} tools is the most one server can list. Untick something to
               choose another.
             </p>
@@ -142,9 +155,14 @@ export function McpToolPicker({ rowName, catalog, allowlist, allowWrites, onChan
             </div>
           )}
 
-          <ul className="max-h-64 overflow-y-auto p-2">
+          <ul
+            role="group"
+            aria-label={`Tools offered by ${rowName}`}
+            className="max-h-64 overflow-y-auto p-2"
+          >
             {visible.map((tool) => {
               const unreachable = !tool.readSafe && !allowWrites;
+              const blocked = unreachable || (atCap && !selected.has(tool.name));
               return (
                 <li key={tool.name}>
                   <label
@@ -156,11 +174,15 @@ export function McpToolPicker({ rowName, catalog, allowlist, allowWrites, onChan
                       type="checkbox"
                       className="mt-1"
                       checked={selected.has(tool.name)}
-                      disabled={unreachable || (atCap && !selected.has(tool.name))}
-                      onChange={() => toggle(tool.name)}
+                      // aria-disabled, not disabled: a disabled checkbox leaves the tab order, so
+                      // the reason sitting next to it is never reached by a keyboard or a screen
+                      // reader — the tool simply is not there (BP-569 review 3)
+                      aria-disabled={blocked}
+                      onChange={() => toggle(tool.name, blocked)}
                       aria-label={`${tool.name} for ${rowName}`}
+                      aria-describedby={`${fieldId}-${tool.name}`}
                     />
-                    <span className="min-w-0">
+                    <span className="min-w-0" id={`${fieldId}-${tool.name}`}>
                       <span className="flex flex-wrap items-center gap-1 text-sm">
                         <code className="text-xs">{tool.name}</code>
                         {!tool.readSafe && (
