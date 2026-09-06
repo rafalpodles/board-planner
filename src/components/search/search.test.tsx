@@ -194,13 +194,16 @@ describe("SearchLayer", () => {
   it("does not open over another open layer, and does again once that layer is gone", () => {
     const { onOpen } = renderLayer(false);
     const unregister = registerLayer(document.createElement("div"));
-    act(() => {
-      document.dispatchEvent(
-        new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true })
-      );
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "/", bubbles: true }));
-    });
-    unregister();
+    try {
+      act(() => {
+        document.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true })
+        );
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "/", bubbles: true }));
+      });
+    } finally {
+      unregister();
+    }
     expect(onOpen).not.toHaveBeenCalled();
 
     act(() => {
@@ -222,6 +225,26 @@ describe("SearchLayer", () => {
       );
     });
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  // Chrome and Firefox bind Ctrl/⌘K themselves, and Firefox binds / to its find bar. A press the
+  // guard lets through unhandled would move focus out of the aria-modal dialog into the browser's
+  // own chrome — which no e2e can see, so this is the one place that pins it
+  it("eats the key under another open layer rather than passing it to the browser", () => {
+    renderLayer(false);
+    const unregister = registerLayer(document.createElement("div"));
+    const presses = [
+      new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true, cancelable: true }),
+      new KeyboardEvent("keydown", { key: "/", bubbles: true, cancelable: true }),
+    ];
+    try {
+      act(() => {
+        for (const press of presses) document.dispatchEvent(press);
+      });
+    } finally {
+      unregister();
+    }
+    expect(presses.map((press) => press.defaultPrevented)).toEqual([true, true]);
   });
 
   it("asks for a longer query before it searches", () => {
