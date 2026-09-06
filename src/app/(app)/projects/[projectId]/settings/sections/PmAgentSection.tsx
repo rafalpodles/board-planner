@@ -17,6 +17,7 @@ import { useDirtyGroup } from "@/components/settings/settings-context";
 import { McpToolPicker, carriedTools } from "@/components/settings/McpToolPicker";
 import type { McpCatalogTool } from "@/components/settings/McpToolPicker";
 import { assessToolBudget, describeToolBudget } from "@/lib/pm/tool-budget";
+import { catalogKey } from "@/lib/pm/catalog-key";
 import { distinctRowNames } from "@/lib/row-names";
 import { SectionProps } from "./types";
 
@@ -38,26 +39,6 @@ interface McpServerDraft {
   oauthStatus?: string;
   oauthClientId: string;
   oauthClientSecret: string;
-}
-
-/** What a catalogue is a fact about. `config.ts` refuses two servers sharing a name. */
-function catalogKey(server: {
-  name: string;
-  url: string;
-  authType: string;
-  authToken: string;
-  oauthStatus?: string;
-}): string {
-  // `oauthStatus` is part of it: `discoverMcpTools` refuses an oauth server with no token, so
-  // after Disconnect the turn carries nothing from it and a catalogue left on screen would be
-  // asserting tools that do not exist (BP-569 review 3).
-  return [
-    server.name.trim(),
-    server.url.trim(),
-    server.authType,
-    server.authToken,
-    server.oauthStatus ?? "",
-  ].join("|");
 }
 
 interface McpTransient {
@@ -221,13 +202,16 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
         .map((s, i) => ({
           name: serverRowNames[i],
           enabled: s.enabled,
+          key: catalogKey(s),
           // The RAW catalogue, the same list the picker's own counter uses, so the two cannot
           // print different numbers for one server
           count: transient[catalogKey(s)]?.catalog
             ? carriedTools(transient[catalogKey(s)]?.catalog, s.toolAllowlist, s.allowWrites).length
             : 0,
         }))
-        .filter((s) => s.enabled),
+        // Two draft rows can share an identity while one of them is still being typed, and they
+        // then share one catalogue — counting both reported it twice (BP-569 review 5)
+        .filter((s, i, all) => s.enabled && all.findIndex((o) => o.key === s.key) === i),
       undefined,
       // A server nobody could reach contributes an unknown number, so the total is a floor
       enabledServers.some((s) => !transient[catalogKey(s)]?.catalog)
@@ -403,7 +387,14 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
       await api.post(`/api/projects/${projectId}/pm/mcp-oauth/disconnect`, {
         name: servers[index].name.trim(),
       });
-      updateServer(index, { oauthStatus: "unconfigured" });
+      // The connection is gone on the server, so this must not be a dirty edit Discard can rewind
+      // — and `discoverMcpTools` refuses an oauth server with no token, so the catalogue on screen
+      // now describes a turn that would carry nothing from it (BP-569 review 5).
+      const cleared = servers.map((s, i) =>
+        i === index ? { ...s, oauthStatus: "unconfigured" } : s
+      );
+      draft.commit({ ...draft.value, mcpServers: cleared });
+      setTransientAt(catalogKey(servers[index]), { catalog: undefined, testResult: "" });
       toast("OAuth connection removed", "success");
     } catch (err) {
       toast(err instanceof Error ? err.message : "Disconnect failed", "error");

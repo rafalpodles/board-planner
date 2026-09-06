@@ -109,3 +109,38 @@ describe("tools a server may not use", () => {
     expect(warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes("MCP tools"))).toHaveLength(1);
   });
 });
+
+/**
+ * Three unit tests on the picker's counter rest on this: a name offered twice is admitted twice,
+ * under a `_2` suffix. Nothing tested the claim itself, so the picker could have been mirroring a
+ * runtime that did the opposite (BP-569 review 5).
+ */
+describe("a server offering one name twice", () => {
+  beforeEach(() => {
+    McpClientMock.mockImplementation(() => ({
+      initialize: vi.fn().mockResolvedValue(undefined),
+      listTools: vi.fn().mockResolvedValue([
+        { name: "list_thing", description: "first" },
+        { name: "list_thing", description: "second" },
+      ]),
+    }));
+  });
+
+  it("carries both, under distinct exposed names", async () => {
+    const runtime = await discoverMcpTools("p1", [server("notion")]);
+
+    expect(runtime.tools.size).toBe(2);
+    expect([...runtime.tools.keys()].sort()).toEqual([
+      "mcp_notion_list_thing",
+      "mcp_notion_list_thing_2",
+    ]);
+  });
+
+  it("carries both when the allowlist names it once, which is how the picker can tick it once", async () => {
+    const narrowed = { ...(server("notion") as object), toolAllowlist: ["list_thing"] } as never;
+
+    const runtime = await discoverMcpTools("p1", [narrowed]);
+
+    expect(runtime.tools.size).toBe(2);
+  });
+});
