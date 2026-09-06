@@ -152,3 +152,123 @@ describe("useProjects reorder", () => {
     expect(api.put).not.toHaveBeenCalled();
   });
 });
+
+// BP-551: what a request applies depends on what happened while it was in flight, not on when it
+// happens to come back
+describe("useProjects overtaken requests", () => {
+  const three = [{ _id: "a" }, { _id: "b" }, { _id: "c" }];
+
+  /** A `get` that is answered only when the returned callback is called. */
+  function heldGet() {
+    let deliver: (value: unknown) => void = () => {};
+    api.get.mockReturnValueOnce(new Promise((resolve) => (deliver = resolve)));
+    return (value: unknown) => deliver(value);
+  }
+
+  it("ignores a read that a later read overtook", async () => {
+    api.get.mockResolvedValue([{ _id: "1" }]);
+    renderProvider();
+    await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("1"));
+
+    const deliverFirst = heldGet();
+    await act(async () => screen.getByText("reload").click());
+
+    api.get.mockResolvedValue([{ _id: "1" }, { _id: "2" }]);
+    await act(async () => screen.getByText("reload").click());
+    expect(screen.getByTestId("count").textContent).toBe("2");
+
+    await act(async () => deliverFirst([{ _id: "9" }, { _id: "8" }, { _id: "7" }]));
+    expect(screen.getByTestId("count").textContent).toBe("2");
+  });
+
+  it("ignores a read that a reorder overtook", async () => {
+    api.get.mockResolvedValue(three);
+    renderProvider(["c", "a", "b"]);
+    await waitFor(() => expect(screen.getByTestId("order").textContent).toBe("a,b,c"));
+
+    const deliverStale = heldGet();
+    await act(async () => screen.getByText("reload").click());
+
+    await act(async () => screen.getByText("reorder").click());
+    expect(screen.getByTestId("order").textContent).toBe("c,a,b");
+
+    // The order the server held when that read was answered, arriving after the drop
+    await act(async () => deliverStale(three));
+    expect(screen.getByTestId("order").textContent).toBe("c,a,b");
+  });
+
+  it("does not snap a failed reorder back over a later one", async () => {
+    api.get.mockResolvedValue(three);
+    let failFirst: (reason: Error) => void = () => {};
+    api.put.mockReturnValueOnce(new Promise((_, reject) => (failFirst = reject)));
+
+    const { rerender } = renderProvider(["c", "a", "b"]);
+    await waitFor(() => expect(screen.getByTestId("order").textContent).toBe("a,b,c"));
+
+    await act(async () => screen.getByText("reorder").click());
+    expect(screen.getByTestId("order").textContent).toBe("c,a,b");
+
+    api.put.mockResolvedValue({ updated: 3 });
+    rerender(
+      <ProjectsProvider>
+        <Probe newOrder={["b", "c", "a"]} />
+      </ProjectsProvider>
+    );
+    await act(async () => screen.getByText("reorder").click());
+    expect(screen.getByTestId("order").textContent).toBe("b,c,a");
+
+    await act(async () => failFirst(new Error("boom")));
+    expect(screen.getByTestId("order").textContent).toBe("b,c,a");
+  });
+
+  // The counter is bumped by the reorder, so a read issued AFTER one must still win. Without this
+  // a guard that simply stopped reading once a drag had happened would pass every test above,
+  // and the sidebar would stop showing renames and new boards for the rest of the session
+  it("applies a read issued after a reorder", async () => {
+    api.get.mockResolvedValue(three);
+    renderProvider(["c", "a", "b"]);
+    await waitFor(() => expect(screen.getByTestId("order").textContent).toBe("a,b,c"));
+
+    await act(async () => screen.getByText("reorder").click());
+    expect(screen.getByTestId("order").textContent).toBe("c,a,b");
+
+    api.get.mockResolvedValue([{ _id: "b" }, { _id: "c" }, { _id: "a" }]);
+    await act(async () => screen.getByText("reload").click());
+    expect(screen.getByTestId("order").textContent).toBe("b,c,a");
+  });
+
+  // The failure path needs the guard as much as the success path: a stale read that rejects —
+  // aborted on navigation, say — would otherwise blank a sidebar a later read had already filled
+  it("does not blank the list when an overtaken read fails", async () => {
+    api.get.mockResolvedValue(three);
+    renderProvider();
+    await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("3"));
+
+    let failFirst: (reason: Error) => void = () => {};
+    api.get.mockReturnValueOnce(new Promise((_, reject) => (failFirst = reject)));
+    await act(async () => screen.getByText("reload").click());
+
+    await act(async () => screen.getByText("reload").click());
+    expect(screen.getByTestId("count").textContent).toBe("3");
+
+    await act(async () => failFirst(new Error("aborted")));
+    expect(screen.getByTestId("count").textContent).toBe("3");
+  });
+
+  // Nothing can be reordered before the first read lands, and letting it through would advance the
+  // counter with no request behind it — leaving that read discarded and the shell loading for ever
+  it("refuses to reorder a list it has not loaded yet", async () => {
+    let deliver: (value: unknown) => void = () => {};
+    api.get.mockReturnValueOnce(new Promise((resolve) => (deliver = resolve)));
+
+    renderProvider(["c", "a", "b"]);
+    expect(screen.getByTestId("loading").textContent).toBe("true");
+
+    await act(async () => screen.getByText("reorder").click());
+    expect(api.put).not.toHaveBeenCalled();
+
+    await act(async () => deliver(three));
+    expect(screen.getByTestId("order").textContent).toBe("a,b,c");
+    expect(screen.getByTestId("loading").textContent).toBe("false");
+  });
+});
