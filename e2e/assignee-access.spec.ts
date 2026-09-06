@@ -49,8 +49,14 @@ async function signIn(page: Page, username: string, password: string) {
 
 async function openTask(page: Page, username: string, password: string, taskNumber: number) {
   await signIn(page, username, password);
+  // The roster is a request of its own, and the picker draws its "Unassigned" row without waiting
+  // for it — so `assigneeOptions` below, which waits for the first option to appear, can read a
+  // list nobody has arrived in yet. Measured at one run in three, on the member arm, before this
+  // line existed; the task key it used to wait for renders from the task's own load.
+  const roster = page.waitForResponse((res) => res.url().includes("/assignable-users"));
   await page.goto(taskUrl(taskNumber));
   await expect(page.getByText(`${PROJECT_KEY}-${taskNumber}`).first()).toBeVisible();
+  await roster;
 }
 
 /**
