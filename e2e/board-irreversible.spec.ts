@@ -623,21 +623,19 @@ test.describe("keyboard", () => {
   });
 
   /**
-   * The help lists "Esc — Close dialogs", and Escape does not close it: the board's own Escape
-   * handler re-renders on every press and the help's listener is re-subscribed in the middle of
-   * the dispatch, so it never sees the key (BP-522). Marked to fail so the day it is fixed this
-   * goes red and the mark comes off — not skipped, which would hide the fix as well as the bug.
+   * The help lists "Esc — Close dialogs", and for a while it did not: the board's own Escape
+   * handler re-rendered on every press and the help's listener was re-subscribed in the middle of
+   * the dispatch, so it never saw the key. This test asserted that limit until BP-522 fixed it,
+   * and going red is how the fix was noticed. `e2e/shortcut-help-escape.spec.ts` carries the rest
+   * of that surface — the modal, the confirm, the context menu and `?`.
    */
-  test("Escape leaves the help open — BP-522, asserted so the fix is noticed", async ({ page }) => {
+  test("Escape closes the help", async ({ page }) => {
     await openBoard(page);
     const help = page.getByRole("heading", { name: "Keyboard Shortcuts" });
     await page.keyboard.press("?");
     await expect(help).toBeVisible();
     await page.keyboard.press("Escape");
-    await page.waitForTimeout(500);
-    // The limit, not the guarantee: this is what the product does today. When BP-522 is fixed this
-    // goes red, and the assertion flips to toHaveCount(0) — which a fail mark would have hidden.
-    await expect(help).toBeVisible();
+    await expect(help).toHaveCount(0);
   });
 
   test("Space opens the focused card, k walks back, and a modifier click opens a new tab", async ({
