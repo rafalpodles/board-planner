@@ -115,7 +115,7 @@ function SearchContent() {
       {!loading && failed && (
         <LoadFailed
           testId="search-error"
-          message="The search failed, so nothing can be said about what matches."
+          message="The task search failed, so nothing can be said about which tasks match."
           onRetry={retry}
         />
       )}

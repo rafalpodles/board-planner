@@ -6,6 +6,7 @@ import { useApi } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/Toast";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { LoadFailed } from "@/components/ui/LoadFailed";
 import { PRIORITY_LABELS, DEFAULT_PROJECT_ICON, ColumnRole, Priority, TaskStatus } from "@/types";
 import { ROLE_ORDER } from "@/lib/columns";
 import { projectPath, taskPath } from "@/lib/urls";
@@ -97,14 +98,7 @@ export default function MyTasksPage() {
   // request that never answered supports no claim about it at all
   if (failed) {
     return (
-      <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
-        <p role="alert" className="text-sm text-text-muted">
-          Failed to load your tasks.
-        </p>
-        <Button size="sm" onClick={load}>
-          Retry
-        </Button>
-      </div>
+      <LoadFailed testId="my-tasks-error" className="py-16" message="Failed to load your tasks." onRetry={load} />
     );
   }
 

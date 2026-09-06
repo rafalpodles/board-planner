@@ -91,8 +91,8 @@ export function useStore() {
 
     reload: load,
 
-    // A mutation's reload keeps the catalog on screen; only a retry after a failure has nothing
-    // to show in the meantime
+    // Only a retry has nothing to show while it runs; a mutation's reload leaves the catalog
+    // where it is
     retry: () => {
       setLoading(true);
       return load();

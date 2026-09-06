@@ -40,6 +40,7 @@ export function Comments({
 }: CommentsProps) {
   const [comments, setComments] = useState<ApiComment[]>([]);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [reading, setReading] = useState(true);
   const [body, setBody] = useState("");
   const [loading, setLoading] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -55,6 +56,7 @@ export function Comments({
   const { toast } = useToast();
 
   async function loadComments() {
+    setReading(true);
     try {
       const data = await api.get(
         `/api/projects/${projectId}/tasks/${taskId}/comments`
@@ -67,6 +69,8 @@ export function Comments({
       // answered supports none. The toast clears after three seconds; the sentence would not.
       setLoadFailed(true);
       toast("Failed to load comments", "error");
+    } finally {
+      setReading(false);
     }
   }
 
@@ -324,7 +328,12 @@ export function Comments({
             </div>
           </div>
         ))}
-        {loadFailed ? (
+        {/* Three states, not one: a read still running is not an empty discussion either */}
+        {reading ? (
+          <div className="flex justify-center py-4" role="status" aria-label="Loading the comments">
+            <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+          </div>
+        ) : loadFailed ? (
           <LoadFailed
             testId="comments-error"
             className="py-4"

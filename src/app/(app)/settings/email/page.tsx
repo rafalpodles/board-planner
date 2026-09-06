@@ -84,16 +84,22 @@ export default function EmailSettingsPage() {
   }
   if (!isAdmin) return null;
 
+  const header = (
+    <>
+      <h2 className="text-lg font-semibold mb-1">Email</h2>
+      <p className="text-sm text-text-muted mb-6">
+        Configured in the environment, not here. This screen shows whether it works.
+      </p>
+    </>
+  );
+
   if (failed || settings === null) {
     return (
       <div className="max-w-2xl">
-        <h2 className="text-lg font-semibold mb-1">Email</h2>
-        <p className="text-sm text-text-muted mb-6">
-          Configured in the environment, not here. This screen shows whether it works.
-        </p>
+        {header}
         <LoadFailed
           testId="email-settings-error"
-          message="Failed to read the mail settings, so this page cannot say whether one is configured."
+          message="Failed to read the mail settings, so this page cannot say whether a mail server is configured."
           onRetry={load}
         />
       </div>
@@ -102,10 +108,7 @@ export default function EmailSettingsPage() {
 
   return (
     <div className="max-w-2xl">
-      <h2 className="text-lg font-semibold mb-1">Email</h2>
-      <p className="text-sm text-text-muted mb-6">
-        Configured in the environment, not here. This screen shows whether it works.
-      </p>
+      {header}
 
       {settings.configured ? (
         <dl className="mb-6 divide-y divide-border rounded-lg border border-border text-sm">

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, cleanup, waitFor, fireEvent, act } from "@testing-library/react";
 
 /**
  * BP-577. `store.ts` had no `catch`: the rejection went unhandled, the catalog stayed the empty
@@ -41,6 +41,7 @@ function serve(agents: unknown[]) {
 
 beforeEach(() => {
   api.get.mockReset();
+  api.del.mockReset();
 });
 
 afterEach(cleanup);
@@ -66,6 +67,54 @@ describe("the agents catalog when the read fails", () => {
     await waitFor(() => expect(screen.getAllByText("Implement").length).toBeGreaterThan(0));
   });
 
+  // The window the ticket is about: before the read answers, the page used to make the claim
+  it("shows a spinner rather than the claim while the first read is in flight", async () => {
+    // The page reads agents and blocks together, so both have to be released
+    const pending: ((rows: unknown[]) => void)[] = [];
+    api.get.mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
+    render(<AgentsPage />);
+
+    expect(screen.getByRole("status", { name: "Loading the catalog" })).toBeTruthy();
+    expect(screen.queryByText("You have not created an agent yet.")).toBeNull();
+
+    await act(async () => pending.forEach((resolve) => resolve([])));
+    await waitFor(() =>
+      expect(screen.getByText("You have not created an agent yet.")).toBeTruthy()
+    );
+  });
+
+  // Retry differs from the reload every mutation runs by showing the spinner while it waits
+  it("shows the spinner again while a Retry is in flight", async () => {
+    const pending: ((rows: unknown[]) => void)[] = [];
+    api.get.mockImplementationOnce(() => Promise.reject(new Error("network")));
+    render(<AgentsPage />);
+    await waitFor(() => expect(screen.getByTestId("agents-catalog-error")).toBeTruthy());
+
+    api.get.mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(screen.getByRole("status", { name: "Loading the catalog" })).toBeTruthy();
+    await act(async () => pending.forEach((resolve) => resolve([])));
+  });
+
+  // A reload that fails after a mutation must not replace a catalog that is still on screen —
+  // "failed to load the catalog" after a delete that succeeded is a claim of its own
+  it("keeps the catalog and says the refresh failed when a mutation's reload fails", async () => {
+    api.get.mockImplementation(() => Promise.resolve([AGENT]));
+    api.del.mockResolvedValue({});
+    render(<AgentsPage />);
+    await waitFor(() => expect(screen.getAllByText("Implement").length).toBeGreaterThan(0));
+
+    api.get.mockImplementation(() => Promise.reject(new Error("network")));
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("Delete Implement"));
+    });
+
+    await waitFor(() => expect(screen.getByTestId("agents-catalog-stale")).toBeTruthy());
+    expect(screen.getAllByText("Implement").length).toBeGreaterThan(0);
+    expect(screen.queryByTestId("agents-catalog-error")).toBeNull();
+  });
+
   // Without this control the failure branch could be rendering unconditionally
   it("still says nothing was created when the read answers with nothing", async () => {
     serve([]);
@@ -85,6 +134,19 @@ describe("the agent editor when the read fails", () => {
 
     await waitFor(() => expect(screen.getByTestId("agent-editor-error")).toBeTruthy());
     expect(screen.queryByText(/No agent with that id/)).toBeNull();
+  });
+
+  it("reads again on Retry", async () => {
+    api.get
+      .mockImplementationOnce(() => Promise.reject(new Error("network")))
+      .mockImplementation(() => Promise.resolve([AGENT]));
+    render(<AgentEditorPage />);
+    await waitFor(() => expect(screen.getByTestId("agent-editor-error")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => expect(screen.getAllByText("Implement").length).toBeGreaterThan(0));
+    expect(screen.queryByTestId("agent-editor-error")).toBeNull();
   });
 
   // A read that answered and holds no such agent is a different answer, and must still be given

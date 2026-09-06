@@ -71,15 +71,17 @@ export default function AgentsPage() {
   }
 
   // Not the empty state: "you have not created an agent yet" is a claim about what this person
-  // has, and a read that never answered supports no claim about it
-  if (store.failed) {
+  // has, and a read that never answered supports no claim about it. A reload that fails after a
+  // mutation keeps the catalog it already has and says the refresh failed above it — replacing a
+  // populated screen would be its own false claim.
+  if (store.failed && !store.allAgents.length) {
     return (
       <>
         <PageHeader title="Agents" subtitle="Ways of getting a task done" />
         <LoadFailed
           testId="agents-catalog-error"
           className="py-12"
-          message="Failed to load the catalog. Nothing here has been deleted."
+          message="Failed to load the catalog."
           onRetry={store.retry}
         />
       </>
@@ -103,6 +105,15 @@ export default function AgentsPage() {
           )
         }
       />
+
+      {store.failed && (
+        <LoadFailed
+          testId="agents-catalog-stale"
+          className="mb-4 py-3"
+          message="Failed to refresh the catalog, so what follows may be out of date."
+          onRetry={store.retry}
+        />
+      )}
 
       <div role="tablist" aria-label="Catalog" className="mb-6 flex gap-6 border-b border-border">
         {TABS.map((t) => (

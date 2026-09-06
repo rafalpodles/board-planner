@@ -1,5 +1,13 @@
 import { test, expect, type Page } from "@playwright/test";
-import { PROJECT_KEY, SIBLING_TASK_NUMBER, seed } from "./seed";
+import {
+  DECOY_TASK_TITLE,
+  PERSONAL_AGENT_ID,
+  PERSONAL_AGENT_NAME,
+  PROJECT_KEY,
+  SIBLING_TASK_NUMBER,
+  seed,
+  seedAgents,
+} from "./seed";
 import { signIn as arriveSignedIn } from "./session";
 
 /**
@@ -74,16 +82,20 @@ for (const { name, url, api, testId, claim } of screens) {
     await expect(page.getByTestId(testId)).toBeVisible();
     await expect(page.getByText(claim)).toHaveCount(0);
 
+    // The recovered content, not the absence of the error: every one of these screens clears
+    // `failed` synchronously on the click, so asserting the error is gone proves only the click
     stopFailing();
     await page.getByRole("button", { name: "Retry" }).click();
+    await expect(page.getByText(claim)).toBeVisible();
     await expect(page.getByTestId(testId)).toHaveCount(0);
   });
 
-  // The control: the same screen, the same assertion, against a server that answers
+  // The control: the same screen against a server that answers — the claim it is entitled to make
   test(`${name} still reads as empty when the read answers`, async ({ page }) => {
     await signIn(page);
     await page.goto(url);
 
+    await expect(page.getByText(claim)).toBeVisible();
     await expect(page.getByTestId(testId)).toHaveCount(0);
   });
 }
@@ -102,6 +114,7 @@ test("the email settings screen never tells an admin to set SMTP_HOST after a fa
 
   stopFailing();
   await page.getByRole("button", { name: "Retry" }).click();
+  await expect(page.getByText("No mail server is configured.")).toBeVisible();
   await expect(page.getByTestId("email-settings-error")).toHaveCount(0);
 });
 
@@ -121,7 +134,11 @@ test("a search that fails says so rather than reporting no tasks", async ({ page
   const stopFailing = await failUntilTold(page, /\/api\/search\?q=/);
   await page.goto("/search");
 
-  await page.getByRole("textbox", { name: "Search tasks and projects" }).fill("review");
+  const box = page.getByRole("textbox", { name: "Search tasks and projects" });
+  // Hydration eats a fill that lands too early, and the assertions below would then blame the fix
+  await expect(box).toBeEnabled();
+  await box.fill("review");
+  await expect(box).toHaveValue("review");
 
   await expect(page.getByTestId("search-error")).toBeVisible();
   await expect(page.getByText("No tasks found")).toHaveCount(0);
@@ -130,6 +147,7 @@ test("a search that fails says so rather than reporting no tasks", async ({ page
 
   stopFailing();
   await page.getByRole("button", { name: "Retry" }).click();
+  await expect(page.getByText(DECOY_TASK_TITLE).first()).toBeVisible();
   await expect(page.getByTestId("search-error")).toHaveCount(0);
 });
 
@@ -138,9 +156,10 @@ test("a search that answers with nothing still reports no tasks", async ({ page 
   await signIn(page);
   await page.goto("/search");
 
-  await page
-    .getByRole("textbox", { name: "Search tasks and projects" })
-    .fill("zzzzz-nothing-matches-this");
+  const box = page.getByRole("textbox", { name: "Search tasks and projects" });
+  await expect(box).toBeEnabled();
+  await box.fill("zzzzz-nothing-matches-this");
+  await expect(box).toHaveValue("zzzzz-nothing-matches-this");
 
   await expect(page.getByText("No tasks found")).toBeVisible();
   await expect(page.getByTestId("search-error")).toHaveCount(0);
@@ -158,6 +177,7 @@ test("a task whose comments cannot be read does not claim it has none", async ({
 
   stopFailing();
   await page.getByRole("button", { name: "Retry" }).click();
+  await expect(page.getByText("No comments yet")).toBeVisible();
   await expect(page.getByTestId("comments-error")).toHaveCount(0);
 });
 
@@ -168,4 +188,33 @@ test("a task with no comments still says it has none", async ({ page }) => {
 
   await expect(page.getByText("No comments yet")).toBeVisible();
   await expect(page.getByTestId("comments-error")).toHaveCount(0);
+});
+
+test("the agent editor says the catalog could not be read, not that the agent is gone", async ({
+  page,
+}) => {
+  await seedAgents();
+  await signIn(page);
+  const stopFailing = await failUntilTold(page, "**/api/agents");
+  await page.goto(`/agents/${PERSONAL_AGENT_ID}`);
+
+  await expect(page.getByTestId("agent-editor-error")).toBeVisible();
+  await expect(page.getByText("No agent with that id.")).toHaveCount(0);
+  await page.waitForTimeout(AFTER_THE_TOAST);
+  await expect(page.getByTestId("agent-editor-error")).toBeVisible();
+
+  stopFailing();
+  await page.getByRole("button", { name: "Retry" }).click();
+  await expect(page.getByRole("heading", { name: PERSONAL_AGENT_NAME })).toBeVisible();
+  await expect(page.getByTestId("agent-editor-error")).toHaveCount(0);
+});
+
+// The control: an id nobody owns is a different answer, and must still be given
+test("the agent editor still says no agent with that id when the read answers", async ({ page }) => {
+  await seedAgents();
+  await signIn(page);
+  await page.goto("/agents/e2e00000000000000000dead");
+
+  await expect(page.getByText("No agent with that id.")).toBeVisible();
+  await expect(page.getByTestId("agent-editor-error")).toHaveCount(0);
 });

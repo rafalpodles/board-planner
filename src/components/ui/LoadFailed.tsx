@@ -19,13 +19,13 @@ export function LoadFailed({
   testId?: string;
 }) {
   return (
+    // The alert is the whole region, so a screen reader hears the Retry along with the failure
     <div
+      role="alert"
       data-testid={testId}
       className={`flex flex-col items-center justify-center gap-3 text-center ${className}`}
     >
-      <p role="alert" className="text-sm text-text-muted">
-        {message}
-      </p>
+      <p className="text-sm text-text-muted">{message}</p>
       <Button size="sm" onClick={onRetry}>
         Retry
       </Button>

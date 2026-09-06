@@ -172,27 +172,34 @@ export function SearchLayer({ open, onOpen, onClose }: SearchLayerProps) {
         </div>
 
         <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto p-2">
-          {!active ? (
-            <p className="px-2 py-3 text-[13px] text-text-muted">
-              Type at least {MIN_QUERY} characters to search
-            </p>
-          ) : !loading && failed ? (
-            <div className="flex items-center justify-between gap-3 px-2 py-3">
-              <p role="alert" className="text-[13px] text-text-muted">
-                The search failed.
-              </p>
+          {/* Above the results rather than instead of them: a project match is computed here from
+              the projects already in hand, so it survives the task endpoint being down */}
+          {!loading && failed && active && (
+            <div role="alert" className="flex items-center justify-between gap-3 px-2 py-3">
+              <p className="text-[13px] text-text-muted">The task search failed.</p>
               <button
                 type="button"
-                onClick={search.retry}
+                onClick={() => {
+                  search.retry();
+                  inputRef.current?.focus();
+                }}
                 className="focus-ring rounded text-[13px] text-primary underline"
               >
                 Retry
               </button>
             </div>
-          ) : !hits.length ? (
+          )}
+          {!active ? (
             <p className="px-2 py-3 text-[13px] text-text-muted">
-              {loading ? "Searching…" : "No matches"}
+              Type at least {MIN_QUERY} characters to search
             </p>
+          ) : !hits.length ? (
+            // Nothing to say about matches when the read failed — the alert above says it
+            loading ? (
+              <p className="px-2 py-3 text-[13px] text-text-muted">Searching…</p>
+            ) : failed ? null : (
+              <p className="px-2 py-3 text-[13px] text-text-muted">No matches</p>
+            )
           ) : (
             <div role="listbox" aria-label="Search results" className="flex flex-col">
               {runsOf(hits, currentProjectRef).map((run) => (

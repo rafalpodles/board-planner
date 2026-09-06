@@ -157,14 +157,14 @@ export default function AgentDetailPage() {
 
   // "No agent with that id" reads as deleted, and this screen is reached from bookmarks. A read
   // that failed knows nothing about whether the agent exists.
-  if (store.failed) {
+  if (store.failed && !agent) {
     return (
       <>
         <PageHeader title="Agent" subtitle="Could not load" />
         <LoadFailed
           testId="agent-editor-error"
           className="py-12"
-          message="Failed to load this agent. It has not been deleted — the catalog could not be read."
+          message="Failed to load the catalog, so this page cannot say whether the agent is there."
           onRetry={store.retry}
         />
       </>
@@ -231,6 +231,15 @@ export default function AgentDetailPage() {
           </>
         }
       />
+
+      {store.failed && (
+        <LoadFailed
+          testId="agent-editor-stale"
+          className="mb-4 py-3"
+          message="Failed to refresh the catalog, so what follows may be out of date."
+          onRetry={store.retry}
+        />
+      )}
 
       {naming && (
         <form

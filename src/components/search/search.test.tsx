@@ -423,7 +423,7 @@ describe("SearchLayer", () => {
       renderLayer();
       await act(async () => void type("login"));
 
-      await waitFor(() => expect(screen.getByText("The search failed.")).toBeTruthy());
+      await waitFor(() => expect(screen.getByText("The task search failed.")).toBeTruthy());
       expect(screen.queryByText("No matches")).toBeNull();
       expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
     });
@@ -434,7 +434,7 @@ describe("SearchLayer", () => {
         .mockImplementation(() => Promise.resolve([]));
       renderLayer();
       await act(async () => void type("login"));
-      await waitFor(() => expect(screen.getByText("The search failed.")).toBeTruthy());
+      await waitFor(() => expect(screen.getByText("The task search failed.")).toBeTruthy());
 
       await act(async () => {
         screen.getByRole("button", { name: "Retry" }).click();
@@ -443,13 +443,25 @@ describe("SearchLayer", () => {
       await waitFor(() => expect(screen.getByText("No matches")).toBeTruthy());
     });
 
+    // BP-577 review: only tasks come from the API — a project match is computed here from the
+    // projects already in hand, so the failure must not take it off the screen
+    it("keeps a project match that never needed the endpoint", async () => {
+      projectsState.projects = [{ _id: "p1", key: "MOB", name: "Mobile App", icon: "📱" }];
+      api.get.mockImplementation(() => Promise.reject(new Error("network")));
+      renderLayer();
+      await act(async () => void type("mobile"));
+
+      await waitFor(() => expect(screen.getByText("The task search failed.")).toBeTruthy());
+      expect(screen.getAllByText("Mobile App").length).toBeGreaterThan(0);
+    });
+
     // Without this control the failure line could be rendering whenever nothing matched
     it("still reports no matches when the search answers with none", async () => {
       renderLayer();
       await act(async () => void type("login"));
 
       await waitFor(() => expect(screen.getByText("No matches")).toBeTruthy());
-      expect(screen.queryByText("The search failed.")).toBeNull();
+      expect(screen.queryByText("The task search failed.")).toBeNull();
     });
   });
 });
