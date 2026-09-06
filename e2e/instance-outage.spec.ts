@@ -46,32 +46,39 @@ test("a session that cannot be resolved is an outage, not a sign-out", async ({ 
 
   await page.goto("/projects");
 
-  // The client gives /api/auth/me eight seconds before calling it unreachable, and the server's own
-  // 503 can take longer than that during server selection — so this is the one assertion in the
-  // spec that has to outwait both
+  // Two clocks, and the shorter one usually wins: the app gives the driver 5 s to select a server
+  // (`SERVER_SELECTION_TIMEOUT_MS`, src/lib/db.ts:36) and answers 503, while the client abandons
+  // /api/auth/me after 8 s and treats that as the same thing. The budget is for a cold Turbopack
+  // compile on top of whichever arrives.
   await expect(page.getByRole("heading", { name: PANEL })).toBeVisible({ timeout: 45_000 });
   await expect(page.getByText(/You have not been signed out/)).toBeVisible();
   // The whole point. A redirect here is the bug, and it is the redirect the guard still performs
   // for a reader who genuinely has no session — see the control at the bottom of this file.
   await expect(page).toHaveURL("/projects");
 
-  // The button asks again, and the ask is what is pinned here rather than the recovery: the guard's
-  // own backoff fires its first automatic attempt ten seconds after the outage was noticed, and the
-  // click lands within a moment of the panel appearing — so a request this soon after it is the
-  // click's. Waiting on the *request* and not the answer, because the answer is the instance's to
-  // give and it takes its time reconnecting.
-  await restore(request);
-  const asked = page.waitForRequest((req) => req.url().includes("/api/auth/me"), {
-    timeout: 5_000,
+  // The button asks again, and the ask is what is pinned here rather than the recovery. Counted
+  // rather than waited for, and inside two seconds: the guard's own backoff fires its first
+  // automatic attempt ten seconds after the outage was noticed, so a window this short cannot be
+  // satisfied by it however slow the runner is. The *request*, not the answer — the answer is the
+  // instance's to give and it takes its time reconnecting.
+  const asks: string[] = [];
+  page.on("request", (req) => {
+    if (req.url().includes("/api/auth/me")) asks.push(req.url());
   });
+  await restore(request);
+  const before = asks.length;
   await page.getByRole("button", { name: "Try again now" }).click();
-  await asked;
+  await expect.poll(() => asks.length, { timeout: 2_000 }).toBe(before + 1);
 
   // Back where they were, with the session they never lost — no sign-in in between. The driver
   // needs a moment to notice the database is there again, and the backoff would arrive here too,
   // so this asserts the return and not which attempt achieved it.
   await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible({ timeout: 60_000 });
   await expect(page.getByRole("heading", { name: PANEL })).toHaveCount(0);
+  // The panel's absence is not enough on its own: it is drawn on `!user && outage`, so it goes the
+  // moment the reader is known again whether or not the flag was cleared. The banner is the half
+  // that reads the flag.
+  await expect(page.getByText(BANNER)).toHaveCount(0);
   await expect(page).toHaveURL("/projects");
 });
 
@@ -80,6 +87,13 @@ test("a reader who is already signed in keeps their screen, and is told it may b
   request,
 }) => {
   await signIn(page, "admin");
+
+  // Visited before the cut, for two reasons: it is the control — this screen works while the
+  // instance does — and nothing else in this group opens /my-tasks, so a first visit pays for a
+  // Turbopack compile of the page and its endpoint that would otherwise land inside the budget
+  // below, on a runner that is already waiting out a server-selection timeout.
+  await page.goto("/my-tasks");
+  await expect(page.getByRole("heading", { name: "My Tasks" })).toBeVisible();
   await page.goto("/projects");
   await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible();
 
@@ -101,16 +115,19 @@ test("a reader who is already signed in keeps their screen, and is told it may b
   // The shell is still drawn under the banner rather than replaced by it
   await expect(page.getByRole("link", { name: "My Tasks" })).toBeVisible();
 
-  // And it goes away once the instance answers again. The heading is asserted first and is not
-  // decoration: while the instance is still down a reload renders the *panel*, which replaces the
-  // children and the banner with them — so "no banner" on its own is equally what a broken
-  // instance looks like, and this arm passed without the instance ever coming back.
+  // And it goes away once the instance answers again — in place, without a reload. A reload is
+  // what made the first version of this arm vacuous: a document load remounts the provider with
+  // `outage` back at its initial `false`, so the banner's absence was guaranteed by initialisation
+  // whatever the product did. Moving between two screens keeps the same provider and produces the
+  // ordinary answers `noteApiStatus` reads, which is the path being asserted.
   await restore(request);
   await expect(async () => {
-    await page.reload();
-    await expect(page.getByRole("heading", { name: "My Tasks" })).toBeVisible({ timeout: 5_000 });
-    await expect(page.getByText(BANNER)).toHaveCount(0);
+    await page.getByRole("link", { name: "Notifications" }).click();
+    await page.getByRole("link", { name: "My Tasks" }).click();
+    await expect(page.getByText(BANNER)).toHaveCount(0, { timeout: 3_000 });
   }).toPass({ timeout: 60_000 });
+  // The positive half of the same moment: the reader is on a working screen, not on the panel
+  await expect(page.getByRole("heading", { name: "My Tasks" })).toBeVisible();
 });
 
 /**

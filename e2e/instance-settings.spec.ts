@@ -7,7 +7,10 @@ import {
   MEMBER_USERNAME,
   PROJECT_KEY,
   PROJECT_NAME,
+  SECOND_PROJECT_KEY,
+  SECOND_PROJECT_NAME,
   seed,
+  seedSecondProject,
 } from "./seed";
 import { signIn as arriveSignedIn, signInThroughForm } from "./session";
 
@@ -263,6 +266,7 @@ test("changing your own password: the new one signs in and the old one stops", a
 });
 
 const TOKEN_NAME = "e2e minted in the browser";
+const SCOPED_TOKEN_NAME = "e2e narrowed to one board";
 
 /** One row of the token list, by the name it was given. */
 function tokenRow(page: Page, name: string) {
@@ -337,6 +341,60 @@ test("a token created here works at once, and stops the moment it is revoked", a
     const res = await request.get(board, { headers: asToken });
     expect(res.status()).toBe(401);
   });
+});
+
+/**
+ * BP-473. The checkbox list beside the name is the only way a person narrows a token, and it is
+ * the half of the scope nothing drives: `mcp-oauth.spec.ts` covers the OAuth analogue, which
+ * reaches the same `applyTokenScope`, and neither of them goes through this form.
+ *
+ * Minted by an **instance admin** on purpose. `decide()` refuses a board outside the scope on its
+ * first line, before the instance-admin branch two lines down (`src/lib/grants.ts:38`) — so the
+ * refusal below can only be the scope. Given to a member instead, the same 403 would be explained
+ * by the missing grant and the scope would never be examined.
+ */
+test("a token narrowed to one board is refused on the other, and the row says which", async ({
+  page,
+  request,
+}) => {
+  // The board this account can reach and the token cannot. Seeded before the page loads, because
+  // the checkbox list is drawn from what the browser was told exists.
+  await seedSecondProject();
+
+  await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
+  await openSettled(page, "/settings/tokens");
+
+  await page.getByPlaceholder("Token name (e.g. MCP Server, CI)").fill(SCOPED_TOKEN_NAME);
+  await expect(page.getByRole("checkbox", { name: SECOND_PROJECT_NAME })).toBeVisible();
+  await page.getByRole("checkbox", { name: PROJECT_NAME }).check();
+
+  const created = page.waitForResponse(
+    (r) =>
+      r.request().method() === "POST" &&
+      new URL(r.url()).pathname === "/api/tokens" &&
+      r.status() < 400
+  );
+  await page.getByRole("button", { name: "Create", exact: true }).click();
+  await created;
+
+  const secret = (await page.locator("code.select-all").innerText()).trim();
+  const asToken = { ...SAME_ORIGIN, Authorization: `Bearer ${secret}` };
+
+  await test.step("the board it was given answers it", async () => {
+    const res = await request.get(`/api/projects/${PROJECT_KEY}`, { headers: asToken });
+    expect(res.status(), await res.text()).toBe(200);
+    expect((await res.json()).name).toBe(PROJECT_NAME);
+  });
+
+  await test.step("the board it was not, refuses it", async () => {
+    const res = await request.get(`/api/projects/${SECOND_PROJECT_KEY}`, { headers: asToken });
+    expect(res.status()).toBe(403);
+  });
+
+  // What the ticking was for, read back where somebody would look for it: the row that used to say
+  // "All projects" for a token this wide
+  await expect(tokenRow(page, SCOPED_TOKEN_NAME).getByText(`\u00b7 ${PROJECT_KEY}`)).toBeVisible();
+  await expect(tokenRow(page, SCOPED_TOKEN_NAME)).not.toContainText("All projects");
 });
 
 test("the collapse preference decides what the board does with its empty columns", async ({

@@ -2,6 +2,7 @@ import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 import mongoose from "mongoose";
 import { ADMIN_AUTH, MEMBER_AUTH, SAME_ORIGIN } from "./api";
 import {
+  ADMIN_ID,
   E2E_MONGODB_URI,
   MEMBER_ID,
   MEMBER_USERNAME,
@@ -72,6 +73,12 @@ function adminAnswers(page: Page): string[] {
 
 test.beforeEach(seed);
 
+// `sessionsOf` leaves a connection open, and seed()'s own disconnect only closes it when another
+// test follows. sessions-and-auth.spec.ts carries the same teardown for the same reason.
+test.afterEach(async () => {
+  if (mongoose.connection.readyState !== 0) await mongoose.disconnect();
+});
+
 test.describe("the administration screens", () => {
   test("a member is bounced off every one of them, and is handed nothing on the way", async ({
     page,
@@ -85,9 +92,10 @@ test.describe("the administration screens", () => {
       await expect(page.getByRole("heading", { name: screen.heading })).toHaveCount(0);
     }
 
-    // The assertion that survives the redirect being restored by hand: a page that renders nothing
-    // may still have asked, and the answer is what a leak looks like. Every 403 here is fine.
-    expect(answers.filter((a) => a.startsWith("200"))).toEqual([]);
+    // Not "no 200s" but "no answers at all": each page returns from its effect before fetching, so
+    // the stronger property is the true one — this browser never asked an administration endpoint
+    // anything. A page that asked and was refused would be a redirect that arrives too late.
+    expect(answers).toEqual([]);
   });
 
   /**
@@ -186,7 +194,13 @@ test.describe("promotion", () => {
 
     // The list is re-read after the save, so the pill is the screen's own account of the change
     await expect(
-      page.locator("div", { has: page.getByText("@member") }).getByText("Admin").last()
+      page
+        // `.last()` on the container, not on the text: every ancestor div holding "@member" matches,
+        // up to the one wrapping the whole shell — which also contains the sidebar's "E2E Admin",
+        // the nav's "Administration" and the admin's own role pill
+        .locator("div", { has: page.getByText("@member") })
+        .last()
+        .getByText("Admin", { exact: true })
     ).toBeVisible();
 
     const theirs = await browser.newContext();
@@ -206,6 +220,9 @@ test.describe("promotion", () => {
 });
 
 test.describe("deleting a user", () => {
+  /** The name the member is renamed to, so the rename that writes an audit row is a real change. */
+  const RENAMED = "E2E Member Renamed";
+
   /** Signs the member in in their own browser, so what the delete does to them can be watched. */
   async function memberBrowser(browser: {
     newContext: () => Promise<BrowserContext>;
@@ -258,12 +275,49 @@ test.describe("deleting a user", () => {
   });
 
   /**
+   * The other thing this dialog can be pointed at, and the only guard on the route that nothing
+   * anywhere pins — `route.test.ts` is four describes, all of them PUT.
+   *
+   * It is asserted through the API rather than the dialog because the screen offers no way to
+   * confirm twice: the point is the refusal, and the refusal is the route's.
+   */
+  test("an admin is refused their own account, and the instance keeps its administrator", async ({
+    page,
+  }) => {
+    await signIn(page, "admin");
+    await page.goto("/settings/users");
+
+    const refused = await page.request.delete(`/api/users/${ADMIN_ID}`, { headers: SAME_ORIGIN });
+    expect(refused.status(), await refused.text()).toBe(400);
+    expect(await refused.text()).toContain("Cannot delete yourself");
+
+    // The consequence, not the status: this is the guard the route relies on to keep one
+    // administrator standing, and it has no last-admin check of its own to fall back on
+    await page.reload();
+    await expect(page.getByText("@admin")).toBeVisible();
+    expect(await sessionsOf(ADMIN_ID)).toHaveLength(1);
+  });
+
+  /**
    * The aftermath, which is where this codebase has actually broken: `populate` renders a
    * reference to a deleted user as `null`, and `typeof null === "object"`, so every surface that
    * asked the shape of the reference took the populated branch and threw. Nine of them were fixed
    * at once; nothing since has walked the screens with a genuinely deleted account behind them.
+   *
+   * Every screen is asserted to name the member BEFORE the delete. Without that, "their name is
+   * gone" is equally what a screen that never showed it looks like — which is exactly what the
+   * first cut of this test asserted on two of the three screens.
    */
   test("the screens that named them still render once they are gone", async ({ page, request }) => {
+    // A row in the instance log written BY the account that is about to go. The fixture seeds no
+    // audit rows and nothing else here writes one, so without this the audit screen is an empty
+    // table and its only line that renders a user reference is never reached.
+    const renamed = await request.put("/api/users/me", {
+      headers: MEMBER_AUTH,
+      data: { fullName: RENAMED },
+    });
+    expect(renamed.status(), await renamed.text()).toBe(200);
+
     const assigned = await request.put(`/api/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_ID}`, {
       headers: ADMIN_AUTH,
       data: { assignee: MEMBER_USERNAME },
@@ -276,18 +330,41 @@ test.describe("deleting a user", () => {
     );
     expect(commented.status(), await commented.text()).toBe(201);
 
+    await signIn(page, "admin");
+
+    const boardCard = page.locator(
+      `[data-column-body] a[href="/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}"]`
+    );
+    const auditRow = page.locator("tr", { hasText: "Name changed by the account itself" });
+    const actorCell = auditRow.locator("td").nth(1);
+
+    await test.step("every screen names them while the account exists", async () => {
+      await page.goto(`/projects/${PROJECT_KEY}`);
+      await expect(boardCard).toContainText(RENAMED);
+
+      await page.goto(`/projects/${PROJECT_KEY}/settings`);
+      await expect(page.getByText(RENAMED)).toBeVisible();
+
+      // The audit write is fire-and-forget, so the row can arrive after the response that caused it
+      await expect(async () => {
+        await page.goto("/settings/audit");
+        await expect(actorCell).toHaveText(MEMBER_USERNAME);
+      }).toPass({ timeout: 20_000 });
+    });
+
     // Through the browser's cookie session rather than the admin Bearer above. The Bearer is
     // accepted here today, which is BP-537 — a machine credential may delete an account though the
     // same route refuses it a role, a password or an address. This spec must not be the thing that
     // goes red when that is closed.
-    await signIn(page, "admin");
     // SAME_ORIGIN because the provenance check is fail-closed: an APIRequestContext sends neither
     // Origin nor Sec-Fetch-Site, and a state-changing request carrying neither is refused 403
     const gone = await page.request.delete(`/api/users/${MEMBER_ID}`, { headers: SAME_ORIGIN });
     expect(gone.status(), await gone.text()).toBe(200);
 
     await page.goto(`/projects/${PROJECT_KEY}`);
-    await expect(page.getByText(SIBLING_TASK_TITLE)).toBeVisible();
+    await expect(boardCard).toBeVisible();
+    await expect(boardCard).toContainText(SIBLING_TASK_TITLE);
+    await expect(boardCard).not.toContainText(RENAMED);
 
     await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
     const comment = page.locator("div.group", { hasText: "Said before the account went" });
@@ -296,11 +373,16 @@ test.describe("deleting a user", () => {
     // surfaces use, and an unscoped match would be satisfied by any of them
     await expect(comment.getByText("Unknown")).toBeVisible();
 
-    await page.goto("/settings/audit");
-    await expect(page.getByRole("heading", { name: "Instance audit log" })).toBeVisible();
-
     await page.goto(`/projects/${PROJECT_KEY}/settings`);
-    await expect(page.getByRole("heading", { name: "Settings" }).first()).toBeVisible();
-    await expect(page.getByText("@member")).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Who can use this board" })).toBeVisible();
+    await expect(page.getByText(RENAMED)).toHaveCount(0);
+
+    await page.goto("/settings/audit");
+    await expect(auditRow).toBeVisible();
+    // The row survives because `target` is a stored username; the actor does not, because it is a
+    // live reference — so this reads "system", the word this screen otherwise reserves for a
+    // machine. That is BP-539, and this assertion is written to go red the day it is fixed.
+    await expect(actorCell).toHaveText("system");
+    await expect(auditRow).toContainText(MEMBER_USERNAME);
   });
 });
