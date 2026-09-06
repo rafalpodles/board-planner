@@ -585,7 +585,11 @@ test.describe("sprints from the card menu", () => {
     // Tight on purpose: the board's own ten-second poll would eventually drop the succeeded
     // card too, which would let a wrong id slip past this assertion unnoticed
     await expect(card(page, PLANNING_SPRINT_TASK_NUMBER)).toHaveCount(0, { timeout: 1_000 });
-    await expect(card(page, PLANNING_SPRINT_DONE_TASK_NUMBER)).toBeVisible();
+    // A one-shot count, not toBeVisible/toHaveCount's retry: the failed task's card is only
+    // ever removed optimistically, by the same code path a wrong id would also take — by the
+    // time the assertion above resolves, that path has already run, so a retrying assertion here
+    // would just wait out the ten-second poll putting a wrongly-removed card back and pass anyway
+    expect(await card(page, PLANNING_SPRINT_DONE_TASK_NUMBER).count()).toBe(1);
 
     expect((await readTask(request, PLANNING_SPRINT_TASK_NUMBER)).body.sprint).toBeNull();
     expect((await readTask(request, PLANNING_SPRINT_DONE_TASK_NUMBER)).body.sprint).toBe(
