@@ -25,7 +25,7 @@ const SHORTCUT_GROUPS: { title: string; shortcuts: Shortcut[] }[] = [
     shortcuts: [{ key: "⌘K / /", description: "Search tasks and projects" }],
   },
   {
-    title: "Board & sprints pages",
+    title: "Board",
     shortcuts: [
       { key: "N", description: "Create new task", hideWhen: "readOnly" },
       { key: "V", description: "Toggle view: board ↔ list", hideWhen: "pinViewMode" },
@@ -35,7 +35,7 @@ const SHORTCUT_GROUPS: { title: string; shortcuts: Shortcut[] }[] = [
     ],
   },
   {
-    title: "Board",
+    title: "Cards",
     shortcuts: [
       { key: "Tab", description: "Move between cards" },
       { key: "Enter / Space", description: "Open the focused card" },
@@ -54,33 +54,34 @@ const SHORTCUT_GROUPS: { title: string; shortcuts: Shortcut[] }[] = [
   },
 ];
 
-// VoiceOver reads ⌘ as "place of interest sign" and NVDA commonly reads neither ⌘ nor ⇧ at all —
-// so each glyph gets a visually-hidden spelling beside it, aria-hidden itself so the two are never
-// both announced.
+// VoiceOver/NVDA misread or drop ⌘/⇧ — each glyph gets a visually-hidden spoken label too.
 const GLYPH_LABELS: Record<string, string> = {
   "⌘": "Cmd",
   "⇧": "Shift",
   "↔": "left-right",
 };
 
-const GLYPH_PATTERN = new RegExp(`[${Object.keys(GLYPH_LABELS).join("")}]`, "g");
+// Alternation in a capturing group, not a [character class]: a class breaks silently if a
+// future glyph is ever a regex metacharacter like ^ ] - or \, and the capture keeps the glyph
+// itself in the split result so one pass finds and places it.
+const GLYPH_PATTERN = new RegExp(
+  `(${Object.keys(GLYPH_LABELS)
+    .map((glyph) => glyph.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|")})`,
+  "g"
+);
 
 function withGlyphLabels(text: string): ReactNode[] {
-  const parts = text.split(GLYPH_PATTERN);
-  const glyphs = text.match(GLYPH_PATTERN) ?? [];
-  const nodes: ReactNode[] = [parts[0]];
-  glyphs.forEach((glyph, i) => {
-    nodes.push(
-      <span key={`${i}-glyph`} aria-hidden="true">
-        {glyph}
-      </span>,
-      <span key={`${i}-label`} className="sr-only">
-        {GLYPH_LABELS[glyph]}
-      </span>,
-      parts[i + 1]
-    );
-  });
-  return nodes;
+  return text.split(GLYPH_PATTERN).map((part, i) =>
+    GLYPH_LABELS[part] ? (
+      <span key={i}>
+        <span aria-hidden="true">{part}</span>
+        <span className="sr-only">{GLYPH_LABELS[part]}</span>
+      </span>
+    ) : (
+      part
+    )
+  );
 }
 
 export function ShortcutHelp({ open, onClose, readOnly = false, pinViewMode }: ShortcutHelpProps) {

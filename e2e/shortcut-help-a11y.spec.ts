@@ -108,8 +108,9 @@ test.describe("on a read-only, view-locked board", () => {
     await expect(helpDialog(page).getByText("Create new task")).toHaveCount(0);
     await expect(helpDialog(page).getByText("Toggle view: board")).toHaveCount(0);
 
-    // Not gated on either prop, so still offered — the control proving the section itself still
-    // renders rather than the whole group having gone missing
+    // Neither gated on these props, so still offered — the control proving hiding a row doesn't
+    // take its section, or unrelated sections, down with it
     await expect(helpDialog(page).getByText("Refresh board")).toBeVisible();
+    await expect(helpDialog(page).getByText("Search tasks and projects")).toBeVisible();
   });
 });
