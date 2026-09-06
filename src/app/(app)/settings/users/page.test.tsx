@@ -215,6 +215,11 @@ describe("the users page, after a save that is followed by a refetch", () => {
     });
 
     expect(toast).toHaveBeenCalledWith("User deleted", "success");
+    // Both halves: that the refresh failure was reported at all, and that it did not claim a save
+    expect(toast).toHaveBeenCalledWith(
+      "The list could not be refreshed — reload the page to see it",
+      "error"
+    );
     expect(toast.mock.calls.map(([message]) => message).join(" ")).not.toContain("Saved");
   });
 });

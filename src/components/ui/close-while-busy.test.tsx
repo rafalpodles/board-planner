@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { StrictMode } from "react";
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, act } from "@testing-library/react";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { NewTaskModal } from "@/components/tasks/NewTaskModal";
@@ -12,6 +12,7 @@ import {
   NewStepDialog,
 } from "@/app/(app)/agents/components/dialogs";
 import { EnrolWorkerModal } from "@/components/settings/EnrolWorkerModal";
+import { useStore } from "@/app/(app)/agents/store";
 import { ApiAgentBlock } from "@/types";
 import { DangerAction } from "@/components/settings/DangerAction";
 import { CompleteSprintDialog } from "@/components/sprints/CompleteSprintDialog";
@@ -32,6 +33,9 @@ vi.mock("@/components/ui/MarkdownEditor", () => ({
 }));
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast }) }));
 
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 afterEach(cleanup);
 
 /**
@@ -431,5 +435,40 @@ describe("a dialog with a request in flight refuses Escape", () => {
     });
 
     expect(toast).toHaveBeenCalledWith("Fields filled by AI — review and save", "success");
+  });
+
+  /**
+   * The write landed; only the list behind the dialog did not. Reported as the write failing, the
+   * dialog stayed open over a record that already existed, with Create inviting a second one.
+   */
+  it("NewAgentDialog does not call a failed refresh a failed create", async () => {
+    const onClose = vi.fn();
+    function Host() {
+      const store = useStore();
+      return <NewAgentDialog open projects={[]} onClose={onClose} onCreate={store.addAgent} />;
+    }
+
+    api.get.mockResolvedValue([]);
+    render(<Host />);
+    await act(async () => {});
+
+    api.post.mockResolvedValue({ _id: "a1" });
+    api.get.mockRejectedValue(new Error("network down"));
+
+    const name = screen.getByLabelText("Name") as HTMLInputElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(name, "Careful");
+      name.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      screen.getByRole("button", { name: "Create" }).click();
+    });
+
+    expect(screen.queryByText("Could not create")).toBeNull();
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(toast).toHaveBeenCalledWith(
+      "The list could not be refreshed — reload the page to see it",
+      "error"
+    );
   });
 });

@@ -525,6 +525,7 @@ describe("Sprint lifecycle from the header", () => {
     await act(async () => {
       finish({});
     });
+    expect(screen.queryByRole("dialog", { name: "Complete Sprint" })).toBeNull();
   });
 
   it("deletes the selected sprint once the confirmation is answered", async () => {

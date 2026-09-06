@@ -101,6 +101,9 @@ export default function UsersPage() {
     }
     setSaving(false);
     closeNew();
+    // Said before the refresh, like the other two writes: a create used to say nothing at all, so
+    // a failed refresh was the only line a new account ever produced.
+    toast("User created", "success");
     await refreshUsers();
   }
 

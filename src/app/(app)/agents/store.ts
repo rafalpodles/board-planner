@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
+import { useToast } from "@/components/ui/Toast";
 import { AgentComposition, ApiAgent, ApiAgentBlock } from "@/types";
 
 export interface NewAgent {
@@ -23,6 +24,7 @@ export interface NewBlock {
 
 export function useStore() {
   const api = useApi();
+  const { toast } = useToast();
   const [agents, setAgents] = useState<ApiAgent[]>([]);
   const [blocks, setBlocks] = useState<ApiAgentBlock[]>([]);
   const [loading, setLoading] = useState(true);
@@ -60,6 +62,18 @@ export function useStore() {
     load();
   }, [load]);
 
+  // The refresh that follows a write, whose failure is not the write's failure. Under the same
+  // `await` as the POST, a blipped GET came back to the dialog as "Could not create" — over a
+  // record the server had already made, with the fields still filled in and Create inviting a
+  // second one (BP-565).
+  const refreshAfterWrite = useCallback(async () => {
+    try {
+      await load();
+    } catch {
+      toast("The list could not be refreshed — reload the page to see it", "error");
+    }
+  }, [load, toast]);
+
   return {
     loading,
     failed,
@@ -70,37 +84,37 @@ export function useStore() {
 
     addAgent: async (agent: NewAgent) => {
       await api.post("/api/agents", agent);
-      await load();
+      await refreshAfterWrite();
     },
 
     addBlock: async (block: NewBlock) => {
       await api.post("/api/agent-blocks", block);
-      await load();
+      await refreshAfterWrite();
     },
 
     saveComposition: async (agentId: string, composition: AgentComposition) => {
       await api.put(`/api/agents/${agentId}`, { composition });
-      await load();
+      await refreshAfterWrite();
     },
 
     updateBlock: async (blockId: string, patch: Partial<NewBlock>) => {
       await api.put(`/api/agent-blocks/${blockId}`, patch);
-      await load();
+      await refreshAfterWrite();
     },
 
     removeAgent: async (agentId: string) => {
       await api.del(`/api/agents/${agentId}`);
-      await load();
+      await refreshAfterWrite();
     },
 
     removeBlock: async (blockId: string) => {
       await api.del(`/api/agent-blocks/${blockId}`);
-      await load();
+      await refreshAfterWrite();
     },
 
     renameAgent: async (agentId: string, name: string, description: string) => {
       await api.put(`/api/agents/${agentId}`, { name, description });
-      await load();
+      await refreshAfterWrite();
     },
 
     reload: load,
