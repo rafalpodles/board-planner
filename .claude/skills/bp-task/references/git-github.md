@@ -72,7 +72,7 @@ Then `![before/after](https://raw.githubusercontent.com/rafalpodles/board-planne
 Preconditions: the last review round returned zero bugs, `gh pr checks <n> --watch` is all green, `gh pr view <n> --json baseRefName -q .baseRefName` prints `main`.
 
 ```bash
-gh pr merge <n> --merge
+gh pr merge <n> --merge --subject "<PR title> (#<n>)"
 gh pr view <n> --json state -q .state          # MERGED, before anything else
 git push origin --delete bp-<n>/<slug>
 git worktree remove ~/Documents/Projects/ClaudePlanner-worktrees/bp-<n>
