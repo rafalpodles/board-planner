@@ -69,6 +69,13 @@ function contextMenu(page: Page): Locator {
   return page.getByTestId("task-context-menu");
 }
 
+/** The list row j/k has focused, read back as the task number in its key. */
+async function focusedRowTaskNumber(page: Page): Promise<number> {
+  const focusedRow = page.locator("tr.ring-2");
+  await expect(focusedRow).toHaveCount(1);
+  return Number(/\b[A-Z]+-(\d+)\b/.exec((await focusedRow.innerText()) ?? "")?.[1]);
+}
+
 async function openBoard(page: Page, cards = SEEDED_TASKS) {
   await signIn(page);
   await page.goto(boardUrl);
@@ -774,9 +781,7 @@ test.describe("keyboard", () => {
     // Which task j focuses first is the list's business; ask it
     await page.keyboard.press("v");
     await page.keyboard.press("j");
-    const focusedRow = page.locator("tr.ring-2");
-    await expect(focusedRow).toHaveCount(1);
-    const first = Number(/\b[A-Z]+-(\d+)\b/.exec((await focusedRow.innerText()) ?? "")?.[1]);
+    const first = await focusedRowTaskNumber(page);
     expect([HELD_TASK_NUMBER, DECOY_TASK_NUMBER, SIBLING_TASK_NUMBER, FINISHED_TASK_NUMBER]).toContain(first);
 
     await page.keyboard.press("Enter");
@@ -832,9 +837,7 @@ test.describe("keyboard", () => {
     // The control: the same keys, in the list, move a visible cursor and Enter opens it
     await page.getByRole("button", { name: "List", exact: true }).click();
     await page.keyboard.press("j");
-    const focusedRow = page.locator("tr.ring-2");
-    await expect(focusedRow).toHaveCount(1);
-    const focused = Number(/\b[A-Z]+-(\d+)\b/.exec((await focusedRow.innerText()) ?? "")?.[1]);
+    const focused = await focusedRowTaskNumber(page);
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(new RegExp(`${taskUrl(focused)}$`));
   });
