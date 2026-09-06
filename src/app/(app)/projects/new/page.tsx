@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
 import { projectPath } from "@/lib/urls";
+import { PROJECT_KEY_MAX_LENGTH } from "@/lib/identifiers";
 import { PageHeader } from "@/components/shell/PageHeader";
 
 export default function NewProjectPage() {
@@ -54,7 +55,7 @@ export default function NewProjectPage() {
           value={key}
           onChange={(e) => setKey(e.target.value.toUpperCase())}
           placeholder="MP"
-          maxLength={5}
+          maxLength={PROJECT_KEY_MAX_LENGTH}
           required
         />
         <Textarea
