@@ -6,6 +6,7 @@ import { McpSession, authorize, type ToolCall } from "./mcp";
 import {
   ADMIN_USERNAME,
   API_TOKEN,
+  FOREIGN_ONLY_AGENT_NAME,
   FOREIGN_SPRINT_ID,
   FOREIGN_SPRINT_NAME,
   HELD_TASK_ID,
@@ -38,6 +39,7 @@ import {
   seed,
   seedAgents,
   seedDemotableAdmin,
+  seedForeignAgent,
   seedForeignSprint,
   seedSecondProject,
   storedExecution,
@@ -505,6 +507,40 @@ test("a personal agent stays with its owner's tasks", async ({ request }) => {
   const row = await storedTask(SIBLING_TASK_NUMBER);
   expect(String(row.agent)).toBe(String(PROJECT_AGENT_ID));
   expect(String(row.assignee)).toBe(String(MEMBER_ID));
+});
+
+/**
+ * BP-496. `/api/agents` sends the project agents of every project the caller can reach, not just
+ * the task's own — for an instance admin, every project on the instance. An agent name resolved
+ * against that whole list used to reach the write only to be refused by `agentUsableOnProject`
+ * (`"That agent cannot run on this project"`), a rule the caller has no way to see coming.
+ * Resolution itself now refuses it, naming the actual problem, and touches nothing.
+ */
+test("an agent name belonging only to another board is refused as such, not written", async ({
+  request,
+}) => {
+  await seedAgents();
+  await seedSecondProject();
+  await seedForeignAgent();
+  const session = await connected(request);
+
+  const foreign = await session.callTool("update_task", {
+    taskKey: SIBLING_TASK_KEY,
+    agent: FOREIGN_ONLY_AGENT_NAME,
+  });
+  refused(foreign);
+  expect(foreign.text).toContain("another project");
+  expect(foreign.text).not.toContain("cannot run on this project");
+  const untouched = await storedTask(SIBLING_TASK_NUMBER);
+  expect(untouched.agent ?? null).toBeNull();
+
+  // The control: the seeded board's own agent still resolves exactly as before
+  const own = await session.callTool("update_task", {
+    taskKey: SIBLING_TASK_KEY,
+    agent: PROJECT_AGENT_NAME,
+  });
+  accepted(own);
+  expect(own.parsed.agent.name).toBe(PROJECT_AGENT_NAME);
 });
 
 /**
