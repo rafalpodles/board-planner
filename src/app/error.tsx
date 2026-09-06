@@ -27,7 +27,10 @@ export default function GlobalError({
   }
 
   return (
-    <div className="flex min-h-[50vh] flex-col items-center justify-center gap-4 px-4">
+    <div
+      data-testid="error-boundary"
+      className="flex min-h-[50vh] flex-col items-center justify-center gap-4 px-4"
+    >
       <h2 className="text-xl font-bold text-danger">Something went wrong</h2>
       <p className="max-w-lg text-center text-sm text-text-muted">{error.message}</p>
 
