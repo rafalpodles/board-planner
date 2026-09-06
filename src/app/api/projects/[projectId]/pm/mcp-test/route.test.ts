@@ -15,10 +15,10 @@ vi.mock("@/lib/grants", () => ({ check }));
 vi.mock("@/models/project", () => ({
   Project: { findById: projectFindById },
 }));
-vi.mock("@/lib/pm/mcp-tools", () => ({
-  resolveServerToken,
-  isReadSafe: vi.fn(() => true),
-}));
+// Only the credential resolver is mocked. `isReadSafe` is deliberately the real one: mocking it
+// to `true` made every readSafe assertion below unfailable, and hid that a name like
+// "notion-search" does NOT start with a read verb and is classified as a write (BP-569 review).
+vi.mock("@/lib/pm/mcp-tools", () => ({ resolveServerToken }));
 vi.mock("@/lib/pm/mcp-client", () => ({ McpClient: McpClientMock }));
 
 const { POST } = await import("./route");
@@ -137,9 +137,10 @@ describe("stored credentials never leave their saved url", () => {
 // typed from memory (BP-569).
 describe("the tool list carries enough to choose from", () => {
   const TOOLS = [
-    { name: "notion-search", description: "Search pages in the workspace" },
-    { name: "notion-update-page", description: "Append blocks to a page" },
-    { name: "notion-orphan" },
+    { name: "search_pages", description: "Search pages in the workspace" },
+    { name: "notion-search", description: "Vendor-prefixed, so not read-shaped to isReadSafe" },
+    { name: "update_page", description: "Append blocks to a page" },
+    { name: "list_orphans" },
   ];
 
   beforeEach(() => {
@@ -156,11 +157,16 @@ describe("the tool list carries enough to choose from", () => {
     );
     const body = await response.json();
 
-    expect(body.count).toBe(3);
+    expect(body.count).toBe(4);
     expect(body.tools).toEqual([
-      { name: "notion-search", description: "Search pages in the workspace", readSafe: true },
-      { name: "notion-update-page", description: "Append blocks to a page", readSafe: true },
-      { name: "notion-orphan", description: "", readSafe: true },
+      { name: "search_pages", description: "Search pages in the workspace", readSafe: true },
+      {
+        name: "notion-search",
+        description: "Vendor-prefixed, so not read-shaped to isReadSafe",
+        readSafe: false,
+      },
+      { name: "update_page", description: "Append blocks to a page", readSafe: false },
+      { name: "list_orphans", description: "", readSafe: true },
     ]);
   });
 });

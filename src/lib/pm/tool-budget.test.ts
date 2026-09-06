@@ -78,3 +78,19 @@ describe("estimateToolTokens", () => {
     expect(estimateToolTokens(86)).toBeLessThan(60_000);
   });
 });
+
+describe("a server that contributes nothing", () => {
+  it("is left out of the blame list, so the log names only who is responsible", () => {
+    const verdict = assessToolBudget([
+      { name: "github", count: 44 },
+      { name: "jira", count: 0 },
+    ]);
+
+    expect(verdict.heaviest.map((s) => s.name)).toEqual(["github"]);
+    expect(describeToolBudget(verdict)).not.toContain("jira");
+  });
+
+  it("does not tip an otherwise fine project over the budget", () => {
+    expect(assessToolBudget([{ name: "a", count: 40 }, { name: "b", count: 0 }]).over).toBe(false);
+  });
+});

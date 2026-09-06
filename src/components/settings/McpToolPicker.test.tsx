@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
-import { McpToolPicker, parseAllowlist } from "./McpToolPicker";
+import { McpToolPicker, carriedTools, parseAllowlist } from "./McpToolPicker";
 
 afterEach(cleanup);
 
@@ -13,13 +13,14 @@ const CATALOG = [
 
 // `null`, not `undefined`: passing undefined would silently fall back to the default parameter
 // and the "never tested" case below would quietly test the opposite of what it says.
-function setup(allowlist = "", catalog: typeof CATALOG | null = CATALOG) {
+function setup(allowlist = "", catalog: typeof CATALOG | null = CATALOG, allowWrites = true) {
   const onChange = vi.fn();
   render(
     <McpToolPicker
       rowName="notion"
       catalog={catalog ?? undefined}
       allowlist={allowlist}
+      allowWrites={allowWrites}
       onChange={onChange}
     />
   );
@@ -71,15 +72,17 @@ describe("McpToolPicker", () => {
   it("counts an empty allowlist as the whole catalogue, not as nothing", () => {
     setup("");
 
-    expect(screen.getByText(/All 3 tools/)).toBeTruthy();
-    expect(screen.getByText(/1,050 tokens per model call/)).toBeTruthy();
+    expect(screen.getByText(/Nothing ticked, so all 3 tools are sent/)).toBeTruthy();
+    // Plain digits, not toLocaleString: the grouping separator follows the runner's locale, so
+    // "1,050" passes in en-US and fails in pl-PL (BP-569 review).
+    expect(screen.getByText(/3 carried per turn, roughly 1050 tokens/)).toBeTruthy();
   });
 
   it("counts the ticked tools once there are any", () => {
     setup("notion-search");
 
-    expect(screen.getByText(/1 of 3 selected/)).toBeTruthy();
-    expect(screen.getByText(/350 tokens per model call/)).toBeTruthy();
+    expect(screen.getByText(/1 of 3 ticked/)).toBeTruthy();
+    expect(screen.getByText(/1 carried per turn, roughly 350 tokens/)).toBeTruthy();
   });
 
   // The control: without a catalogue the text field is the only way in, and it must still work.
@@ -90,7 +93,7 @@ describe("McpToolPicker", () => {
     expect(field.value).toBe("a, b");
     fireEvent.change(field, { target: { value: "a, b, c" } });
     expect(onChange).toHaveBeenCalledWith("a, b, c");
-    expect(screen.queryByText(/selected/)).toBeNull();
+    expect(screen.queryByText(/carried per turn/)).toBeNull();
   });
 });
 
@@ -98,5 +101,87 @@ describe("parseAllowlist", () => {
   it("ignores blanks and stray whitespace the field invites", () => {
     expect(parseAllowlist(" a ,, b , ")).toEqual(["a", "b"]);
     expect(parseAllowlist("")).toEqual([]);
+  });
+});
+
+/**
+ * A server without `allowWrites` drops its mutating tools at discovery. The picker used to offer
+ * them anyway, so an admin could tick three, see "(3)" everywhere and have the turn carry none —
+ * the operator sees it ticked and the agent denies it (BP-569 review).
+ */
+describe("a server that may not write", () => {
+  it("will not let a mutating tool be ticked, and says why", () => {
+    setup("", CATALOG, false);
+
+    const write = screen.getByLabelText("notion-update-page for notion") as HTMLInputElement;
+    expect(write.disabled).toBe(true);
+    expect(screen.getByText("needs Allow writes")).toBeTruthy();
+  });
+
+  it("counts only what the turn will carry", () => {
+    setup("", CATALOG, false);
+
+    expect(screen.getByText(/2 carried per turn/)).toBeTruthy();
+  });
+
+  // The control: with writes allowed the same tool is tickable and counted
+  it("leaves it tickable when writes are allowed", () => {
+    setup("", CATALOG, true);
+
+    expect((screen.getByLabelText("notion-update-page for notion") as HTMLInputElement).disabled).toBe(false);
+    expect(screen.getByText(/3 carried per turn/)).toBeTruthy();
+  });
+});
+
+describe("carriedTools", () => {
+  it("reads an empty allowlist as every reachable tool", () => {
+    expect(carriedTools(CATALOG, "", true)).toHaveLength(3);
+    expect(carriedTools(CATALOG, "", false)).toEqual(["notion-search", "notion-fetch"]);
+  });
+
+  it("ignores a ticked name the server does not offer", () => {
+    expect(carriedTools(CATALOG, "notion-search, gone-away", true)).toEqual(["notion-search"]);
+  });
+
+  it("trusts a hand-typed name when there is no catalogue to check it against", () => {
+    expect(carriedTools(undefined, "typed-by-hand", true)).toEqual(["typed-by-hand"]);
+  });
+});
+
+describe("the same tool offered twice", () => {
+  it("appears once, so ticking one does not flip the other", () => {
+    const twice = [...CATALOG, { name: "notion-search", description: "again", readSafe: true }];
+    const onChange = vi.fn();
+    render(
+      <McpToolPicker
+        rowName="notion"
+        catalog={twice}
+        allowlist=""
+        allowWrites
+        onChange={onChange}
+      />
+    );
+
+    expect(screen.getAllByLabelText("notion-search for notion")).toHaveLength(1);
+  });
+});
+
+describe("the cap the validator enforces", () => {
+  const many = Array.from({ length: 60 }, (_, i) => ({
+    name: `list_thing_${i}`,
+    description: `Thing ${i}`,
+    readSafe: true,
+  }));
+
+  it("stops at 50 rather than letting the whole save be refused", () => {
+    const fifty = many.slice(0, 50).map((t) => t.name).join(", ");
+    render(
+      <McpToolPicker rowName="wide" catalog={many} allowlist={fifty} allowWrites onChange={vi.fn()} />
+    );
+
+    expect(screen.getByText(/50 tools is the most one server can list/)).toBeTruthy();
+    expect((screen.getByLabelText("list_thing_55 for wide") as HTMLInputElement).disabled).toBe(true);
+    // An already-ticked one stays tickable, or there would be no way back under the cap
+    expect((screen.getByLabelText("list_thing_1 for wide") as HTMLInputElement).disabled).toBe(false);
   });
 });
