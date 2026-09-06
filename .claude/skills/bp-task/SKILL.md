@@ -24,7 +24,7 @@ A task is done when it is merged, documented, cleaned up after, and nobody was a
 
 ## 2. Review loop
 
-- Independent agents, lenses scaled to the diff: `references/review.md`. Fix every bug, send the delta to the same reviewers, repeat until a round returns zero bugs. Nits do not block. There is no cap on rounds.
+- Independent agents, scaled to the diff (S/M: one reviewer): `references/review.md`. Fix every bug and send the delta to the same reviewers; repeat until a round finds zero bugs. Nits do not block and nit fixes get no re-review.
 - A question only a person can answer: comment, `needs_human_review`, stop.
 
 ## 3. Look
