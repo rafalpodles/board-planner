@@ -153,6 +153,7 @@ function TaskDetailView({
   // things about what is lost, and one is undoable while the other is not (BP-337)
   const [heldDelete, setHeldDelete] = useState<RunConflict | null>(null);
   const [addingChild, setAddingChild] = useState(false);
+  const [addingChildSaving, setAddingChildSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [commentRefreshKey, setCommentRefreshKey] = useState(0);
@@ -474,6 +475,7 @@ function TaskDetailView({
       <Modal
         open={addingChild}
         onClose={() => setAddingChild(false)}
+        closeDisabled={addingChildSaving}
         title={`New child of ${taskKey}`}
         size="lg"
       >
@@ -490,6 +492,7 @@ function TaskDetailView({
             onReload();
           }}
           onCancel={() => setAddingChild(false)}
+          onBusyChange={setAddingChildSaving}
         />
       </Modal>
 

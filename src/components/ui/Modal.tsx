@@ -88,6 +88,7 @@ export function Modal({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
+        aria-busy={closeDisabled || undefined}
         aria-labelledby={named && !bare ? titleId : undefined}
         aria-label={named && !bare ? undefined : named ? title : UNNAMED_DIALOG_LABEL}
         tabIndex={-1}
@@ -105,11 +106,15 @@ export function Modal({
         {!bare && (
           <div className="flex shrink-0 items-center justify-between mb-4">
             <h2 id={titleId} className="text-lg font-semibold">{title}</h2>
+            {/* aria-disabled rather than `disabled`: a disabled button leaves the tab order, and in a
+                confirm dialog mid-delete every other control is disabled too — the dialog would have
+                no tab stop left, and a keyboard user's focus would drop to the body mid-request. This
+                stays focusable, announces itself as unavailable, and swallows the click. */}
             <button
               onClick={requestClose}
-              disabled={closeDisabled}
+              aria-disabled={closeDisabled || undefined}
               aria-label="Close dialog"
-              className="p-2 rounded-lg hover:bg-bg-hover text-text-muted min-h-[44px] min-w-[44px] flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50 disabled:pointer-events-none"
+              className="p-2 rounded-lg hover:bg-bg-hover text-text-muted min-h-[44px] min-w-[44px] flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary aria-disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent"
             >
               &#x2715;
             </button>

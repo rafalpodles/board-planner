@@ -48,6 +48,9 @@ interface TaskFormProps {
   // When set, the created task is linked as this task's child
   parentTaskId?: string;
   onCancel: () => void;
+  /** Told when the create is in flight, so a dialog wrapping this form can refuse to be dismissed
+      out from under it — the form is where the typed task lives (BP-565) */
+  onBusyChange?: (busy: boolean) => void;
 }
 
 export function TaskForm({
@@ -62,6 +65,7 @@ export function TaskForm({
   onSaved,
   parentTaskId,
   onCancel,
+  onBusyChange,
 }: TaskFormProps) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -163,6 +167,7 @@ export function TaskForm({
     e.preventDefault();
     setError("");
     setLoading(true);
+    onBusyChange?.(true);
 
     try {
       const created = await api.post(`/api/projects/${projectId}/tasks`, body);
@@ -184,6 +189,7 @@ export function TaskForm({
       setError(err instanceof Error ? err.message : "Failed to save");
     } finally {
       setLoading(false);
+      onBusyChange?.(false);
     }
   }
 
@@ -563,7 +569,7 @@ export function TaskForm({
         <Button type="submit" disabled={loading}>
           {loading ? "Saving..." : "Create Task"}
         </Button>
-        <Button type="button" variant="secondary" onClick={onCancel}>
+        <Button type="button" variant="secondary" onClick={onCancel} disabled={loading}>
           Cancel
         </Button>
       </div>

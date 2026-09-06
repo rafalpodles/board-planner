@@ -215,13 +215,36 @@ test.describe("creating and editing a sprint from the form", () => {
     await form.getByRole("button", { name: "Create" }).click();
     await sent;
 
+    // A dismissal is a React state update from a native listener, so asserting "still there" in the
+    // same tick would pass on its first poll even if the gate were gone. Two frames is where that
+    // update has landed if it is going to.
+    const painted = () =>
+      page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+          )
+      );
+
     await test.step("all three of the dialog's own ways out refuse", async () => {
-      await expect(form.getByRole("button", { name: "Close dialog" })).toBeDisabled();
+      await expect(form.getByRole("button", { name: "Close dialog" })).toHaveAttribute(
+        "aria-disabled",
+        "true"
+      );
+      await expect(form).toHaveAttribute("aria-busy", "true");
       await expect(form.getByRole("button", { name: "Cancel" })).toBeDisabled();
+
       await page.keyboard.press("Escape");
+      await painted();
       await expect(form).toBeVisible();
+
       // Beside the dialog, which is the one nothing but Modal could ever have gated
       await page.mouse.click(5, 5);
+      await painted();
+      await expect(form).toBeVisible();
+
+      await form.getByRole("button", { name: "Close dialog" }).click();
+      await painted();
       await expect(form).toBeVisible();
       await expect(form.getByLabel("Name")).toHaveValue("Sprint Hindenburg");
     });
@@ -231,7 +254,10 @@ test.describe("creating and editing a sprint from the form", () => {
 
     await test.step("and the failure leaves a dialog to land on, still dismissable", async () => {
       await expect(form).toBeVisible();
-      await expect(form.getByRole("button", { name: "Close dialog" })).toBeEnabled();
+      await expect(form.getByRole("button", { name: "Close dialog" })).not.toHaveAttribute(
+        "aria-disabled",
+        "true"
+      );
       await page.keyboard.press("Escape");
       await expect(form).toBeHidden();
     });

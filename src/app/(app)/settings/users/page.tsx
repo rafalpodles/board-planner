@@ -119,7 +119,7 @@ export default function UsersPage() {
   }
 
   async function handleEditSave() {
-    if (!editUser) return;
+    if (!editUser || editSaving) return;
     setPasswordError("");
     setEmailError("");
 

@@ -3,6 +3,7 @@ import { useRef } from "react";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, act, within } from "@testing-library/react";
 import { Modal } from "./Modal";
+import { tabbablesWithin } from "@/lib/focus-trap";
 
 afterEach(cleanup);
 
@@ -521,16 +522,38 @@ describe("Modal, while its caller's request is in flight", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  // Disabled rather than inert: a × that swallows clicks in silence reads as a broken dialog,
-  // which is what the Cancel button beside it already avoids by dimming.
-  it("shows the header button as disabled rather than swallowing the click", () => {
+  // Dimmed and announced rather than inert: a × that swallows clicks in silence reads as a broken
+  // dialog, which is what the Cancel button beside it already avoids by dimming. `aria-disabled`
+  // rather than `disabled` so it keeps its place in the tab order — in a confirm dialog mid-delete
+  // it is the only control left that has one.
+  it("announces the header button as unavailable, dims it, and keeps it focusable", () => {
     const onClose = vi.fn();
     renderModal({ onClose, closeDisabled: true });
     const close = screen.getByRole("button", { name: "Close dialog" }) as HTMLButtonElement;
-    expect(close.disabled).toBe(true);
-    expect(close.className).toContain("disabled:opacity-50");
+    expect(close.getAttribute("aria-disabled")).toBe("true");
+    expect(close.disabled).toBe(false);
+    expect(close.className).toContain("aria-disabled:opacity-50");
     act(() => close.click());
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("says the dialog is busy, so the refusal is announced and not only felt", () => {
+    renderModal({ closeDisabled: true });
+    expect(screen.getByRole("dialog").getAttribute("aria-busy")).toBe("true");
+  });
+
+  // The gap the disabled × would have opened: with Cancel and Confirm disabled too, a dialog whose
+  // × had left the tab order would have no tab stop at all, and focus would sit on the container,
+  // which draws no ring.
+  it("still offers a tab stop while every button the caller owns is disabled", () => {
+    render(
+      <Modal open onClose={() => {}} title="Delete Task" closeDisabled>
+        <button disabled>Cancel</button>
+        <button disabled>Delete</button>
+      </Modal>
+    );
+    const stops = tabbablesWithin(screen.getByRole("dialog"));
+    expect(stops.map((el) => el.getAttribute("aria-label"))).toEqual(["Close dialog"]);
   });
 
   // The refusal lasts exactly as long as the request: a dialog that could not be dismissed
