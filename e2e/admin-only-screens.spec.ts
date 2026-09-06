@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import { ADMIN_AUTH, MEMBER_AUTH, SAME_ORIGIN } from "./api";
 import {
   ADMIN_ID,
+  ADMIN_USERNAME,
   E2E_MONGODB_URI,
   MEMBER_ID,
   MEMBER_USERNAME,
@@ -394,10 +395,17 @@ test.describe("deleting a user", () => {
 
     await page.goto("/settings/audit");
     await expect(auditRow).toBeVisible();
-    // The row survives because `target` is a stored username; the actor does not, because it is a
-    // live reference — so this reads "system", the word this screen otherwise reserves for a
-    // machine. That is BP-539, and this assertion is written to go red the day it is fixed.
-    await expect(actorCell).toHaveText("system");
+    // Both halves of the row outlive the account now: `target` was always a stored username, and
+    // since BP-539 so is the actor. Before that this read "system" — the word this screen reserves
+    // for a machine — so deleting somebody rewrote every row they had ever written.
+    await expect(actorCell).toHaveText(MEMBER_USERNAME);
     await expect(auditRow).toContainText(MEMBER_USERNAME);
+
+    // And the deletion itself, which nothing recorded before BP-538: the account is gone, so this
+    // row is the only place it is written down that it existed and who removed it.
+    const deletionRow = page.locator("tr", { hasText: "Account deleted" });
+    await expect(deletionRow).toBeVisible();
+    await expect(deletionRow.locator("td").nth(1)).toHaveText(ADMIN_USERNAME);
+    await expect(deletionRow).toContainText(MEMBER_USERNAME);
   });
 });

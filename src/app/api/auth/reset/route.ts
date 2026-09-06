@@ -119,6 +119,7 @@ export async function POST(request: Request) {
   void logInstanceAudit({
     action: "user_password_reset_by_email",
     user: user._id,
+    actorUsername: user.username,
     target: user.username,
     // The address, because "was that me?" is the whole question this row exists to answer, and a
     // row saying only that it happened cannot answer it

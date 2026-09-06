@@ -76,7 +76,7 @@ export default function InstanceAuditPage() {
                   {/* "system" for a machine, matching the project log — a worker spending its
                       enrolment token has no session to attribute the row to */}
                   <td className="align-top font-medium sm:table-cell sm:whitespace-nowrap sm:px-3 sm:py-2">
-                    {log.user?.username ?? "system"}
+                    {log.actorUsername || log.user?.username || "system"}
                   </td>
                   <td
                     className={`w-full align-top sm:table-cell sm:w-auto sm:whitespace-nowrap sm:px-3 sm:py-2 ${

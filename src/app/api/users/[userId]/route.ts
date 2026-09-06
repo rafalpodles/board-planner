@@ -47,6 +47,9 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
+  const previousRole = target.role;
+  let roleWasChanged = false;
+
   // Update role
   if (body.role !== undefined) {
     // Promotion is the second half of the machine-credential escape: create an account, raise it,
@@ -77,6 +80,7 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
         );
       }
     }
+    roleWasChanged = body.role !== previousRole;
     target.role = body.role as "admin" | "member";
   }
 
@@ -179,6 +183,19 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
     throw err;
   }
 
+  // What an account may do on this instance, which is the change the branch above gates on
+  // `viaMachineCredential` precisely because it is the escalation path — and then left no trace of.
+  // The direction is in `detail`, the way the address change carries old → new.
+  if (roleWasChanged) {
+    void logInstanceAudit({
+      action: "user_role_changed",
+      user: admin._id,
+      actorUsername: admin.username,
+      target: target.username,
+      detail: `${previousRole} → ${target.role}`,
+    });
+  }
+
   if (passwordWasSet) {
     // Handing somebody a password is the administrator's answer to "I cannot get in", so it has to
     // lift a login lockout too — including one an attacker aimed at them, which on a deployment
@@ -189,6 +206,7 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
     void logInstanceAudit({
       action: "user_password_reset",
       user: admin._id,
+      actorUsername: admin.username,
       target: target.username,
     });
     // The account holder is the one person this happens to who was not in the room for it. Sent to
@@ -215,6 +233,7 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
     void logInstanceAudit({
       action: "user_email_changed",
       user: admin._id,
+      actorUsername: admin.username,
       target: target.username,
       detail: `${previousEmail || "none"} → ${target.email || "none"}`,
     });
@@ -301,6 +320,16 @@ export const DELETE = withAdmin(async (_request, { params, user: admin }) => {
   }
 
   await revokeUserSessions(user._id);
+
+  // After the delete, and named rather than referenced: the account is gone, so this row is the
+  // only place it is recorded that it ever existed or who removed it.
+  void logInstanceAudit({
+    action: "user_deleted",
+    user: admin._id,
+    actorUsername: admin.username,
+    target: user.username,
+    detail: user.role === "admin" ? "an administrator" : "a member",
+  });
 
   return NextResponse.json({ message: "User deleted" });
 });

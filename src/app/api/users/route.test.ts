@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const create = vi.fn();
 const countDocuments = vi.fn();
 const getAuthUser = vi.fn();
+const logInstanceAudit = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/user", () => ({
@@ -17,6 +18,7 @@ vi.mock("@/lib/auth", () => ({
   MIN_PASSWORD_LENGTH: 8,
   PASSWORD_COST_FACTOR: 4,
 }));
+vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/lib/session", () => ({
   ProvenanceError: class ProvenanceError extends Error {},
   provenanceRefusal: () => null,
@@ -34,9 +36,55 @@ const VALID = { password: "password123", fullName: "Somebody" };
 
 beforeEach(() => {
   create.mockReset();
-  create.mockResolvedValue({ _id: "u1" });
+  logInstanceAudit.mockReset();
+  create.mockResolvedValue({ _id: "u1", username: "newcomer" });
   countDocuments.mockResolvedValue(5);
-  getAuthUser.mockResolvedValue({ _id: "a1", role: "admin" });
+  getAuthUser.mockResolvedValue({ _id: "a1", role: "admin", username: "rafal" });
+});
+
+/**
+ * BP-538. The log knew that somebody had changed their display name and not that the account
+ * existed. `target` is the username rather than a reference, because this row has to still name
+ * them once the account is gone — which is the other row this ticket added.
+ */
+describe("the row an account's creation leaves", () => {
+  it("names the account and the administrator who made it", async () => {
+    await post({ ...VALID, username: "newcomer" });
+
+    expect(logInstanceAudit).toHaveBeenCalledWith({
+      action: "user_created",
+      user: "a1",
+      actorUsername: "rafal",
+      target: "newcomer",
+      detail: "member",
+    });
+  });
+
+  // The first account on an instance is made by whoever reaches the login screen, so there is no
+  // actor to name — and the row has to say which case it was, because this one is an administrator
+  it("says so when the account is the instance's first, and names nobody", async () => {
+    countDocuments.mockResolvedValue(0);
+    getAuthUser.mockResolvedValue(null);
+
+    await post({ ...VALID, username: "firstadmin" });
+
+    expect(logInstanceAudit).toHaveBeenCalledWith({
+      action: "user_created",
+      user: null,
+      actorUsername: "",
+      target: "newcomer",
+      detail: "the first account on this instance, made an administrator",
+    });
+  });
+
+  it("records nothing when the account was refused", async () => {
+    create.mockRejectedValue(Object.assign(new Error("dup"), { code: 11000, keyPattern: { username: 1 } }));
+
+    const res = await post({ ...VALID, username: "taken" });
+
+    expect(res.status).toBe(409);
+    expect(logInstanceAudit).not.toHaveBeenCalled();
+  });
 });
 
 /**

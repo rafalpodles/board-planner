@@ -1295,6 +1295,12 @@ export const INSTANCE_AUDIT_ACTIONS = [
   // It is what a comment is signed with, though, so this row is the only place the change is
   // recorded at all (BP-410)
   "user_full_name_changed_self",
+  // The account's own life. A display name was already worth a row (above); being made an
+  // administrator, and being deleted, are the two that decide what an account can do and whether
+  // it exists — and neither was recorded anywhere at all.
+  "user_created",
+  "user_deleted",
+  "user_role_changed",
 ] as const;
 
 export type InstanceAuditAction = (typeof INSTANCE_AUDIT_ACTIONS)[number];
@@ -1303,6 +1309,10 @@ export interface IInstanceAuditLog {
   _id: Types.ObjectId;
   // Absent when a machine did it: a worker spends its enrolment token with no session behind it
   user: Types.ObjectId | IUser | null;
+  // The actor's username as it was at the time, for the same reason `target` is denormalised: the
+  // reference above resolves to null once that account is deleted, which used to rewrite every row
+  // they ever wrote as "system" — the word this log reserves for a machine
+  actorUsername: string;
   action: InstanceAuditAction;
   target: string;
   detail: string;
@@ -1312,6 +1322,7 @@ export interface IInstanceAuditLog {
 export interface ApiInstanceAuditLog {
   _id: string;
   user: { _id: string; username: string; fullName: string } | null;
+  actorUsername: string;
   action: InstanceAuditAction;
   target: string;
   detail: string;

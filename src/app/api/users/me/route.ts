@@ -201,6 +201,7 @@ export const PUT = withAuth(async (request, { user }) => {
     void logInstanceAudit({
       action: "user_full_name_changed_self",
       user: user._id,
+      actorUsername: user.username,
       target: user.username,
       detail: `${previousFullName || "none"} → ${updates.fullName}`,
     });
@@ -214,6 +215,7 @@ export const PUT = withAuth(async (request, { user }) => {
     void logInstanceAudit({
       action: "user_email_changed_self",
       user: user._id,
+      actorUsername: user.username,
       target: user.username,
       detail: `${previousEmail || "none"} → ${updates.email || "none"}`,
     });
