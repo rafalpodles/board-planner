@@ -5,11 +5,13 @@ import { signIn } from "./session";
 /**
  * BP-469: the project's audit log — "every settings change on this project, newest first".
  *
- * The screen was reachable in the suite and asserted nowhere, and its failure mode is silent: a
- * read that answers nothing renders "No settings changes recorded yet", which is also what a
- * healthy log says on a fresh board. So every test here **causes** the rows it then reads, through
- * the settings screen a person uses, and the empty state is asserted first — as the control that
- * says the rows arrived because of the change rather than being there all along.
+ * The screen was reachable in the suite and asserted nowhere. So every test here **causes** the
+ * rows it then reads, through the settings screen a person uses, and the empty state is asserted
+ * first — as the control that says the rows arrived because of the change rather than being there
+ * all along.
+ *
+ * The card's three silences — not yet, could not, nothing — are BP-548's own tests, at the foot
+ * of this file.
  */
 
 test.beforeEach(seed);
@@ -17,9 +19,9 @@ test.beforeEach(seed);
 const SETTINGS = `/projects/${PROJECT_KEY}/settings`;
 
 /**
- * Waits for the read, not for the card. The card renders "No settings changes recorded yet."
- * before its request has been made — the empty state is also the pre-fetch state (BP-548) — so
- * asserting on what is on screen at load time says nothing about what the server holds.
+ * Returns what the server held, by waiting for the read rather than reading the card. The card
+ * now distinguishes "not answered yet" from "nothing recorded" (BP-548), so its sentence is worth
+ * asserting — but it is still a rendering of the payload, and the callers below want the payload.
  */
 async function openAuditLog(page: Page): Promise<StoredRow[]> {
   const read = page.waitForResponse(
@@ -66,8 +68,7 @@ test("a change made on the settings screen becomes a row naming who made it", as
   await signIn(page);
 
   // The control, read off the payload rather than the card: this board has no history, so a row
-  // below can only have come from the change. The card cannot answer it — it renders its empty
-  // sentence before the request lands (BP-548)
+  // below can only have come from the change
   expect(await openAuditLog(page)).toEqual([]);
   await expect(page.getByText("No settings changes recorded yet.")).toBeVisible();
 
@@ -130,4 +131,96 @@ test("a member is not shown the log at all", async ({ page }) => {
   // grant, not ownership, and the route asks for the same "admin" need `project.canAdmin` does.
   const asMember = await page.request.get(`/api/projects/${PROJECT_KEY}/audit`);
   expect(asMember.status()).toBe(403);
+});
+
+/**
+ * BP-548: which of the three silences the card is showing.
+ *
+ * "No settings changes recorded yet." used to be the answer to three different questions — the
+ * read has not come back, the read failed, and the board really has no history — and only the
+ * third of those is true. On a screen whose whole subject is "who changed what", the second is
+ * the one that lies: the toast fades and the card is left asserting that nothing ever happened
+ * here.
+ *
+ * Both tests below hold or break the read from the browser side, so what is asserted is what a
+ * reader would have on screen at that moment, not what the endpoint would have said.
+ */
+
+const AUDIT_READ = "**/api/projects/*/audit";
+
+// Scoped to the card, like rows() above: the settings screen mounts every section at once and
+// hides the inactive ones, and a future copy tweak that lines up the toast text with the panel
+// text would otherwise make an unscoped getByText match both and fail on strict mode.
+const auditCard = (page: Page) => page.locator("section").filter({ hasText: "Recent changes" });
+const spinner = (page: Page) => auditCard(page).getByRole("status", { name: "Loading the audit log" });
+const emptyState = (page: Page) => auditCard(page).getByText("No settings changes recorded yet.");
+const failurePanel = (page: Page) => auditCard(page).getByText("Failed to load the audit log.");
+
+test("the card does not call the log empty while its read is still out", async ({ page }) => {
+  await signIn(page);
+
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(AUDIT_READ, async (route) => {
+    await held;
+    await route.continue();
+  });
+
+  await page.goto(`${SETTINGS}?section=audit`);
+  await expect(page.getByRole("heading", { name: "Audit log", exact: true })).toBeVisible();
+
+  // The bug first, so a red run names it: the read is not back, and the card must not answer a
+  // question nobody can answer yet. Then what it shows instead — which also keeps the assertion
+  // above from passing against a card that rendered nothing at all.
+  await expect(emptyState(page)).toHaveCount(0);
+  await expect(spinner(page)).toBeVisible();
+
+  // The control, on the same card and the same board: once the read answers, the sentence is
+  // exactly what it should say. Without it, a card that never rendered at all reads identically.
+  release();
+  await expect(emptyState(page)).toBeVisible();
+  await expect(spinner(page)).toHaveCount(0);
+});
+
+test("a read that fails says so and offers a retry, rather than reporting no history", async ({
+  page,
+}) => {
+  await signIn(page);
+
+  // History for the failure to be wrong about. Without it a board that genuinely has nothing and
+  // a board whose log could not be read look the same, which is the bug rather than the control.
+  await addCategory(page, "spike");
+  await expect(async () => {
+    expect(await openAuditLog(page)).toHaveLength(1);
+  }).toPass({ timeout: 20_000 });
+
+  let breakIt = true;
+  await page.route(AUDIT_READ, async (route) => {
+    if (!breakIt) return route.continue();
+    breakIt = false;
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "the audit log could not be read" }),
+    });
+  });
+
+  await page.goto(`${SETTINGS}?section=audit`);
+
+  // The render anchor comes first: toBeVisible retries until the card exists, so the count-0
+  // check after it is evaluated against a card that has actually rendered. Reversed, the empty
+  // check runs immediately after goto — before anything is on screen — and passes vacuously,
+  // which is exactly the bug this test exists to catch (found by independent review).
+  await expect(failurePanel(page)).toBeVisible();
+  await expect(emptyState(page)).toHaveCount(0);
+  await expect(rows(page)).toHaveCount(0);
+
+  // The control: Retry reads again, and the row that was there the whole time arrives. This is
+  // also what separates a failure branch that works from one that latches for ever.
+  await page.getByRole("button", { name: "Retry" }).click();
+  await expect(rows(page)).toHaveCount(1);
+  await expect(cells(rows(page).first()).nth(3)).toHaveText("Category added: spike");
+  await expect(failurePanel(page)).toHaveCount(0);
 });
