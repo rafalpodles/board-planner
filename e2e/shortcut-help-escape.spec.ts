@@ -377,3 +377,39 @@ test("v does not toggle the view behind the help", async ({ page }) => {
   await page.keyboard.press("?");
   await expect(help(page)).toBeHidden();
 });
+
+/**
+ * BP-542. `Modal`'s scroll container carried no `tabindex`, so `tabbablesWithin` never returned
+ * it and `cycleTabWithin` bounced every Tab straight back to the close button — a sibling of the
+ * scroller, not a descendant. Content below the fold had no key that reached it at all: measured
+ * on this exact dialog at 1280×700, PageDown/ArrowDown/End all left `scrollTop` at 0.
+ *
+ * The viewport is shrunk to where the ticket measured the overflow. At the suite's default
+ * 1280×720 the help nearly fits, so whether it overflows (and so whether the bug is even
+ * reachable) would ride on font-metric differences this spec does not control.
+ */
+test.describe("the help's content overflows the dialog", () => {
+  test.use({ viewport: { width: 1280, height: 700 } });
+
+  const focused = (page: Page) => page.locator(":focus");
+
+  test("Tab reaches the scroll container, and PageDown scrolls it", async ({ page }) => {
+    await openBoard(page);
+
+    await page.keyboard.press("?");
+    await expect(help(page)).toBeVisible();
+
+    // Control: the close button is the first tab stop, same as ever — unaffected by the fix,
+    // so this failing would mean the trap broke in some other way, not the one this test is about
+    await page.keyboard.press("Tab");
+    await expect(focused(page)).toHaveAccessibleName("Close dialog");
+
+    // The scroll container is the second tab stop only once it is a tab stop at all
+    await page.keyboard.press("Tab");
+    const scroller = focused(page);
+    await expect(scroller).toHaveJSProperty("scrollTop", 0);
+
+    await page.keyboard.press("PageDown");
+    await expect.poll(() => scroller.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  });
+});

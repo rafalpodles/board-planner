@@ -93,10 +93,11 @@ export function Modal({
             padding here would show as a strip above that header, and scrolling here would
             move it. Every other dialog keeps the room its focus rings need. */}
         <div
+          tabIndex={bare ? undefined : 0}
           className={
             bare
               ? "flex min-h-0 flex-1 flex-col overflow-hidden"
-              : "min-h-0 overflow-y-auto scroll-ring-room"
+              : "min-h-0 overflow-y-auto scroll-ring-room focus-ring"
           }
         >
           {children}
