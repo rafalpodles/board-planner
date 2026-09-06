@@ -119,6 +119,7 @@ export function ProjectBoardView({
     function handleKeyDown(e: KeyboardEvent) {
       const tag = (e.target as HTMLElement).tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (openLayerCount() > 0 && e.key !== "?") return;
 
       const noMod = !e.metaKey && !e.ctrlKey && !e.altKey;
 
