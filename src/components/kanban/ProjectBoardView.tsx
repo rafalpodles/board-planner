@@ -63,6 +63,7 @@ export function ProjectBoardView({
     bulkDeleting,
     confirmContextDelete,
     setConfirmContextDelete,
+    deleting,
     heldMove,
     heldDelete,
     setHeldDelete,
@@ -393,6 +394,7 @@ export function ProjectBoardView({
         title="Delete Task"
         message="Are you sure you want to delete this task? This action cannot be undone."
         confirmLabel="Delete"
+        loading={deleting}
       />
 
       {/* The delete was refused for the same reason, and asks separately because the cost is not

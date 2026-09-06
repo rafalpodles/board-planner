@@ -34,7 +34,7 @@ import {
   storedExecution,
 } from "./seed";
 import { signIn } from "./session";
-import { expectToast, recordToasts } from "./toasts";
+import { expectToast, recordedToasts, recordToasts } from "./toasts";
 
 /**
  * BP-466 — the half of the board that cannot be undone: delete, bulk delete, duplicate, and the
@@ -263,6 +263,44 @@ test.describe("delete", () => {
       await expect(page.locator(CARDS)).toHaveCount(SEEDED_TASKS - 1, { timeout: 1_000 });
       expect((await readTask(request, FINISHED_TASK_NUMBER)).status).toBe(404);
     });
+  });
+
+  /**
+   * BP-527. The dialog rendered without a `loading` prop, so the confirm button stayed clickable
+   * for the whole round trip: a double click fired two DELETEs, the first succeeding and the
+   * second landing on an already-gone task — answering 404 and toasting a failure right after the
+   * success toast, reporting a failed delete for a task that no longer existed.
+   */
+  test("a double click sends one DELETE, not two, and no false failure toast", async ({
+    page,
+    request,
+  }) => {
+    await openBoard(page);
+
+    let deleteRequests = 0;
+    await page.route(`**/api/projects/*/tasks/${FINISHED_TASK_ID}`, async (route) => {
+      if (route.request().method() !== "DELETE") return route.continue();
+      deleteRequests += 1;
+      // Held open long enough that the dialog is still disabled when the double click's second
+      // half lands — without this margin a fast local response could close the window on its own
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      await route.continue();
+    });
+
+    const menu = await openMenuOn(page, FINISHED_TASK_NUMBER);
+    await menu.getByRole("button", { name: "Delete", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Delete Task" });
+
+    const deleted = taskWrite(page, "DELETE", FINISHED_TASK_ID);
+    await dialog.getByRole("button", { name: "Delete", exact: true }).dblclick();
+    // The guard showing itself while the request is in flight — the same wiring as bulk delete
+    await expect(dialog.getByRole("button", { name: "Deleting..." })).toBeDisabled();
+    expect((await deleted).status()).toBe(200);
+
+    expect(deleteRequests).toBe(1);
+    await expect.poll(() => recordedToasts(page)).toEqual(["Task deleted"]);
+    await expect(card(page, FINISHED_TASK_NUMBER)).toHaveCount(0, { timeout: 1_000 });
+    expect((await readTask(request, FINISHED_TASK_NUMBER)).status).toBe(404);
   });
 
   test("from the task screen: the rail's button, naming the task", async ({ page, request }) => {
