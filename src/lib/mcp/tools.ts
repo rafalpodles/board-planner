@@ -266,9 +266,21 @@ export function registerPlannerTools(server: McpServer): void {
       // unreachable from a conversation.
       if (agent !== undefined) {
         if (agent) {
-          const agents = (await client.listAgents()) as { _id: string; name: string }[];
-          const match = agents.find((a) => a.name.toLowerCase() === agent.toLowerCase());
-          if (!match) throw new Error(`Agent "${agent}" not found`);
+          const agents = (await client.listAgents()) as
+            { _id: string; name: string; scope: string; projectId: string | null }[];
+          // Scoped to this task's own project, the same predicate the browser's picker filters by
+          // (PropertyRail.tsx) — otherwise a name belonging to another board either steals that
+          // board's agent silently (two boards sharing a name) or reaches the write only to be
+          // refused by `agentUsableOnProject`, a 400 naming a rule the caller cannot see.
+          const named = agents.filter((a) => a.name.toLowerCase() === agent.toLowerCase());
+          const match = named.find((a) => a.scope !== "project" || a.projectId === projectId);
+          if (!match) {
+            throw new Error(
+              named.length > 0
+                ? `Agent "${agent}" exists on another project — only this project's own agents can be assigned here.`
+                : `Agent "${agent}" not found`
+            );
+          }
           data.agent = match._id;
         } else {
           data.agent = null;
