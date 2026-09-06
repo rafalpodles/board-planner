@@ -1,5 +1,6 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
 import { MONGO_PROXY_CONTROL_URL } from "../playwright.config";
+import { ADMIN_AUTH } from "./api";
 import { seed } from "./seed";
 import { signIn } from "./session";
 
@@ -25,9 +26,18 @@ const restore = (request: APIRequestContext) => request.post(`${MONGO_PROXY_CONT
 
 test.beforeEach(seed);
 
-// Unconditional, so a failed assertion cannot leave the database cut for the rest of the run
+/**
+ * Unconditional, so a failed assertion cannot leave the database cut for the rest of the run — and
+ * it waits for the app, not only for the proxy. The specs that follow this one open with a single
+ * un-retried `GET /api/auth/me` inside `signInContext`, and the driver takes seconds to notice the
+ * database is back: without this wait, `own-display-name.spec.ts` — the next file in this group —
+ * failed with a 503 out of a helper that reports it as "did this spec seed()?".
+ */
 test.afterEach(async ({ request }) => {
   await restore(request);
+  await expect(async () => {
+    expect((await request.get("/api/projects", { headers: ADMIN_AUTH })).status()).toBe(200);
+  }).toPass({ timeout: 60_000 });
 });
 
 test("a session that cannot be resolved is an outage, not a sign-out", async ({ page, request }) => {
@@ -91,12 +101,16 @@ test("a reader who is already signed in keeps their screen, and is told it may b
   // The shell is still drawn under the banner rather than replaced by it
   await expect(page.getByRole("link", { name: "My Tasks" })).toBeVisible();
 
-  // And it goes away by itself: any answer below 500 is proof the instance is answering again
+  // And it goes away once the instance answers again. The heading is asserted first and is not
+  // decoration: while the instance is still down a reload renders the *panel*, which replaces the
+  // children and the banner with them — so "no banner" on its own is equally what a broken
+  // instance looks like, and this arm passed without the instance ever coming back.
   await restore(request);
   await expect(async () => {
     await page.reload();
+    await expect(page.getByRole("heading", { name: "My Tasks" })).toBeVisible({ timeout: 5_000 });
     await expect(page.getByText(BANNER)).toHaveCount(0);
-  }).toPass({ timeout: 45_000 });
+  }).toPass({ timeout: 60_000 });
 });
 
 /**
