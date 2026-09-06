@@ -112,8 +112,8 @@ const control = createControl(guard(NAME, async (req, res) => {
 
 // The health check answers only once both are listening: a dev server started against a control
 // port that was up before the proxy port would fail its first query and read as an outage
-// Named apart: one line saying which of the two ports it was beats reading the port out of git's
-// own EADDRINUSE text.
+// Named apart: one line saying which of the two ports it was beats reading the port out of
+// Node's own EADDRINUSE text.
 fatalOnListenFailure(`${NAME} (pipe)`, proxy);
 fatalOnListenFailure(`${NAME} (control)`, control);
 

@@ -1,6 +1,16 @@
-import { execFile } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { execFile, execFileSync, spawn } from "node:child_process";
+import {
+  closeSync,
+  constants,
+  createReadStream,
+  mkdtempSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer, Server } from "node:http";
 import { AddressInfo, connect, createServer as createTcpServer } from "node:net";
@@ -27,7 +37,7 @@ const { errors, stderr } = vi.hoisted(() => ({
   errors: [] as string[],
   // How the mocked fd 2 behaves for the test in hand: `accept` bytes per call, and `throwsOnce` to
   // reproduce the EAGAIN a full non-blocking pipe really raises.
-  stderr: { accept: Infinity, throwsOnce: false },
+  stderr: { accept: Infinity, throwsOnce: false, throwsAfter: Infinity, calls: 0 },
 }));
 
 vi.mock("node:fs", async (importOriginal) => {
@@ -38,7 +48,8 @@ vi.mock("node:fs", async (importOriginal) => {
       if (fd !== 2) {
         return (actual.writeSync as (...args: unknown[]) => number)(fd, data, offset, length);
       }
-      if (stderr.throwsOnce) {
+      stderr.calls += 1;
+      if (stderr.throwsOnce || stderr.calls > stderr.throwsAfter) {
         stderr.throwsOnce = false;
         throw Object.assign(new Error("resource temporarily unavailable, write"), { code: "EAGAIN" });
       }
@@ -61,6 +72,8 @@ beforeEach(() => {
   errors.length = 0;
   stderr.accept = Infinity;
   stderr.throwsOnce = false;
+  stderr.throwsAfter = Infinity;
+  stderr.calls = 0;
 });
 
 afterEach(async () => {
@@ -185,6 +198,12 @@ describe("reporting", () => {
     // what the uncaughtException handler calls, and a throw in there ends the process (BP-575
     // round-two review).
     stderr.throwsOnce = true;
+    const queued: string[] = [];
+    vi.spyOn(process.stderr, "write").mockImplementation(((chunk: unknown) => {
+      queued.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write);
+
     const url = await listen(() => {
       throw new Error("the directive was not JSON");
     });
@@ -192,6 +211,30 @@ describe("reporting", () => {
     const crashed = await fetch(`${url}/v1/chat/completions`, { method: "POST" });
     // Still answered, and this process is still running to assert it.
     expect(crashed.status).toBe(500);
+    // And the report was not dropped on the way: what fd 2 refused went to the stream instead.
+    expect(queued.join("")).toContain("the directive was not JSON");
+  });
+
+  it("writes what the synchronous call took, then queues only the rest", async () => {
+    // The real sequence, which the two cases above only ever meet apart: a short write at the pipe
+    // buffer, and EAGAIN on the very next call within the same report.
+    stderr.accept = 12;
+    stderr.throwsAfter = 1;
+    const queued: string[] = [];
+    vi.spyOn(process.stderr, "write").mockImplementation(((chunk: unknown) => {
+      queued.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write);
+
+    const url = await listen(() => {
+      throw new Error("a stack that outlasts the buffer");
+    });
+    await fetch(`${url}/v1/chat/completions`, { method: "POST" });
+
+    expect(errors.join("")).toBe(`\n${CRASH_MARKER} [`.slice(0, 12));
+    expect(queued.join("")).toContain("a stack that outlasts the buffer");
+    // Nothing written twice: the queue picks up exactly where the synchronous write stopped.
+    expect(errors.join("") + queued.join("")).toContain(`${CRASH_MARKER} [test stub]`);
   });
 });
 
@@ -288,6 +331,94 @@ describe("the process-level guard", () => {
     expect(ended.stderr).toContain("nobody awaited this");
   }, 20_000);
 
+  it("does not spin when stderr itself is gone", async () => {
+    // The livelock the fallback invited: fd 2 unwritable, so writeSync throws, the queued write
+    // emits `error` on a stream nobody listens to, Node raises that as an uncaught exception, and
+    // the handler reports again — 127,832 rounds in five seconds, measured, with the stub alive
+    // and serving nothing (BP-575 round-three review).
+    const rounds = await new Promise<number>((resolve, reject) => {
+      const spawned = spawn(
+        process.execPath,
+        [
+          "--input-type=module",
+          "--eval",
+          `import { keepAlive } from "./e2e/stub-guard.mjs";
+           keepAlive("livelock test");
+           let seen = 0;
+           process.on("uncaughtException", () => { seen += 1; });
+           setTimeout(() => { throw new Error("the report has nowhere to go"); }, 20);
+           setTimeout(() => { console.log("ROUNDS " + seen); process.exit(0); }, 600);`,
+        ],
+        { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"] }
+      );
+      // The reader goes away, which is what makes fd 2 refuse the write.
+      spawned.stderr.destroy();
+      let out = "";
+      spawned.stdout.on("data", (chunk) => (out += chunk));
+      spawned.on("error", reject);
+      spawned.on("close", () => resolve(Number(/ROUNDS (\d+)/.exec(out)?.[1] ?? -1)));
+    });
+
+    expect(rounds).toBeGreaterThanOrEqual(0);
+    // One report, not a storm. The number is a ceiling with room, not a measurement.
+    expect(rounds).toBeLessThan(20);
+  }, 20_000);
+
+  it("reports before it exits, when a stub refuses to start at all", async () => {
+    const ended = await child(`
+      import { fatal } from "./e2e/stub-guard.mjs";
+      fatal("startup test", "E2E_MONGODB_URI must name a database");
+    `);
+
+    expect(ended.code).toBe(1);
+    expect(ended.stderr).toContain(CRASH_MARKER);
+    expect(ended.stderr).toContain("E2E_MONGODB_URI must name a database");
+  }, 20_000);
+
+  it("does not exit out from under a refusal stderr could not take at once", async () => {
+    // `process.exit` throws away whatever the write had to queue. Reproduced rather than argued,
+    // and through a FIFO rather than a spawn pipe: Node drains a child's stdio pipe on its own, so
+    // one can never fill. Here nobody reads until the child has already met a full buffer.
+    const fifo = join(mkdtempSync(join(tmpdir(), "bp575-")), "stderr");
+    execFileSync("mkfifo", [fifo]);
+    const reader = openSync(fifo, constants.O_RDONLY | constants.O_NONBLOCK);
+    const writer = openSync(fifo, constants.O_WRONLY);
+
+    try {
+      const spawned = spawn(
+        process.execPath,
+        [
+          "--input-type=module",
+          "--eval",
+          `import { writeSync } from "node:fs";
+           import { fatal } from "./e2e/stub-guard.mjs";
+           const filler = Buffer.alloc(16 * 1024, 0x2e);
+           for (let i = 0; i < 64; i += 1) { try { writeSync(2, filler); } catch { break; } }
+           fatal("startup test", "THE REFUSAL ITSELF");`,
+        ],
+        { cwd: process.cwd(), stdio: ["ignore", "ignore", writer] }
+      );
+
+      // Late, so the buffer is full while `fatal` runs — but before its unreferenced backstop.
+      const drained = new Promise<string>((resolve) => {
+        setTimeout(() => {
+          const stream = createReadStream("", { fd: reader, autoClose: false });
+          let out = "";
+          stream.on("data", (chunk) => (out += chunk));
+          setTimeout(() => resolve(out), 1_500);
+        }, 300);
+      });
+
+      const code = await new Promise<number | null>((resolve) => spawned.on("close", resolve));
+      expect(code).toBe(1);
+      expect(await drained).toContain("THE REFUSAL ITSELF");
+    } finally {
+      closeSync(writer);
+      closeSync(reader);
+      rmSync(dirname(fifo), { recursive: true, force: true });
+    }
+  }, 20_000);
+
   it("still dies when it cannot bind, rather than holding a port it never serves", async () => {
     // The regression the guard invited: `uncaughtException` turns an EADDRINUSE that used to end
     // the process into a clean exit or a hang, and Playwright then waits out its own timeout
@@ -312,33 +443,40 @@ describe("the process-level guard", () => {
   }, 20_000);
 });
 
+/** Source with its comments taken out, so prose cannot satisfy or trip a scan of it. */
+function withoutComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/.*$/gm, "");
+}
+
+/** …and without string literals either, for the questions a sentence must not be able to answer. */
+function withoutStrings(source: string): string {
+  return source.replace(/(["'`])(?:\\.|(?!\1)[^\\\n])*\1/g, '""');
+}
+
 describe("every stub process", () => {
   it("reaches the guard, so a new one cannot quietly reintroduce the bug", () => {
     // The ticket asks for the guard on every stub, not only the model one, and four of the five
     // were the same shape with the same gap. Nothing but this stops the sixth being written the
     // old way against a green suite.
     //
-    // Importing the module is not the test — the likely new stub imports `readBody` and then calls
-    // a bare `createServer` anyway. What is required is that the file CALLS `serve` or `guard`.
-    // Comments are stripped first: a scanner that reads prose as code has cost this repo a day
-    // before, and this file's own comments name every symbol it looks for.
-    //
-    // An `e2e/*.mjs` that used node:http only as a *client* would be flagged and would have to be
-    // exempted here on purpose. None exists; the TCP half of mongo-proxy is out of reach of an
-    // HTTP guard and is covered only because that file also serves control over HTTP.
+    // Importing the module is not enough to pass: the likely new stub imports readBody and then
+    // calls a bare createServer. Nor is calling something named serve, which a file can declare
+    // itself, or merely mention. Both are required, of code with its comments and — for the call —
+    // its strings removed: a trailing `// move this to serve()` used to satisfy this check.
     const here = dirname(fileURLToPath(import.meta.url));
     const files = readdirSync(here, { recursive: true, encoding: "utf8" })
+      // .artifacts is a run's own output, gitignored, and nothing in it is a stub.
+      .filter((file) => !file.split(sep).some((part) => part.startsWith(".")))
       .filter((file) => file.endsWith(".mjs") && !file.endsWith("stub-guard.mjs"));
 
-    // A sanity floor: an empty candidate set would make every assertion below vacuous.
-    expect(files.length).toBeGreaterThanOrEqual(5);
+    // Not a count, which retiring one stub would break: the file the ticket is named after has to
+    // be in the candidate set, or the assertion below is about nothing.
+    expect(files).toContain("openrouter-stub.mjs");
 
     const unguarded = files.filter((file) => {
-      const code = readFileSync(join(here, file), "utf8")
-        .replace(/\/\*[\s\S]*?\*\//g, "")
-        .replace(/^\s*\/\/.*$/gm, "");
-      const servesHttp = /from\s+["'](?:node:)?https?["']/.test(code);
-      const guarded = /\b(?:serve|guard)\s*\(/.test(code);
+      const source = withoutComments(readFileSync(join(here, file), "utf8"));
+      const servesHttp = /["'](?:node:)?http2?s?["']/.test(source);
+      const guarded = /stub-guard/.test(source) && /\b(?:serve|guard)\s*\(/.test(withoutStrings(source));
       return servesHttp && !guarded;
     });
 

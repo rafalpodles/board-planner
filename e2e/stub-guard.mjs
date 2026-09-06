@@ -29,22 +29,45 @@ export const CRASH_MARKER = "STUB CRASH";
  *   then makes `writeSync` **throw** EAGAIN. Thrown from here that is fatal in the worst possible
  *   place: this function is what the `uncaughtException` handler calls, and a throw inside that
  *   handler ends the process — the exact death this module exists to prevent. So nothing escapes;
- *   the fallback is the stream's own queue, which costs the synchrony and keeps the report.
+ *   what could not be written synchronously is handed to the stream's own queue, which costs the
+ *   synchrony and delivers it only if the process lives long enough to drain — see `fatal`.
+ *
+ * The re-entrancy guard is not belt and braces. With fd 2 unwritable, the fallback's `write` emits
+ * `error` on a stream nobody listens to, Node raises that as an uncaught exception, and the
+ * handler calls back into here: measured at 127,832 rounds in five seconds, RSS climbing, the stub
+ * alive and serving nothing. A stub spinning at 100% is worse for a run than one that died fast.
  */
+let emitting = false;
+
 function emit(text) {
-  const buffer = Buffer.from(text, "utf8");
-  let written = 0;
-  while (written < buffer.length) {
-    try {
-      written += writeSync(2, buffer, written, buffer.length - written);
-    } catch {
+  if (emitting) return;
+  emitting = true;
+  try {
+    const buffer = Buffer.from(text, "utf8");
+    let written = 0;
+    while (written < buffer.length) {
+      let sent = 0;
       try {
-        process.stderr.write(buffer.subarray(written));
+        sent = writeSync(2, buffer, written, buffer.length - written);
       } catch {
-        // Nothing left to try. A report nobody reads is bad; a crash caused by reporting is worse.
+        // Never let the queued write's own `error` event become an uncaught exception.
+        if (process.stderr.listenerCount("error") === 0) process.stderr.on("error", () => {});
+        try {
+          process.stderr.write(buffer.subarray(written));
+        } catch {
+          // Nothing left to try. A report nobody reads is bad; a crash caused by reporting is worse.
+        }
+        return;
       }
-      return;
+      // A zero-length write is not progress, and looping on it wedges the event loop — which is
+      // this function failing in the one way its whole point is to avoid.
+      if (sent <= 0) return;
+      written += sent;
     }
+  } catch {
+    // Buffer.from itself, on a stack too long to hold. Nothing this function does may throw.
+  } finally {
+    emitting = false;
   }
 }
 
@@ -54,10 +77,19 @@ function report(name, error, req) {
   emit(`\n${CRASH_MARKER} [${name}] ${where}\n${detail}\n`);
 }
 
-/** A refusal the stub cannot serve past — reported the same way, then fatal. */
+/**
+ * A refusal the stub cannot serve past — reported the same way, then fatal.
+ *
+ * `process.exit` discards whatever `emit` had to queue, so the exit waits for the stream instead
+ * of racing it: measured, a `fatal` behind a full pipe lost its entire message that way. The timer
+ * is unreferenced, so a pipe nobody drains ends the process on the exit code rather than hanging.
+ */
 export function fatal(name, message) {
   emit(`\n${CRASH_MARKER} [${name}] outside any request\n${message}\n`);
-  process.exit(1);
+  process.exitCode = 1;
+  if (process.stderr.writableLength === 0) process.exit(1);
+  process.stderr.write("", () => process.exit(1));
+  setTimeout(() => process.exit(1), 1_000).unref();
 }
 
 /**
@@ -114,9 +146,10 @@ let guarding = false;
  * ticket started from.
  *
  * One listener, not two. Node raises an unhandled rejection as an uncaught exception under its
- * default mode, so an `unhandledRejection` listener beside this one changes nothing that any test
- * can tell apart — it was written, found unpinnable by mutation, and removed rather than left as a
- * line nobody can redden (BP-575 round-two review).
+ * default mode, so an `unhandledRejection` listener beside this one changes nothing under any
+ * setting this suite runs with — it was written, found unpinnable by mutation, and removed rather
+ * than left as a line nobody can redden. Only `--unhandled-rejections=warn` tells them apart, and
+ * nothing here sets it (BP-575 round-two review).
  */
 export function keepAlive(name) {
   if (guarding) return;
