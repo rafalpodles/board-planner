@@ -108,6 +108,8 @@ export function useSearch(
   const [query, setQuery] = useState(initialQuery);
   const [tasks, setTasks] = useState<ApiTask[]>([]);
   const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState(0);
 
   const trimmed = query.trim();
@@ -117,16 +119,23 @@ export function useSearch(
     if (!active) {
       setTasks([]);
       setLoading(false);
+      setFailed(false);
       return;
     }
     let cancelled = false;
     setLoading(true);
+    setFailed(false);
     const timer = setTimeout(async () => {
       try {
         const data = await api.get(`/api/search?q=${encodeURIComponent(trimmed)}`);
         if (!cancelled) setTasks(data);
       } catch {
-        if (!cancelled) setTasks([]);
+        // "No tasks found" is a claim about the whole instance's tasks; a search that never
+        // answered supports none (BP-577)
+        if (!cancelled) {
+          setTasks([]);
+          setFailed(true);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -135,7 +144,7 @@ export function useSearch(
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [trimmed, active, api]);
+  }, [trimmed, active, api, attempt]);
 
   const hits = useMemo(
     () =>
@@ -148,9 +157,12 @@ export function useSearch(
   // A shrinking result set would otherwise leave the cursor past the end
   useEffect(() => setSelectedIndex(0), [trimmed]);
 
+  const retry = useCallback(() => setAttempt((n) => n + 1), []);
+
   const reset = useCallback(() => {
     setQuery("");
     setTasks([]);
+    setFailed(false);
     setSelectedIndex(0);
   }, []);
 
@@ -168,6 +180,8 @@ export function useSearch(
     trimmed,
     active,
     loading,
+    failed,
+    retry,
     hits,
     selectedIndex,
     setSelectedIndex,

@@ -5,6 +5,7 @@ import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { ApiComment, ApiReaction } from "@/types";
 import { Button } from "@/components/ui/Button";
+import { LoadFailed } from "@/components/ui/LoadFailed";
 import { Textarea } from "@/components/ui/Textarea";
 import { useToast } from "@/components/ui/Toast";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -38,6 +39,7 @@ export function Comments({
   scope,
 }: CommentsProps) {
   const [comments, setComments] = useState<ApiComment[]>([]);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [body, setBody] = useState("");
   const [loading, setLoading] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -58,8 +60,12 @@ export function Comments({
         `/api/projects/${projectId}/tasks/${taskId}/comments`
       );
       setComments(data);
+      setLoadFailed(false);
       onCountChange?.(data.length);
     } catch {
+      // "No comments yet" is a claim about the discussion on this task, and a read that never
+      // answered supports none. The toast clears after three seconds; the sentence would not.
+      setLoadFailed(true);
       toast("Failed to load comments", "error");
     }
   }
@@ -318,8 +324,17 @@ export function Comments({
             </div>
           </div>
         ))}
-        {comments.length === 0 && (
-          <p className="text-sm text-text-muted">No comments yet</p>
+        {loadFailed ? (
+          <LoadFailed
+            testId="comments-error"
+            className="py-4"
+            message="Failed to load the comments."
+            onRetry={loadComments}
+          />
+        ) : (
+          comments.length === 0 && (
+            <p className="text-sm text-text-muted">No comments yet</p>
+          )
         )}
       </div>
 

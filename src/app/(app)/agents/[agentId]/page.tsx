@@ -23,6 +23,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useProjects } from "@/hooks/use-projects";
 import { PageHeader } from "@/components/shell/PageHeader";
 import { Button } from "@/components/ui/Button";
+import { LoadFailed } from "@/components/ui/LoadFailed";
 import { agentProblems } from "@/lib/agent-rules";
 import { BUCKETS } from "../catalog";
 import { useStore } from "../store";
@@ -153,6 +154,22 @@ export default function AgentDetailPage() {
   );
 
   if (store.loading) return <PageHeader title="Agent" subtitle="Loading" />;
+
+  // "No agent with that id" reads as deleted, and this screen is reached from bookmarks. A read
+  // that failed knows nothing about whether the agent exists.
+  if (store.failed) {
+    return (
+      <>
+        <PageHeader title="Agent" subtitle="Could not load" />
+        <LoadFailed
+          testId="agent-editor-error"
+          className="py-12"
+          message="Failed to load this agent. It has not been deleted — the catalog could not be read."
+          onRetry={store.retry}
+        />
+      </>
+    );
+  }
 
   if (!agent) {
     return (

@@ -93,7 +93,7 @@ export function SearchLayer({ open, onOpen, onClose }: SearchLayerProps) {
 
   if (!open) return null;
 
-  const { hits, loading, active, trimmed, selectedIndex } = search;
+  const { hits, loading, failed, active, trimmed, selectedIndex } = search;
 
   function close(hit?: SearchHit) {
     if (hit) search.open(hit);
@@ -176,6 +176,19 @@ export function SearchLayer({ open, onOpen, onClose }: SearchLayerProps) {
             <p className="px-2 py-3 text-[13px] text-text-muted">
               Type at least {MIN_QUERY} characters to search
             </p>
+          ) : !loading && failed ? (
+            <div className="flex items-center justify-between gap-3 px-2 py-3">
+              <p role="alert" className="text-[13px] text-text-muted">
+                The search failed.
+              </p>
+              <button
+                type="button"
+                onClick={search.retry}
+                className="focus-ring rounded text-[13px] text-primary underline"
+              >
+                Retry
+              </button>
+            </div>
           ) : !hits.length ? (
             <p className="px-2 py-3 text-[13px] text-text-muted">
               {loading ? "Searching…" : "No matches"}

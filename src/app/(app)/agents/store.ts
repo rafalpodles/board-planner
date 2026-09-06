@@ -26,12 +26,18 @@ export function useStore() {
   const [agents, setAgents] = useState<ApiAgent[]>([]);
   const [blocks, setBlocks] = useState<ApiAgentBlock[]>([]);
   const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
 
   const load = useCallback(async () => {
+    setFailed(false);
     try {
       const [a, b] = await Promise.all([api.get("/api/agents"), api.get("/api/agent-blocks")]);
       setAgents(Array.isArray(a) ? (a as ApiAgent[]) : []);
       setBlocks(Array.isArray(b) ? (b as ApiAgentBlock[]) : []);
+    } catch {
+      // Without this the rejection went unhandled and the catalog rendered as empty — on the
+      // agent screen that reads as deleted rather than as unread (BP-577)
+      setFailed(true);
     } finally {
       setLoading(false);
     }
@@ -43,6 +49,7 @@ export function useStore() {
 
   return {
     loading,
+    failed,
     allAgents: agents,
     allSteps: blocks.filter((b) => b.kind === "step"),
     allGates: blocks.filter((b) => b.kind === "gate"),
@@ -83,5 +90,12 @@ export function useStore() {
     },
 
     reload: load,
+
+    // A mutation's reload keeps the catalog on screen; only a retry after a failure has nothing
+    // to show in the meantime
+    retry: () => {
+      setLoading(true);
+      return load();
+    },
   };
 }

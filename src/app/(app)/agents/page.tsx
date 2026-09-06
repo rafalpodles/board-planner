@@ -3,6 +3,7 @@
 import { useRef, useState, type KeyboardEvent } from "react";
 import { PageHeader } from "@/components/shell/PageHeader";
 import { Button } from "@/components/ui/Button";
+import { LoadFailed } from "@/components/ui/LoadFailed";
 import { useProjects } from "@/hooks/use-projects";
 import { useAuth } from "@/hooks/use-auth";
 import { useStore } from "./store";
@@ -56,6 +57,33 @@ export default function AgentsPage() {
     e.preventDefault();
     setTab(next);
     tabRefs.current[next]?.focus();
+  }
+
+  if (store.loading) {
+    return (
+      <>
+        <PageHeader title="Agents" subtitle="Ways of getting a task done" />
+        <div className="flex justify-center py-12" role="status" aria-label="Loading the catalog">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        </div>
+      </>
+    );
+  }
+
+  // Not the empty state: "you have not created an agent yet" is a claim about what this person
+  // has, and a read that never answered supports no claim about it
+  if (store.failed) {
+    return (
+      <>
+        <PageHeader title="Agents" subtitle="Ways of getting a task done" />
+        <LoadFailed
+          testId="agents-catalog-error"
+          className="py-12"
+          message="Failed to load the catalog. Nothing here has been deleted."
+          onRetry={store.retry}
+        />
+      </>
+    );
   }
 
   return (
