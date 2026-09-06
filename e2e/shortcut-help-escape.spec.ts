@@ -198,10 +198,10 @@ test("? still closes the help after a reload has reordered the listeners", async
  * scrollable, and — registering no focus-trap layer — it let the board's Escape branch run beside
  * its own and clear a card selection nobody had touched.
  *
- * Each of the four asserts one of those on its own: none waits on `role="dialog"` except the one
- * that is about the role, so a run says which of the four gaps is open rather than four times
- * that the first is. Their control is the `?` toggle test above — routing the help through
- * `Modal` must not cost the board the key it owns.
+ * Each of the four asserts one of those on its own. Only the first *gates* on `role="dialog"`;
+ * the other three wait for the heading, which is on screen either way, so a run says which of the
+ * four gaps is open rather than four times that the first one is. Their control is the `?` toggle
+ * test above — routing the help through `Modal` must not cost the board the key it owns.
  */
 
 const helpDialog = (page: Page) => page.getByRole("dialog", { name: "Keyboard Shortcuts" });
@@ -215,14 +215,6 @@ const activeElementIsInsideTheHelp = (page: Page) =>
 
 const collapseSidebar = (page: Page) =>
   page.getByRole("button", { name: /(Collapse|Expand) sidebar/ });
-
-const focusedElement = (page: Page) =>
-  page.evaluate(() => {
-    const active = document.activeElement as HTMLElement | null;
-    if (!active) return "none";
-    const label = active.getAttribute("aria-label");
-    return label ? `${active.tagName}[${label}]` : active.tagName;
-  });
 
 test("the help announces as a dialog named after its heading", async ({ page }) => {
   await openBoard(page);
@@ -239,14 +231,15 @@ test("focus moves into the help and Tab never reaches the sidebar behind it", as
   await page.keyboard.press("?");
   await expect(help(page)).toBeVisible();
   // Measured at open: BODY. Focus was never moved into the overlay at all
-  await expect.poll(() => focusedElement(page)).not.toBe("BODY");
+  await expect.poll(() => activeElementIsInsideTheHelp(page)).toBe(true);
 
-  // Measured: four presses walked out of the backdrop and into the sidebar's Collapse button
+  // Measured: four presses walked out of the backdrop and into the sidebar's Collapse button.
+  // Asserted as where focus *is* rather than as one place it is not — a `.not.toBe(thatButton)`
+  // is satisfied by any of the several other elements Tab used to reach on the way there
   for (let i = 0; i < 4; i++) {
     await page.keyboard.press("Tab");
-    await expect.poll(() => focusedElement(page)).not.toBe("BUTTON[Collapse sidebar]");
+    await expect.poll(() => activeElementIsInsideTheHelp(page)).toBe(true);
   }
-  await expect.poll(() => activeElementIsInsideTheHelp(page)).toBe(true);
 
   // The control: that button is on the page and tabbable, so Tab staying put is the trap holding
   // rather than the target being gone
