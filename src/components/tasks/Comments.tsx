@@ -340,15 +340,11 @@ export function Comments({
             </div>
           </div>
         ))}
-        {/* Three states, not one: a read still running is not an empty discussion either */}
-        {reading ? (
-          // One line tall, the same as the sentence it gives way to: a taller placeholder shrinks
-          // the page when the read lands, and a scroll parked at the bottom is clamped back up
-          <div className="flex h-5 items-center justify-center" role="status">
-            <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-            <span className="sr-only">Loading the comments</span>
-          </div>
-        ) : loadFailed ? (
+        {/* Three states, not one. A read still running is not an empty discussion — and it draws
+            nothing rather than a placeholder: this panel sits in a page whose sticky header depends
+            on the body being the only thing that scrolls, and a placeholder that appears and goes
+            resizes it under the reader (it broke e2e/sticky-task-header.spec.ts) */}
+        {reading ? null : loadFailed ? (
           <LoadFailed
             testId="comments-error"
             variant={comments.length ? "row" : "block"}

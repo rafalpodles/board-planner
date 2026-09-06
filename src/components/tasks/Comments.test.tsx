@@ -268,7 +268,7 @@ describe("Comments when the read fails", () => {
     api.get.mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
     render(<Comments projectId="TP" taskId="t1" />);
 
-    expect(screen.getByText("Loading the comments")).toBeTruthy();
+    expect(screen.queryByText("Kasia Nowak")).toBeNull();
     expect(screen.queryByText("No comments yet")).toBeNull();
 
     await act(async () => pending.forEach((resolve) => resolve([])));
@@ -286,7 +286,7 @@ describe("Comments when the read fails", () => {
     view.rerender(<Comments projectId="TP" taskId="t2" />);
 
     expect(screen.queryByText("Kasia Nowak")).toBeNull();
-    expect(screen.getByRole("status")).toBeTruthy();
+    expect(screen.queryByText("No comments yet")).toBeNull();
 
     await act(async () => pending.forEach((resolve) => resolve([])));
     await waitFor(() => expect(screen.getByText("No comments yet")).toBeTruthy());
@@ -348,7 +348,7 @@ describe("Comments when the read fails", () => {
     await act(async () => pending[0]([]));
 
     expect(screen.queryByText("No comments yet")).toBeNull();
-    expect(screen.getByText("Loading the comments")).toBeTruthy();
+    expect(screen.queryByText("Kasia Nowak")).toBeNull();
   });
 
   // The tab badge is fed from here, and 3 is the count of a task nobody is looking at any more
