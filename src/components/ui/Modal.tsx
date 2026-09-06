@@ -130,6 +130,7 @@ export function Modal({
                 no tab stop left, and a keyboard user's focus would drop to the body mid-request. This
                 stays focusable, announces itself as unavailable, and swallows the click. */}
             <button
+              type="button"
               onClick={requestClose}
               aria-disabled={closeDisabled || undefined}
               aria-label="Close dialog"

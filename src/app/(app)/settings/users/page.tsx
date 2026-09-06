@@ -77,6 +77,7 @@ export default function UsersPage() {
 
     try {
       await api.post("/api/users", { username, password, fullName, email: newUserEmail });
+      setSaving(false);
       closeNew();
       const data = await api.get("/api/users");
       setUsers(data);
@@ -140,6 +141,7 @@ export default function UsersPage() {
         ...(editEmail !== (editUser.email ?? "") ? { email: editEmail } : {}),
         ...(passwordWasSet ? { password: newPassword } : {}),
       });
+      setEditSaving(false);
       closeEdit();
       const data = await api.get("/api/users");
       setUsers(data);

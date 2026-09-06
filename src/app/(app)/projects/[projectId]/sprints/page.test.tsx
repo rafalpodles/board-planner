@@ -499,6 +499,35 @@ describe("Sprint lifecycle from the header", () => {
     });
   });
 
+  // BP-565: the dialog owns the refusal but the page owns the flag, so this is the wiring — one
+  // completion is a PUT that moves every unfinished task, and a second one lands on a sprint that
+  // is already closed.
+  it("holds the completion dialog open, and both answers shut, while the PUT is in flight", async () => {
+    let finish: (value: unknown) => void = () => {};
+    api.put.mockImplementation(() => new Promise((resolve) => (finish = resolve)));
+    await renderSprints();
+
+    await click(screen.getByRole("button", { name: "Complete" }));
+    await click(screen.getByRole("button", { name: "Move to Backlog" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Complete Sprint" });
+    expect(dialog.getAttribute("aria-busy")).toBe("true");
+    expect((screen.getByRole("button", { name: "Keep in Sprint" }) as HTMLButtonElement).disabled).toBe(
+      true
+    );
+    act(() => {
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })
+      );
+    });
+    expect(screen.getByRole("dialog", { name: "Complete Sprint" })).toBe(dialog);
+
+    await act(async () => {
+      finish({});
+    });
+    expect(api.put).toHaveBeenCalledTimes(1);
+  });
+
   it("deletes the selected sprint once the confirmation is answered", async () => {
     api.del.mockResolvedValue({});
     await renderSprints();

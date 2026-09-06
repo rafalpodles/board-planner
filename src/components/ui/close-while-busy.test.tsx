@@ -4,6 +4,7 @@ import { render, screen, cleanup, act } from "@testing-library/react";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { NewTaskModal } from "@/components/tasks/NewTaskModal";
 import { EditBlockDialog, NewAgentDialog } from "@/app/(app)/agents/components/dialogs";
+import { EnrolWorkerModal } from "@/components/settings/EnrolWorkerModal";
 import { ApiAgentBlock } from "@/types";
 import { DangerAction } from "@/components/settings/DangerAction";
 import { CompleteSprintDialog } from "@/components/sprints/CompleteSprintDialog";
@@ -243,5 +244,26 @@ describe("a dialog with a request in flight refuses Escape", () => {
     });
     escape();
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("EnrolWorkerModal, while the token is being minted", async () => {
+    let finish: (value: unknown) => void = () => {};
+    api.post.mockImplementation(() => new Promise((resolve) => (finish = resolve)));
+    const onClose = vi.fn();
+
+    render(<EnrolWorkerModal open onClose={onClose} />);
+    await act(async () => {
+      screen.getByRole("button", { name: "Mint token" }).click();
+    });
+
+    escape();
+    expect(onClose).not.toHaveBeenCalled();
+
+    // The token is shown once and cannot be fetched again, so a dialog dismissed mid-mint loses it
+    // for good — the worker it was for has to be enrolled with a second one.
+    await act(async () => {
+      finish({ token: "cpe_abc", expiresAt: new Date(Date.now() + 3_600_000).toISOString() });
+    });
+    expect(screen.getByText("cpe_abc")).toBeTruthy();
   });
 });
