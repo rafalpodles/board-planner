@@ -65,6 +65,7 @@ export default function AgentsPage() {
         <PageHeader title="Agents" subtitle="Ways of getting a task done" />
         <div className="flex justify-center py-12" role="status" aria-label="Loading the catalog">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+          <span className="sr-only">Loading the catalog</span>
         </div>
       </>
     );
@@ -74,7 +75,12 @@ export default function AgentsPage() {
   // has, and a read that never answered supports no claim about it. A reload that fails after a
   // mutation keeps the catalog it already has and says the refresh failed above it — replacing a
   // populated screen would be its own false claim.
-  if (store.failed && !store.allAgents.length) {
+  // Every tab, not just the first: an instance with gates but no agents was still holding blocks
+  // on screen when the guard asked only about agents
+  const holdsNothing =
+    !store.allAgents.length && !store.allSteps.length && !store.allGates.length;
+
+  if (store.failed && holdsNothing) {
     return (
       <>
         <PageHeader title="Agents" subtitle="Ways of getting a task done" />
@@ -109,9 +115,9 @@ export default function AgentsPage() {
       {store.failed && (
         <LoadFailed
           testId="agents-catalog-stale"
-          className="mb-4 py-3"
+          variant="row"
           message="Failed to refresh the catalog, so what follows may be out of date."
-          onRetry={store.retry}
+          onRetry={store.reload}
         />
       )}
 

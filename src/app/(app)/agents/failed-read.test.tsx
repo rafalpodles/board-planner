@@ -115,6 +115,32 @@ describe("the agents catalog when the read fails", () => {
     expect(screen.queryByTestId("agents-catalog-error")).toBeNull();
   });
 
+  // An instance with blocks but no agents still has something on screen, and the guard used to
+  // ask only about agents
+  it("keeps blocks on screen when the reload fails and only agents are empty", async () => {
+    const STEP = { _id: "b1", kind: "step", name: "Implement it", description: "" };
+    api.get.mockImplementation((url: string) =>
+      Promise.resolve(url.includes("/api/agent-blocks") ? [STEP] : [])
+    );
+    api.del.mockResolvedValue({});
+    render(<AgentsPage />);
+    await waitFor(() =>
+      expect(screen.getByText("You have not created an agent yet.")).toBeTruthy()
+    );
+
+    api.get.mockImplementation(() => Promise.reject(new Error("network")));
+    await act(async () => {
+      fireEvent.click(screen.getAllByRole("tab").find((t) => t.textContent === "Steps")!);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("Delete Implement it"));
+    });
+
+    await waitFor(() => expect(screen.getByTestId("agents-catalog-stale")).toBeTruthy());
+    expect(screen.getAllByText("Implement it").length).toBeGreaterThan(0);
+    expect(screen.queryByTestId("agents-catalog-error")).toBeNull();
+  });
+
   // Without this control the failure branch could be rendering unconditionally
   it("still says nothing was created when the read answers with nothing", async () => {
     serve([]);

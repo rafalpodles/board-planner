@@ -235,9 +235,9 @@ export default function AgentDetailPage() {
       {store.failed && (
         <LoadFailed
           testId="agent-editor-stale"
-          className="mb-4 py-3"
+          variant="row"
           message="Failed to refresh the catalog, so what follows may be out of date."
-          onRetry={store.retry}
+          onRetry={store.reload}
         />
       )}
 

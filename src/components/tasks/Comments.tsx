@@ -56,7 +56,6 @@ export function Comments({
   const { toast } = useToast();
 
   async function loadComments() {
-    setReading(true);
     try {
       const data = await api.get(
         `/api/projects/${projectId}/tasks/${taskId}/comments`
@@ -332,13 +331,17 @@ export function Comments({
         {reading ? (
           <div className="flex justify-center py-4" role="status" aria-label="Loading the comments">
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            <span className="sr-only">Loading the comments</span>
           </div>
         ) : loadFailed ? (
           <LoadFailed
             testId="comments-error"
             className="py-4"
             message="Failed to load the comments."
-            onRetry={loadComments}
+            onRetry={() => {
+              setReading(true);
+              return loadComments();
+            }}
           />
         ) : (
           comments.length === 0 && (
