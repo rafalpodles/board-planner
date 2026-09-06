@@ -560,7 +560,8 @@ export async function createTask(
   if (categoryNames.length > 0 && !categoryNames.includes(category)) {
     return {
       ok: false,
-      error: `Invalid category "${category}" — project categories: ${categoryNames.join(", ")}`,
+      // Sliced because this string reaches one as a tool result — see noSuchAccount.
+      error: `Invalid category "${String(category).slice(0, 64)}" — project categories: ${categoryNames.join(", ")}`,
       status: 400,
     };
   }
@@ -570,7 +571,7 @@ export async function createTask(
   if (!columnIds.includes(status)) {
     return {
       ok: false,
-      error: `Invalid status "${status}" — project columns: ${columnIds.join(", ")}`,
+      error: `Invalid status "${String(status).slice(0, 64)}" — project columns: ${columnIds.join(", ")}`,
       status: 400,
     };
   }
@@ -1012,7 +1013,8 @@ export async function updateTask(
       if (names.length > 0 && !names.includes(String(updates.category))) {
         return {
           ok: false,
-          error: `Invalid category "${updates.category}" — project categories: ${names.join(", ")}`,
+          // Sliced because this string reaches one as a tool result — see noSuchAccount.
+          error: `Invalid category "${String(updates.category).slice(0, 64)}" — project categories: ${names.join(", ")}`,
           status: 400,
         };
       }
@@ -1022,7 +1024,7 @@ export async function updateTask(
       if (!columnIds.includes(String(updates.status))) {
         return {
           ok: false,
-          error: `Invalid status "${updates.status}" — project columns: ${columnIds.join(", ")}`,
+          error: `Invalid status "${String(updates.status).slice(0, 64)}" — project columns: ${columnIds.join(", ")}`,
           status: 400,
         };
       }

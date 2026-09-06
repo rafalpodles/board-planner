@@ -2453,6 +2453,59 @@ describe("createTask and a foreign sprint", () => {
 });
 
 /**
+ * BP-515. Sibling of BP-511's `assignee` fix, raised by that ticket's independent review:
+ * `createTask` and `updateTask` both interpolate `category`/`status` into their refusal with no
+ * bound, and both reach a model as a tool result the same way `noSuchAccount` does — the comment
+ * on that function says why it is sliced. The GET route's four refusals already slice to 64;
+ * these two (in both writers) did not.
+ */
+describe("createTask and updateTask do not echo an unbounded category or status", () => {
+  const board = { categories: [{ name: "bug" }], ...customBoard };
+
+  beforeEach(() => {
+    findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+  });
+
+  it("createTask bounds an invalid category in its refusal", async () => {
+    const result = await createTask("p1", "actor", { title: "x", category: "y".repeat(5000) });
+
+    expect(result).toMatchObject({ ok: false, status: 400 });
+    expect((result as { error: string }).error.length).toBeLessThan(500);
+  });
+
+  it("createTask bounds an invalid status in its refusal", async () => {
+    const result = await createTask("p1", "actor", { title: "x", status: "y".repeat(5000) });
+
+    expect(result).toMatchObject({ ok: false, status: 400 });
+    expect((result as { error: string }).error.length).toBeLessThan(500);
+  });
+
+  it("updateTask bounds an invalid category in its refusal", async () => {
+    const result = await updateTask("p1", "t1", { category: "y".repeat(5000) }, "actor");
+
+    expect(result).toMatchObject({ ok: false, status: 400 });
+    expect((result as { error: string }).error.length).toBeLessThan(500);
+  });
+
+  it("updateTask bounds an invalid status in its refusal", async () => {
+    const result = await updateTask("p1", "t1", { status: "y".repeat(5000) }, "actor");
+
+    expect(result).toMatchObject({ ok: false, status: 400 });
+    expect((result as { error: string }).error.length).toBeLessThan(500);
+  });
+
+  // The control: a short invalid value still names itself, so the bound does not swallow the
+  // information an honest caller needs to fix their request.
+  it("still names a short invalid category or status", async () => {
+    const category = await createTask("p1", "actor", { title: "x", category: "not-real" });
+    const status = await createTask("p1", "actor", { title: "x", status: "not-real" });
+
+    expect(category).toMatchObject({ error: expect.stringContaining("not-real") });
+    expect(status).toMatchObject({ error: expect.stringContaining("not-real") });
+  });
+});
+
+/**
  * Choosing the agent chooses what runs on the operator's machine, under bypassPermissions, in
  * their own checkout. BP-345 held it to instance admins because, at the time, choosing one could
  * arm a machine belonging to somebody else. Since BP-358 a claim takes only what its own owner
