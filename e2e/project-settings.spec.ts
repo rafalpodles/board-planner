@@ -86,11 +86,24 @@ async function storedColumns(request: APIRequestContext): Promise<StoredColumn[]
  * saving and got the board as it was — passing the click and failing the read.
  *
  * The success toast is emitted after the whole save chain has resolved, which for categories is
- * several requests, so it is the one signal that means "the server is done".
+ * several requests, so it is the one signal that means "the server is done". A test that saves
+ * twice cannot rely on the toast alone, though: its text repeats, so a lingering toast from the
+ * previous save can satisfy the wait before the new request has even landed, or both can be on
+ * screen together. Columns saves are a single PUT, so this gates on that response directly and
+ * only then reads the toast — with `.last()`, not `.first()`: toasts append in order, so the
+ * oldest match is the previous save's, still fading, and asserting on it would never actually
+ * confirm this save's own toast fired. Categories has no single response to gate on and stays
+ * toast-only — fine while no categories test saves twice, and the same trap the moment one does.
  */
 async function save(page: Page, saved: "Columns saved" | "Categories saved") {
+  const written =
+    saved === "Columns saved"
+      ? page.waitForResponse((res) => res.request().method() === "PUT" && res.url().endsWith("/columns"))
+      : null;
   await saveButton(page).click();
-  await expect(page.getByText(saved)).toBeVisible();
+  const response = await written;
+  if (response && !response.ok()) expect(response.status(), await response.text()).toBe(200);
+  await expect(page.getByText(saved).last()).toBeVisible();
   await expect(saveButton(page)).toBeHidden();
 }
 
