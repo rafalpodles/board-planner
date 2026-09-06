@@ -367,6 +367,9 @@ test("v does not toggle the view behind the help", async ({ page }) => {
   await expect(help(page)).toBeVisible();
 
   await page.keyboard.press("v");
+  // No bounded wait needed here unlike the j/Enter test above: setViewMode is a synchronous
+  // local-state and localStorage write with no network hop, so a leak would already be in the
+  // DOM by the time this round-trips back from the browser
   await expect(boardToggle(page)).toHaveAttribute("aria-current", "true");
   await expect(help(page)).toBeVisible();
 

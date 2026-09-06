@@ -119,6 +119,9 @@ export function ProjectBoardView({
     function handleKeyDown(e: KeyboardEvent) {
       const tag = (e.target as HTMLElement).tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      // BP-522/BP-543: an open layer owns every key but "?", Escape included — clearing the
+      // selection under the bulk-delete confirm used to relabel it "delete 0 tasks" and report
+      // success having deleted nothing
       if (openLayerCount() > 0 && e.key !== "?") return;
 
       const noMod = !e.metaKey && !e.ctrlKey && !e.altKey;
@@ -129,9 +132,6 @@ export function ProjectBoardView({
         return;
       }
       if (e.key === "Escape") {
-        // BP-522: an open layer owns Escape — clearing the selection under the bulk-delete
-        // confirm relabelled it "delete 0 tasks" and deleting nothing reported success
-        if (openLayerCount() > 0) return;
         setSelectedTasks(new Set());
         setSelectionMode(false);
         setFocusedTaskIndex(-1);
