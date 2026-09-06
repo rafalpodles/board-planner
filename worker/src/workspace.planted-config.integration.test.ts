@@ -133,11 +133,20 @@ describe("workspace.create against a planted config", () => {
 
     beforeEach(() => {
       const home = join(dir, "home");
-      mkdirSync(join(home, ".config", "git"), { recursive: true });
+      mkdirSync(home, { recursive: true });
       writeFileSync(payload, `#!/bin/sh\ntouch "${marker}"\ncat\n`);
       chmodSync(payload, 0o755);
-      writeFileSync(join(home, ".gitconfig"), `[filter "z"]\n\tsmudge = ${payload}\n`);
-      writeFileSync(join(home, ".config", "git", "attributes"), "* filter=z\n");
+      // Both halves named by the global config itself — the filter and the attributes file that
+      // selects it. The XDG default (`~/.config/git/attributes`) is not used on purpose: git reads
+      // `$XDG_CONFIG_HOME/git/attributes` when that variable is set, which it is on CI, so a
+      // fixture relying on the default is a fixture that quietly stops planting anything. The
+      // premise arm below caught exactly that, having passed on the machine it was written on.
+      const attributes = join(home, "attributes");
+      writeFileSync(
+        join(home, ".gitconfig"),
+        `[filter "z"]\n\tsmudge = ${payload}\n[core]\n\tattributesFile = ${attributes}\n`
+      );
+      writeFileSync(attributes, "* filter=z\n");
       realHome = process.env.HOME;
       process.env.HOME = home;
     });
