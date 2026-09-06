@@ -242,4 +242,59 @@ test.describe("choosing an MCP server's tools", () => {
 
     await expect(page.getByTestId("mcp-tool-budget-warning")).toContainText("48 MCP tools");
   });
+
+  test("disconnecting OAuth does not swallow an unsaved edit", async ({ page }) => {
+    await connectServers([
+      server("narrow", "/narrow"),
+      {
+        ...(server("linked", "/wide") as object),
+        authType: "oauth",
+        oauth: { status: "connected", clientId: "e2e-client", accessToken: "", refreshToken: "" },
+      },
+    ]);
+    await signIn(page, "admin");
+    await page.goto(SETTINGS_URL);
+    await expect(page.getByRole("button", { name: "Disconnect linked" })).toBeVisible();
+
+    await page.getByLabel("Tool allowlist for narrow").fill("list_narrow_alpha");
+
+    const disconnected = page.waitForResponse((r) => r.url().includes("/pm/mcp-oauth/disconnect"));
+    await page.getByRole("button", { name: "Disconnect linked" }).click();
+    await disconnected;
+
+    const save = page.getByRole("button", { name: "Save changes" });
+    await expect(save).toBeEnabled();
+
+    const saved = page.waitForResponse(
+      (r) => r.request().method() === "PUT" && r.url().endsWith(`/api/projects/${PROJECT_KEY}`)
+    );
+    await save.click();
+    await saved;
+    expect(await storedAllowlist("narrow")).toEqual(["list_narrow_alpha"]);
+  });
+
+  test("Discard still rewinds an edit made before a disconnect", async ({ page }) => {
+    await connectServers([
+      server("narrow", "/narrow"),
+      {
+        ...(server("linked", "/wide") as object),
+        authType: "oauth",
+        oauth: { status: "connected", clientId: "e2e-client", accessToken: "", refreshToken: "" },
+      },
+    ]);
+    await signIn(page, "admin");
+    await page.goto(SETTINGS_URL);
+    await expect(page.getByRole("button", { name: "Disconnect linked" })).toBeVisible();
+
+    await page.getByLabel("Tool allowlist for narrow").fill("list_narrow_alpha");
+
+    const disconnected = page.waitForResponse((r) => r.url().includes("/pm/mcp-oauth/disconnect"));
+    await page.getByRole("button", { name: "Disconnect linked" }).click();
+    await disconnected;
+
+    await page.getByRole("button", { name: "Discard" }).click();
+
+    await expect(page.getByLabel("Tool allowlist for narrow")).toHaveValue("");
+    await expect(page.getByRole("button", { name: "Disconnect linked" })).toHaveCount(0);
+  });
 });

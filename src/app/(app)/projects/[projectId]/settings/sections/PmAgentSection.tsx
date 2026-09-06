@@ -14,7 +14,7 @@ import { Switch } from "@/components/ui/Switch";
 import { firstReviewHour, reviewHoursOfDay } from "@/lib/pm/autonomy";
 import { SettingsCard, EmptyState, ListRow } from "@/components/settings/SettingsCard";
 import { useDirtyGroup } from "@/components/settings/settings-context";
-import { McpToolPicker, carriedTools } from "@/components/settings/McpToolPicker";
+import { McpToolPicker, carriedTools, parseAllowlist } from "@/components/settings/McpToolPicker";
 import type { McpCatalogTool } from "@/components/settings/McpToolPicker";
 import { assessToolBudget, describeToolBudget } from "@/lib/pm/tool-budget";
 import { catalogKey } from "@/lib/pm/catalog-key";
@@ -156,18 +156,29 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
         .map((s, i) => ({
           name: serverRowNames[i],
           enabled: s.enabled,
-          key: catalogKey(s),
+          key: [
+            catalogKey(s),
+            [...new Set(parseAllowlist(s.toolAllowlist))].sort().join(","),
+            s.allowWrites,
+          ].join("|"),
           count: transient[catalogKey(s)]?.catalog
             ? carriedTools(transient[catalogKey(s)]?.catalog, s.toolAllowlist, s.allowWrites).length
             : 0,
         }))
-        .filter((s, i, all) => s.enabled && all.findIndex((o) => o.key === s.key) === i),
+        .filter(
+          (s, i, all) => s.enabled && all.findIndex((o) => o.enabled && o.key === s.key) === i
+        ),
       undefined,
       enabledServers.some((s) => !transient[catalogKey(s)]?.catalog)
     )
   );
 
   function updateServer(index: number, patch: Partial<McpServerDraft>) {
+    const before = servers[index];
+    const hadToken = before.hasAuthToken || Boolean(before.authToken);
+    if ("authToken" in patch && hadToken && patch.authToken !== before.authToken) {
+      setTransientAt(catalogKey(before), { catalog: undefined, testResult: "" });
+    }
     draft.set(
       "mcpServers",
       servers.map((s, i) => (i === index ? { ...s, ...patch } : s))
@@ -300,14 +311,22 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
   }
 
   async function disconnectOauth(index: number) {
+    const row = servers[index];
+    const name = row.name.trim();
     try {
-      await api.post(`/api/projects/${projectId}/pm/mcp-oauth/disconnect`, {
-        name: servers[index].name.trim(),
-      });
-      const cleared = servers.map((s, i) =>
-        i === index ? { ...s, oauthStatus: "unconfigured" } : s
-      );
-      draft.commit({ ...draft.value, mcpServers: cleared });
+      await api.post(`/api/projects/${projectId}/pm/mcp-oauth/disconnect`, { name });
+      draft.setValue((prev) => ({
+        ...prev,
+        mcpServers: prev.mcpServers.map((s) =>
+          s === row ? { ...s, oauthStatus: "unconfigured" } : s
+        ),
+      }));
+      draft.rebase((prev) => ({
+        ...prev,
+        mcpServers: prev.mcpServers.map((s) =>
+          s.name.trim() === name ? { ...s, oauthStatus: "unconfigured" } : s
+        ),
+      }));
       setTransientAt(catalogKey(servers[index]), { catalog: undefined, testResult: "" });
       toast("OAuth connection removed", "success");
     } catch (err) {

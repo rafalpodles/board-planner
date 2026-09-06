@@ -32,7 +32,11 @@ export function useDraft<T extends Record<string, unknown>>(initial: T) {
     setValue(next);
   }, []);
 
-  const rebase = useCallback((next: T) => setBaseline(next), []);
+  const rebase = useCallback(
+    (next: T | ((prev: T) => T)) =>
+      setBaseline((prev) => (typeof next === "function" ? (next as (p: T) => T)(prev) : next)),
+    []
+  );
 
   return {
     value,
