@@ -336,6 +336,47 @@ test.describe("delete", () => {
     expect((await readTask(request, FINISHED_TASK_NUMBER)).status).toBe(404);
   });
 
+  /**
+   * BP-556, found by the independent review of BP-527. The confirm button was gated on `loading`
+   * but Cancel and the dialog's own close (backdrop/Escape) were not — a person could dismiss the
+   * dialog while the DELETE was still in flight, and a failure landing afterwards toasted with
+   * nothing on screen to connect it to.
+   */
+  test("Cancel and Escape are refused while the delete is in flight, so a later failure still has a dialog to land on", async ({
+    page,
+    request,
+  }) => {
+    await openBoard(page);
+
+    await page.route(`**/api/projects/*/tasks/${FINISHED_TASK_ID}`, async (route) => {
+      if (route.request().method() !== "DELETE") return route.continue();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await route.fulfill({ status: 500, body: "{}" });
+    });
+
+    const requestSent = page.waitForRequest(
+      (req) => req.method() === "DELETE" && req.url().endsWith(`/tasks/${FINISHED_TASK_ID}`)
+    );
+    const deleted = taskWrite(page, "DELETE", FINISHED_TASK_ID);
+    const menu = await openMenuOn(page, FINISHED_TASK_NUMBER);
+    await menu.getByRole("button", { name: "Delete", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Delete Task" });
+    await dialog.getByRole("button", { name: "Delete", exact: true }).click();
+    await requestSent;
+
+    // In flight: neither the button nor the keyboard escape hatch can dismiss it
+    await expect(dialog.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeVisible();
+
+    expect((await deleted).status()).toBe(500);
+    // Settled on its own — the dialog closes itself once there is something to report
+    await expect(dialog).toBeHidden();
+    await expectToast(page, "Failed to delete task");
+    await expect(card(page, FINISHED_TASK_NUMBER)).toBeVisible();
+    expect((await readTask(request, FINISHED_TASK_NUMBER)).status).toBe(200);
+  });
+
   test("from the task screen: the rail's button, naming the task", async ({ page, request }) => {
     await signIn(page);
     await page.goto(taskUrl(FINISHED_TASK_NUMBER));
