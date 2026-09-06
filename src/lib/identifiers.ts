@@ -1,4 +1,4 @@
-import { PROJECT_KEY_PATTERN } from "@/lib/urls";
+import { PROJECT_KEY_MAX_LENGTH, PROJECT_KEY_PATTERN } from "@/lib/urls";
 
 /**
  * A project key and a username are not free text. Both are interpolated into places that give
@@ -10,7 +10,7 @@ import { PROJECT_KEY_PATTERN } from "@/lib/urls";
  * `PROJECT_KEY_PATTERN` is reused rather than restated: it is what the router already accepts as a
  * project segment, so a key it would refuse to route was never usable anyway.
  */
-export { PROJECT_KEY_PATTERN };
+export { PROJECT_KEY_MAX_LENGTH, PROJECT_KEY_PATTERN };
 
 /**
  * Lower-case, and long enough for the machine accounts this instance mints itself
@@ -19,7 +19,7 @@ export { PROJECT_KEY_PATTERN };
 export const USERNAME_PATTERN = /^[a-z0-9][a-z0-9._-]{1,31}$/;
 
 export const PROJECT_KEY_RULE =
-  "A project key starts with a letter and may hold up to 20 letters, digits, hyphens or underscores";
+  `A project key starts with a letter and may hold up to ${PROJECT_KEY_MAX_LENGTH} letters, digits, hyphens or underscores`;
 export const USERNAME_RULE =
   "A username is lower-case, starts with a letter or digit, and may hold up to 32 letters, digits, dots, hyphens or underscores";
 
