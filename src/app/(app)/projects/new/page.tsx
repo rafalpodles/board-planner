@@ -54,7 +54,7 @@ export default function NewProjectPage() {
           value={key}
           onChange={(e) => setKey(e.target.value.toUpperCase())}
           placeholder="MP"
-          maxLength={5}
+          maxLength={20}
           required
         />
         <Textarea

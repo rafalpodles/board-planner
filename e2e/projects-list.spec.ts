@@ -17,7 +17,6 @@ import {
   seedNewestProject,
   seedSecondProject,
 } from "./seed";
-import { SAME_ORIGIN } from "./api";
 import { signIn, signInThroughForm } from "./session";
 
 /**
@@ -166,8 +165,8 @@ test("with nothing to show, the list says so — and only an admin is offered a 
 });
 
 /**
- * The two below assert what the product does today and name the tickets that say it should not,
- * so each turns red on the day it is fixed. Neither is `test.fail`-marked: that would make any
+ * BP-534 below asserts what the product does today and names the ticket that says it should not,
+ * so it turns red on the day it is fixed. It is not `test.fail`-marked: that would make any
  * failure a pass.
  */
 
@@ -196,22 +195,23 @@ test("a member reaches the create-a-board form, and is refused only after fillin
   await expect(page).toHaveURL("/projects/new");
 });
 
-// TODO(BP-535): the key field stops at 5 characters, the rule it is validated against allows 20
-test("the create form refuses a key the product accepts", async ({ page }) => {
+// BP-535: the key field used to stop at 5 characters while the rule it is validated against
+// allows 20, silently truncating a legitimate key. Driven through the real form, since the bug
+// was in the client, not the server.
+test("the create form accepts a key as long as the product allows", async ({ page }) => {
   await signIn(page);
   await page.goto("/projects/new");
 
   const key = page.getByLabel("Project Key");
-  await key.fill("LONGERKEY");
-  await expect(key).toHaveValue("LONGE");
-  await expect(key).toHaveAttribute("maxlength", "5");
+  await key.fill("twentycharacterkeyxx");
+  await expect(key).toHaveValue("TWENTYCHARACTERKEYXX");
+  await expect(key).toHaveAttribute("maxlength", "20");
 
-  // The other half of the disagreement, so the ticket cannot be closed by narrowing the rule to
-  // five and leaving this green: the same key the field refuses to hold is one the product takes
-  const created = await page.request.post("/api/projects", {
-    headers: SAME_ORIGIN,
-    data: { name: "A key longer than the field allows", key: "TWENTYCHARACTERKEYXX" },
-  });
-  expect(created.status()).toBe(201);
-  expect((await created.json()).key).toBe("TWENTYCHARACTERKEYXX");
+  await page.getByLabel("Project Name").fill("A key as long as the product allows");
+  const created = page.waitForResponse(
+    (response) => response.url().endsWith("/api/projects") && response.request().method() === "POST"
+  );
+  await page.getByRole("button", { name: "Create Project" }).click();
+  expect((await created).status()).toBe(201);
+  await expect(page).toHaveURL("/projects/TWENTYCHARACTERKEYXX");
 });
