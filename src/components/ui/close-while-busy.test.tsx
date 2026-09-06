@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { StrictMode } from "react";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, act } from "@testing-library/react";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -17,8 +18,9 @@ import { CompleteSprintDialog } from "@/components/sprints/CompleteSprintDialog"
 import { SprintFormModal } from "@/components/sprints/SprintFormModal";
 import { ApiProject, ApiSprint } from "@/types";
 
-const { api } = vi.hoisted(() => ({
+const { api, toast } = vi.hoisted(() => ({
   api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn(), upload: vi.fn() },
+  toast: vi.fn(),
 }));
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 // Stands in for the editor so the upload it owns can be driven from a test: the file goes through
@@ -28,7 +30,7 @@ vi.mock("@/components/ui/MarkdownEditor", () => ({
     <button onClick={() => onFileUpload?.(new File(["x"], "shot.png"))}>Attach a file</button>
   ),
 }));
-vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
+vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast }) }));
 
 afterEach(cleanup);
 
@@ -389,5 +391,45 @@ describe("a dialog with a request in flight refuses Escape", () => {
       view.rerender(<Parent tick={2} />);
     });
     expect(seen).toEqual([false, true]);
+  });
+
+  /**
+   * The AI fill reports its result with a toast only while the form is still there, which rests on
+   * a mounted ref — and a ref that is set once at creation is wrong under StrictMode, where the
+   * first mount is torn down before the real one. The failure would be dev-only and silent: no fill
+   * ever announces itself.
+   */
+  it("still announces an AI fill after StrictMode's throwaway first mount", async () => {
+    api.get.mockImplementation((path: string) =>
+      path.includes("/ai/generate-task") ? Promise.resolve({ enabled: true }) : Promise.resolve([])
+    );
+    api.post.mockResolvedValue({
+      title: "Filled",
+      description: "",
+      category: "user-story",
+      acceptanceCriteria: "",
+      suggestedBlockedBy: [],
+      suggestedBlocking: [],
+    });
+
+    render(
+      <StrictMode>
+        <TaskForm projectId="p1" projectKey="TP" onSaved={() => {}} onCancel={() => {}} />
+      </StrictMode>
+    );
+
+    const prompt = (await screen.findByPlaceholderText(/describe/i)) as HTMLInputElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(
+        prompt,
+        "a login screen"
+      );
+      prompt.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      screen.getByRole("button", { name: "Generate" }).click();
+    });
+
+    expect(toast).toHaveBeenCalledWith("Fields filled by AI — review and save", "success");
   });
 });

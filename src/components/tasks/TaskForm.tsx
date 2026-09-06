@@ -170,7 +170,9 @@ export function TaskForm({
       }
       setAiInsights(result);
       // The fill is deliberately not gated (see `busy` above), so the form can be gone by now —
-      // and a line telling somebody to review fields they cannot see is worse than silence.
+      // and a line telling somebody to review fields they cannot see is worse than silence. The
+      // failure below is deliberately not held back the same way: a request that failed is worth
+      // hearing about wherever the reader ended up.
       if (mounted.current) toast("Fields filled by AI — review and save", "success");
     } catch {
       toast("AI generation failed", "error");

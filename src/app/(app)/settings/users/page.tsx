@@ -76,7 +76,10 @@ export default function UsersPage() {
     try {
       setUsers(await api.get("/api/users"));
     } catch {
-      toast("Saved. The list could not be refreshed — reload the page to see it", "error");
+      // No verb: this runs after a create, a save and a delete, and telling somebody "Saved" when
+      // they deleted a user — who is still on screen, because this is the fetch that failed — is
+      // the one message they cannot act on.
+      toast("The list could not be refreshed — reload the page to see it", "error");
     }
   }
 

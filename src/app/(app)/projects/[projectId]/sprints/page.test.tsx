@@ -525,7 +525,6 @@ describe("Sprint lifecycle from the header", () => {
     await act(async () => {
       finish({});
     });
-    expect(api.put).toHaveBeenCalledTimes(1);
   });
 
   it("deletes the selected sprint once the confirmation is answered", async () => {

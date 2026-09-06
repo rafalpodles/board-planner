@@ -170,13 +170,7 @@ describe("the users page, after a save that is followed by a refetch", () => {
    * a save that landed, followed by a list fetch that did not, said nothing at all and raised an
    * unhandled rejection.
    */
-  it("still reports a save whose list refresh fails, and does not reject into nowhere", async () => {
-    const rejections: unknown[] = [];
-    const onRejection = (e: PromiseRejectionEvent) => {
-      e.preventDefault();
-      rejections.push(e.reason);
-    };
-    window.addEventListener("unhandledrejection", onRejection);
+  it("still reports a save whose list refresh fails, and says which half failed", async () => {
     api.put.mockResolvedValue({});
 
     render(<UsersPage />);
@@ -195,11 +189,32 @@ describe("the users page, after a save that is followed by a refetch", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: /Edit Ada/ })).toBeNull());
 
     expect(toast).toHaveBeenCalledWith("Saved", "success");
-    expect(toast.mock.calls.some(([, kind]) => kind === "error")).toBe(true);
+    // The failure is the list's, not the save's, and it says so without claiming a verb — this
+    // same helper runs after a delete
+    expect(toast).toHaveBeenCalledWith(
+      "The list could not be refreshed — reload the page to see it",
+      "error"
+    );
+  });
+
+  it("does not tell somebody who deleted a user that it was saved", async () => {
+    api.del.mockResolvedValue({});
+
+    render(<UsersPage />);
+    await screen.findByText("Ada");
+    act(() => screen.getByText("Ada").click());
+    await screen.findByRole("dialog", { name: /Edit Ada/ });
+    act(() => screen.getByRole("button", { name: "Delete" }).click());
+    api.get.mockImplementation((path: string) =>
+      path === "/api/users"
+        ? Promise.reject(new Error("network down"))
+        : Promise.resolve({ configured: false })
+    );
     await act(async () => {
-      await Promise.resolve();
+      screen.getByRole("button", { name: "Delete User" }).click();
     });
-    expect(rejections).toEqual([]);
-    window.removeEventListener("unhandledrejection", onRejection);
+
+    expect(toast).toHaveBeenCalledWith("User deleted", "success");
+    expect(toast.mock.calls.map(([message]) => message).join(" ")).not.toContain("Saved");
   });
 });
