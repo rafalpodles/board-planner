@@ -342,8 +342,10 @@ export function Comments({
         ))}
         {/* Three states, not one: a read still running is not an empty discussion either */}
         {reading ? (
-          <div className="flex justify-center py-4" role="status">
-            <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+          // One line tall, the same as the sentence it gives way to: a taller placeholder shrinks
+          // the page when the read lands, and a scroll parked at the bottom is clamped back up
+          <div className="flex h-5 items-center justify-center" role="status">
+            <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
             <span className="sr-only">Loading the comments</span>
           </div>
         ) : loadFailed ? (
