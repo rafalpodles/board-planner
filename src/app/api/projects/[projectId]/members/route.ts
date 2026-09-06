@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { isValidObjectId } from "mongoose";
+import { Types, isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withProjectOwner } from "@/lib/middleware";
 import { audienceFilterFrom, recipientsWithAccess } from "@/lib/grants";
@@ -99,6 +99,11 @@ export const DELETE = withProjectOwner(async (request, { params }) => {
   if (!isValidObjectId(userId)) {
     return NextResponse.json({ error: "userId must be an object id" }, { status: 400 });
   }
+  // Normalised once, because the check below compares this against a stored subject as strings and
+  // BSON accepts a hex id in either case: the same id shouted was a different string and the same
+  // row, so it skipped the last-owner refusal while `deleteOne` cast it back and removed the grant.
+  // Same defect as BP-546, one route over, and reachable here by any board owner.
+  const subject = new Types.ObjectId(userId).toString();
 
   await connectDB();
   if ((await ownerCount(projectId)) <= 1) {
@@ -106,7 +111,7 @@ export const DELETE = withProjectOwner(async (request, { params }) => {
       .select("subject relation")
       .lean();
     const isLastOwner = remaining.some(
-      (g) => String(g.subject) === userId && g.relation === "owner"
+      (g) => String(g.subject) === subject && g.relation === "owner"
     );
     if (isLastOwner) {
       return NextResponse.json(
@@ -116,7 +121,7 @@ export const DELETE = withProjectOwner(async (request, { params }) => {
     }
   }
 
-  await Grant.deleteOne({ subject: userId, objectType: "project", object: projectId });
+  await Grant.deleteOne({ subject, objectType: "project", object: projectId });
 
   // Hygiene, NOT containment: what makes a lost board unreadable is the filter on the read
   // routes, which is authoritative and covers every way access can end — including the ones that
@@ -132,14 +137,14 @@ export const DELETE = withProjectOwner(async (request, { params }) => {
   // keeping it costs nothing, while deleting it on a guess cannot be undone.
   let stillReaches = true;
   try {
-    stillReaches = (await recipientsWithAccess([userId], projectId)).length > 0;
+    stillReaches = (await recipientsWithAccess([subject], projectId)).length > 0;
   } catch (err) {
     console.error("Could not tell whether the removed member still reaches the board:", err);
   }
 
   if (!stillReaches) {
     try {
-      await Notification.deleteMany({ recipient: userId, project: projectId });
+      await Notification.deleteMany({ recipient: subject, project: projectId });
     } catch (err) {
       console.error("Failed to clear notifications for a removed member:", err);
     }
