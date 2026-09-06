@@ -66,6 +66,11 @@ test("a board dragged down the sidebar stays there, for everybody, after a reloa
     SECOND_PROJECT_KEY,
   ]);
 
+  // Settled first, deliberately: a `GET /api/projects` still in flight when the drop lands
+  // overwrites the reorder on screen (BP-551), and this spec is about the drag rather than that
+  // race. When the guard lands this wait can go.
+  await page.waitForLoadState("networkidle");
+
   const saved = page.waitForResponse(
     (response) =>
       response.url().endsWith("/api/projects/reorder") && response.request().method() === "PUT"
@@ -73,17 +78,24 @@ test("a board dragged down the sidebar stays there, for everybody, after a reloa
 
   await sortableRows(page).first().focus();
   await page.keyboard.press("Space");
-  // Awaited between keys: the sensor starts on the next tick, and an arrow pressed before that
-  // arrives while nothing has been picked up
-  await expect(announced(page)).toContainText(/picked up|was moved/i);
+  // A sortable is already over its own droppable, so the "picked up" line is replaced on the next
+  // tick by this one. Waiting for it — rather than for either — is what proves the sensor is live
+  // and has settled, which a `picked up|was moved` alternation does not
+  await expect(announced(page)).toContainText(`over droppable area ${NEWEST_PROJECT_ID}`);
 
-  await page.keyboard.press("ArrowDown");
-  // The drop target has to have CHANGED before the drop, or the row goes back where it came from.
-  // Waited for by NAME rather than "any line but the one I captured": the announcement dnd-kit
-  // makes on pick-up is itself replaced a tick later by a "moved over itself" line, which would
-  // satisfy a difference check while nothing had moved
-  await expect(announced(page)).toContainText(String(PROJECT_ID));
+  // The target has to have CHANGED before the drop, or the row goes back where it came from. The
+  // press is retried because an arrow can still be swallowed while dnd-kit is between ticks, and
+  // a lost keystroke is indistinguishable from a broken drag until the announcement names the row
+  // it is now over — one press is the normal case, and a second only happens if the first was lost
+  await expect(async () => {
+    await page.keyboard.press("ArrowDown");
+    await expect(announced(page)).toContainText(`over droppable area ${PROJECT_ID}`, {
+      timeout: 2_000,
+    });
+  }).toPass({ timeout: 20_000 });
   await page.keyboard.press("Space");
+  // The drag is finished, not merely keyed: the drop announcement is dnd-kit's own commit signal
+  await expect(announced(page)).toContainText(/was dropped/i);
 
   expect((await saved).status()).toBe(200);
 
