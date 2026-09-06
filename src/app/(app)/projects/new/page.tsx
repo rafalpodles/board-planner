@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, FormEvent } from "react";
+import { useEffect, useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
+import { useAuth } from "@/hooks/use-auth";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
@@ -18,6 +19,12 @@ export default function NewProjectPage() {
   const [loading, setLoading] = useState(false);
   const api = useApi();
   const router = useRouter();
+  const { isAdmin, isLoading: authLoading } = useAuth();
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (!isAdmin) router.replace("/projects");
+  }, [isAdmin, authLoading, router]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -37,6 +44,15 @@ export default function NewProjectPage() {
       setLoading(false);
     }
   }
+
+  if (authLoading) {
+    return (
+      <div className="flex justify-center py-12">
+        <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
+      </div>
+    );
+  }
+  if (!isAdmin) return null;
 
   return (
     <div className="w-full max-w-lg mx-auto">
