@@ -94,8 +94,26 @@ async function storedColumns(request: APIRequestContext): Promise<StoredColumn[]
  * several requests, so it is the one signal that means "the server is done".
  */
 async function save(page: Page, saved: "Columns saved" | "Categories saved") {
+  // ...and where a test saves twice it is not enough on its own, because both saves emit the same
+  // sentence. Under load the first toast is still on screen when the second lands, and the two
+  // readings of that are both wrong: matched early it is the *previous* save's toast, so the read
+  // that follows gets the board as it was; matched late there are two of them and `getByText`
+  // refuses to choose. "Relabelling a column keeps its id" saves twice and hit one of those in
+  // each of two full-file runs, passing five times in isolation.
+  //
+  // So the response is the ordering, and the toast is only the UI's claim on top of it. A columns
+  // save is exactly one PUT; categories are several requests and keep the toast as their only
+  // whole-chain signal.
+  const written =
+    saved === "Columns saved"
+      ? page.waitForResponse(
+          (res) => res.request().method() === "PUT" && res.url().endsWith("/columns")
+        )
+      : null;
   await saveButton(page).click();
-  await expect(page.getByText(saved)).toBeVisible();
+  const response = await written;
+  if (response) expect(response.status(), await response.text()).toBe(200);
+  await expect(page.getByText(saved).first()).toBeVisible();
   await expect(saveButton(page)).toBeHidden();
 }
 
