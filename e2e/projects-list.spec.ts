@@ -38,8 +38,9 @@ import { signIn, signInThroughForm } from "./session";
 test.beforeEach(seed);
 
 function cards(page: Page): Locator {
-  // Scoped to main: the sidebar links to the same boards on every route
-  return page.locator('main a[href^="/projects/"]');
+  // Scoped to main because the sidebar links to the same boards on every route, and past
+  // /projects/new because the header's own action lives inside main too
+  return page.locator('main a[href^="/projects/"]:not([href="/projects/new"])');
 }
 
 function card(page: Page, projectKey: string): Locator {
@@ -123,13 +124,16 @@ test.describe("the boards a reader may reach", () => {
   test("New Project is the admin's, and the member is not offered it", async ({ page }) => {
     await openProjects(page);
 
-    const newProject = page.getByRole("link", { name: "New Project" });
-    await newProject.click();
+    // In main, not the sidebar: the sidebar carries a second link to the same page, and the two
+    // are gated separately
+    await page.locator('main a[href="/projects/new"]').click();
     await expect(page).toHaveURL("/projects/new");
     await expect(page.getByRole("heading", { name: "New project" })).toBeVisible();
 
     await openProjects(page, "member");
-    await expect(page.getByRole("link", { name: "New Project" })).toHaveCount(0);
+    await expect(page.locator('main a[href="/projects/new"]')).toHaveCount(0);
+    // The sidebar's "+" is the same gate on the same page, and is asserted nowhere else
+    await expect(page.getByRole("link", { name: "New project" })).toHaveCount(0);
   });
 });
 
@@ -164,7 +168,7 @@ test("with nothing to show, the list says so — and only an admin is offered a 
  * failure a pass.
  */
 
-// TODO(BP-526): /projects/new is admin-only on the server and gated nowhere on the client
+// TODO(BP-534): /projects/new is admin-only on the server and gated nowhere on the client
 test("a member reaches the create-a-board form, and is refused only after filling it in", async ({
   page,
 }) => {
@@ -188,7 +192,7 @@ test("a member reaches the create-a-board form, and is refused only after fillin
   await expect(page).toHaveURL("/projects/new");
 });
 
-// TODO(BP-527): the key field stops at 5 characters, the rule it is validated against allows 20
+// TODO(BP-535): the key field stops at 5 characters, the rule it is validated against allows 20
 test("the create form refuses a key the product accepts", async ({ page }) => {
   await signIn(page);
   await page.goto("/projects/new");
