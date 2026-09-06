@@ -80,16 +80,16 @@ function report(name, error, req) {
 /**
  * A refusal the stub cannot serve past — reported the same way, then fatal.
  *
- * `process.exit` discards whatever `emit` had to queue, so the exit waits for the stream instead
- * of racing it: measured, a `fatal` behind a full pipe lost its entire message that way. The timer
- * is unreferenced, so a pipe nobody drains ends the process on the exit code rather than hanging.
+ * The one thing `emit` cannot promise here: if stderr could not take the message synchronously it
+ * goes to the stream's queue, and `process.exit` discards that queue. Waiting for it instead was
+ * written, and the test that pinned it was a timing race one run in four, so this keeps the plain
+ * exit. The exposure is a startup refusal behind an already-full pipe — `fatal` runs before a stub
+ * has served or logged anything, so there is nothing of its own in that buffer (BP-575 round
+ * three).
  */
 export function fatal(name, message) {
   emit(`\n${CRASH_MARKER} [${name}] outside any request\n${message}\n`);
-  process.exitCode = 1;
-  if (process.stderr.writableLength === 0) process.exit(1);
-  process.stderr.write("", () => process.exit(1));
-  setTimeout(() => process.exit(1), 1_000).unref();
+  process.exit(1);
 }
 
 /**

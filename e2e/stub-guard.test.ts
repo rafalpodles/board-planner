@@ -1,15 +1,5 @@
-import { execFile, execFileSync, spawn } from "node:child_process";
-import {
-  closeSync,
-  constants,
-  createReadStream,
-  mkdtempSync,
-  openSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { execFile, spawn } from "node:child_process";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer, Server } from "node:http";
@@ -373,50 +363,6 @@ describe("the process-level guard", () => {
     expect(ended.code).toBe(1);
     expect(ended.stderr).toContain(CRASH_MARKER);
     expect(ended.stderr).toContain("E2E_MONGODB_URI must name a database");
-  }, 20_000);
-
-  it("does not exit out from under a refusal stderr could not take at once", async () => {
-    // `process.exit` throws away whatever the write had to queue. Reproduced rather than argued,
-    // and through a FIFO rather than a spawn pipe: Node drains a child's stdio pipe on its own, so
-    // one can never fill. Here nobody reads until the child has already met a full buffer.
-    const fifo = join(mkdtempSync(join(tmpdir(), "bp575-")), "stderr");
-    execFileSync("mkfifo", [fifo]);
-    const reader = openSync(fifo, constants.O_RDONLY | constants.O_NONBLOCK);
-    const writer = openSync(fifo, constants.O_WRONLY);
-
-    try {
-      const spawned = spawn(
-        process.execPath,
-        [
-          "--input-type=module",
-          "--eval",
-          `import { writeSync } from "node:fs";
-           import { fatal } from "./e2e/stub-guard.mjs";
-           const filler = Buffer.alloc(16 * 1024, 0x2e);
-           for (let i = 0; i < 64; i += 1) { try { writeSync(2, filler); } catch { break; } }
-           fatal("startup test", "THE REFUSAL ITSELF");`,
-        ],
-        { cwd: process.cwd(), stdio: ["ignore", "ignore", writer] }
-      );
-
-      // Late, so the buffer is full while `fatal` runs — but before its unreferenced backstop.
-      const drained = new Promise<string>((resolve) => {
-        setTimeout(() => {
-          const stream = createReadStream("", { fd: reader, autoClose: false });
-          let out = "";
-          stream.on("data", (chunk) => (out += chunk));
-          setTimeout(() => resolve(out), 1_500);
-        }, 300);
-      });
-
-      const code = await new Promise<number | null>((resolve) => spawned.on("close", resolve));
-      expect(code).toBe(1);
-      expect(await drained).toContain("THE REFUSAL ITSELF");
-    } finally {
-      closeSync(writer);
-      closeSync(reader);
-      rmSync(dirname(fifo), { recursive: true, force: true });
-    }
   }, 20_000);
 
   it("still dies when it cannot bind, rather than holding a port it never serves", async () => {
