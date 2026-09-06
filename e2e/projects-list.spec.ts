@@ -164,35 +164,19 @@ test("with nothing to show, the list says so — and only an admin is offered a 
   });
 });
 
-/**
- * BP-534 below asserts what the product does today and names the ticket that says it should not,
- * so it turns red on the day it is fixed. It is not `test.fail`-marked: that would make any
- * failure a pass.
- */
-
-// TODO(BP-534): /projects/new is admin-only on the server and gated nowhere on the client
-test("a member reaches the create-a-board form, and is refused only after filling it in", async ({
-  page,
-}) => {
+// BP-534: /projects/new used to read no auth state at all, so a member typing the URL got the
+// full form and was only refused after filling it in and posting. It now gates itself the same
+// way every other admin-only page does — redirect to /projects, render nothing.
+//
+// This proves where the member ends up, not the transient frame between mount and the redirect
+// landing — catching that deterministically would mean racing expect's polling against the
+// redirect rather than testing the gate, so it's left unasserted.
+test("a member typing the URL is bounced to /projects", async ({ page }) => {
   await signIn(page, "member");
   await page.goto("/projects/new");
 
-  // Every other admin-only page redirects to /projects and renders nothing
-  await expect(page).toHaveURL("/projects/new");
-  await expect(page.getByRole("heading", { name: "New project" })).toBeVisible();
-
-  await page.getByLabel("Project Name").fill("A board they may not create");
-  await page.getByLabel("Project Key").fill("NOPE");
-  await page.getByLabel("Description").fill("Typed in full before anything refused it");
-  const refused = page.waitForResponse(
-    (response) => response.url().endsWith("/api/projects") && response.request().method() === "POST"
-  );
-  await page.getByRole("button", { name: "Create Project" }).click();
-  expect((await refused).status()).toBe(403);
-
-  // The refusal a person actually reads, after typing a name, a key and a description
-  await expect(page.getByText(/forbidden|admin/i)).toBeVisible();
-  await expect(page).toHaveURL("/projects/new");
+  await expect(page).toHaveURL("/projects");
+  await expect(page.getByRole("heading", { name: "New project" })).toHaveCount(0);
 });
 
 // BP-535: the key field used to stop at 5 characters while the rule it is validated against
