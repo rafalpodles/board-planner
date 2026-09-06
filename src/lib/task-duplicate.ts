@@ -1,4 +1,5 @@
 import type { ApiTask } from "@/types";
+import { TASK_TITLE_MAX_LENGTH } from "@/lib/identifiers";
 
 /**
  * A copy is work to do, so it arrives unticked — the one answer both "make me another one of these"
@@ -48,7 +49,7 @@ type DuplicableTask = Pick<
  */
 export function duplicatePayload(task: DuplicableTask) {
   return {
-    title: `Copy of ${task.title}`,
+    title: `Copy of ${task.title}`.slice(0, TASK_TITLE_MAX_LENGTH),
     description: task.description,
     priority: task.priority,
     category: task.category,
