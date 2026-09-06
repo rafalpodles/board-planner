@@ -172,9 +172,13 @@ describe("PUT /api/users/:id", () => {
       })
     );
 
-    const res = await PUT(put({ email: "taken@example.com" }), ctx());
+    // The screen sends `role` on every save (`settings/users/page.tsx`), so this request carries
+    // one too: the save rolls back, and a row saying the role changed would record something that
+    // did not happen
+    const res = await PUT(put({ email: "taken@example.com", role: "admin" }), ctx());
 
     expect(res.status).toBe(409);
+    expect(logInstanceAudit).not.toHaveBeenCalled();
   });
 
   it("does not ask whether an unchanged address is taken", async () => {
@@ -269,6 +273,9 @@ describe("PUT /api/users/:id — an admin sets a password", () => {
         action: "user_password_reset",
         target: "target",
         user: "admin-1",
+        // The name beside the reference, because the reference stops naming this administrator the
+        // day their own account goes (BP-539)
+        actorUsername: "rafal",
       })
     );
   });
@@ -582,7 +589,7 @@ describe("DELETE /api/users/:id", () => {
     expect(userFindByIdAndDelete).toHaveBeenCalledWith(TARGET_HEX);
   });
 
-  it("still deletes an admin while another one remains", async () => {
+  it("still deletes an admin while another one remains, and says so in the row", async () => {
     found(person({ role: "admin" }));
     userCountDocuments.mockResolvedValue(2);
 
@@ -590,6 +597,11 @@ describe("DELETE /api/users/:id", () => {
 
     expect(res.status).toBe(200);
     expect(userFindByIdAndDelete).toHaveBeenCalled();
+    // Which kind of account it was, because that is the half of "who was deleted" the username
+    // does not answer
+    expect(logInstanceAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "user_deleted", detail: "an administrator" })
+    );
   });
 
   // A machine's account is not a person. The Users list does not offer one, and deleting it takes
@@ -638,6 +650,19 @@ describe("DELETE /api/users/:id", () => {
     });
   });
 
+  // Why the row goes in before the revoke rather than after it, as the password path does: by this
+  // point the account is already gone, so a revoke that throws must not take the record with it.
+  it("records the deletion even if ending the sessions fails", async () => {
+    found(person());
+    revokeUserSessions.mockRejectedValueOnce(new Error("mongo is away"));
+
+    await expect(DELETE(...del(TARGET_HEX))).rejects.toThrow();
+
+    expect(logInstanceAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "user_deleted", target: "target" })
+    );
+  });
+
   it("records nothing when the delete was refused", async () => {
     found(person({ _id: ADMIN_HEX, role: "admin" }));
 
@@ -655,6 +680,8 @@ describe("DELETE /api/users/:id", () => {
 
     expect(res.status).toBe(404);
     expect(revokeUserSessions).not.toHaveBeenCalled();
+    // Nor a row about a deletion that did not happen: the log goes in after the delete's own answer
+    expect(logInstanceAudit).not.toHaveBeenCalled();
   });
 
   // An id that is not an id: `findById` rejects with a CastError, which used to leave this handler

@@ -129,7 +129,7 @@ export async function POST(request: Request) {
       target: user.username,
       detail: isBootstrap
         ? "the first account on this instance, made an administrator"
-        : "member",
+        : "a member",
     });
 
     return NextResponse.json(user, { status: 201 });

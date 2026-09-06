@@ -319,10 +319,10 @@ export const DELETE = withAdmin(async (_request, { params, user: admin }) => {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
-  await revokeUserSessions(user._id);
-
-  // After the delete, and named rather than referenced: the account is gone, so this row is the
-  // only place it is recorded that it ever existed or who removed it.
+  // After the delete and BEFORE the revoke, which is the opposite order to the password path
+  // above — and for the same reason it uses that one. There, nothing is committed until the save,
+  // so a failed revoke must leave the account untouched. Here the account is already gone, and a
+  // revoke that throws would take the only record of it having existed with it.
   void logInstanceAudit({
     action: "user_deleted",
     user: admin._id,
@@ -330,6 +330,8 @@ export const DELETE = withAdmin(async (_request, { params, user: admin }) => {
     target: user.username,
     detail: user.role === "admin" ? "an administrator" : "a member",
   });
+
+  await revokeUserSessions(user._id);
 
   return NextResponse.json({ message: "User deleted" });
 });

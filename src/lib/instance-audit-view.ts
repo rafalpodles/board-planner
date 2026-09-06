@@ -65,6 +65,21 @@ const NOTABLE = new Set<InstanceAuditAction>([
 
 type Entry = Pick<ApiInstanceAuditLog, "action" | "detail">;
 
+/**
+ * Who wrote the row, as this log can still name them.
+ *
+ * The stored username first, because the reference beside it resolves to null the moment that
+ * account is deleted — which used to rewrite every row an administrator had written as "system",
+ * the word reserved for a caller with no session at all (BP-539). The reference second, for the
+ * rows written before that field existed. "system" last, which is then the honest answer: either a
+ * machine wrote it, or it predates the fix and its author is gone.
+ */
+export function auditActor(
+  log: Pick<ApiInstanceAuditLog, "actorUsername" | "user">
+): string {
+  return log.actorUsername || log.user?.username || "system";
+}
+
 export function auditActionLabel(log: Entry): string {
   if (log.action === COMMAND_SENT) return COMMAND_LABELS[log.detail] ?? UNKNOWN_COMMAND;
   // The fallback is for an action this build has never heard of — a row written by a newer

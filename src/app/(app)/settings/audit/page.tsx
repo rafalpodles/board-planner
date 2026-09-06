@@ -6,7 +6,7 @@ import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/components/ui/Toast";
 import { ApiInstanceAuditLog } from "@/types";
-import { auditActionLabel, auditIsNotable } from "@/lib/instance-audit-view";
+import { auditActionLabel, auditActor, auditIsNotable } from "@/lib/instance-audit-view";
 
 export default function InstanceAuditPage() {
   const api = useApi();
@@ -50,9 +50,10 @@ export default function InstanceAuditPage() {
         <h2 className="text-lg font-semibold mb-1">Instance audit log</h2>
         <p className="text-sm text-text-muted">
           Instance-wide actions: stopping a machine, enrolling one, committing a project to
-          workers, and anything that changes how an account is signed into — a password set for
-          somebody, a reset by email, or an address moved, whether by an administrator or by the
-          account itself. Each project keeps its own log of its own settings, under that project.
+          workers, an account created, made an administrator or deleted, and anything that changes
+          how an account is signed into — a password set for somebody, a reset by email, or an
+          address moved, whether by an administrator or by the account itself. Each project keeps
+          its own log of its own settings, under that project.
         </p>
       </div>
 
@@ -76,7 +77,7 @@ export default function InstanceAuditPage() {
                   {/* "system" for a machine, matching the project log — a worker spending its
                       enrolment token has no session to attribute the row to */}
                   <td className="align-top font-medium sm:table-cell sm:whitespace-nowrap sm:px-3 sm:py-2">
-                    {log.actorUsername || log.user?.username || "system"}
+                    {auditActor(log)}
                   </td>
                   <td
                     className={`w-full align-top sm:table-cell sm:w-auto sm:whitespace-nowrap sm:px-3 sm:py-2 ${

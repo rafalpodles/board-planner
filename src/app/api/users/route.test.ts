@@ -56,7 +56,7 @@ describe("the row an account's creation leaves", () => {
       user: "a1",
       actorUsername: "rafal",
       target: "newcomer",
-      detail: "member",
+      detail: "a member",
     });
   });
 

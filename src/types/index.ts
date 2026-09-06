@@ -1322,7 +1322,9 @@ export interface IInstanceAuditLog {
 export interface ApiInstanceAuditLog {
   _id: string;
   user: { _id: string; username: string; fullName: string } | null;
-  actorUsername: string;
+  // Optional because `/api/admin/audit` reads with `.lean()`, which applies no schema default: a
+  // row written before this field existed comes back without the key at all
+  actorUsername?: string;
   action: InstanceAuditAction;
   target: string;
   detail: string;

@@ -402,9 +402,13 @@ test.describe("deleting a user", () => {
     await expect(auditRow).toContainText(MEMBER_USERNAME);
 
     // And the deletion itself, which nothing recorded before BP-538: the account is gone, so this
-    // row is the only place it is written down that it existed and who removed it.
+    // row is the only place it is written down that it existed and who removed it. Retried through
+    // a reload, like the rename above: the write is fire-and-forget, and this page asks once.
     const deletionRow = page.locator("tr", { hasText: "Account deleted" });
-    await expect(deletionRow).toBeVisible();
+    await expect(async () => {
+      await page.goto("/settings/audit");
+      await expect(deletionRow).toBeVisible({ timeout: 3_000 });
+    }).toPass({ timeout: 20_000 });
     await expect(deletionRow.locator("td").nth(1)).toHaveText(ADMIN_USERNAME);
     await expect(deletionRow).toContainText(MEMBER_USERNAME);
   });
