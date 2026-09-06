@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
+import { openLayerCount, subscribeLayers } from "@/lib/focus-trap";
 import { isPmRunnable } from "@/lib/pm/gate";
 import { projectRefFromPathname } from "@/lib/urls";
 import { ApiProject } from "@/types";
@@ -18,6 +19,10 @@ export function PmChatWidget() {
 
   const [project, setProject] = useState<ApiProject | null>(null);
   const [open, setOpen] = useState(false);
+  // A dialog is a bottom sheet on a phone, and this button is painted at the same z-50 over its
+  // action row: on a right-aligned footer it covers the primary button's own corner, so a finger
+  // there opens the PM chat instead (BP-589). Server-rendered as 0, which is what no dialog is.
+  const layers = useSyncExternalStore(subscribeLayers, openLayerCount, () => 0);
 
   useEffect(() => {
     setProject(null);
@@ -33,6 +38,9 @@ export function PmChatWidget() {
   if (!projectId || onPmPage || !project?.pmAvailable || !isPmRunnable(project?.pm)) {
     return null;
   }
+
+  // Its own panel registers no layer, so this only stands aside for somebody else's dialog
+  if (layers > 0) return null;
 
   return (
     <>

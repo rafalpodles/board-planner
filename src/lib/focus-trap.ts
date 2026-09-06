@@ -13,12 +13,24 @@ const FOCUSABLE_SELECTOR = [
 // owns Escape and Tab. The drawer registers here too, or a dialog opened from
 // inside it would fight it for both.
 const openLayers: HTMLElement[] = [];
+const layerListeners = new Set<() => void>();
 
 export function registerLayer(el: HTMLElement): () => void {
   openLayers.push(el);
+  layerListeners.forEach((notify) => notify());
   return () => {
     const at = openLayers.indexOf(el);
     if (at >= 0) openLayers.splice(at, 1);
+    layerListeners.forEach((notify) => notify());
+  };
+}
+
+// So anything the shell paints on top of a layer can stand aside while one is open — the count
+// is the single source of truth for "is there a dialog", and reading it is not enough on its own
+export function subscribeLayers(listener: () => void): () => void {
+  layerListeners.add(listener);
+  return () => {
+    layerListeners.delete(listener);
   };
 }
 

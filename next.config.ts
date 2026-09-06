@@ -1,6 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Next paints its dev indicator over the bottom-left of every page, which is exactly where a
+  // bottom sheet puts its action row on a phone — a real click there lands on the indicator, and
+  // the whole e2e suite runs `next dev` (BP-589). Development only; `next start` never had it.
+  devIndicators: false,
   // Next refuses to support `next start` against standalone output, and Railway deploys that way.
   // Only the Docker build asks for the minimal server, and it runs it directly.
   output: process.env.BUILD_STANDALONE ? "standalone" : undefined,
