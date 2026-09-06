@@ -51,6 +51,8 @@ export const GROUPS = {
     "project-dashboard.spec.ts",
     "my-tasks.spec.ts",
     "projects-list.spec.ts",
+    "project-audit-log.spec.ts",
+    "sidebar-reorder.spec.ts",
     "dashboard-reads-the-board.spec.ts",
     "dashboard-says-why.spec.ts",
     "instance-settings.spec.ts",
