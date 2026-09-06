@@ -81,6 +81,7 @@ export const POST = withAuth(async (request, { params, user }) => {
       action: "project_workers_enabled",
       target: key,
       user: String(user._id),
+      actorUsername: user.username,
       detail: `Enrolling ${enrolment.machineName}`,
     });
   }
@@ -116,6 +117,7 @@ export const POST = withAuth(async (request, { params, user }) => {
     action: "enrolment_token_spent",
     target: worker.name,
     user: String(user._id),
+    actorUsername: user.username,
     detail: `Enrolled for ${key} on ${enrolment.machineHost}`,
   });
 

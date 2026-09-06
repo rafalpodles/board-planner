@@ -40,6 +40,7 @@ export const POST = withAuth(async (request, { user }) => {
     action: "enrolment_token_minted",
     target: label || "unlabelled",
     user: String(user._id),
+    actorUsername: user.username,
     detail: `Expires ${expiresAt.toISOString()}`,
   });
 

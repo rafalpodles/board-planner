@@ -178,7 +178,7 @@ export const PATCH = withAuth(async (request, { params, user }) => {
   // Read off the pre-update document, which is still in hand: the entry describes a transition,
   // and "renamed to X" without the old name answers half the question somebody is asking.
   for (const entry of auditEntries(body, worker)) {
-    void logInstanceAudit({ ...entry, user: String(user._id) });
+    void logInstanceAudit({ ...entry, user: String(user._id), actorUsername: user.username });
   }
 
   return NextResponse.json(toApiWorker(updated));

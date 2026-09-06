@@ -172,9 +172,13 @@ describe("PUT /api/users/:id", () => {
       })
     );
 
-    const res = await PUT(put({ email: "taken@example.com" }), ctx());
+    // The screen sends `role` on every save (`settings/users/page.tsx`), so this request carries
+    // one too: the save rolls back, and a row saying the role changed would record something that
+    // did not happen
+    const res = await PUT(put({ email: "taken@example.com", role: "admin" }), ctx());
 
     expect(res.status).toBe(409);
+    expect(logInstanceAudit).not.toHaveBeenCalled();
   });
 
   it("does not ask whether an unchanged address is taken", async () => {
@@ -269,6 +273,9 @@ describe("PUT /api/users/:id — an admin sets a password", () => {
         action: "user_password_reset",
         target: "target",
         user: "admin-1",
+        // The name beside the reference, because the reference stops naming this administrator the
+        // day their own account goes (BP-539)
+        actorUsername: "rafal",
       })
     );
   });
@@ -401,8 +408,11 @@ describe("PUT /api/users/:id — an admin sets a password", () => {
     expect(target.save).not.toHaveBeenCalled();
   });
 
-  // The revoke and the audit hang off a flag; a role-only edit must not trip either
-  it("leaves sessions and the audit log alone when only the role changes", async () => {
+  // The revoke hangs off the password flag and a role-only edit must not trip it. The audit row
+  // does not: since BP-538 a role change writes one of its own, which is the whole point — this is
+  // the escalation path the branch above gates on `viaMachineCredential`, and it used to leave no
+  // trace at all.
+  it("leaves sessions alone when only the role changes, and records the change", async () => {
     const target = targetDoc({ role: "member" });
     found(target);
 
@@ -410,6 +420,24 @@ describe("PUT /api/users/:id — an admin sets a password", () => {
 
     expect(res.status).toBe(200);
     expect(revokeUserSessions).not.toHaveBeenCalled();
+    expect(logInstanceAudit).toHaveBeenCalledTimes(1);
+    expect(logInstanceAudit).toHaveBeenCalledWith({
+      action: "user_role_changed",
+      user: "admin-1",
+      actorUsername: "rafal",
+      target: "target",
+      // The direction, because "role changed" answers half the question somebody is asking
+      detail: "member → admin",
+    });
+  });
+
+  it("records nothing when the role submitted is the one already stored", async () => {
+    const target = targetDoc({ role: "member" });
+    found(target);
+
+    const res = await PUT(put({ role: "member" }), ctx());
+
+    expect(res.status).toBe(200);
     expect(logInstanceAudit).not.toHaveBeenCalled();
   });
 });
@@ -561,7 +589,7 @@ describe("DELETE /api/users/:id", () => {
     expect(userFindByIdAndDelete).toHaveBeenCalledWith(TARGET_HEX);
   });
 
-  it("still deletes an admin while another one remains", async () => {
+  it("still deletes an admin while another one remains, and says so in the row", async () => {
     found(person({ role: "admin" }));
     userCountDocuments.mockResolvedValue(2);
 
@@ -569,6 +597,11 @@ describe("DELETE /api/users/:id", () => {
 
     expect(res.status).toBe(200);
     expect(userFindByIdAndDelete).toHaveBeenCalled();
+    // Which kind of account it was, because that is the half of "who was deleted" the username
+    // does not answer
+    expect(logInstanceAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "user_deleted", detail: "an administrator" })
+    );
   });
 
   // A machine's account is not a person. The Users list does not offer one, and deleting it takes
@@ -601,6 +634,44 @@ describe("DELETE /api/users/:id", () => {
 
   // The gap between the check and the write. Two administrators on the same account: the loser
   // used to be told they had deleted it, because the delete's own answer was thrown away.
+  // BP-538. The account is gone, so this row is the only place it is recorded that it ever existed
+  // or who removed it — which is why `target` is the username and not a reference.
+  it("records the deletion, naming the account and who did it", async () => {
+    found(person({ role: "member" }));
+
+    await DELETE(...del(TARGET_HEX));
+
+    expect(logInstanceAudit).toHaveBeenCalledWith({
+      action: "user_deleted",
+      user: ADMIN_HEX,
+      actorUsername: "rafal",
+      target: "target",
+      detail: "a member",
+    });
+  });
+
+  // Why the row goes in before the revoke rather than after it, as the password path does: by this
+  // point the account is already gone, so a revoke that throws must not take the record with it.
+  it("records the deletion even if ending the sessions fails", async () => {
+    found(person());
+    revokeUserSessions.mockRejectedValueOnce(new Error("mongo is away"));
+
+    await expect(DELETE(...del(TARGET_HEX))).rejects.toThrow();
+
+    expect(logInstanceAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "user_deleted", target: "target" })
+    );
+  });
+
+  it("records nothing when the delete was refused", async () => {
+    found(person({ _id: ADMIN_HEX, role: "admin" }));
+
+    const res = await DELETE(...del(ADMIN_HEX));
+
+    expect(res.status).toBe(400);
+    expect(logInstanceAudit).not.toHaveBeenCalled();
+  });
+
   it("answers 404 when the account goes between the checks and the delete", async () => {
     found(person());
     userFindByIdAndDelete.mockResolvedValue(null);
@@ -609,6 +680,8 @@ describe("DELETE /api/users/:id", () => {
 
     expect(res.status).toBe(404);
     expect(revokeUserSessions).not.toHaveBeenCalled();
+    // Nor a row about a deletion that did not happen: the log goes in after the delete's own answer
+    expect(logInstanceAudit).not.toHaveBeenCalled();
   });
 
   // An id that is not an id: `findById` rejects with a CastError, which used to leave this handler

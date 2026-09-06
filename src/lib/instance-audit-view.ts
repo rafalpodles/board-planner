@@ -24,6 +24,10 @@ const LABELS: Partial<Record<InstanceAuditAction, string>> = {
   user_email_changed_self: "Address changed by the account itself",
   user_password_reset_by_email: "Password reset by email",
   user_full_name_changed_self: "Name changed by the account itself",
+  user_created: "Account created",
+  user_deleted: "Account deleted",
+  // The direction is in `detail`, the way the address change carries old → new
+  user_role_changed: "Role changed",
 };
 
 // The one action whose verb lives in `detail` rather than in its name, because a single endpoint
@@ -53,9 +57,28 @@ const NOTABLE = new Set<InstanceAuditAction>([
   // it decides where the next reset link lands, and it signs nobody out
   "user_email_changed_self",
   "user_password_reset_by_email",
+  // What an account may do, and whether it exists at all. Creation is routine and stays quiet;
+  // these two are the ones somebody scanning the log is looking for.
+  "user_role_changed",
+  "user_deleted",
 ]);
 
 type Entry = Pick<ApiInstanceAuditLog, "action" | "detail">;
+
+/**
+ * Who wrote the row, as this log can still name them.
+ *
+ * The stored username first, because the reference beside it resolves to null the moment that
+ * account is deleted — which used to rewrite every row an administrator had written as "system",
+ * the word reserved for a caller with no session at all (BP-539). The reference second, for the
+ * rows written before that field existed. "system" last, which is then the honest answer: either a
+ * machine wrote it, or it predates the fix and its author is gone.
+ */
+export function auditActor(
+  log: Pick<ApiInstanceAuditLog, "actorUsername" | "user">
+): string {
+  return log.actorUsername || log.user?.username || "system";
+}
 
 export function auditActionLabel(log: Entry): string {
   if (log.action === COMMAND_SENT) return COMMAND_LABELS[log.detail] ?? UNKNOWN_COMMAND;
