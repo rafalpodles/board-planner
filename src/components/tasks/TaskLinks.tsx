@@ -6,7 +6,7 @@ import { ApiTask, ApiTaskLink, DependencyType } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { taskPath } from "@/lib/urls";
-import { useOpenTask } from "@/components/tasks/task-surface";
+import { useOpenTask } from "@/hooks/use-open-task";
 
 const DEPENDENCY_LABELS: { value: DependencyType; label: string }[] = [
   { value: "blocked_by", label: "Blocked by" },

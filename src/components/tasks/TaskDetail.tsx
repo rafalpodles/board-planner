@@ -30,7 +30,7 @@ import { useScrolledBehind } from "@/components/tasks/detail/atoms";
 import { useTaskEditor } from "@/components/tasks/detail/useTaskEditor";
 import type { Trigger } from "@/hooks/use-trigger-autocomplete";
 import { useEditorTriggers } from "@/hooks/use-editor-triggers";
-import { useOpenTask } from "@/components/tasks/task-surface";
+import { useOpenTask } from "@/hooks/use-open-task";
 
 interface TaskDetailProps {
   projectId: string;

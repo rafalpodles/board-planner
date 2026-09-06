@@ -27,3 +27,9 @@ export function projectPath(projectRef: string): string {
 export function taskPath(projectRef: string, taskRef: string | number): string {
   return `/projects/${projectRef}/tasks/${taskRef}`;
 }
+
+export function isTaskPath(pathname: string | null | undefined): boolean {
+  if (!pathname) return false;
+  const [, base, ref, tasks, taskRef] = pathname.split("/");
+  return base === "projects" && !!projectRefFromPathname(`/${base}/${ref}`) && tasks === "tasks" && !!taskRef;
+}
