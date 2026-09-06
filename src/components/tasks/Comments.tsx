@@ -20,7 +20,7 @@ interface CommentsProps {
   projectId: string;
   taskId: string;
   hideHeading?: boolean;
-  onCountChange?: (count: number) => void;
+  onCountChange?: (count: number | null) => void;
   /** Bumped when a comment is posted from somewhere else, e.g. the phone's bottom bar */
   refreshKey?: number;
   // Adding, editing and deleting a comment each write an activity entry; reacting does not
@@ -41,6 +41,7 @@ export function Comments({
   const [comments, setComments] = useState<ApiComment[]>([]);
   const [loadFailed, setLoadFailed] = useState(false);
   const [reading, setReading] = useState(true);
+  const loadSeq = useRef(0);
   const [body, setBody] = useState("");
   const [loading, setLoading] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -56,20 +57,25 @@ export function Comments({
   const { toast } = useToast();
 
   async function loadComments() {
+    // A task switch reconciles this panel in place, so the previous task's read is still in
+    // flight and would otherwise land as this task's discussion
+    const seq = ++loadSeq.current;
     try {
       const data = await api.get(
         `/api/projects/${projectId}/tasks/${taskId}/comments`
       );
+      if (seq !== loadSeq.current) return;
       setComments(data);
       setLoadFailed(false);
       onCountChange?.(data.length);
     } catch {
       // "No comments yet" is a claim about the discussion on this task, and a read that never
       // answered supports none. The toast clears after three seconds; the sentence would not.
+      if (seq !== loadSeq.current) return;
       setLoadFailed(true);
       toast("Failed to load comments", "error");
     } finally {
-      setReading(false);
+      if (seq === loadSeq.current) setReading(false);
     }
   }
 
@@ -79,6 +85,8 @@ export function Comments({
     setReading(true);
     setLoadFailed(false);
     setComments([]);
+    // The count belongs to the task that was here a moment ago; nobody knows this one's yet
+    onCountChange?.(null);
     loadComments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId]);

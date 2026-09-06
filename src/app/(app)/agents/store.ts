@@ -35,13 +35,15 @@ export function useStore() {
     // rejection lands after a newer success and hangs a "may be out of date" banner over current
     // data, and a slow success overwrites newer rows while clearing the banner that said so.
     const seq = ++loadSeq.current;
-    setFailed(false);
     setRefreshing(true);
     try {
       const [a, b] = await Promise.all([api.get("/api/agents"), api.get("/api/agent-blocks")]);
       if (seq !== loadSeq.current) return;
       setAgents(Array.isArray(a) ? (a as ApiAgent[]) : []);
       setBlocks(Array.isArray(b) ? (b as ApiAgentBlock[]) : []);
+      // Cleared by an answer, not by the click: clearing it up front unmounted the banner that
+      // was about to say "Retrying…", so the screen went quiet and the failure came back later
+      setFailed(false);
     } catch {
       // Without this the rejection went unhandled and the catalog rendered as empty — on the
       // agent screen that reads as deleted rather than as unread (BP-577)

@@ -143,6 +143,30 @@ describe("the agents catalog when the read fails", () => {
     expect(screen.queryByTestId("agents-catalog-error")).toBeNull();
   });
 
+  // The banner has to survive its own Retry: clearing `failed` on the click unmounted the very
+  // thing that was about to say it was retrying
+  it("keeps the banner, saying Retrying…, while the retry is in flight", async () => {
+    api.get.mockImplementation(() => Promise.resolve([AGENT]));
+    api.del.mockResolvedValue({});
+    render(<AgentsPage />);
+    await waitFor(() => expect(screen.getAllByText("Implement").length).toBeGreaterThan(0));
+
+    api.get.mockImplementation(() => Promise.reject(new Error("network")));
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("Delete Implement"));
+    });
+    await waitFor(() => expect(screen.getByTestId("agents-catalog-stale")).toBeTruthy());
+
+    api.get.mockImplementation(() => new Promise(() => {}));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    });
+
+    expect(screen.getByTestId("agents-catalog-stale")).toBeTruthy();
+    const retry = screen.getByRole("button", { name: "Retrying…" }) as HTMLButtonElement;
+    expect(retry.disabled).toBe(true);
+  });
+
   // Without this control the failure branch could be rendering unconditionally
   it("still says nothing was created when the read answers with nothing", async () => {
     serve([]);

@@ -292,6 +292,53 @@ describe("Comments when the read fails", () => {
     await waitFor(() => expect(screen.getByText("No comments yet")).toBeTruthy());
   });
 
+  // The out-of-order half: the previous task's read is still in flight when the new one answers
+  it("ignores the previous task's read when it lands late", async () => {
+    const pending: ((rows: unknown[]) => void)[] = [];
+    api.get.mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
+    const view = render(<Comments projectId="TP" taskId="t1" />);
+
+    view.rerender(<Comments projectId="TP" taskId="t2" />);
+    await act(async () => pending[pending.length - 1]([]));
+    await waitFor(() => expect(screen.getByText("No comments yet")).toBeTruthy());
+
+    // t1 answers at last, with a comment that belongs to a task nobody is looking at
+    await act(async () => pending[0]([comment]));
+
+    expect(screen.queryByText("Kasia Nowak")).toBeNull();
+    expect(screen.getByText("No comments yet")).toBeTruthy();
+  });
+
+  it("does not let the previous task's failure claim the new task's discussion", async () => {
+    const pending: { resolve: (rows: unknown[]) => void; reject: (e: Error) => void }[] = [];
+    api.get.mockImplementation(
+      () => new Promise((resolve, reject) => pending.push({ resolve, reject }))
+    );
+    const view = render(<Comments projectId="TP" taskId="t1" />);
+
+    view.rerender(<Comments projectId="TP" taskId="t2" />);
+    await act(async () => pending[pending.length - 1].resolve([comment]));
+    await waitFor(() => expect(screen.getByText("Kasia Nowak")).toBeTruthy());
+
+    await act(async () => pending[0].reject(new Error("network")));
+
+    expect(screen.queryByTestId("comments-error")).toBeNull();
+    expect(screen.getByText("Kasia Nowak")).toBeTruthy();
+  });
+
+  // The tab badge is fed from here, and 3 is the count of a task nobody is looking at any more
+  it("withdraws the count it reported when the task changes", async () => {
+    const onCountChange = vi.fn();
+    serve([comment]);
+    const view = render(<Comments projectId="TP" taskId="t1" onCountChange={onCountChange} />);
+    await waitFor(() => expect(onCountChange).toHaveBeenCalledWith(1));
+
+    api.get.mockImplementation(() => new Promise(() => {}));
+    view.rerender(<Comments projectId="TP" taskId="t2" onCountChange={onCountChange} />);
+
+    expect(onCountChange).toHaveBeenLastCalledWith(null);
+  });
+
   // Without this control the failure branch could be rendering whenever the list is empty
   it("still says there are none when the read answers with none", async () => {
     serve([]);
