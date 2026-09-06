@@ -16,9 +16,18 @@ test.beforeEach(seed);
 
 const SETTINGS = `/projects/${PROJECT_KEY}/settings`;
 
+/**
+ * Waits for the read, not for the card. The card renders "No settings changes recorded yet."
+ * before its request has been made — the empty state is also the pre-fetch state (BP-548) — so
+ * asserting on what is on screen at load time says nothing about what the server holds.
+ */
 async function openAuditLog(page: Page) {
+  const read = page.waitForResponse(
+    (response) => response.url().includes("/audit") && response.request().method() === "GET"
+  );
   await page.goto(`${SETTINGS}?section=audit`);
   await expect(page.getByRole("heading", { name: "Audit log", exact: true })).toBeVisible();
+  expect((await read).status()).toBe(200);
 }
 
 /**
