@@ -102,6 +102,7 @@ export const GROUPS = {
     "pm-assignment-is-a-handover.spec.ts",
     "pm-autonomy.spec.ts",
     "pm-what-a-turn-costs.spec.ts",
+    "pm-mcp-tool-picker.spec.ts",
     "select-has-a-name.spec.ts",
     "rows-announce-apart.spec.ts",
     "removed-member-notifications.spec.ts",

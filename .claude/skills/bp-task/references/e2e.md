@@ -21,7 +21,7 @@ docker run -d --name bp$N-mongo -p 27$N:27017 mongo:4.4
 E2E_MONGODB_URI=mongodb://localhost:27$N/bp${N}_e2e E2E_PORT=$((30000 + N * 10)) npx playwright test e2e/<name>.spec.ts
 ```
 
-The database name must end in `_e2e`. A run owns `E2E_PORT` through `E2E_PORT+5`. `docker rm -f bp$N-mongo` once the task is done.
+The database name must end in `_e2e`. A run owns `E2E_PORT` through `E2E_PORT+6` (the last is the outbound MCP server stub). `docker rm -f bp$N-mongo` once the task is done.
 
 - Before believing a failure: `ps aux | grep -E "[p]laywright|[n]ext dev"` (a sibling suite), `docker ps` (the container), `df -h /System/Volumes/Data` (a full disk kills Mongo mid-suite and reads as two product bugs).
 - After any `next dev` in the worktree, `rm -rf .next` before `npm run build`, or the build fails on stale generated types.
