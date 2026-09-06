@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { Modal } from "@/components/ui/Modal";
 
 interface ShortcutHelpProps {
   open: boolean;
@@ -42,58 +42,28 @@ const SHORTCUT_GROUPS = [
 ];
 
 export function ShortcutHelp({ open, onClose }: ShortcutHelpProps) {
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
-
-  useEffect(() => {
-    if (!open) return;
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key !== "Escape") return;
-      e.preventDefault();
-      onCloseRef.current();
-    }
-    // BP-522: a dep on onClose resubscribes mid-dispatch, and a listener added during a
-    // dispatch never sees that event. `?` is the board's, so one listener owns each key
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [open]);
-
-  if (!open) return null;
-
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      onClick={onClose}
-    >
-      <div
-        className="bg-bg-card border border-border rounded-xl shadow-xl p-6 max-w-md w-full mx-4
-          max-h-[85vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="text-lg font-semibold mb-4">Keyboard Shortcuts</h2>
-        <div className="space-y-4">
-          {SHORTCUT_GROUPS.map(({ title, shortcuts }) => (
-            <section key={title}>
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-text-muted mb-2">
-                {title}
-              </h3>
-              <div className="space-y-2">
-                {shortcuts.map(({ key, description }) => (
-                  <div key={key} className="flex items-center justify-between gap-4">
-                    <span className="text-sm text-text-muted">{description}</span>
-                    <kbd className="text-xs bg-bg-input border border-border px-2 py-1 rounded font-mono whitespace-nowrap">
-                      {key}
-                    </kbd>
-                  </div>
-                ))}
-              </div>
-            </section>
-          ))}
-        </div>
-        <p className="text-xs text-text-muted mt-4">
-          Shortcuts are disabled when typing in inputs.
-        </p>
+    <Modal open={open} onClose={onClose} title="Keyboard Shortcuts" size="sm">
+      <div className="space-y-4">
+        {SHORTCUT_GROUPS.map(({ title, shortcuts }) => (
+          <section key={title}>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-text-muted mb-2">
+              {title}
+            </h3>
+            <div className="space-y-2">
+              {shortcuts.map(({ key, description }) => (
+                <div key={key} className="flex items-center justify-between gap-4">
+                  <span className="text-sm text-text-muted">{description}</span>
+                  <kbd className="text-xs bg-bg-input border border-border px-2 py-1 rounded font-mono whitespace-nowrap">
+                    {key}
+                  </kbd>
+                </div>
+              ))}
+            </div>
+          </section>
+        ))}
       </div>
-    </div>
+      <p className="text-xs text-text-muted mt-4">Shortcuts are disabled when typing in inputs.</p>
+    </Modal>
   );
 }

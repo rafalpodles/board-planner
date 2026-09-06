@@ -188,3 +188,131 @@ test("? still closes the help after a reload has reordered the listeners", async
   await page.keyboard.press("?");
   await expect(help(page)).toBeHidden();
 });
+
+/**
+ * BP-530. The same overlay, measured as an assistive technology and a keyboard see it.
+ *
+ * BP-522 fixed Escape and deliberately left the rest: the help hand-rolled its overlay instead of
+ * going through `Modal`, so it had no `role="dialog"` and no accessible name, focus was never
+ * moved into it and Tab walked out through the backdrop into the sidebar, the page behind stayed
+ * scrollable, and — registering no focus-trap layer — it let the board's Escape branch run beside
+ * its own and clear a card selection nobody had touched.
+ *
+ * Each of the four asserts one of those on its own. Only the first *gates* on `role="dialog"`;
+ * the other three wait for the heading, which is on screen either way, so a run says which of the
+ * four gaps is open rather than four times that the first one is. Their control is the `?` toggle
+ * test above — routing the help through `Modal` must not cost the board the key it owns.
+ */
+
+const helpDialog = (page: Page) => page.getByRole("dialog", { name: "Keyboard Shortcuts" });
+
+const activeElementIsInsideTheHelp = (page: Page) =>
+  page.evaluate(() => {
+    const active = document.activeElement;
+    const dialog = document.querySelector('[role="dialog"]');
+    return active !== null && dialog !== null && dialog.contains(active);
+  });
+
+const collapseSidebar = (page: Page) =>
+  page.getByRole("button", { name: /(Collapse|Expand) sidebar/ });
+
+test("the help announces as a dialog named after its heading", async ({ page }) => {
+  await openBoard(page);
+
+  await page.keyboard.press("?");
+  // Measured: `[role="dialog"]` elements in the document — 0. A screen reader was told nothing
+  // opened, and there was no name to announce if it had been
+  await expect(helpDialog(page)).toBeVisible();
+});
+
+test("focus moves into the help and Tab never reaches the sidebar behind it", async ({ page }) => {
+  await openBoard(page);
+
+  await page.keyboard.press("?");
+  await expect(help(page)).toBeVisible();
+  // Measured at open: BODY. Focus was never moved into the overlay at all
+  await expect.poll(() => activeElementIsInsideTheHelp(page)).toBe(true);
+
+  // Measured: four presses walked out of the backdrop and into the sidebar's Collapse button.
+  // Asserted as where focus *is* rather than as one place it is not — a `.not.toBe(thatButton)`
+  // is satisfied by any of the several other elements Tab used to reach on the way there
+  for (let i = 0; i < 4; i++) {
+    await page.keyboard.press("Tab");
+    await expect.poll(() => activeElementIsInsideTheHelp(page)).toBe(true);
+  }
+
+  // The control: that button is on the page and tabbable, so Tab staying put is the trap holding
+  // rather than the target being gone
+  await expect(collapseSidebar(page)).toBeVisible();
+});
+
+/**
+ * Measured on the board before the help opens: `body` and `html` are both unscrollable there — the
+ * shell scrolls inside its own containers — so `overflow: hidden` has nothing to stop on this
+ * page and this asserts the lock, not movement. It is still the assertion worth having: the lock
+ * is what holds on any surface where the body *is* the scrollport, and asserting both halves means
+ * a pass is not the body having been unscrollable all along.
+ */
+test("the page behind the help does not scroll, and scrolls again once it closes", async ({
+  page,
+}) => {
+  await openBoard(page);
+
+  await page.keyboard.press("?");
+  await expect(help(page)).toBeVisible();
+  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("hidden");
+
+  await page.keyboard.press("Escape");
+  await expect(help(page)).toBeHidden();
+  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("");
+});
+
+test("Escape closes the help without also clearing the selection underneath it", async ({
+  page,
+}) => {
+  await openBoard(page);
+
+  await card(page).click({ modifiers: ["Shift"] });
+  await expect(selectBox(page)).toHaveAttribute("aria-pressed", "true");
+
+  await page.keyboard.press("?");
+  await expect(help(page)).toBeVisible();
+
+  // The help registered no layer, so `openLayerCount()` was 0 and the board's Escape branch ran
+  // beside the help's own: one press closed the help and emptied a selection nobody asked it to.
+  // The bulk-delete confirm above is the same arbitration, from a layer that did register
+  await page.keyboard.press("Escape");
+  await expect(help(page)).toBeHidden();
+  await expect(selectBox(page)).toHaveAttribute("aria-pressed", "true");
+});
+
+/**
+ * The fifth, and the one that made BP-530 more than a markup change.
+ *
+ * Routing the help through `Modal` gave away the ref that the hand-rolled version kept its
+ * `onClose` in. `useFocusTrap`'s keydown effect lists `onEscape` in its deps, and every caller
+ * passes an inline arrow — so any state write during an Escape dispatch re-renders the board, the
+ * trap tears its listener down and re-adds it mid-dispatch, and a listener added during a dispatch
+ * is not called for that event. That is BP-522's bug, one layer down.
+ *
+ * The card's context menu is the reachable way to cause the write: it keeps its own listener and
+ * registers no layer, so its `onClose` sets board state while the help's trap is subscribed. One
+ * Escape closed the menu and left the help open — worst for the reader this ticket is about, since
+ * `aria-modal` tells them the menu behind is not there.
+ *
+ * The fix belongs in `use-focus-trap.ts`, so it holds for every dialog, not just this one.
+ */
+test("Escape closes the help even when a context menu closes on the same press", async ({
+  page,
+}) => {
+  await openBoard(page);
+
+  await card(page).click({ button: "right" });
+  await expect(contextMenu(page)).toBeVisible();
+  await page.keyboard.press("?");
+  await expect(help(page)).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(contextMenu(page)).toBeHidden();
+  await expect(help(page)).toBeHidden();
+});
