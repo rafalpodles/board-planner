@@ -4,12 +4,12 @@ Independent means agents that did not write the change. Give each one the worktr
 
 ## Size it to the diff
 
-| Diff | Lenses |
+| Diff | Review |
 |------|--------|
-| S/M ticket, one or two files, under about 50 lines | correctness, test honesty. Direct reads, no verifier. |
-| Anything larger, multi-file, or touching auth, sessions, data integrity, workers | correctness and regression, integration with code the branch did not write, UX and accessibility, test quality, contract and degradation. Each lens gets an adversarial verifier whose job is to refute its findings; only survivors count. |
+| S/M ticket, one or two files, under about 50 lines | one reviewer, correctness and test honesty in the same brief. |
+| Anything larger, multi-file, or touching auth, sessions, data integrity, workers | separate lenses: correctness and regression, integration with code the branch did not write, UX and accessibility, test quality, contract and degradation. Each lens gets an adversarial verifier whose job is to refute its findings; only survivors count. |
 
-Test honesty lens: name the production mutation that turns each new test red, or it is decoration.
+Test honesty: name the production mutation that turns each new test red, or it is decoration.
 
 ## Running reviewers
 
@@ -21,9 +21,9 @@ Test honesty lens: name the production mutation that turns each new test red, or
 
 ## The loop
 
-1. Fix every bug the round found. Nits (style, naming, "could also") do not block; say which you skipped.
-2. Send the delta to the same reviewers (SendMessage keeps their context).
-3. Repeat until a round returns zero bugs. There is no cap on rounds.
+1. Fix every bug the round found. Nits (style, naming, "could also") do not block; apply the ones worth it, say which you skipped.
+2. A round that found a bug: send the delta to the same reviewers (SendMessage keeps their context), who read only the delta. A round that found nits only: the loop is over, no re-review of the nit fixes.
+3. Repeat until a round returns zero bugs. Four lines of production code get at most two rounds in practice; more means the reviews are re-reading what they already accepted.
 4. Then mutation-check every new test yourself (the red check in `e2e.md`).
 5. A finding outside the task: fix it now when it belongs to the task; otherwise `create_task` in `todo` with file:line, after grepping `list_tasks` titles for a duplicate.
 
