@@ -595,12 +595,13 @@ test.describe("what happens when the task is closed", () => {
   // requests on the wire close enough together to reach a window measured in milliseconds, and the
   // fixture is otherwise the same "closing a recurring task" every test above already sets up.
   //
-  // Both PATCH .../status, not one of each writer: measured against the unfixed code, a PATCH
-  // raced against a PUT (the board vs. the detail view — updateTask does an extra Project.findById
-  // before its own read of oldTask) consistently let the PATCH land first and never reproduced the
-  // double mint, three runs straight — a test that cannot go red proves nothing. Two identical,
-  // identically-timed writers is what actually forces the window. updateTask's own guard is
-  // covered directly, and deterministically, by the unit tests next to it in task-service.test.ts.
+  // Both PATCH .../status, not one of each writer: a PATCH raced against a PUT (the board vs. the
+  // detail view — updateTask does an extra Project.findById before its own read of oldTask, which
+  // tends to let the PATCH land first) reproduced the double mint on the unfixed code in only
+  // roughly 1 run in 3 across a larger sample — real, but too flaky to serve as this branch's
+  // proof. Two identical, identically-timed writers forces the window far more reliably. That
+  // narrows what THIS test exercises to changeStatus racing itself; updateTask's own guard is
+  // covered separately, and deterministically, by the unit tests next to it in task-service.test.ts.
   test("two overlapping closes mint at most one occurrence", async ({ request }) => {
     const due = BASE_DUE();
     await giveDueDate(due);

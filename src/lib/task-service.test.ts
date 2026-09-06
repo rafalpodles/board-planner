@@ -1940,8 +1940,11 @@ describe("two overlapping closes of the same recurring task (BP-489)", () => {
     setup({ recurrence: { frequency: "weekly", interval: 1 } });
     findOneAndUpdate.mockReturnValue({ populate: () => Promise.resolve(null) });
 
-    await changeStatus("p1", "t1", "shipped", "actor");
+    const result = await changeStatus("p1", "t1", "shipped", "actor");
 
+    // Without this, reverting the null-handling branch back to a bare 404 leaves this test
+    // green: a 404 never calls the webhook or Task.create either, for the wrong reason.
+    expect(result.ok).toBe(true);
     expect(dispatchWebhooks).not.toHaveBeenCalled();
     expect(taskCreate).not.toHaveBeenCalled();
   });
