@@ -521,6 +521,38 @@ test.describe("sprints from the card menu", () => {
     });
   });
 
+  /**
+   * BP-528. handleBulkSprint ran the per-task PUTs through Promise.all inside a try/catch: the
+   * first rejection skipped applySprintChange and the toast entirely, even for the task whose PUT
+   * had already landed server-side — and left the selection standing as if nothing had happened.
+   */
+  test("one task's PUT failing does not hide the other's success, and the selection clears", async ({
+    page,
+    request,
+  }) => {
+    await openBoard(page, PLANNED_CARDS);
+    await select(page, [SIBLING_TASK_NUMBER, FINISHED_TASK_NUMBER]);
+
+    await page.route(`**/api/projects/*/tasks/${FINISHED_TASK_ID}`, (route) => {
+      if (route.request().method() !== "PUT") return route.continue();
+      return route.fulfill({ status: 500, body: "{}" });
+    });
+
+    const succeeded = taskWrite(page, "PUT", SIBLING_TASK_ID);
+    const failed = taskWrite(page, "PUT", FINISHED_TASK_ID);
+    const menu = await openMenuOn(page, SIBLING_TASK_NUMBER);
+    await menu.getByRole("button", { name: new RegExp(`^${PLANNING_SPRINT_NAME}`) }).click();
+    expect((await succeeded).status()).toBe(200);
+    expect((await failed).status()).toBe(500);
+
+    await expectToast(page, `Moved 1 of 2 to ${PLANNING_SPRINT_NAME}`);
+    // The move that already landed is kept, not thrown away with the one that didn't
+    expect((await readTask(request, SIBLING_TASK_NUMBER)).body.sprint).toBe(String(PLANNING_SPRINT_ID));
+    expect((await readTask(request, FINISHED_TASK_NUMBER)).body.sprint).toBeNull();
+    // Spent either way — a person is not left re-selecting the same two tasks to retry
+    await expect(page.getByRole("button", { name: "Select", exact: true })).toBeVisible();
+  });
+
   test("on a board scoped to the sprint, a card removed from it leaves the board", async ({
     page,
     request,
