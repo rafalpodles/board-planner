@@ -15,12 +15,26 @@ import { signIn } from "./session";
  * pair, and the assertions are `toHaveCount(1)` rather than `toBeVisible()` so a name shared by
  * both rows fails as a count of 2 instead of passing on the first match.
  *
+ * **A placeholder IS a name, which is why the sweep alone would not have caught most of this.**
+ * BP-510 says the placeholder-only boxes lose their name "as soon as somebody types". Measured
+ * here with `ariaSnapshot`, against this app, with the fix removed: they do not. Chrome falls back
+ * to the placeholder and keeps it whatever the field holds —
+ *
+ *     - textbox "name (slug, e.g. notion)": acme
+ *
+ * So the defect is not an unnamed control. It is that the name is a *hint* rather than a label
+ * (WCAG 3.3.2), that every row carries the identical one, and that the on-screen cue a sighted
+ * reader had is gone the moment the field is used. `namelessControls` below cannot see any of
+ * that — it finds controls with no name at all, which is what the worker policy inputs were. The
+ * per-control assertions are what protect the placeholder-only ones, and reverting any one of
+ * them reddens the test that names it.
+ *
  * **What this does not cover.** The per-server `Enabled` and `Allow writes` switches still
  * announce identically across rows. `Switch` takes its name from its visible label and offers no
  * way to add the row's name without either changing what is on screen or widening the component,
- * so they were left alone — and `namelessControls` below cannot see them either, since they are
- * named, just not apart. Asserted as the known limit in the last test, so the day somebody fixes
- * them this spec goes red and gets updated rather than silently over-claiming.
+ * so they were left alone — and `namelessControls` cannot see them either, since they are named,
+ * just not apart. Asserted as the known limit in the last test, so the day somebody fixes them
+ * this spec goes red and gets updated rather than silently over-claiming.
  */
 
 test.beforeEach(seed);
@@ -290,8 +304,9 @@ test.describe("a settings row says which row it is", () => {
     await expect(search).toHaveCount(1);
     await expect(search).toHaveAccessibleName("Search tasks to link");
 
-    // Typed into, which is where a placeholder stops being a label a sighted reader can see —
-    // the name has to be something the field carries rather than something it displays
+    // Typed into, which is where the placeholder stops being visible. It does NOT stop being the
+    // accessible name — see the note at the top of this file — so what this pins is that the box
+    // is named by a label of its own rather than by the hint it displays.
     await search.fill("Free");
     await expect(search).toHaveValue("Free");
     await expect(search).toHaveAccessibleName("Search tasks to link");
