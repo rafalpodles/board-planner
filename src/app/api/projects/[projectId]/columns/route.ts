@@ -54,6 +54,14 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
   }
 
   const existingIds = new Set((project.columns || []).map((c) => c.id));
+  // Which existing ids the incoming board claims by identity, resolved before a single slug is
+  // handed out. A slug must not be able to take one: the column that owns it is staying, and
+  // every task standing in it names that id (BP-536).
+  const claimed = new Set(
+    columns
+      .filter((raw) => typeof raw?.id === "string" && existingIds.has(raw.id))
+      .map((raw) => raw.id as string)
+  );
   const usedIds = new Set<string>();
   const clean: { id: string; label: string; color: string; role: ColumnRole; order: number; triggersPmReview: boolean }[] = [];
 
@@ -75,7 +83,8 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
       );
     }
     // Existing columns keep their immutable id; new ones get a slug from the label
-    let id = typeof raw.id === "string" && existingIds.has(raw.id) ? raw.id : slugify(label);
+    const keepsItsOwn = typeof raw.id === "string" && existingIds.has(raw.id);
+    let id = keepsItsOwn ? raw.id : slugify(label);
     if (!id) {
       return NextResponse.json(
         { error: `Column label "${label}" produces an empty id` },
@@ -84,7 +93,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     }
     let candidate = id;
     let n = 2;
-    while (usedIds.has(candidate)) {
+    while (usedIds.has(candidate) || (!keepsItsOwn && claimed.has(candidate))) {
       candidate = `${id}_${n++}`;
     }
     id = candidate;
@@ -102,7 +111,10 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
 
   // Before the role rule below: a column that still holds tasks is the more local refusal, and
   // the one whose fix — move the tasks — the person has to make first whatever else is wrong
-  const removed = (project.columns || []).filter((c) => !usedIds.has(c.id));
+  // Removed means no incoming column claims it, not merely that its id went unused: a new
+  // column taking the id of one being dropped used to make the dropped one invisible here, so
+  // the check below never ran for it (BP-536).
+  const removed = (project.columns || []).filter((c) => !claimed.has(c.id));
   for (const col of removed) {
     const inUse = await Task.find({ project: projectId, status: col.id })
       .select("taskNumber")

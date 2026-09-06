@@ -2,11 +2,13 @@ import { test, expect, type APIRequestContext, type Page } from "@playwright/tes
 import { ADMIN_AUTH } from "./api";
 import {
   HELD_TASK_KEY,
+  HELD_TASK_TITLE,
   demoteActiveColumn,
   demoteDoneColumn,
   PROJECT_ID,
   PROJECT_KEY,
   SIBLING_TASK_KEY,
+  SIBLING_TASK_TITLE,
   seed,
   seedSecondEscalationColumn,
   seedWebhookDeliveryOutcomes,
@@ -469,6 +471,90 @@ test.describe("Board · Columns", () => {
 
     await roleOf(page, "To Do").selectOption("backlog");
     await expect(page.getByText(WARNING)).toBeVisible();
+  });
+});
+
+/**
+ * BP-536. A column's id is handed out before the de-duplication that protects it, so a *new*
+ * column processed earlier can take an id a *staying* column is about to ask for. The staying
+ * one — the real owner, with tasks standing in it — is pushed to `<id>_2`.
+ *
+ * The guard twenty lines below never fires, and that is the sharp part: `removed` is
+ * `current.filter((c) => !usedIds.has(c.id))`, and the stolen id **is** in `usedIds` — claimed by
+ * the thief. So "still has tasks" is not merely bypassed for a column being dropped; it is
+ * bypassed for a column that is *staying* and losing its identity, which is the case it exists to
+ * catch. The role rule passes too, because the displaced column keeps carrying the role.
+ *
+ * The label here slugifies onto `in_progress` while reading differently on screen, so the two
+ * columns can be told apart in an assertion. A person doing this by hand would more likely type
+ * the same label twice; the mechanism is identical and the test would then be unable to say which
+ * column it had found.
+ */
+test.describe("Board · a new column that wants an id somebody is standing in", () => {
+  test("cannot take it, and the tasks stay under the column they were in", async ({
+    page,
+    request,
+  }) => {
+    await signIn(page);
+    await openSection(page, "Board");
+
+    // The premise, from the server: In Progress owns `in_progress` and two tasks stand in it
+    const before = await storedColumns(request);
+    expect(before.find((c) => c.label === "In Progress")?.id).toBe("in_progress");
+
+    await page.getByPlaceholder("New column name...").fill("In-Progress");
+    await page.getByRole("button", { name: "Add column" }).click();
+
+    // Up from the end to index 2, so the newcomer is processed before the column it collides
+    // with — the whole bug is an ordering one, and appended-last it never triggers
+    for (let from = 7; from > 2; from--) {
+      await page.getByRole("button", { name: "Move column up" }).nth(from).click();
+    }
+    expect(
+      (await labelsInOrder(page, 8)).slice(1, 4),
+      "the newcomer did not end up above In Progress on screen"
+    ).toEqual(["To Do", "In-Progress", "In Progress"]);
+
+    await save(page, "Columns saved");
+
+    const stored = await storedColumns(request);
+    expect(stored.find((c) => c.label === "In Progress")?.id).toBe("in_progress");
+    expect(stored.find((c) => c.label === "In-Progress")?.id).toBe("in_progress_2");
+    // The role went with the id, not with the position
+    expect(stored.find((c) => c.id === "in_progress")?.role).toBe("active");
+
+    // Where a person meets it: the two cards keep `status: "in_progress"` whatever happens here,
+    // so the question is only which column that id now names — and the heading over them says it
+    await page.goto(`/projects/${PROJECT_KEY}`);
+    const column = page.getByTestId("column-in_progress");
+    await expect(column.getByRole("heading", { name: "In Progress", exact: true })).toBeVisible();
+    await expect(column.getByText(HELD_TASK_TITLE)).toBeVisible();
+    await expect(column.getByText(SIBLING_TASK_TITLE)).toBeVisible();
+  });
+
+  // The other door to the same harm. Here the removal is real and deliberate, and the guard has
+  // to refuse it — but the newcomer's slug filled the vacancy, so the column being dropped no
+  // longer looked absent and the check skipped it. Which is why "removed" cannot be read off the
+  // final ids: it is a question about who claimed what, not about which ids ended up spoken for.
+  test("and taking the id of one being removed does not excuse it from the task check", async ({
+    page,
+    request,
+  }) => {
+    await signIn(page);
+    await openSection(page, "Board");
+
+    await page.getByRole("button", { name: "Remove In Progress" }).click();
+    await page.getByPlaceholder("New column name...").fill("In-Progress");
+    await page.getByRole("button", { name: "Add column" }).click();
+    await saveButton(page).click();
+
+    await expect(
+      page.getByText(new RegExp(`still has tasks: ${HELD_TASK_KEY}, ${SIBLING_TASK_KEY}(?![0-9])`))
+    ).toBeVisible();
+    // Refused whole, so the board still has the column and its tasks are where they were
+    const stored = await storedColumns(request);
+    expect(stored.find((c) => c.label === "In Progress")?.id).toBe("in_progress");
+    expect(stored.map((c) => c.label)).not.toContain("In-Progress");
   });
 });
 
