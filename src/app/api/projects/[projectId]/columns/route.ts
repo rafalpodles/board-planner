@@ -54,14 +54,19 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
   }
 
   const existingIds = new Set((project.columns || []).map((c) => c.id));
-  // Which existing ids the incoming board claims by identity, resolved before a single slug is
-  // handed out. A slug must not be able to take one: the column that owns it is staying, and
-  // every task standing in it names that id (BP-536).
-  const claimed = new Set(
-    columns
-      .filter((raw) => typeof raw?.id === "string" && existingIds.has(raw.id))
-      .map((raw) => raw.id as string)
-  );
+  // Every id the incoming board claims by identity, resolved before a slug is handed out
+  const claims: string[] = columns
+    .filter((raw) => typeof raw?.id === "string" && existingIds.has(raw.id))
+    .map((raw) => raw.id as string);
+  const claimed = new Set(claims);
+  // Two rows naming one column contradict each other, and there is no reading of that worth
+  // guessing at: served by "first one wins" it silently invents a column for the loser
+  if (claimed.size !== claims.length) {
+    return NextResponse.json(
+      { error: "Two columns cannot claim the same id" },
+      { status: 400 }
+    );
+  }
   const usedIds = new Set<string>();
   const clean: { id: string; label: string; color: string; role: ColumnRole; order: number; triggersPmReview: boolean }[] = [];
 
@@ -83,8 +88,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
       );
     }
     // Existing columns keep their immutable id; new ones get a slug from the label
-    const keepsItsOwn = typeof raw.id === "string" && existingIds.has(raw.id);
-    let id = keepsItsOwn ? raw.id : slugify(label);
+    let id = typeof raw.id === "string" && existingIds.has(raw.id) ? raw.id : slugify(label);
     if (!id) {
       return NextResponse.json(
         { error: `Column label "${label}" produces an empty id` },
@@ -93,7 +97,8 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     }
     let candidate = id;
     let n = 2;
-    while (usedIds.has(candidate) || (!keepsItsOwn && claimed.has(candidate))) {
+    // Off its own id, an entry is a stranger again and may not land on one somebody claimed
+    while (usedIds.has(candidate) || (candidate !== raw.id && claimed.has(candidate))) {
       candidate = `${id}_${n++}`;
     }
     id = candidate;
@@ -111,9 +116,8 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
 
   // Before the role rule below: a column that still holds tasks is the more local refusal, and
   // the one whose fix — move the tasks — the person has to make first whatever else is wrong
-  // Removed means no incoming column claims it, not merely that its id went unused: a new
-  // column taking the id of one being dropped used to make the dropped one invisible here, so
-  // the check below never ran for it (BP-536).
+  // Removed means nobody claimed it, not that its id went unused: a newcomer taking a
+  // departing column's id used to hide the departure from the check below
   const removed = (project.columns || []).filter((c) => !claimed.has(c.id));
   for (const col of removed) {
     const inUse = await Task.find({ project: projectId, status: col.id })
@@ -171,7 +175,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     projectId,
     user._id,
     "settings_updated",
-    `Columns updated: ${clean.map((c) => c.label).join(", ")}`
+    `Columns updated: ${clean.map((c) => `${c.label} (${c.id})`).join(", ")}`
   );
 
   return NextResponse.json(project.columns);

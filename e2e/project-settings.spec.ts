@@ -1,6 +1,7 @@
 import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 import { ADMIN_AUTH } from "./api";
 import {
+  FINISHED_TASK_KEY,
   HELD_TASK_KEY,
   HELD_TASK_TITLE,
   demoteActiveColumn,
@@ -532,10 +533,17 @@ test.describe("Board · a new column that wants an id somebody is standing in", 
     await expect(column.getByText(SIBLING_TASK_TITLE)).toBeVisible();
   });
 
-  // The other door to the same harm. Here the removal is real and deliberate, and the guard has
-  // to refuse it — but the newcomer's slug filled the vacancy, so the column being dropped no
-  // longer looked absent and the check skipped it. Which is why "removed" cannot be read off the
-  // final ids: it is a question about who claimed what, not about which ids ended up spoken for.
+  /**
+   * The other door. Here the removal is deliberate and the guard has to refuse it — but the
+   * newcomer's slug filled the vacancy, so the departing column no longer looked absent and the
+   * check skipped it. That is why "removed" cannot be read off the final ids.
+   *
+   * To Do rather than In Progress, deliberately: `addColumn` hard-codes the backlog role, so
+   * removing the board's only In-progress column is refused by the role rule instead, and the
+   * spec would go red on unfixed source for a reason that is not this bug. `approved` is not
+   * load-bearing, so unfixed source really does accept this one — and TP-4, approved for work,
+   * lands in a backlog column with nobody told.
+   */
   test("and taking the id of one being removed does not excuse it from the task check", async ({
     page,
     request,
@@ -543,18 +551,58 @@ test.describe("Board · a new column that wants an id somebody is standing in", 
     await signIn(page);
     await openSection(page, "Board");
 
-    await page.getByRole("button", { name: "Remove In Progress" }).click();
-    await page.getByPlaceholder("New column name...").fill("In-Progress");
+    await page.getByRole("button", { name: "Remove To Do" }).click();
+    await page.getByPlaceholder("New column name...").fill("Todo");
     await page.getByRole("button", { name: "Add column" }).click();
     await saveButton(page).click();
 
     await expect(
-      page.getByText(new RegExp(`still has tasks: ${HELD_TASK_KEY}, ${SIBLING_TASK_KEY}(?![0-9])`))
+      page.getByText(new RegExp(`still has tasks: ${FINISHED_TASK_KEY}(?![0-9])`))
     ).toBeVisible();
-    // Refused whole, so the board still has the column and its tasks are where they were
+    // Refused whole, so the board still has the column and its task is where it was
     const stored = await storedColumns(request);
-    expect(stored.find((c) => c.label === "In Progress")?.id).toBe("in_progress");
-    expect(stored.map((c) => c.label)).not.toContain("In-Progress");
+    expect(stored.find((c) => c.label === "To Do")?.id).toBe("todo");
+    expect(stored.map((c) => c.label)).not.toContain("Todo");
+  });
+
+  /**
+   * The editor cannot send this — its rows come from the stored board, one draft each — so this
+   * one is driven at the endpoint, which any API token can reach. Naming one existing column
+   * twice is meaningless, and the interesting part is where the second copy goes: it keeps its
+   * own id at the first candidate, and the suffix then walks it onto the id of a *different*
+   * live column. Guarding on "is this a newcomer" instead of "is this still its own id" let that
+   * through, which is how the first version of this fix still stole an id.
+   */
+  test("nor by naming one column twice, so the suffix lands on a third", async ({ request }) => {
+    const putColumns = (columns: unknown[]) =>
+      request.put(`/api/projects/${PROJECT_ID}/columns`, {
+        headers: ADMIN_AUTH,
+        data: { columns },
+      });
+
+    // The collision target, built by the product's own rule: a second In Progress becomes `in_progress_2`
+    const twin = await putColumns([
+      ...(await storedColumns(request)),
+      { label: "In-Progress", role: "backlog" },
+    ]);
+    expect(twin.status(), await twin.text()).toBe(200);
+    const withTwin = await storedColumns(request);
+    expect(withTwin.find((c) => c.label === "In-Progress")?.id).toBe("in_progress_2");
+
+    // Two entries now claim `in_progress`. Served rather than refused, the loser walks off its
+    // own id and onto `in_progress_2` — which belongs to the twin, and carries whatever stands
+    // in it. There is no reading of a contradictory payload worth guessing at.
+    const res = await putColumns(
+      withTwin.map((c) => (c.id === "planned" ? { ...c, id: "in_progress" } : c))
+    );
+    expect(res.status()).toBe(400);
+    expect((await res.json()).error).toMatch(/cannot claim the same id/);
+
+    // Refused whole: every column still holds exactly what it held
+    const after = await storedColumns(request);
+    expect(after.map((c) => `${c.id}:${c.label}`)).toEqual(
+      withTwin.map((c) => `${c.id}:${c.label}`)
+    );
   });
 });
 
