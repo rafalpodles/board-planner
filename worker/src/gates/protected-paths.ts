@@ -44,9 +44,9 @@ export const EXECUTABLE_CONFIG_FILE =
 // nothing here is executed locally — which is exactly why it was invisible to the list above and
 // why leaving it out was worse than not supporting those repos: the gates report as having run.
 //
-// The hazard is the same one .github/workflows carries. With autoMerge on, a change to a build
-// backend, a task runner or a dependency pin reaches the default branch with no human in the loop,
-// and the target's own CI executes it there.
+// The hazard is the same one .github/workflows carries. Under an agent that merges without a
+// review gate, a change to a build backend, a task runner or a dependency pin reaches the default
+// branch with no human in the loop, and the target's own CI executes it there.
 //
 // Matched at any depth, not only at the repository root: this repository alone has three manifests
 // (root, worker/, mcp-server/), and an agent editing worker/package.json is doing the same thing as
