@@ -6,9 +6,12 @@ import { describe, it, expect, vi } from "vitest";
 import { createWorkspace, reapOrphans, Workspace } from "./workspace.js";
 import { CommandResult, RunOpts } from "./exec.js";
 import { gitArgs } from "./git-safety.js";
+import { scopedConfigListZ } from "./config-list.fixtures.js";
+
+const REPO_PATH = "/repo";
 
 const config = {
-  repoPath: "/repo",
+  repoPath: REPO_PATH,
   worktreeRoot: "/worktrees",
   baseBranch: "main",
 } as never;
@@ -23,6 +26,7 @@ const REMOTE_URL = "https://git.example/acme/repo.git";
 const LS_REMOTE = `ls-remote -- ${REMOTE_URL} refs/heads/main`;
 const FETCH = `fetch --no-tags -- ${REMOTE_URL} main`;
 const LOCAL_REF = "rev-parse --verify main^{commit}";
+const CONFIG_LIST = "config --list -z --show-scope --no-includes";
 
 function fakeGit(responses: Record<string, Partial<CommandResult>>) {
   const run = vi.fn(async (_command: string, args: string[], _opts: RunOpts): Promise<CommandResult> => {
@@ -46,6 +50,10 @@ function baseFromRemote(sha: string, extra: Record<string, Partial<CommandResult
 
 function withRemote(runner: Parameters<typeof createWorkspace>[1], env: () => NodeJS.ProcessEnv = () => ({})) {
   return createWorkspace(config, runner, env, REMOTE_URL);
+}
+
+function ranAny(run: { mock: { calls: unknown[][] } }, fragment: string): boolean {
+  return run.mock.calls.some((call) => (call[1] as string[]).join(" ").includes(fragment));
 }
 
 function readsLocalRef(run: { mock: { calls: unknown[][] } }): boolean {
@@ -341,6 +349,107 @@ describe("createWorkspace", () => {
     for (const call of localCalls) {
       expect(call[2].env?.GH_TOKEN).toBeUndefined();
     }
+  });
+
+  describe("a checkout whose config carries an executable key", () => {
+    const PLANTED = {
+      [CONFIG_LIST]: { stdout: scopedConfigListZ("filter.z.smudge=touch /tmp/pwned") },
+    };
+
+    it("is refused, naming the key", async () => {
+      const { runner } = fakeGit(baseFromRemote("base1", PLANTED));
+
+      await expect(withRemote(runner).create("BP-1", "worker")).rejects.toMatchObject({
+        name: "PoisonedCheckoutError",
+        message: expect.stringContaining("filter.z.smudge"),
+      });
+    });
+
+    it("is refused before anything is checked out", async () => {
+      const { runner, run } = fakeGit(baseFromRemote("base1", PLANTED));
+
+      await expect(withRemote(runner).create("BP-1", "worker")).rejects.toThrow();
+
+      expect(ranAny(run, "worktree add"), "the worktree was created anyway").toBe(false);
+    });
+
+    it("is refused before the remote is asked anything", async () => {
+      const { runner, run } = fakeGit(baseFromRemote("base1", PLANTED));
+
+      await expect(withRemote(runner).create("BP-1", "worker")).rejects.toThrow();
+
+      expect(ranAny(run, "ls-remote"), "the remote was asked for the base ref").toBe(false);
+      expect(ranAny(run, "fetch"), "the poisoned clone was fetched into").toBe(false);
+    });
+
+    it("asks the shared checkout, which is where the key lives", async () => {
+      const { runner, run } = fakeGit(baseFromRemote("base1", PLANTED));
+
+      await expect(withRemote(runner).create("BP-1", "worker")).rejects.toThrow();
+
+      const scan = run.mock.calls.find((call) =>
+        (call[1] as string[]).join(" ").includes("config --list -z --show-scope")
+      );
+      expect((scan?.[2] as { cwd?: string })?.cwd).toBe(REPO_PATH);
+    });
+
+    it("reads the config again immediately before checking anything out", async () => {
+      let listings = 0;
+      const run = vi.fn(async (_command: string, args: string[]): Promise<CommandResult> => {
+        const key = args.slice(HARDENING_PREFIX.length).join(" ");
+        const answer = (stdout = "") => ({ code: 0, stdout, stderr: "", timedOut: false });
+        if (key === CONFIG_LIST) {
+          listings += 1;
+          return answer(listings === 1 ? "" : scopedConfigListZ("filter.z.smudge=touch /tmp/pwned"));
+        }
+        if (key === "worktree list --porcelain") return answer("");
+        if (args.join(" ") === LS_REMOTE) return answer("base1\trefs/heads/main\n");
+        if (args.join(" ") === FETCH) return answer();
+        if (key === "rev-parse --verify base1^{commit}") return answer("base1\n");
+        return answer();
+      });
+
+      await expect(withRemote({ run }).create("BP-1", "worker")).rejects.toMatchObject({
+        name: "PoisonedCheckoutError",
+      });
+
+      expect(listings, "the config was read only once").toBeGreaterThan(1);
+      expect(ranAny(run, "worktree add"), "the checkout happened anyway").toBe(false);
+    });
+
+    it("still creates the worktree when the config carries nothing executable", async () => {
+      const { runner, run } = fakeGit(
+        baseFromRemote("base1", {
+          [CONFIG_LIST]: { stdout: scopedConfigListZ("core.bare=false\nfilter.z.required=true") },
+        })
+      );
+
+      const worktree = await withRemote(runner).create("BP-1", "worker");
+
+      expect(worktree.baseSha).toBe("base1");
+      expect(ranAny(run, "worktree add")).toBe(true);
+    });
+
+    it("is refused when the config cannot be read at all", async () => {
+      const { runner, run } = fakeGit(
+        baseFromRemote("base1", { "config --local --list": { code: 128, stderr: "not a repository" } })
+      );
+
+      await expect(withRemote(runner).create("BP-1", "worker")).rejects.toMatchObject({
+        name: "PoisonedCheckoutError",
+        kind: "unreadable",
+      });
+      expect(ranAny(run, "worktree add")).toBe(false);
+    });
+
+    it("calls a key somebody planted planted, from the same path", async () => {
+      const { runner } = fakeGit(baseFromRemote("base1", PLANTED));
+
+      await expect(withRemote(runner).create("BP-1", "worker")).rejects.toMatchObject({
+        name: "PoisonedCheckoutError",
+        kind: "planted",
+      });
+    });
   });
 
   it("throws when git fails to create the worktree", async () => {

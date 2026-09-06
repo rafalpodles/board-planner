@@ -3,7 +3,7 @@ import { tmpdir } from "os";
 import { join, resolve, sep } from "path";
 import { WorkerConfig } from "./config.js";
 import { childEnv } from "./env.js";
-import { configBaseline } from "./repos.js";
+import { configBaseline, plantedConfig, UNREADABLE_CONFIG } from "./repos.js";
 import { CommandResult, Runner } from "./exec.js";
 import { gitArgs, GIT_SAFE_ENV } from "./git-safety.js";
 
@@ -18,6 +18,23 @@ export class BaseUnavailableError extends Error {
     super(message);
     this.name = "BaseUnavailableError";
     this.kind = kind;
+  }
+}
+
+export class PoisonedCheckoutError extends Error {
+  readonly finding: string;
+
+  readonly kind: "planted" | "unreadable";
+
+  constructor(finding: string) {
+    super(
+      finding === UNREADABLE_CONFIG
+        ? "refusing to check out: the shared checkout's git config could not be read, so nothing can vouch for what a checkout would run"
+        : `refusing to check out: ${JSON.stringify(finding)} is in the shared checkout's git config, and a checkout is where git runs one`
+    );
+    this.name = "PoisonedCheckoutError";
+    this.finding = finding;
+    this.kind = finding === UNREADABLE_CONFIG ? "unreadable" : "planted";
   }
 }
 
@@ -67,7 +84,7 @@ export function createWorkspace(
     const result = await runner.run("git", gitArgs(args), {
       cwd: config.repoPath,
       timeoutMs: GIT_TIMEOUT_MS,
-      env: { ...childEnv(), ...GIT_SAFE_ENV },
+      env: { ...childEnv(), ...GIT_SAFE_ENV, GIT_CONFIG_GLOBAL: "/dev/null" },
     });
     if (result.timedOut) {
       throw new Error(`git ${args[0]} timed out after ${GIT_TIMEOUT_MS}ms`);
@@ -189,10 +206,20 @@ export function createWorkspace(
     return resolveFreshBase(remoteEnv, remoteUrl);
   }
 
+  async function refuseIfPoisoned(): Promise<void> {
+    const planted = await plantedConfig(runner, config.repoPath, undefined, {
+      GIT_CONFIG_GLOBAL: "/dev/null",
+    });
+    if (planted) throw new PoisonedCheckoutError(planted);
+  }
+
   return {
     async create(taskKey, slug) {
       const path = pathFor(taskKey);
       const branch = `${taskKey.toLowerCase()}/${slug}`;
+
+      await refuseIfPoisoned();
+
       let baseSha: string;
       try {
         baseSha = await resolveBase();
@@ -204,6 +231,7 @@ export function createWorkspace(
       }
 
       await removeIfRegistered(path);
+      await refuseIfPoisoned();
       await git(["worktree", "add", "-B", branch, "--", path, baseSha]);
       return { path, baseSha, configBaseline: await configBaseline(runner, path) };
     },

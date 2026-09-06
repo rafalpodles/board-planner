@@ -44,6 +44,23 @@ describe("plantedConfig against a real repository", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it("names a key whose subsection carries the separator a line-based read would split on", async () => {
+    git(work, "config", "filter.a=b.smudge", "/tmp/payload.sh");
+
+    const said = await scan();
+
+    expect(said).toContain("filter.a=b.smudge");
+    expect(said).toContain("local");
+  });
+
+  it("is not fooled by a newline inside a value", async () => {
+    git(work, "config", "user.agent", "one\nfilter.z.smudge=/tmp/payload.sh");
+
+    const said = await scan();
+
+    expect(said, "the value's second line was read as a key of its own").toBe("");
+  });
+
   it("says nothing about an ordinary checkout", async () => {
     expect(await scan(await configBaseline(createRunner(), work))).toBe("");
   });

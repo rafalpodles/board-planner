@@ -864,3 +864,42 @@ test("the run history reads a finished run's project, agent, machine, outcome, d
     "merged",
   ]);
 });
+
+test("a machine that quarantined a checkout says so on the fleet screen, not `ready`", async ({
+  page,
+  request,
+}) => {
+  const CHECKOUT = "/Users/e2e/repos/demo";
+  const KEY = "filter.z.smudge (worktree)";
+
+  await heartbeat(request, {
+    preflight: { ok: true, account: "rafalpodles", checks: [{ name: "gh", ok: true, detail: "" }] },
+  });
+
+  await signIn(page);
+  await page.goto("/settings/workers");
+  await expect(fleetRow(page, WORKER_NAME).getByText(/^ready/)).toBeVisible();
+
+  await heartbeat(request, {
+    preflight: {
+      ok: false,
+      account: "rafalpodles",
+      checks: [
+        { name: "gh", ok: true, detail: "" },
+        {
+          name: "checkout quarantined",
+          ok: false,
+          detail: `${CHECKOUT}: its git config carries ${KEY}. Remove the key, then restart this worker.`,
+        },
+      ],
+    },
+  });
+
+  await page.reload();
+  const row = fleetRow(page, WORKER_NAME);
+  await expect(row.getByText("checkout quarantined")).toBeVisible();
+  await expect(row).toContainText(CHECKOUT);
+  await expect(row).toContainText(KEY);
+  await expect(row).toContainText("restart this worker");
+  await expect(row.getByText(/^ready/), "the machine still reads ready").toHaveCount(0);
+});

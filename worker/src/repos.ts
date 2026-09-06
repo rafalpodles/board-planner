@@ -85,13 +85,7 @@ function usesExtTransport(value: string): boolean {
 }
 
 function dangerousConfigEntry(listOutput: string): string | null {
-  for (const rawLine of listOutput.split("\n")) {
-    const line = rawLine.trim();
-    if (!line) continue;
-    const eq = line.indexOf("=");
-    const key = (eq === -1 ? line : line.slice(0, eq)).toLowerCase();
-    const value = eq === -1 ? "" : line.slice(eq + 1);
-
+  for (const { key, value } of nulRecords(listOutput)) {
     if (EXACT_DANGEROUS_KEYS.includes(key)) return key;
     if (key.startsWith("alias.")) return key;
     if (dangerousFamilyLeaf(key)) return key;
@@ -101,15 +95,15 @@ function dangerousConfigEntry(listOutput: string): string | null {
   return null;
 }
 
-function git(runner: Runner, cwd: string, args: string[]) {
+function git(runner: Runner, cwd: string, args: string[], extraEnv?: NodeJS.ProcessEnv) {
   return runner.run("git", gitArgs(args), {
     cwd,
     timeoutMs: GIT_TIMEOUT_MS,
-    env: { ...childEnv(), ...GIT_SAFE_ENV },
+    env: { ...childEnv(), ...GIT_SAFE_ENV, ...extraEnv },
   });
 }
 
-const CONFIG_LIST_ARGS = ["config", "--list", "--show-scope", "--no-includes"];
+const CONFIG_LIST_ARGS = ["config", "--list", "-z", "--show-scope", "--no-includes"];
 
 const REPO_SCOPES = ["local", "worktree"];
 
@@ -122,21 +116,27 @@ interface ConfigEntry {
   raw: string;
 }
 
-function parseConfigList(output: string): ConfigEntry[] {
-  const entries: ConfigEntry[] = [];
-  for (const raw of output.split("\n")) {
-    if (!raw.trim()) continue;
-    const tab = raw.indexOf("\t");
-    if (tab === -1) continue;
-    const scope = raw.slice(0, tab);
-    const rest = raw.slice(tab + 1);
-    const eq = rest.indexOf("=");
-    entries.push({
-      scope,
-      key: (eq === -1 ? rest : rest.slice(0, eq)).toLowerCase(),
-      value: eq === -1 ? "" : rest.slice(eq + 1),
-      raw,
+function nulRecords(output: string): { key: string; value: string }[] {
+  const records: { key: string; value: string }[] = [];
+  for (const record of output.split("\0")) {
+    if (!record) continue;
+    const nl = record.indexOf("\n");
+    records.push({
+      key: (nl === -1 ? record : record.slice(0, nl)).toLowerCase(),
+      value: nl === -1 ? "" : record.slice(nl + 1),
     });
+  }
+  return records;
+}
+
+function parseConfigList(output: string): ConfigEntry[] {
+  const fields = output.split("\0");
+  const entries: ConfigEntry[] = [];
+  for (let at = 0; at + 1 < fields.length; at += 2) {
+    const scope = fields[at];
+    const record = nulRecords(`${fields[at + 1]}\0`)[0];
+    if (!record) continue;
+    entries.push({ scope, key: record.key, value: record.value, raw: `${scope}\0${fields[at + 1]}` });
   }
   return entries;
 }
@@ -165,17 +165,20 @@ export async function configBaseline(
   return parseConfigList(result.stdout).map((entry) => entry.raw);
 }
 
+export const UNREADABLE_CONFIG = "an unreadable git config";
+
 export async function plantedConfig(
   runner: Runner,
   cwd: string,
   baseline?: readonly string[] | null,
+  extraEnv?: NodeJS.ProcessEnv,
 ): Promise<string> {
-  const readable = await git(runner, cwd, ["config", "--local", "--list"]);
+  const readable = await git(runner, cwd, ["config", "--local", "--list"], extraEnv);
   if (readable.code !== 0 || readable.timedOut)
-    return "an unreadable git config";
+    return UNREADABLE_CONFIG;
 
-  const result = await git(runner, cwd, CONFIG_LIST_ARGS);
-  if (result.code !== 0 || result.timedOut) return "an unreadable git config";
+  const result = await git(runner, cwd, CONFIG_LIST_ARGS, extraEnv);
+  if (result.code !== 0 || result.timedOut) return UNREADABLE_CONFIG;
 
   const entries = parseConfigList(result.stdout);
   const known = new Set(baseline ?? []);
@@ -264,6 +267,7 @@ export async function bindRepository(
     "config",
     "--local",
     "--list",
+    "-z",
   ]);
   if (config.code !== 0 || config.timedOut) {
     return {

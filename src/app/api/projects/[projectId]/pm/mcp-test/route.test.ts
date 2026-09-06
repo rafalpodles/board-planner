@@ -15,10 +15,7 @@ vi.mock("@/lib/grants", () => ({ check }));
 vi.mock("@/models/project", () => ({
   Project: { findById: projectFindById },
 }));
-vi.mock("@/lib/pm/mcp-tools", () => ({
-  resolveServerToken,
-  isReadSafe: vi.fn(() => true),
-}));
+vi.mock("@/lib/pm/mcp-tools", () => ({ resolveServerToken }));
 vi.mock("@/lib/pm/mcp-client", () => ({ McpClient: McpClientMock }));
 
 const { POST } = await import("./route");
@@ -124,5 +121,41 @@ describe("stored credentials never leave their saved url", () => {
 
     expect(response.status).toBe(400);
     expect(McpClientMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("the tool list carries enough to choose from", () => {
+  const TOOLS = [
+    { name: "search_pages", description: "Search pages in the workspace" },
+    { name: "notion-search", description: "Vendor-prefixed, so not read-shaped to isReadSafe" },
+    { name: "update_page", description: "Append blocks to a page" },
+    { name: "list_orphans" },
+  ];
+
+  beforeEach(() => {
+    McpClientMock.mockImplementation(() => ({
+      initialize: vi.fn().mockResolvedValue(undefined),
+      listTools: vi.fn().mockResolvedValue(TOOLS),
+    }));
+  });
+
+  it("returns each tool's description alongside its name", async () => {
+    const response = await POST(
+      request({ url: "https://mcp.example/mcp", authType: "bearer", authToken: "t" }),
+      ctx()
+    );
+    const body = await response.json();
+
+    expect(body.count).toBe(4);
+    expect(body.tools).toEqual([
+      { name: "search_pages", description: "Search pages in the workspace", readSafe: true },
+      {
+        name: "notion-search",
+        description: "Vendor-prefixed, so not read-shaped to isReadSafe",
+        readSafe: false,
+      },
+      { name: "update_page", description: "Append blocks to a page", readSafe: false },
+      { name: "list_orphans", description: "", readSafe: true },
+    ]);
   });
 });

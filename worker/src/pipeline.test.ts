@@ -8,7 +8,8 @@ import { Executor } from "./executor.js";
 import { gitArgs } from "./git-safety.js";
 import { Reporter } from "./reporter.js";
 import { createTelemetry, isOutcome, isQuota, Progress, TelemetryUpdate } from "./telemetry.js";
-import { BaseUnavailableError, Workspace } from "./workspace.js";
+import { BaseUnavailableError, PoisonedCheckoutError, Workspace } from "./workspace.js";
+import { UNREADABLE_CONFIG } from "./repos.js";
 import { ClaimedTask, DiffStats, ExecutionResult, Gate, SnapshotEntry } from "./types.js";
 import { PipelineDeps, resolveStatusIds, runTask } from "./pipeline.js";
 
@@ -158,6 +159,7 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
   const runner = defaultRunner();
   const gateFor = vi.fn<PipelineDeps["gateFor"]>((entry) => passingGate(entry.key));
   const recordRun = vi.fn<PipelineDeps["recordRun"]>();
+  const quarantineProject = vi.fn<PipelineDeps["quarantineProject"]>();
 
   const deps: PipelineDeps = {
     config,
@@ -170,6 +172,7 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
     collectDiff,
     gateFor,
     recordRun,
+    quarantineProject,
     runner,
     ...overrides,
   };
@@ -187,6 +190,7 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
     collectDiff,
     gateFor,
     recordRun,
+    quarantineProject,
     runner,
   };
 }
@@ -305,6 +309,88 @@ describe("runTask", () => {
     await runTask(h.deps, task);
 
     expect(logError).toHaveBeenCalledWith(expect.stringMatching(/CP-158.*no route to host/));
+  });
+
+  describe("a checkout whose config carries an executable key", () => {
+    const poisoned = () =>
+      new PoisonedCheckoutError("filter.z.smudge (local)");
+
+    it("refunds the attempt rather than charging the task for the machine's compromise", async () => {
+      const h = harness();
+      h.workspace.create.mockRejectedValue(poisoned());
+
+      const disposition = await runTask(h.deps, task);
+
+      expect(disposition).toBe("machine-fault");
+      expect(h.reporter.released).toHaveBeenCalled();
+      expect(h.reporter.requeued, "the attempt was charged").not.toHaveBeenCalled();
+    });
+
+    it("quarantines the project, naming what was found", async () => {
+      const h = harness();
+      h.workspace.create.mockRejectedValue(poisoned());
+
+      await runTask(h.deps, task);
+
+      expect(h.quarantineProject).toHaveBeenCalledWith(
+        task.projectId,
+        expect.stringContaining("filter.z.smudge")
+      );
+    });
+
+    it("refuses a config it could not read without quarantining anything", async () => {
+      const h = harness();
+      h.workspace.create.mockRejectedValue(new PoisonedCheckoutError(UNREADABLE_CONFIG));
+
+      const disposition = await runTask(h.deps, task);
+
+      expect(disposition).toBe("machine-fault");
+      expect(h.reporter.released).toHaveBeenCalled();
+      expect(h.quarantineProject, "a transient read latched the project off").not.toHaveBeenCalled();
+    });
+
+    it("records what was actually found, which for an unreadable config is not a key", async () => {
+      const h = harness();
+      h.workspace.create.mockRejectedValue(new PoisonedCheckoutError(UNREADABLE_CONFIG));
+
+      await runTask(h.deps, task);
+
+      const [, record] = h.recordRun.mock.calls.at(-1)!;
+      expect(record).toMatchObject({ detail: "the checkout's git config could not be read" });
+    });
+
+    it("records the key when there was one", async () => {
+      const h = harness();
+      h.workspace.create.mockRejectedValue(poisoned());
+
+      await runTask(h.deps, task);
+
+      const [, record] = h.recordRun.mock.calls.at(-1)!;
+      expect(record).toMatchObject({
+        detail: "the checkout's git config carries an executable key",
+      });
+    });
+
+    it("says so in the worker's own log, where an operator sees it without opening the board", async () => {
+      const logError = vi.fn();
+      const h = harness({ logError });
+      h.workspace.create.mockRejectedValue(poisoned());
+
+      await runTask(h.deps, task);
+
+      expect(logError).toHaveBeenCalledWith(expect.stringMatching(/filter\.z\.smudge/));
+    });
+
+    it("leaves an ordinary worktree failure alone", async () => {
+      const h = harness();
+      h.workspace.create.mockRejectedValue(new Error("worktree add failed"));
+
+      const disposition = await runTask(h.deps, task);
+
+      expect(disposition).toBeUndefined();
+      expect(h.reporter.requeued).toHaveBeenCalled();
+      expect(h.quarantineProject).not.toHaveBeenCalled();
+    });
   });
 
   it("still charges the attempt when the worktree fails for a reason that is not the base", async () => {
