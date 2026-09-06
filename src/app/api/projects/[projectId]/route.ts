@@ -108,9 +108,9 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
         { status: 403 }
       );
     }
-    // Enabling a project for workers, or turning on autoMerge, commits somebody's machine to
-    // running agent-written code. The device-enrolment route performing the same enable is
-    // already gated this way; an unscoped admin API token used to walk past this one (BP-306).
+    // Enabling a project for workers commits somebody's machine to running agent-written code.
+    // The device-enrolment route performing the same enable is already gated this way; an unscoped
+    // admin API token used to walk past this one (BP-306).
     if (user.viaMachineCredential) {
       return NextResponse.json(
         { error: "Interactive admin session required to change worker settings" },
@@ -124,7 +124,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     const parsed = parseProjectWorkerConfig(
       body.worker,
       existing.worker?.policyOverrides ?? [],
-      // The cross-field rule is judged on the resulting state, so it needs what is stored
+      // Nothing reads this any more — see the parameter it lands on
       (existing.worker?.policy ?? {}) as unknown as Record<string, unknown>
     );
     if (!parsed.ok) {
@@ -353,8 +353,9 @@ function pendingWorkerAudit(
     });
   }
 
-  // Only the safety pair. The rest of the policy describes how work is done and stays in the
-  // project's own log; these two decide whether anything reaches a base branch unreviewed.
+  // Both retired at BP-458 and read by nothing: what reaches a base branch unreviewed is now
+  // decided by the agent's own sequence, not by these. Still audited because a direct API call can
+  // still set them, and a row nobody can explain is worse than one nobody needs.
   const changed: string[] = [];
   for (const field of ["autoMerge", "reviewGate"] as const) {
     const next = updates[`worker.policy.${field}`];

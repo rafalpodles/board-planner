@@ -31,9 +31,8 @@ function isPositiveInt(value: unknown): value is number {
 export function parseProjectWorkerConfig(
   input: unknown,
   existingOverrides: string[] = [],
-  // The stored values this patch lands on. Needed because the one rule here is cross-field, and a
-  // partial patch cannot be judged on its own: setting autoMerge alone is fine or fatal depending
-  // on a reviewGate the request never mentions.
+  // Read by nothing since the cross-field rule below was retired. Kept so the one caller does not
+  // have to change in a comment-only fix; removing both is BP-579.
   existingPolicy: Record<string, unknown> = {}
 ): WorkerConfigPatch {
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
