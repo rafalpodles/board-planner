@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useSyncExternalStore } from "react";
-import { useRouter } from "next/navigation";
-import { isTaskPath } from "@/lib/urls";
+import { usePathname, useRouter } from "next/navigation";
+import { isTaskPath, projectRefFromPathname } from "@/lib/urls";
 
 /**
  * Whether the full task page is what the reader is looking at.
@@ -55,17 +55,30 @@ export function useDeclareTaskPage(): void {
  * the task waits there and reappears over whatever is opened next. A document load never arms it,
  * and is how a task key written in prose has always reached its task.
  *
+ * A task on *another* board is a document load too, whatever page the reader is on. The
+ * intercepting route lives under `projects/[projectId]`, so it would draw that task inside the
+ * layout of the project being left: the modal takes its project from the params of a layout that
+ * has not moved, while the task follows the new URL, and the two halves name different tasks
+ * (BP-540). Leaving a board is a navigation, not an overlay on the board being left.
+ *
  * Anything that is not a task — a project page from the same ⌘K list — is an ordinary push.
  */
 export function useOpenTask() {
   const fromTaskPage = useSyncExternalStore(subscribe, onTaskPage, onServer);
   const router = useRouter();
+  const pathname = usePathname();
 
   return useCallback(
     (href: string) => {
-      if (fromTaskPage && isTaskPath(href)) window.location.assign(href);
+      const here = projectRefFromPathname(pathname);
+      const there = projectRefFromPathname(href);
+      // A key against an id is the same board spelled two ways, and canonicalisation settles it
+      // a moment later; only two names that are both keys can disagree meaningfully
+      const anotherBoard = !!here && !!there && here.toLowerCase() !== there.toLowerCase();
+
+      if (isTaskPath(href) && (fromTaskPage || anotherBoard)) window.location.assign(href);
       else router.push(href);
     },
-    [fromTaskPage, router]
+    [fromTaskPage, pathname, router]
   );
 }

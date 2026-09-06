@@ -33,3 +33,9 @@ export function isTaskPath(pathname: string | null | undefined): boolean {
   const [, base, ref, tasks, taskRef] = pathname.split("/");
   return base === "projects" && !!projectRefFromPathname(`/${base}/${ref}`) && tasks === "tasks" && !!taskRef;
 }
+
+/** The task a task URL names, or undefined if it names none. */
+export function taskRefFromPathname(pathname: string | null | undefined): string | undefined {
+  if (!isTaskPath(pathname)) return undefined;
+  return pathname!.split("/")[4];
+}
