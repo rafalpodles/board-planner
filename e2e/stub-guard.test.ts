@@ -1,5 +1,7 @@
 import { execFile } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createServer, Server } from "node:http";
 import { AddressInfo, connect, createServer as createTcpServer } from "node:net";
 import { promisify } from "node:util";
@@ -21,29 +23,51 @@ const run = promisify(execFile);
 // The guard writes to fd 2 through `fs.writeSync` rather than console.error — see the comment on
 // `report` — so that is the call these tests read. A module mock rather than a spy: an ESM
 // namespace object cannot be spied on.
-const { errors } = vi.hoisted(() => ({ errors: [] as string[] }));
+const { errors, stderr } = vi.hoisted(() => ({
+  errors: [] as string[],
+  // How the mocked fd 2 behaves for the test in hand: `accept` bytes per call, and `throwsOnce` to
+  // reproduce the EAGAIN a full non-blocking pipe really raises.
+  stderr: { accept: Infinity, throwsOnce: false },
+}));
 
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
-  return {
+  const mocked = {
     ...actual,
-    default: actual,
-    writeSync: (fd: number, text: unknown, ...rest: unknown[]) => {
-      if (fd !== 2) return (actual.writeSync as (...args: unknown[]) => number)(fd, text, ...rest);
-      errors.push(String(text));
-      return String(text).length;
+    writeSync: (fd: number, data: unknown, offset?: number, length?: number) => {
+      if (fd !== 2) {
+        return (actual.writeSync as (...args: unknown[]) => number)(fd, data, offset, length);
+      }
+      if (stderr.throwsOnce) {
+        stderr.throwsOnce = false;
+        throw Object.assign(new Error("resource temporarily unavailable, write"), { code: "EAGAIN" });
+      }
+      // The real call takes a Buffer with an offset; it returns BYTES, which is what the loop in
+      // `emit` advances by, so the mock has to count them the same way.
+      const slice = Buffer.isBuffer(data)
+        ? data.subarray(offset ?? 0, (offset ?? 0) + (length ?? data.length - (offset ?? 0)))
+        : Buffer.from(String(data), "utf8");
+      const taken = Math.min(slice.length, stderr.accept);
+      errors.push(slice.subarray(0, taken).toString("utf8"));
+      return taken;
     },
   };
+  return { ...mocked, default: mocked };
 });
 
 let server: Server | undefined;
 
 beforeEach(() => {
   errors.length = 0;
+  stderr.accept = Infinity;
+  stderr.throwsOnce = false;
 });
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  // Also on the way out: `res.on("error")` can report after a body has finished, and a leftover
+  // line would satisfy the next test's `toContain`.
+  errors.length = 0;
   const running = server;
   server = undefined;
   if (running) await new Promise<void>((resolve) => running.close(() => resolve()));
@@ -140,6 +164,37 @@ describe("guard", () => {
   });
 });
 
+describe("reporting", () => {
+  it("writes the whole report when stderr takes it a piece at a time", async () => {
+    // `writeSync` does not loop: on a pipe it returns a short count at the 64 KB buffer and drops
+    // the rest without a word, which is how the first cut of this could truncate a stack.
+    stderr.accept = 8;
+    const url = await listen(() => {
+      throw new Error("a stack long enough to need more than one write");
+    });
+    await fetch(`${url}/v1/chat/completions`, { method: "POST" });
+
+    expect(errors.length).toBeGreaterThan(1);
+    expect(errors.join("")).toContain("a stack long enough to need more than one write");
+    expect(errors.join("")).toContain(CRASH_MARKER);
+  });
+
+  it("survives stderr refusing the write, rather than dying inside its own report", async () => {
+    // Once anything has touched process.stderr the fd is non-blocking, and a full pipe makes
+    // writeSync throw EAGAIN. Thrown from `report` that is fatal in the worst place: `report` is
+    // what the uncaughtException handler calls, and a throw in there ends the process (BP-575
+    // round-two review).
+    stderr.throwsOnce = true;
+    const url = await listen(() => {
+      throw new Error("the directive was not JSON");
+    });
+
+    const crashed = await fetch(`${url}/v1/chat/completions`, { method: "POST" });
+    // Still answered, and this process is still running to assert it.
+    expect(crashed.status).toBe(500);
+  });
+});
+
 describe("readBody", () => {
   it("hands the handler a body that arrived in one piece", async () => {
     let seen = "";
@@ -203,6 +258,36 @@ describe("the process-level guard", () => {
     expect(ended.stderr).toContain("thrown from a timer");
   }, 20_000);
 
+  it("reports a server error after it is listening, and stays up", async () => {
+    // The other half of the `listening` flag. An accept failure or EMFILE is not a reason to take
+    // the stub down; making every server error fatal is the original bug wearing a new hat.
+    const port = await freePort();
+    const ended = await child(`
+      const server = serve({ name: "late error", port: ${port}, handler: (_req, res) => res.writeHead(204).end() });
+      server.on("listening", () => {
+        server.emit("error", Object.assign(new Error("accept failed"), { code: "EMFILE" }));
+        setTimeout(() => { console.log("STILL ALIVE"); process.exit(0); }, 100);
+      });
+    `);
+
+    expect(ended.code).toBe(0);
+    expect(ended.stdout).toContain("STILL ALIVE");
+    expect(ended.stderr).toContain("accept failed");
+  }, 20_000);
+
+  it("survives a rejected promise nobody awaited, which arrives as an uncaught exception", async () => {
+    const ended = await child(`
+      keepAlive("rejection test");
+      Promise.reject(new Error("nobody awaited this"));
+      setTimeout(() => { console.log("STILL ALIVE"); process.exit(0); }, 300);
+    `);
+
+    expect(ended.code).toBe(0);
+    expect(ended.stdout).toContain("STILL ALIVE");
+    expect(ended.stderr).toContain(CRASH_MARKER);
+    expect(ended.stderr).toContain("nobody awaited this");
+  }, 20_000);
+
   it("still dies when it cannot bind, rather than holding a port it never serves", async () => {
     // The regression the guard invited: `uncaughtException` turns an EADDRINUSE that used to end
     // the process into a clean exit or a hang, and Playwright then waits out its own timeout
@@ -228,16 +313,34 @@ describe("the process-level guard", () => {
 });
 
 describe("every stub process", () => {
-  it("reaches the guard, so a new one cannot quietly reintroduce the bug", async () => {
+  it("reaches the guard, so a new one cannot quietly reintroduce the bug", () => {
     // The ticket asks for the guard on every stub, not only the model one, and four of the five
     // were the same shape with the same gap. Nothing but this stops the sixth being written the
     // old way against a green suite.
-    const unguarded = readdirSync("e2e")
-      .filter((file) => file.endsWith(".mjs") && file !== "stub-guard.mjs")
-      .filter((file) => {
-        const source = readFileSync(`e2e/${file}`, "utf8");
-        return /from "node:http"/.test(source) && !/from "\.\/stub-guard\.mjs"/.test(source);
-      });
+    //
+    // Importing the module is not the test — the likely new stub imports `readBody` and then calls
+    // a bare `createServer` anyway. What is required is that the file CALLS `serve` or `guard`.
+    // Comments are stripped first: a scanner that reads prose as code has cost this repo a day
+    // before, and this file's own comments name every symbol it looks for.
+    //
+    // An `e2e/*.mjs` that used node:http only as a *client* would be flagged and would have to be
+    // exempted here on purpose. None exists; the TCP half of mongo-proxy is out of reach of an
+    // HTTP guard and is covered only because that file also serves control over HTTP.
+    const here = dirname(fileURLToPath(import.meta.url));
+    const files = readdirSync(here, { recursive: true, encoding: "utf8" })
+      .filter((file) => file.endsWith(".mjs") && !file.endsWith("stub-guard.mjs"));
+
+    // A sanity floor: an empty candidate set would make every assertion below vacuous.
+    expect(files.length).toBeGreaterThanOrEqual(5);
+
+    const unguarded = files.filter((file) => {
+      const code = readFileSync(join(here, file), "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "");
+      const servesHttp = /from\s+["'](?:node:)?https?["']/.test(code);
+      const guarded = /\b(?:serve|guard)\s*\(/.test(code);
+      return servesHttp && !guarded;
+    });
 
     expect(unguarded).toEqual([]);
   });

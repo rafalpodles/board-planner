@@ -16,12 +16,48 @@ import { createServer } from "node:http";
 /** Prefixes every line this module prints, so a crash is greppable in a long run log. */
 export const CRASH_MARKER = "STUB CRASH";
 
+/**
+ * Puts a line on stderr, whole, without ever becoming the failure itself.
+ *
+ * Synchronously rather than through console.error, because a write to a pipe is asynchronous on
+ * POSIX and the report that matters most is the one followed immediately by `process.exit`. Two
+ * things that costs, both measured rather than reasoned about:
+ *
+ * - `writeSync` does not loop. On a pipe it returns a short count at the 64 KB buffer and drops
+ *   the rest in silence, so the write is repeated from where it stopped.
+ * - Once anything has touched `process.stderr`, libuv leaves the fd non-blocking, and a full pipe
+ *   then makes `writeSync` **throw** EAGAIN. Thrown from here that is fatal in the worst possible
+ *   place: this function is what the `uncaughtException` handler calls, and a throw inside that
+ *   handler ends the process — the exact death this module exists to prevent. So nothing escapes;
+ *   the fallback is the stream's own queue, which costs the synchrony and keeps the report.
+ */
+function emit(text) {
+  const buffer = Buffer.from(text, "utf8");
+  let written = 0;
+  while (written < buffer.length) {
+    try {
+      written += writeSync(2, buffer, written, buffer.length - written);
+    } catch {
+      try {
+        process.stderr.write(buffer.subarray(written));
+      } catch {
+        // Nothing left to try. A report nobody reads is bad; a crash caused by reporting is worse.
+      }
+      return;
+    }
+  }
+}
+
 function report(name, error, req) {
   const where = req ? `${req.method ?? "?"} ${req.url ?? "?"}` : "outside any request";
   const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
-  // Synchronously, not through console.error: a write to a pipe is asynchronous on POSIX, and the
-  // one report that matters most is the one followed immediately by process.exit.
-  writeSync(2, `\n${CRASH_MARKER} [${name}] ${where}\n${detail}\n`);
+  emit(`\n${CRASH_MARKER} [${name}] ${where}\n${detail}\n`);
+}
+
+/** A refusal the stub cannot serve past — reported the same way, then fatal. */
+export function fatal(name, message) {
+  emit(`\n${CRASH_MARKER} [${name}] outside any request\n${message}\n`);
+  process.exit(1);
 }
 
 /**
@@ -76,12 +112,16 @@ let guarding = false;
  * Stops the process exiting on what escapes a handler entirely — a throw from a timer, a rejected
  * promise nobody awaited. Logged the same way, because a crash nobody can see is the state this
  * ticket started from.
+ *
+ * One listener, not two. Node raises an unhandled rejection as an uncaught exception under its
+ * default mode, so an `unhandledRejection` listener beside this one changes nothing that any test
+ * can tell apart — it was written, found unpinnable by mutation, and removed rather than left as a
+ * line nobody can redden (BP-575 round-two review).
  */
 export function keepAlive(name) {
   if (guarding) return;
   guarding = true;
   process.on("uncaughtException", (error) => report(name, error));
-  process.on("unhandledRejection", (reason) => report(name, reason));
 }
 
 /**
@@ -91,6 +131,9 @@ export function keepAlive(name) {
  * A stub that cannot listen has nothing to serve, and Playwright's "url not reachable" names that
  * far better than a process sitting up answering nothing. Every server a stub listens on needs
  * this, including the ones that do not go through `serve` (BP-575 review).
+ *
+ * Only *before* listening, though. An error after that — an accept failure, EMFILE — is reported
+ * and survived, because killing the stub over one refused connection is the whole bug again.
  */
 export function fatalOnListenFailure(name, server) {
   let listening = false;
