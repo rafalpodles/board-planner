@@ -1639,6 +1639,32 @@ export async function seedAgents() {
 }
 
 /**
+ * A project-scoped agent that belongs to the second board and nowhere else, for BP-496: naming it
+ * from a task on the seeded board must be refused as belonging to another project, not treated as
+ * though no such agent existed at all. Requires seedSecondProject().
+ */
+export const FOREIGN_ONLY_AGENT_NAME = "Their Runner";
+export const FOREIGN_ONLY_AGENT_ID = id("e2e00000000000000000ab03");
+
+export async function seedForeignAgent() {
+  const db = (await connect()).db!;
+  const now = new Date();
+  await db.collection("agents").insertOne({
+    _id: FOREIGN_ONLY_AGENT_ID,
+    name: FOREIGN_ONLY_AGENT_NAME,
+    description: "",
+    owner: null,
+    project: SECOND_PROJECT_ID,
+    scope: "project",
+    builtIn: false,
+    composition: RUNNABLE_COMPOSITION,
+    createdAt: now,
+    updatedAt: now,
+  });
+  await mongoose.disconnect();
+}
+
+/**
  * A sprint on the second board, for the cross-project reference BP-314 closed: named through TP,
  * it has to be refused as if it did not exist. Requires seedSecondProject().
  */
