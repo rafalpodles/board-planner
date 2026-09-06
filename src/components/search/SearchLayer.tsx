@@ -50,10 +50,9 @@ function useSearchShortcut(onOpen: () => void, onClose: () => void, open: boolea
       const slash =
         e.key === "/" && !e.metaKey && !e.ctrlKey && !e.altKey && !isTypingTarget(e.target);
       if (!cmdK && !slash) return;
-      // BP-560: a dialog owns the key while it is up. Checked on the way in only — the open
-      // palette is a layer itself, and ⌘K has to keep closing it
-      if (!open && openLayerCount() > 0) return;
       e.preventDefault();
+      // On the way in only: the open palette is a layer itself, and ⌘K has to keep closing it
+      if (!open && openLayerCount() > 0) return;
       if (open && cmdK) onClose();
       else if (!open) onOpen();
     }

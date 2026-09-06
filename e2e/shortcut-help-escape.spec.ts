@@ -211,8 +211,16 @@ const helpDialog = (page: Page) => page.getByRole("dialog", { name: "Keyboard Sh
 const activeElementIsInsideTheHelp = (page: Page) =>
   page.evaluate(() => {
     const active = document.activeElement;
-    const dialog = document.querySelector('[role="dialog"]');
-    return active !== null && dialog !== null && dialog.contains(active);
+    // The help by its accessible name, not the first dialog in DOM order — with Search leaked
+    // open over it, that would be whichever of the two rendered first
+    const dialog = Array.from(document.querySelectorAll('[role="dialog"]')).find((el) => {
+      const labelledBy = el.getAttribute("aria-labelledby");
+      return (
+        labelledBy !== null &&
+        document.getElementById(labelledBy)?.textContent?.trim() === "Keyboard Shortcuts"
+      );
+    });
+    return active !== null && dialog !== undefined && dialog.contains(active);
   });
 
 const collapseSidebar = (page: Page) =>
@@ -448,8 +456,16 @@ test("a dialog that never overflows gets no extra tab stop", async ({ page }) =>
  *
  * Measured before the fix, with the help open: `/` and ⌘K each put a second dialog named
  * "Search" on the page, with focus on its input.
+ *
+ * What none of these can see: a press the guard swallows still has to be `preventDefault`ed, or
+ * the browser's own Ctrl/⌘K binding takes focus out of the dialog into its chrome — invisible
+ * from inside the page, so `search.test.tsx` pins that half.
  */
 const searchLayer = (page: Page) => page.getByRole("dialog", { name: "Search" });
+
+// The effect that registers a layer sets this and the cleanup that unregisters it lifts it —
+// a task after the DOM has changed, either way
+const scrollLock = (page: Page) => page.evaluate(() => document.body.style.overflow);
 
 for (const [label, key] of [
   ["/", "/"],
@@ -473,13 +489,42 @@ for (const [label, key] of [
     await expect.poll(() => activeElementIsInsideTheHelp(page)).toBe(true);
     await expect(help(page)).toBeVisible();
 
-    // The control: the same key opens Search once the help is gone
+    // The control: the same key opens Search once the help is gone — gone from the registry,
+    // not only from the DOM, or the press can land while the count still says 1
     await page.keyboard.press("Escape");
     await expect(help(page)).toBeHidden();
+    await expect.poll(() => scrollLock(page)).toBe("");
     await page.keyboard.press(key);
     await expect(searchLayer(page)).toBeVisible();
   });
 }
+
+/**
+ * The harm the ticket names, on the dialog it names it for: ⌘K over the New Task form with the
+ * cursor in the title. The typing-target check that keeps `/` out of a text field never applied
+ * to ⌘K, so a press there put Search over a half-written form.
+ */
+test("⌘K does not open Search over the New Task form, cursor in the title", async ({ page }) => {
+  await openBoard(page);
+
+  await page.keyboard.press("n");
+  await expect(newTask(page)).toBeVisible();
+  const title = newTask(page).getByLabel("Title", { exact: true });
+  await title.click();
+  await expect(title).toBeFocused();
+
+  await page.keyboard.press("ControlOrMeta+k");
+  await expect(searchLayer(page)).toHaveCount(0);
+  await expect(title).toBeFocused();
+  await expect(newTask(page)).toBeVisible();
+
+  // The control: the same press opens Search once the form is gone
+  await page.keyboard.press("Escape");
+  await expect(newTask(page)).toBeHidden();
+  await expect.poll(() => scrollLock(page)).toBe("");
+  await page.keyboard.press("ControlOrMeta+k");
+  await expect(searchLayer(page)).toBeVisible();
+});
 
 /**
  * The palette registers a layer of its own the moment it opens, so a guard that only counted
@@ -490,6 +535,9 @@ test("⌘K still closes the Search it opened", async ({ page }) => {
 
   await page.keyboard.press("ControlOrMeta+k");
   await expect(searchLayer(page)).toBeVisible();
+  // Registered, not only rendered — otherwise the second press could catch the guard before
+  // the count it is about has reached 1, and pass for the wrong reason
+  await expect.poll(() => scrollLock(page)).toBe("hidden");
 
   await page.keyboard.press("ControlOrMeta+k");
   await expect(searchLayer(page)).toBeHidden();
