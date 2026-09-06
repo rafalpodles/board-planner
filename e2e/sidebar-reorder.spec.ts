@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import {
   NEWEST_PROJECT_ID,
+  PROJECT_ID,
   NEWEST_PROJECT_KEY,
   PROJECT_KEY,
   SECOND_PROJECT_KEY,
@@ -9,6 +10,7 @@ import {
   seedNewestProject,
   seedSecondProject,
 } from "./seed";
+import { SAME_ORIGIN } from "./api";
 import { signIn } from "./session";
 
 /**
@@ -31,7 +33,7 @@ test.beforeEach(async () => {
   await seedNewestProject();
 });
 
-/** dnd-kit's own announcements. Two live regions exist — the shell renders a second DndContext. */
+/** dnd-kit's own announcements. `.last()` because an empty region is rendered before the first. */
 const announced = (page: Page) =>
   page.locator('[id^="DndLiveRegion"]').filter({ hasText: /./ }).last();
 
@@ -74,20 +76,22 @@ test("a board dragged down the sidebar stays there, for everybody, after a reloa
   // Awaited between keys: the sensor starts on the next tick, and an arrow pressed before that
   // arrives while nothing has been picked up
   await expect(announced(page)).toContainText(/picked up|was moved/i);
-  const beforeArrow = await announced(page).innerText();
 
   await page.keyboard.press("ArrowDown");
-  // The drop target has to have CHANGED before the drop, or the row goes back where it came from
-  await expect.poll(() => announced(page).innerText()).not.toBe(beforeArrow);
+  // The drop target has to have CHANGED before the drop, or the row goes back where it came from.
+  // Waited for by NAME rather than "any line but the one I captured": the announcement dnd-kit
+  // makes on pick-up is itself replaced a tick later by a "moved over itself" line, which would
+  // satisfy a difference check while nothing had moved
+  await expect(announced(page)).toContainText(String(PROJECT_ID));
   await page.keyboard.press("Space");
 
   expect((await saved).status()).toBe(200);
 
-  await expect(keysInSidebar(page)).resolves.toEqual([
-    PROJECT_KEY,
-    NEWEST_PROJECT_KEY,
-    SECOND_PROJECT_KEY,
-  ]);
+  // Polled: the list is reordered optimistically, so a one-shot read races the render rather than
+  // the request it is gated on
+  await expect
+    .poll(() => keysInSidebar(page))
+    .toEqual([PROJECT_KEY, NEWEST_PROJECT_KEY, SECOND_PROJECT_KEY]);
 
   // The order is one list shared by everyone, so it belongs to the server rather than the session
   expect(await storedOrder(page)).toEqual([
@@ -120,9 +124,19 @@ test("a member has no rows to drag, and reordering is refused if they ask anyway
   // Two rows they may open and neither carries the sortable attributes dnd-kit needs
   await expect(sortableRows(page)).toHaveCount(0);
 
-  const refused = await page.request.put("/api/projects/reorder", {
-    headers: { "Sec-Fetch-Site": "same-origin" },
+  const asMember = await page.request.put("/api/projects/reorder", {
+    headers: SAME_ORIGIN,
     data: { order: [] },
   });
-  expect(refused.status()).toBe(403);
+  expect(asMember.status()).toBe(403);
+
+  // The control, and it is the point of the assertion above: 403 is also what the provenance guard
+  // answers, so without an identical request that succeeds this test would stay green with the
+  // admin gate deleted and every write refused as cross-origin
+  await signIn(page, "admin");
+  const asAdmin = await page.request.put("/api/projects/reorder", {
+    headers: SAME_ORIGIN,
+    data: { order: [] },
+  });
+  expect(asAdmin.status()).toBe(200);
 });

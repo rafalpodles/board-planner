@@ -21,13 +21,23 @@ const SETTINGS = `/projects/${PROJECT_KEY}/settings`;
  * before its request has been made — the empty state is also the pre-fetch state (BP-548) — so
  * asserting on what is on screen at load time says nothing about what the server holds.
  */
-async function openAuditLog(page: Page) {
+async function openAuditLog(page: Page): Promise<StoredRow[]> {
   const read = page.waitForResponse(
-    (response) => response.url().includes("/audit") && response.request().method() === "GET"
+    (response) => response.url().endsWith("/audit") && response.request().method() === "GET"
   );
   await page.goto(`${SETTINGS}?section=audit`);
   await expect(page.getByRole("heading", { name: "Audit log", exact: true })).toBeVisible();
-  expect((await read).status()).toBe(200);
+  const response = await read;
+  expect(response.status()).toBe(200);
+  // Before anything else can navigate: a response whose page has gone no longer has a body
+  return response.json();
+}
+
+interface StoredRow {
+  action: string;
+  detail: string;
+  createdAt: string;
+  user: { username: string } | null;
 }
 
 /**
@@ -55,13 +65,21 @@ async function addCategory(page: Page, name: string) {
 test("a change made on the settings screen becomes a row naming who made it", async ({ page }) => {
   await signIn(page);
 
-  await openAuditLog(page);
-  // The control: this board has no history, so a row below can only have come from the change
+  // The control, read off the payload rather than the card: this board has no history, so a row
+  // below can only have come from the change. The card cannot answer it — it renders its empty
+  // sentence before the request lands (BP-548)
+  expect(await openAuditLog(page)).toEqual([]);
   await expect(page.getByText("No settings changes recorded yet.")).toBeVisible();
-  await expect(rows(page)).toHaveCount(0);
 
   await addCategory(page, "spike");
-  await openAuditLog(page);
+
+  // The write is fire-and-forget (`categories/route.ts` does not await logProjectAudit) and the
+  // card fetches once per mount, so the read is retried rather than assumed to have caught it
+  let stored: StoredRow[] = [];
+  await expect(async () => {
+    stored = await openAuditLog(page);
+    expect(stored).toHaveLength(1);
+  }).toPass({ timeout: 20_000 });
 
   await expect(page.getByText("No settings changes recorded yet.")).toHaveCount(0);
   await expect(rows(page)).toHaveCount(1);
@@ -72,10 +90,12 @@ test("a change made on the settings screen becomes a row naming who made it", as
   await expect(row.nth(2)).toHaveText("settings updated");
   await expect(row.nth(3)).toHaveText("Category added: spike");
 
-  // A time, and one from this run rather than a rendering of undefined
-  const when = new Date(await row.nth(0).innerText());
-  expect(when.getTime()).not.toBeNaN();
-  expect(Math.abs(Date.now() - when.getTime())).toBeLessThan(10 * 60_000);
+  // A time from this run, taken from the payload: the cell is `toLocaleString()` and nothing pins
+  // the browser's locale, so parsing what is on screen reads a day-first date as month-first and
+  // fails by months on a machine whose locale differs from CI's
+  expect(Math.abs(Date.now() - new Date(stored[0].createdAt).getTime())).toBeLessThan(10 * 60_000);
+  // And the cell renders it rather than rendering nothing
+  await expect(row.nth(0)).not.toHaveText("");
 });
 
 test("each change is its own row, newest first", async ({ page }) => {
@@ -83,7 +103,9 @@ test("each change is its own row, newest first", async ({ page }) => {
 
   await addCategory(page, "spike");
   await addCategory(page, "chore");
-  await openAuditLog(page);
+  await expect(async () => {
+    expect(await openAuditLog(page)).toHaveLength(2);
+  }).toPass({ timeout: 20_000 });
 
   await expect(rows(page)).toHaveCount(2);
   await expect(cells(rows(page).nth(0)).nth(3)).toHaveText("Category added: chore");
@@ -103,4 +125,10 @@ test("a member is not shown the log at all", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Audit log" })).toHaveCount(0);
   await expect(page.getByText("Recent changes")).toHaveCount(0);
   await expect(rows(page)).toHaveCount(0);
+
+  // What the screen withholds, the endpoint does not: `withProjectAccess` lets any member read
+  // every row. Asserted as it is rather than as it should be, and filed as BP-549 — the day the
+  // two are reconciled this goes red, which is the signal to rewrite it.
+  const asMember = await page.request.get(`/api/projects/${PROJECT_KEY}/audit`);
+  expect(asMember.status()).toBe(200);
 });
