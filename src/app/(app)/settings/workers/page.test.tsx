@@ -1,16 +1,31 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen, cleanup, waitFor, within } from "@testing-library/react";
-import { ApiWorker } from "@/types";
+import { ApiUser, ApiWorker } from "@/types";
+import type { AuthState } from "@/hooks/use-auth";
 
-const { api, toast, replace } = vi.hoisted(() => ({
+const { api, toast, replace, auth } = vi.hoisted(() => ({
   api: { get: vi.fn(), patch: vi.fn(), post: vi.fn() },
   toast: vi.fn(),
   replace: vi.fn(),
+  // Annotated, so a field added to AuthState fails here instead of reaching the component as
+  // undefined with the suite green — this mock used to carry a `loading` field that isn't part
+  // of AuthState at all, so `isLoading` was always undefined and the spinner branch untested
+  auth: {
+    user: null as ApiUser | null,
+    isAdmin: true,
+    isLoading: false as boolean,
+    outage: false as boolean,
+    login: vi.fn(),
+    logout: vi.fn(),
+    refreshUser: vi.fn(),
+    onUnauthorized: vi.fn(),
+    noteApiStatus: vi.fn(),
+  } satisfies AuthState,
 }));
 
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
-vi.mock("@/hooks/use-auth", () => ({ useAuth: () => ({ isAdmin: true, loading: false }) }));
+vi.mock("@/hooks/use-auth", () => ({ useAuth: () => auth }));
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast }) }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ replace }) }));
 // The real hook also runs on an interval and on visibility changes; here the first load is enough
@@ -56,9 +71,23 @@ function worker(over: Partial<ApiWorker> = {}): ApiWorker {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  auth.isLoading = false;
 });
 
 afterEach(cleanup);
+
+// The mock used to carry a field AuthState doesn't have, so isLoading was always undefined and
+// this branch ran untested — `authLoading` here really is what the console decides nothing on.
+describe("while auth is still loading", () => {
+  it("shows the spinner and asks the fleet for nothing yet", () => {
+    auth.isLoading = true;
+
+    render(<WorkersPage />);
+
+    expect(api.get).not.toHaveBeenCalled();
+    expect(replace).not.toHaveBeenCalled();
+  });
+});
 
 /**
  * BP-358: the owner is the whole of what a machine may reach, and an ownerless one is
