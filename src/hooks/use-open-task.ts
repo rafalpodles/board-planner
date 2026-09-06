@@ -12,8 +12,13 @@ import { isTaskPath } from "@/lib/urls";
  * widget are mounted in the shell, above both task routes (BP-533) — so the page publishes the
  * fact here, and anything in the tree can read it.
  *
- * A count rather than a flag: React may mount the next page before unmounting the last, and a
- * flag would then be cleared by the one that is leaving.
+ * A count rather than a flag. Nothing in this tree mounts two task pages at once — one `children`
+ * slot, and React tears the old subtree down inside the same commit — so the two behave alike
+ * today, and no test can tell them apart. It is written as a count because the failure a flag
+ * would have is silent: the page that leaves clears the flag the page that arrived just set.
+ *
+ * A second full-page task route, if one is ever added, has to call `useDeclareTaskPage` as well.
+ * Forgetting it puts BP-521 back, quietly, and no test can guard a route that does not exist yet.
  */
 let mountedTaskPages = 0;
 const listeners = new Set<() => void>();

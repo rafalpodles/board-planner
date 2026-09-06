@@ -441,7 +441,7 @@ export function PmChat({
               // where a soft navigation draws the task twice (BP-533). Modified clicks are left
               // to the browser — a new tab is a document of its own.
               onClick={(e) => {
-                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
                 e.preventDefault();
                 openTask(href);
               }}

@@ -7,6 +7,7 @@ import {
   HELD_TASK_TITLE,
   PROJECT_ID,
   PROJECT_KEY,
+  PROJECT_NAME,
   SIBLING_TASK_NUMBER,
   SIBLING_TASK_TITLE,
   seed,
@@ -19,10 +20,11 @@ import { signIn } from "./session";
  * both task routes, so they could not be told — and the address cannot answer it either, since
  * with the modal open the URL is already the task's. The page now publishes the fact instead.
  *
- * Each test leaves the task after arriving at it. A soft navigation keeps an unmatched slot's
- * state, so a test that stops at "the destination is here" cannot see the modal parked behind it,
- * waiting to be drawn over the board (BP-521). Both surfaces carry their control: opening the
- * same task from the board must still swap the modal and leave the board underneath.
+ * The two tests that open from the task page leave it again afterwards: a soft navigation keeps
+ * an unmatched slot's state, so a test that stops at "the destination is here" cannot see the
+ * modal parked behind it, waiting to be drawn over the board (BP-521). Their controls open the
+ * same task from the board, where the modal must still swap and leave the board underneath —
+ * which is what a fix that reached too far would break.
  */
 
 const taskDialog = (page: Page) =>
@@ -119,6 +121,8 @@ test.describe("⌘K", () => {
     await expect(taskDialog(page).getByLabel("Task title")).toHaveValue(HELD_TASK_TITLE);
     await expect(page.getByLabel("Task title")).toHaveCount(1);
     await expect(taskDialog(page)).toHaveCount(1);
+    // And the board is what it is drawn over, not a task page that replaced it
+    await expect(page.getByRole("heading", { name: PROJECT_NAME })).toBeVisible();
   });
 });
 
@@ -144,7 +148,7 @@ test.describe("a PM chip", () => {
   test("from the board opens the modal, as it always did", async ({ page }) => {
     await pmAnswerLinking(`${PROJECT_KEY}-${HELD_TASK_NUMBER}`);
     await page.goto(`/projects/${PROJECT_KEY}`);
-    await expect(page.getByText(SIBLING_TASK_TITLE)).toBeVisible();
+    await expect(page.getByText(SIBLING_TASK_TITLE).first()).toBeVisible();
 
     await openAPmChip(page, `${PROJECT_KEY}-${HELD_TASK_NUMBER}`);
 
@@ -152,5 +156,6 @@ test.describe("a PM chip", () => {
     await expect(page).toHaveURL(new RegExp(`/tasks/${PROJECT_KEY}-${HELD_TASK_NUMBER}$`));
     await expect(taskDialog(page).getByLabel("Task title")).toHaveValue(HELD_TASK_TITLE);
     await expect(taskDialog(page)).toHaveCount(1);
+    await expect(page.getByRole("heading", { name: PROJECT_NAME })).toBeVisible();
   });
 });
