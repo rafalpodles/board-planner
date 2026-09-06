@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, cleanup, waitFor, fireEvent, act } from "@testing-library/react";
 import { Comments } from "./Comments";
 
 const { api, auth } = vi.hoisted(() => ({
@@ -232,5 +232,144 @@ describe("referring to another task", () => {
     fireEvent.change(box, { target: { value: "blocked by ACME-" } });
 
     await waitFor(() => expect(screen.queryByText("TP-1")).toBeNull());
+  });
+});
+
+/**
+ * BP-577. A failed read left the list at [] and the panel said "No comments yet" — a claim about
+ * the discussion on this task. The toast clears after three seconds; the sentence did not.
+ */
+describe("Comments when the read fails", () => {
+  it("says the read failed instead of claiming there are none", async () => {
+    api.get.mockImplementation(() => Promise.reject(new Error("network")));
+    render(<Comments projectId="TP" taskId="t1" />);
+
+    await waitFor(() => expect(screen.getByTestId("comments-error")).toBeTruthy());
+    expect(screen.queryByText("No comments yet")).toBeNull();
+  });
+
+  it("reads again on Retry", async () => {
+    api.get
+      .mockImplementationOnce(() => Promise.reject(new Error("network")))
+      .mockImplementation(() => Promise.resolve([comment]));
+    render(<Comments projectId="TP" taskId="t1" />);
+    await waitFor(() => expect(screen.getByTestId("comments-error")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => expect(screen.getByText("Kasia Nowak")).toBeTruthy());
+    expect(screen.queryByTestId("comments-error")).toBeNull();
+  });
+
+  // The same class of claim, one state earlier: a read still running is not an empty discussion
+  it("shows a spinner rather than the claim while the first read is in flight", async () => {
+    // The panel reads more than the comments, so every pending read has to be released
+    const pending: ((rows: unknown[]) => void)[] = [];
+    api.get.mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
+    render(<Comments projectId="TP" taskId="t1" />);
+
+    expect(screen.queryByText("Kasia Nowak")).toBeNull();
+    expect(screen.queryByText("No comments yet")).toBeNull();
+
+    await act(async () => pending.forEach((resolve) => resolve([])));
+    await waitFor(() => expect(screen.getByText("No comments yet")).toBeTruthy());
+  });
+
+  // A task switch reconciles the panel in place, so the previous discussion must not stand in
+  it("does not show the previous task's comments while the next task is being read", async () => {
+    serve([comment]);
+    const view = render(<Comments projectId="TP" taskId="t1" />);
+    await waitFor(() => expect(screen.getByText("Kasia Nowak")).toBeTruthy());
+
+    const pending: ((rows: unknown[]) => void)[] = [];
+    api.get.mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
+    view.rerender(<Comments projectId="TP" taskId="t2" />);
+
+    expect(screen.queryByText("Kasia Nowak")).toBeNull();
+    expect(screen.queryByText("No comments yet")).toBeNull();
+
+    await act(async () => pending.forEach((resolve) => resolve([])));
+    await waitFor(() => expect(screen.getByText("No comments yet")).toBeTruthy());
+  });
+
+  // The out-of-order half: the previous task's read is still in flight when the new one answers
+  it("ignores the previous task's read when it lands late", async () => {
+    const pending: ((rows: unknown[]) => void)[] = [];
+    api.get.mockImplementation((url: string) =>
+      url.includes("/comments")
+        ? new Promise((resolve) => pending.push(resolve))
+        : Promise.resolve([])
+    );
+    const view = render(<Comments projectId="TP" taskId="t1" />);
+
+    view.rerender(<Comments projectId="TP" taskId="t2" />);
+    await act(async () => pending[pending.length - 1]([]));
+    await waitFor(() => expect(screen.getByText("No comments yet")).toBeTruthy());
+
+    // t1 answers at last, with a comment that belongs to a task nobody is looking at
+    await act(async () => pending[0]([comment]));
+
+    expect(screen.queryByText("Kasia Nowak")).toBeNull();
+    expect(screen.getByText("No comments yet")).toBeTruthy();
+  });
+
+  it("does not let the previous task's failure claim the new task's discussion", async () => {
+    const pending: { resolve: (rows: unknown[]) => void; reject: (e: Error) => void }[] = [];
+    api.get.mockImplementation((url: string) =>
+      url.includes("/comments")
+        ? new Promise((resolve, reject) => pending.push({ resolve, reject }))
+        : Promise.resolve([])
+    );
+    const view = render(<Comments projectId="TP" taskId="t1" />);
+
+    view.rerender(<Comments projectId="TP" taskId="t2" />);
+    await act(async () => pending[pending.length - 1].resolve([comment]));
+    await waitFor(() => expect(screen.getByText("Kasia Nowak")).toBeTruthy());
+
+    await act(async () => pending[0].reject(new Error("network")));
+
+    expect(screen.queryByTestId("comments-error")).toBeNull();
+    expect(screen.getByText("Kasia Nowak")).toBeTruthy();
+  });
+
+  // The third exit: a superseded read must not tear the spinner down and let "No comments yet"
+  // stand as a claim about a task whose own read is still running
+  it("keeps the spinner when the previous task's read answers first", async () => {
+    const pending: ((rows: unknown[]) => void)[] = [];
+    api.get.mockImplementation((url: string) =>
+      url.includes("/comments")
+        ? new Promise((resolve) => pending.push(resolve))
+        : Promise.resolve([])
+    );
+    const view = render(<Comments projectId="TP" taskId="t1" />);
+    view.rerender(<Comments projectId="TP" taskId="t2" />);
+
+    // t1 answers while t2 is still in flight
+    await act(async () => pending[0]([]));
+
+    expect(screen.queryByText("No comments yet")).toBeNull();
+    expect(screen.queryByText("Kasia Nowak")).toBeNull();
+  });
+
+  // The tab badge is fed from here, and 3 is the count of a task nobody is looking at any more
+  it("withdraws the count it reported when the task changes", async () => {
+    const onCountChange = vi.fn();
+    serve([comment]);
+    const view = render(<Comments projectId="TP" taskId="t1" onCountChange={onCountChange} />);
+    await waitFor(() => expect(onCountChange).toHaveBeenCalledWith(1));
+
+    api.get.mockImplementation(() => new Promise(() => {}));
+    view.rerender(<Comments projectId="TP" taskId="t2" onCountChange={onCountChange} />);
+
+    expect(onCountChange).toHaveBeenLastCalledWith(null);
+  });
+
+  // Without this control the failure branch could be rendering whenever the list is empty
+  it("still says there are none when the read answers with none", async () => {
+    serve([]);
+    render(<Comments projectId="TP" taskId="t1" />);
+
+    await waitFor(() => expect(screen.getByText("No comments yet")).toBeTruthy());
+    expect(screen.queryByTestId("comments-error")).toBeNull();
   });
 });

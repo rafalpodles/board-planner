@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/Button";
+import { LoadFailed } from "@/components/ui/LoadFailed";
 import { useToast } from "@/components/ui/Toast";
 
 interface EmailSettings {
@@ -23,6 +24,7 @@ export default function EmailSettingsPage() {
   const { toast } = useToast();
 
   const [settings, setSettings] = useState<EmailSettings | null>(null);
+  const [failed, setFailed] = useState(false);
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<{
     ok: boolean;
@@ -31,13 +33,14 @@ export default function EmailSettingsPage() {
   } | null>(null);
 
   const load = useCallback(async () => {
+    setFailed(false);
     try {
       setSettings(await api.get("/api/admin/email"));
     } catch {
       toast("Failed to read the mail settings", "error");
-      // Otherwise the page spins for ever: the toast clears after three seconds and leaves an
-      // admin watching an animation with nothing to click
-      setSettings({ configured: false, host: "", port: 0, user: "", from: "" });
+      // Never the unconfigured state: telling an admin whose SMTP works to set three environment
+      // variables and restart is a destructive-adjacent instruction given on no evidence
+      setFailed(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -72,7 +75,7 @@ export default function EmailSettingsPage() {
     }
   }
 
-  if (authLoading || settings === null) {
+  if (authLoading || (settings === null && !failed)) {
     return (
       <div className="flex justify-center py-12">
         <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
@@ -81,12 +84,31 @@ export default function EmailSettingsPage() {
   }
   if (!isAdmin) return null;
 
-  return (
-    <div className="max-w-2xl">
+  const header = (
+    <>
       <h2 className="text-lg font-semibold mb-1">Email</h2>
       <p className="text-sm text-text-muted mb-6">
         Configured in the environment, not here. This screen shows whether it works.
       </p>
+    </>
+  );
+
+  if (failed || settings === null) {
+    return (
+      <div className="max-w-2xl">
+        {header}
+        <LoadFailed
+          testId="email-settings-error"
+          message="Failed to read the mail settings, so this page cannot say whether a mail server is configured."
+          onRetry={load}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-2xl">
+      {header}
 
       {settings.configured ? (
         <dl className="mb-6 divide-y divide-border rounded-lg border border-border text-sm">

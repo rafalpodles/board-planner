@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
+import { LoadFailed } from "@/components/ui/LoadFailed";
 import { useToast } from "@/components/ui/Toast";
 import { ApiInstanceAuditLog } from "@/types";
 import { auditActionLabel, auditActor, auditIsNotable } from "@/lib/instance-audit-view";
@@ -15,13 +16,15 @@ export default function InstanceAuditPage() {
   const { toast } = useToast();
 
   const [logs, setLogs] = useState<ApiInstanceAuditLog[] | null>(null);
+  const [failed, setFailed] = useState(false);
 
   const load = useCallback(async () => {
+    setFailed(false);
     try {
       setLogs(await api.get("/api/admin/audit"));
     } catch {
       toast("Failed to load the audit log", "error");
-      setLogs([]);
+      setFailed(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -35,7 +38,7 @@ export default function InstanceAuditPage() {
     load();
   }, [isAdmin, authLoading, router, load]);
 
-  if (authLoading || logs === null) {
+  if (authLoading || (logs === null && !failed)) {
     return (
       <div className="flex justify-center py-12">
         <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
@@ -57,7 +60,14 @@ export default function InstanceAuditPage() {
         </p>
       </div>
 
-      {logs.length === 0 ? (
+      {failed || logs === null ? (
+        // Not the empty state: "nothing recorded yet" is a claim about this instance's history
+        <LoadFailed
+          testId="instance-audit-error"
+          message="Failed to load the audit log."
+          onRetry={load}
+        />
+      ) : logs.length === 0 ? (
         <p className="text-sm text-text-muted">Nothing recorded yet.</p>
       ) : (
         <div className="border border-border rounded-lg overflow-hidden">

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
+import { LoadFailed } from "@/components/ui/LoadFailed";
 import { useToast } from "@/components/ui/Toast";
 import { timeAgo } from "@/lib/time";
 import { endedBadly, endState } from "@/lib/run-outcome";
@@ -20,13 +21,15 @@ export default function FleetRunsPage() {
   const { toast } = useToast();
 
   const [runs, setRuns] = useState<ApiFleetRun[] | null>(null);
+  const [failed, setFailed] = useState(false);
 
   const load = useCallback(async () => {
+    setFailed(false);
     try {
       setRuns(await api.get("/api/admin/runs"));
     } catch {
       toast("Failed to load the run history", "error");
-      setRuns([]);
+      setFailed(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -40,7 +43,7 @@ export default function FleetRunsPage() {
     load();
   }, [isAdmin, authLoading, router, load]);
 
-  if (authLoading || runs === null) {
+  if (authLoading || (runs === null && !failed)) {
     return (
       <div className="flex justify-center py-12">
         <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
@@ -62,7 +65,15 @@ export default function FleetRunsPage() {
         </Link>
       </div>
 
-      {runs.length === 0 ? (
+      {failed || runs === null ? (
+        // Not the empty state: "nothing has finished yet" is a claim about every run on this
+        // instance, and a read that never answered supports none
+        <LoadFailed
+          testId="fleet-runs-error"
+          message="Failed to load the run history."
+          onRetry={load}
+        />
+      ) : runs.length === 0 ? (
         <p className="text-sm text-text-muted">Nothing has finished yet.</p>
       ) : (
         <div className="border border-border rounded-lg overflow-hidden">

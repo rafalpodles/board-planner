@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/Toast";
-import { Button } from "@/components/ui/Button";
+import { LoadFailed } from "@/components/ui/LoadFailed";
 import { ApiProjectAuditLog } from "@/types";
 import { SettingsCard, EmptyState } from "@/components/settings/SettingsCard";
 
@@ -54,14 +54,11 @@ export function AuditSection({ projectId, active }: { projectId: string; active:
         // Not the empty state: "nothing was ever changed here" is a claim about this board's
         // history, and a read that never answered supports no claim about it at all. The toast
         // fades; this stays until somebody has an answer
-        <div className="flex flex-col items-center justify-center gap-3 py-8 text-center">
-          <p role="alert" className="text-sm text-text-muted">
-            Failed to load the audit log.
-          </p>
-          <Button size="sm" onClick={load}>
-            Retry
-          </Button>
-        </div>
+        <LoadFailed
+          testId="project-audit-error"
+          message="Failed to load the audit log."
+          onRetry={load}
+        />
       ) : logs.length === 0 ? (
         <EmptyState>No settings changes recorded yet.</EmptyState>
       ) : (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { AgentComposition, ApiAgent, ApiAgentBlock } from "@/types";
 
@@ -26,14 +26,33 @@ export function useStore() {
   const [agents, setAgents] = useState<ApiAgent[]>([]);
   const [blocks, setBlocks] = useState<ApiAgentBlock[]>([]);
   const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const loadSeq = useRef(0);
 
   const load = useCallback(async () => {
+    // Every mutation reloads, so two reads are routinely in flight. Without the sequence a slow
+    // rejection lands after a newer success and hangs a "may be out of date" banner over current
+    // data, and a slow success overwrites newer rows while clearing the banner that said so.
+    const seq = ++loadSeq.current;
+    setRefreshing(true);
     try {
       const [a, b] = await Promise.all([api.get("/api/agents"), api.get("/api/agent-blocks")]);
+      if (seq !== loadSeq.current) return;
       setAgents(Array.isArray(a) ? (a as ApiAgent[]) : []);
       setBlocks(Array.isArray(b) ? (b as ApiAgentBlock[]) : []);
+      // Cleared by an answer, not by the click: clearing it up front unmounted the banner that
+      // was about to say "Retrying…", so the screen went quiet and the failure came back later
+      setFailed(false);
+    } catch {
+      // Without this the rejection went unhandled and the catalog rendered as empty — on the
+      // agent screen that reads as deleted rather than as unread (BP-577)
+      if (seq === loadSeq.current) setFailed(true);
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [api]);
 
@@ -43,6 +62,8 @@ export function useStore() {
 
   return {
     loading,
+    failed,
+    refreshing,
     allAgents: agents,
     allSteps: blocks.filter((b) => b.kind === "step"),
     allGates: blocks.filter((b) => b.kind === "gate"),
@@ -83,5 +104,12 @@ export function useStore() {
     },
 
     reload: load,
+
+    // Only a retry has nothing to show while it runs; a mutation's reload leaves the catalog
+    // where it is
+    retry: () => {
+      setLoading(true);
+      return load();
+    },
   };
 }

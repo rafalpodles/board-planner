@@ -3,6 +3,7 @@
 import { useRef, useState, type KeyboardEvent } from "react";
 import { PageHeader } from "@/components/shell/PageHeader";
 import { Button } from "@/components/ui/Button";
+import { LoadFailed } from "@/components/ui/LoadFailed";
 import { useProjects } from "@/hooks/use-projects";
 import { useAuth } from "@/hooks/use-auth";
 import { useStore } from "./store";
@@ -58,6 +59,41 @@ export default function AgentsPage() {
     tabRefs.current[next]?.focus();
   }
 
+  if (store.loading) {
+    return (
+      <>
+        <PageHeader title="Agents" subtitle="Ways of getting a task done" />
+        <div className="flex justify-center py-12" role="status">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+          <span className="sr-only">Loading the catalog</span>
+        </div>
+      </>
+    );
+  }
+
+  // Not the empty state: "you have not created an agent yet" is a claim about what this person
+  // has, and a read that never answered supports no claim about it. A reload that fails after a
+  // mutation keeps the catalog it already has and says the refresh failed above it — replacing a
+  // populated screen would be its own false claim.
+  // Every tab, not just the first: an instance with gates but no agents was still holding blocks
+  // on screen when the guard asked only about agents
+  const holdsNothing =
+    !store.allAgents.length && !store.allSteps.length && !store.allGates.length;
+
+  if (store.failed && holdsNothing) {
+    return (
+      <>
+        <PageHeader title="Agents" subtitle="Ways of getting a task done" />
+        <LoadFailed
+          testId="agents-catalog-error"
+          className="py-12"
+          message="Failed to load the catalog."
+          onRetry={store.retry}
+        />
+      </>
+    );
+  }
+
   return (
     <>
       <PageHeader
@@ -75,6 +111,16 @@ export default function AgentsPage() {
           )
         }
       />
+
+      {store.failed && (
+        <LoadFailed
+          testId="agents-catalog-stale"
+          variant="row"
+          message="Failed to refresh the catalog, so what follows may be out of date."
+          busy={store.refreshing}
+          onRetry={store.reload}
+        />
+      )}
 
       <div role="tablist" aria-label="Catalog" className="mb-6 flex gap-6 border-b border-border">
         {TABS.map((t) => (

@@ -64,6 +64,7 @@ export const GROUPS = {
     "instance-settings.spec.ts",
     "settings-mobile-nav.spec.ts",
     "instance-audit.spec.ts",
+    "failed-read-states.spec.ts",
     "agents-catalog.spec.ts",
     "agent-editor-permissions.spec.ts",
     "compose-without-a-mouse.spec.ts",

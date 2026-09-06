@@ -5,6 +5,7 @@ import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { ApiComment, ApiReaction } from "@/types";
 import { Button } from "@/components/ui/Button";
+import { LoadFailed } from "@/components/ui/LoadFailed";
 import { Textarea } from "@/components/ui/Textarea";
 import { useToast } from "@/components/ui/Toast";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -19,7 +20,7 @@ interface CommentsProps {
   projectId: string;
   taskId: string;
   hideHeading?: boolean;
-  onCountChange?: (count: number) => void;
+  onCountChange?: (count: number | null) => void;
   /** Bumped when a comment is posted from somewhere else, e.g. the phone's bottom bar */
   refreshKey?: number;
   // Adding, editing and deleting a comment each write an activity entry; reacting does not
@@ -38,6 +39,9 @@ export function Comments({
   scope,
 }: CommentsProps) {
   const [comments, setComments] = useState<ApiComment[]>([]);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [reading, setReading] = useState(true);
+  const loadSeq = useRef(0);
   const [body, setBody] = useState("");
   const [loading, setLoading] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -53,18 +57,36 @@ export function Comments({
   const { toast } = useToast();
 
   async function loadComments() {
+    // A task switch reconciles this panel in place, so the previous task's read is still in
+    // flight and would otherwise land as this task's discussion
+    const seq = ++loadSeq.current;
     try {
       const data = await api.get(
         `/api/projects/${projectId}/tasks/${taskId}/comments`
       );
+      if (seq !== loadSeq.current) return;
       setComments(data);
+      setLoadFailed(false);
       onCountChange?.(data.length);
     } catch {
+      // "No comments yet" is a claim about the discussion on this task, and a read that never
+      // answered supports none. The toast clears after three seconds; the sentence would not.
+      if (seq !== loadSeq.current) return;
+      setLoadFailed(true);
       toast("Failed to load comments", "error");
+    } finally {
+      if (seq === loadSeq.current) setReading(false);
     }
   }
 
   useEffect(() => {
+    // A task switch reconciles this component in place, so without the reset the previous task's
+    // comments stand in as this one's until the read lands — and stay if it fails
+    setReading(true);
+    setLoadFailed(false);
+    setComments([]);
+    // The count belongs to the task that was here a moment ago; nobody knows this one's yet
+    onCountChange?.(null);
     loadComments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId]);
@@ -318,8 +340,29 @@ export function Comments({
             </div>
           </div>
         ))}
-        {comments.length === 0 && (
-          <p className="text-sm text-text-muted">No comments yet</p>
+        {/* Three states, not one: a read still running is not an empty discussion. It holds the
+            same one line the sentence takes rather than a spinner — this panel sits in a page whose
+            sticky header depends on the body being the only thing that scrolls, and anything that
+            resizes or animates here moves that page under the reader */}
+        {reading ? (
+          <p className="text-sm text-text-muted" aria-hidden>
+            &nbsp;
+          </p>
+        ) : loadFailed ? (
+          <LoadFailed
+            testId="comments-error"
+            variant={comments.length ? "row" : "block"}
+            className={comments.length ? "mt-2" : "py-4"}
+            message="Failed to load the comments."
+            onRetry={() => {
+              setReading(true);
+              return loadComments();
+            }}
+          />
+        ) : (
+          comments.length === 0 && (
+            <p className="text-sm text-text-muted">No comments yet</p>
+          )
         )}
       </div>
 

@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { STATUS_LABELS, PRIORITY_LABELS } from "@/types";
 import { Badge } from "@/components/ui/Badge";
+import { LoadFailed } from "@/components/ui/LoadFailed";
 import { PageHeader } from "@/components/shell/PageHeader";
 import { useProjects } from "@/hooks/use-projects";
 import { MIN_QUERY, SearchHit, columnOf, useSearch } from "@/components/search/use-search";
@@ -43,7 +44,7 @@ function SearchContent() {
 
   // Read once: after this the box owns the query and writes the address, not the other way round
   const initialQuery = useSearchParams().get("q") ?? "";
-  const { query, setQuery, trimmed, active, loading, hits } = useSearch(
+  const { query, setQuery, trimmed, active, loading, failed, retry, hits } = useSearch(
     projects,
     undefined,
     initialQuery
@@ -111,7 +112,15 @@ function SearchContent() {
         </div>
       )}
 
-      {!loading && active && hits.length === 0 && (
+      {!loading && failed && (
+        <LoadFailed
+          testId="search-error"
+          message="The task search failed, so nothing can be said about which tasks match."
+          onRetry={retry}
+        />
+      )}
+
+      {!loading && !failed && active && hits.length === 0 && (
         <p className="py-8 text-center text-text-muted">No tasks found</p>
       )}
 
