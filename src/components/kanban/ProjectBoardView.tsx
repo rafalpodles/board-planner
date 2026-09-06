@@ -151,8 +151,8 @@ export function ProjectBoardView({
         reload();
         return;
       }
-      // J/K navigation in list view
-      if (e.key === "j" && noMod) {
+      // J/K navigation in list view — the board draws no indicator for focusedTaskIndex (BP-544)
+      if (e.key === "j" && noMod && viewMode === "list") {
         e.preventDefault();
         setFocusedTaskIndex((prev) => {
           const max = filteredTasks.length - 1;
@@ -160,12 +160,12 @@ export function ProjectBoardView({
         });
         return;
       }
-      if (e.key === "k" && noMod) {
+      if (e.key === "k" && noMod && viewMode === "list") {
         e.preventDefault();
         setFocusedTaskIndex((prev) => Math.max(prev - 1, 0));
         return;
       }
-      if (e.key === "Enter" && noMod && focusedTaskIndex >= 0 && focusedTaskIndex < filteredTasks.length) {
+      if (e.key === "Enter" && noMod && viewMode === "list" && focusedTaskIndex >= 0 && focusedTaskIndex < filteredTasks.length) {
         e.preventDefault();
         const task = filteredTasks[focusedTaskIndex];
         router.push(taskPath(projectId, task.taskNumber));

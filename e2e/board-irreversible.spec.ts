@@ -802,6 +802,42 @@ test.describe("keyboard", () => {
     await expect(page.getByRole("button", { name: "Select (1)" })).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_KEY}$`));
   });
+
+  /**
+   * BP-544. j/k used to move `focusedTaskIndex` in either view, and Enter navigated to wherever
+   * it landed — but only the list draws a ring around the focused row; the board drew nothing, so
+   * j moved an invisible cursor and Enter jumped to whatever task it silently landed on.
+   */
+  test("j/k/Enter are inert on the board — the cursor they move is only ever drawn in the list", async ({
+    page,
+  }) => {
+    await openBoard(page);
+    await expect(page.getByRole("button", { name: "Board", exact: true })).toHaveAttribute(
+      "aria-current",
+      "true"
+    );
+
+    await page.keyboard.press("j");
+    await page.keyboard.press("j");
+    await page.keyboard.press("k");
+    await page.keyboard.press("Enter");
+    // A one-shot check after a settle, not a retrying matcher: the URL already matches before
+    // Enter is even pressed, so toHaveURL would pass on its first poll and never see a
+    // navigation that lands a tick later — measured at ~5ms, so 1s is a comfortable margin
+    await page.waitForTimeout(1_000);
+    await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_KEY}$`));
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page.locator(CARDS)).toHaveCount(SEEDED_TASKS);
+
+    // The control: the same keys, in the list, move a visible cursor and Enter opens it
+    await page.getByRole("button", { name: "List", exact: true }).click();
+    await page.keyboard.press("j");
+    const focusedRow = page.locator("tr.ring-2");
+    await expect(focusedRow).toHaveCount(1);
+    const focused = Number(/\b[A-Z]+-(\d+)\b/.exec((await focusedRow.innerText()) ?? "")?.[1]);
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(new RegExp(`${taskUrl(focused)}$`));
+  });
 });
 
 test.describe("a board with nothing on it, and one that would not load", () => {
