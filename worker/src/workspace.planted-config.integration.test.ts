@@ -90,6 +90,61 @@ describe("workspace.create against a planted config", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  /**
+   * A subsection name may contain `=`, and git lists such a key as `filter.a=b.smudge=<cmd>`. Read
+   * off a line and split on the first `=`, that is the inert key `filter.a` — the whole scan
+   * walked past, while git still reads the filter and runs it on checkout. Planted through the
+   * plain CLI, which accepts it, so this is not a config file no agent could have written.
+   *
+   * Real git because a mocked `key=value` line cannot express a key with an `=` in it: the bug was
+   * in the fixtures' own idea of the wire format, so no unit test written against them could have
+   * found it. config-list.fixtures.ts exists to stop that recurring.
+   */
+  describe("and a subsection name carrying the separator the scan splits on", () => {
+    // The filter's NAME, which is the part carrying the `=`. The config key is then
+    // `filter.a=b.smudge` and the attribute `filter=a=b` — gitattributes splits its own
+    // `name=value` on the first `=` too, so everything after that one is the value.
+    const FILTER_NAME = "a=b";
+
+    function plantThroughSubsectionName(repoPath: string) {
+      writeFileSync(payload, `#!/bin/sh\ntouch "${marker}"\ncat\n`);
+      chmodSync(payload, 0o755);
+      git(repoPath, "config", `filter.${FILTER_NAME}.smudge`, payload);
+      git(repoPath, "config", `filter.${FILTER_NAME}.clean`, "cat");
+      writeFileSync(join(repoPath, ".git", "info", "attributes"), `* filter=${FILTER_NAME}\n`);
+    }
+
+    it(
+      "is a live danger — plain git runs it",
+      () => {
+        plantThroughSubsectionName(main);
+
+        git(main, "worktree", "add", "-B", "raw", "--", join(dir, "raw"), "HEAD");
+
+        expect(
+          existsSync(marker),
+          `git ${git(main, "--version").trim()} did not run the filter`
+        ).toBe(true);
+      },
+      REAL_GIT_TIMEOUT_MS
+    );
+
+    it(
+      "does not run when the worker checks the same tree out",
+      async () => {
+        plantThroughSubsectionName(main);
+
+        await expect(workspaceFor(main).create("BP-1", "worker")).rejects.toMatchObject({
+          name: "PoisonedCheckoutError",
+          message: expect.stringContaining("filter.a=b.smudge"),
+        });
+
+        expect(existsSync(marker), "the planted filter ran anyway").toBe(false);
+      },
+      REAL_GIT_TIMEOUT_MS
+    );
+  });
+
   // The premise. Everything below is about preventing this, so it is asserted rather than assumed:
   // on this git, `git worktree add` runs the planted smudge filter.
   it("git worktree add runs a planted smudge filter, which is the whole danger", () => {

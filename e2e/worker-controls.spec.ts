@@ -1,9 +1,4 @@
-import {
-  test,
-  expect,
-  type APIRequestContext,
-  type Page,
-} from "@playwright/test";
+import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 import http from "node:http";
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
@@ -77,16 +72,12 @@ interface Machine {
   credential: string;
 }
 
-const SEEDED_MACHINE: Machine = {
-  workerId: String(WORKER_ID),
-  credential: WORKER_CREDENTIAL,
-};
+const SEEDED_MACHINE: Machine = { workerId: String(WORKER_ID), credential: WORKER_CREDENTIAL };
 
 const cardHref = `/projects/${PROJECT_KEY}/tasks/${HELD_TASK_NUMBER}`;
 
 async function db() {
-  if (mongoose.connection.readyState === 0)
-    await mongoose.connect(E2E_MONGODB_URI);
+  if (mongoose.connection.readyState === 0) await mongoose.connect(E2E_MONGODB_URI);
   const handle = mongoose.connection.db;
   if (!handle) throw new Error("no database handle");
   return handle;
@@ -101,10 +92,7 @@ function asMachine(machine: Machine = SEEDED_MACHINE) {
 }
 
 /** The machine reporting in, exactly as worker/src/registration.ts does — and reading its answer. */
-async function heartbeat(
-  request: APIRequestContext,
-  body: Record<string, unknown> = {},
-) {
+async function heartbeat(request: APIRequestContext, body: Record<string, unknown> = {}) {
   const response = await request.post(`/api/workers/${WORKER_ID}/heartbeat`, {
     headers: asMachine(),
     data: body,
@@ -116,7 +104,7 @@ async function heartbeat(
 /** A run reporting where it is, for the task seed() left it holding. */
 function reportPhase(
   request: APIRequestContext,
-  event: { runId?: string; seq: number; phase: string },
+  event: { runId?: string; seq: number; phase: string }
 ) {
   return request.post(`/api/workers/${WORKER_ID}/events`, {
     headers: asMachine(),
@@ -124,13 +112,8 @@ function reportPhase(
   });
 }
 
-function machineReadsItsWork(
-  request: APIRequestContext,
-  machine: Machine = SEEDED_MACHINE,
-) {
-  return request.get(`/api/workers/${machine.workerId}`, {
-    headers: asMachine(machine),
-  });
+function machineReadsItsWork(request: APIRequestContext, machine: Machine = SEEDED_MACHINE) {
+  return request.get(`/api/workers/${machine.workerId}`, { headers: asMachine(machine) });
 }
 
 function claim(request: APIRequestContext, runId: string) {
@@ -161,31 +144,16 @@ async function projectRow(id: mongoose.Types.ObjectId) {
   return (await db()).collection("projects").findOne({ _id: id });
 }
 
-async function nameRepository(
-  projectId: mongoose.Types.ObjectId,
-  repositoryUrl: string,
-) {
-  await (
-    await db()
-  )
-    .collection("projects")
-    .updateOne({ _id: projectId }, { $set: { repositoryUrl } });
+async function nameRepository(projectId: mongoose.Types.ObjectId, repositoryUrl: string) {
+  await (await db()).collection("projects").updateOne({ _id: projectId }, { $set: { repositoryUrl } });
 }
 
 async function setWorker(fields: Record<string, unknown>) {
-  await (
-    await db()
-  )
-    .collection("workers")
-    .updateOne({ _id: WORKER_ID }, { $set: fields });
+  await (await db()).collection("workers").updateOne({ _id: WORKER_ID }, { $set: fields });
 }
 
 async function setHeldTask(fields: Record<string, unknown>) {
-  await (
-    await db()
-  )
-    .collection("tasks")
-    .updateOne({ _id: HELD_TASK_ID }, { $set: fields });
+  await (await db()).collection("tasks").updateOne({ _id: HELD_TASK_ID }, { $set: fields });
 }
 
 /**
@@ -197,23 +165,19 @@ async function setHeldTask(fields: Record<string, unknown>) {
  */
 async function pollAfter(page: Page): Promise<Record<string, unknown>[]> {
   const request = await page.waitForRequest(
-    (r) => new URL(r.url()).pathname === "/api/admin/workers",
+    (r) => new URL(r.url()).pathname === "/api/admin/workers"
   );
   const response = await request.response();
   expect(response?.status()).toBe(200);
   return response!.json();
 }
 
-async function issueCommand(
-  page: Page,
-  row: ReturnType<typeof fleetRow>,
-  command: string,
-) {
+async function issueCommand(page: Page, row: ReturnType<typeof fleetRow>, command: string) {
   const [issued] = await Promise.all([
     page.waitForResponse(
       (r) =>
         new URL(r.url()).pathname === `/api/workers/${WORKER_ID}/command` &&
-        r.request().method() === "POST",
+        r.request().method() === "POST"
     ),
     row.getByRole("button", { name: command, exact: true }).click(),
   ]);
@@ -252,12 +216,8 @@ function openStream(machine: Machine = SEEDED_MACHINE): Promise<Stream> {
             // A comment line is the keep-alive ping, and not an event
             if (frame.startsWith(":")) continue;
             const lines = frame.split("\n");
-            const name = lines
-              .find((line) => line.startsWith("event: "))
-              ?.slice("event: ".length);
-            const data = lines
-              .find((line) => line.startsWith("data: "))
-              ?.slice("data: ".length);
+            const name = lines.find((line) => line.startsWith("event: "))?.slice("event: ".length);
+            const data = lines.find((line) => line.startsWith("data: "))?.slice("data: ".length);
             const event = { event: name, ...(data ? JSON.parse(data) : {}) };
             const waiter = waiting.shift();
             if (waiter) waiter(event);
@@ -272,11 +232,8 @@ function openStream(machine: Machine = SEEDED_MACHINE): Promise<Stream> {
             if (queued) return Promise.resolve(queued);
             return new Promise((resolveEvent, rejectEvent) => {
               const timer = setTimeout(
-                () =>
-                  rejectEvent(
-                    new Error(`no event on the stream within ${timeoutMs}ms`),
-                  ),
-                timeoutMs,
+                () => rejectEvent(new Error(`no event on the stream within ${timeoutMs}ms`)),
+                timeoutMs
               );
               waiting.push((event) => {
                 clearTimeout(timer);
@@ -286,7 +243,7 @@ function openStream(machine: Machine = SEEDED_MACHINE): Promise<Stream> {
           },
           close: () => req.destroy(),
         });
-      },
+      }
     );
     req.on("error", reject);
   });
@@ -299,9 +256,7 @@ function openStream(machine: Machine = SEEDED_MACHINE): Promise<Stream> {
  * silently skipped without it), and an agent the claim can resolve — with the two catalog blocks
  * it names, since seed() wiped the ones the app seeded at boot.
  */
-const WORKER_IDENTITY_ID = new mongoose.Types.ObjectId(
-  "e2e00000000000000000a901",
-);
+const WORKER_IDENTITY_ID = new mongoose.Types.ObjectId("e2e00000000000000000a901");
 const AGENT_ID = new mongoose.Types.ObjectId("e2e00000000000000000ab01");
 
 async function makeTheMachineClaimCapable() {
@@ -340,18 +295,10 @@ async function makeTheMachineClaimCapable() {
     updatedAt: now,
     ...over,
   });
-  await handle
-    .collection("agentblocks")
-    .insertMany([
-      block({
-        key: "implement",
-        kind: "step",
-        name: "Implement",
-        capability: "edit",
-        prompt: "Make the change.",
-      }),
-      block({ key: "push", kind: "step", name: "Push", deterministic: true }),
-    ]);
+  await handle.collection("agentblocks").insertMany([
+    block({ key: "implement", kind: "step", name: "Implement", capability: "edit", prompt: "Make the change." }),
+    block({ key: "push", kind: "step", name: "Push", deterministic: true }),
+  ]);
   await handle.collection("agents").insertOne({
     _id: AGENT_ID,
     name: AGENT_NAME,
@@ -386,13 +333,13 @@ async function handedToTheMachine(execution: Record<string, unknown>) {
 
 /** Save, and what the route answered — the message on screen is built from it. */
 async function save(
-  page: Page,
+  page: Page
 ): Promise<{ projects: string[]; leftDisabled: string[]; refused: string[] }> {
   const [response] = await Promise.all([
     page.waitForResponse(
       (r) =>
         new URL(r.url()).pathname === `/api/workers/${WORKER_ID}/projects` &&
-        r.request().method() === "PUT",
+        r.request().method() === "PUT"
     ),
     page.getByRole("button", { name: "Save", exact: true }).click(),
   ]);
@@ -419,9 +366,7 @@ test("Pause reads as asked until the machine acknowledges it over heartbeat, and
   await signIn(page);
   await page.goto("/settings/workers");
   const row = fleetRow(page, WORKER_NAME);
-  await expect(
-    row.getByRole("button", { name: "Pause", exact: true }),
-  ).toBeVisible();
+  await expect(row.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
   // Nothing has been asked of this machine, so nothing is claimed about it
   await expect(row.getByText(/Pausing…|Paused/)).toHaveCount(0);
 
@@ -446,18 +391,14 @@ test("Pause reads as asked until the machine acknowledges it over heartbeat, and
   await heartbeat(request, { acked: "pause" });
   await expect(row.getByText("Paused", { exact: true })).toBeVisible();
   const acked = await workerRow();
-  expect(new Date(acked?.commandAckedAt).getTime()).toBeGreaterThan(
-    new Date(issuedAt).getTime(),
-  );
+  expect(new Date(acked?.commandAckedAt).getTime()).toBeGreaterThan(new Date(issuedAt).getTime());
 
   // Stop is asked next. The machine's late acknowledgement of the PAUSE must not stand in for it:
   // that is the ack the heartbeat still carries from the previous cycle.
   await issueCommand(page, row, "Stop");
   await expect(row.getByText("Stopping…", { exact: true })).toBeVisible();
   await heartbeat(request, { acked: "pause" });
-  expect(
-    (await pollAfter(page)).find((w) => w._id === SEEDED_MACHINE.workerId),
-  ).toMatchObject({
+  expect((await pollAfter(page)).find((w) => w._id === SEEDED_MACHINE.workerId)).toMatchObject({
     command: "stop",
     commandAckedAt: null,
   });
@@ -467,9 +408,7 @@ test("Pause reads as asked until the machine acknowledges it over heartbeat, and
   await expect(row.getByText("Stopped", { exact: true })).toBeVisible();
 });
 
-test("a command nobody acknowledged says so, and for how long", async ({
-  page,
-}) => {
+test("a command nobody acknowledged says so, and for how long", async ({ page }) => {
   // Sixty seconds is the threshold and a test cannot wait it out; the issue time is the one
   // fixture write here, and the ack that follows is what proves the reading is off the timestamps
   await setWorker({
@@ -484,19 +423,13 @@ test("a command nobody acknowledged says so, and for how long", async ({
   const chip = row.getByText(/^not acknowledged for \d+s$/);
   await expect(chip).toBeVisible();
   await expect(chip).toHaveClass(/text-danger/);
-  expect(
-    Number((await chip.innerText()).match(/(\d+)s/)![1]),
-  ).toBeGreaterThanOrEqual(90);
+  expect(Number((await chip.innerText()).match(/(\d+)s/)![1])).toBeGreaterThanOrEqual(90);
 
   // Acknowledged later than it was asked reads as done, however old the request
   await setWorker({ commandAckedAt: new Date(Date.now() - 30_000) });
   await page.reload();
-  await expect(
-    fleetRow(page, WORKER_NAME).getByText("Stopped", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    fleetRow(page, WORKER_NAME).getByText(/not acknowledged/),
-  ).toHaveCount(0);
+  await expect(fleetRow(page, WORKER_NAME).getByText("Stopped", { exact: true })).toBeVisible();
+  await expect(fleetRow(page, WORKER_NAME).getByText(/not acknowledged/)).toHaveCount(0);
 });
 
 test("the emergency brake is a person's control: a machine credential, a member and a nonsense command are refused", async ({
@@ -506,39 +439,23 @@ test("the emergency brake is a person's control: a machine credential, a member 
 
   // An unscoped admin API token keeps role "admin" and sits on a disk the coding agent can read;
   // the counterpart switches were gated this way and this one was not (BP-306)
-  const asToken = await request.post(url, {
-    headers: ADMIN_AUTH,
-    data: { command: "pause" },
-  });
+  const asToken = await request.post(url, { headers: ADMIN_AUTH, data: { command: "pause" } });
   expect(asToken.status()).toBe(403);
-  expect((await asToken.json()).error).toBe(
-    "Interactive admin session required",
-  );
+  expect((await asToken.json()).error).toBe("Interactive admin session required");
 
-  const asMember = await request.post(url, {
-    headers: MEMBER_AUTH,
-    data: { command: "pause" },
-  });
+  const asMember = await request.post(url, { headers: MEMBER_AUTH, data: { command: "pause" } });
   expect(asMember.status()).toBe(403);
 
   await signInApi(request, ADMIN_USERNAME, ADMIN_PASSWORD);
-  const nonsense = await request.post(url, {
-    headers: SAME_ORIGIN,
-    data: { command: "reboot" },
-  });
+  const nonsense = await request.post(url, { headers: SAME_ORIGIN, data: { command: "reboot" } });
   expect(nonsense.status()).toBe(400);
-  expect((await nonsense.json()).error).toBe(
-    "command must be pause, resume or stop",
-  );
+  expect((await nonsense.json()).error).toBe("command must be pause, resume or stop");
 
   // None of the three wrote anything the machine would read
   expect((await workerRow())?.command).toBe("");
 
   // The control, on the same session: a real command is taken
-  const accepted = await request.post(url, {
-    headers: SAME_ORIGIN,
-    data: { command: "resume" },
-  });
+  const accepted = await request.post(url, { headers: SAME_ORIGIN, data: { command: "resume" } });
   expect(accepted.status(), await accepted.text()).toBe(200);
   expect((await workerRow())?.command).toBe("resume");
 });
@@ -608,10 +525,7 @@ test("a phase the machine reports over /events is what the card and the fleet co
     { seq: 9, phase: "" },
     { seq: 9, phase: "gates:\u0007review" },
   ]) {
-    expect(
-      (await reportPhase(request, bad)).status(),
-      JSON.stringify(bad),
-    ).toBe(400);
+    expect((await reportPhase(request, bad)).status(), JSON.stringify(bad)).toBe(400);
   }
 
   await page.reload();
@@ -647,14 +561,9 @@ test("a run abandoned past the lease is handed back on the next claim, and that 
   // nothing — a sweep that ignored the lease would be caught here
   const early = await claim(request, NEXT_RUN_ID);
   expect(early.status(), await early.text()).toBe(204);
-  expect((await storedTask())?.execution).toMatchObject({
-    runId: HELD_RUN_ID,
-    attempts: 1,
-  });
+  expect((await storedTask())?.execution).toMatchObject({ runId: HELD_RUN_ID, attempts: 1 });
 
-  await setHeldTask({
-    "execution.startedAt": new Date(Date.now() - EXECUTION_LEASE_MS - 60_000),
-  });
+  await setHeldTask({ "execution.startedAt": new Date(Date.now() - EXECUTION_LEASE_MS - 60_000) });
 
   const reclaimed = await claim(request, NEXT_RUN_ID);
   expect(reclaimed.status(), await reclaimed.text()).toBe(200);
@@ -677,9 +586,7 @@ test("a run abandoned past the lease is handed back on the next claim, and that 
 
   await signIn(page);
   await page.goto(`/projects/${PROJECT_KEY}`);
-  const card = page
-    .getByTestId("column-in_progress")
-    .locator(`a[href="${cardHref}"]`);
+  const card = page.getByTestId("column-in_progress").locator(`a[href="${cardHref}"]`);
   await expect(card).toBeVisible();
   // A fresh run that has not reported yet, not the old run's last phase
   await expect(card.getByTestId("card-run-live")).toContainText("starting");
@@ -712,14 +619,10 @@ test("a run out of attempts is parked for a person, off the machine, and the wat
 
   await signIn(page, "member");
   await page.goto(`/projects/${PROJECT_KEY}`);
-  const card = page
-    .getByTestId("column-needs_human_review")
-    .locator(`a[href="${cardHref}"]`);
+  const card = page.getByTestId("column-needs_human_review").locator(`a[href="${cardHref}"]`);
   await expect(card).toBeVisible();
   await expect(
-    card.locator(
-      '[data-testid="card-run-live"], [data-testid="card-run-quiet"]',
-    ),
+    card.locator('[data-testid="card-run-live"], [data-testid="card-run-quiet"]')
   ).toHaveCount(0);
 
   // The move had no actor and went through updateMany, so this row is the only way anybody hears.
@@ -728,9 +631,7 @@ test("a run out of attempts is parked for a person, off the machine, and the wat
     await page.goto("/notifications");
     const rows = page.locator("#main-content").locator(`a[href="${cardHref}"]`);
     await expect(rows).toHaveCount(1, { timeout: 3_000 });
-    await expect(rows).toContainText(
-      `${HELD_TASK_KEY} needs a human — the run was abandoned`,
-    );
+    await expect(rows).toContainText(`${HELD_TASK_KEY} needs a human — the run was abandoned`);
   }).toPass({ timeout: 30_000 });
 
   // And the fleet console no longer shows the machine running it. The machine's own row is waited
@@ -739,17 +640,13 @@ test("a run out of attempts is parked for a person, off the machine, and the wat
   // produces.
   await signIn(page);
   await page.goto("/settings/workers");
-  await expect(
-    fleetRow(page, WORKER_NAME).getByText(WORKER_NAME),
-  ).toBeVisible();
+  await expect(fleetRow(page, WORKER_NAME).getByText(WORKER_NAME)).toBeVisible();
   // Any task key, not just this one. The Running cell reports a single task per machine, chosen
   // newest-claim-first, and this board leaves a *finished* run on TP-4 whose workerId is the same
   // machine — so a regression that stopped filtering on a live runId would fill this cell with
   // TP-4 and leave "TP-1 is not here" perfectly true. Measured: naming the key alone let exactly
   // that mutation through green.
-  await expect(fleetRow(page, WORKER_NAME).getByText(/^TP-\d+$/)).toHaveCount(
-    0,
-  );
+  await expect(fleetRow(page, WORKER_NAME).getByText(/^TP-\d+$/)).toHaveCount(0);
 });
 
 test("an admin mints a single-use enrolment token, and a machine spends it on a credential that works", async ({
@@ -764,8 +661,7 @@ test("an admin mints a single-use enrolment token, and a machine spends it on a 
   const [minted] = await Promise.all([
     page.waitForResponse(
       (r) =>
-        new URL(r.url()).pathname === "/api/workers/enrolment" &&
-        r.request().method() === "POST",
+        new URL(r.url()).pathname === "/api/workers/enrolment" && r.request().method() === "POST"
     ),
     dialog.getByRole("button", { name: "Mint token" }).click(),
   ]);
@@ -773,20 +669,11 @@ test("an admin mints a single-use enrolment token, and a machine spends it on a 
 
   const token = (await dialog.getByText(/^cpe_[0-9a-f]+$/).innerText()).trim();
   expect(token).toMatch(/^cpe_[0-9a-f]{48}$/);
-  await expect(
-    dialog.getByText(/Single use · expires in (59|60) min/),
-  ).toBeVisible();
+  await expect(dialog.getByText(/Single use · expires in (59|60) min/)).toBeVisible();
 
-  const register = (
-    headers: Record<string, string>,
-    data: Record<string, unknown>,
-  ) =>
+  const register = (headers: Record<string, string>, data: Record<string, unknown>) =>
     request.post("/api/workers/register", {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "x-cp-protocol": PROTOCOL,
-        ...headers,
-      },
+      headers: { Authorization: `Bearer ${token}`, "x-cp-protocol": PROTOCOL, ...headers },
       data,
     });
 
@@ -823,21 +710,15 @@ test("an admin mints a single-use enrolment token, and a machine spends it on a 
   // Both halves are on the record: who minted, and which host spent it
   await page.goto("/settings/audit");
   await expect(
-    page.getByRole("row").filter({ hasText: "Enrolment token minted" }).first(),
+    page.getByRole("row").filter({ hasText: "Enrolment token minted" }).first()
   ).toContainText("build-box-2");
-  const spent = page
-    .getByRole("row")
-    .filter({ hasText: "Enrolment token spent" })
-    .first();
+  const spent = page.getByRole("row").filter({ hasText: "Enrolment token spent" }).first();
   await expect(spent).toContainText(NEW_MACHINE.name);
   await expect(spent).toContainText(`Registered ${NEW_MACHINE.host}`);
 
   // A machine credential cannot mint: a token readable off the worker's disk that could would hand
   // back the very power enrolment tokens exist to remove
-  const asToken = await request.post("/api/workers/enrolment", {
-    headers: ADMIN_AUTH,
-    data: {},
-  });
+  const asToken = await request.post("/api/workers/enrolment", { headers: ADMIN_AUTH, data: {} });
   expect(asToken.status()).toBe(403);
   expect((await asToken.json()).error).toBe("Interactive session required");
 });
@@ -852,18 +733,14 @@ test("the checkout picker: what a machine has, what it is given, and what saving
 
   await signIn(page);
   await page.goto(`/settings/workers/${WORKER_ID}/projects`);
-  await expect(
-    page.getByRole("heading", { name: `Projects for ${WORKER_NAME}` }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: `Projects for ${WORKER_NAME}` })).toBeVisible();
 
   // The seeded board names no repository, so there is nothing to clone — shown and disabled
   // rather than hidden, with the fix named
   const tp = pickerRow(page, PROJECT_NAME);
   await expect(tp.getByRole("checkbox")).toBeDisabled();
   await expect(
-    tp.getByText(
-      "no repository set — add one under the project's Integrations settings",
-    ),
+    tp.getByText("no repository set — add one under the project's Integrations settings")
   ).toBeVisible();
 
   // Once it does, and the machine reports a checkout of it, the row is connected and ticked: with
@@ -877,24 +754,18 @@ test("the checkout picker: what a machine has, what it is given, and what saving
 
   const ib = pickerRow(page, SECOND_PROJECT_NAME);
   await expect(ib.getByRole("checkbox")).not.toBeChecked();
-  await expect(
-    ib.getByText("does not run machines yet — ticking it turns that on"),
-  ).toBeVisible();
+  await expect(ib.getByText("does not run machines yet — ticking it turns that on")).toBeVisible();
 
   await ib.getByRole("checkbox").check();
   await expect(
     page.getByText(
-      "One project will be cloned by the app the next time it looks — which is right after you save.",
-    ),
+      "One project will be cloned by the app the next time it looks — which is right after you save."
+    )
   ).toBeVisible();
   const saved = await save(page);
   expect(saved).toMatchObject({ leftDisabled: [], refused: [] });
-  expect([...saved.projects].sort()).toEqual(
-    [String(PROJECT_ID), String(SECOND_PROJECT_ID)].sort(),
-  );
-  await expect(
-    page.getByText("Saved. The app picks this up and sets up the checkouts."),
-  ).toBeVisible();
+  expect([...saved.projects].sort()).toEqual([String(PROJECT_ID), String(SECOND_PROJECT_ID)].sort());
+  await expect(page.getByText("Saved. The app picks this up and sets up the checkouts.")).toBeVisible();
 
   // Ticking it turned workers on for that project, which is an instance-admin act and audited as one
   expect((await projectRow(SECOND_PROJECT_ID))?.worker.enabled).toBe(true);
@@ -902,21 +773,12 @@ test("the checkout picker: what a machine has, what it is given, and what saving
   // The row itself first: this screen renders "Loading…" and no labels at all until its own fetch
   // resolves, and a warning that is absent because nothing has rendered reads exactly like a
   // warning that is gone
-  await expect(
-    pickerRow(page, SECOND_PROJECT_NAME).getByRole("checkbox"),
-  ).toBeChecked();
-  await expect(
-    pickerRow(page, SECOND_PROJECT_NAME).getByText(/does not run machines/),
-  ).toHaveCount(0);
+  await expect(pickerRow(page, SECOND_PROJECT_NAME).getByRole("checkbox")).toBeChecked();
+  await expect(pickerRow(page, SECOND_PROJECT_NAME).getByText(/does not run machines/)).toHaveCount(0);
 
   // The machine reads the same decision on its own route — the one it clones from
-  const catalogue = wantedByProject(
-    await (await machineReadsItsWork(request)).json(),
-  );
-  expect(catalogue.get(String(PROJECT_ID))).toMatchObject({
-    wanted: true,
-    servedHere: true,
-  });
+  const catalogue = wantedByProject(await (await machineReadsItsWork(request)).json());
+  expect(catalogue.get(String(PROJECT_ID))).toMatchObject({ wanted: true, servedHere: true });
   expect(catalogue.get(String(SECOND_PROJECT_ID))).toMatchObject({
     wanted: true,
     servedHere: false,
@@ -931,31 +793,19 @@ test("the checkout picker: what a machine has, what it is given, and what saving
     .filter({ hasText: /^Saving removes a checkout from this machine:/ })
     .first();
   await expect(warning).toBeVisible();
-  await expect(warning.getByRole("listitem")).toHaveText([
-    `${PROJECT_NAME} · ${PROJECT_KEY}`,
-  ]);
-  await expect(warning).toContainText(
-    "refuses any checkout with uncommitted changes",
-  );
+  await expect(warning.getByRole("listitem")).toHaveText([`${PROJECT_NAME} · ${PROJECT_KEY}`]);
+  await expect(warning).toContainText("refuses any checkout with uncommitted changes");
 
   const removed = await save(page);
   expect(removed.projects).toEqual([String(SECOND_PROJECT_ID)]);
-  const after = wantedByProject(
-    await (await machineReadsItsWork(request)).json(),
-  );
+  const after = wantedByProject(await (await machineReadsItsWork(request)).json());
   // Still reported — the app has not acted yet — and no longer wanted, which is the request to
   // remove it
-  expect(after.get(String(PROJECT_ID))).toMatchObject({
-    wanted: false,
-    servedHere: true,
-  });
+  expect(after.get(String(PROJECT_ID))).toMatchObject({ wanted: false, servedHere: true });
   expect(after.get(String(SECOND_PROJECT_ID))).toMatchObject({ wanted: true });
 
   await page.goto("/settings/audit");
-  const enabled = page
-    .getByRole("row")
-    .filter({ hasText: "Workers enabled for project" })
-    .first();
+  const enabled = page.getByRole("row").filter({ hasText: "Workers enabled for project" }).first();
   await expect(enabled).toContainText(SECOND_PROJECT_KEY);
   await expect(enabled).toContainText(`Picked for ${WORKER_NAME}`);
 });
@@ -967,10 +817,7 @@ test("a member picks for their own machine; what they cannot switch on is said, 
   await seedSecondProject();
   await nameRepository(PROJECT_ID, REPOSITORY);
   await nameRepository(SECOND_PROJECT_ID, SECOND_REPOSITORY);
-  await setWorker({
-    owner: MEMBER_ID,
-    repos: [{ remote: REPOSITORY, path: CHECKOUT }],
-  });
+  await setWorker({ owner: MEMBER_ID, repos: [{ remote: REPOSITORY, path: CHECKOUT }] });
   const handle = await db();
   // A grant on the switched-off board, so it is in the member's reach and on the screen — the row
   // whose switch they cannot throw
@@ -994,14 +841,10 @@ test("a member picks for their own machine; what they cannot switch on is said, 
 
   await signIn(page, "member");
   await page.goto(`/settings/workers/${WORKER_ID}/projects`);
-  await expect(
-    page.getByRole("heading", { name: `Projects for ${WORKER_NAME}` }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: `Projects for ${WORKER_NAME}` })).toBeVisible();
   const ib = pickerRow(page, SECOND_PROJECT_NAME);
   await expect(
-    ib.getByText(
-      "does not run machines yet, and only an instance admin can turn that on",
-    ),
+    ib.getByText("does not run machines yet, and only an instance admin can turn that on")
   ).toBeVisible();
 
   await ib.getByRole("checkbox").check();
@@ -1009,13 +852,13 @@ test("a member picks for their own machine; what they cannot switch on is said, 
   expect(saved.leftDisabled).toEqual([SECOND_PROJECT_KEY]);
   await expect(
     page.getByText(
-      `Saved. ${SECOND_PROJECT_KEY} does not run machines yet, and only an instance admin can turn that on — the machine will leave it alone until somebody does.`,
-    ),
+      `Saved. ${SECOND_PROJECT_KEY} does not run machines yet, and only an instance admin can turn that on — the machine will leave it alone until somebody does.`
+    )
   ).toBeVisible();
   // The wish is recorded and the switch is not thrown
   expect((await projectRow(SECOND_PROJECT_ID))?.worker.enabled).toBe(false);
   expect((await workerRow())?.desiredProjects.map(String).sort()).toEqual(
-    [String(PROJECT_ID), String(SECOND_PROJECT_ID)].sort(),
+    [String(PROJECT_ID), String(SECOND_PROJECT_ID)].sort()
   );
 
   // A board outside the reach is refused by id and not stored, whatever the screen was told
@@ -1025,13 +868,8 @@ test("a member picks for their own machine; what they cannot switch on is said, 
     data: { projects: [String(PROJECT_ID), outside] },
   });
   expect(pushed.status(), await pushed.text()).toBe(200);
-  expect(await pushed.json()).toMatchObject({
-    projects: [String(PROJECT_ID)],
-    refused: [outside],
-  });
-  expect((await workerRow())?.desiredProjects.map(String)).toEqual([
-    String(PROJECT_ID),
-  ]);
+  expect(await pushed.json()).toMatchObject({ projects: [String(PROJECT_ID)], refused: [outside] });
+  expect((await workerRow())?.desiredProjects.map(String)).toEqual([String(PROJECT_ID)]);
 
   // The screen that decides what a machine clones is closed to machines: the worker's own
   // credential is not a person's at all, and a person's API token is refused as a machine's
@@ -1070,31 +908,21 @@ test("a plain member is bounced off every admin-only worker screen, and the rout
   // The nav is honest about it: no Administration group is offered
   await page.goto("/settings/profile");
   await expect(page.getByRole("heading", { name: "Profile" })).toBeVisible();
-  await expect(
-    page.getByRole("link", { name: "Workers", exact: true }),
-  ).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Workers", exact: true })).toHaveCount(0);
   await expect(page.getByText("Administration")).toHaveCount(0);
 
   // The routes the screens read, on the member's own credential
-  const fleet = await request.get("/api/admin/workers", {
-    headers: MEMBER_AUTH,
-  });
+  const fleet = await request.get("/api/admin/workers", { headers: MEMBER_AUTH });
   expect(fleet.status()).toBe(403);
   const runs = await request.get("/api/admin/runs", { headers: MEMBER_AUTH });
   expect(runs.status()).toBe(403);
 
   // The run history carries every project's run detail, so an admin's API token is refused too —
   // and the fleet list on the same token is the control that it is the token, not the role
-  const runsOnToken = await request.get("/api/admin/runs", {
-    headers: ADMIN_AUTH,
-  });
+  const runsOnToken = await request.get("/api/admin/runs", { headers: ADMIN_AUTH });
   expect(runsOnToken.status()).toBe(403);
-  expect((await runsOnToken.json()).error).toBe(
-    "Interactive admin session required",
-  );
-  expect(
-    (await request.get("/api/admin/workers", { headers: ADMIN_AUTH })).status(),
-  ).toBe(200);
+  expect((await runsOnToken.json()).error).toBe("Interactive admin session required");
+  expect((await request.get("/api/admin/workers", { headers: ADMIN_AUTH })).status()).toBe(200);
 });
 
 test("the run history reads a finished run's project, agent, machine, outcome, duration and cost", async ({
@@ -1137,30 +965,15 @@ test("the run history reads a finished run's project, agent, machine, outcome, d
 
   await signIn(page);
   await page.goto("/settings/workers/runs");
-  await expect(
-    page.getByRole("heading", { name: "Run history" }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Run history" })).toBeVisible();
 
-  const delivered = page
-    .getByRole("row")
-    .filter({ hasText: "Pull request open" });
+  const delivered = page.getByRole("row").filter({ hasText: "Pull request open" });
   await expect(delivered).toHaveCount(1);
-  for (const cell of [
-    HELD_TASK_KEY,
-    PROJECT_NAME,
-    AGENT_NAME,
-    WORKER_NAME,
-    "4 min",
-    "$1.23",
-  ]) {
+  for (const cell of [HELD_TASK_KEY, PROJECT_NAME, AGENT_NAME, WORKER_NAME, "4 min", "$1.23"]) {
     await expect(delivered, cell).toContainText(cell);
   }
-  await expect(delivered.getByText("Pull request open")).toHaveClass(
-    /text-success/,
-  );
-  await expect(page.getByTestId("run-detail")).toHaveText(
-    "Opened pull request #12",
-  );
+  await expect(delivered.getByText("Pull request open")).toHaveClass(/text-success/);
+  await expect(page.getByTestId("run-detail")).toHaveText("Opened pull request #12");
 
   // A run filed by hand, or before the machine reported itself: blank cells are the honest answer
   const merged = page.getByRole("row").filter({ hasText: "Merged" });
@@ -1169,19 +982,15 @@ test("the run history reads a finished run's project, agent, machine, outcome, d
   await expect(merged).toContainText("$0.50");
   await expect(merged.getByText("—", { exact: true })).toHaveCount(2);
   await expect(page.getByTestId("run-detail-empty")).toHaveText(
-    "Nothing was recorded about how this run ended.",
+    "Nothing was recorded about how this run ended."
   );
 
   // Newest first
-  const order = await page
-    .locator("tbody tr")
-    .filter({ hasText: / min/ })
-    .allInnerTexts();
-  expect(
-    order.map((text) =>
-      text.includes("Pull request open") ? "delivered" : "merged",
-    ),
-  ).toEqual(["delivered", "merged"]);
+  const order = await page.locator("tbody tr").filter({ hasText: / min/ }).allInnerTexts();
+  expect(order.map((text) => (text.includes("Pull request open") ? "delivered" : "merged"))).toEqual([
+    "delivered",
+    "merged",
+  ]);
 });
 
 /**
@@ -1202,14 +1011,10 @@ test("a machine that quarantined a checkout says so on the fleet screen, not `re
   const KEY = "filter.z.smudge (worktree)";
 
   // The control first, on the same row and the same screen: a machine whose checks all pass reads
-  // ready. Without it, a cell that failed to render anything at all would satisfy the assertions
+  // ready. Without it a cell that failed to render anything at all would satisfy the assertions
   // below by never containing the word.
   await heartbeat(request, {
-    preflight: {
-      ok: true,
-      account: "rafalpodles",
-      checks: [{ name: "gh", ok: true, detail: "" }],
-    },
+    preflight: { ok: true, account: "rafalpodles", checks: [{ name: "gh", ok: true, detail: "" }] },
   });
 
   await signIn(page);
@@ -1240,8 +1045,5 @@ test("a machine that quarantined a checkout says so on the fleet screen, not `re
   await expect(row).toContainText(CHECKOUT);
   await expect(row).toContainText(KEY);
   await expect(row).toContainText("restart this worker");
-  await expect(
-    row.getByText(/^ready/),
-    "the machine still reads ready",
-  ).toHaveCount(0);
+  await expect(row.getByText(/^ready/), "the machine still reads ready").toHaveCount(0);
 });

@@ -6,9 +6,11 @@ import { describe, it, expect, vi } from "vitest";
 import { createWorkspace, reapOrphans, Workspace } from "./workspace.js";
 import { CommandResult, RunOpts } from "./exec.js";
 import { gitArgs } from "./git-safety.js";
+import { scopedConfigListZ } from "./config-list.fixtures.js";
 
-// Named separately because a test asserts the scan runs in it, and `config` is cast to `never` to
-// stand in for the whole WorkerConfig — reading a property back off that cast does not typecheck.
+// Named separately because a test asserts the scan runs in it, and `config` is cast to `never`
+// to stand in for the whole WorkerConfig — reading a property back off that cast does not
+// typecheck.
 const REPO_PATH = "/repo";
 
 const config = {
@@ -32,7 +34,7 @@ const REMOTE_URL = "https://git.example/acme/repo.git";
 const LS_REMOTE = `ls-remote -- ${REMOTE_URL} refs/heads/main`;
 const FETCH = `fetch --no-tags -- ${REMOTE_URL} main`;
 const LOCAL_REF = "rev-parse --verify main^{commit}";
-const CONFIG_LIST = "config --list --show-scope --no-includes";
+const CONFIG_LIST = "config --list -z --show-scope --no-includes";
 
 function fakeGit(responses: Record<string, Partial<CommandResult>>) {
   const run = vi.fn(async (_command: string, args: string[], _opts: RunOpts): Promise<CommandResult> => {
@@ -405,7 +407,7 @@ describe("createWorkspace", () => {
    */
   describe("a checkout whose config carries an executable key", () => {
     const PLANTED = {
-      [CONFIG_LIST]: { stdout: "local\tfilter.z.smudge=touch /tmp/pwned\n" },
+      [CONFIG_LIST]: { stdout: scopedConfigListZ("filter.z.smudge=touch /tmp/pwned") },
     };
 
     it("is refused, naming the key", async () => {
@@ -444,7 +446,7 @@ describe("createWorkspace", () => {
       await expect(withRemote(runner).create("BP-1", "worker")).rejects.toThrow();
 
       const scan = run.mock.calls.find((call) =>
-        (call[1] as string[]).join(" ").includes("config --list --show-scope")
+        (call[1] as string[]).join(" ").includes("config --list -z --show-scope")
       );
       expect((scan?.[2] as { cwd?: string })?.cwd).toBe(REPO_PATH);
     });
@@ -466,7 +468,7 @@ describe("createWorkspace", () => {
         const answer = (stdout = "") => ({ code: 0, stdout, stderr: "", timedOut: false });
         if (key === CONFIG_LIST) {
           listings += 1;
-          return answer(listings === 1 ? "" : "local\tfilter.z.smudge=touch /tmp/pwned\n");
+          return answer(listings === 1 ? "" : scopedConfigListZ("filter.z.smudge=touch /tmp/pwned"));
         }
         if (key === "worktree list --porcelain") return answer("");
         if (args.join(" ") === LS_REMOTE) return answer("base1\trefs/heads/main\n");
@@ -488,7 +490,7 @@ describe("createWorkspace", () => {
     it("still creates the worktree when the config carries nothing executable", async () => {
       const { runner, run } = fakeGit(
         baseFromRemote("base1", {
-          [CONFIG_LIST]: { stdout: "local\tcore.bare=false\nlocal\tfilter.z.required=true\n" },
+          [CONFIG_LIST]: { stdout: scopedConfigListZ("core.bare=false\nfilter.z.required=true") },
         })
       );
 

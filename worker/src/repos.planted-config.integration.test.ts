@@ -57,6 +57,29 @@ describe("plantedConfig against a real repository", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  /**
+   * The same key `workspace.planted-config.integration.test.ts` watches git run, asserted here on
+   * what the scan itself answers: a subsection name carrying the `=` a line-based read splits on.
+   */
+  it("names a key whose subsection carries the separator a line-based read would split on", async () => {
+    git(work, "config", "filter.a=b.smudge", "/tmp/payload.sh");
+
+    const said = await scan();
+
+    expect(said).toContain("filter.a=b.smudge");
+    expect(said).toContain("local");
+  });
+
+  // The same shape in the value instead of the key: a newline inside a config value is legal, and
+  // a reader that splits the listing into lines reads the tail of one as an entry of its own.
+  it("is not fooled by a newline inside a value", async () => {
+    git(work, "config", "user.agent", "one\nfilter.z.smudge=/tmp/payload.sh");
+
+    const said = await scan();
+
+    expect(said, "the value's second line was read as a key of its own").toBe("");
+  });
+
   // The control that matters most, and the one that caught the naive fix: a repository with
   // nothing planted, on a machine whose global config is whatever it is, is not refused.
   it("says nothing about an ordinary checkout", async () => {

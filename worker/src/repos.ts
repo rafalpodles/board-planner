@@ -113,13 +113,7 @@ function usesExtTransport(value: string): boolean {
 }
 
 function dangerousConfigEntry(listOutput: string): string | null {
-  for (const rawLine of listOutput.split("\n")) {
-    const line = rawLine.trim();
-    if (!line) continue;
-    const eq = line.indexOf("=");
-    const key = (eq === -1 ? line : line.slice(0, eq)).toLowerCase();
-    const value = eq === -1 ? "" : line.slice(eq + 1);
-
+  for (const { key, value } of nulRecords(listOutput)) {
     if (EXACT_DANGEROUS_KEYS.includes(key)) return key;
     if (key.startsWith("alias.")) return key;
     if (dangerousFamilyLeaf(key)) return key;
@@ -148,7 +142,7 @@ function git(runner: Runner, cwd: string, args: string[]) {
 //
 // So the indirection is refused as itself below rather than read through. That also means nothing
 // of the operator's own included configuration is ever parsed by this scan.
-const CONFIG_LIST_ARGS = ["config", "--list", "--show-scope", "--no-includes"];
+const CONFIG_LIST_ARGS = ["config", "--list", "-z", "--show-scope", "--no-includes"];
 
 // The scopes the agent writes *inside the repository*, which this pipeline created for the run —
 // anything executable there is the agent's by construction. `global`, `system` and the `unknown`
@@ -168,21 +162,39 @@ interface ConfigEntry {
   raw: string;
 }
 
-function parseConfigList(output: string): ConfigEntry[] {
-  const entries: ConfigEntry[] = [];
-  for (const raw of output.split("\n")) {
-    if (!raw.trim()) continue;
-    const tab = raw.indexOf("\t");
-    if (tab === -1) continue;
-    const scope = raw.slice(0, tab);
-    const rest = raw.slice(tab + 1);
-    const eq = rest.indexOf("=");
-    entries.push({
-      scope,
-      key: (eq === -1 ? rest : rest.slice(0, eq)).toLowerCase(),
-      value: eq === -1 ? "" : rest.slice(eq + 1),
-      raw,
+// A config listing is NOT lines of `key=value`, and reading it as though it were is how the guard
+// this module exists to be got walked past. A subsection name may contain `=`: git lists such a
+// filter as `filter.a=b.smudge=<cmd>`, which split on its first `=` is the inert key `filter.a`
+// while git reads it as the filter it is and runs it on checkout. A value may contain a newline
+// for the same reason. Under `-z` the key ends at the record's first newline and the record ends
+// at a NUL, neither of which a key or a value can contain. Measured on git 2.50.1;
+// workspace.planted-config.integration.test.ts plants one through the plain CLI and watches it.
+function nulRecords(output: string): { key: string; value: string }[] {
+  const records: { key: string; value: string }[] = [];
+  for (const record of output.split("\0")) {
+    if (!record) continue;
+    const nl = record.indexOf("\n");
+    records.push({
+      key: (nl === -1 ? record : record.slice(0, nl)).toLowerCase(),
+      // A key git lists with no value at all — `[a] b` — is a record with no newline in it
+      value: nl === -1 ? "" : record.slice(nl + 1),
     });
+  }
+  return records;
+}
+
+// `--show-scope -z` frames each entry as two NUL-terminated fields: the scope, then the
+// `key\nvalue` record nulRecords reads.
+function parseConfigList(output: string): ConfigEntry[] {
+  const fields = output.split("\0");
+  const entries: ConfigEntry[] = [];
+  // Two at a time, stopping before a trailing half-pair: a truncated read must drop the entry it
+  // could not finish rather than pair a scope with the next entry's key.
+  for (let at = 0; at + 1 < fields.length; at += 2) {
+    const scope = fields[at];
+    const record = nulRecords(`${fields[at + 1]}\0`)[0];
+    if (!record) continue;
+    entries.push({ scope, key: record.key, value: record.value, raw: `${scope}\0${fields[at + 1]}` });
   }
   return entries;
 }
@@ -204,7 +216,7 @@ function executes(key: string, value: string): boolean {
 
 /**
  * Everything the effective config says before the agent has touched the checkout, as raw
- * `scope\tkey=value` lines. Held in this process and never written down: the agent runs as this
+ * NUL-framed `scope\0key\nvalue` records. Held in this process and never written down: the agent runs as this
  * uid with no filesystem sandbox, so a baseline on disk is a baseline it can edit. Same reason
  * `Worktree.baseSha` is carried rather than re-read.
  *
@@ -346,6 +358,7 @@ export async function bindRepository(
     "config",
     "--local",
     "--list",
+    "-z",
   ]);
   if (config.code !== 0 || config.timedOut) {
     return {
