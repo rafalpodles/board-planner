@@ -5,7 +5,7 @@ import { Project } from "@/models/project";
 import { Task } from "@/models/task";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { COLUMN_ROLES, ColumnRole, ROLE_LABELS } from "@/types";
-import { columnIdsWithRole } from "@/lib/columns";
+import { effectiveColumns } from "@/lib/columns";
 
 const MAX_COLUMNS = 12;
 const MAX_LABEL = 40;
@@ -53,7 +53,13 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  const existingIds = new Set((project.columns || []).map((c) => c.id));
+  // The board as everything else sees it, and as this endpoint's role rules always did. A
+  // project stored with `columns: []` predates column seeding and is shown the built-in seven
+  // by every reader — the editor on this screen included, which then sends those seven back.
+  // Reading the raw array here re-slugged the ids it had just been given and judged removals
+  // against a board nobody can see (BP-523).
+  const current = effectiveColumns(project.columns);
+  const existingIds = new Set(current.map((c) => c.id));
   const usedIds = new Set<string>();
   const clean: { id: string; label: string; color: string; role: ColumnRole; order: number; triggersPmReview: boolean }[] = [];
 
@@ -102,7 +108,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
 
   // Before the role rule below: a column that still holds tasks is the more local refusal, and
   // the one whose fix — move the tasks — the person has to make first whatever else is wrong
-  const removed = (project.columns || []).filter((c) => !usedIds.has(c.id));
+  const removed = current.filter((c) => !usedIds.has(c.id));
   for (const col of removed) {
     const inUse = await Task.find({ project: projectId, status: col.id })
       .select("taskNumber")
@@ -134,10 +140,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
    * creates the problem, never the board that already has it.
    */
   for (const [role, loses] of Object.entries(LOAD_BEARING) as [ColumnRole, string][]) {
-    // Through `effectiveColumns`, like every other reader: a project stored with `columns: []` is
-    // shown the seven defaults everywhere — including this very editor — so reading the raw array
-    // would answer "there was never a Done column" about a board whose admin can see one.
-    const had = columnIdsWithRole(project, role).length > 0;
+    const had = current.some((c) => c.role === role);
     const willHave = clean.some((c) => c.role === role);
     if (had && !willHave) {
       const { label } = ROLE_LABELS[role];

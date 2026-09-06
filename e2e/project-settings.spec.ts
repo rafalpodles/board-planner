@@ -1,6 +1,8 @@
 import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 import { ADMIN_AUTH } from "./api";
 import {
+  FINISHED_TASK_KEY,
+  FINISHED_TASK_TITLE,
   HELD_TASK_KEY,
   demoteActiveColumn,
   demoteDoneColumn,
@@ -10,6 +12,7 @@ import {
   seed,
   seedSecondEscalationColumn,
   seedWebhookDeliveryOutcomes,
+  stripStoredColumns,
 } from "./seed";
 import { signIn } from "./session";
 
@@ -469,6 +472,86 @@ test.describe("Board · Columns", () => {
 
     await roleOf(page, "To Do").selectOption("backlog");
     await expect(page.getByText(WARNING)).toBeVisible();
+  });
+});
+
+/**
+ * BP-523. A project stored with `columns: []` predates column seeding, and every reader answers
+ * it with the built-in seven — `effectiveColumns` — the editor on this very screen included. The
+ * endpoint used to read the **raw** array for two of its three decisions: which ids already exist
+ * (so an incoming one is kept rather than re-slugged from its label) and which columns a save
+ * removes. Only the role rules went through `effectiveColumns`. On such a board both raw reads
+ * saw nothing, so a round trip through the editor re-slugged "To Do" to `to_do` and stranded
+ * every task standing in it, while the "still has tasks" check iterated an empty array and warned
+ * about none of it.
+ *
+ * The ordinary board is the control, and it is the rest of this file: `effectiveColumns` hands a
+ * board with its seven stored back the same set, so "relabelling a column keeps its id" and "one
+ * holding tasks is refused" above must keep passing unchanged. The premise assertion in the first
+ * test is the other half — a `stripStoredColumns` that silently did nothing would otherwise make
+ * both tests here pass by testing the control twice.
+ */
+test.describe("Board · a board stored before its columns were", () => {
+  test.beforeEach(stripStoredColumns);
+
+  test("relabelling one column re-ids none of them, so no task is stranded", async ({
+    page,
+    request,
+  }) => {
+    // The premise: this board really is stored empty, and the editor shows the seven regardless
+    expect(await storedColumns(request), "the board still has its columns stored").toEqual([]);
+
+    await signIn(page);
+    await openSection(page, "Board");
+    expect(await labelsInOrder(page, 7)).toEqual([
+      "Planned",
+      "To Do",
+      "In Progress",
+      "In Review",
+      "Needs Human Review",
+      "Ready to Test",
+      "Done",
+    ]);
+
+    // Something has to change or there is nothing to save; Planned is the one column no task is
+    // standing in, so its own id is the only thing this edit could destroy
+    await columnNames(page).nth(0).fill("Icebox");
+    await save(page, "Columns saved");
+
+    const stored = [...(await storedColumns(request))].sort((a, b) => a.order - b.order);
+    expect(stored.map((c) => c.id)).toEqual([
+      "planned",
+      "todo",
+      "in_progress",
+      "in_review",
+      "needs_human_review",
+      "ready_to_test",
+      "done",
+    ]);
+    expect(stored.find((c) => c.id === "planned")?.label).toBe("Icebox");
+
+    // The harm, where a person meets it: TP-4 stands in `todo`, and a column called `to_do` is
+    // one it is not in, so the card is on no board at all
+    await page.goto(`/projects/${PROJECT_KEY}`);
+    await expect(page.getByText(FINISHED_TASK_TITLE)).toBeVisible();
+  });
+
+  test("removing a column that still holds tasks is refused here too", async ({
+    page,
+    request,
+  }) => {
+    await signIn(page);
+    await openSection(page, "Board");
+
+    await page.getByRole("button", { name: "Remove To Do" }).click();
+    await saveButton(page).click();
+
+    await expect(
+      page.getByText(new RegExp(`still has tasks: ${FINISHED_TASK_KEY}(?![0-9])`))
+    ).toBeVisible();
+    // Refused, not partially applied — and on this board that means still stored empty
+    expect(await storedColumns(request)).toEqual([]);
+    await expect(saveButton(page)).toBeVisible();
   });
 });
 

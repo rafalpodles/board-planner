@@ -1836,3 +1836,24 @@ export async function deleteProjectRow(projectId: mongoose.Types.ObjectId) {
   await db.collection("projects").deleteOne({ _id: projectId });
   await mongoose.disconnect();
 }
+
+/**
+ * The board as it is stored if it predates column seeding: `columns: []`.
+ *
+ * Every reader answers such a project with the built-in seven — `effectiveColumns` — including
+ * the settings editor, which then PUTs those seven back with their real ids. Written straight to
+ * the database because nothing in the product can put a board into this state any more, and the
+ * seeded columns are byte-identical to `DEFAULT_PROJECT_COLUMNS`, so stripping them changes
+ * nothing anybody can see. That is the point: the difference is entirely in what the endpoint
+ * reads.
+ */
+export async function stripStoredColumns() {
+  const db = (await connect()).db!;
+  const result = await db
+    .collection("projects")
+    .updateOne({ _id: PROJECT_ID }, { $set: { columns: [] } });
+  await mongoose.disconnect();
+  if (result.modifiedCount !== 1) {
+    throw new Error(`stripStoredColumns changed ${result.modifiedCount} boards, expected 1`);
+  }
+}
