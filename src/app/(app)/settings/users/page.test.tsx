@@ -82,4 +82,37 @@ describe("the users page, after a save that is followed by a refetch", () => {
       releaseList([OTHER]);
     });
   });
+
+  it("does the same after a create, which is a different flag on a different dialog", async () => {
+    let releaseList: (value: unknown) => void = () => {};
+    api.post.mockResolvedValue({ _id: "u3" });
+
+    render(<UsersPage />);
+    await screen.findByText("Ada");
+
+    act(() => screen.getByRole("button", { name: /new user/i }).click());
+    type(screen.getByLabelText("Username") as HTMLInputElement, "grace");
+    type(screen.getByLabelText("Password") as HTMLInputElement, "hopper-1906");
+    type(screen.getByLabelText("Full Name") as HTMLInputElement, "Grace Hopper");
+
+    api.get.mockImplementation((path: string) =>
+      path === "/api/users"
+        ? new Promise((resolve) => (releaseList = resolve))
+        : Promise.resolve({ configured: false })
+    );
+    await act(async () => {
+      screen.getByRole("button", { name: "Create User" }).click();
+    });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "New User" })).toBeNull());
+
+    act(() => screen.getByRole("button", { name: /new user/i }).click());
+    const reopened = await screen.findByRole("dialog", { name: "New User" });
+    expect(reopened.getAttribute("aria-busy")).toBeNull();
+    escape();
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "New User" })).toBeNull());
+
+    await act(async () => {
+      releaseList([OTHER]);
+    });
+  });
 });

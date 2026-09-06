@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, FormEvent, useEffect, type CSSProperties } from "react";
+import { useState, useCallback, useRef, FormEvent, useEffect, type CSSProperties } from "react";
 import { useApi } from "@/hooks/use-api";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
@@ -95,9 +95,15 @@ export function TaskForm({
   const [aiEnabled, setAiEnabled] = useState(false);
   const [aiInsights, setAiInsights] = useState<GeneratedTask | null>(null);
   const api = useApi();
-  // Every request this form makes, in one flag: whatever is in flight lands in these fields and
-  // nowhere else, so a dialog around the form has to stay put for all three (BP-565).
-  const busy = loading || aiLoading || uploads > 0;
+  // What a dialog around this form must not be dismissed during: the create, and an upload whose
+  // markdown lands in the description. Both are short and both take the whole typed task with them
+  // (BP-565).
+  //
+  // Deliberately NOT the AI fill. It is an enrichment the reader asked for, it can run for tens of
+  // seconds, and nothing can abort it — a dialog locked for that long with no way out is a worse
+  // bargain than a fill that lands on a form somebody closed. Its own button already says
+  // "Generating…" and refuses a second press.
+  const busy = loading || uploads > 0;
   const { toast } = useToast();
 
   useEffect(() => {
@@ -112,12 +118,17 @@ export function TaskForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Through a ref, so a caller passing an inline arrow does not make every one of its renders
+  // report false and then true again
+  const onBusyChangeRef = useRef(onBusyChange);
+  onBusyChangeRef.current = onBusyChange;
+
   useEffect(() => {
-    onBusyChange?.(busy);
-  }, [busy, onBusyChange]);
+    onBusyChangeRef.current?.(busy);
+  }, [busy]);
 
   // A form torn down mid-request would otherwise leave the flag set on whoever owns it
-  useEffect(() => () => onBusyChange?.(false), [onBusyChange]);
+  useEffect(() => () => onBusyChangeRef.current?.(false), []);
 
   const handleFileUpload = useCallback(
     async (file: File): Promise<string> => {

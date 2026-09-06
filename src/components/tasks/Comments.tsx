@@ -142,20 +142,26 @@ export function Comments({
   }
 
   async function handleDelete(commentId: string) {
+    if (deleteLoading) return;
     setDeleteLoading(true);
+    // The flag reaches ConfirmDialog as `loading`, which now refuses the dialog's own ways out, so
+    // it has to end with the DELETE rather than with the reload that follows it: held across the
+    // reload it belonged to a dialog that had closed, and the next one opened unable to close
+    // (BP-565).
     try {
       await api.del(
         `/api/projects/${projectId}/tasks/${taskId}/comments/${commentId}`
       );
-      setConfirmDeleteId(null);
-      await loadComments();
-      onMutated?.();
-      toast("Comment deleted", "success");
     } catch {
       toast("Failed to delete comment", "error");
-    } finally {
       setDeleteLoading(false);
+      return;
     }
+    setDeleteLoading(false);
+    setConfirmDeleteId(null);
+    await loadComments();
+    onMutated?.();
+    toast("Comment deleted", "success");
   }
 
   const REACTION_EMOJIS = ["\u{1F44D}", "\u{1F44E}", "\u{2764}\uFE0F", "\u{1F440}", "\u{1F389}", "\u{1F604}"];

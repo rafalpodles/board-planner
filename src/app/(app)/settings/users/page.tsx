@@ -72,20 +72,23 @@ export default function UsersPage() {
 
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
+    if (saving) return;
     setError("");
     setSaving(true);
 
+    // The flag ends with the write, and the list refetch below is deliberately outside its life.
+    // It gates the dialog's own ways out, so a flag still set across that fetch belonged to a
+    // dialog that had already closed — and the next one opened into it (BP-565).
     try {
       await api.post("/api/users", { username, password, fullName, email: newUserEmail });
-      setSaving(false);
-      closeNew();
-      const data = await api.get("/api/users");
-      setUsers(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create user");
-    } finally {
       setSaving(false);
+      return;
     }
+    setSaving(false);
+    closeNew();
+    setUsers(await api.get("/api/users"));
   }
 
   function openEdit(user: ApiUser) {
@@ -141,16 +144,6 @@ export default function UsersPage() {
         ...(editEmail !== (editUser.email ?? "") ? { email: editEmail } : {}),
         ...(passwordWasSet ? { password: newPassword } : {}),
       });
-      setEditSaving(false);
-      closeEdit();
-      const data = await api.get("/api/users");
-      setUsers(data);
-      toast(
-        passwordWasSet
-          ? `Password set for ${username}. They were signed out everywhere.`
-          : "Saved",
-        "success"
-      );
     } catch (err) {
       const status = (err as { status?: number })?.status;
       const message = err instanceof Error ? err.message : "Failed to update user";
@@ -161,25 +154,36 @@ export default function UsersPage() {
       } else {
         toast(message, "error");
       }
-    } finally {
       setEditSaving(false);
+      return;
     }
+
+    // Cleared with the PUT, before the refetch — see handleCreate.
+    setEditSaving(false);
+    closeEdit();
+    setUsers(await api.get("/api/users"));
+    toast(
+      passwordWasSet
+        ? `Password set for ${username}. They were signed out everywhere.`
+        : "Saved",
+      "success"
+    );
   }
 
   async function handleDelete() {
-    if (!confirmDeleteUser) return;
+    if (!confirmDeleteUser || deleting) return;
     setDeleting(true);
     try {
       await api.del(`/api/users/${confirmDeleteUser._id}`);
-      setConfirmDeleteUser(null);
-      const data = await api.get("/api/users");
-      setUsers(data);
-      toast("User deleted", "success");
     } catch (err) {
       toast(err instanceof Error ? err.message : "Failed to delete user", "error");
-    } finally {
       setDeleting(false);
+      return;
     }
+    setDeleting(false);
+    setConfirmDeleteUser(null);
+    setUsers(await api.get("/api/users"));
+    toast("User deleted", "success");
   }
 
   if (!isAdmin) return null;

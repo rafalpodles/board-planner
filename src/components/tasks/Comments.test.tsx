@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, waitFor, fireEvent, act } from "@testing-library/react";
+import { render, screen, cleanup, waitFor, fireEvent, within, act } from "@testing-library/react";
 import { Comments } from "./Comments";
 
 const { api, auth } = vi.hoisted(() => ({
@@ -56,6 +56,47 @@ describe("Comments", () => {
     await waitFor(() => expect(screen.getByText("A remark")).toBeTruthy());
     // The pill carries the reactor's name in its title; a deleted user reads as Unknown
     expect(screen.getByTitle(/Unknown/)).toBeTruthy();
+  });
+});
+
+/**
+ * BP-565. `deleteLoading` reaches ConfirmDialog as `loading`, which now also refuses the dialog's
+ * scrim, Escape and ×. That makes the flag part of a dialog's lifetime, so it has to end with the
+ * DELETE rather than with the comment reload that follows: held across the reload, it belonged to a
+ * dialog that had already closed, and the next one opened unable to close.
+ */
+describe("deleting a comment", () => {
+  it("leaves the next confirmation free while the reload is still running", async () => {
+    // The reader's own comments: only those carry a Delete
+    const mine = { ...comment, author: auth.user };
+    const second = { ...mine, _id: "c2", body: "Another remark" };
+    serve([mine, second]);
+    api.del.mockResolvedValue({});
+    render(<Comments projectId="TP" taskId="t1" />);
+    await waitFor(() => expect(screen.getByText("A remark")).toBeTruthy());
+
+    let releaseReload: (value: unknown) => void = () => {};
+    fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[0]);
+    api.get.mockImplementation((url: string) =>
+      url.includes("/comments")
+        ? new Promise((resolve) => (releaseReload = resolve))
+        : Promise.resolve([])
+    );
+    const confirm = screen.getByRole("dialog", { name: "Delete Comment" });
+    fireEvent.click(within(confirm).getByRole("button", { name: "Delete" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Delete Comment" })).toBeNull()
+    );
+
+    // The reload has not answered yet. The confirmation opened now is about the other comment.
+    fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[0]);
+    const reopened = await screen.findByRole("dialog", { name: "Delete Comment" });
+    expect(reopened.getAttribute("aria-busy")).toBeNull();
+    expect((within(reopened).getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(
+      false
+    );
+
+    releaseReload([second]);
   });
 });
 
