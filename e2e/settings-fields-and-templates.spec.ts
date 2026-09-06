@@ -339,10 +339,9 @@ test.describe("task templates", () => {
       // "doc", not the seed's first category: a new template defaults to that one, so picking it
       // would prove nothing about the picker
       const picker = row.getByRole("combobox", { name: "Template category" });
-      // TODO(BP-532): opened at the bottom edge of the viewport, the picker's own open scrolls
-      // the settings container and its scroll listener closes it on the same click. Scrolled to
-      // the middle first so the click tests the picker rather than that.
-      await picker.evaluate((el) => el.scrollIntoView({ block: "center" }));
+      // Clicked where it stands, at the bottom edge of the settings container. Until BP-532 that
+      // closed the picker on the same click and this needed a scroll to the middle first; the
+      // plain click is now the test, and this is the settings surface it covers
       await picker.click();
       const options = page.getByRole("listbox", { name: "Template category" });
       await expect(options).toBeVisible();
