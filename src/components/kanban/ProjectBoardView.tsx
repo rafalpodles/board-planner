@@ -455,6 +455,8 @@ export function ProjectBoardView({
       <ShortcutHelp
         open={showShortcutHelp}
         onClose={() => setShowShortcutHelp(false)}
+        readOnly={readOnly}
+        pinViewMode={pinViewMode}
       />
 
       <ConfirmDialog
