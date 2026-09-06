@@ -1,6 +1,11 @@
 const OBJECT_ID_PATTERN = /^[0-9a-fA-F]{24}$/;
 
-export const PROJECT_KEY_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,19}$/;
+// The single source for the key's length cap — a UI field's own maxLength and the rule text
+// shown for a rejected key both import this rather than restating "20" (BP-535).
+export const PROJECT_KEY_MAX_LENGTH = 20;
+export const PROJECT_KEY_PATTERN = new RegExp(
+  `^[A-Za-z][A-Za-z0-9_-]{0,${PROJECT_KEY_MAX_LENGTH - 1}}$`
+);
 
 // Routes under /projects that are pages in their own right, not a project ref
 const RESERVED_PROJECT_SEGMENTS = new Set(["new"]);
