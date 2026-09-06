@@ -31,7 +31,8 @@ boardplanner_project_key: BP
 Working a task (picking it, statuses, worktree, tests, review, PR, merge, cleanup) is the `bp-task`
 skill in `.claude/skills/bp-task/`. Invoke it before touching a task. Its references cover the
 board's MCP conventions, the e2e suite, git and GitHub. On session start run `list_tasks` for BP to
-see current work; when asked what to work on, list tasks and suggest the next one.
+see current work; when asked what to work on, list tasks and suggest the next one. When the user
+describes new work, ask whether it should be tracked and `create_task` if so.
 
 Every `gh` command here runs as `rafalpodles` and every commit is authored by
 `Rafał Podleś <rafalpodles@gmail.com>`; any other account on this machine is not a collaborator.
