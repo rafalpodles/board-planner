@@ -78,6 +78,62 @@ describe("update_task and the agent that runs it", () => {
     expect(update).not.toHaveBeenCalled();
   });
 
+  /**
+   * BP-496: `/api/agents` sends the project agents of every project the caller can reach, not just
+   * this task's — an instance admin sees all of them. Resolution has to filter by the task's own
+   * project the way PropertyRail's picker does, or a namesake belonging to another board either
+   * gets chosen silently or reaches the write only to be refused by `agentUsableOnProject`.
+   */
+  it("resolves a project-scoped agent only against the task's own project, never a namesake elsewhere", async () => {
+    vi.spyOn(PlannerClient.prototype, "listAgents").mockResolvedValue([
+      { _id: "elsewhere", name: "Runner", scope: "project", projectId: "p2" },
+      { _id: "a1", name: "Runner", scope: "project", projectId: "p1" },
+    ]);
+    const update = vi.spyOn(PlannerClient.prototype, "updateTask").mockResolvedValue({});
+
+    await callUpdate({ agent: "Runner" });
+
+    expect(update).toHaveBeenCalledWith("p1", "t1", { agent: "a1" });
+  });
+
+  it("refuses a name that exists only on another project, saying so rather than a bare \"not found\"", async () => {
+    vi.spyOn(PlannerClient.prototype, "listAgents").mockResolvedValue([
+      { _id: "elsewhere", name: "Runner", scope: "project", projectId: "p2" },
+    ]);
+    const update = vi.spyOn(PlannerClient.prototype, "updateTask").mockResolvedValue({});
+
+    await expect(callUpdate({ agent: "Runner" })).rejects.toThrow(/another project/);
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  // The control: a global agent carries no project of its own, so it must keep resolving
+  // everywhere exactly as before this fix
+  it("resolves a global agent regardless of project", async () => {
+    vi.spyOn(PlannerClient.prototype, "listAgents").mockResolvedValue([
+      { _id: "g1", name: "Default", scope: "global", projectId: null },
+    ]);
+    const update = vi.spyOn(PlannerClient.prototype, "updateTask").mockResolvedValue({});
+
+    await callUpdate({ agent: "default" });
+
+    expect(update).toHaveBeenCalledWith("p1", "t1", { agent: "g1" });
+  });
+
+  // A second control, distinct from the global one above: a personal agent also carries no
+  // project of its own (the filter only gates `scope === "project"`), so it must resolve
+  // regardless of project too — this pins that down against a fix that narrowed the check to
+  // `scope === "global"` instead of `scope !== "project"`, which would wrongly exclude it
+  it("resolves a personal (user-scope) agent regardless of project too", async () => {
+    vi.spyOn(PlannerClient.prototype, "listAgents").mockResolvedValue([
+      { _id: "u1", name: "Admin's own", scope: "user", projectId: null },
+    ]);
+    const update = vi.spyOn(PlannerClient.prototype, "updateTask").mockResolvedValue({});
+
+    await callUpdate({ agent: "admin's own" });
+
+    expect(update).toHaveBeenCalledWith("p1", "t1", { agent: "u1" });
+  });
+
   // Null, not "": an empty string is not a value an ObjectId ref can hold, and only updateTask's
   // own normalisation stands between the two
   it("sends null for the empty string, which means nobody runs it", async () => {
