@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { withProjectAccess } from "@/lib/middleware";
+import { withProjectOwner } from "@/lib/middleware";
 import { ProjectAuditLog } from "@/models/projectAuditLog";
 
-export const GET = withProjectAccess(async (_request, { params }) => {
+export const GET = withProjectOwner(async (_request, { params }) => {
   const { projectId } = await params;
   await connectDB();
 

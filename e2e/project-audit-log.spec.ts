@@ -126,9 +126,8 @@ test("a member is not shown the log at all", async ({ page }) => {
   await expect(page.getByText("Recent changes")).toHaveCount(0);
   await expect(rows(page)).toHaveCount(0);
 
-  // What the screen withholds, the endpoint does not: `withProjectAccess` lets any member read
-  // every row. Asserted as it is rather than as it should be, and filed as BP-549 — the day the
-  // two are reconciled this goes red, which is the signal to rewrite it.
+  // The endpoint now refuses what the screen already withholds (BP-549) — a member holds a
+  // grant, not ownership, and the route asks for the same "admin" need `project.canAdmin` does.
   const asMember = await page.request.get(`/api/projects/${PROJECT_KEY}/audit`);
-  expect(asMember.status()).toBe(200);
+  expect(asMember.status()).toBe(403);
 });
