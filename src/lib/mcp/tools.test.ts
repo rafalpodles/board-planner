@@ -119,6 +119,21 @@ describe("update_task and the agent that runs it", () => {
     expect(update).toHaveBeenCalledWith("p1", "t1", { agent: "g1" });
   });
 
+  // A second control, distinct from the global one above: a personal agent also carries no
+  // project of its own (the filter only gates `scope === "project"`), so it must resolve
+  // regardless of project too — this pins that down against a fix that narrowed the check to
+  // `scope === "global"` instead of `scope !== "project"`, which would wrongly exclude it
+  it("resolves a personal (user-scope) agent regardless of project too", async () => {
+    vi.spyOn(PlannerClient.prototype, "listAgents").mockResolvedValue([
+      { _id: "u1", name: "Admin's own", scope: "user", projectId: null },
+    ]);
+    const update = vi.spyOn(PlannerClient.prototype, "updateTask").mockResolvedValue({});
+
+    await callUpdate({ agent: "admin's own" });
+
+    expect(update).toHaveBeenCalledWith("p1", "t1", { agent: "u1" });
+  });
+
   // Null, not "": an empty string is not a value an ObjectId ref can hold, and only updateTask's
   // own normalisation stands between the two
   it("sends null for the empty string, which means nobody runs it", async () => {
