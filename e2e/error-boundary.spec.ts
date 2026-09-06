@@ -21,6 +21,9 @@ test.beforeEach(seed);
 
 const BROKEN = { not: "an array" };
 
+/** The app's own crash screen, told apart from the dev server's overlay of the same error. */
+const boundary = (page: Page) => page.getByTestId("error-boundary");
+
 async function crash(page: Page) {
   await page.route("**/api/projects", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(BROKEN) })
@@ -37,13 +40,17 @@ test("the stack is there for a bug report, and behind a disclosure until asked f
 
   // What is on the surface: a sentence, not a stack. The <p>, specifically — the same words are
   // inside the disclosure, and it is where they are that this test is about
-  await expect(page.locator("p", { hasText: /is not a function/ })).toBeVisible();
-  // A direct child of the disclosure: the dev server paints its own <pre> over the page, and
-  // which of the two an unscoped locator finds depends on when the overlay mounted
-  const stack = page.locator("details > pre");
+  await expect(boundary(page).locator("p", { hasText: /is not a function/ })).toBeVisible();
+
+  // Nothing on this screen shows a frame until it is asked for. Read as rendered text, not as a
+  // locator count: a closed <details> keeps its content in the DOM, and "the disclosure is closed"
+  // would also be satisfied by a stack printed beside it — which is the state this replaced
+  expect(await boundary(page).innerText()).not.toMatch(/at .+_next/);
+
+  const stack = boundary(page).locator("details > pre");
   await expect(stack).toBeHidden();
 
-  await page.locator("summary").click();
+  await boundary(page).locator("summary").click();
   await expect(stack).toBeVisible();
   // A real stack, not the message repeated: frames carry the chunk they came from
   await expect(stack).toContainText(/_next|at /);
@@ -53,10 +60,10 @@ test("the details can be copied in one click", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await crash(page);
 
-  await page.locator("summary").click();
-  const shown = (await page.locator("details > pre").innerText()).trim();
+  await boundary(page).locator("summary").click();
+  const shown = (await boundary(page).locator("details > pre").innerText()).trim();
 
-  await page.getByRole("button", { name: "Copy details" }).click();
+  await boundary(page).getByRole("button", { name: "Copy details" }).click();
   await expect(page.getByRole("button", { name: "Copied" })).toBeVisible();
 
   const clipboard = await page.evaluate(() => navigator.clipboard.readText());
