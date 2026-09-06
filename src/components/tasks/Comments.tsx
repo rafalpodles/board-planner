@@ -195,7 +195,7 @@ export function Comments({
     <div>
       {!hideHeading && (
         <h3 className="font-semibold mb-3">
-          Comments ({comments.length})
+          Comments{reading || loadFailed ? "" : ` (${comments.length})`}
         </h3>
       )}
 
@@ -336,7 +336,8 @@ export function Comments({
         ) : loadFailed ? (
           <LoadFailed
             testId="comments-error"
-            className="py-4"
+            variant={comments.length ? "row" : "block"}
+            className={comments.length ? "mt-2" : "py-4"}
             message="Failed to load the comments."
             onRetry={() => {
               setReading(true);

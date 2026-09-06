@@ -135,9 +135,10 @@ test("a search that fails says so rather than reporting no tasks", async ({ page
   await page.goto("/search");
 
   const box = page.getByRole("textbox", { name: "Search tasks and projects" });
-  // Hydration eats a fill that lands too early, and the assertions below would then blame the fix
-  await expect(box).toBeEnabled();
+  await expect(box).toBeVisible();
   await box.fill("review");
+  // A fill dropped before hydration shows up as the alert below never arriving, not as a pass:
+  // `toHaveValue` cannot tell the two apart, so the real anchor is the assertion that follows
   await expect(box).toHaveValue("review");
 
   await expect(page.getByTestId("search-error")).toBeVisible();
@@ -157,7 +158,7 @@ test("a search that answers with nothing still reports no tasks", async ({ page 
   await page.goto("/search");
 
   const box = page.getByRole("textbox", { name: "Search tasks and projects" });
-  await expect(box).toBeEnabled();
+  await expect(box).toBeVisible();
   await box.fill("zzzzz-nothing-matches-this");
   await expect(box).toHaveValue("zzzzz-nothing-matches-this");
 

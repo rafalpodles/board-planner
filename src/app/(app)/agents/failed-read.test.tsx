@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, waitFor, fireEvent, act } from "@testing-library/react";
+import { render, renderHook, screen, cleanup, waitFor, fireEvent, act } from "@testing-library/react";
 
 /**
  * BP-577. `store.ts` had no `catch`: the rejection went unhandled, the catalog stayed the empty
@@ -18,6 +18,7 @@ vi.mock("@/hooks/use-auth", () => ({ useAuth: () => ({ isAdmin: true }) }));
 vi.mock("@/hooks/use-projects", () => ({ useProjects: () => ({ projects: [] }) }));
 vi.mock("next/navigation", () => ({ useParams: () => ({ agentId: "a1" }) }));
 
+const { useStore } = await import("./store");
 const { default: AgentsPage } = await import("./page");
 const { default: AgentEditorPage } = await import("./[agentId]/page");
 
@@ -42,6 +43,7 @@ function serve(agents: unknown[]) {
 beforeEach(() => {
   api.get.mockReset();
   api.del.mockReset();
+  api.put.mockReset();
 });
 
 afterEach(cleanup);
@@ -153,6 +155,61 @@ describe("the agents catalog when the read fails", () => {
   });
 });
 
+describe("two reads in flight at once", () => {
+  // Every mutation reloads, so overlapping reads are the normal case. A rejection that a newer
+  // read has already overtaken must not hang a "may be out of date" banner over current data,
+  // and a stale success must not overwrite newer rows.
+  it("ignores a rejection the newer read overtook", async () => {
+    let failFirst: (error: Error) => void = () => {};
+    const pendingRejections: ((error: Error) => void)[] = [];
+    let call = 0;
+    api.get.mockImplementation(() => {
+      call += 1;
+      if (call <= 2) {
+        return new Promise((_, reject) => pendingRejections.push(reject));
+      }
+      return Promise.resolve([AGENT]);
+    });
+
+    const { result } = renderHook(() => useStore());
+
+    await act(async () => {
+      void result.current.reload();
+    });
+    await waitFor(() => expect(result.current.allAgents.length).toBe(1));
+
+    failFirst = pendingRejections[0];
+    await act(async () => failFirst(new Error("network")));
+
+    expect(result.current.failed).toBe(false);
+    expect(result.current.allAgents.length).toBe(1);
+  });
+
+  it("ignores a success the newer read overtook", async () => {
+    const pendingResolutions: ((rows: unknown[]) => void)[] = [];
+    let call = 0;
+    const STALE = { ...AGENT, _id: "a0", name: "Was here first" };
+    api.get.mockImplementation(() => {
+      call += 1;
+      if (call <= 2) {
+        return new Promise((resolve) => pendingResolutions.push(resolve));
+      }
+      return Promise.resolve([AGENT]);
+    });
+
+    const { result } = renderHook(() => useStore());
+
+    await act(async () => {
+      void result.current.reload();
+    });
+    await waitFor(() => expect(result.current.allAgents.length).toBe(1));
+
+    await act(async () => pendingResolutions.forEach((resolve) => resolve([STALE])));
+
+    expect(result.current.allAgents.map((a) => a.name)).toEqual(["Implement"]);
+  });
+});
+
 describe("the agent editor when the read fails", () => {
   it("does not say the agent does not exist", async () => {
     fail();
@@ -173,6 +230,31 @@ describe("the agent editor when the read fails", () => {
 
     await waitFor(() => expect(screen.getAllByText("Implement").length).toBeGreaterThan(0));
     expect(screen.queryByTestId("agent-editor-error")).toBeNull();
+  });
+
+  // The editor's half of the same rule: a reload that fails while the agent is on screen must
+  // keep it there and say the refresh failed, not claim the agent is gone
+  it("keeps the agent on screen when a later read fails", async () => {
+    api.get.mockImplementation(() => Promise.resolve([AGENT]));
+    const { result } = renderHook(() => useStore());
+    await waitFor(() => expect(result.current.allAgents.length).toBe(1));
+    cleanup();
+
+    api.get.mockImplementationOnce(() => Promise.resolve([AGENT]));
+    api.get.mockImplementationOnce(() => Promise.resolve([]));
+    render(<AgentEditorPage />);
+    await waitFor(() => expect(screen.getAllByText("Implement").length).toBeGreaterThan(0));
+
+    api.get.mockImplementation(() => Promise.reject(new Error("network")));
+    api.put.mockResolvedValue({});
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    });
+
+    await waitFor(() => expect(screen.getByTestId("agent-editor-stale")).toBeTruthy());
+    expect(screen.getAllByText("Implement").length).toBeGreaterThan(0);
+    expect(screen.queryByTestId("agent-editor-error")).toBeNull();
+    expect(screen.queryByText(/No agent with that id/)).toBeNull();
   });
 
   // A read that answered and holds no such agent is a different answer, and must still be given

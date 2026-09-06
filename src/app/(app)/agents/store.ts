@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { AgentComposition, ApiAgent, ApiAgentBlock } from "@/types";
 
@@ -27,19 +27,25 @@ export function useStore() {
   const [blocks, setBlocks] = useState<ApiAgentBlock[]>([]);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+  const loadSeq = useRef(0);
 
   const load = useCallback(async () => {
+    // Every mutation reloads, so two reads are routinely in flight. Without the sequence a slow
+    // rejection lands after a newer success and hangs a "may be out of date" banner over current
+    // data, and a slow success overwrites newer rows while clearing the banner that said so.
+    const seq = ++loadSeq.current;
     setFailed(false);
     try {
       const [a, b] = await Promise.all([api.get("/api/agents"), api.get("/api/agent-blocks")]);
+      if (seq !== loadSeq.current) return;
       setAgents(Array.isArray(a) ? (a as ApiAgent[]) : []);
       setBlocks(Array.isArray(b) ? (b as ApiAgentBlock[]) : []);
     } catch {
       // Without this the rejection went unhandled and the catalog rendered as empty — on the
       // agent screen that reads as deleted rather than as unread (BP-577)
-      setFailed(true);
+      if (seq === loadSeq.current) setFailed(true);
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   }, [api]);
 
