@@ -1376,9 +1376,18 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         ).toBe("");
       });
 
-      // Once per checkout, not once per pass. The map's early return is the only thing making it
-      // so, and an operator reading stderr for the reason a machine went quiet should find one
-      // line rather than a line every poll interval for as long as the worker runs.
+      /**
+       * Once per checkout, not once per pass: an operator reading stderr for the reason a machine
+       * went quiet should find one line, not a line every poll interval for as long as the worker
+       * runs.
+       *
+       * What makes it so is the `assignments()` filter, NOT `quarantineProject`'s own early
+       * return — measured: removing that guard leaves this green, because a quarantined checkout
+       * is never claimed for again, so the function is never reached a second time. The guard is
+       * defensive against a caller that does not exist yet. This test pins the property an
+       * operator sees; it deliberately does not pin which of the two produces it, because either
+       * one alone is enough and a test that named one would be a test of the wrong thing.
+       */
       it("says it once, however many passes go by", async () => {
         const run = await runOneTask(undefined, undefined, {
           scopedConfig: PLANTED,
