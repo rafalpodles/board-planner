@@ -868,6 +868,9 @@ async function seedBoard(withSessions: boolean) {
     }),
   ]);
 
+  // Before this grant, the board had no "owner" relation at all, so `ownerCount` (members/route.ts)
+  // was 0 and the "a board must keep at least one owner" refusal was unreachable on this fixture.
+  // It is now — a spec that promotes then demotes a grant will behave differently than on `main`.
   await db.collection("grants").insertMany([
     {
       _id: GRANT_ID,
@@ -1118,7 +1121,7 @@ export async function seedRenamedColumn() {
   await mongoose.disconnect();
 }
 
-/** seed(), minus the two session rows — see seedBoard. */
+/** seed(), minus the session rows — see seedBoard. */
 export const seedWithoutSessions = () => seedBoard(false);
 
 // BP-386. Search answers differently depending on who is asking, so the corpus is two boards
