@@ -209,11 +209,10 @@ test("? still closes the help after a reload has reordered the listeners", async
 const helpDialog = (page: Page) => page.getByRole("dialog", { name: "Keyboard Shortcuts" });
 
 const activeElementIsInsideTheHelp = (page: Page) =>
-  page.evaluate(() => {
-    const active = document.activeElement;
-    const dialog = document.querySelector('[role="dialog"]');
-    return active !== null && dialog !== null && dialog.contains(active);
-  });
+  helpDialog(page).evaluate((el) => el.contains(document.activeElement));
+
+// Written by the same effect that registers a layer, so polling this is polling the registry
+const scrollLock = (page: Page) => page.evaluate(() => document.body.style.overflow);
 
 const collapseSidebar = (page: Page) =>
   page.getByRole("button", { name: /(Collapse|Expand) sidebar/ });
@@ -262,11 +261,11 @@ test("the page behind the help does not scroll, and scrolls again once it closes
 
   await page.keyboard.press("?");
   await expect(help(page)).toBeVisible();
-  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("hidden");
+  await expect.poll(() => scrollLock(page)).toBe("hidden");
 
   await page.keyboard.press("Escape");
   await expect(help(page)).toBeHidden();
-  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("");
+  await expect.poll(() => scrollLock(page)).toBe("");
 });
 
 test("Escape closes the help without also clearing the selection underneath it", async ({
@@ -438,4 +437,95 @@ test("a dialog that never overflows gets no extra tab stop", async ({ page }) =>
   // Straight to Cancel — no silent stop in between, unlike the overflowing help above
   await page.keyboard.press("Tab");
   await expect(focused(page)).toHaveAccessibleName("Cancel");
+});
+
+/**
+ * BP-560. The board's handler was gated in BP-543; the search palette's own listener was not.
+ * `useSearchShortcut` checked `/` against the event target being a text field and ⌘K against
+ * nothing at all, and a dialog's container is a DIV — so either key opened Search over any
+ * `aria-modal` dialog, and a hit picked from it navigated away from under a form nobody closed.
+ *
+ * Measured before the fix, with the help open: `/` and ⌘K each put a second dialog named
+ * "Search" on the page, with focus on its input.
+ *
+ * What none of these can see: a press the guard swallows still has to be `preventDefault`ed, or
+ * the browser's own Ctrl/⌘K binding takes focus out of the dialog into its chrome — which the
+ * headless Chromium here has none of, so `search.test.tsx` pins that half.
+ */
+const searchLayer = (page: Page) => page.getByRole("dialog", { name: "Search" });
+
+for (const [label, key] of [
+  ["/", "/"],
+  ["⌘K", "ControlOrMeta+k"],
+] as const) {
+  test(`${label} does not open Search over the help`, async ({ page }) => {
+    await openBoard(page);
+
+    await page.keyboard.press("?");
+    await expect(help(page)).toBeVisible();
+    // The premise: focus sits on the help's own container, a DIV, which is why a text-field
+    // check on the event target cannot be the guard
+    await expect.poll(() => activeElementIsInsideTheHelp(page)).toBe(true);
+
+    await page.keyboard.press(key);
+    // No settle wait, for the same reason as the `v` test above: opening the palette is one
+    // synchronous state write with no network hop, so a leak is already in the DOM when this
+    // round-trips back from the browser. Then where focus *is*, not only what is absent — the
+    // palette takes focus the moment it opens, so a leak fails both
+    await expect(searchLayer(page)).toHaveCount(0);
+    await expect.poll(() => activeElementIsInsideTheHelp(page)).toBe(true);
+    await expect(help(page)).toBeVisible();
+
+    // The control: the same key opens Search once the help is gone — gone from the registry,
+    // not only from the DOM, or the press can land while the count still says 1
+    await page.keyboard.press("Escape");
+    await expect(help(page)).toBeHidden();
+    await expect.poll(() => scrollLock(page)).toBe("");
+    await page.keyboard.press(key);
+    await expect(searchLayer(page)).toBeVisible();
+  });
+}
+
+/**
+ * The harm the ticket names, on the dialog it names it for: ⌘K over the New Task form with the
+ * cursor in the title. The typing-target check that keeps `/` out of a text field never applied
+ * to ⌘K, so a press there put Search over a half-written form.
+ */
+test("⌘K does not open Search over the New Task form, cursor in the title", async ({ page }) => {
+  await openBoard(page);
+
+  await page.keyboard.press("n");
+  await expect(newTask(page)).toBeVisible();
+  const title = newTask(page).getByLabel("Title", { exact: true });
+  await title.click();
+  await expect(title).toBeFocused();
+
+  await page.keyboard.press("ControlOrMeta+k");
+  await expect(searchLayer(page)).toHaveCount(0);
+  await expect(title).toBeFocused();
+  await expect(newTask(page)).toBeVisible();
+
+  // The control: the same press opens Search once the form is gone
+  await page.keyboard.press("Escape");
+  await expect(newTask(page)).toBeHidden();
+  await expect.poll(() => scrollLock(page)).toBe("");
+  await page.keyboard.press("ControlOrMeta+k");
+  await expect(searchLayer(page)).toBeVisible();
+});
+
+/**
+ * The palette registers a layer of its own the moment it opens, so a guard that only counted
+ * open layers — the fix's obvious shape — would leave ⌘K unable to close it.
+ */
+test("⌘K still closes the Search it opened", async ({ page }) => {
+  await openBoard(page);
+
+  await page.keyboard.press("ControlOrMeta+k");
+  await expect(searchLayer(page)).toBeVisible();
+  // Registered, not only rendered — otherwise the second press could catch the guard before
+  // the count it is about has reached 1, and pass for the wrong reason
+  await expect.poll(() => scrollLock(page)).toBe("hidden");
+
+  await page.keyboard.press("ControlOrMeta+k");
+  await expect(searchLayer(page)).toBeHidden();
 });
