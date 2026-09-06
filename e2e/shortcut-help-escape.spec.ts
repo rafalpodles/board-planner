@@ -40,6 +40,8 @@ const contextMenu = (page: Page) => page.getByTestId("task-context-menu");
 const selectBox = (page: Page) =>
   page.getByRole("button", { name: `Select ${PROJECT_KEY}-${DECOY_TASK_NUMBER}` });
 
+const focused = (page: Page) => page.locator(":focus");
+
 /**
  * Leaves the board's own reload hanging, so no later response can re-order the two listeners.
  * GET only: the same path is where a new task is POSTed, and test 2 opens that very form.
@@ -376,4 +378,64 @@ test("v does not toggle the view behind the help", async ({ page }) => {
   // The control: the one key the board must still own while a dialog is open
   await page.keyboard.press("?");
   await expect(help(page)).toBeHidden();
+});
+
+/**
+ * BP-542. `Modal`'s scroll container carried no `tabindex`, so `tabbablesWithin` never returned
+ * it and `cycleTabWithin` bounced every Tab straight back to the close button — a sibling of the
+ * scroller, not a descendant. Content below the fold had no key that reached it at all: measured
+ * on this exact dialog at 1280×700, PageDown/ArrowDown/End all left `scrollTop` at 0.
+ *
+ * The viewport is shrunk to where the ticket measured the overflow. At the suite's default
+ * 1280×720 the help nearly fits, so whether it overflows (and so whether the bug is even
+ * reachable) would ride on font-metric differences this spec does not control.
+ */
+test.describe("the help's content overflows the dialog", () => {
+  test.use({ viewport: { width: 1280, height: 700 } });
+
+  test("Tab reaches the scroll container, and PageDown scrolls it", async ({ page }) => {
+    await openBoard(page);
+
+    await page.keyboard.press("?");
+    await expect(help(page)).toBeVisible();
+
+    // Control: the close button is the first tab stop, same as ever — unaffected by the fix,
+    // so this failing would mean the trap broke in some other way, not the one this test is about
+    await page.keyboard.press("Tab");
+    await expect(focused(page)).toHaveAccessibleName("Close dialog");
+
+    // The scroll container is the second tab stop only once it is a tab stop at all
+    await page.keyboard.press("Tab");
+    const scroller = focused(page);
+    await expect(scroller).toHaveJSProperty("scrollTop", 0);
+
+    await page.keyboard.press("PageDown");
+    await expect.poll(() => scroller.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * BP-542, the other half: the scroll container is only a tab stop when it actually scrolls.
+ * The bulk-delete confirm is a `Modal` too, but a short one — a message and two buttons, never
+ * overflowing — so this is the case the fix must leave alone. An unconditional `tabIndex={0}`
+ * passed the test above just as well, and was caught only by independent review: it made this
+ * exact dialog's wrapper a silent, ring-highlighted tab stop between Close and Cancel.
+ */
+test("a dialog that never overflows gets no extra tab stop", async ({ page }) => {
+  await openBoard(page);
+
+  await card(page).click({ modifiers: ["Shift"] });
+  await cardFor(page, SIBLING_TASK_NUMBER).click({ modifiers: ["Shift"] });
+  await card(page).click({ button: "right" });
+  await page.getByRole("button", { name: /^Delete 2 tasks/ }).click();
+
+  const confirm = page.getByRole("dialog", { name: "Delete Selected Tasks" });
+  await expect(confirm).toBeVisible();
+
+  await page.keyboard.press("Tab");
+  await expect(focused(page)).toHaveAccessibleName("Close dialog");
+
+  // Straight to Cancel — no silent stop in between, unlike the overflowing help above
+  await page.keyboard.press("Tab");
+  await expect(focused(page)).toHaveAccessibleName("Cancel");
 });

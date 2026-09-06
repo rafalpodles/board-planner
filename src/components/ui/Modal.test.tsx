@@ -266,6 +266,32 @@ describe("Modal chrome", () => {
   });
 });
 
+describe("Modal scroll container as a tab stop", () => {
+  it("is not a tab stop when its content does not overflow", () => {
+    const { container } = renderModal();
+    const scroller = container.querySelector(".overflow-y-auto")!;
+    expect(scroller.getAttribute("tabindex")).toBeNull();
+  });
+
+  it("becomes a tab stop once its content overflows", () => {
+    const { container, rerender } = renderModal();
+    const scroller = container.querySelector(".overflow-y-auto")!;
+    Object.defineProperty(scroller, "scrollHeight", { value: 800, configurable: true });
+    Object.defineProperty(scroller, "clientHeight", { value: 400, configurable: true });
+
+    act(() => {
+      rerender(
+        <Modal open onClose={() => {}} title="Edit Sprint">
+          <input aria-label="Name" />
+          <button>Save</button>
+        </Modal>
+      );
+    });
+
+    expect(scroller.getAttribute("tabindex")).toBe("0");
+  });
+});
+
 describe("Modal dismissal, still intact", () => {
   it("closes on Escape", () => {
     const onClose = vi.fn();
