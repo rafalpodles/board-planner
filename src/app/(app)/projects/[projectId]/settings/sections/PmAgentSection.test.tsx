@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { PmAgentSection } from "./PmAgentSection";
 import { SettingsProvider } from "@/components/settings/settings-context";
 import { ApiProject } from "@/types";
@@ -55,9 +55,13 @@ function project(over: Partial<ApiProject> = {}): ApiProject {
   } as ApiProject;
 }
 
+const register = vi.fn();
+
+const dirtyCount = () => register.mock.calls.at(-1)?.[0]?.count;
+
 function renderSection(isAdmin: boolean, over: Partial<ApiProject> = {}) {
   return render(
-    <SettingsProvider register={vi.fn()} unregister={vi.fn()}>
+    <SettingsProvider register={register} unregister={vi.fn()}>
       <PmAgentSection
         projectId="p1"
         project={project(over)}
@@ -71,6 +75,7 @@ function renderSection(isAdmin: boolean, over: Partial<ApiProject> = {}) {
 }
 
 beforeEach(() => {
+  register.mockClear();
   api.post.mockReset();
   api.put.mockReset();
   toast.mockReset();
@@ -181,5 +186,199 @@ describe("the turn-cap hint", () => {
     renderSection(true, { pm: { ...project().pm!, ...withZone(undefined) } });
 
     expect(screen.getByText(/Resets at midnight in Europe\/Warsaw/)).toBeTruthy();
+  });
+});
+
+describe("disconnecting an OAuth server", () => {
+  const notes = () => screen.getByLabelText(/Project context/i);
+
+  it("leaves an unrelated unsaved edit dirty and still on screen", async () => {
+    renderSection(true);
+    api.post.mockResolvedValue({ ok: true });
+
+    fireEvent.change(notes(), { target: { value: "something the admin typed" } });
+    expect(dirtyCount()).toBe(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect notion" }));
+
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("OAuth connection removed", "success"));
+    expect(dirtyCount()).toBe(1);
+    expect((notes() as HTMLTextAreaElement).value).toBe("something the admin typed");
+  });
+
+  it("does not itself make the form dirty", async () => {
+    renderSection(true);
+    api.post.mockResolvedValue({ ok: true });
+
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect notion" }));
+
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("OAuth connection removed", "success"));
+    expect(dirtyCount()).toBe(0);
+  });
+
+  it("leaves the row alone when the server refuses", async () => {
+    renderSection(true);
+    api.post.mockRejectedValue(new Error("nope"));
+
+    fireEvent.change(notes(), { target: { value: "typed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect notion" }));
+
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("nope", "error"));
+    expect(dirtyCount()).toBe(1);
+    expect(screen.getByRole("button", { name: "Disconnect notion" })).toBeTruthy();
+  });
+});
+
+describe("the flood warning's arithmetic", () => {
+  const twins = (first: Partial<Record<string, unknown>>, second: Partial<Record<string, unknown>>) =>
+    ({
+      pm: {
+        enabled: true,
+        model: "",
+        contextNotes: "",
+        links: [],
+        dailyTurnCap: 0,
+        mcpServers: [
+          {
+            name: "notion",
+            url: "https://mcp.notion.example/mcp",
+            authType: "none",
+            allowWrites: true,
+            toolAllowlist: [],
+            hasAuthToken: false,
+            ...first,
+          },
+          {
+            name: "notion",
+            url: "https://mcp.notion.example/mcp",
+            authType: "none",
+            allowWrites: true,
+            toolAllowlist: [],
+            hasAuthToken: false,
+            ...second,
+          },
+        ],
+      },
+    }) as unknown as Partial<ApiProject>;
+
+  const tools = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ name: `list_thing_${i}`, description: "d", readSafe: true }));
+
+  async function warningAfterProbe(over: Partial<ApiProject>) {
+    api.post.mockResolvedValue({ count: 45, tools: tools(45) });
+    renderSection(true, over);
+    await waitFor(() => expect(api.post).toHaveBeenCalled());
+    return screen.queryByTestId("mcp-tool-budget-warning");
+  }
+
+  it("is not silenced by a disabled row that shares an enabled row's identity", async () => {
+    const warning = await warningAfterProbe(twins({ enabled: false }, { enabled: true }));
+
+    await waitFor(() => expect(screen.getByTestId("mcp-tool-budget-warning")).toBeTruthy());
+    expect(warning ?? screen.getByTestId("mcp-tool-budget-warning")).toBeTruthy();
+  });
+
+  it("counts one catalogue once when two enabled rows share it", async () => {
+    await warningAfterProbe(twins({ enabled: true }, { enabled: true }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("mcp-tool-budget-warning").textContent).toContain("45 MCP tools")
+    );
+  });
+});
+
+describe("editing while a disconnect is in flight", () => {
+  it("keeps what was typed during the round trip", async () => {
+    renderSection(true);
+    let land: (value: unknown) => void = () => {};
+    api.post.mockImplementation(() => new Promise((resolve) => (land = resolve)));
+
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect notion" }));
+    fireEvent.change(screen.getByLabelText("Tool allowlist for jira"), {
+      target: { value: "typed_during_the_flight" },
+    });
+
+    land({ ok: true });
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("OAuth connection removed", "success"));
+
+    expect((screen.getByLabelText("Tool allowlist for jira") as HTMLInputElement).value).toBe(
+      "typed_during_the_flight"
+    );
+    expect(dirtyCount()).toBe(1);
+  });
+});
+
+describe("Discard after a disconnect", () => {
+  it("does not resurrect the connection", async () => {
+    renderSection(true);
+    api.post.mockResolvedValue({ ok: true });
+
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect notion" }));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("OAuth connection removed", "success"));
+    expect(screen.queryByRole("button", { name: "Disconnect notion" })).toBeNull();
+
+    register.mock.calls.at(-1)?.[0]?.discard?.();
+
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Disconnect notion" })).toBeNull()
+    );
+    expect(screen.getByRole("button", { name: "Connect notion" })).toBeTruthy();
+  });
+});
+
+describe("the rows moving under a disconnect", () => {
+  it("disconnects the row it was asked about, not whoever took its position", async () => {
+    renderSection(true, {
+      pm: {
+        enabled: true,
+        model: "",
+        contextNotes: "",
+        links: [],
+        dailyTurnCap: 0,
+        mcpServers: [
+          { name: "spare", url: "https://a.example/mcp", authType: "none", allowWrites: false, toolAllowlist: [], enabled: true, hasAuthToken: false },
+          { name: "notion", url: "https://n.example/mcp", authType: "oauth", allowWrites: false, toolAllowlist: [], enabled: true, hasAuthToken: false, oauthStatus: "connected", oauthClientId: "" },
+          { name: "linear", url: "https://l.example/mcp", authType: "oauth", allowWrites: false, toolAllowlist: [], enabled: true, hasAuthToken: false, oauthStatus: "connected", oauthClientId: "" },
+        ],
+      },
+    } as unknown as Partial<ApiProject>);
+
+    let land: (value: unknown) => void = () => {};
+    api.post.mockImplementation(() => new Promise((resolve) => (land = resolve)));
+
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect notion" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove spare" }));
+
+    land({ ok: true });
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("OAuth connection removed", "success"));
+
+    expect(screen.queryByRole("button", { name: "Disconnect notion" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Disconnect linear" })).toBeTruthy();
+  });
+
+  it("does not roll back a save that landed during the round trip", async () => {
+    renderSection(true);
+    let landDisconnect: (value: unknown) => void = () => {};
+    api.post.mockImplementation(() => new Promise((resolve) => (landDisconnect = resolve)));
+
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect notion" }));
+    fireEvent.change(screen.getByLabelText(/Project context/i), { target: { value: "saved text" } });
+    expect(dirtyCount()).toBe(1);
+
+    api.put.mockResolvedValue({
+      _id: "p1",
+      key: "TP",
+      name: "Test Project",
+      canAdmin: true,
+      pmAvailable: true,
+      pm: { enabled: true, model: "", contextNotes: "saved text", links: [], dailyTurnCap: 0, mcpServers: [] },
+    });
+    await register.mock.calls.at(-1)![0].save();
+    await waitFor(() => expect(dirtyCount()).toBe(0));
+
+    landDisconnect({ ok: true });
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("OAuth connection removed", "success"));
+
+    expect(dirtyCount()).toBe(0);
   });
 });
