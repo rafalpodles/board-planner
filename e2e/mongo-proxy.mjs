@@ -1,6 +1,6 @@
 import { createServer as createControl } from "node:http";
 import { connect, createServer } from "node:net";
-import { guard, keepAlive } from "./stub-guard.mjs";
+import { fatalOnListenFailure, guard, keepAlive } from "./stub-guard.mjs";
 
 /**
  * Sits between the dev server and MongoDB so a test can take the database away and give it back.
@@ -112,6 +112,9 @@ const control = createControl(guard(NAME, async (req, res) => {
 
 // The health check answers only once both are listening: a dev server started against a control
 // port that was up before the proxy port would fail its first query and read as an outage
+fatalOnListenFailure(NAME, proxy);
+fatalOnListenFailure(NAME, control);
+
 proxy.listen(PORT, LOOPBACK, () => {
   control.listen(CONTROL_PORT, LOOPBACK, () => {
     console.log(

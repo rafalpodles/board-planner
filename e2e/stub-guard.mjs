@@ -1,3 +1,4 @@
+import { writeSync } from "node:fs";
 import { createServer } from "node:http";
 
 /**
@@ -18,17 +19,26 @@ export const CRASH_MARKER = "STUB CRASH";
 function report(name, error, req) {
   const where = req ? `${req.method ?? "?"} ${req.url ?? "?"}` : "outside any request";
   const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
-  console.error(`\n${CRASH_MARKER} [${name}] ${where}\n${detail}\n`);
+  // Synchronously, not through console.error: a write to a pipe is asynchronous on POSIX, and the
+  // one report that matters most is the one followed immediately by process.exit.
+  writeSync(2, `\n${CRASH_MARKER} [${name}] ${where}\n${detail}\n`);
 }
 
 /**
- * The request body, as one string. Replaces the `req.on("end", …)` callback the stubs used to
- * parse in: a throw there is not reachable by a try/catch around the handler, which is exactly
- * where `openrouter-stub.mjs` died on a malformed directive.
+ * The request body, as one string.
+ *
+ * Replaces the `req.on("end", …)` callback the stubs used to parse in: a throw there is not
+ * reachable by a try/catch around the handler, which is exactly where `openrouter-stub.mjs` died
+ * on a malformed directive.
+ *
+ * `setEncoding` rather than concatenating chunks: a multi-byte character split across two of them
+ * decodes to a pair of replacement characters otherwise, and the PM chat box is typed into in
+ * Polish.
  */
 export function readBody(req) {
   return new Promise((resolve, reject) => {
     let raw = "";
+    req.setEncoding("utf8");
     req.on("data", (chunk) => (raw += chunk));
     req.on("end", () => resolve(raw));
     req.on("error", reject);
@@ -41,17 +51,17 @@ export function readBody(req) {
  */
 export function guard(name, handler) {
   return (req, res) => {
-    // A client that hangs up mid-write makes the response emit `error`, and an `error` event with
-    // no listener is itself an uncaught throw — the crash this guard exists to stop, arriving by
-    // the one route a try/catch cannot cover.
+    // An `error` event with no listener throws, and a response can emit one after the handler has
+    // returned — past anything a catch could hold. Handled here rather than left to `keepAlive`
+    // so a hung-up client is reported as what it is instead of as a process-level crash.
     res.on("error", (error) => report(name, error, req));
     Promise.resolve()
       .then(() => handler(req, res))
       .catch((error) => {
         report(name, error, req);
         if (res.headersSent) {
-          // Half a reply is already on the wire; there is no status left to send, and the caller
-          // has to see a broken response rather than a plausible one.
+          // Half a reply is already on the wire; there is no status left to send, so the reply is
+          // abandoned unfinished rather than completed into something that reads as an answer.
           res.destroy();
           return;
         }
@@ -64,8 +74,8 @@ let guarding = false;
 
 /**
  * Stops the process exiting on what escapes a handler entirely — a throw from a timer, a rejected
- * promise nobody awaited, a socket error on a server. Logged the same way, because a crash nobody
- * can see is the state this ticket started from.
+ * promise nobody awaited. Logged the same way, because a crash nobody can see is the state this
+ * ticket started from.
  */
 export function keepAlive(name) {
   if (guarding) return;
@@ -75,25 +85,27 @@ export function keepAlive(name) {
 }
 
 /**
- * A guarded HTTP stub: `handler` may be async and may throw, and the process survives both.
+ * Makes a failure to bind fatal, which `keepAlive` would otherwise swallow into a clean exit or a
+ * process hanging on to a port it never serves.
  *
- * Failing to bind stays fatal. A stub that never listens has nothing to serve, and Playwright's
- * "url not reachable" names that far better than a process sitting up answering nothing.
+ * A stub that cannot listen has nothing to serve, and Playwright's "url not reachable" names that
+ * far better than a process sitting up answering nothing. Every server a stub listens on needs
+ * this, including the ones that do not go through `serve` (BP-575 review).
  */
+export function fatalOnListenFailure(name, server) {
+  let listening = false;
+  server.on("listening", () => (listening = true));
+  server.on("error", (error) => {
+    report(name, error);
+    if (!listening) process.exit(1);
+  });
+  return server;
+}
+
+/** A guarded HTTP stub: `handler` may be async and may throw, and the process survives both. */
 export function serve({ name, port, host = "127.0.0.1", handler }) {
   keepAlive(name);
-  const server = createServer(guard(name, handler));
-  let listening = false;
-  server.on("error", (error) => {
-    if (!listening) {
-      report(name, error);
-      process.exit(1);
-    }
-    report(name, error);
-  });
-  server.listen(port, host, () => {
-    listening = true;
-    console.log(`${name} listening on ${port}`);
-  });
+  const server = fatalOnListenFailure(name, createServer(guard(name, handler)));
+  server.listen(port, host, () => console.log(`${name} listening on ${port}`));
   return server;
 }
