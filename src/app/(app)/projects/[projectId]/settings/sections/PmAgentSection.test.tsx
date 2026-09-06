@@ -81,12 +81,15 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("PmAgentSection MCP connections — owner (not instance admin)", () => {
-  it("shows Connect, Reconnect, Disconnect and Test connection", () => {
+  it("shows Connect, Reconnect, Disconnect and Test connection, one named per server", () => {
     renderSection(false);
 
-    expect(screen.getAllByRole("button", { name: "Test connection" })).toHaveLength(2);
-    expect(screen.getByRole("button", { name: "Reconnect" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Disconnect" })).toBeTruthy();
+    // BP-510: two servers put two buttons called "Test connection" on the card, and nothing in
+    // either name said which server it would reach
+    expect(screen.getByRole("button", { name: "Test connection for jira" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Test connection for notion" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Reconnect notion" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Disconnect notion" })).toBeTruthy();
   });
 
   it("shows each server's name as read-only text instead of an editable field", () => {
@@ -105,7 +108,9 @@ describe("PmAgentSection MCP connections — owner (not instance admin)", () => 
     expect(screen.queryByPlaceholderText("Tool allowlist, comma-separated (empty = all)")).toBeNull();
     expect(screen.queryByLabelText("Enabled")).toBeNull();
     expect(screen.queryByLabelText("Allow writes")).toBeNull();
-    expect(screen.queryByLabelText("Remove MCP server")).toBeNull();
+    // Named per row since BP-510, so this asks for the name the admin case asserts is there
+    expect(screen.queryByLabelText("Remove jira")).toBeNull();
+    expect(screen.queryByLabelText(/^Remove /)).toBeNull();
     expect(screen.queryByRole("button", { name: "Add MCP server" })).toBeNull();
   });
 });
@@ -122,9 +127,21 @@ describe("PmAgentSection MCP connections — instance admin", () => {
     expect(screen.getAllByLabelText("Allow writes")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "Add MCP server" })).toBeTruthy();
 
-    expect(screen.getAllByRole("button", { name: "Test connection" })).toHaveLength(2);
-    expect(screen.getByRole("button", { name: "Reconnect" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Disconnect" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Test connection for jira" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Test connection for notion" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Reconnect notion" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Disconnect notion" })).toBeTruthy();
+  });
+
+  // The positive half of the non-admin case above: these exist here, named per row, so that
+  // `queryByLabelText("Remove jira") === null` there is a real absence and not a stale name
+  it("names each row's inputs and its remove button after that server", () => {
+    renderSection(true);
+
+    expect(screen.getByLabelText("Name for jira")).toBeTruthy();
+    expect(screen.getByLabelText("URL for notion")).toBeTruthy();
+    expect(screen.getByLabelText("Remove jira")).toBeTruthy();
+    expect(screen.getByLabelText("Remove notion")).toBeTruthy();
   });
 });
 

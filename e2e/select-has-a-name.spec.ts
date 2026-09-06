@@ -118,11 +118,11 @@ async function workerSettings(page: Page) {
 async function integrationSettings(page: Page) {
   await page.goto(`/projects/${PROJECT_KEY}/settings?section=integrations`);
   // The channel form lives inside a collapsed card — the select does not exist until it is opened,
-  // which is a second reason the old sweep could visit this page and see nothing
-  // Filtered by text rather than by accessible name: the card's title and blurb sit in elements
-  // that do not contribute one, so `getByRole("button", { name: /^Team channels/ })` matches
-  // nothing at all — which is worth knowing, because it is the same gap this ticket is about.
-  await page.getByRole("button").filter({ hasText: "Team channels" }).click();
+  // which is a second reason the old sweep could visit this page and see nothing.
+  // Reached by accessible name since BP-510: the brand icon inside the button used to carry
+  // `role="img" aria-label="Slack"`, so the name began "Slack Team channels…" and this had to be a
+  // text filter. `rows-announce-apart.spec.ts` is where that is asserted directly.
+  await page.getByRole("button", { name: /^Team channels/ }).click();
   await expect(page.getByLabel("New channel type")).toBeVisible();
 }
 
@@ -152,6 +152,13 @@ const SURFACES: [string, (page: Page) => Promise<void>][] = [
  * covering four, and five unnamed selects sat outside them for a month. What this actually
  * guarantees is that these nine surfaces hold no unnamed select; `select-has-a-name` in the source
  * is the list to keep in step.
+ *
+ * And desktop-only, at every viewport it runs: `selectNaming` skips anything whose box is zero, so
+ * a `lg:hidden`/`md:hidden` control is invisible to it on a desktop page — `SprintHeader.tsx`'s
+ * status select is exactly that, and adding the sprint page to the list above would not start
+ * examining it. Reaching those needs a run under an emulated narrow viewport, which nothing here
+ * does. Four surfaces carrying selects are also still outside the list: the board filter panel,
+ * `settings?section=board`, `settings?section=general`, and that sprint header (BP-510).
  */
 test.describe("the selects on the surfaces this sweeps", () => {
   for (const [where, open] of SURFACES) {

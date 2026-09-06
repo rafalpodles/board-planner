@@ -221,6 +221,7 @@ export function Connections({
                   className="focus-ring flex items-center gap-3 rounded-lg border border-border px-3 py-2.5 text-left transition-colors hover:border-primary hover:bg-primary/5"
                 >
                   <BrandIcon
+                    decorative
                     brand={integration.brand}
                     className="h-5 w-5 shrink-0"
                   />

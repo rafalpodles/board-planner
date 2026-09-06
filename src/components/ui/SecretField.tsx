@@ -48,7 +48,14 @@ export function SecretField({
         >
           {masked || "Not set"}
         </code>
-        <Button variant="secondary" size="sm" disabled={disabled} onClick={() => setReplacing(true)}>
+        <Button
+          variant="secondary"
+          size="sm"
+          // One of these per row, and "Replace" alone is the same word on every one of them
+          aria-label={`Replace ${label}`}
+          disabled={disabled}
+          onClick={() => setReplacing(true)}
+        >
           Replace
         </Button>
       </div>
@@ -74,12 +81,18 @@ export function SecretField({
           }
         }}
       />
-      <Button size="sm" disabled={busy || !value.trim()} onClick={submit}>
+      <Button
+        size="sm"
+        aria-label={`Save ${label}`}
+        disabled={busy || !value.trim()}
+        onClick={submit}
+      >
         Save
       </Button>
       <Button
         variant="ghost"
         size="sm"
+        aria-label={`Cancel ${label}`}
         disabled={busy}
         onClick={() => {
           setValue("");

@@ -42,17 +42,29 @@ interface BrandIconProps {
   className?: string;
   /** Tint with the vendor's colour. Off inside a button that already carries a colour. */
   coloured?: boolean;
+  /**
+   * Inside a control whose text already names the thing. The vendor title would otherwise be
+   * read first and become part of that control's name — "Slack Team channels Post board
+   * events…" rather than "Team channels…" (BP-510).
+   */
+  decorative?: boolean;
 }
 
-export function BrandIcon({ brand, className = "h-5 w-5", coloured = true }: BrandIconProps) {
+export function BrandIcon({
+  brand,
+  className = "h-5 w-5",
+  coloured = true,
+  decorative = false,
+}: BrandIconProps) {
   const meta = BRANDS[brand];
   const themed = NEEDS_THEME_COLOUR.has(brand);
   const fill = !coloured || themed ? "currentColor" : meta.hex;
 
   return (
     <svg
-      role="img"
-      aria-label={meta.title}
+      role={decorative ? "presentation" : "img"}
+      aria-hidden={decorative || undefined}
+      aria-label={decorative ? undefined : meta.title}
       viewBox="0 0 24 24"
       className={className}
       fill={fill}

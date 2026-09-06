@@ -245,6 +245,11 @@ export function TaskLinks({
           </select>
           <input
             type="text"
+            // A placeholder is not a name, and it is gone the moment somebody types.
+            // "to link" rather than the placeholder's bare "Search tasks": the shell's own search
+            // is called "Search tasks and projects", and two boxes whose names are prefixes of
+            // each other are ambiguous by voice and to any substring locator.
+            aria-label="Search tasks to link"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search tasks..."
