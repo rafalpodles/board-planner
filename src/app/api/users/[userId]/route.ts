@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isValidObjectId } from "mongoose";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
 import { MIN_PASSWORD_LENGTH, PASSWORD_COST_FACTOR } from "@/lib/auth";
@@ -234,19 +235,72 @@ export const DELETE = withAdmin(async (_request, { params, user: admin }) => {
   const { userId } = await params;
   await connectDB();
 
-  if (userId === admin._id.toString()) {
+  // The same refusal the three writes above make, for a sharper reason than any of theirs: this is
+  // the one thing on this route that cannot be undone, and the only one an unattended credential
+  // could be made to do.
+  if (admin.viaMachineCredential) {
+    return NextResponse.json(
+      { error: "This action requires an interactive session" },
+      { status: 403 }
+    );
+  }
+
+  // Answered rather than thrown: `findById` on something that is not an id rejects with a
+  // CastError, which leaves this handler as a 500 about nothing. A caller who guessed a malformed
+  // id gets the same answer as one who guessed a wrong one.
+  if (!isValidObjectId(userId)) {
+    return NextResponse.json({ error: "User not found" }, { status: 404 });
+  }
+
+  const user = await User.findById(userId);
+  if (!user) {
+    return NextResponse.json({ error: "User not found" }, { status: 404 });
+  }
+
+  // The loaded document, the way both guards in PUT do it, and not the path segment: BSON resolves
+  // a hex id case-insensitively while `===` does not, so `E2E…A001` used to be a different string
+  // and the same account — which walked straight past this and left instances with no
+  // administrator at all (BP-546).
+  if (user._id.toString() === admin._id.toString()) {
     return NextResponse.json(
       { error: "Cannot delete yourself" },
       { status: 400 }
     );
   }
 
-  const user = await User.findByIdAndDelete(userId);
-  if (!user) {
+  // A machine's account is not a person to delete from here — the same reason GET filters them out
+  // of the list this screen is built from. Deleting one takes the fleet's identity with it, and
+  // every worker call then fails with "this worker has no identity yet", naming nothing that
+  // explains why.
+  if (user.kind === "machine") {
+    return NextResponse.json(
+      { error: "A machine account is released under Settings → Workers, not deleted here" },
+      { status: 400 }
+    );
+  }
+
+  // The invariant PUT keeps for demotion, kept here too. Unreachable while the guard above holds —
+  // an admin cannot be looking at the last admin unless they are looking at themselves — which is
+  // exactly why it is here: that guard failed once, and an instance with no administrator cannot be
+  // repaired from the product.
+  if (user.role === "admin") {
+    const adminCount = await User.countDocuments({ role: "admin" });
+    if (adminCount <= 1) {
+      return NextResponse.json(
+        { error: "Cannot delete the last admin" },
+        { status: 400 }
+      );
+    }
+  }
+
+  // The delete's own answer, not a discarded one: two administrators deleting the same account
+  // otherwise both hear that they did it, and the checks above are read-then-write.
+  const deleted = await User.findByIdAndDelete(user._id);
+  if (!deleted) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
-  await revokeUserSessions(userId);
+  await revokeUserSessions(user._id);
 
   return NextResponse.json({ message: "User deleted" });
 });

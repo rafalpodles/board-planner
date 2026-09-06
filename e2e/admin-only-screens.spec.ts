@@ -281,8 +281,9 @@ test.describe("deleting a user", () => {
    * It is asserted through the API rather than the dialog because the screen offers no way to
    * confirm twice: the point is the refusal, and the refusal is the route's.
    */
-  test("an admin is refused their own account, and the instance keeps its administrator", async ({
+  test("an admin is refused their own account, however the id is spelled", async ({
     page,
+    request,
   }) => {
     await signIn(page, "admin");
     await page.goto("/settings/users");
@@ -291,10 +292,26 @@ test.describe("deleting a user", () => {
     expect(refused.status(), await refused.text()).toBe(400);
     expect(await refused.text()).toContain("Cannot delete yourself");
 
-    // The consequence, not the status: this is the guard the route relies on to keep one
-    // administrator standing, and it has no last-admin check of its own to fall back on
+    // BP-546. The same account, spelled the way BSON also accepts: a 24-character hex id resolves
+    // case-insensitively, so this was a different string and the same document. It answered 200,
+    // and with no last-admin guard behind it the instance was left with no administrator at all.
+    const shouted = await page.request.delete(
+      `/api/users/${ADMIN_ID.toString().toUpperCase()}`,
+      { headers: SAME_ORIGIN }
+    );
+    expect(shouted.status(), await shouted.text()).toBe(400);
+    expect(await shouted.text()).toContain("Cannot delete yourself");
+
+    // BP-537. The same call with this admin's API token, which is what every unattended credential
+    // on this instance is. The three writes above it on that route refuse one; this one did not.
+    const byToken = await request.delete(`/api/users/${MEMBER_ID}`, { headers: ADMIN_AUTH });
+    expect(byToken.status(), await byToken.text()).toBe(403);
+
+    // The consequence, not the status. Both accounts are still there, and the administrator still
+    // holds the session they made these calls with.
     await page.reload();
     await expect(page.getByText("@admin")).toBeVisible();
+    await expect(page.getByText("@member")).toBeVisible();
     expect(await sessionsOf(ADMIN_ID)).toHaveLength(1);
   });
 
@@ -352,10 +369,8 @@ test.describe("deleting a user", () => {
       }).toPass({ timeout: 20_000 });
     });
 
-    // Through the browser's cookie session rather than the admin Bearer above. The Bearer is
-    // accepted here today, which is BP-537 — a machine credential may delete an account though the
-    // same route refuses it a role, a password or an address. This spec must not be the thing that
-    // goes red when that is closed.
+    // Through the browser's cookie session rather than the admin Bearer used for the setup above:
+    // a machine credential is refused here since BP-537, which the test before this one asserts.
     // SAME_ORIGIN because the provenance check is fail-closed: an APIRequestContext sends neither
     // Origin nor Sec-Fetch-Site, and a state-changing request carrying neither is refused 403
     const gone = await page.request.delete(`/api/users/${MEMBER_ID}`, { headers: SAME_ORIGIN });
