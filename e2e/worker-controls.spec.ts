@@ -992,3 +992,58 @@ test("the run history reads a finished run's project, agent, machine, outcome, d
     "merged",
   ]);
 });
+
+/**
+ * BP-504. A checkout carrying a key git would run on checkout is quarantined by the worker: it
+ * stops claiming for every project bound to that path until an operator removes the key and
+ * restarts. The half a person can reach is this screen — and until BP-504 the account of it lived
+ * only on the worker's own stderr and a socket field the menubar does not decode, so a machine
+ * that had deliberately stopped serving a project read `ready` here.
+ *
+ * Driven through the real heartbeat rather than a fixture write: the report has to survive the
+ * route's own parsing to reach the row, which a direct write would skip.
+ */
+test("a machine that quarantined a checkout says so on the fleet screen, not `ready`", async ({
+  page,
+  request,
+}) => {
+  const CHECKOUT = "/Users/e2e/repos/demo";
+  const KEY = "filter.z.smudge (worktree)";
+
+  // The control first, on the same row and the same screen: a machine whose checks all pass reads
+  // ready. Without it a cell that failed to render anything at all would satisfy the assertions
+  // below by never containing the word.
+  await heartbeat(request, {
+    preflight: { ok: true, account: "rafalpodles", checks: [{ name: "gh", ok: true, detail: "" }] },
+  });
+
+  await signIn(page);
+  await page.goto("/settings/workers");
+  await expect(fleetRow(page, WORKER_NAME).getByText(/^ready/)).toBeVisible();
+
+  // Now the same machine reports what wiring.ts composes when a run refuses a poisoned checkout
+  await heartbeat(request, {
+    preflight: {
+      ok: false,
+      account: "rafalpodles",
+      checks: [
+        { name: "gh", ok: true, detail: "" },
+        {
+          name: "checkout quarantined",
+          ok: false,
+          detail: `${CHECKOUT}: its git config carries ${KEY}. Remove the key, then restart this worker.`,
+        },
+      ],
+    },
+  });
+
+  await page.reload();
+  const row = fleetRow(page, WORKER_NAME);
+  await expect(row.getByText("checkout quarantined")).toBeVisible();
+  // The three things an operator needs off this screen without opening a terminal: which checkout,
+  // what is in it, and the way out.
+  await expect(row).toContainText(CHECKOUT);
+  await expect(row).toContainText(KEY);
+  await expect(row).toContainText("restart this worker");
+  await expect(row.getByText(/^ready/), "the machine still reads ready").toHaveCount(0);
+});

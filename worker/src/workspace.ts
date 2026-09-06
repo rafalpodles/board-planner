@@ -3,7 +3,7 @@ import { tmpdir } from "os";
 import { join, resolve, sep } from "path";
 import { WorkerConfig } from "./config.js";
 import { childEnv } from "./env.js";
-import { configBaseline } from "./repos.js";
+import { configBaseline, plantedConfig, UNREADABLE_CONFIG } from "./repos.js";
 import { CommandResult, Runner } from "./exec.js";
 import { gitArgs, GIT_SAFE_ENV } from "./git-safety.js";
 
@@ -29,6 +29,44 @@ export class BaseUnavailableError extends Error {
     super(message);
     this.name = "BaseUnavailableError";
     this.kind = kind;
+  }
+}
+
+/**
+ * The shared checkout carries a key git would run, and the run is over before it does.
+ *
+ * Its own class because the pipeline owes this a different answer from every other creation
+ * failure: the task did nothing, and the next task on this machine meets the same key.
+ */
+export class PoisonedCheckoutError extends Error {
+  /** What was found — a key with its scope, or plantedConfig's sentinel for a config it cannot read. */
+  readonly finding: string;
+
+  /**
+   * Which of the two, because they are owed different treatment — the same split, and for the same
+   * reason, as `BaseUnavailableError.kind` above.
+   *
+   * `planted` — a key somebody put there. It repeats until a human removes it, so the project is
+   * quarantined and the machine stops offering it.
+   * `unreadable` — git would not answer. A checkout that has just been moved or re-cloned, a
+   * machine under load, a 60-second timeout. The run is still refused, because a config this
+   * cannot read is one it cannot vouch for — but latching a project off until the process
+   * restarts on the strength of one bad answer is a different claim, and a wrong one.
+   */
+  readonly kind: "planted" | "unreadable";
+
+  constructor(finding: string) {
+    // Branched rather than phrased to fit both: this message is the only account of the failure
+    // that reaches the board, and "an unreadable git config is in the git config" sends a person
+    // looking for a planted key that was never found.
+    super(
+      finding === UNREADABLE_CONFIG
+        ? "refusing to check out: the shared checkout's git config could not be read, so nothing can vouch for what a checkout would run"
+        : `refusing to check out: ${JSON.stringify(finding)} is in the shared checkout's git config, and a checkout is where git runs one`
+    );
+    this.name = "PoisonedCheckoutError";
+    this.finding = finding;
+    this.kind = finding === UNREADABLE_CONFIG ? "unreadable" : "planted";
   }
 }
 
@@ -90,7 +128,15 @@ export function createWorkspace(
     const result = await runner.run("git", gitArgs(args), {
       cwd: config.repoPath,
       timeoutMs: GIT_TIMEOUT_MS,
-      env: { ...childEnv(), ...GIT_SAFE_ENV },
+      // `~/.gitconfig` is out of the picture on these calls, the way delivery.ts already puts it
+      // out of the picture on its own. Without this the scan below is close to decorative: it
+      // judges the repository's scopes, `childEnv()` allowlists HOME because the CLI authenticates
+      // from its session there, and BP-349 says the agent's Write reaches HOME — so a
+      // `[filter "z"] smudge` in ~/.gitconfig plus `* filter=z` in ~/.config/git/attributes made
+      // `git worktree add` run the payload with nothing planted inside the repository at all.
+      // Measured on git 2.50.1, against this branch. A filter still has to be DEFINED somewhere,
+      // and with the global file gone the only place left is a scope the scan reads.
+      env: { ...childEnv(), ...GIT_SAFE_ENV, GIT_CONFIG_GLOBAL: "/dev/null" },
     });
     if (result.timedOut) {
       throw new Error(`git ${args[0]} timed out after ${GIT_TIMEOUT_MS}ms`);
@@ -266,10 +312,44 @@ export function createWorkspace(
     return resolveFreshBase(remoteEnv, remoteUrl);
   }
 
+  /**
+   * `git worktree add` checks files **out**, and a checkout is where a `filter.<name>.smudge`
+   * runs — so a key an earlier run's agent planted in the shared `<main>/.git/config` executes
+   * inside this module, on every later attempt, before any gate has seen anything. BP-403's guard
+   * is in `commitAll`, downstream of the run this one would already have started. Measured on git
+   * 2.50.1: workspace.planted-config.integration.test.ts plants one and watches git run it.
+   *
+   * No baseline is passed, and none would help: this runs before the run a baseline exists to
+   * date, and the machine scopes it would unlock are neutralised on these calls instead.
+   */
+  async function refuseIfPoisoned(): Promise<void> {
+    // The same neutralised global config the checkout below runs with. A scan judging a config git
+    // will not read answers a different question from the one asked, in both directions: it would
+    // refuse over an operator's own credential helper, and — measured — one malformed line in
+    // `~/.gitconfig` makes `--local --list` exit 128, which is read as unreadable and refuses
+    // every project on the machine until somebody notices.
+    const planted = await plantedConfig(runner, config.repoPath, undefined, {
+      GIT_CONFIG_GLOBAL: "/dev/null",
+    });
+    if (planted) throw new PoisonedCheckoutError(planted);
+  }
+
   return {
     async create(taskKey, slug) {
       const path = pathFor(taskKey);
       const branch = `${taskKey.toLowerCase()}/${slug}`;
+
+      // First, ahead of the fetch and well ahead of `worktree add`. That command checks files
+      // **out**, and a checkout is exactly where a `filter.<name>.smudge` runs — so a key planted
+      // in the shared `<main>/.git/config` by an earlier run's agent executes inside this call, on
+      // every later attempt, before any gate has seen anything. BP-403's guard is in `commitAll`,
+      // downstream of the run this one would already have started. Measured on git 2.50.1:
+      // workspace.planted-config.integration.test.ts plants one and watches git run it.
+      //
+      // No baseline is passed and none is wanted: the repository's own scopes are judged on their
+      // own, and this runs before the run whose changes a baseline would exist to date.
+      await refuseIfPoisoned();
+
       let baseSha: string;
       try {
         baseSha = await resolveBase();
@@ -284,6 +364,12 @@ export function createWorkspace(
       }
 
       await removeIfRegistered(path);
+      // Again, immediately before the checkout. The scan above and this command are separate
+      // processes with a fetch between them — two network round-trips, which is a window an
+      // attacker with a watcher can win: measured, replanting 50ms after the first scan got the
+      // payload run five times out of five. This does not close the race, and nothing short of not
+      // sharing `.git` would; it shortens it from two round-trips to one spawn.
+      await refuseIfPoisoned();
       // -B resets the branch instead of failing if a crashed previous attempt already created it
       await git(["worktree", "add", "-B", branch, "--", path, baseSha]);
       return { path, baseSha, configBaseline: await configBaseline(runner, path) };

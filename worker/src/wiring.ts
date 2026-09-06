@@ -205,6 +205,59 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // before a task is claimed — checkRepo runs at every rebind — and spending an agent's run to
   // rediscover it at the build gate is the cost this map exists to stop (BP-379).
   const unusable = new Map<string, string>();
+  /**
+   * Projects this machine has stopped offering because their checkout itself is the problem — a
+   * git config carrying a key git runs on checkout, found by the run that refused to make one
+   * (BP-504).
+   *
+   * Deliberately not cleared on rebind, unlike `unusable` above. That map is recomputed from a
+   * static check and may legitimately change; this one records that something planted an
+   * executable key in a checkout this machine binds, and a re-scan reading clean thirty seconds
+   * later is exactly what re-planting produces. Refusing each attempt without this is the old
+   * requeue-against-an-unchanged-clone with the charge taken off: the loop claims again on the
+   * next pass, for ever. An operator removes the key and restarts the worker.
+   */
+  // Keyed on the CHECKOUT, not the project: `rebind` resolves a project's repository by remote, so
+  // several projects can share one path — and the poison is in that path's config, not in any
+  // project. Keyed per project, each sibling paid its own claim, its own refusal and its own
+  // window against a clone the machine already knew was poisoned.
+  const quarantined = new Map<string, string>();
+
+  const checkoutOf = (projectId: string): string =>
+    bound.get(projectId)?.path ?? `project:${projectId}`;
+
+  const quarantineReasonFor = (projectId: string): string | undefined =>
+    quarantined.get(checkoutOf(projectId));
+
+  function quarantineProject(projectId: string, reason: string): void {
+    const checkout = checkoutOf(projectId);
+    if (quarantined.has(checkout)) return;
+    // Stored as the sentence, not as the bare finding. This map answers the cockpit's `blocked`
+    // field as well as the preflight check, and next to the gates' detail sentences and the
+    // board's own refusal a bare `filter.z.smudge (local)` says neither that the machine stopped
+    // on purpose nor what to do about it.
+    quarantined.set(
+      checkout,
+      `${checkout}: its git config carries ${reason}. Remove the key, then restart this worker.`
+    );
+    deps.logError(
+      `quarantining ${checkout}: its git config carries ${reason}. ` +
+        `Nothing on this machine will claim for any project on that checkout again until the key ` +
+        `is gone and this worker is restarted.`
+    );
+  }
+
+  // A failing check per quarantined checkout, composed where preflight is asked rather than at
+  // rebind: a quarantine happens mid-pass, and the report is the only place a person looking at
+  // Settings → Workers can learn that this machine has stopped serving a project on purpose.
+  // Without it the console reads `ready`, the menubar reads idle, and the sole account of it is a
+  // line on the worker's own stderr.
+  const quarantineChecks = (): PreflightCheck[] =>
+    [...quarantined.entries()].map(([checkout, detail]) => ({
+      name: "checkout quarantined",
+      ok: false,
+      detail,
+    }));
 
   function configFor(projectId: string): WorkerConfig | null {
     const identity = loadIdentity(identityStore);
@@ -508,6 +561,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
           gateFor: gateFromEntry,
           recordRun: (project, record) => outbox.add({ kind: "run", projectId: project, record }),
           logError: deps.logError,
+          quarantineProject,
           runner: deps.runner,
           signal,
           telemetry,
@@ -531,7 +585,10 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     pollIntervalMs: () => policy.pollIntervalMs,
     // A project whose checkout cannot pass the gates is not claimed from. The refusal would arrive
     // anyway — at the build gate, after the agent has worked — with the reason this already has.
-    assignments: () => [...bound.keys()].filter((projectId) => !unusable.has(projectId)),
+    assignments: () =>
+      [...bound.keys()].filter(
+        (projectId) => !unusable.has(projectId) && !quarantineReasonFor(projectId)
+      ),
     api,
     execute,
     sleep: deps.sleep,
@@ -554,7 +611,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     repos: () => (inventoryError ? undefined : inventory),
     preflight: () => {
       if (!preflight) return undefined;
-      const checks = [...preflight.checks, ...repoChecks];
+      const checks = [...preflight.checks, ...repoChecks, ...quarantineChecks()];
       return { ok: checks.every((c) => c.ok), account: preflight.account, checks };
     },
     forgetEnrolmentToken: bootstrap.enrolmentTokenFile
@@ -597,9 +654,14 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       projects: [...bound.entries()].map(([project, repo]) => ({
         project,
         // Empty when the project is claimable. Non-empty is the answer to "why is this machine
-        // sitting on a project and doing nothing", which otherwise has no answer anywhere — the
-        // checkout failing the gates' own checks, or the board refusing the claim outright.
-        blocked: unusable.get(project) ?? loop.unclaimable(project),
+        // sitting on a project and doing nothing", which otherwise has no answer anywhere — a
+        // poisoned checkout, the checkout failing the gates' own checks, or the board refusing the
+        // claim outright. Quarantine first because it is the one that needs a person at this
+        // machine, and the only one of the three a rebind does not lift. The board's refusal is
+        // still true when it is outranked here — nothing on this machine repairs that board's
+        // columns — it is just not the thing to go and do first.
+        blocked:
+          quarantineReasonFor(project) ?? unusable.get(project) ?? loop.unclaimable(project),
         baseBranch: repo.config.baseBranch,
         model: repo.config.model,
         reviewModel: repo.config.reviewModel,

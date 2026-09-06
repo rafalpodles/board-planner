@@ -28,7 +28,7 @@ import { CommandResult, createRunner, Runner } from "./exec.js";
 // the remote, so an assertion that the branch landed could not tell the two apart
 const HOOK = (marker: string) => `#!/bin/sh\ntouch ${JSON.stringify(marker)}\nexit 1\n`;
 
-// refuseIfPlanted reads `git config --list --show-scope --no-includes` through the runner before
+// refuseIfPlanted reads `git config --list -z --show-scope --no-includes` through the runner before
 // the push (BP-346 widened it from `--local --list`). Where the
 // subject is an override rather than the guard, that one read is blinded: the planted key stays on
 // disk, so the real git still meets it, and only delivery's own look at the config comes back

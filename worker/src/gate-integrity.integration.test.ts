@@ -354,6 +354,18 @@ describe("the base lookup runs with the environment production gives it", () => 
     rmSync(dir, { recursive: true, force: true });
   });
 
+  /**
+   * BP-504 put a scan of the checkout's own config **ahead of** the checkout, and it now fires
+   * before this fixture can reach a fetch at all: `protocol.allow = always` and an `ext::`
+   * `insteadOf` are both repository-scope entries the scan refuses on their own. So the assertion
+   * moved from git's own `transport 'ext' not allowed` to the earlier refusal — the property, that
+   * the planted program never runs, is unchanged and still the point.
+   *
+   * A repo-scope `insteadOf` can no longer reach a fetch at all — every scope one can live in is
+   * scanned first, and `GIT_CONFIG_GLOBAL=/dev/null` neutralises the operator's own file. So the
+   * end-to-end proof of the hardening moved to the test below this one, which carries the `ext::`
+   * in the **remote URL**: that is not config, nothing scans it, and it still reaches the fetch.
+   */
   it("does not execute a program the checkout wired into the fetch transport", async () => {
     const workspace = createWorkspace(
       { repoPath: parent, worktreeRoot: join(dir, "wt"), baseBranch: "main" } as WorkerConfig,
@@ -362,9 +374,37 @@ describe("the base lookup runs with the environment production gives it", () => 
       remoteUrl
     );
 
-    // Named rather than "it rejects": the message proves ls-remote answered and the fetch is where
-    // this stopped, so the refusal is the transport's and not the run failing somewhere earlier.
-    await expect(workspace.create("BP-1", "worker")).rejects.toThrow(/transport 'ext' not allowed/);
+    // Named rather than "it rejects": the message proves which layer stopped it, so a refusal
+    // arriving for some unrelated reason cannot pass for this one.
+    await expect(workspace.create("BP-1", "worker")).rejects.toMatchObject({
+      name: "PoisonedCheckoutError",
+      message: expect.stringContaining("protocol.allow"),
+    });
     expect(existsSync(marker)).toBe(false);
   });
+
+  /**
+   * The hardening this describe exists for, kept provable against real git. The URL is where the
+   * `ext::` goes now: it arrives from the server as the project's remote, it is not configuration,
+   * and no scan reads it — so this reaches the fetch, and `protocol.ext.allow=never` is the only
+   * thing that stops the program running. A string assertion on the composed environment, which is
+   * what the unit suites make, cannot notice git changing what that flag does.
+   */
+  it("does not execute a program named by the remote URL either", async () => {
+    const clean = join(dir, "clean");
+    execFileSync("git", ["clone", "--quiet", remoteUrl, clean], { stdio: "pipe" });
+    const program = join(dir, "payload.sh");
+
+    const workspace = createWorkspace(
+      { repoPath: clean, worktreeRoot: join(dir, "wt2"), baseBranch: "main" } as WorkerConfig,
+      createRunner(),
+      productionRemoteEnv,
+      `ext::${program} %S`
+    );
+
+    // Named, so a refusal arriving from the scan — or from anything else earlier — cannot pass for
+    // the transport being refused
+    await expect(workspace.create("BP-2", "worker")).rejects.toThrow(/transport 'ext' not allowed/);
+    expect(existsSync(marker)).toBe(false);
+  }, 30_000);
 });
