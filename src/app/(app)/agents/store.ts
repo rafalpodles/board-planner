@@ -27,6 +27,7 @@ export function useStore() {
   const [blocks, setBlocks] = useState<ApiAgentBlock[]>([]);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const loadSeq = useRef(0);
 
   const load = useCallback(async () => {
@@ -35,6 +36,7 @@ export function useStore() {
     // data, and a slow success overwrites newer rows while clearing the banner that said so.
     const seq = ++loadSeq.current;
     setFailed(false);
+    setRefreshing(true);
     try {
       const [a, b] = await Promise.all([api.get("/api/agents"), api.get("/api/agent-blocks")]);
       if (seq !== loadSeq.current) return;
@@ -45,7 +47,10 @@ export function useStore() {
       // agent screen that reads as deleted rather than as unread (BP-577)
       if (seq === loadSeq.current) setFailed(true);
     } finally {
-      if (seq === loadSeq.current) setLoading(false);
+      if (seq === loadSeq.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [api]);
 
@@ -56,6 +61,7 @@ export function useStore() {
   return {
     loading,
     failed,
+    refreshing,
     allAgents: agents,
     allSteps: blocks.filter((b) => b.kind === "step"),
     allGates: blocks.filter((b) => b.kind === "gate"),

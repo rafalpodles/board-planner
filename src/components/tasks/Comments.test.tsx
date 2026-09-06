@@ -268,8 +268,25 @@ describe("Comments when the read fails", () => {
     api.get.mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
     render(<Comments projectId="TP" taskId="t1" />);
 
-    expect(screen.getByRole("status", { name: "Loading the comments" })).toBeTruthy();
+    expect(screen.getByText("Loading the comments")).toBeTruthy();
     expect(screen.queryByText("No comments yet")).toBeNull();
+
+    await act(async () => pending.forEach((resolve) => resolve([])));
+    await waitFor(() => expect(screen.getByText("No comments yet")).toBeTruthy());
+  });
+
+  // A task switch reconciles the panel in place, so the previous discussion must not stand in
+  it("does not show the previous task's comments while the next task is being read", async () => {
+    serve([comment]);
+    const view = render(<Comments projectId="TP" taskId="t1" />);
+    await waitFor(() => expect(screen.getByText("Kasia Nowak")).toBeTruthy());
+
+    const pending: ((rows: unknown[]) => void)[] = [];
+    api.get.mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
+    view.rerender(<Comments projectId="TP" taskId="t2" />);
+
+    expect(screen.queryByText("Kasia Nowak")).toBeNull();
+    expect(screen.getByRole("status")).toBeTruthy();
 
     await act(async () => pending.forEach((resolve) => resolve([])));
     await waitFor(() => expect(screen.getByText("No comments yet")).toBeTruthy());

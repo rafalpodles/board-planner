@@ -74,6 +74,11 @@ export function Comments({
   }
 
   useEffect(() => {
+    // A task switch reconciles this component in place, so without the reset the previous task's
+    // comments stand in as this one's until the read lands — and stay if it fails
+    setReading(true);
+    setLoadFailed(false);
+    setComments([]);
     loadComments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId]);
@@ -195,7 +200,7 @@ export function Comments({
     <div>
       {!hideHeading && (
         <h3 className="font-semibold mb-3">
-          Comments{reading || loadFailed ? "" : ` (${comments.length})`}
+          Comments ({comments.length})
         </h3>
       )}
 
@@ -329,7 +334,7 @@ export function Comments({
         ))}
         {/* Three states, not one: a read still running is not an empty discussion either */}
         {reading ? (
-          <div className="flex justify-center py-4" role="status" aria-label="Loading the comments">
+          <div className="flex justify-center py-4" role="status">
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
             <span className="sr-only">Loading the comments</span>
           </div>

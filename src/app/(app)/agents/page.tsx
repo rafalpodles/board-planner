@@ -63,7 +63,7 @@ export default function AgentsPage() {
     return (
       <>
         <PageHeader title="Agents" subtitle="Ways of getting a task done" />
-        <div className="flex justify-center py-12" role="status" aria-label="Loading the catalog">
+        <div className="flex justify-center py-12" role="status">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
           <span className="sr-only">Loading the catalog</span>
         </div>
@@ -117,6 +117,7 @@ export default function AgentsPage() {
           testId="agents-catalog-stale"
           variant="row"
           message="Failed to refresh the catalog, so what follows may be out of date."
+          busy={store.refreshing}
           onRetry={store.reload}
         />
       )}

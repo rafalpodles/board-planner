@@ -13,12 +13,14 @@ import { Button } from "@/components/ui/Button";
 export function LoadFailed({
   message,
   onRetry,
+  busy = false,
   variant = "block",
   className = "",
   testId,
 }: {
   message: string;
   onRetry: () => void;
+  busy?: boolean;
   variant?: "block" | "row";
   className?: string;
   testId?: string;
@@ -36,8 +38,14 @@ export function LoadFailed({
       className={`${shape} ${className || (variant === "row" ? "mb-4" : "py-8")}`}
     >
       <p className="text-sm text-text-muted">{message}</p>
-      <Button size="sm" variant={variant === "row" ? "secondary" : "primary"} onClick={onRetry}>
-        Retry
+      <Button
+        size="sm"
+        className="shrink-0"
+        disabled={busy}
+        variant={variant === "row" ? "secondary" : "primary"}
+        onClick={onRetry}
+      >
+        {busy ? "Retrying…" : "Retry"}
       </Button>
     </div>
   );

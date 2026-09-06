@@ -76,7 +76,7 @@ describe("the agents catalog when the read fails", () => {
     api.get.mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
     render(<AgentsPage />);
 
-    expect(screen.getByRole("status", { name: "Loading the catalog" })).toBeTruthy();
+    expect(screen.getByText("Loading the catalog")).toBeTruthy();
     expect(screen.queryByText("You have not created an agent yet.")).toBeNull();
 
     await act(async () => pending.forEach((resolve) => resolve([])));
@@ -95,7 +95,7 @@ describe("the agents catalog when the read fails", () => {
     api.get.mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
 
-    expect(screen.getByRole("status", { name: "Loading the catalog" })).toBeTruthy();
+    expect(screen.getByText("Loading the catalog")).toBeTruthy();
     await act(async () => pending.forEach((resolve) => resolve([])));
   });
 
@@ -120,7 +120,7 @@ describe("the agents catalog when the read fails", () => {
   // An instance with blocks but no agents still has something on screen, and the guard used to
   // ask only about agents
   it("keeps blocks on screen when the reload fails and only agents are empty", async () => {
-    const STEP = { _id: "b1", kind: "step", name: "Implement it", description: "" };
+    const STEP = { _id: "b1", key: "implement", kind: "step", name: "Implement it", description: "" };
     api.get.mockImplementation((url: string) =>
       Promise.resolve(url.includes("/api/agent-blocks") ? [STEP] : [])
     );
@@ -160,7 +160,6 @@ describe("two reads in flight at once", () => {
   // read has already overtaken must not hang a "may be out of date" banner over current data,
   // and a stale success must not overwrite newer rows.
   it("ignores a rejection the newer read overtook", async () => {
-    let failFirst: (error: Error) => void = () => {};
     const pendingRejections: ((error: Error) => void)[] = [];
     let call = 0;
     api.get.mockImplementation(() => {
@@ -178,11 +177,31 @@ describe("two reads in flight at once", () => {
     });
     await waitFor(() => expect(result.current.allAgents.length).toBe(1));
 
-    failFirst = pendingRejections[0];
-    await act(async () => failFirst(new Error("network")));
+    await act(async () => pendingRejections[0](new Error("network")));
 
     expect(result.current.failed).toBe(false);
     expect(result.current.allAgents.length).toBe(1);
+  });
+
+  // A superseded call must not drop the spinner out from under the one still running
+  it("leaves loading set when a superseded read finishes first", async () => {
+    const pending: ((rows: unknown[]) => void)[] = [];
+    let call = 0;
+    api.get.mockImplementation(() => {
+      call += 1;
+      if (call <= 2) return new Promise((resolve) => pending.push(resolve));
+      return new Promise(() => {});
+    });
+
+    const { result } = renderHook(() => useStore());
+    await act(async () => {
+      void result.current.retry();
+    });
+
+    expect(result.current.loading).toBe(true);
+    await act(async () => pending.forEach((resolve) => resolve([])));
+
+    expect(result.current.loading).toBe(true);
   });
 
   it("ignores a success the newer read overtook", async () => {
@@ -235,11 +254,6 @@ describe("the agent editor when the read fails", () => {
   // The editor's half of the same rule: a reload that fails while the agent is on screen must
   // keep it there and say the refresh failed, not claim the agent is gone
   it("keeps the agent on screen when a later read fails", async () => {
-    api.get.mockImplementation(() => Promise.resolve([AGENT]));
-    const { result } = renderHook(() => useStore());
-    await waitFor(() => expect(result.current.allAgents.length).toBe(1));
-    cleanup();
-
     api.get.mockImplementationOnce(() => Promise.resolve([AGENT]));
     api.get.mockImplementationOnce(() => Promise.resolve([]));
     render(<AgentEditorPage />);
