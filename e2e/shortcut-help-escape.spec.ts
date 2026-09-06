@@ -188,3 +188,102 @@ test("? still closes the help after a reload has reordered the listeners", async
   await page.keyboard.press("?");
   await expect(help(page)).toBeHidden();
 });
+
+/**
+ * BP-530. The same overlay, measured as an assistive technology and a keyboard see it.
+ *
+ * BP-522 fixed Escape and deliberately left the rest: the help hand-rolled its overlay instead of
+ * going through `Modal`, so it had no `role="dialog"` and no accessible name, focus was never
+ * moved into it and Tab walked out through the backdrop into the sidebar, the page behind stayed
+ * scrollable, and — registering no focus-trap layer — it let the board's Escape branch run beside
+ * its own and clear a card selection nobody had touched.
+ *
+ * Each of the four asserts one of those on its own: none waits on `role="dialog"` except the one
+ * that is about the role, so a run says which of the four gaps is open rather than four times
+ * that the first is. Their control is the `?` toggle test above — routing the help through
+ * `Modal` must not cost the board the key it owns.
+ */
+
+const helpDialog = (page: Page) => page.getByRole("dialog", { name: "Keyboard Shortcuts" });
+
+const activeElementIsInsideTheHelp = (page: Page) =>
+  page.evaluate(() => {
+    const active = document.activeElement;
+    const dialog = document.querySelector('[role="dialog"]');
+    return active !== null && dialog !== null && dialog.contains(active);
+  });
+
+const collapseSidebar = (page: Page) =>
+  page.getByRole("button", { name: /(Collapse|Expand) sidebar/ });
+
+const focusedElement = (page: Page) =>
+  page.evaluate(() => {
+    const active = document.activeElement as HTMLElement | null;
+    if (!active) return "none";
+    const label = active.getAttribute("aria-label");
+    return label ? `${active.tagName}[${label}]` : active.tagName;
+  });
+
+test("the help announces as a dialog named after its heading", async ({ page }) => {
+  await openBoard(page);
+
+  await page.keyboard.press("?");
+  // Measured: `[role="dialog"]` elements in the document — 0. A screen reader was told nothing
+  // opened, and there was no name to announce if it had been
+  await expect(helpDialog(page)).toBeVisible();
+});
+
+test("focus moves into the help and Tab never reaches the sidebar behind it", async ({ page }) => {
+  await openBoard(page);
+
+  await page.keyboard.press("?");
+  await expect(help(page)).toBeVisible();
+  // Measured at open: BODY. Focus was never moved into the overlay at all
+  await expect.poll(() => focusedElement(page)).not.toBe("BODY");
+
+  // Measured: four presses walked out of the backdrop and into the sidebar's Collapse button
+  for (let i = 0; i < 4; i++) {
+    await page.keyboard.press("Tab");
+    await expect.poll(() => focusedElement(page)).not.toBe("BUTTON[Collapse sidebar]");
+  }
+  await expect.poll(() => activeElementIsInsideTheHelp(page)).toBe(true);
+
+  // The control: that button is on the page and tabbable, so Tab staying put is the trap holding
+  // rather than the target being gone
+  await expect(collapseSidebar(page)).toBeVisible();
+});
+
+test("the page behind the help does not scroll, and scrolls again once it closes", async ({
+  page,
+}) => {
+  await openBoard(page);
+
+  await page.keyboard.press("?");
+  await expect(help(page)).toBeVisible();
+  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("hidden");
+
+  // The control: the lock is released, so a passing first half is not the body having been
+  // unscrollable all along
+  await page.keyboard.press("Escape");
+  await expect(help(page)).toBeHidden();
+  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("");
+});
+
+test("Escape closes the help without also clearing the selection underneath it", async ({
+  page,
+}) => {
+  await openBoard(page);
+
+  await card(page).click({ modifiers: ["Shift"] });
+  await expect(selectBox(page)).toHaveAttribute("aria-pressed", "true");
+
+  await page.keyboard.press("?");
+  await expect(help(page)).toBeVisible();
+
+  // The help registered no layer, so `openLayerCount()` was 0 and the board's Escape branch ran
+  // beside the help's own: one press closed the help and emptied a selection nobody asked it to.
+  // The bulk-delete confirm above is the same arbitration, from a layer that did register
+  await page.keyboard.press("Escape");
+  await expect(help(page)).toBeHidden();
+  await expect(selectBox(page)).toHaveAttribute("aria-pressed", "true");
+});
