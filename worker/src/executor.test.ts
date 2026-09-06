@@ -624,14 +624,14 @@ describe("the environment handed to the agent", () => {
   });
 
   it("still carries what the CLI needs to find its logged-in session", async () => {
-    vi.stubEnv("HOME", "/Users/rpo");
+    vi.stubEnv("HOME", "/Users/owner");
     vi.stubEnv("PATH", "/usr/bin");
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 
     await createExecutor(config, runner).execute(options);
 
     const env = run.mock.calls[0][2].env;
-    expect(env.HOME).toBe("/Users/rpo");
+    expect(env.HOME).toBe("/Users/owner");
     expect(env.PATH).toBe("/usr/bin");
   });
 });

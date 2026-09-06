@@ -122,7 +122,7 @@ const NOTIFICATION = {
     projectRef: "BP",
     taskNumber: 142,
     assigneeId: ASSIGNEE,
-    quote: { who: "rafal", text: "two writes, not one" },
+    quote: { who: "owner", text: "two writes, not one" },
   },
 };
 
@@ -180,7 +180,7 @@ describe("notification emails", () => {
     await createNotifications({
       ...NOTIFICATION,
       type: "mentioned",
-      title: "rafal mentioned you in BP-142",
+      title: "owner mentioned you in BP-142",
       email: { ...NOTIFICATION.email, kicker: "You were mentioned" },
     });
     const [mail] = await sentMails();

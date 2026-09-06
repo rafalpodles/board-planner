@@ -100,7 +100,7 @@ const TWO_GH_ACCOUNTS = `github.com
   - Active account: true
   - Git operations protocol: ssh
 
-  ✓ Logged in to github.com account rafalpodles (keyring)
+  ✓ Logged in to github.com account owner (keyring)
   - Active account: false
   - Git operations protocol: ssh
 `;
@@ -247,7 +247,7 @@ describe("runPreflight", () => {
 
     expect(report.githubAccounts).toEqual([
       { login: "other-account", active: true },
-      { login: "rafalpodles", active: false },
+      { login: "owner", active: false },
     ]);
   });
 
@@ -262,14 +262,14 @@ describe("runPreflight", () => {
   it("reports the pinned account rather than gh's active one", async () => {
     const m = machine({ ghAuth: ok(TWO_GH_ACCOUNTS) });
 
-    const report = await runPreflight(depsFor(m, { pinnedGithubAccount: "rafalpodles" }));
+    const report = await runPreflight(depsFor(m, { pinnedGithubAccount: "owner" }));
 
     expect(check(report, "gh").ok).toBe(true);
-    expect(report.githubAccount).toBe("rafalpodles");
+    expect(report.githubAccount).toBe("owner");
     expect(report.githubPinned).toBe(true);
     // Both names, because the difference between them is the whole answer to "why is it pushing as
     // somebody else" — and it is invisible from either name alone
-    expect(check(report, "gh").detail).toContain("rafalpodles");
+    expect(check(report, "gh").detail).toContain("owner");
     expect(check(report, "gh").detail).toContain("other-account");
   });
 
@@ -279,16 +279,16 @@ describe("runPreflight", () => {
   it("verifies the pin against gh itself, not against the status text it parsed", async () => {
     const m = machine({ ghAuth: ok("some future format nobody has parsed") });
 
-    const report = await runPreflight(depsFor(m, { pinnedGithubAccount: "rafalpodles" }));
+    const report = await runPreflight(depsFor(m, { pinnedGithubAccount: "owner" }));
 
     expect(check(report, "gh").ok).toBe(true);
-    expect(report.githubAccount).toBe("rafalpodles");
+    expect(report.githubAccount).toBe("owner");
     expect(m.calls).toContainEqual([
       "/opt/homebrew/bin/gh",
       "auth",
       "token",
       "--user",
-      "rafalpodles",
+      "owner",
     ]);
   });
 
@@ -297,7 +297,7 @@ describe("runPreflight", () => {
   it("puts no token in the report it hands back", async () => {
     const m = machine({ ghAuth: ok(TWO_GH_ACCOUNTS), ghToken: ok("gho_a_real_looking_token") });
 
-    const report = await runPreflight(depsFor(m, { pinnedGithubAccount: "rafalpodles" }));
+    const report = await runPreflight(depsFor(m, { pinnedGithubAccount: "owner" }));
 
     expect(JSON.stringify(report)).not.toContain("gho_");
   });

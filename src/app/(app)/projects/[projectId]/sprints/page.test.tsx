@@ -41,7 +41,7 @@ vi.mock("@/components/sprints/SprintHeader", async (importOriginal) => {
 });
 vi.mock("@/hooks/use-auth", () => ({
   useAuth: () => ({
-    user: { username: "rpo", collapseEmptyColumns: false },
+    user: { username: "owner", collapseEmptyColumns: false },
     isAdmin: false,
   }),
 }));

@@ -24,7 +24,7 @@ const { nav, auth } = vi.hoisted(() => ({
   } satisfies AuthState,
 }));
 
-const SIGNED_IN = { username: "rpo" } as ApiUser;
+const SIGNED_IN = { username: "owner" } as ApiUser;
 
 vi.mock("next/navigation", () => ({
   useRouter: () => nav,

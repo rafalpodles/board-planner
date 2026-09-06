@@ -15,9 +15,9 @@ private func scratch() throws -> String {
 
 @Test func roundTripsTheWorkersOwnFormat() throws {
     let file = ReposFile(path: try scratch())
-    try file.write(["/Users/rpo/code/a", "/Users/rpo/code/b"])
+    try file.write(["/Users/owner/code/a", "/Users/owner/code/b"])
 
-    #expect(try file.read() == ["/Users/rpo/code/a", "/Users/rpo/code/b"])
+    #expect(try file.read() == ["/Users/owner/code/a", "/Users/owner/code/b"])
 }
 
 // repos.ts reads {"repos": [...]}; any other shape means every binding is silently refused.

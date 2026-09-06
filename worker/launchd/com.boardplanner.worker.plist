@@ -18,7 +18,7 @@
     <key>CP_API_TOKEN_FILE</key>
     <string>HOME_DIR/.boardplanner/token</string>
     <key>CP_WORKER_NAME</key>
-    <string>rpo-laptop</string>
+    <string>owner-laptop</string>
     <key>CP_STATE_DIR</key>
     <string>HOME_DIR/.boardplanner</string>
     <key>HOME</key>

@@ -15,16 +15,16 @@ const project = {
   columns: [],
 };
 
-const rafal = { username: "rafal", fullName: "Rafal Podles", isAgent: false };
+const owner = { username: "owner", fullName: "Owner Name", isAgent: false };
 
-function prompt(actor: typeof rafal | null) {
+function prompt(actor: typeof owner | null) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return buildSystemPrompt(project as any, mcp as never, [], actor as never);
 }
 
 describe("the PM agent's system prompt", () => {
   it("names who is speaking, with their handle", () => {
-    expect(prompt(rafal)).toContain("Rafal Podles (@rafal)");
+    expect(prompt(owner)).toContain("Owner Name (@owner)");
   });
 
   /**
@@ -33,7 +33,7 @@ describe("the PM agent's system prompt", () => {
    * inferences; this is the second one, said out loud rather than left to the model.
    */
   it("says what 'me' resolves to, so a self-assignment needs no follow-up question", () => {
-    expect(prompt(rafal)).toMatch(/"me".*mean.*@rafal/);
+    expect(prompt(owner)).toMatch(/"me".*mean.*@owner/);
   });
 
   /** An autonomous turn has no human behind it, and nothing it could resolve "me" to. */
@@ -56,7 +56,7 @@ describe("member-written vocabulary cannot add a line to the system prompt", () 
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const promptFor = (over: Record<string, unknown>) =>
-    buildSystemPrompt({ ...project, ...over } as any, mcp as never, [], rafal as never);
+    buildSystemPrompt({ ...project, ...over } as any, mcp as never, [], owner as never);
 
   it("a category name cannot start a line of its own", () => {
     const text = promptFor({ categories: [{ name: FORGED }] });

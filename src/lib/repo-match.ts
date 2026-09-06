@@ -1,14 +1,14 @@
 import { repositoryCandidates, RepositoryFields } from "./repository";
 
 // One repository is reachable by many strings — ssh, https, with or without .git, and through a
-// per-account ssh host alias like `git@github-rafalpodles:owner/repo.git`. Matching a worker's
+// per-account ssh host alias like `git@github-owner:owner/repo.git`. Matching a worker's
 // checkout to a project has to see through all of them, so both sides reduce to `owner/repo`.
 const SSH_LIKE = /^[^/]+@[^/:]+:(.+)$/;
 const SCHEMED = /^[a-z][a-z0-9+.-]*:\/\/(?:[^@/]*@)?[^/]+\/(.+)$/i;
 
 export interface ParsedRemote {
   // Empty when the string carries no real hostname — a bare "owner/repo", or an ssh alias like
-  // `github-rafalpodles` that only this machine's ssh config can resolve.
+  // `github-owner` that only this machine's ssh config can resolve.
   host: string;
   repo: string;
 }

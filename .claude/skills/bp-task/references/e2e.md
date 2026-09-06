@@ -46,7 +46,7 @@ The database name must end in `_e2e`. A run owns `E2E_PORT` through `E2E_PORT+6`
 
 ## Specs that already pin the behaviour you change
 
-Before changing what a key, a click or a route does, grep `e2e/` for the surface (`grep -rl "ControlOrMeta+k" e2e`) and run every spec that drives it, whatever group it is in. Rerunning the group your own spec lives in is not enough: BP-560 broke a `tasks`-group spec while the `board` group was green. An existing test that pins the flow you are removing is a decision somebody made; do not override it yourself, put the question on the task and let rafal choose.
+Before changing what a key, a click or a route does, grep `e2e/` for the surface (`grep -rl "ControlOrMeta+k" e2e`) and run every spec that drives it, whatever group it is in. Rerunning the group your own spec lives in is not enough: BP-560 broke a `tasks`-group spec while the `board` group was green. An existing test that pins the flow you are removing is a decision somebody made; do not override it yourself, put the question on the task and let owner choose.
 
 ## The control
 

@@ -58,7 +58,7 @@ export const GET = withProjectAccess(async (request, { params }) => {
      * `list_tasks`'s own parameter description and CLAUDE.md's conventions — and an ObjectId
      * appears in no MCP response, so demanding one makes the filter unreachable from a
      * conversation. It went straight into `filter.assignee`, which is an ObjectId on the model, so
-     * `?assignee=rpo` reached Mongoose as a cast crash and answered 500. Every time. The comment on
+     * `?assignee=owner` reached Mongoose as a cast crash and answered 500. Every time. The comment on
      * the sprint branch below has warned against exactly this since it was written.
      *
      * An id still works, because it always has and this route is public REST — but the **username

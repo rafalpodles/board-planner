@@ -28,14 +28,14 @@ final class CloneStepTests: XCTestCase {
         let git = Git()
 
         let outcome = git.step().run(
-            repositoryURL: "https://github.com/o/r", parent: "/Users/rpo/checkouts", projectKey: "TP")
+            repositoryURL: "https://github.com/o/r", parent: "/Users/owner/checkouts", projectKey: "TP")
 
-        XCTAssertEqual(outcome, .cloned(path: "/Users/rpo/checkouts/TP"))
+        XCTAssertEqual(outcome, .cloned(path: "/Users/owner/checkouts/TP"))
         XCTAssertEqual(
             git.calls.first,
             [
                 "git", "-c", "protocol.ext.allow=never", "-c", "protocol.file.allow=never",
-                "clone", "--", "https://github.com/o/r", "/Users/rpo/checkouts/TP",
+                "clone", "--", "https://github.com/o/r", "/Users/owner/checkouts/TP",
             ])
     }
 
@@ -189,11 +189,11 @@ final class CloneStepTests: XCTestCase {
     // checkout landed — and ProjectSetup then writes that path into repos.json, which is the
     // allowlist deciding where the worker may run anything at all.
     func testItRefusesAProjectKeyThatIsNotASingleDirectoryName() {
-        for key in ["../../../../Users/rpo/Library/LaunchAgents", "..", "a/b", ".hidden", "", "-x"] {
+        for key in ["../../../../Users/owner/Library/LaunchAgents", "..", "a/b", ".hidden", "", "-x"] {
             let git = Git()
 
             let outcome = git.step().run(
-                repositoryURL: "https://github.com/o/r", parent: "/Users/rpo/checkouts", projectKey: key)
+                repositoryURL: "https://github.com/o/r", parent: "/Users/owner/checkouts", projectKey: key)
 
             guard case .failed(let reason) = outcome else {
                 return XCTFail("expected key \(key) to be refused, got \(outcome)")

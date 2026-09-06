@@ -4,7 +4,7 @@ import { render, screen, waitFor, cleanup, act } from "@testing-library/react";
 import { AuthProvider } from "@/components/AuthProvider";
 import { useAuth } from "@/hooks/use-auth";
 
-const USER = { _id: "u1", username: "rpo", role: "admin" };
+const USER = { _id: "u1", username: "owner", role: "admin" };
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -13,7 +13,7 @@ function jsonResponse(status: number, body: unknown): Response {
   });
 }
 
-let attempt: { username: string; password: string } = { username: "rpo", password: "pw" };
+let attempt: { username: string; password: string } = { username: "owner", password: "pw" };
 
 function Probe() {
   const { user, isLoading, outage, login, logout, refreshUser, onUnauthorized, noteApiStatus } =
@@ -53,7 +53,7 @@ async function renderSettled() {
 
 describe("useAuthProvider — telling an outage from a signed-out session", () => {
   beforeEach(() => {
-    attempt = { username: "rpo", password: "pw" };
+    attempt = { username: "owner", password: "pw" };
     vi.stubGlobal("fetch", vi.fn());
   });
 
@@ -111,13 +111,13 @@ describe("useAuthProvider — telling an outage from a signed-out session", () =
     });
 
     await waitFor(() => expect(screen.getByTestId("outage").textContent).toBe("false"));
-    expect(screen.getByTestId("user").textContent).toBe("rpo");
+    expect(screen.getByTestId("user").textContent).toBe("owner");
   });
 });
 
 describe("useAuthProvider — what a failed sign-in says", () => {
   beforeEach(() => {
-    attempt = { username: "rpo", password: "pw" };
+    attempt = { username: "owner", password: "pw" };
     vi.stubGlobal("fetch", vi.fn());
   });
 
@@ -180,13 +180,13 @@ describe("useAuthProvider — what a failed sign-in says", () => {
     const reason = await signIn(jsonResponse(200, USER));
 
     await waitFor(() => expect(reason.textContent).toBe("ok"));
-    expect(screen.getByTestId("user").textContent).toBe("rpo");
+    expect(screen.getByTestId("user").textContent).toBe("owner");
   });
 });
 
 describe("useAuthProvider — what the rest of the app reports back", () => {
   beforeEach(() => {
-    attempt = { username: "rpo", password: "pw" };
+    attempt = { username: "owner", password: "pw" };
     vi.stubGlobal("fetch", vi.fn());
   });
 
@@ -198,7 +198,7 @@ describe("useAuthProvider — what the rest of the app reports back", () => {
   async function signedIn() {
     vi.mocked(fetch).mockResolvedValueOnce(jsonResponse(200, USER));
     await renderSettled();
-    expect(screen.getByTestId("user").textContent).toBe("rpo");
+    expect(screen.getByTestId("user").textContent).toBe("owner");
   }
 
   // The only way the shell learns about an outage for somebody already signed in: they are never
@@ -211,7 +211,7 @@ describe("useAuthProvider — what the rest of the app reports back", () => {
     });
     expect(screen.getByTestId("outage").textContent).toBe("true");
     // Still signed in — an outage is not a logout, which is the whole point
-    expect(screen.getByTestId("user").textContent).toBe("rpo");
+    expect(screen.getByTestId("user").textContent).toBe("owner");
 
     await act(async () => {
       screen.getByText("saw 200").click();

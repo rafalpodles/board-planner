@@ -57,7 +57,7 @@ const PATH_LIKE = /^(\/|~\/|[A-Za-z]:\\)/;
 
 /**
  * Fields naming something that lives outside this database and did not get renamed with it.
- * A repository is the sharpest case: the project points at `rafalpodles/claude-planner`,
+ * A repository is the sharpest case: the project points at `owner/claude-planner`,
  * that is still the repository's name on GitHub, and rewriting it makes every pull-request
  * sync ask about a repository that does not exist. A redirect URI is registered with the
  * remote OAuth server, so changing this copy only makes the two disagree.

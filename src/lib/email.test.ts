@@ -62,11 +62,11 @@ describe("emailSettingsSummary", () => {
 
 describe("addresses", () => {
   it("normalises what people actually type", () => {
-    expect(normaliseEmail("  Rafal@Example.COM ")).toBe("rafal@example.com");
+    expect(normaliseEmail("  Owner@Example.COM ")).toBe("owner@example.com");
   });
 
   it("rejects the typos that would silently swallow a reset", () => {
-    for (const bad of ["", "rafal", "rafal@", "@example.com", "a b@example.com", "a@b@c.com"]) {
+    for (const bad of ["", "owner", "owner@", "@example.com", "a b@example.com", "a@b@c.com"]) {
       expect(isValidEmail(bad), bad).toBe(false);
     }
   });
@@ -89,10 +89,10 @@ describe("addresses", () => {
 
   it("accepts addresses people really have", () => {
     for (const good of [
-      "rafal@example.com",
-      "rafal+board@example.co.uk",
+      "owner@example.com",
+      "owner+board@example.co.uk",
       "r.example@other-domain.com",
-      "rafal_1@sub.domain.example.org",
+      "owner_1@sub.domain.example.org",
       // Ordinary on the company network this product is self-hosted on. Demanding a dot would lock
       // those deployments out of their own email.
       "admin@intranet",

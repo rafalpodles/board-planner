@@ -10,9 +10,9 @@ const { ProvenanceError } = await import("@/lib/session");
 
 const USER = {
   _id: "u1",
-  username: "rpo",
-  fullName: "Rafal",
-  email: "rpo@example.com",
+  username: "owner",
+  fullName: "Owner",
+  email: "owner@example.com",
   role: "admin",
   createdAt: new Date("2026-01-01T00:00:00.000Z"),
 };
@@ -37,7 +37,7 @@ describe("GET /api/auth/me", () => {
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body.username).toBe("rpo");
+    expect(body.username).toBe("owner");
   });
 
   it("never includes the password hash", async () => {

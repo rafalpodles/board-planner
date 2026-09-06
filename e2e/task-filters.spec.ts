@@ -11,7 +11,7 @@ import {
 } from "./seed";
 
 /**
- * BP-502. `?assignee=rpo` was written straight into `filter.assignee`, which is an ObjectId on the
+ * BP-502. `?assignee=owner` was written straight into `filter.assignee`, which is an ObjectId on the
  * model, so Mongoose threw a CastError and the route answered **500** — every time, reproduced over
  * the hosted MCP endpoint. MCP is this parameter's only caller and its only documentation; the
  * browser never sends it, which is why it stood.

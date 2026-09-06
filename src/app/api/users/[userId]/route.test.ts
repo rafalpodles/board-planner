@@ -44,7 +44,7 @@ const { PUT, DELETE } = await import("./route");
 const { resetRateLimits, lockoutKey, recordFailedAttempt, isRateLimited, ANONYMOUS_ACCOUNT_ATTEMPTS } =
   await import("@/lib/rate-limit");
 
-const ADMIN = { _id: "admin-1", role: "admin", username: "rafal" };
+const ADMIN = { _id: "admin-1", role: "admin", username: "owner" };
 
 function put(body: unknown) {
   return new Request("http://x/api/users/target-1", {
@@ -275,7 +275,7 @@ describe("PUT /api/users/:id — an admin sets a password", () => {
         user: "admin-1",
         // The name beside the reference, because the reference stops naming this administrator the
         // day their own account goes (BP-539)
-        actorUsername: "rafal",
+        actorUsername: "owner",
       })
     );
   });
@@ -292,7 +292,7 @@ describe("PUT /api/users/:id — an admin sets a password", () => {
       email: "target@example.com",
       username: "target",
       how: "admin",
-      actor: "rafal",
+      actor: "owner",
     });
     // Whatever the mail says, it is not this
     expect(JSON.stringify(notifyPasswordChanged.mock.calls)).not.toContain("a-fresh-password");
@@ -424,7 +424,7 @@ describe("PUT /api/users/:id — an admin sets a password", () => {
     expect(logInstanceAudit).toHaveBeenCalledWith({
       action: "user_role_changed",
       user: "admin-1",
-      actorUsername: "rafal",
+      actorUsername: "owner",
       target: "target",
       // The direction, because "role changed" answers half the question somebody is asking
       detail: "member → admin",
@@ -456,7 +456,7 @@ describe("PUT /api/users/:id — an admin repoints the address", () => {
       previousEmail: "target@example.com",
       username: "target",
       newEmail: "new@example.com",
-      actor: "rafal",
+      actor: "owner",
     });
   });
 
@@ -481,7 +481,7 @@ describe("PUT /api/users/:id — an admin repoints the address", () => {
 describe("DELETE /api/users/:id", () => {
   const ADMIN_HEX = "6a9d0f0b5d781bded2cb9759";
   const TARGET_HEX = "6a9d0f0b5d781bded2cb975a";
-  const ADMIN_DOC = { _id: ADMIN_HEX, role: "admin", username: "rafal", kind: "human" };
+  const ADMIN_DOC = { _id: ADMIN_HEX, role: "admin", username: "owner", kind: "human" };
 
   const del = (id: string) =>
     [
@@ -644,7 +644,7 @@ describe("DELETE /api/users/:id", () => {
     expect(logInstanceAudit).toHaveBeenCalledWith({
       action: "user_deleted",
       user: ADMIN_HEX,
-      actorUsername: "rafal",
+      actorUsername: "owner",
       target: "target",
       detail: "a member",
     });

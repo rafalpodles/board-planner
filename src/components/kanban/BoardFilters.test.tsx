@@ -24,7 +24,7 @@ const tasks = [
     _id: "2",
     taskNumber: 2,
     title: "Assigned work",
-    assignee: { _id: "u1", username: "rpo" },
+    assignee: { _id: "u1", username: "owner" },
   } as Partial<ApiTask> & { _id: string }),
   task({ _id: "3", taskNumber: 3, title: "Low chore", priority: "low" }),
 ];
@@ -38,7 +38,7 @@ function renderFilters(over: Partial<React.ComponentProps<typeof BoardFilters>> 
       categories={["bug", "doc"]}
       projectKey="TP"
       projectId="TP"
-      currentUsername="rpo"
+      currentUsername="owner"
       sortField="manual"
       sortDir="asc"
       onSortChange={onSortChange}
@@ -126,16 +126,16 @@ describe("BoardFilters", () => {
 
     const assignee = screen.getByRole("dialog").querySelectorAll("select")[0];
     await act(async () => {
-      assignee.value = "rpo";
+      assignee.value = "owner";
       assignee.dispatchEvent(new Event("change", { bubbles: true }));
     });
 
-    expect(screen.getByLabelText("Remove rpo filter")).toBeTruthy();
+    expect(screen.getByLabelText("Remove owner filter")).toBeTruthy();
 
     await act(async () => {
-      screen.getByLabelText("Remove rpo filter").click();
+      screen.getByLabelText("Remove owner filter").click();
     });
-    expect(screen.queryByLabelText("Remove rpo filter")).toBeNull();
+    expect(screen.queryByLabelText("Remove owner filter")).toBeNull();
   });
 
   it("applies filters to the task set without any request", async () => {
@@ -188,7 +188,7 @@ describe("BoardFilters", () => {
     expect(screen.getByText("1")).toBeTruthy();
 
     await openPopover();
-    expect(screen.getByLabelText("Remove rpo filter")).toBeTruthy();
+    expect(screen.getByLabelText("Remove owner filter")).toBeTruthy();
   });
 
   // Search sits in the resting row, outside the popover, so clearing filters

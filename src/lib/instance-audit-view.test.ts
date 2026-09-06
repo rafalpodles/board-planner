@@ -66,16 +66,16 @@ describe("auditIsNotable", () => {
  * username comes first — and the order is the whole fix, not a preference.
  */
 describe("auditActor", () => {
-  const actor = { _id: "u1", username: "rafal", fullName: "Rafal" };
+  const actor = { _id: "u1", username: "owner", fullName: "Owner" };
 
   it("names the account that wrote the row after that account is deleted", () => {
-    expect(auditActor({ actorUsername: "rafal", user: null })).toBe("rafal");
+    expect(auditActor({ actorUsername: "owner", user: null })).toBe("owner");
   });
 
   // Written before the field existed: the reference is all there is, and while it resolves it is
   // still the right answer
   it("falls back to the reference for a row that predates the stored name", () => {
-    expect(auditActor({ actorUsername: undefined, user: actor })).toBe("rafal");
+    expect(auditActor({ actorUsername: undefined, user: actor })).toBe("owner");
   });
 
   // The control, and the reason the order matters: this is what a machine's row looks like, and
@@ -86,8 +86,8 @@ describe("auditActor", () => {
 
   // The stored name wins, because the reference is the one that can go
   it("prefers the stored name over the reference", () => {
-    expect(auditActor({ actorUsername: "rafal", user: { ...actor, username: "someone-else" } })).toBe(
-      "rafal"
+    expect(auditActor({ actorUsername: "owner", user: { ...actor, username: "someone-else" } })).toBe(
+      "owner"
     );
   });
 });

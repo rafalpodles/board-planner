@@ -798,7 +798,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
   // account gh happens to have active when delivery reaches the remote.
   it("resolves the pinned github account's token by name before the run", async () => {
     const { everyCall } = await runOneTask(undefined, undefined, {
-      stateFiles: { "github.json": JSON.stringify({ account: "rafalpodles" }) },
+      stateFiles: { "github.json": JSON.stringify({ account: "owner" }) },
     });
 
     expect(everyCall).toContainEqual([
@@ -806,7 +806,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       "auth",
       "token",
       "--user",
-      "rafalpodles",
+      "owner",
     ]);
   });
 
@@ -898,11 +898,11 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
   // to be the live pin rather than the value preflight read when the process started.
   it("serves the pinned github account on the socket, and never a token", async () => {
     const { localConfig } = await runOneTask(undefined, undefined, {
-      stateFiles: { "github.json": JSON.stringify({ account: "rafalpodles" }) },
+      stateFiles: { "github.json": JSON.stringify({ account: "owner" }) },
     });
 
     const view = localConfig?.();
-    expect(view?.githubAccount).toBe("rafalpodles");
+    expect(view?.githubAccount).toBe("owner");
     expect(JSON.stringify(view)).not.toMatch(/gho_|ghp_|cpw_/);
   });
 

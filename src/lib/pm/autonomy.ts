@@ -63,9 +63,9 @@ export function buildBoardReviewPrompt(projectKey: string, digest: string): stri
     digest,
     ``,
     `Fix what is unambiguous: fill in missing acceptance criteria, tighten vague descriptions.`,
-    `You cannot change statuses, assign tasks or create tasks in this turn — recommend those to rpo instead of doing them.`,
+    `You cannot change statuses, assign tasks or create tasks in this turn — recommend those to owner instead of doing them.`,
     `Do not repeat a refinement you already made in an earlier review; check the task before rewriting it.`,
-    `Finish with a short report: board state in one or two lines, what you changed, what needs rpo's attention.`,
+    `Finish with a short report: board state in one or two lines, what you changed, what needs owner's attention.`,
     `If the board is healthy and there is nothing to change, say exactly that in one line.`,
   ].join("\n");
 }
@@ -78,9 +78,9 @@ export function buildNeedsHumanReviewPrompt(taskKey: string): string {
     ``,
     `Add exactly one comment, then stop:`,
     `1. If the blocker is answerable from the board and project context, answer it with your reasoning, and name the status you would move the task to.`,
-    `2. If it needs a decision only rpo can make, state the ONE specific question and the options you see.`,
+    `2. If it needs a decision only owner can make, state the ONE specific question and the options you see.`,
     ``,
-    `You cannot change statuses or assignees in this turn — recommend those to rpo instead of doing them.`,
+    `You cannot change statuses or assignees in this turn — recommend those to owner instead of doing them.`,
     `Do not restate the task description back to us. Be concise and concrete.`,
     `Finish with a one-line summary of which of the two you did and why.`,
   ].join("\n");

@@ -9,10 +9,10 @@ final class WorkerLauncherTests: XCTestCase {
         OnboardingState(
             step: .starting,
             apiURL: "https://app.example.com",
-            workerName: "rpo-MacBook",
-            checkoutsFolder: "/Users/rpo/checkouts",
-            checkoutPath: "/Users/rpo/checkouts/thing",
-            toolPath: "/Users/rpo/.nvm/versions/node/v22/bin:/opt/homebrew/bin:/Users/rpo/.local/bin:/usr/bin:/bin"
+            workerName: "owner-macbook",
+            checkoutsFolder: "/Users/owner/checkouts",
+            checkoutPath: "/Users/owner/checkouts/thing",
+            toolPath: "/Users/owner/.nvm/versions/node/v22/bin:/opt/homebrew/bin:/Users/owner/.local/bin:/usr/bin:/bin"
         )
     }
 
@@ -20,10 +20,10 @@ final class WorkerLauncherTests: XCTestCase {
     // spawns a worker that inherits Finder's PATH, and every task fails with the check still green.
     func testTheSpawnedWorkerGetsThePathPreflightResolved() {
         let plan = WorkerLauncher.plan(
-            nodePath: "/Users/rpo/.nvm/versions/node/v22/bin/node",
+            nodePath: "/Users/owner/.nvm/versions/node/v22/bin/node",
             workerEntry: "/checkout/worker/dist/main.js",
             state: state(),
-            stateDirectory: "/Users/rpo/.boardplanner",
+            stateDirectory: "/Users/owner/.boardplanner",
             baseEnvironment: finderEnvironment)
 
         XCTAssertEqual(plan.environment["PATH"], state().toolPath)
@@ -58,11 +58,11 @@ final class WorkerLauncherTests: XCTestCase {
     func testItSetsTheSameVariablesThePlistDoes() {
         let plan = WorkerLauncher.plan(
             nodePath: "/n", workerEntry: "/e", state: state(),
-            stateDirectory: "/Users/rpo/.boardplanner", baseEnvironment: finderEnvironment)
+            stateDirectory: "/Users/owner/.boardplanner", baseEnvironment: finderEnvironment)
 
         XCTAssertEqual(plan.environment["CP_API_URL"], "https://app.example.com")
-        XCTAssertEqual(plan.environment["CP_WORKER_NAME"], "rpo-MacBook")
-        XCTAssertEqual(plan.environment["CP_STATE_DIR"], "/Users/rpo/.boardplanner")
+        XCTAssertEqual(plan.environment["CP_WORKER_NAME"], "owner-macbook")
+        XCTAssertEqual(plan.environment["CP_STATE_DIR"], "/Users/owner/.boardplanner")
     }
 
     // Shipped once. The worker registered, cloned, started and then never reported, and the fleet
@@ -128,7 +128,7 @@ final class WorkerLauncherTests: XCTestCase {
         defer { try? FileManager.default.removeItem(atPath: bundled) }
 
         XCTAssertEqual(
-            WorkerLauncher.entryPoint(bundledAt: bundled, checkout: "/Users/rpo/anything"),
+            WorkerLauncher.entryPoint(bundledAt: bundled, checkout: "/Users/owner/anything"),
             bundled)
     }
 
@@ -144,7 +144,7 @@ final class WorkerLauncherTests: XCTestCase {
     // Someone else's project, and no worker in the app: saying so beats spawning a path that is
     // not there and reporting whatever node says about it
     func testItAnswersNothingWhenNeitherExists() {
-        XCTAssertNil(WorkerLauncher.entryPoint(bundledAt: "/nope/main.js", checkout: "/Users/rpo/their-project"))
+        XCTAssertNil(WorkerLauncher.entryPoint(bundledAt: "/nope/main.js", checkout: "/Users/owner/their-project"))
     }
 
     func testTheBundledWorkerLivesUnderResources() {

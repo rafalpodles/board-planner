@@ -63,7 +63,7 @@ describe("duplicatePayload", () => {
   it("names neither the status, the assignee, the sprint nor the agent", () => {
     const payload = duplicatePayload({
       ...task,
-      assignee: { _id: "u1", username: "rpo" },
+      assignee: { _id: "u1", username: "owner" },
       sprint: "s1",
       agent: { _id: "a1", name: "Default" },
     } as unknown as ApiTask);

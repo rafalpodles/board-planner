@@ -3,7 +3,7 @@ import { childEnv } from "./env.js";
 
 const parent = {
   PATH: "/usr/bin",
-  HOME: "/Users/rpo",
+  HOME: "/Users/owner",
   LANG: "en_GB.UTF-8",
   CP_API_TOKEN: "cp_secret",
   GH_TOKEN: "gho_secret",
@@ -17,7 +17,7 @@ describe("childEnv", () => {
   it("passes the variables a build actually needs", () => {
     expect(childEnv([], parent)).toEqual({
       PATH: "/usr/bin",
-      HOME: "/Users/rpo",
+      HOME: "/Users/owner",
       LANG: "en_GB.UTF-8",
     });
   });

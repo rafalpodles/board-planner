@@ -45,7 +45,7 @@ describe("renderEmail", () => {
     const { html, text } = renderEmail({
       ...MINIMAL,
       taskCard: { key: "BP-1", title: `<img src=x onerror="alert(1)">` },
-      quote: { who: "rafal", text: "<script>steal()</script>" },
+      quote: { who: "owner", text: "<script>steal()</script>" },
     });
 
     expect(html).not.toContain("<img src=x");

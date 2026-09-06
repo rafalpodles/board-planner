@@ -304,7 +304,7 @@ describe("parseAssignments", () => {
 // because the pinned GitHub account lives there and the check answers for that identity.
 describe("stateDirFrom", () => {
   it("resolves without any of the variables a bootstrap needs", () => {
-    expect(stateDirFrom({ CP_STATE_DIR: "/Users/rpo/rig/state" })).toBe("/Users/rpo/rig/state");
+    expect(stateDirFrom({ CP_STATE_DIR: "/Users/owner/rig/state" })).toBe("/Users/owner/rig/state");
     expect(stateDirFrom({})).toMatch(/\.boardplanner$/);
   });
 

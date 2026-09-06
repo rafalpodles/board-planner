@@ -38,7 +38,7 @@ const { POST } = await import("./route");
 const PROJECT_ID = "69a52e3b399b27d3cbb2c5a5";
 // An ordinary member connecting their own laptop — the case admin approval used to stand in front
 // of, and the one the whole of BP-358 is about.
-const MEMBER = { _id: "member-1", role: "member", fullName: "Rafal Podles", username: "rpo" };
+const MEMBER = { _id: "member-1", role: "member", fullName: "Owner Name", username: "owner" };
 const ADMIN = { _id: "admin-1", role: "admin", fullName: "Ada", username: "ada" };
 
 function enrolment(overrides: Record<string, unknown> = {}) {
@@ -106,19 +106,19 @@ describe("POST /api/workers/enrolment/device/:userCode/approve", () => {
       expect.objectContaining({
         name: "rig-laptop",
         host: "mac.home",
-        owner: "Rafal Podles",
+        owner: "Owner Name",
         ownerId: "member-1",
       })
     );
   });
 
   it("falls back to the username when they have no display name", async () => {
-    getAuthUser.mockResolvedValue({ ...MEMBER, _id: "member-2", fullName: "", username: "rpo2" });
+    getAuthUser.mockResolvedValue({ ...MEMBER, _id: "member-2", fullName: "", username: "owner2" });
 
     await POST(request({ projectId: PROJECT_ID }), ctx());
 
     expect(registerWorker).toHaveBeenCalledWith(
-      expect.objectContaining({ owner: "rpo2", ownerId: "member-2" })
+      expect.objectContaining({ owner: "owner2", ownerId: "member-2" })
     );
   });
 

@@ -30,7 +30,7 @@ function run(over: Partial<ApiFleetRun> = {}): ApiFleetRun {
     finishedAt: new Date().toISOString(),
     projectKey: "BP",
     projectName: "Board Planner",
-    workerName: "rafal-mac",
+    workerName: "owner-mac",
     ...over,
   };
 }
@@ -67,7 +67,7 @@ describe("the fleet's run history", () => {
     expect(await screen.findByText("BP-158")).toBeTruthy();
     expect(screen.getByText("Board Planner")).toBeTruthy();
     expect(screen.getByText("Default")).toBeTruthy();
-    expect(screen.getByText("rafal-mac")).toBeTruthy();
+    expect(screen.getByText("owner-mac")).toBeTruthy();
   });
 
   it("says how the run ended", async () => {

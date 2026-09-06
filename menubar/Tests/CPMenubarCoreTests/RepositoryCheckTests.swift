@@ -3,7 +3,7 @@ import XCTest
 
 final class RepositoryCheckTests: XCTestCase {
     private func good(
-        resolved: String = "/Users/rpo/checkout",
+        resolved: String = "/Users/owner/checkout",
         hasGit: Bool = false,
         permissions: Int = 0o755,
         owned: Bool = true
@@ -14,7 +14,7 @@ final class RepositoryCheckTests: XCTestCase {
     }
 
     func testAPlainFolderHasNothingToSay() {
-        XCTAssertTrue(RepositoryCheck.problems(at: "/Users/rpo/checkout", good()).isEmpty)
+        XCTAssertTrue(RepositoryCheck.problems(at: "/Users/owner/checkout", good()).isEmpty)
     }
 
     func testAMissingFolderIsTheOnlyThingReported() {
@@ -31,7 +31,7 @@ final class RepositoryCheckTests: XCTestCase {
     // The worker compares real paths, so a symlinked pick is not the directory it ends up in
     func testASymlinkIsNamedAlongWithWhatItPointsAt() {
         let problems = RepositoryCheck.problems(
-            at: "/Users/rpo/link", good(resolved: "/Volumes/work/checkout"))
+            at: "/Users/owner/link", good(resolved: "/Volumes/work/checkout"))
 
         XCTAssertEqual(problems.count, 1)
         XCTAssertTrue(problems[0].summary.contains("/Volumes/work/checkout"))
@@ -42,7 +42,7 @@ final class RepositoryCheckTests: XCTestCase {
     // working inside the operator's — it registers worktrees in whatever it is handed and reaps
     // directories beside them, which has already bitten in this repository.
     func testPickingAnActualCheckoutIsRefusedWithTheReason() {
-        let problems = RepositoryCheck.problems(at: "/Users/rpo/checkout", good(hasGit: true))
+        let problems = RepositoryCheck.problems(at: "/Users/owner/checkout", good(hasGit: true))
 
         XCTAssertEqual(problems.count, 1)
         XCTAssertTrue(problems[0].summary.contains("itself a checkout"))
@@ -50,11 +50,11 @@ final class RepositoryCheckTests: XCTestCase {
     }
 
     func testAGroupWritableCheckoutIsRefused() {
-        XCTAssertEqual(RepositoryCheck.problems(at: "/Users/rpo/checkout", good(permissions: 0o775)).count, 1)
+        XCTAssertEqual(RepositoryCheck.problems(at: "/Users/owner/checkout", good(permissions: 0o775)).count, 1)
     }
 
     func testAWorldWritableCheckoutIsRefused() {
-        XCTAssertEqual(RepositoryCheck.problems(at: "/Users/rpo/checkout", good(permissions: 0o757)).count, 1)
+        XCTAssertEqual(RepositoryCheck.problems(at: "/Users/owner/checkout", good(permissions: 0o757)).count, 1)
     }
 
     func testSomeoneElsesCheckoutIsRefused() {
@@ -67,7 +67,7 @@ final class RepositoryCheckTests: XCTestCase {
 
     func testEveryProblemCarriesSomethingToDoAboutIt() {
         let problems = RepositoryCheck.problems(
-            at: "/Users/rpo/link", good(resolved: "/elsewhere", hasGit: true, permissions: 0o777, owned: false))
+            at: "/Users/owner/link", good(resolved: "/elsewhere", hasGit: true, permissions: 0o777, owned: false))
 
         XCTAssertEqual(problems.count, 4, "all of them, not just the first")
         for problem in problems {

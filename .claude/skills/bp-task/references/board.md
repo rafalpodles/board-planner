@@ -22,7 +22,7 @@ A task held by a running worker (`execution.runId` set) refuses to leave its col
 
 - `Difficulty` (S, M, L, XL) is a project-defined field. In `get_task` it sits in `customFieldValues` keyed by the field's id; `get_project` maps ids to names. No value means S/M.
 - Project-defined fields are written through `fields`, keyed by name: `fields: { "Difficulty": "M" }`. Tool schemas are strict; a parameter a tool does not declare is refused, not dropped.
-- Assignees are usernames. On the BP board the user is `rafal`; `rpo` is refused as not a member, and `claude` hands the task to nobody.
+- Assignees are usernames. On the BP board the user is `owner`; `owner` is refused as not a member, and `claude` hands the task to nobody.
 - `agent` on `update_task` hands the task to a machine, by name. Leave it alone unless the request says a worker should run the task.
 
 ## Handing a task to a worker

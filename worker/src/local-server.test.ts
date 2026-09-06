@@ -367,8 +367,8 @@ describe("the progress stream", () => {
         workerName: "rig-laptop",
         projectCount: 1,
         pollIntervalMs: 30_000,
-        githubAccount: "rafalpodles",
-        githubAccounts: [{ login: "rafalpodles", active: true }],
+        githubAccount: "owner",
+        githubAccounts: [{ login: "owner", active: true }],
         offers: [],
         catalogue: [],
         projects: [
@@ -393,8 +393,8 @@ describe("the progress stream", () => {
       workerName: "rig-laptop",
       projectCount: 1,
       pollIntervalMs: 30_000,
-      githubAccount: "rafalpodles",
-      githubAccounts: [{ login: "rafalpodles", active: true }],
+      githubAccount: "owner",
+      githubAccounts: [{ login: "owner", active: true }],
       offers: [],
       catalogue: [],
       projects: [
@@ -431,8 +431,8 @@ describe("the progress stream", () => {
         workerName: "w",
         projectCount: 1,
         pollIntervalMs: 30_000,
-        githubAccount: "rafalpodles",
-        githubAccounts: [{ login: "rafalpodles", active: true }],
+        githubAccount: "owner",
+        githubAccounts: [{ login: "owner", active: true }],
         offers: [],
         catalogue: [],
         projects: [

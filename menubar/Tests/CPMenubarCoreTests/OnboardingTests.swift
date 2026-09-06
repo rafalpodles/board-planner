@@ -116,7 +116,7 @@ final class ChangingBoardTests: XCTestCase {
     private func running() -> OnboardingState {
         OnboardingState(
             step: .running, apiURL: "http://localhost:3958", workerName: "rig-mac",
-            checkoutsFolder: "/Users/rpo/checkouts", checkoutPath: "/Users/rpo/checkouts/BP",
+            checkoutsFolder: "/Users/owner/checkouts", checkoutPath: "/Users/owner/checkouts/BP",
             userCode: "ABCD-1234", deviceCode: "cpd_x", workerID: "w1",
             toolPath: "/opt/homebrew/bin")
     }
@@ -133,7 +133,7 @@ final class ChangingBoardTests: XCTestCase {
     func testItKeepsWhatDescribesTheMachineRatherThanTheBoard() {
         let next = Onboarding.changingBoard(running())
 
-        XCTAssertEqual(next.checkoutsFolder, "/Users/rpo/checkouts")
+        XCTAssertEqual(next.checkoutsFolder, "/Users/owner/checkouts")
         XCTAssertEqual(next.toolPath, "/opt/homebrew/bin")
         XCTAssertEqual(next.workerName, "rig-mac")
         // The address being changed is the one worth showing in the field about to be edited

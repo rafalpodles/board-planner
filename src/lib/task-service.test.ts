@@ -2855,7 +2855,7 @@ describe("a task records who assigned it", () => {
       taskNumber: 1,
       status: "doing",
       title: "x",
-      assignee: { _id: "u1", username: "rpo", fullName: "Rafal" },
+      assignee: { _id: "u1", username: "owner", fullName: "Owner" },
       // Already recorded, so the no-op cases below are about the assignee not moving rather than
       // about the legacy repair
       assignedBy: "u9",
@@ -2888,9 +2888,9 @@ describe("a task records who assigned it", () => {
    * claim, with no error, no activity row, and a card that looks exactly as it did.
    */
   it("leaves the assigner alone when the body re-sends the assignee it already has", async () => {
-    userFindOne.mockResolvedValue({ _id: "u1", username: "rpo" });
+    userFindOne.mockResolvedValue({ _id: "u1", username: "owner" });
 
-    await updateTask("p1", "t1", { assignee: "rpo", title: "renamed" }, "somebody-else");
+    await updateTask("p1", "t1", { assignee: "owner", title: "renamed" }, "somebody-else");
 
     expect(setStage(findOneAndUpdate.mock.calls[0][1])).not.toHaveProperty("assignedBy");
   });
@@ -2898,9 +2898,9 @@ describe("a task records who assigned it", () => {
   // Resolved first, then compared: the body carries a username and the stored value is an id, so
   // comparing before resolution would read every re-send as a change
   it("compares the resolved id, not the username the body carried", async () => {
-    userFindOne.mockResolvedValue({ _id: "u1", username: "rpo" });
+    userFindOne.mockResolvedValue({ _id: "u1", username: "owner" });
 
-    await updateTask("p1", "t1", { assignee: "RPO" }, "somebody-else");
+    await updateTask("p1", "t1", { assignee: "OWNER" }, "somebody-else");
 
     expect(setStage(findOneAndUpdate.mock.calls[0][1])).not.toHaveProperty("assignedBy");
   });
@@ -2918,13 +2918,13 @@ describe("a task records who assigned it", () => {
       lean: () => Promise.resolve(legacy),
       populate: () => ({ lean: () => Promise.resolve(legacy) }),
     });
-    userFindOne.mockResolvedValue({ _id: userId, username: "rpo" });
+    userFindOne.mockResolvedValue({ _id: userId, username: "owner" });
   }
 
   it("stamps a task that has no assigner yet, when its assignee takes it on themselves", async () => {
     legacyTaskAssignedTo("u1");
 
-    await updateTask("p1", "t1", { assignee: "rpo" }, "u1");
+    await updateTask("p1", "t1", { assignee: "owner" }, "u1");
 
     expect(setStage(findOneAndUpdate.mock.calls[0][1]).assignedBy).toBe("u1");
   });
@@ -2940,7 +2940,7 @@ describe("a task records who assigned it", () => {
   it("leaves a legacy task blank when a third writer merely echoes its assignee", async () => {
     legacyTaskAssignedTo("u1");
 
-    await updateTask("p1", "t1", { assignee: "rpo", title: "renamed" }, "the-pm-agent");
+    await updateTask("p1", "t1", { assignee: "owner", title: "renamed" }, "the-pm-agent");
 
     expect(setStage(findOneAndUpdate.mock.calls[0][1])).not.toHaveProperty("assignedBy");
   });
@@ -2998,7 +2998,7 @@ describe("assigning somebody who cannot reach the board", () => {
       taskNumber: 1,
       status: "doing",
       title: "x",
-      assignee: { _id: "u1", username: "rpo", fullName: "Rafal" },
+      assignee: { _id: "u1", username: "owner", fullName: "Owner" },
       assignedBy: "u9",
     };
     findOne.mockReturnValue({
@@ -3080,9 +3080,9 @@ describe("assigning somebody who cannot reach the board", () => {
    */
   it("lets the stored assignee be echoed back even once they have lost access", async () => {
     canBeAssignedMock.mockResolvedValue(false);
-    userFindOne.mockResolvedValue({ _id: "u1", username: "rpo" });
+    userFindOne.mockResolvedValue({ _id: "u1", username: "owner" });
 
-    const result = await updateTask("p1", "t1", { assignee: "rpo", title: "renamed" }, "actor");
+    const result = await updateTask("p1", "t1", { assignee: "owner", title: "renamed" }, "actor");
 
     expect(result.ok).toBe(true);
     expect(canBeAssignedMock).not.toHaveBeenCalled();
@@ -3151,7 +3151,7 @@ describe("an assignee username nobody holds", () => {
       taskNumber: 1,
       status: "doing",
       title: "x",
-      assignee: { _id: "u1", username: "rpo", fullName: "Rafal" },
+      assignee: { _id: "u1", username: "owner", fullName: "Owner" },
       assignedBy: "u9",
     };
     findOne.mockReturnValue({
@@ -3253,7 +3253,7 @@ describe("an assignee username nobody holds", () => {
 
   /**
    * The lookup normalises, and after this change that is a refusal path rather than a silent
-   * no-op: without it `@RPO` is a 400 naming an account that plainly exists. The schema normalises
+   * no-op: without it `@OWNER` is a 400 naming an account that plainly exists. The schema normalises
    * a query too (`username` is `lowercase`+`trim`), so the property survives either way and the
    * e2e cannot tell them apart — what this pins is that the writer does not lean on that.
    */
@@ -3666,7 +3666,7 @@ describe("whose machine choosing an agent can reach", () => {
   });
 
   /**
-   * Allowed, and it really does run on the colleague's machine — which is the residue rpo's own
+   * Allowed, and it really does run on the colleague's machine — which is the residue owner's own
    * decision text describes and accepts. What bounds it is that a project agent takes project-admin
    * to author (`POST /api/agents`), so the composition reaching that machine is the board's own.
    */
@@ -4158,11 +4158,11 @@ describe("createTask handing the task to somebody", () => {
     });
     taskCreate.mockImplementation(async (doc: Record<string, unknown>) => ({ ...doc, _id: "new" }));
     taskFindById.mockReturnValue({ populate: () => ({ lean: async () => ({ _id: "new" }) }) });
-    userFindOne.mockResolvedValue({ _id: ASSIGNEE, username: "rpo" });
+    userFindOne.mockResolvedValue({ _id: ASSIGNEE, username: "owner" });
   });
 
   it("tells the assignee, with the column's label and a link", async () => {
-    await createTask("p1", "actor", { title: "Session cookie survives a change", assignee: "rpo" });
+    await createTask("p1", "actor", { title: "Session cookie survives a change", assignee: "owner" });
 
     const [notification] = createNotificationsMock.mock.calls.at(-1) ?? [];
     expect(notification.type).toBe("task_assigned");
@@ -4240,7 +4240,7 @@ describe("a comment mentioning a watcher", () => {
 
   it("writes to a mentioned watcher once, as a mention", async () => {
     setup([MENTIONED_WATCHER], [MENTIONED_WATCHER]);
-    await addComment("p1", "t1", "@bob look at this", { id: "actor", username: "rafal" });
+    await addComment("p1", "t1", "@bob look at this", { id: "actor", username: "owner" });
 
     const byType = notificationsByType();
     expect(byType.comment_added, "the same person got both mails").toBeUndefined();
@@ -4249,7 +4249,7 @@ describe("a comment mentioning a watcher", () => {
 
   it("still tells the watchers who were not mentioned", async () => {
     setup([MENTIONED_WATCHER], [WATCHER, MENTIONED_WATCHER]);
-    await addComment("p1", "t1", "@bob look at this", { id: "actor", username: "rafal" });
+    await addComment("p1", "t1", "@bob look at this", { id: "actor", username: "owner" });
 
     const byType = notificationsByType();
     expect(byType.comment_added.recipientIds).toEqual([WATCHER]);
@@ -4258,13 +4258,13 @@ describe("a comment mentioning a watcher", () => {
 
   it("gives the mail the column's label and a link, not the raw status id", async () => {
     setup([], [WATCHER]);
-    await addComment("p1", "t1", "no mentions here", { id: "actor", username: "rafal" });
+    await addComment("p1", "t1", "no mentions here", { id: "actor", username: "owner" });
 
     const email = notificationsByType().comment_added.email as Record<string, unknown>;
     expect(email.taskPills).toEqual([{ label: "Doing", tone: "progress" }]);
     expect(email.projectRef).toBe("TP");
     expect(email.taskNumber).toBe(7);
-    expect(email.quote).toEqual({ who: "rafal", text: "no mentions here" });
+    expect(email.quote).toEqual({ who: "owner", text: "no mentions here" });
   });
 });
 
@@ -4295,7 +4295,7 @@ describe("what a rewritten updateTask still tells the assignee", () => {
       taskNumber: 4,
       status: "doing",
       title: "Session cookie survives a change",
-      assignee: { _id: "u1", username: "rpo" },
+      assignee: { _id: "u1", username: "owner" },
       assignedBy: "u9",
     };
     findOne.mockReturnValue({

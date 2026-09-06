@@ -110,7 +110,7 @@ final class CheckoutRemovalReachTests: XCTestCase {
             atPath: checkout + "/build", withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: checkout + "/build/out.o", contents: Data("x".utf8))
 
-        // Deliberate, and the gap rpo chose to leave: that .env is unrecoverable and goes with the
+        // Deliberate, and the gap owner chose to leave: that .env is unrecoverable and goes with the
         // directory. No git flag separates it from build/out.o, so the guard does not try.
         XCTAssertEqual(verdict(checkout), .go(worktrees: []))
     }

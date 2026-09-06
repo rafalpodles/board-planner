@@ -3,7 +3,7 @@ import { handoverOf } from "./handover";
 import { ApiTask, ApiUser } from "@/types";
 import type { AnyColumn } from "@/lib/columns";
 
-const RAFAL = { _id: "u1", username: "rpo", fullName: "Rafal" } as ApiUser;
+const OWNER = { _id: "u1", username: "owner", fullName: "Owner" } as ApiUser;
 const KRZYSIEK = { _id: "u2", username: "kmk", fullName: "Krzysiek" };
 
 // A board of its own rather than the seeded seven, so an implementation comparing against literal
@@ -20,7 +20,7 @@ const BOARD: AnyColumn[] = [
 // `status` widened to a plain string: TaskStatus is the union of the SEEDED column ids, and a
 // project that built its own board has ids outside it — which is the whole point of judging by role
 function task(over: Partial<Omit<ApiTask, "status">> & { status?: string } = {}): Parameters<typeof handoverOf>[0] {
-  return { agent: "a1", assignee: RAFAL, assignedBy: { ...RAFAL }, status: "ready", ...over } as ApiTask;
+  return { agent: "a1", assignee: OWNER, assignedBy: { ...OWNER }, status: "ready", ...over } as ApiTask;
 }
 
 /**
@@ -164,7 +164,7 @@ describe("handoverOf and a PM hand-over", () => {
 
   it("runs when the PM assigned it on the assignee's own instruction", () => {
     expect(
-      handoverOf(task({ assignedBy: { ...PM }, pmAssignedFor: { ...RAFAL } }), BOARD)
+      handoverOf(task({ assignedBy: { ...PM }, pmAssignedFor: { ...OWNER } }), BOARD)
     ).toEqual({ runs: true });
   });
 
@@ -200,7 +200,7 @@ describe("handoverOf and a PM hand-over", () => {
   // The control: a person is still not the PM, whatever pmAssignedFor happens to say
   it("does not let a stray pmAssignedFor turn a colleague's assignment into a hand-over", () => {
     expect(
-      handoverOf(task({ assignedBy: { ...KRZYSIEK }, pmAssignedFor: { ...RAFAL } }), BOARD)
+      handoverOf(task({ assignedBy: { ...KRZYSIEK }, pmAssignedFor: { ...OWNER } }), BOARD)
     ).toEqual({ runs: false, reason: "assigned-by-someone-else", by: "Krzysiek" });
   });
 });

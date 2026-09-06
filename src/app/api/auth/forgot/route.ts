@@ -17,7 +17,7 @@ import { provenanceRefusal, selfOrigin } from "@/lib/session";
 import { User } from "@/models/user";
 
 // One answer for every outcome: account found, no such account, account with no address, machine
-// account. Anything else turns this endpoint into a way to ask "does rafal have an account here",
+// account. Anything else turns this endpoint into a way to ask "does owner have an account here",
 // and a login screen that refuses to say so is pointless if the reset form will.
 const UNIFORM_ANSWER = {
   message: "If that account exists and has an email address, a link is on its way.",

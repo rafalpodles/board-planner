@@ -51,7 +51,7 @@ beforeEach(async () => {
   vi.clearAllMocks();
   await resetRateLimits();
   consumeResetToken.mockResolvedValue({ ok: true, userId: "u1" });
-  accountIs({ _id: "u1", username: "rafal", kind: "human" });
+  accountIs({ _id: "u1", username: "owner", kind: "human" });
   hash.mockResolvedValue("new-hash");
   userUpdateOne.mockResolvedValue({});
 });
@@ -62,8 +62,8 @@ describe("POST /api/auth/reset", () => {
   // I reset it" ends in the correct new password being refused, and a link that was just spent
   // looking broken. A reset is the answer to being locked out, so it has to lift the lockout.
   it("lifts a login lockout, including one filled from an address the resetter never used", async () => {
-    const fromSomebodyElse = lockoutKey("203.0.113.9", "rafal");
-    const shared = lockoutKey("-", "rafal");
+    const fromSomebodyElse = lockoutKey("203.0.113.9", "owner");
+    const shared = lockoutKey("-", "owner");
     for (let i = 0; i < ANONYMOUS_ACCOUNT_ATTEMPTS; i++) {
       await recordFailedAttempt(fromSomebodyElse);
       await recordFailedAttempt(shared);
@@ -87,7 +87,7 @@ describe("POST /api/auth/reset", () => {
 
   it("does not lift a lockout when the token was refused", async () => {
     consumeResetToken.mockResolvedValue({ ok: false, reason: "expired" });
-    const shared = lockoutKey("-", "rafal");
+    const shared = lockoutKey("-", "owner");
     for (let i = 0; i < ANONYMOUS_ACCOUNT_ATTEMPTS; i++) await recordFailedAttempt(shared);
 
     const res = await POST(post());
@@ -108,7 +108,7 @@ describe("POST /api/auth/reset", () => {
     // Whoever knew the old password is signed out — usually the reason somebody is resetting
     expect(revokeUserSessions).toHaveBeenCalledWith("u1");
     expect(logInstanceAudit).toHaveBeenCalledWith(
-      expect.objectContaining({ action: "user_password_reset_by_email", target: "rafal" })
+      expect.objectContaining({ action: "user_password_reset_by_email", target: "owner" })
     );
   });
 

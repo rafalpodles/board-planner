@@ -39,7 +39,7 @@ beforeEach(() => {
   logInstanceAudit.mockReset();
   create.mockResolvedValue({ _id: "u1", username: "newcomer" });
   countDocuments.mockResolvedValue(5);
-  getAuthUser.mockResolvedValue({ _id: "a1", role: "admin", username: "rafal" });
+  getAuthUser.mockResolvedValue({ _id: "a1", role: "admin", username: "owner" });
 });
 
 /**
@@ -54,7 +54,7 @@ describe("the row an account's creation leaves", () => {
     expect(logInstanceAudit).toHaveBeenCalledWith({
       action: "user_created",
       user: "a1",
-      actorUsername: "rafal",
+      actorUsername: "owner",
       target: "newcomer",
       detail: "a member",
     });
@@ -148,10 +148,10 @@ describe("the display name an account may be given", () => {
     const res = await post({
       username: "nowak",
       password: "password123",
-      fullName: "  Rafał Podleś-O'Brien  ",
+      fullName: "  Owner Name-O'Brien  ",
     });
 
     expect(res.status).toBe(201);
-    expect(create.mock.calls[0][0].fullName).toBe("Rafał Podleś-O'Brien");
+    expect(create.mock.calls[0][0].fullName).toBe("Owner Name-O'Brien");
   });
 });

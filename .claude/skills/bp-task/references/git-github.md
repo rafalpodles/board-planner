@@ -15,10 +15,10 @@ Also `git worktree list`. A branch, PR or worktree named for the ticket means so
 git fetch origin
 git worktree add -b bp-<n>/<slug> ~/Documents/Projects/ClaudePlanner-worktrees/bp-<n> origin/main
 cd ~/Documents/Projects/ClaudePlanner-worktrees/bp-<n> && npm ci && (cd mcp-server && npm ci)
-git config user.name && git config user.email   # Rafał Podleś, rafalpodles@gmail.com
+git config --local user.name && git config --local user.email   # must both be set here, not inherited
 ```
 
-The global git config is the work account and a fresh clone inherits it; the repo-local config is shared by every worktree of this checkout. If the check above prints anything else: `git config user.name "Rafał Podleś" && git config user.email rafalpodles@gmail.com`.
+The global git config is a work account and a fresh clone inherits it; the repo-local config is shared by every worktree of this checkout. If either prints nothing, the worktree is inheriting the global identity — set both locally before the first commit.
 
 - Outside the repo. Never under the scratchpad or `.claude/worktrees`: a dev server there serves main's code.
 - Never symlink `node_modules`, never borrow another worktree, never `git stash`.
@@ -27,10 +27,11 @@ The global git config is the work account and a fresh clone inherits it; the rep
 
 ## Identity
 
-Every `gh` call runs as `rafalpodles`. The active account flips between sessions, so check immediately before `pr create`, `pr merge` and the branch delete:
+Every `gh` call runs as the repository owner. The active account flips between sessions, so check immediately before `pr create`, `pr merge` and the branch delete:
 
 ```bash
-gh api user -q .login   # rafalpodles, else: gh auth switch --user rafalpodles
+expected=$(gh repo view --json owner -q .owner.login)
+[ "$(gh api user -q .login)" = "$expected" ] || gh auth switch --user "$expected"
 ```
 
 `must be a collaborator` means the wrong account, not a permission problem.
@@ -65,7 +66,7 @@ mkdir -p "$SCRATCH/BP-<n>" && cp <shot>.png "$SCRATCH/BP-<n>/" \
   && git -C "$SCRATCH" push -q origin HEAD:refs/heads/pr-assets && git worktree remove "$SCRATCH"
 ```
 
-Then `![before/after](https://raw.githubusercontent.com/rafalpodles/board-planner/pr-assets/BP-<n>/<shot>.png)` in the body.
+Then `![before/after](https://raw.githubusercontent.com/<owner>/<repo>/pr-assets/BP-<n>/<shot>.png)` in the body, with `<owner>/<repo>` from `gh repo view --json nameWithOwner -q .nameWithOwner`.
 
 ## Merge
 

@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const getAuthUser = vi.fn();
 const consumeEnrolmentToken = vi.fn();
 const attachWorkerToEnrolment = vi.fn();
-const enrolmentTokenOwner = vi.fn().mockResolvedValue("Rafal");
+const enrolmentTokenOwner = vi.fn().mockResolvedValue("Owner");
 const enrolmentTokenOwnerId = vi.fn().mockResolvedValue("u1");
 const registerWorker = vi.fn();
 

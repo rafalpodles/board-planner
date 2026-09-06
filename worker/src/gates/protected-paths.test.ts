@@ -18,12 +18,12 @@ describe("a committed symlink that leaves the checkout", () => {
 
   it("is refused, and the refusal says where it points", async () => {
     const verdict = await gate.run(
-      context(["src/deep"], [{ path: "src/deep", target: "/Users/rpo/Documents" }])
+      context(["src/deep"], [{ path: "src/deep", target: "/Users/owner/Documents" }])
     );
 
     expect(verdict.ok).toBe(false);
     expect(verdict.reason).toContain("src/deep");
-    expect(verdict.reason).toContain("/Users/rpo/Documents");
+    expect(verdict.reason).toContain("/Users/owner/Documents");
   });
 
   it("is refused when it climbs out with .. rather than naming an absolute path", async () => {

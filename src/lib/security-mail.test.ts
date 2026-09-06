@@ -24,33 +24,33 @@ beforeEach(() => {
 describe("notifyPasswordChanged", () => {
   it("warns hard when a reset link did it, because that is the takeover case", async () => {
     await notifyPasswordChanged({
-      email: "rpo@example.com",
-      username: "rpo",
+      email: "owner@example.com",
+      username: "owner",
       how: "reset_link",
       from: "from 203.0.113.9",
     });
 
-    expect(sent().to).toBe("rpo@example.com");
+    expect(sent().to).toBe("owner@example.com");
     expect(sent().text).toContain("whoever did it can sign in as you right now");
     expect(sent().text).toContain("from 203.0.113.9");
   });
 
   it("names the administrator and says the password was not sent", async () => {
     await notifyPasswordChanged({
-      email: "rpo@example.com",
-      username: "rpo",
+      email: "owner@example.com",
+      username: "owner",
       how: "admin",
-      actor: "rafal",
+      actor: "owner",
     });
 
-    expect(sent().text).toContain("(rafal)");
+    expect(sent().text).toContain("(owner)");
     expect(sent().text).toContain("not sent by email");
     // The admin case is not a takeover alarm — somebody they can ask did it on purpose
     expect(sent().text).not.toContain("can sign in as you right now");
   });
 
   it("says nothing to an account with no address", async () => {
-    await notifyPasswordChanged({ email: "", username: "rpo", how: "admin" });
+    await notifyPasswordChanged({ email: "", username: "owner", how: "admin" });
 
     expect(sendEmail).not.toHaveBeenCalled();
   });
@@ -59,7 +59,7 @@ describe("notifyPasswordChanged", () => {
     sendEmail.mockRejectedValueOnce(new Error("smtp is down"));
 
     await expect(
-      notifyPasswordChanged({ email: "rpo@example.com", username: "rpo", how: "admin" })
+      notifyPasswordChanged({ email: "owner@example.com", username: "owner", how: "admin" })
     ).resolves.toBeUndefined();
   });
 });
@@ -68,21 +68,21 @@ describe("notifyAddressChanged", () => {
   it("goes to the address losing the account and shows the new one masked", async () => {
     await notifyAddressChanged({
       previousEmail: "old@example.com",
-      username: "rpo",
+      username: "owner",
       newEmail: "attacker@evil.test",
-      actor: "rafal",
+      actor: "owner",
     });
 
     expect(sent().to).toBe("old@example.com");
     expect(sent().text).not.toContain("attacker@evil.test");
     expect(sent().text).toContain("a•••@•••.test");
-    expect(sent().text).toContain("rafal");
+    expect(sent().text).toContain("owner");
   });
 
   it("says the account did it itself when no administrator is named", async () => {
     await notifyAddressChanged({
       previousEmail: "old@example.com",
-      username: "rpo",
+      username: "owner",
       newEmail: "new@example.com",
     });
 
@@ -92,7 +92,7 @@ describe("notifyAddressChanged", () => {
 
 describe("maskAddress", () => {
   it("keeps one letter and the last label, and gives up safely on nonsense", () => {
-    expect(maskAddress("rafal@corp.example.com")).toBe("r•••@•••.com");
+    expect(maskAddress("owner@corp.example.com")).toBe("o•••@•••.com");
     expect(maskAddress("admin@intranet")).toBe("a•••@•••.intranet");
     expect(maskAddress("not-an-address")).toBe("•••");
   });
@@ -101,8 +101,8 @@ describe("maskAddress", () => {
 describe("notifyCredentialCreated", () => {
   it("names what was created and what it can reach", async () => {
     await notifyCredentialCreated({
-      email: "rpo@example.com",
-      username: "rpo",
+      email: "owner@example.com",
+      username: "owner",
       kind: "token",
       name: "laptop cli",
       scope: "your whole account",
@@ -118,8 +118,8 @@ describe("notifyCredentialCreated", () => {
     selfOrigin.mockReturnValue(null);
 
     await notifyCredentialCreated({
-      email: "rpo@example.com",
-      username: "rpo",
+      email: "owner@example.com",
+      username: "owner",
       kind: "oauth",
       name: "Claude",
       scope: "board BP",

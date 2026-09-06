@@ -246,7 +246,7 @@ describe("summarise — over the whole captured run", () => {
 
   it("summarises each event of the real transcript", () => {
     const editedFile =
-      "/private/tmp/claude-502/-Users-rpo-Documents-Projects-BoardPlanner/11f74b5f-f0b9-4e31-936d-f02716080dcb/scratchpad/capture/sample.ts";
+      "/private/tmp/claude-502/-Users-owner-Documents-Projects-BoardPlanner/11f74b5f-f0b9-4e31-936d-f02716080dcb/scratchpad/capture/sample.ts";
 
     expect(summaries).toEqual([
       null,

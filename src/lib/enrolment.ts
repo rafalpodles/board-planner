@@ -36,7 +36,7 @@ export async function mintEnrolmentToken(
   return { token, expiresAt };
 }
 
-// Who enrolled this machine, used to name its identity — "Rafal · MacBook". Empty rather than
+// Who enrolled this machine, used to name its identity — "Owner · MacBook". Empty rather than
 // throwing: a machine whose enroller has since been deleted still needs a working identity.
 export async function enrolmentTokenOwner(tokenId: string): Promise<string> {
   await connectDB();

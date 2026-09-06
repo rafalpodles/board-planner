@@ -36,16 +36,16 @@ const { SESSION_IDLE_TTL_MS, SESSION_ABSOLUTE_TTL_MS } = await import("@/lib/ses
 
 const USER = {
   _id: "u1",
-  username: "rpo",
-  fullName: "Rafal",
-  email: "rpo@example.com",
+  username: "owner",
+  fullName: "Owner",
+  email: "owner@example.com",
   emailNotifications: true,
   collapseEmptyColumns: false,
   role: "admin",
   createdAt: new Date("2026-01-01T00:00:00.000Z"),
 };
 
-const CREDENTIALS = { username: "rpo", password: "correct-horse" };
+const CREDENTIALS = { username: "owner", password: "correct-horse" };
 
 function request(
   headers: Record<string, string> = { "sec-fetch-site": "same-origin" },
@@ -141,9 +141,9 @@ describe("POST /api/auth/login — credentials", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       _id: "u1",
-      username: "rpo",
-      fullName: "Rafal",
-      email: "rpo@example.com",
+      username: "owner",
+      fullName: "Owner",
+      email: "owner@example.com",
       emailNotifications: true,
       collapseEmptyColumns: false,
       role: "admin",
@@ -316,7 +316,7 @@ describe("POST /api/auth/login — credentials", () => {
 
   it("rejects a malformed body before touching the password check", async () => {
     expect((await POST(request({ "sec-fetch-site": "same-origin" }, "{"))).status).toBe(400);
-    expect((await POST(request({ "sec-fetch-site": "same-origin" }, { username: "rpo" }))).status).toBe(400);
+    expect((await POST(request({ "sec-fetch-site": "same-origin" }, { username: "owner" }))).status).toBe(400);
     expect(verifyCredentials).not.toHaveBeenCalled();
   });
 });

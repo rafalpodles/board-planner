@@ -16,7 +16,7 @@ const tasks = [
     status: "todo",
     priority: "medium",
     category: "bug",
-    assignee: { _id: "u1", username: "rpo", fullName: "Rafał Podleś-Wojciechowski" },
+    assignee: { _id: "u1", username: "owner", fullName: "Owner Name-Wojciechowski" },
     sprint: "s1",
     createdAt: "2026-08-01T00:00:00Z",
     updatedAt: "2026-08-01T00:00:00Z",
@@ -86,8 +86,8 @@ describe("ListView truncated cells", () => {
   // The cell shows initials to save width, so the name has to survive on the title
   it("keeps the whole assignee name reachable", () => {
     renderList();
-    expect(screen.getByTitle("Rafał Podleś-Wojciechowski")).toBeTruthy();
-    expect(screen.getByText("RP")).toBeTruthy();
+    expect(screen.getByTitle("Owner Name-Wojciechowski")).toBeTruthy();
+    expect(screen.getByText("ON")).toBeTruthy();
   });
 
   it("keeps the whole sprint name reachable", () => {
@@ -241,7 +241,7 @@ describe("ListView column visibility", () => {
 });
 
 const roster = [
-  { _id: "u1", username: "rpo", fullName: "Rafał Podleś-Wojciechowski" },
+  { _id: "u1", username: "owner", fullName: "Owner Name-Wojciechowski" },
   { _id: "u2", username: "claude", fullName: "Claude Code" },
 ];
 
@@ -272,7 +272,7 @@ describe("ListView inline assignee", () => {
   it("stays a read-only avatar without a handler", () => {
     renderList({ assignableUsers: roster });
     expect(screen.queryByRole("combobox", { name: /^Assignee for/ })).toBeNull();
-    expect(screen.getByText("RP")).toBeTruthy();
+    expect(screen.getByText("ON")).toBeTruthy();
   });
 
   // A member's user-list fetch 403s today, and an empty dropdown that silently
@@ -280,19 +280,19 @@ describe("ListView inline assignee", () => {
   it("stays a read-only avatar when the roster failed to load", () => {
     renderList({ assignableUsers: [], onAssigneeChange: vi.fn() });
     expect(screen.queryByRole("combobox", { name: /^Assignee for/ })).toBeNull();
-    expect(screen.getByText("RP")).toBeTruthy();
+    expect(screen.getByText("ON")).toBeTruthy();
   });
 
   it("offers every user plus Unassigned, with the current one selected", () => {
     renderList({ assignableUsers: roster, onAssigneeChange: vi.fn() });
     expect(optionLabels()).toEqual([
       "Unassigned",
-      "Rafał Podleś-Wojciechowski",
+      "Owner Name-Wojciechowski",
       "Claude Code",
     ]);
     const selected = screen.getAllByRole("option").filter((o) => o.getAttribute("aria-selected") === "true");
     expect(selected.map((o) => o.textContent?.replace("✓", "").trim())).toEqual([
-      "Rafał Podleś-Wojciechowski",
+      "Owner Name-Wojciechowski",
     ]);
   });
 
@@ -314,7 +314,7 @@ describe("ListView inline assignee", () => {
   // among its options renders as the first one — quietly showing the wrong person
   it("keeps an assignee who is no longer in the roster", () => {
     renderList({ assignableUsers: [roster[1]], onAssigneeChange: vi.fn() });
-    expect(optionLabels()).toContain("rpo");
+    expect(optionLabels()).toContain("owner");
     const selected = screen.getAllByRole("option").filter((o) => o.getAttribute("aria-selected") === "true");
     expect(selected).toHaveLength(1);
   });

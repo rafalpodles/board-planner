@@ -9,9 +9,9 @@ A task is done when it is merged, documented, cleaned up after, and nobody was a
 
 ## 0. Pick
 
-- A task named in the request wins. Otherwise pick from `todo`, never from `planned`: assigned to `rafal` first, then highest priority, then oldest.
+- A task named in the request wins. Otherwise pick from `todo`, never from `planned`: assigned to `owner` first, then highest priority, then oldest.
 - Before anything else: `git ls-remote --heads origin | grep -i <n>`, `gh pr list --state all --search BP-<n>`, and grep `list_tasks` titles for the same subject. Somebody may be on it, or it may already be fixed. Details in `references/git-github.md`.
-- `change_task_status` to `in_progress`, `update_task` assignee `rafal`, `add_comment` with the approach. Every size starts at once; no plan waits for approval.
+- `change_task_status` to `in_progress`, `update_task` assignee `owner`, `add_comment` with the approach. Every size starts at once; no plan waits for approval.
 - Own worktree outside the repo, branch `bp-<n>/<slug>`, own Mongo container. Recipe in `references/git-github.md`.
 
 ## 1. Build
@@ -34,7 +34,7 @@ A task is done when it is merged, documented, cleaned up after, and nobody was a
 
 ## 4. Ship
 
-- Rebase on `origin/main`, rerun the touched e2e groups, `gh api user -q .login` prints `rafalpodles`, PR with what, why, how verified, and the screenshot for a UI change: `references/git-github.md`.
+- Rebase on `origin/main`, rerun the touched e2e groups, the active `gh` account matches the repository owner, PR with what, why, how verified, and the screenshot for a UI change: `references/git-github.md`.
 - Docs, when the task touches what a user sees or does: the product page in `board-planner-site`, its own PR, same review, merged. Technical matter (running, building, configuration) goes to Notion. A touched component with no page gets one.
 - Green is: the last review round found no bugs, and CI passed. Green means merge, without asking. `gh pr merge <n> --merge`, read `state` until it says MERGED, only then delete the branch. Never both in one command. `main` deploys to production.
 

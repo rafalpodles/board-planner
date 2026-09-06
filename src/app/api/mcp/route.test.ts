@@ -41,7 +41,7 @@ beforeEach(() => {
   delete process.env.PUBLIC_ORIGIN;
   process.env.PUBLIC_ORIGIN = "https://board.example.com";
   connectDB.mockResolvedValue(undefined);
-  getAuthUser.mockResolvedValue({ username: "rpo" });
+  getAuthUser.mockResolvedValue({ username: "owner" });
 });
 
 afterEach(() => {
@@ -173,6 +173,6 @@ describe("POST /api/mcp when the database is unreachable", () => {
   it("still serves a healthy request", async () => {
     const body = await (await POST(request({ authorization: "Bearer cpat_x" }))).json();
 
-    expect(body.auth.clientId).toBe("rpo");
+    expect(body.auth.clientId).toBe("owner");
   });
 });

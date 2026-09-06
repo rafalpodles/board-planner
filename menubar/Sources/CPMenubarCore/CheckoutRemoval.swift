@@ -147,7 +147,7 @@ public struct CheckoutRemoval: Sendable {
         // local scratch repo — refuses on every commit it holds. That is the direction this errs
         // in deliberately, but "costs an honest checkout nothing" would be untrue.
         //
-        // Deliberately NOT covered, decided by rpo rather than assumed: a plain ignored file. A
+        // Deliberately NOT covered, decided by owner rather than assumed: a plain ignored file. A
         // stray .env in a checkout this deletes is gone, and nothing here will stop it. Said out
         // loud because the alternative is a guard set that reads as complete.
         //

@@ -108,7 +108,7 @@ describe("GET /api/projects/:projectId/tasks — what it names", () => {
 });
 
 /**
- * BP-502. `?assignee=rpo` went straight into `filter.assignee`, which is an ObjectId on the model,
+ * BP-502. `?assignee=owner` went straight into `filter.assignee`, which is an ObjectId on the model,
  * so Mongoose threw a CastError and the route answered **500** — reproduced over the hosted MCP
  * endpoint, which is this parameter's only caller and its only documentation. The browser never
  * sends it, which is why it stood.
@@ -121,19 +121,19 @@ describe("GET /api/projects/:projectId/tasks — assignee filter", () => {
   it("resolves a username to the id the model stores", async () => {
     userFindOne.mockReturnValue({ lean: async () => ({ _id: "u7" }) });
 
-    const res = await GET(request("?assignee=rafal"), ctx());
+    const res = await GET(request("?assignee=owner"), ctx());
 
     expect(res.status).toBe(200);
-    expect(userFindOne).toHaveBeenCalledWith({ username: "rafal" }, "_id");
+    expect(userFindOne).toHaveBeenCalledWith({ username: "owner" }, "_id");
     expect(filterUsed()?.assignee).toBe("u7");
   });
 
   it("matches a username whatever case it arrives in", async () => {
     userFindOne.mockReturnValue({ lean: async () => ({ _id: "u7" }) });
 
-    await GET(request("?assignee=RaFaL"), ctx());
+    await GET(request("?assignee=OwNeR"), ctx());
 
-    expect(userFindOne).toHaveBeenCalledWith({ username: "rafal" }, "_id");
+    expect(userFindOne).toHaveBeenCalledWith({ username: "owner" }, "_id");
   });
 
   // The whole point of refusing: an empty list and a typo read identically to whoever asked

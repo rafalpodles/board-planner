@@ -9,7 +9,7 @@ vi.mock("@/hooks/use-api", () => ({
   useApi: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn() }),
 }));
 vi.mock("@/hooks/use-auth", () => ({
-  useAuth: () => ({ user: { username: "rpo", collapseEmptyColumns: false }, isAdmin: false }),
+  useAuth: () => ({ user: { username: "owner", collapseEmptyColumns: false }, isAdmin: false }),
 }));
 vi.mock("next/navigation", () => ({
   useParams: () => ({ projectId: "p1" }),

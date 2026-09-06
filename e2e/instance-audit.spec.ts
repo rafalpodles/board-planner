@@ -48,7 +48,7 @@ test.beforeEach(async () => {
     .collection("projects")
     .updateOne(
       { _id: PROJECT_ID },
-      { $set: { repositoryUrl: "git@github.com:rafalpodles/board-planner.git" } }
+      { $set: { repositoryUrl: "git@github.com:owner/board-planner.git" } }
     );
   await handle.collection("instanceauditlogs").deleteMany({});
 });

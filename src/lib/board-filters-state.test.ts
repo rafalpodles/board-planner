@@ -13,18 +13,18 @@ describe("migratePersistedFilters — category renames", () => {
   // Categories are stored on a task by name, so renaming one leaves this filter pointing
   // at a name the picker no longer offers: an empty board and no way to clear it
   it("drops a category filter the project no longer has", () => {
-    const state = migratePersistedFilters(stored, "rpo", [], ["defect", "doc"]);
+    const state = migratePersistedFilters(stored, "owner", [], ["defect", "doc"]);
     expect(state.filters.category).toBe("");
   });
 
   it("keeps a category the project still has", () => {
-    const state = migratePersistedFilters(stored, "rpo", [], ["bug", "doc"]);
+    const state = migratePersistedFilters(stored, "owner", [], ["bug", "doc"]);
     expect(state.filters.category).toBe("bug");
   });
 
   // Callers that do not know the categories yet must not have their filter wiped
   it("leaves the filter alone when the category list is not supplied", () => {
-    const state = migratePersistedFilters(stored, "rpo", []);
+    const state = migratePersistedFilters(stored, "owner", []);
     expect(state.filters.category).toBe("bug");
   });
 });
@@ -32,7 +32,7 @@ describe("migratePersistedFilters — category renames", () => {
 describe("migratePersistedFilters", () => {
   it("falls back to defaults for missing or malformed storage", () => {
     for (const raw of [null, undefined, "nonsense", 42, []]) {
-      const state = migratePersistedFilters(raw, "rpo");
+      const state = migratePersistedFilters(raw, "owner");
       expect(state.filters).toEqual(EMPTY_FILTERS);
       expect(state.sortField).toBe("manual");
       expect(state.sortDir).toBe("asc");
@@ -43,7 +43,7 @@ describe("migratePersistedFilters", () => {
   it("reads stored filters back", () => {
     const state = migratePersistedFilters(
       { filters: { assignee: "claude", priority: "high" }, sortField: "priority", sortDir: "desc" },
-      "rpo"
+      "owner"
     );
     expect(state.filters.assignee).toBe("claude");
     expect(state.filters.priority).toBe("high");
@@ -53,14 +53,14 @@ describe("migratePersistedFilters", () => {
 
   // The regression this function exists to prevent
   it("carries a legacy myTasks toggle over to the assignee filter", () => {
-    const state = migratePersistedFilters({ myTasks: true, filters: {} }, "rpo");
-    expect(state.filters.assignee).toBe("rpo");
+    const state = migratePersistedFilters({ myTasks: true, filters: {} }, "owner");
+    expect(state.filters.assignee).toBe("owner");
   });
 
   it("does not clobber an explicit assignee with the legacy toggle", () => {
     const state = migratePersistedFilters(
       { myTasks: true, filters: { assignee: "claude" } },
-      "rpo"
+      "owner"
     );
     expect(state.filters.assignee).toBe("claude");
   });
@@ -71,7 +71,7 @@ describe("migratePersistedFilters", () => {
   });
 
   it("ignores myTasks:false", () => {
-    const state = migratePersistedFilters({ myTasks: false, filters: {} }, "rpo");
+    const state = migratePersistedFilters({ myTasks: false, filters: {} }, "owner");
     expect(state.filters.assignee).toBe("");
   });
 
@@ -79,13 +79,13 @@ describe("migratePersistedFilters", () => {
   // truthy, and a corrupted blob should not silently start filtering the board
   it("only migrates a literal true, not any truthy value", () => {
     for (const value of ["false", "true", 1, "yes", {}]) {
-      const state = migratePersistedFilters({ myTasks: value, filters: {} }, "rpo");
+      const state = migratePersistedFilters({ myTasks: value, filters: {} }, "owner");
       expect(state.filters.assignee).toBe("");
     }
   });
 
   it("never leaks the legacy field into the returned state", () => {
-    const state = migratePersistedFilters({ myTasks: true, filters: {} }, "rpo");
+    const state = migratePersistedFilters({ myTasks: true, filters: {} }, "owner");
     expect("myTasks" in state).toBe(false);
     expect("myTasks" in state.filters).toBe(false);
   });
@@ -93,20 +93,20 @@ describe("migratePersistedFilters", () => {
   it("coerces non-string filter values to empty rather than trusting them", () => {
     const state = migratePersistedFilters(
       { filters: { assignee: 42, priority: null, label: { a: 1 } } },
-      "rpo"
+      "owner"
     );
     expect(state.filters.assignee).toBe("");
     expect(state.filters.priority).toBe("");
   });
 
   it("treats any sortDir other than desc as asc", () => {
-    expect(migratePersistedFilters({ sortDir: "sideways" }, "rpo").sortDir).toBe("asc");
-    expect(migratePersistedFilters({ sortDir: "desc" }, "rpo").sortDir).toBe("desc");
+    expect(migratePersistedFilters({ sortDir: "sideways" }, "owner").sortDir).toBe("asc");
+    expect(migratePersistedFilters({ sortDir: "desc" }, "owner").sortDir).toBe("desc");
   });
 
   it("keeps showFilters, which now drives the popover", () => {
-    expect(migratePersistedFilters({ showFilters: true }, "rpo").showFilters).toBe(true);
-    expect(migratePersistedFilters({ showFilters: "yes" }, "rpo").showFilters).toBe(false);
+    expect(migratePersistedFilters({ showFilters: true }, "owner").showFilters).toBe(true);
+    expect(migratePersistedFilters({ showFilters: "yes" }, "owner").showFilters).toBe(false);
   });
 });
 
@@ -116,15 +116,15 @@ describe("countActiveFilters", () => {
   });
 
   it("counts each set dimension once", () => {
-    expect(countActiveFilters({ ...EMPTY_FILTERS, assignee: "rpo" })).toBe(1);
+    expect(countActiveFilters({ ...EMPTY_FILTERS, assignee: "owner" })).toBe(1);
     expect(
-      countActiveFilters({ ...EMPTY_FILTERS, assignee: "rpo", priority: "high", category: "bug" })
+      countActiveFilters({ ...EMPTY_FILTERS, assignee: "owner", priority: "high", category: "bug" })
     ).toBe(3);
   });
 
   // Search lives in the resting row, not the popover, so it must not inflate the pill
   it("does not count search", () => {
-    const withSearch = { ...EMPTY_FILTERS, assignee: "rpo", search: "CP-128" };
+    const withSearch = { ...EMPTY_FILTERS, assignee: "owner", search: "CP-128" };
     expect(countActiveFilters(withSearch as never)).toBe(1);
   });
 });
@@ -137,7 +137,7 @@ describe("project field filters", () => {
   ] as unknown as ApiCustomField[];
 
   it("counts a set field filter alongside the built-in ones", () => {
-    const filters = { ...EMPTY_FILTERS, assignee: "rpo", fields: { f1: { from: "3" } } };
+    const filters = { ...EMPTY_FILTERS, assignee: "owner", fields: { f1: { from: "3" } } };
     expect(countActiveFilters(filters)).toBe(2);
   });
 
