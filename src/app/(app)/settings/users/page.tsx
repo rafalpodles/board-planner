@@ -179,8 +179,8 @@ export default function UsersPage() {
     // Cleared with the PUT, before the refetch — see handleCreate.
     setEditSaving(false);
     closeEdit();
-    // Before the refresh, not after it: the save is what the toast is about, and a refresh that
-    // fails must not swallow the one line telling somebody their password was changed.
+    // Before the refresh, not after it: the save is what the toast is about, and the line saying a
+    // password was changed should not wait on a slow list to be re-read.
     toast(
       passwordWasSet
         ? `Password set for ${username}. They were signed out everywhere.`

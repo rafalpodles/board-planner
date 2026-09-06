@@ -537,6 +537,42 @@ describe("Modal, while its caller's request is in flight", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  // The only feedback a phone gets: no Escape key, and the dimmed × is off to the side of a sheet
+  // whose scrim is the gesture people reach for.
+  it("moves the dialog when a refused close is the one thing that happened", () => {
+    const animate = vi.fn();
+    const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "animate");
+    Object.defineProperty(HTMLElement.prototype, "animate", { value: animate, configurable: true });
+    const { container } = renderModal({ closeDisabled: true });
+
+    press("Escape");
+    act(() => (container.firstElementChild as HTMLElement).click());
+    expect(animate).toHaveBeenCalledTimes(2);
+    expect(animate.mock.calls[0][0]).toEqual([
+      { transform: "scale(1)" },
+      { transform: "scale(1.015)" },
+      { transform: "scale(1)" },
+    ]);
+
+    if (original) Object.defineProperty(HTMLElement.prototype, "animate", original);
+    else delete (HTMLElement.prototype as unknown as Record<string, unknown>).animate;
+  });
+
+  it("stays still for a reader who asked for less motion", () => {
+    const animate = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "animate", { value: animate, configurable: true });
+    const matchMedia = vi.fn(() => ({ matches: true }));
+    Object.defineProperty(window, "matchMedia", { value: matchMedia, configurable: true });
+
+    renderModal({ closeDisabled: true });
+    press("Escape");
+
+    expect(animate).not.toHaveBeenCalled();
+    expect(matchMedia).toHaveBeenCalledWith("(prefers-reduced-motion: reduce)");
+    delete (HTMLElement.prototype as unknown as Record<string, unknown>).animate;
+    delete (window as unknown as Record<string, unknown>).matchMedia;
+  });
+
   it("marks the dialog busy while it refuses", () => {
     renderModal({ closeDisabled: true });
     expect(screen.getByRole("dialog").getAttribute("aria-busy")).toBe("true");

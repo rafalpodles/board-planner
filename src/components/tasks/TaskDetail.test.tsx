@@ -27,7 +27,16 @@ vi.mock("./TaskActivityPanel", () => ({
 }));
 vi.mock("./TaskLinks", () => ({ TaskLinks: () => <div data-testid="task-links" /> }));
 vi.mock("./GitlabActivity", () => ({ GitlabActivity: () => <div data-testid="gitlab" /> }));
-vi.mock("./TaskForm", () => ({ TaskForm: () => <div data-testid="task-form" /> }));
+// The form is stubbed, but it keeps the one part the dialog around it depends on: the write it
+// reports upwards, which is what tells that dialog to stay put (BP-565).
+vi.mock("./TaskForm", () => ({
+  TaskForm: ({ onBusyChange }: { onBusyChange?: (busy: boolean) => void }) => (
+    <div data-testid="task-form">
+      <button onClick={() => onBusyChange?.(true)}>stub: start the write</button>
+      <button onClick={() => onBusyChange?.(false)}>stub: finish the write</button>
+    </div>
+  ),
+}));
 vi.mock("@/components/ui/MarkdownEditor", () => ({
   MarkdownEditor: ({ value }: { value: string }) => <div data-testid="md">{value}</div>,
 }));
@@ -751,5 +760,46 @@ describe("TaskDetail, the mobile summary's assignee chip", () => {
 
     const chip = await screen.findByTestId("mobile-assignee-chip");
     expect(chip.textContent).toContain("Unassigned");
+  });
+
+});
+
+/**
+ * BP-565. The subtask form holds the create, so the dialog around it can only refuse what the form
+ * tells it — the ninth and last of the `closeDisabled` wirings, and the one no test held.
+ */
+describe("TaskDetail, the subtask dialog while its create is in flight", () => {
+  it("refuses Escape until the form says the write is over", async () => {
+    renderDetail();
+    await loaded();
+    await act(async () => screen.getByRole("button", { name: "More actions" }).click());
+    await act(async () => {
+      within(screen.getByRole("listbox", { name: "More actions" }))
+        .getByRole("option", { name: "Add subtask" })
+        .click();
+    });
+    const dialog = screen.getByRole("dialog", { name: /New child of/ });
+
+    await act(async () => {
+      within(dialog).getByRole("button", { name: "stub: start the write" }).click();
+    });
+    expect(dialog.getAttribute("aria-busy")).toBe("true");
+    act(() => {
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })
+      );
+    });
+    expect(screen.getByRole("dialog", { name: /New child of/ })).toBe(dialog);
+
+    await act(async () => {
+      within(dialog).getByRole("button", { name: "stub: finish the write" }).click();
+    });
+    expect(dialog.getAttribute("aria-busy")).toBeNull();
+    act(() => {
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })
+      );
+    });
+    expect(screen.queryByRole("dialog", { name: /New child of/ })).toBeNull();
   });
 });

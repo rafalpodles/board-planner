@@ -7,9 +7,13 @@ import { LIST_REFRESH_FAILED } from "./list-refresh";
  * empty string.
  */
 describe("the message a failed list refresh shows", () => {
-  it("says what failed, what to do, and claims no verb for the write that landed", () => {
+  it("says what failed and what to do", () => {
     expect(LIST_REFRESH_FAILED).toBe("The list could not be refreshed — reload the page to see it");
-    expect(LIST_REFRESH_FAILED.toLowerCase()).not.toContain("saved");
-    expect(LIST_REFRESH_FAILED.toLowerCase()).not.toContain("deleted");
+  });
+
+  // Its own case, because an assertion after a full equality check can never be the one that fails.
+  // The rule it states outlives the wording: this line runs after a create, a save and a delete.
+  it("claims no verb for the write that landed", () => {
+    expect(LIST_REFRESH_FAILED.toLowerCase()).not.toMatch(/saved|deleted|created/);
   });
 });

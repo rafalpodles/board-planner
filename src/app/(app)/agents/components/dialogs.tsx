@@ -54,7 +54,7 @@ function Footer({
             }
           }}
         >
-          Create
+          {busy ? "Creating…" : "Create"}
         </Button>
       </div>
     </>
