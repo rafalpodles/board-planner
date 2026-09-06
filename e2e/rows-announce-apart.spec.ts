@@ -255,9 +255,12 @@ test.describe("a settings row says which row it is", () => {
     await page.goto(`/projects/${PROJECT_KEY}/settings?section=workers`);
     await expect(page.getByRole("heading", { name: "Agent", exact: true })).toBeVisible();
 
-    // The <span> beside each of these was not a label, so the inputs had no name at all
-    await expect(page.getByLabel("Base branch")).toHaveValue("main");
-    await expect(page.getByLabel("Timeout for one step (ms)")).toHaveValue("1800000");
+    // The <span> beside each of these was not a label, so the inputs had no name at all.
+    // `exact` because the reset button beside each one now names the same field.
+    await expect(page.getByLabel("Base branch", { exact: true })).toHaveValue("main");
+    await expect(page.getByLabel("Timeout for one step (ms)", { exact: true })).toHaveValue(
+      "1800000"
+    );
 
     await expect(
       page.getByRole("button", { name: "Reset Base branch to the default" })
@@ -283,13 +286,15 @@ test.describe("a settings row says which row it is", () => {
     await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
     await page.getByRole("button", { name: "+ Add dependency" }).click();
 
-    const search = page.getByLabel("Search tasks");
+    const search = page.getByLabel("Search tasks to link");
     await expect(search).toHaveCount(1);
-    // The whole point of a name over a placeholder: the placeholder is what a reader had, and it
-    // is gone the moment the field is used
+    await expect(search).toHaveAccessibleName("Search tasks to link");
+
+    // Typed into, which is where a placeholder stops being a label a sighted reader can see —
+    // the name has to be something the field carries rather than something it displays
     await search.fill("Free");
     await expect(search).toHaveValue("Free");
-    await expect(page.getByLabel("Search tasks")).toHaveCount(1);
+    await expect(search).toHaveAccessibleName("Search tasks to link");
   });
 });
 
@@ -359,7 +364,7 @@ test.describe("no control inside these cards is anonymous", () => {
       "the worker policy card",
       async (page) => {
         await page.goto(`/projects/${PROJECT_KEY}/settings?section=workers`);
-        await expect(page.getByLabel("Base branch")).toBeVisible();
+        await expect(page.getByLabel("Base branch", { exact: true })).toBeVisible();
         return card(page, "How work is done here");
       },
     ],
