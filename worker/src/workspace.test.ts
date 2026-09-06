@@ -7,8 +7,12 @@ import { createWorkspace, reapOrphans, Workspace } from "./workspace.js";
 import { CommandResult, RunOpts } from "./exec.js";
 import { gitArgs } from "./git-safety.js";
 
+// Named separately because a test asserts the scan runs in it, and `config` is cast to `never` to
+// stand in for the whole WorkerConfig — reading a property back off that cast does not typecheck.
+const REPO_PATH = "/repo";
+
 const config = {
-  repoPath: "/repo",
+  repoPath: REPO_PATH,
   worktreeRoot: "/worktrees",
   baseBranch: "main",
 } as never;
@@ -442,7 +446,7 @@ describe("createWorkspace", () => {
       const scan = run.mock.calls.find((call) =>
         (call[1] as string[]).join(" ").includes("config --list --show-scope")
       );
-      expect((scan?.[2] as { cwd?: string })?.cwd).toBe(config.repoPath);
+      expect((scan?.[2] as { cwd?: string })?.cwd).toBe(REPO_PATH);
     });
 
     /**
