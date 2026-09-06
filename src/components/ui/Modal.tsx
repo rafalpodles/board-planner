@@ -54,8 +54,24 @@ export function Modal({
   // after open (an error message appearing, a field expanding) still gets picked up.
   const [scrollable, setScrollable] = useState(false);
 
+  // A refusal nobody can see reads as a dead dialog, and the scrim is the gesture a phone has —
+  // there is no Escape key there, and the dimmed × is off to the side. So a refused attempt says so
+  // by moving, briefly, and not at all for a reader who asked for less motion.
+  const refuse = () => {
+    const el = dialogRef.current;
+    if (!el || typeof el.animate !== "function") return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    el.animate(
+      [{ transform: "scale(1)" }, { transform: "scale(1.015)" }, { transform: "scale(1)" }],
+      { duration: 180, easing: "ease-out" }
+    );
+  };
+
   const requestClose = () => {
-    if (closeDisabled) return;
+    if (closeDisabled) {
+      refuse();
+      return;
+    }
     onClose();
   };
 
@@ -88,6 +104,9 @@ export function Modal({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
+        // Not an announcement — ARIA's own definition is "may wait before exposing changes" — but
+        // it is the standard way to say a dialog is mid-write, and what a reader hears instead is
+        // the caller's own "Saving…" label.
         aria-busy={closeDisabled || undefined}
         aria-labelledby={named && !bare ? titleId : undefined}
         aria-label={named && !bare ? undefined : named ? title : UNNAMED_DIALOG_LABEL}

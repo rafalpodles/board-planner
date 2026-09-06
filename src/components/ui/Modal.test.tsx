@@ -537,7 +537,7 @@ describe("Modal, while its caller's request is in flight", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it("says the dialog is busy, so the refusal is announced and not only felt", () => {
+  it("marks the dialog busy while it refuses", () => {
     renderModal({ closeDisabled: true });
     expect(screen.getByRole("dialog").getAttribute("aria-busy")).toBe("true");
   });

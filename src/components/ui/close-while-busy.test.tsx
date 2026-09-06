@@ -3,6 +3,8 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, act } from "@testing-library/react";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { NewTaskModal } from "@/components/tasks/NewTaskModal";
+import { EditBlockDialog, NewAgentDialog } from "@/app/(app)/agents/components/dialogs";
+import { ApiAgentBlock } from "@/types";
 import { DangerAction } from "@/components/settings/DangerAction";
 import { CompleteSprintDialog } from "@/components/sprints/CompleteSprintDialog";
 import { SprintFormModal } from "@/components/sprints/SprintFormModal";
@@ -180,5 +182,66 @@ describe("a dialog with a request in flight refuses Escape", () => {
     });
     escape();
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * The one dialog in the agents file that had no in-flight state at all: Save could be clicked
+   * into two PUTs, and every exit dismissed it mid-write.
+   */
+  it("EditBlockDialog, mid-save", async () => {
+    let finish = () => {};
+    const held = new Promise<void>((resolve) => (finish = resolve));
+    const onClose = vi.fn();
+    const block = {
+      _id: "b1",
+      kind: "step",
+      name: "Write the tests",
+      description: "",
+      prompt: "do it",
+      params: {},
+    } as unknown as ApiAgentBlock;
+
+    render(<EditBlockDialog block={block} onClose={onClose} onSave={() => held} />);
+    await act(async () => {
+      screen.getByRole("button", { name: "Save" }).click();
+    });
+
+    escape();
+    expect(onClose).not.toHaveBeenCalled();
+    expect((screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(
+      true
+    );
+
+    await act(async () => {
+      finish();
+      await held;
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("NewAgentDialog, while the agent is being created", async () => {
+    let finish = () => {};
+    const held = new Promise<void>((resolve) => (finish = resolve));
+    const onClose = vi.fn();
+
+    render(<NewAgentDialog open projects={[]} onClose={onClose} onCreate={() => held} />);
+    const name = screen.getByLabelText("Name") as HTMLInputElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(name, "Careful");
+      name.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      screen.getByRole("button", { name: "Create" }).click();
+    });
+
+    escape();
+    expect(onClose).not.toHaveBeenCalled();
+
+    await act(async () => {
+      finish();
+      await held;
+    });
+    escape();
+    expect(onClose).toHaveBeenCalled();
   });
 });

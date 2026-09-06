@@ -91,9 +91,13 @@ export function TaskForm({
   const [loading, setLoading] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
+  const [uploads, setUploads] = useState(0);
   const [aiEnabled, setAiEnabled] = useState(false);
   const [aiInsights, setAiInsights] = useState<GeneratedTask | null>(null);
   const api = useApi();
+  // Every request this form makes, in one flag: whatever is in flight lands in these fields and
+  // nowhere else, so a dialog around the form has to stay put for all three (BP-565).
+  const busy = loading || aiLoading || uploads > 0;
   const { toast } = useToast();
 
   useEffect(() => {
@@ -108,13 +112,25 @@ export function TaskForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    onBusyChange?.(busy);
+  }, [busy, onBusyChange]);
+
+  // A form torn down mid-request would otherwise leave the flag set on whoever owns it
+  useEffect(() => () => onBusyChange?.(false), [onBusyChange]);
+
   const handleFileUpload = useCallback(
     async (file: File): Promise<string> => {
       const formData = new FormData();
       formData.append("file", file);
       formData.append("projectId", projectId);
-      const result = await api.upload("/api/uploads", formData);
-      return result.markdown;
+      setUploads((n) => n + 1);
+      try {
+        const result = await api.upload("/api/uploads", formData);
+        return result.markdown;
+      } finally {
+        setUploads((n) => n - 1);
+      }
     },
     [api, projectId]
   );
@@ -167,7 +183,6 @@ export function TaskForm({
     e.preventDefault();
     setError("");
     setLoading(true);
-    onBusyChange?.(true);
 
     try {
       const created = await api.post(`/api/projects/${projectId}/tasks`, body);
@@ -189,7 +204,6 @@ export function TaskForm({
       setError(err instanceof Error ? err.message : "Failed to save");
     } finally {
       setLoading(false);
-      onBusyChange?.(false);
     }
   }
 
@@ -566,10 +580,10 @@ export function TaskForm({
       {error && <p className="text-sm text-danger">{error}</p>}
 
       <div className="flex gap-3 items-center">
-        <Button type="submit" disabled={loading}>
+        <Button type="submit" disabled={busy}>
           {loading ? "Saving..." : "Create Task"}
         </Button>
-        <Button type="button" variant="secondary" onClick={onCancel} disabled={loading}>
+        <Button type="button" variant="secondary" onClick={onCancel} disabled={busy}>
           Cancel
         </Button>
       </div>

@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { ApiSprint } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
@@ -18,6 +19,7 @@ export function CompleteSprintDialog({
   onClose,
 }: CompleteSprintDialogProps) {
   const incomplete = (sprint.taskCount ?? 0) - (sprint.doneCount ?? 0);
+  const [pressed, setPressed] = useState<"backlog" | "keep" | null>(null);
 
   return (
     <Modal open onClose={onClose} closeDisabled={completing} title="Complete Sprint">
@@ -31,11 +33,24 @@ export function CompleteSprintDialog({
           )}
         </p>
         <div className="flex gap-3">
-          <Button disabled={completing} onClick={() => onComplete(true)}>
-            {completing ? "Completing..." : "Move to Backlog"}
+          <Button
+            disabled={completing}
+            onClick={() => {
+              setPressed("backlog");
+              onComplete(true);
+            }}
+          >
+            {completing && pressed === "backlog" ? "Completing..." : "Move to Backlog"}
           </Button>
-          <Button variant="secondary" disabled={completing} onClick={() => onComplete(false)}>
-            Keep in Sprint
+          <Button
+            variant="secondary"
+            disabled={completing}
+            onClick={() => {
+              setPressed("keep");
+              onComplete(false);
+            }}
+          >
+            {completing && pressed === "keep" ? "Completing..." : "Keep in Sprint"}
           </Button>
           <Button variant="ghost" disabled={completing} onClick={onClose}>
             Cancel

@@ -227,10 +227,9 @@ test.describe("creating and editing a sprint from the form", () => {
       );
 
     await test.step("all three of the dialog's own ways out refuse", async () => {
-      await expect(form.getByRole("button", { name: "Close dialog" })).toHaveAttribute(
-        "aria-disabled",
-        "true"
-      );
+      // Playwright reads aria-disabled on a button as disabled, which is also why the click below
+      // has to be dispatched rather than performed: a plain click() waits for it to become enabled.
+      await expect(form.getByRole("button", { name: "Close dialog" })).toBeDisabled();
       await expect(form).toHaveAttribute("aria-busy", "true");
       await expect(form.getByRole("button", { name: "Cancel" })).toBeDisabled();
 
@@ -243,7 +242,7 @@ test.describe("creating and editing a sprint from the form", () => {
       await painted();
       await expect(form).toBeVisible();
 
-      await form.getByRole("button", { name: "Close dialog" }).click();
+      await form.getByRole("button", { name: "Close dialog" }).dispatchEvent("click");
       await painted();
       await expect(form).toBeVisible();
       await expect(form.getByLabel("Name")).toHaveValue("Sprint Hindenburg");
@@ -254,10 +253,7 @@ test.describe("creating and editing a sprint from the form", () => {
 
     await test.step("and the failure leaves a dialog to land on, still dismissable", async () => {
       await expect(form).toBeVisible();
-      await expect(form.getByRole("button", { name: "Close dialog" })).not.toHaveAttribute(
-        "aria-disabled",
-        "true"
-      );
+      await expect(form.getByRole("button", { name: "Close dialog" })).toBeEnabled();
       await page.keyboard.press("Escape");
       await expect(form).toBeHidden();
     });
