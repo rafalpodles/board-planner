@@ -16,6 +16,14 @@ export const ADMIN_PASSWORD = "test1234";
 export const MEMBER_USERNAME = "member";
 export const MEMBER_PASSWORD = "test1234";
 
+// A genuine project owner: reaches "admin"-need routes through a Grant `relation: "owner"`, with
+// no standing on the instance at all (role "member", same as MEMBER_USERNAME). "admin" sign-in
+// bypasses the grant lookup entirely via `principal.instanceAdmin` in src/lib/grants.ts, so it
+// cannot tell this path apart from the instance-admin one — every `withProjectOwner` route's own
+// test mocks `check()` rather than composing this persona, which is what this fills in.
+export const OWNER_USERNAME = "owner";
+export const OWNER_PASSWORD = "test1234";
+
 export const PROJECT_KEY = "TP";
 // Deliberately not "Test Project": a project keyed TP also exists in the development database,
 // so the name is what proves which one the server is actually reading.
@@ -38,6 +46,7 @@ export const MEMBER_API_TOKEN = "cp_e2e00002deadbeefdeadbeefdeadbeef";
 // them unavoidable. Specs whose subject IS signing in keep the form — see e2e/session.ts.
 export const ADMIN_SESSION_TOKEN = "cps_e2e00003deadbeefdeadbeefdeadbeef";
 export const MEMBER_SESSION_TOKEN = "cps_e2e00004deadbeefdeadbeefdeadbeef";
+export const OWNER_SESSION_TOKEN = "cps_e2e00005deadbeefdeadbeefdeadbeef";
 export const RUN_PHASE = "agent";
 
 export const HELD_TASK_NUMBER = 1;
@@ -83,13 +92,16 @@ const ADMIN_PASSWORD_HASH = bcrypt.hashSync(ADMIN_PASSWORD, 10);
 const MEMBER_PASSWORD_HASH = bcrypt.hashSync(MEMBER_PASSWORD, 10);
 const API_TOKEN_HASH = bcrypt.hashSync(API_TOKEN, 10);
 const MEMBER_API_TOKEN_HASH = bcrypt.hashSync(MEMBER_API_TOKEN, 10);
+const OWNER_PASSWORD_HASH = bcrypt.hashSync(OWNER_PASSWORD, 10);
 const WORKER_CREDENTIAL_HASH = bcrypt.hashSync(WORKER_CREDENTIAL, 10);
 
 export const ADMIN_ID = id("e2e00000000000000000a001");
 export const MEMBER_ID = id("e2e00000000000000000a002");
+export const OWNER_ID = id("e2e00000000000000000a008");
 export const PROJECT_ID = id("e2e00000000000000000c001");
 export const WORKER_ID = id("e2e00000000000000000b001");
 export const GRANT_ID = id("e2e00000000000000000e001");
+export const OWNER_GRANT_ID = id("e2e00000000000000000e004");
 export const HELD_TASK_ID = id("e2e00000000000000000d001");
 export const DECOY_TASK_ID = id("e2e00000000000000000d002");
 export const SIBLING_TASK_ID = id("e2e00000000000000000d003");
@@ -846,18 +858,38 @@ async function seedBoard(withSessions: boolean) {
       // reach on this project it reaches through the grant below
       role: "member",
     }),
+    person({
+      _id: OWNER_ID,
+      username: OWNER_USERNAME,
+      password: OWNER_PASSWORD_HASH,
+      fullName: "E2E Owner",
+      // Same as MEMBER_ID: no instance standing. Only the grant below tells the two apart.
+      role: "member",
+    }),
   ]);
 
-  await db.collection("grants").insertOne({
-    _id: GRANT_ID,
-    subject: MEMBER_ID,
-    relation: "member",
-    objectType: "project",
-    object: PROJECT_ID,
-    createdBy: ADMIN_ID,
-    createdAt: now,
-    updatedAt: now,
-  });
+  await db.collection("grants").insertMany([
+    {
+      _id: GRANT_ID,
+      subject: MEMBER_ID,
+      relation: "member",
+      objectType: "project",
+      object: PROJECT_ID,
+      createdBy: ADMIN_ID,
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      _id: OWNER_GRANT_ID,
+      subject: OWNER_ID,
+      relation: "owner",
+      objectType: "project",
+      object: PROJECT_ID,
+      createdBy: ADMIN_ID,
+      createdAt: now,
+      updatedAt: now,
+    },
+  ]);
 
   await db.collection("projects").insertOne({
     _id: PROJECT_ID,
@@ -962,6 +994,7 @@ async function seedBoard(withSessions: boolean) {
       .insertMany([
         sessionRow(ADMIN_SESSION_TOKEN, ADMIN_ID),
         sessionRow(MEMBER_SESSION_TOKEN, MEMBER_ID),
+        sessionRow(OWNER_SESSION_TOKEN, OWNER_ID),
       ]);
   }
 
