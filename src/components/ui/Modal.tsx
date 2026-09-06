@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import { useFocusTrap } from "@/hooks/use-focus-trap";
 import { topmostLayer } from "@/lib/focus-trap";
 
@@ -37,14 +37,26 @@ export function Modal({
 }: ModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const named = title.trim().length > 0;
+  // Only a tab stop when there is something to scroll — otherwise every dialog that just fits
+  // (most of them: confirms, short forms) would gain a dead stop between the close button and
+  // its real controls. Re-measured after every render rather than once, so content that grows
+  // after open (an error message appearing, a field expanding) still gets picked up.
+  const [scrollable, setScrollable] = useState(false);
 
   useFocusTrap({
     active: open,
     containerRef: dialogRef,
     onEscape: onClose,
     returnFocusTo,
+  });
+
+  useLayoutEffect(() => {
+    if (!open || bare) return;
+    const el = scrollRef.current;
+    if (el) setScrollable(el.scrollHeight > el.clientHeight);
   });
 
   if (!open) return null;
@@ -93,11 +105,12 @@ export function Modal({
             padding here would show as a strip above that header, and scrolling here would
             move it. Every other dialog keeps the room its focus rings need. */}
         <div
-          tabIndex={bare ? undefined : 0}
+          ref={scrollRef}
+          tabIndex={scrollable ? 0 : undefined}
           className={
             bare
               ? "flex min-h-0 flex-1 flex-col overflow-hidden"
-              : "min-h-0 overflow-y-auto scroll-ring-room focus-ring"
+              : `min-h-0 overflow-y-auto scroll-ring-room${scrollable ? " focus-ring" : ""}`
           }
         >
           {children}
