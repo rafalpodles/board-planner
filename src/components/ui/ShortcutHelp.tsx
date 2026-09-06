@@ -1,21 +1,34 @@
 "use client";
 
+import { ReactNode } from "react";
 import { Modal } from "@/components/ui/Modal";
 
 interface ShortcutHelpProps {
   open: boolean;
   onClose: () => void;
+  readOnly?: boolean;
+  pinViewMode?: "board" | "list";
+}
+
+interface Shortcut {
+  key: string;
+  description: string;
+  // Which prop makes this row dead, so it is hidden instead of advertising a key that does nothing
+  hideWhen?: "readOnly" | "pinViewMode";
 }
 
 // The same dialog is shown in both views, so anything that only works in one of
 // them is listed under that view rather than claimed everywhere
-const SHORTCUT_GROUPS = [
+const SHORTCUT_GROUPS: { title: string; shortcuts: Shortcut[] }[] = [
   {
     title: "Anywhere",
+    shortcuts: [{ key: "⌘K / /", description: "Search tasks and projects" }],
+  },
+  {
+    title: "Board & sprints pages",
     shortcuts: [
-      { key: "N", description: "Create new task" },
-      { key: "⌘K / /", description: "Search tasks and projects" },
-      { key: "V", description: "Toggle view: board ↔ list" },
+      { key: "N", description: "Create new task", hideWhen: "readOnly" },
+      { key: "V", description: "Toggle view: board ↔ list", hideWhen: "pinViewMode" },
       { key: "R", description: "Refresh board" },
       { key: "Esc", description: "Close dialogs / clear selection" },
       { key: "?", description: "Show this help" },
@@ -41,27 +54,66 @@ const SHORTCUT_GROUPS = [
   },
 ];
 
-export function ShortcutHelp({ open, onClose }: ShortcutHelpProps) {
+// VoiceOver reads ⌘ as "place of interest sign" and NVDA commonly reads neither ⌘ nor ⇧ at all —
+// so each glyph gets a visually-hidden spelling beside it, aria-hidden itself so the two are never
+// both announced.
+const GLYPH_LABELS: Record<string, string> = {
+  "⌘": "Cmd",
+  "⇧": "Shift",
+  "↔": "left-right",
+};
+
+const GLYPH_PATTERN = new RegExp(`[${Object.keys(GLYPH_LABELS).join("")}]`, "g");
+
+function withGlyphLabels(text: string): ReactNode[] {
+  const parts = text.split(GLYPH_PATTERN);
+  const glyphs = text.match(GLYPH_PATTERN) ?? [];
+  const nodes: ReactNode[] = [parts[0]];
+  glyphs.forEach((glyph, i) => {
+    nodes.push(
+      <span key={`${i}-glyph`} aria-hidden="true">
+        {glyph}
+      </span>,
+      <span key={`${i}-label`} className="sr-only">
+        {GLYPH_LABELS[glyph]}
+      </span>,
+      parts[i + 1]
+    );
+  });
+  return nodes;
+}
+
+export function ShortcutHelp({ open, onClose, readOnly = false, pinViewMode }: ShortcutHelpProps) {
   return (
     <Modal open={open} onClose={onClose} title="Keyboard Shortcuts" size="sm">
       <div className="space-y-4">
-        {SHORTCUT_GROUPS.map(({ title, shortcuts }) => (
-          <section key={title}>
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-text-muted mb-2">
-              {title}
-            </h3>
-            <div className="space-y-2">
-              {shortcuts.map(({ key, description }) => (
-                <div key={key} className="flex items-center justify-between gap-4">
-                  <span className="text-sm text-text-muted">{description}</span>
-                  <kbd className="text-xs bg-bg-input border border-border px-2 py-1 rounded font-mono whitespace-nowrap">
-                    {key}
-                  </kbd>
-                </div>
-              ))}
-            </div>
-          </section>
-        ))}
+        {SHORTCUT_GROUPS.map(({ title, shortcuts }) => {
+          const visible = shortcuts.filter((s) => {
+            if (s.hideWhen === "readOnly" && readOnly) return false;
+            if (s.hideWhen === "pinViewMode" && pinViewMode) return false;
+            return true;
+          });
+          if (visible.length === 0) return null;
+          return (
+            <section key={title}>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-text-muted mb-2">
+                {title}
+              </h3>
+              <dl className="space-y-2">
+                {visible.map(({ key, description }) => (
+                  <div key={key} className="flex items-center justify-between gap-4">
+                    <dt className="text-sm text-text-muted">{withGlyphLabels(description)}</dt>
+                    <dd className="m-0">
+                      <kbd className="text-xs bg-bg-input border border-border px-2 py-1 rounded font-mono whitespace-nowrap">
+                        {withGlyphLabels(key)}
+                      </kbd>
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
+          );
+        })}
       </div>
       <p className="text-xs text-text-muted mt-4">Shortcuts are disabled when typing in inputs.</p>
     </Modal>
