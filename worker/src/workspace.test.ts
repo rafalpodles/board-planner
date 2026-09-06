@@ -509,8 +509,25 @@ describe("createWorkspace", () => {
 
       await expect(withRemote(runner).create("BP-1", "worker")).rejects.toMatchObject({
         name: "PoisonedCheckoutError",
+        // The kind, not only the class. Everything downstream keys on it — this one refuses the
+        // run and nothing more, while `planted` latches the project off until somebody restarts
+        // the worker. Asserted from a real unreadable answer rather than from the sentinel: a test
+        // that builds the error out of the same constant the code compares against proves only
+        // that a string equals itself, and would stay green if the sentinel ever drifted.
+        kind: "unreadable",
       });
       expect(ranAny(run, "worktree add")).toBe(false);
+    });
+
+    // The other half of the same assertion, so neither can pass by answering "unreadable" — or
+    // "planted" — to everything.
+    it("calls a key somebody planted planted, from the same path", async () => {
+      const { runner } = fakeGit(baseFromRemote("base1", PLANTED));
+
+      await expect(withRemote(runner).create("BP-1", "worker")).rejects.toMatchObject({
+        name: "PoisonedCheckoutError",
+        kind: "planted",
+      });
     });
   });
 
