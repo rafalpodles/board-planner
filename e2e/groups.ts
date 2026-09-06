@@ -55,6 +55,7 @@ export const GROUPS = {
     "projects-list.spec.ts",
     "project-audit-log.spec.ts",
     "sidebar-reorder.spec.ts",
+    "error-boundary.spec.ts",
     "dashboard-reads-the-board.spec.ts",
     "dashboard-says-why.spec.ts",
     "instance-settings.spec.ts",
