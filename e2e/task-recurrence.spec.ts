@@ -589,11 +589,18 @@ test.describe("what happens when the task is closed", () => {
     expect(new Date(march.dueDate as Date).toISOString()).toBe("2026-03-31T00:00:00.000Z");
   });
 
-  // BP-489. Two overlapping closes — a double-click, or the board and the detail view racing each
-  // other — both used to read the same pre-write status and both mint a next occurrence. Driven
-  // through two concurrent API requests rather than two real clicks: a browser cannot reliably put
-  // two PATCHes on the wire close enough together to reach a window measured in milliseconds, and
-  // the fixture is otherwise the same "closing a recurring task" every test above already sets up.
+  // BP-489. Two overlapping closes — a double-click, or two workers racing each other — both used
+  // to read the same pre-write status and both mint a next occurrence. Driven through two
+  // concurrent API requests rather than two real clicks: a browser cannot reliably put two
+  // requests on the wire close enough together to reach a window measured in milliseconds, and the
+  // fixture is otherwise the same "closing a recurring task" every test above already sets up.
+  //
+  // Both PATCH .../status, not one of each writer: measured against the unfixed code, a PATCH
+  // raced against a PUT (the board vs. the detail view — updateTask does an extra Project.findById
+  // before its own read of oldTask) consistently let the PATCH land first and never reproduced the
+  // double mint, three runs straight — a test that cannot go red proves nothing. Two identical,
+  // identically-timed writers is what actually forces the window. updateTask's own guard is
+  // covered directly, and deterministically, by the unit tests next to it in task-service.test.ts.
   test("two overlapping closes mint at most one occurrence", async ({ request }) => {
     const due = BASE_DUE();
     await giveDueDate(due);
