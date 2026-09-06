@@ -12,7 +12,7 @@ import { Modal } from "@/components/ui/Modal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
 import { generatePassword } from "@/lib/password-generator";
-import { LIST_REFRESH_FAILED } from "@/lib/messages";
+import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -102,8 +102,9 @@ export default function UsersPage() {
     }
     setSaving(false);
     closeNew();
-    // Said before the refresh, like the other two writes: a create used to say nothing at all, so
-    // a failed refresh was the only line a new account ever produced.
+    // Before the refresh, so it does not wait on a slow list — and said at all, which it was not:
+    // a create used to produce no line of its own, leaving a failed refresh as the only thing a new
+    // account ever said.
     toast("User created", "success");
     await refreshUsers();
   }

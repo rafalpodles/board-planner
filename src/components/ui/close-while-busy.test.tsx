@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { StrictMode } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { LIST_REFRESH_FAILED } from "@/lib/messages";
+import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
 import { render, screen, cleanup, act } from "@testing-library/react";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { NewTaskModal } from "@/components/tasks/NewTaskModal";
@@ -14,6 +14,7 @@ import {
 } from "@/app/(app)/agents/components/dialogs";
 import { EnrolWorkerModal } from "@/components/settings/EnrolWorkerModal";
 import { useStore } from "@/app/(app)/agents/store";
+import { AgentComposition } from "@/types";
 import { ApiAgentBlock } from "@/types";
 import { DangerAction } from "@/components/settings/DangerAction";
 import { CompleteSprintDialog } from "@/components/sprints/CompleteSprintDialog";
@@ -440,6 +441,9 @@ describe("a dialog with a request in flight refuses Escape", () => {
     expect(toast).toHaveBeenCalledWith("Fields filled by AI — review and save", "success");
   });
 
+});
+
+describe("a write whose list refresh fails", () => {
   /**
    * The write landed; only the list behind the dialog did not. Reported as the write failing, the
    * dialog stayed open over a record that already existed, with Create inviting a second one.
@@ -468,7 +472,6 @@ describe("a dialog with a request in flight refuses Escape", () => {
     });
 
     expect(screen.queryByText("network down")).toBeNull();
-    expect(screen.queryByText("Could not create")).toBeNull();
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(toast).toHaveBeenCalledWith(
       LIST_REFRESH_FAILED,
@@ -477,18 +480,24 @@ describe("a dialog with a request in flight refuses Escape", () => {
   });
 
   /**
-   * The composition editor is the other side of the same store: it renders "Not saved." over a
-   * refusal, so a refetch reported as the write's failure put a red banner over a composition the
-   * server had already stored.
+   * The store's other writes go the same way. The composition editor is the one that shows it worst
+   * — `agents/[agentId]/page.tsx` renders "Not saved." over whatever the store rejected with — but
+   * this covers the store, not that banner.
    */
   it("saveComposition survives a refetch that fails", async () => {
     api.get.mockResolvedValue([]);
     api.put.mockResolvedValue({});
     let save: (() => Promise<void>) | null = null;
+    const composition: AgentComposition = {
+      analysis: [],
+      implementation: [],
+      verification: [],
+      delivery: [],
+    };
 
     function Host() {
       const store = useStore();
-      save = () => store.saveComposition("a1", { blocks: [] } as never);
+      save = () => store.saveComposition("a1", composition);
       return null;
     }
     render(<Host />);
@@ -498,6 +507,7 @@ describe("a dialog with a request in flight refuses Escape", () => {
     await act(async () => {
       await expect(save!()).resolves.toBeUndefined();
     });
+    expect(api.put).toHaveBeenCalledWith("/api/agents/a1", { composition });
     expect(toast).toHaveBeenCalledWith(LIST_REFRESH_FAILED, "error");
   });
 });

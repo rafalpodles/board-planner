@@ -1,12 +1,12 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { LIST_REFRESH_FAILED } from "@/lib/messages";
+import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
 import { render, screen, cleanup, act, waitFor } from "@testing-library/react";
 import UsersPage from "./page";
 
 const { api, auth, toast } = vi.hoisted(() => ({
   api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), del: vi.fn() },
-  auth: { user: { _id: "u1", username: "rpo" }, isAdmin: true, isLoading: false },
+  auth: { user: { _id: "u1", username: "owner" }, isAdmin: true, isLoading: false },
   toast: vi.fn(),
 }));
 

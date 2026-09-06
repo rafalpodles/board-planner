@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/Toast";
 import { AgentComposition, ApiAgent, ApiAgentBlock } from "@/types";
-import { LIST_REFRESH_FAILED } from "@/lib/messages";
+import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
 
 export interface NewAgent {
   name: string;
