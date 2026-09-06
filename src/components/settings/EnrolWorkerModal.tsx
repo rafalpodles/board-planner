@@ -63,7 +63,7 @@ export function EnrolWorkerModal({ open, onClose }: EnrolWorkerModalProps) {
   const expiry = minted ? enrolmentExpiry(minted.expiresAt) : null;
 
   return (
-    <Modal open={open} onClose={close} title="Enrol a worker" size="lg">
+    <Modal open={open} onClose={close} closeDisabled={minting} title="Enrol a worker" size="lg">
       {!minted ? (
         <div className="space-y-4">
           <p className="text-sm text-text-muted">
@@ -84,7 +84,7 @@ export function EnrolWorkerModal({ open, onClose }: EnrolWorkerModalProps) {
             }}
           />
           <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={close}>
+            <Button variant="secondary" onClick={close} disabled={minting}>
               Cancel
             </Button>
             <Button onClick={mint} disabled={minting}>

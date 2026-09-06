@@ -22,16 +22,11 @@ export function ConfirmDialog({
   confirmLabel = "Delete",
   loading = false,
 }: ConfirmDialogProps) {
-  const handleClose = () => {
-    if (loading) return;
-    onClose();
-  };
-
   return (
-    <Modal open={open} onClose={handleClose} title={title}>
+    <Modal open={open} onClose={onClose} closeDisabled={loading} title={title}>
       <p className="text-sm text-text-muted mb-6">{message}</p>
       <div className="flex justify-end gap-3">
-        <Button variant="secondary" size="sm" onClick={handleClose} disabled={loading}>
+        <Button variant="secondary" size="sm" onClick={onClose} disabled={loading}>
           Cancel
         </Button>
         <Button

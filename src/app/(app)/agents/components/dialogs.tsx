@@ -19,32 +19,38 @@ function Footer({
   onCancel,
   onCreate,
   disabled,
+  busy,
+  onBusy,
 }: {
   onCancel: () => void;
   onCreate: () => Promise<void> | void;
   disabled: boolean;
+  busy: boolean;
+  onBusy: (busy: boolean) => void;
 }) {
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
 
+  // `busy` is the dialog's rather than this footer's: the write is in flight for the whole dialog,
+  // and the dialog is what has to stay on screen until it lands — a footer that owned it could
+  // disable its own Cancel while the backdrop still dismissed everything (BP-565).
   return (
     <>
       {error && <p className="mt-2 text-[13px] text-danger">{error}</p>}
       <div className="mt-2 flex justify-end gap-2">
-        <Button variant="secondary" onClick={onCancel}>
+        <Button variant="secondary" onClick={onCancel} disabled={busy}>
           Cancel
         </Button>
         <Button
           disabled={disabled || busy}
           onClick={async () => {
             setError("");
-            setBusy(true);
+            onBusy(true);
             try {
               await onCreate();
             } catch (err) {
               setError(err instanceof Error ? err.message : "Could not create");
             } finally {
-              setBusy(false);
+              onBusy(false);
             }
           }}
         >
@@ -69,6 +75,7 @@ export function NewAgentDialog({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [scope, setScope] = useState(MINE);
+  const [busy, setBusy] = useState(false);
 
   const close = () => {
     setName("");
@@ -78,7 +85,7 @@ export function NewAgentDialog({
   };
 
   return (
-    <Modal open={open} onClose={close} title="New agent">
+    <Modal open={open} onClose={close} closeDisabled={busy} title="New agent">
       <div className="flex flex-col gap-4">
         <Input
           label="Name"
@@ -106,6 +113,8 @@ export function NewAgentDialog({
         />
         <Footer
           onCancel={close}
+          busy={busy}
+          onBusy={setBusy}
           disabled={!name.trim()}
           onCreate={async () => {
             await onCreate({
@@ -133,6 +142,7 @@ export function NewGateDialog({
   const [name, setName] = useState("");
   const [gateKind, setGateKind] = useState(GATE_KINDS[0].key);
   const [params, setParams] = useState<Record<string, string>>(GATE_KINDS[0].defaults);
+  const [busy, setBusy] = useState(false);
   const kind = gateKindByKey(gateKind);
 
   const close = () => {
@@ -143,7 +153,7 @@ export function NewGateDialog({
   };
 
   return (
-    <Modal open={open} onClose={close} title="New gate">
+    <Modal open={open} onClose={close} closeDisabled={busy} title="New gate">
       <div className="flex flex-col gap-4">
         <Select
           label="What it checks"
@@ -193,6 +203,8 @@ export function NewGateDialog({
 
         <Footer
           onCancel={close}
+          busy={busy}
+          onBusy={setBusy}
           disabled={!name.trim()}
           onCreate={async () => {
             await onCreate({
@@ -224,6 +236,7 @@ export function NewStepDialog({
   const [prompt, setPrompt] = useState("");
   const [capability, setCapability] = useState<string>(CAPABILITIES[0].value);
   const [model, setModel] = useState<string>(MODELS[0].value);
+  const [busy, setBusy] = useState(false);
 
   const close = () => {
     setName("");
@@ -235,7 +248,7 @@ export function NewStepDialog({
   };
 
   return (
-    <Modal open={open} onClose={close} title="New step">
+    <Modal open={open} onClose={close} closeDisabled={busy} title="New step">
       <div className="flex flex-col gap-4">
         <Input
           label="Name"
@@ -279,6 +292,8 @@ export function NewStepDialog({
 
         <Footer
           onCancel={close}
+          busy={busy}
+          onBusy={setBusy}
           disabled={!name.trim()}
           onCreate={async () => {
             await onCreate({

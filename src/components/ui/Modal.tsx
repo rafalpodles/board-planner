@@ -24,6 +24,13 @@ interface ModalProps {
   returnFocusTo?: React.RefObject<HTMLElement | null>;
   /** Drops the header and padding for a child that draws its own frame */
   bare?: boolean;
+  /**
+   * Refuses the dialog's own three ways out — backdrop, Escape, the × — while a request it started
+   * is still in flight. Its own buttons stay the caller's business; this is the half no caller can
+   * reach, and the half that used to let a failure toast land with nothing on screen to explain it
+   * (BP-556, BP-565).
+   */
+  closeDisabled?: boolean;
 }
 
 export function Modal({
@@ -34,6 +41,7 @@ export function Modal({
   size = "md",
   returnFocusTo,
   bare = false,
+  closeDisabled = false,
 }: ModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -46,10 +54,15 @@ export function Modal({
   // after open (an error message appearing, a field expanding) still gets picked up.
   const [scrollable, setScrollable] = useState(false);
 
+  const requestClose = () => {
+    if (closeDisabled) return;
+    onClose();
+  };
+
   useFocusTrap({
     active: open,
     containerRef: dialogRef,
-    onEscape: onClose,
+    onEscape: requestClose,
     returnFocusTo,
   });
 
@@ -68,7 +81,7 @@ export function Modal({
       onClick={(e) => {
         if (e.target !== overlayRef.current) return;
         if (topmostLayer() !== dialogRef.current) return;
-        onClose();
+        requestClose();
       }}
     >
       <div
@@ -93,9 +106,10 @@ export function Modal({
           <div className="flex shrink-0 items-center justify-between mb-4">
             <h2 id={titleId} className="text-lg font-semibold">{title}</h2>
             <button
-              onClick={onClose}
+              onClick={requestClose}
+              disabled={closeDisabled}
               aria-label="Close dialog"
-              className="p-2 rounded-lg hover:bg-bg-hover text-text-muted min-h-[44px] min-w-[44px] flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              className="p-2 rounded-lg hover:bg-bg-hover text-text-muted min-h-[44px] min-w-[44px] flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50 disabled:pointer-events-none"
             >
               &#x2715;
             </button>

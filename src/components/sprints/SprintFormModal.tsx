@@ -88,7 +88,7 @@ export function SprintFormModal({
   }
 
   return (
-    <Modal open onClose={onClose} title={editing ? "Edit Sprint" : "New Sprint"}>
+    <Modal open onClose={onClose} closeDisabled={saving} title={editing ? "Edit Sprint" : "New Sprint"}>
       <form onSubmit={handleSubmit} className="space-y-4">
         <Input
           label="Name"
@@ -149,7 +149,7 @@ export function SprintFormModal({
           <Button type="submit" disabled={saving}>
             {saving ? "Saving..." : editing ? "Update" : "Create"}
           </Button>
-          <Button type="button" variant="secondary" onClick={onClose}>
+          <Button type="button" variant="secondary" onClick={onClose} disabled={saving}>
             Cancel
           </Button>
         </div>

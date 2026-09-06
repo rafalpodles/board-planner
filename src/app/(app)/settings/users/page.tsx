@@ -236,6 +236,7 @@ export default function UsersPage() {
       <Modal
         open={showNew}
         onClose={closeNew}
+        closeDisabled={saving}
         title="New User"
       >
         <form onSubmit={handleCreate} className="space-y-4">
@@ -282,6 +283,7 @@ export default function UsersPage() {
               type="button"
               variant="secondary"
               onClick={closeNew}
+              disabled={saving}
             >
               Cancel
             </Button>
@@ -293,6 +295,7 @@ export default function UsersPage() {
       <Modal
         open={!!editUser}
         onClose={closeEdit}
+        closeDisabled={editSaving}
         title={editUser ? `Edit ${editUser.fullName}` : ""}
       >
         {editUser && (
@@ -418,11 +421,13 @@ export default function UsersPage() {
               <Button
                 variant="secondary"
                 onClick={closeEdit}
+                disabled={editSaving}
               >
                 Cancel
               </Button>
               <Button
                 variant="danger"
+                disabled={editSaving}
                 onClick={() => {
                   closeEdit();
                   setConfirmDeleteUser(editUser);
