@@ -1,7 +1,16 @@
 import { test, expect, type Page } from "@playwright/test";
 import mongoose from "mongoose";
 import { ADMIN_AUTH, SAME_ORIGIN, signInApi } from "./api";
-import { ADMIN_PASSWORD, ADMIN_USERNAME, E2E_MONGODB_URI, PROJECT_ID, PROJECT_KEY, seed } from "./seed";
+import {
+  ADMIN_PASSWORD,
+  ADMIN_USERNAME,
+  E2E_MONGODB_URI,
+  PROJECT_ID,
+  PROJECT_KEY,
+  WORKER_ID,
+  WORKER_NAME,
+  seed,
+} from "./seed";
 import { signIn as arriveSignedIn } from "./session";
 
 /**
@@ -204,4 +213,51 @@ test("the log is not readable by someone who could not have written to it", asyn
   const response = await request.get("/api/admin/audit");
 
   expect(response.status()).toBe(403);
+});
+
+/**
+ * BP-531. The log had two ways to stop a machine in it and drew only one of them as something to
+ * notice: `worker_locked` was labelled "Kill switch on" in red, while `worker_command_sent` had no
+ * label at all and fell back to its own identifier, in grey.
+ *
+ * Both halves are read here from the rendered row rather than from the stored document, because
+ * the row is the whole of what was wrong — the write was always correct.
+ */
+test("a machine told to stop reads as loudly as one that was locked, and a resume does not", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.goto("/settings/workers");
+  const machine = page.getByRole("row").filter({ hasText: WORKER_NAME }).first();
+
+  for (const command of ["Stop", "Resume"] as const) {
+    const [issued] = await Promise.all([
+      page.waitForResponse(
+        (r) =>
+          new URL(r.url()).pathname === `/api/workers/${WORKER_ID}/command` &&
+          r.request().method() === "POST"
+      ),
+      machine.getByRole("button", { name: command, exact: true }).click(),
+    ]);
+    expect(issued.status(), await issued.text()).toBe(200);
+  }
+
+  await page.goto("/settings/audit");
+  await expect(page.getByRole("heading", { name: "Instance audit log" })).toBeVisible();
+
+  // Which command, not that a command happened: the actions on this page are deliberately separate
+  // verbs so nobody has to read the next column to find out what was done
+  const stopped = page.getByRole("row").filter({ hasText: "Worker told to stop" });
+  await expect(stopped).toHaveCount(1);
+  await expect(stopped).toContainText(WORKER_NAME);
+  await expect(stopped.getByText("Worker told to stop")).toHaveClass(/text-danger/);
+
+  // The control, and the reason notability cannot be a property of the action: the same endpoint
+  // wrote this row, and giving the work back is not worth the same red
+  const resumed = page.getByRole("row").filter({ hasText: "Worker told to resume" });
+  await expect(resumed).toHaveCount(1);
+  await expect(resumed.getByText("Worker told to resume")).toHaveClass(/text-text-muted/);
+
+  // And the identifier itself never reaches a reader
+  await expect(page.getByText(/worker command sent/)).toHaveCount(0);
 });
