@@ -208,9 +208,13 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
           // The allowlist parsed and ordered, not the raw string: `carriedTools` parses it, so
           // "a, b" and "b,a" produce the same count and must produce the same key or one
           // catalogue is counted twice (BP-574 review).
-          key: [catalogKey(s), parseAllowlist(s.toolAllowlist).sort().join(","), s.allowWrites].join(
-            "|"
-          ),
+          key: [
+            catalogKey(s),
+            // De-duplicated and ordered the way `carriedTools` reads it — it compares against a
+            // Set, so "a, b" and "a, a, b" contribute the same count and must share a key
+            [...new Set(parseAllowlist(s.toolAllowlist))].sort().join(","),
+            s.allowWrites,
+          ].join("|"),
           // The RAW catalogue, the same list the picker's own counter uses, so the two cannot
           // print different numbers for one server
           count: transient[catalogKey(s)]?.catalog
@@ -236,12 +240,11 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
     // one does not move the key and the catalogue found with the old credential would stay on
     // screen — a narrower token then sees fewer tools than the ticks claim (BP-574).
     // A stored token OR one typed but not yet saved: the unsaved case is the same defect, and
-    // restricting to `hasAuthToken` excluded it. Emptying the field is exempt — the placeholder
-    // says an empty field keeps the stored token, so the catalogue still describes it (BP-574
-    // review).
+    // restricting to `hasAuthToken` excluded it. No exemption for emptying the field: erasing a
+    // token that was typed and tested falls back to the STORED one, which is a different
+    // credential from the one the catalogue was discovered with (BP-574 review 2).
     const hadToken = before.hasAuthToken || Boolean(before.authToken);
-    const keepsStored = patch.authToken === "" && before.hasAuthToken;
-    if ("authToken" in patch && hadToken && !keepsStored && patch.authToken !== before.authToken) {
+    if ("authToken" in patch && hadToken && patch.authToken !== before.authToken) {
       setTransientAt(catalogKey(before), { catalog: undefined, testResult: "" });
     }
     draft.set(
@@ -408,7 +411,8 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
   }
 
   async function disconnectOauth(index: number) {
-    const name = servers[index].name.trim();
+    const row = servers[index];
+    const name = row.name.trim();
     try {
       await api.post(`/api/projects/${projectId}/pm/mcp-oauth/disconnect`, { name });
       // The connection is gone on the server, so this must not be a dirty edit Discard can rewind.
@@ -421,13 +425,17 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
       // the same data loss one round trip narrower — or roll back a save that landed meanwhile
       // (BP-574 review).
       //
-      // The value is matched by INDEX and the baseline by name: the click knows which row it came
-      // from, while the baseline may hold a different set of rows. Name-matching the value would
-      // also stamp any row that momentarily shares the name while it is being typed.
+      // The value is matched by OBJECT IDENTITY. An index captured before the await is the very
+      // staleness these updaters exist to remove — a row removed during the flight shifts it onto
+      // a neighbour, and the disconnect is then stamped on a server that is still connected while
+      // the one that was disconnected keeps offering Disconnect. `map`/`filter` preserve untouched
+      // row references, so identity survives a reorder and cannot be forged by another row being
+      // typed. If a save landed meanwhile the reference is gone and nothing is stamped, which is
+      // the safe direction: that save already re-read the row from the server (BP-574 review 2).
       draft.setValue((prev) => ({
         ...prev,
-        mcpServers: prev.mcpServers.map((s, i) =>
-          i === index ? { ...s, oauthStatus: "unconfigured" } : s
+        mcpServers: prev.mcpServers.map((s) =>
+          s === row ? { ...s, oauthStatus: "unconfigured" } : s
         ),
       }));
       draft.rebase((prev) => ({
