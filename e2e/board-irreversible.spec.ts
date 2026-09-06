@@ -27,10 +27,13 @@ import {
   SIBLING_TASK_ID,
   SIBLING_TASK_NUMBER,
   SIBLING_TASK_TITLE,
+  STRANDED_TASK_ID,
+  STRANDED_TASK_NUMBER,
   WORKER_NAME,
   seed,
   seedSecondProject,
   seedSprintPlanning,
+  seedTaskInCompletedSprint,
   storedExecution,
 } from "./seed";
 import { signIn } from "./session";
@@ -598,6 +601,35 @@ test.describe("sprints from the card menu", () => {
     await expect(card(page, SIBLING_TASK_NUMBER)).toBeVisible();
     await expect(card(page, PLANNING_SPRINT_TASK_NUMBER)).toBeVisible();
     await expect(card(page, PLANNING_SPRINT_DONE_TASK_NUMBER)).toBeVisible();
+  });
+});
+
+// BP-529. The sibling scenario the block above never hits: a task whose sprint already closed,
+// on a board with no open sprint left to pair it with. "Move to sprint" has nothing to offer —
+// that part is right — but that used to take "Remove from sprint" down with it, which is exactly
+// the button this task needs.
+test.describe("a sprint that closed with the task still in it", () => {
+  test.beforeEach(async () => {
+    await seedTaskInCompletedSprint();
+  });
+
+  test("Remove from sprint is offered even though there is no open sprint to move to", async ({
+    page,
+    request,
+  }) => {
+    await openBoard(page, SEEDED_TASKS + 1);
+
+    const menu = await openMenuOn(page, STRANDED_TASK_NUMBER);
+    await expect(menu.getByText("Move to sprint")).toHaveCount(0);
+    const removeButton = menu.getByRole("button", { name: "Remove from sprint" });
+    await expect(removeButton).toBeVisible();
+
+    const written = taskWrite(page, "PUT", STRANDED_TASK_ID);
+    await removeButton.click();
+    expect((await written).status()).toBe(200);
+    await expectToast(page, "Moved to backlog");
+
+    expect((await readTask(request, STRANDED_TASK_NUMBER)).body.sprint).toBeNull();
   });
 });
 

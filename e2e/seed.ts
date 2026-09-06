@@ -216,6 +216,46 @@ export async function seedSecondHeldTask() {
   );
 }
 
+// BP-529. A sprint that closed with this task still in it, and never swept to the backlog — the
+// one situation where "Remove from sprint" is needed, and the board has no *open* sprint to pair
+// it with.
+export const STRANDED_SPRINT_ID = id("e2e00000000000000000c105");
+export const STRANDED_SPRINT_NAME = "Sprint 2";
+export const STRANDED_TASK_ID = id("e2e00000000000000000d007");
+export const STRANDED_TASK_NUMBER = 15;
+export const STRANDED_TASK_TITLE = "Left in a sprint that already closed";
+
+/** Adds a completed sprint and a task still carrying it, on a board with no open sprint. */
+export async function seedTaskInCompletedSprint() {
+  const db = (await connect()).db!;
+  const now = new Date();
+  await db.collection("sprints").insertOne({
+    _id: STRANDED_SPRINT_ID,
+    project: PROJECT_ID,
+    name: STRANDED_SPRINT_NAME,
+    goal: "",
+    status: "completed",
+    startDate: new Date(now.getTime() - 30 * 86_400_000),
+    endDate: new Date(now.getTime() - 16 * 86_400_000),
+    createdAt: now,
+    updatedAt: now,
+  });
+  await db.collection("tasks").insertOne(
+    taskFactory(now)({
+      _id: STRANDED_TASK_ID,
+      taskNumber: STRANDED_TASK_NUMBER,
+      title: STRANDED_TASK_TITLE,
+      status: SPARE_COLUMN.id,
+      sprint: STRANDED_SPRINT_ID,
+      order: 1,
+    })
+  );
+  await db
+    .collection("projects")
+    .updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: STRANDED_TASK_NUMBER } });
+  await mongoose.disconnect();
+}
+
 /**
  * A run that still holds its task but has not reported in `quietForMs`. Past the card's threshold
  * it reads quiet rather than live — and runHolding keys on runId, not on the clock, so the server
