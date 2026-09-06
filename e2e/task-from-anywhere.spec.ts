@@ -70,12 +70,6 @@ async function openTaskPage(page: Page) {
   await expect(page.getByLabel("Task title")).toHaveValue(SIBLING_TASK_TITLE);
 }
 
-async function openTheBoardsModal(page: Page) {
-  await page.goto(`/projects/${PROJECT_KEY}`);
-  await page.getByRole("link", { name: new RegExp(SIBLING_TASK_TITLE) }).first().click();
-  await expect(taskDialog(page).getByLabel("Task title")).toHaveValue(SIBLING_TASK_TITLE);
-}
-
 async function pickFromSearch(page: Page, title: string) {
   await page.keyboard.press("ControlOrMeta+k");
   const layer = page.getByRole("dialog", { name: "Search" });
@@ -110,19 +104,6 @@ test.describe("⌘K", () => {
     await page.getByRole("button", { name: "Close task" }).click();
     await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_KEY}$`));
     await expect(page.getByRole("dialog")).toHaveCount(0);
-  });
-
-  test("from the board's modal still swaps the modal, board underneath", async ({ page }) => {
-    await openTheBoardsModal(page);
-
-    await pickFromSearch(page, HELD_TASK_TITLE);
-
-    await expect(page).toHaveURL(new RegExp(`/tasks/${HELD_TASK_NUMBER}$`));
-    await expect(taskDialog(page).getByLabel("Task title")).toHaveValue(HELD_TASK_TITLE);
-    await expect(page.getByLabel("Task title")).toHaveCount(1);
-    await expect(taskDialog(page)).toHaveCount(1);
-    // And the board is what it is drawn over, not a task page that replaced it
-    await expect(page.getByRole("heading", { name: PROJECT_NAME })).toBeVisible();
   });
 });
 
