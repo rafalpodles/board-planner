@@ -227,6 +227,29 @@ test.describe("duplicate", () => {
     expect(stored.body).toMatchObject({ status: "planned", priority: "high", assignee: null });
     expect(stored.body.checklist.map((i: { done: boolean }) => i.done)).toEqual([false, false]);
   });
+
+  // BP-526: "Copy of " prepended with no clamp meant any original 193 characters or longer — a
+  // length the product had already accepted on save — pushed the copy's title past the 200-char
+  // cap, and the server refused the duplicate outright with a generic error.
+  test("a title at the old cutoff still duplicates, clamped to the cap", async ({ page, request }) => {
+    const longTitle = "A".repeat(193);
+    const renamed = await request.put(`/api/projects/${PROJECT_ID}/tasks/${SIBLING_TASK_ID}`, {
+      headers: ADMIN_AUTH,
+      data: { title: longTitle },
+    });
+    expect(renamed.status(), await renamed.text()).toBe(200);
+
+    await openBoard(page);
+    const created = taskCreated(page);
+    const menu = await openMenuOn(page, SIBLING_TASK_NUMBER);
+    await menu.getByRole("button", { name: "Duplicate", exact: true }).click();
+    expect((await created).status()).toBe(201);
+    await expectToast(page, "Task duplicated");
+
+    const stored = await readTask(request, NEXT_TASK_NUMBER);
+    expect(stored.body.title).toHaveLength(200);
+    expect(stored.body.title).toBe(`Copy of ${longTitle}`.slice(0, 200));
+  });
 });
 
 test.describe("delete", () => {
