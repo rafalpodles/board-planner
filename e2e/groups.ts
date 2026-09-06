@@ -13,6 +13,7 @@
 export const GROUPS = {
   tasks: [
     "task-detail.spec.ts",
+    "another-boards-task.spec.ts",
     "task-from-anywhere.spec.ts",
     "duplicate-opens-one-editor.spec.ts",
     "task-references.spec.ts",
