@@ -38,6 +38,16 @@ describe("duplicatePayload", () => {
     ]);
   });
 
+  // BP-526: "Copy of " prepended with no clamp pushed a title past TASK_TITLE_MAX_LENGTH (200) for
+  // any original 193 characters or longer — a length the product had already accepted — and the
+  // server's own titleOrRefusal then refused the duplicate outright.
+  it("clamps the copy's title to the cap instead of letting the prefix push it over", () => {
+    const longTitle = "A".repeat(193);
+    const payload = duplicatePayload({ ...task, title: longTitle } as unknown as ApiTask);
+    expect(payload.title).toHaveLength(200);
+    expect(payload.title).toBe(`Copy of ${longTitle}`.slice(0, 200));
+  });
+
   // The three the product deliberately leaves behind, plus the status the server picks itself
   it("names neither the status, the assignee, the sprint nor the agent", () => {
     const payload = duplicatePayload({
