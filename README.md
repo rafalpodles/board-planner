@@ -9,7 +9,9 @@
 A Kanban board, sprints and a dashboard small teams can actually run — plus an MCP server and a
 REST API, so coding agents pick up the same tasks under the same rules as everybody else.
 
-[Website](https://board-planner.com) · [Documentation](https://board-planner.com/docs) · [Quick start](https://board-planner.com/docs/getting-started/quick-start/)
+<a href="https://board-planner.com"><img src="https://img.shields.io/badge/%F0%9F%8C%90_board--planner.com-see_it_move-5b8cff?style=for-the-badge" alt="Website"></a>
+<a href="https://board-planner.com/docs"><img src="https://img.shields.io/badge/%F0%9F%93%96_Documentation-28_pages-1f2937?style=for-the-badge" alt="Documentation"></a>
+<a href="https://board-planner.com/docs/getting-started/quick-start/"><img src="https://img.shields.io/badge/%E2%9A%A1_Quick_start-5_minutes-22c55e?style=for-the-badge" alt="Quick start"></a>
 
 <img src="https://img.shields.io/badge/Next.js-16-000?logo=nextdotjs&logoColor=white" alt="Next.js 16">
 <img src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white" alt="TypeScript">
@@ -19,7 +21,7 @@ REST API, so coding agents pick up the same tasks under the same rules as everyb
 
 <br><br>
 
-<img src="docs/images/board.png" alt="The Orbit board in Board Planner: five columns, cards carrying key, priority, type, component and difficulty" width="100%">
+<img src="docs/images/board.gif" alt="The board, a task opened from it, and two acceptance criteria ticked off" width="100%">
 
 </div>
 
@@ -33,24 +35,80 @@ dragging the card, and leaves the same trail in the same history.
 
 Self-hosted, single instance, no tenants. `docker compose up` and it is yours.
 
-## One task, all the way through
+## The part nobody else ships
 
-| Step | What happens |
+Plenty of tools can now make a machine write code. The interesting problem is not that — it is
+everything around it: **who approved the work, what the machine was allowed to touch, what had to
+pass before anything landed, and where it stops and gives the work back.** That is the part Board
+Planner is actually about, and it is a first-class product surface rather than a webhook you wire
+up yourself.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/pipeline-dark.svg">
+  <img src="docs/images/pipeline.svg" alt="A run: claim, worktree, agent, gates, push, pull request — then a wall, because the review column is where it stops and hands the task back to you" width="100%">
+</picture>
+
+### You hand it over the way you would hand it to a person
+
+Assign the task, name an agent, drag it into the column you approve from. **That pair is the
+hand-over** — nothing runs on a task that names no agent, and there is no falling back to a project
+default. A task somebody else assigned to you is a proposal, not a job queued on your machine.
+
+### An agent is composed, not configured
+
+An **agent** is an ordered list of blocks, and there are exactly two kinds:
+
+|  | Can it change anything? | Can it stop the run? |
+| --- | --- | --- |
+| **Step** — Implement, Push, Pull request, Merge | yes | no |
+| **Gate** — Size, Protected files, Test written, Builds, Tests pass, Reviewed | no | yes |
+
+A step cannot refuse and a gate cannot write. That single boundary is what makes a composition
+readable: every block that could stop the run is a gate, and you can see all of them at a glance.
+
+Each step is **its own model session**. Two steps in one agent share the task and the worktree and
+nothing else — which is why *analyse, then implement* is genuinely different from asking one model
+to do both: the second step reads what the first wrote, not what it was thinking.
+
+**Merging is a step, not a switch.** There is no "auto-merge" checkbox and no rule that ties it to
+a review setting. An agent merges because its sequence ends with a Merge block; leave it out and
+the run stops at the pull request. What you read is what runs.
+
+Three agents ship with it — **Default**, **With security review**, **Merges its own work** — and a
+project that never opens the editor runs Default.
+
+### The machine is not trusted, by construction
+
+This is the part that took the longest to get right, and it is why the hand-over is safe to use on
+a real repository:
+
+| Guarantee | Why it holds |
 | --- | --- |
-| **1. It starts as a question** | The PM agent reads the board, notices what is missing and brings you the decision — not a pile of tickets you never asked for. |
-| **2. You approve it** | Assign the task to an agent and drag it into the column you approve from. That pair *is* the hand-over. Until then it is a proposal and no worker touches it. |
-| **3. The agent takes it** | A worker you run yourself claims it, works in its own git worktree, and reports each phase back onto the board — branch, edits, tests, model quota left. |
-| **4. It stops** | Every gate you configured runs, then it opens a pull request and hands the task back. Nothing merges, because you said a person reads the diff. |
-| **5. You finish it** | Accept, and it is merged, moved, and written into the task's own history: who did what, and when. |
+| **The server never sends a path** | An assignment names a task and a git remote. The worker resolves its own checkout from a file on its own machine, so where anything lives stays a local decision. |
+| **A read-only step cannot be talked into writing** | `Read only` becomes a tool list the worker builds itself. It is not a thing the board can express, so no prompt typed into a task can grant write access. |
+| **A check the machine does not implement stops the run** | A gate naming an unknown kind refuses rather than skipping — a missing check must never look like a check that passed. |
+| **Nothing executes the repo's own scripts unreviewed** | The editor refuses a Builds or Tests-pass gate over a change that Protected files has not read first, so a script the agent just wrote cannot run before something checked whether it was allowed to write it. |
+| **The worker holds one credential, and never the database** | It talks to the app over REST with a `cpw_` credential registration minted. A box executing agent-written code has no business holding database credentials. |
+| **It pushes as an account you named** | `gh auth switch` is global state on a developer machine, so the identity is pinned per worker rather than left to whatever somebody switched to last. |
+| **A held task refuses to move** | While a run holds a task, a status change that would leave the column is refused with **409** through every writer — board, edit form, MCP, PM agent. Forcing past it is a person's gesture: any machine credential is refused. |
+| **Failure lands in front of a human** | A usage limit returns the task with its attempt refunded; a crash spends one. A repeating failure runs out of retries and stops, instead of cycling forever. |
 
-## What you get
+The whole run reports onto the task as it happens, so **the task's comments are the run log** —
+branch, edits, which gate said no, how much model quota is left. No side channel, no CI tab.
+
+📖 The full story: [Agents](https://board-planner.com/docs/ai/agents/) ·
+[Execution workers](https://board-planner.com/docs/ai/execution-workers/) ·
+[`worker/README.md`](worker/README.md)
+
+## The rest of the board
 
 ### It's a board first
 
 Columns you name, in an order you choose. Each one is mapped to a role automation understands
 (`backlog`, `approved`, `active`, `review`, `blocked`, `done`), so renaming *Up next* to *Ready*
-breaks nothing. Drag-and-drop board, list view, sprints, dependencies and subtasks, recurring tasks, and
-⌘K search across every task from anywhere in the app.
+breaks nothing — and any column with the `review` role is a stop sign for automation, where work
+waits for a person. Drag-and-drop board, list view, sprints, dependencies and subtasks, recurring
+tasks, and ⌘K search across every task from anywhere in the app.
 
 It follows your system theme, and the whole app is built for both:
 
@@ -69,25 +127,6 @@ a side channel. Name a branch `bp-8/dark-mode` and the pull request finds its ta
 Twelve MCP tools over HTTP put the board in your terminal, so Claude Code reads the backlog, claims
 a task and moves it — through the same permissions a teammate gets. API tokens can be scoped to
 specific projects, and the scope is enforced centrally, so it holds for REST and MCP alike.
-
-### You hand it over, it hands it back
-
-An **execution worker** is a coding agent you run on a machine you choose. The board only ever tells
-it which task and which repository — never where anything lives. It works in an isolated git
-worktree, so the checkout you are sitting in is never touched, and it stops at the column where you
-said a person has to look.
-
-### And nothing merges without your rules
-
-A **gate** is a check that has to pass before anything merges: diff size, paths you declared off
-limits, tests present and green, a build, and a second model reading the diff. You choose which run.
-The first one that says no hands the task back to a person, with the reason attached, instead of
-merging anyway.
-
-> [!NOTE]
-> Any column with the `review` role is a stop sign for automation. Work waits there for a person —
-> and while a run holds a task, moving it out of its column is refused with a 409 through every
-> writer: the board, the edit form, MCP and the PM agent.
 
 ### Enough to answer the Monday question
 
@@ -303,7 +342,15 @@ Give an e2e run its own ports and database, since the fixture is not isolated by
 E2E_PORT=3200 PM_STUB_PORT=3201 E2E_MONGODB_URI=mongodb://localhost:27017/local_e2e npx playwright test
 ```
 
-## Documentation
+## Website and documentation
+
+**[board-planner.com](https://board-planner.com)** is the product tour — a board you can actually
+drag a card on, a worker run you can try to interrupt while it is going, and the gate that refuses.
+If this README interested you, that page is the five minutes worth spending next.
+
+**[board-planner.com/docs](https://board-planner.com/docs)** is the manual, twenty-eight pages of
+it, and the single source of truth: it lives in the `board-planner-site` repository and publishes
+on merge, so a page there is never behind the product.
 
 | Page | Covers |
 | --- | --- |
