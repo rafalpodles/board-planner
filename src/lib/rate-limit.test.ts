@@ -210,14 +210,14 @@ describe("clearing an account's counters", () => {
   // client address the key they filled is the shared one. So a password change cannot delete "its"
   // key — it has to clear the account across every address (BP-353).
   it("forgets failures recorded from every address, not just one", async () => {
-    const fromAttacker = lockoutKey("203.0.113.9", "rafal");
-    const fromAnonymous = lockoutKey("-", "rafal");
-    const fromElsewhere = lockoutKey("198.51.100.4", "rafal");
+    const fromAttacker = lockoutKey("203.0.113.9", "owner");
+    const fromAnonymous = lockoutKey("-", "owner");
+    const fromElsewhere = lockoutKey("198.51.100.4", "owner");
     for (const k of [fromAttacker, fromAnonymous, fromElsewhere]) {
       for (let i = 0; i < 10; i++) await recordFailedAttempt(k);
     }
 
-    await clearAccountAttempts("rafal");
+    await clearAccountAttempts("owner");
 
     expect(await isRateLimited(fromAttacker, 10)).toBe(false);
     expect(await isRateLimited(fromAnonymous, 10)).toBe(false);
@@ -225,21 +225,21 @@ describe("clearing an account's counters", () => {
   });
 
   it("leaves another account's counters alone", async () => {
-    const mine = lockoutKey("-", "rafal");
+    const mine = lockoutKey("-", "owner");
     const theirs = lockoutKey("-", "somebody-else");
     for (let i = 0; i < 10; i++) await recordFailedAttempt(theirs);
     for (let i = 0; i < 10; i++) await recordFailedAttempt(mine);
 
-    await clearAccountAttempts("rafal");
+    await clearAccountAttempts("owner");
 
     expect(await isRateLimited(theirs, 10)).toBe(true);
   });
 
   it("normalises the username the same way the key does", async () => {
-    const key = lockoutKey("-", "rafal");
+    const key = lockoutKey("-", "owner");
     for (let i = 0; i < 10; i++) await recordFailedAttempt(key);
 
-    await clearAccountAttempts("  RAFAL  ");
+    await clearAccountAttempts("  OWNER  ");
 
     expect(await isRateLimited(key, 10)).toBe(false);
   });
@@ -248,18 +248,18 @@ describe("clearing an account's counters", () => {
     const shared = sourceKey("203.0.113.9");
     for (let i = 0; i < SHARED_SOURCE_ATTEMPTS; i++) await recordFailedAttempt(shared);
 
-    await clearAccountAttempts("rafal");
+    await clearAccountAttempts("owner");
 
     expect(await isRateLimited(shared, SHARED_SOURCE_ATTEMPTS)).toBe(true);
   });
 
   it("stays within its own scope, so clearing a login lockout leaves the profile form's counter", async () => {
-    const login = lockoutKey("-", "rafal");
-    const profile = lockoutKey("-", "rafal", "password-change");
+    const login = lockoutKey("-", "owner");
+    const profile = lockoutKey("-", "owner", "password-change");
     for (let i = 0; i < 10; i++) await recordFailedAttempt(login);
     for (let i = 0; i < 10; i++) await recordFailedAttempt(profile);
 
-    await clearAccountAttempts("rafal");
+    await clearAccountAttempts("owner");
 
     expect(await isRateLimited(login, 10)).toBe(false);
     expect(await isRateLimited(profile, 10)).toBe(true);

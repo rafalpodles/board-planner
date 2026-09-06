@@ -88,7 +88,7 @@ let currentSearchParams = new URLSearchParams();
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/hooks/use-auth", () => ({
   useAuth: () => ({
-    user: { username: "rpo", collapseEmptyColumns: false },
+    user: { username: "owner", collapseEmptyColumns: false },
     isAdmin: false,
   }),
 }));

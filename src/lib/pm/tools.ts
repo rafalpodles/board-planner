@@ -141,7 +141,7 @@ export function refuseUndeclaredArgs(tool: PmTool, args: Record<string, unknown>
  * BP-419 made the PM's assignment a real hand-over, but not every hand-over completes: a task
  * naming no agent is one a person is doing, and a project not enabled for workers runs nothing at
  * all. Those have to be said where the PM says it assigned the work — the Agent row on the task
- * detail is a view nobody reopens after reading "BP-x → @rafal" in the chat.
+ * detail is a view nobody reopens after reading "BP-x → @owner" in the chat.
  *
  * Deliberately not a promise of the opposite. The claim also weighs open blockers, spent attempts
  * and whether that person owns a live machine at all, none of which is knowable here, so "" means
@@ -163,7 +163,7 @@ async function whyItWillNotRun(
   // assignment* — `updateTask` stamps `assignedBy` only when the assignee actually moves, so
   // re-assigning a legacy task to the person who already holds it leaves the assigner unrecorded,
   // and re-assigning a task somebody else handed over leaves theirs. Both then answered
-  // "BP-x → @rpo" with no caveat and were never claimed: the exact silence this ticket exists to
+  // "BP-x → @owner" with no caveat and were never claimed: the exact silence this ticket exists to
   // end, reproduced inside the feature written to end it.
   switch (handover.reason) {
     case "no-agent":

@@ -67,7 +67,7 @@ interface StoredIdentity extends Identity {
 const REGISTER_RETRY_MS = 30_000;
 
 // The server mints this as a Mongo ObjectId, and repos.ts interpolates it into a filesystem path —
-// `join` normalises "..", so a workerId of "../../../../Users/rpo/Library/LaunchAgents" relocated
+// `join` normalises "..", so a workerId of "../../../../Users/owner/Library/LaunchAgents" relocated
 // the worktree root outside the repos.json allowlist, which is the worker's whole containment
 // story. Checked on both sides of the disk: whoever controls the API answers the registration, and
 // the identity file itself sits under a state directory the agent's own HOME reaches.

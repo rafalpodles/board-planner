@@ -76,7 +76,7 @@ export async function POST(request: Request) {
       host,
       platform: String(body.platform ?? ""),
       version: String(body.version ?? ""),
-      // Names the machine's identity after the person who enrolled it — "Rafal · MacBook"
+      // Names the machine's identity after the person who enrolled it — "Owner · MacBook"
       owner: await enrolmentTokenOwner(consumed.tokenId),
       ownerId: (await enrolmentTokenOwnerId(consumed.tokenId)) ?? undefined,
     });

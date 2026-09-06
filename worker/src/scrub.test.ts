@@ -46,9 +46,9 @@ const rows: Row[] = [
   {
     // A credential in userinfo is caught by where it sits, not by matching a known token shape
     name: "a credential in a pull request url's userinfo",
-    input: "Merged https://x-access-token:ghp_0123456789abcdefghijABCDEFGHIJ012345@github.com/rafalpodles/BoardPlanner/pull/7",
+    input: "Merged https://x-access-token:ghp_0123456789abcdefghijABCDEFGHIJ012345@github.com/owner/BoardPlanner/pull/7",
     mustNotAppear: ["x-access-token", "ghp_0123456789"],
-    mustAppear: ["https://[redacted]@github.com/rafalpodles/BoardPlanner/pull/7", "Merged"],
+    mustAppear: ["https://[redacted]@github.com/owner/BoardPlanner/pull/7", "Merged"],
   },
   {
     // The counterexample the no-\b decision turns on. Nothing pinned it before, so the tempting
@@ -89,11 +89,11 @@ const rows: Row[] = [
   },
   {
     name: "a GitHub token embedded in a push failure",
-    input: `could not push \`cp-161/worker\`: remote: Invalid username or password for https://x-access-token:${GITHUB_PAT}@github.com/rafalpodles/BoardPlanner.git`,
+    input: `could not push \`cp-161/worker\`: remote: Invalid username or password for https://x-access-token:${GITHUB_PAT}@github.com/owner/BoardPlanner.git`,
     mustNotAppear: [GITHUB_PAT, "0123456789abcdefghij"],
     mustAppear: [
       "remote: Invalid username or password",
-      "github.com/rafalpodles/BoardPlanner.git",
+      "github.com/owner/BoardPlanner.git",
       "cp-161/worker",
       "[redacted]",
     ],
@@ -130,12 +130,12 @@ const rows: Row[] = [
   },
   {
     name: "a secret mid-line leaves both halves of the line standing",
-    input: `the build gate rejected the change: \`npm ci\` failed with GITHUB_TOKEN=${GITHUB_PAT} — 403 while fetching git+https://github.com/rafalpodles/private-dep.git`,
+    input: `the build gate rejected the change: \`npm ci\` failed with GITHUB_TOKEN=${GITHUB_PAT} — 403 while fetching git+https://github.com/owner/private-dep.git`,
     mustNotAppear: [GITHUB_PAT],
     mustAppear: [
       "the build gate rejected the change",
       "GITHUB_TOKEN=[redacted]",
-      "403 while fetching git+https://github.com/rafalpodles/private-dep.git",
+      "403 while fetching git+https://github.com/owner/private-dep.git",
     ],
   },
   {

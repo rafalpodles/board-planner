@@ -15,7 +15,7 @@ const TWO_ACCOUNTS = `github.com
   - Token: gho_************************************
   - Token scopes: 'gist', 'read:org', 'repo'
 
-  ✓ Logged in to github.com account rafalpodles (keyring)
+  ✓ Logged in to github.com account owner (keyring)
   - Active account: false
   - Git operations protocol: ssh
   - Token: gho_************************************
@@ -36,7 +36,7 @@ describe("parseGhAccounts", () => {
   it("reads every account and which one is active", () => {
     expect(parseGhAccounts(TWO_ACCOUNTS)).toEqual([
       { login: "other-account", active: true },
-      { login: "rafalpodles", active: false },
+      { login: "owner", active: false },
     ]);
   });
 
@@ -75,12 +75,12 @@ describe("parseGhAccounts", () => {
 describe("usableAccount", () => {
   const accounts = [
     { login: "other-account", active: true },
-    { login: "rafalpodles", active: false },
+    { login: "owner", active: false },
   ];
 
   it("uses the pinned account when gh knows it", () => {
-    expect(usableAccount(accounts, "rafalpodles")).toEqual({
-      login: "rafalpodles",
+    expect(usableAccount(accounts, "owner")).toEqual({
+      login: "owner",
       pinned: true,
       known: true,
     });
@@ -111,8 +111,8 @@ describe("usableAccount", () => {
 
 describe("pinnedAccount", () => {
   it("reads the login out of the state directory", () => {
-    const read = () => JSON.stringify({ account: "rafalpodles" });
-    expect(pinnedAccount(read, "/state")).toBe("rafalpodles");
+    const read = () => JSON.stringify({ account: "owner" });
+    expect(pinnedAccount(read, "/state")).toBe("owner");
   });
 
   // Both shapes of "not there": the worker's own reader answers null, a plain fs read throws
@@ -141,11 +141,11 @@ describe("resolveGhToken", () => {
   it("asks gh for the named account's token", async () => {
     const seen: { command?: string; args?: string[] } = {};
     const deps = runner({ stdout: "gho_abc123\n" }, seen);
-    await expect(resolveGhToken(deps, "/opt/homebrew/bin/gh", "rafalpodles", {})).resolves.toBe(
+    await expect(resolveGhToken(deps, "/opt/homebrew/bin/gh", "owner", {})).resolves.toBe(
       "gho_abc123"
     );
     expect(seen.command).toBe("/opt/homebrew/bin/gh");
-    expect(seen.args).toEqual(["auth", "token", "--user", "rafalpodles"]);
+    expect(seen.args).toEqual(["auth", "token", "--user", "owner"]);
   });
 
   it("resolves nothing for no account, rather than asking for the active one's token", async () => {

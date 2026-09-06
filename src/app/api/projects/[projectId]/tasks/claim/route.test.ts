@@ -406,7 +406,7 @@ describe("the worker's owner travels with the claim", () => {
     verifyWorkerCredential.mockResolvedValue({
       _id: OID,
       assignments: [],
-      owner: { _id: "u-owner", username: "rpo", toString: () => "[object Object]" },
+      owner: { _id: "u-owner", username: "owner", toString: () => "[object Object]" },
     });
 
     await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });

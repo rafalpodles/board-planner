@@ -5,7 +5,7 @@ import { Comments } from "./Comments";
 
 const { api, auth } = vi.hoisted(() => ({
   api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn() },
-  auth: { user: { _id: "u1", username: "rpo", fullName: "Rafal Podles" } },
+  auth: { user: { _id: "u1", username: "owner", fullName: "Owner Name" } },
 }));
 
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));

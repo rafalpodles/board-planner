@@ -31,7 +31,7 @@ const emptyStats: Stats = {
   done: 0,
   statusBreakdown: { todo: 4 },
   categoryBreakdown: { bug: 4 },
-  assigneeBreakdown: { rpo: 4 },
+  assigneeBreakdown: { owner: 4 },
   difficultyBreakdown: { M: 4 },
   velocity: weeks.map((week) => ({ week, count: 0 })),
   createdOverTime: weeks.map((week) => ({ week, created: 0, completed: 0 })),

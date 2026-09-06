@@ -27,7 +27,7 @@ export function workerDisplayName(machine: string, owner: string): string {
   // The cap applies to the composed string, not each half separately: the two inputs are already
   // bounded well under it on their own (register.ts caps `name` at 120, but a display name that
   // long has never been the point), and a name it still had to shorten is display text, not an
-  // identifier — a truncated "Rafal · MacBook P" is a worse cosmetic than a rejected enrolment
+  // identifier — a truncated "Owner · MacBook P" is a worse cosmetic than a rejected enrolment
   // would be a functional one.
   return capLength(composed, FULL_NAME_MAX_LENGTH);
 }

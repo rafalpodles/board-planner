@@ -51,11 +51,11 @@ describe("logInstanceAudit", () => {
       action: "user_deleted",
       target: "someone",
       user: "admin-1",
-      actorUsername: "rafal",
+      actorUsername: "owner",
     });
 
     expect(create).toHaveBeenCalledWith(
-      expect.objectContaining({ user: "admin-1", actorUsername: "rafal" })
+      expect.objectContaining({ user: "admin-1", actorUsername: "owner" })
     );
   });
 

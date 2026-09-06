@@ -93,7 +93,7 @@ describe("the workerId a registration hands back", () => {
   it("is refused when it would traverse out of the worktree root", async () => {
     const deps = depsWith({
       stored: null,
-      registerResponse: { workerId: "../../../../Users/rpo/Library/LaunchAgents" },
+      registerResponse: { workerId: "../../../../Users/owner/Library/LaunchAgents" },
     });
 
     await startHeartbeat(deps).tick();

@@ -10,8 +10,8 @@ final class ProjectSyncTests: XCTestCase {
             available: available, workersEnabled: true, servedHere: servedHere, wanted: wanted)
     }
 
-    private let bpRemote = "git@github.com:rafalpodles/board-planner.git"
-    private let sbRemote = "https://github.com/rafalpodles/ventures"
+    private let bpRemote = "git@github.com:owner/board-planner.git"
+    private let sbRemote = "https://github.com/owner/ventures"
 
     func testItClonesWhatWasPickedAndIsMissing() {
         let plan = ProjectSync.plan(
@@ -48,7 +48,7 @@ final class ProjectSyncTests: XCTestCase {
     func testACheckoutAddedByHandCountsAsTheProjectsOwn() {
         let plan = ProjectSync.plan(
             catalogue: [row("SB", repo: sbRemote, wanted: true, servedHere: true)],
-            checkouts: ["/Users/rpo/code/my-ventures": "git@github.com:rafalpodles/ventures.git"])
+            checkouts: ["/Users/owner/code/my-ventures": "git@github.com:owner/ventures.git"])
 
         XCTAssertTrue(plan.isEmpty)
     }
@@ -58,9 +58,9 @@ final class ProjectSyncTests: XCTestCase {
     func testUntickingRemovesACheckoutOutsideTheAppsOwnFolder() {
         let plan = ProjectSync.plan(
             catalogue: [row("SB", repo: sbRemote, wanted: false, servedHere: true)],
-            checkouts: ["/Users/rpo/code/my-ventures": "git@github.com:rafalpodles/ventures.git"])
+            checkouts: ["/Users/owner/code/my-ventures": "git@github.com:owner/ventures.git"])
 
-        XCTAssertEqual(plan.remove.map(\.path), ["/Users/rpo/code/my-ventures"])
+        XCTAssertEqual(plan.remove.map(\.path), ["/Users/owner/code/my-ventures"])
     }
 
     // Reaching for it would be one failure per poll, forever, for a project the screen already
@@ -77,7 +77,7 @@ final class ProjectSyncTests: XCTestCase {
     func testItLeavesACheckoutNoProjectClaims() {
         let plan = ProjectSync.plan(
             catalogue: [row("BP", repo: bpRemote, wanted: true, servedHere: true)],
-            checkouts: ["/checkouts/BP": bpRemote, "/Users/rpo/code/something-else": "git@github.com:o/other.git"])
+            checkouts: ["/checkouts/BP": bpRemote, "/Users/owner/code/something-else": "git@github.com:o/other.git"])
 
         XCTAssertTrue(plan.remove.isEmpty)
     }

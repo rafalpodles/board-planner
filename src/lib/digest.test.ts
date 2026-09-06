@@ -44,7 +44,7 @@ const SECOND_BOARD = "69a52e3b399b27d3cbb2c5a7";
 // `role` is what the grant lookup reads; `emailNotifications` is what the grid falls back to for
 // an account that predates it. The digest asks both questions, so the fixture answers both.
 const WAITING = [
-  { _id: "u1", email: "rpo@example.com", username: "rpo", role: "member", emailNotifications: true },
+  { _id: "u1", email: "owner@example.com", username: "owner", role: "member", emailNotifications: true },
 ];
 
 const PROJECT = "507f1f77bcf86cd799439021";

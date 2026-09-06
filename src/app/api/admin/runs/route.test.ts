@@ -55,7 +55,7 @@ function runDoc(overrides: Record<string, unknown> = {}) {
     finishedAt: new Date("2026-08-25T10:04:00.000Z"),
     costUsd: 0.42,
     project: { _id: "p1", key: "BP", name: "Board Planner" },
-    worker: { _id: "w1", name: "rafal-mac" },
+    worker: { _id: "w1", name: "owner-mac" },
     ...overrides,
   };
 }
@@ -107,7 +107,7 @@ describe("GET /api/admin/runs", () => {
     expect(run.taskKey).toBe("BP-158");
     expect(run.projectKey).toBe("BP");
     expect(run.projectName).toBe("Board Planner");
-    expect(run.workerName).toBe("rafal-mac");
+    expect(run.workerName).toBe("owner-mac");
     expect(run.minutes).toBe(4);
   });
 

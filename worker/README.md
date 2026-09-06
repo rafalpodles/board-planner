@@ -73,7 +73,7 @@ on the box, so a worker left to gh's own resolution pushes as whichever account 
 last. Name one instead, in `<CP_STATE_DIR>/github.json`:
 
 ```json
-{ "account": "rafalpodles" }
+{ "account": "owner" }
 ```
 
 The menubar app writes it — Preferences → Connection, or the picker during onboarding, both offered
@@ -257,7 +257,7 @@ and `SIGINT` both finish the task in flight before the loop exits.
   read your config.
 - **Nothing the server sends becomes a path or an option.** Everything below arrives over HTTP from
   whichever server this worker is enrolled with, and everything past that boundary runs on somebody's
-  laptop at their uid. Two of these were live: a `workerId` of `../../../../Users/rpo/Library/LaunchAgents`
+  laptop at their uid. Two of these were live: a `workerId` of `../../../../Users/owner/Library/LaunchAgents`
   relocated the worktree root outside the `repos.json` allowlist, and a `baseBranch` of
   `--output=/tmp/pwned` was read by `git diff` as an option rather than a revision — measured on git
   2.50.1, exit 0, file created. Both are fixed; the rest of the table is the sweep that found them

@@ -13,7 +13,7 @@ vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/hooks/use-auth", () => ({
   useAuth: () => ({
     // Off so every column keeps a body: a rail has no drop area to aim a card at
-    user: { username: "rpo", collapseEmptyColumns: false },
+    user: { username: "owner", collapseEmptyColumns: false },
     isAdmin: false,
   }),
 }));

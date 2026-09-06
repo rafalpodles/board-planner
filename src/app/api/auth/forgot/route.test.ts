@@ -26,7 +26,7 @@ vi.mock("@/models/user", () => ({ User: { findOne: userFindOne } }));
 const { POST } = await import("./route");
 const { resetRateLimits } = await import("@/lib/rate-limit");
 
-function post(identifier: unknown = "rafal") {
+function post(identifier: unknown = "owner") {
   return new Request("http://x/api/auth/forgot", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -46,7 +46,7 @@ beforeEach(async () => {
   isEmailConfigured.mockReturnValue(true);
   issueResetToken.mockResolvedValue("cpr_deadbeef");
   sendEmail.mockResolvedValue(true);
-  found({ _id: "u1", username: "rafal", email: "rafal@example.com", fullName: "Rafal" });
+  found({ _id: "u1", username: "owner", email: "owner@example.com", fullName: "Owner" });
 });
 
 describe("POST /api/auth/forgot", () => {
@@ -55,7 +55,7 @@ describe("POST /api/auth/forgot", () => {
 
     expect(res.status).toBe(200);
     expect(sendEmail).toHaveBeenCalledWith(
-      expect.objectContaining({ to: "rafal@example.com" })
+      expect.objectContaining({ to: "owner@example.com" })
     );
     expect(sendEmail.mock.calls[0][0].text).toContain(
       "https://board.example.com/reset?token=cpr_deadbeef"
@@ -66,7 +66,7 @@ describe("POST /api/auth/forgot", () => {
   // Every outcome below has to be indistinguishable from the one above.
   it.each([
     ["no such account", null],
-    ["an account with no address", { _id: "u1", username: "rafal", email: "" }],
+    ["an account with no address", { _id: "u1", username: "owner", email: "" }],
   ])("answers identically for %s", async (_case, user) => {
     found(user);
 
@@ -97,14 +97,14 @@ describe("POST /api/auth/forgot", () => {
   // Both lookups run every time, in parallel: doing the second only on a miss makes the miss path
   // slower than the hit path, which is the enumeration oracle read backwards
   it("looks for the address and the username, always, and normalises both", async () => {
-    await POST(post("  Rafal@Example.COM "));
+    await POST(post("  Owner@Example.COM "));
 
     expect(userFindOne).toHaveBeenCalledTimes(2);
     expect(userFindOne).toHaveBeenCalledWith(
-      expect.objectContaining({ email: "rafal@example.com" })
+      expect.objectContaining({ email: "owner@example.com" })
     );
     expect(userFindOne).toHaveBeenCalledWith(
-      expect.objectContaining({ username: "rafal@example.com" })
+      expect.objectContaining({ username: "owner@example.com" })
     );
   });
 
@@ -148,7 +148,7 @@ describe("POST /api/auth/forgot", () => {
     found(null);
     for (let i = 0; i < 10; i++) await POST(post());
 
-    found({ _id: "u1", username: "rafal", email: "rafal@example.com" });
+    found({ _id: "u1", username: "owner", email: "owner@example.com" });
     const res = await POST(post());
 
     expect(res.status).toBe(429);

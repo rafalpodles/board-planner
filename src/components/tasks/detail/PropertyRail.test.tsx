@@ -32,7 +32,7 @@ const BOARD: AnyColumn[] = [
 ];
 
 const users = [
-  { _id: "u1", username: "rpo", fullName: "Rafal Podles" },
+  { _id: "u1", username: "owner", fullName: "Owner Name" },
   { _id: "u2", username: "claude", fullName: "Claude Code" },
 ] as ApiUser[];
 
@@ -77,7 +77,7 @@ function renderRail(over: Partial<React.ComponentProps<typeof PropertyRail>> = {
       customFields={[]}
       stored={{ agent: null, assignee: null, assignedBy: null, status: "todo" }}
       onRepairAssigner={() => {}}
-      currentUsername="rpo"
+      currentUsername="owner"
       reporter="Claude Code"
       onDelete={() => {}}
       {...over}
@@ -105,8 +105,8 @@ describe("PropertyRail", () => {
   it("edits the assignee by username, which is what the API takes", async () => {
     const set = renderRail();
     await openRow("Assignee");
-    await pick(/Rafal Podles/);
-    expect(set).toHaveBeenCalledWith("assignee", "rpo");
+    await pick(/Owner Name/);
+    expect(set).toHaveBeenCalledWith("assignee", "owner");
   });
 
   /**
@@ -137,7 +137,7 @@ describe("PropertyRail", () => {
   });
 
   it("clears the assignee to null rather than an empty string", async () => {
-    const set = renderRail({ draft: { ...draft, assignee: "rpo" } });
+    const set = renderRail({ draft: { ...draft, assignee: "owner" } });
     await openRow("Assignee");
     await pick(/Unassigned/);
     expect(set).toHaveBeenCalledWith("assignee", null);
@@ -513,7 +513,7 @@ describe("the Agent row", () => {
         ...(BOTH as unknown as Record<string, unknown>[]),
         { _id: "a6", name: "Their own agent", scope: "user", description: "" },
       ] as never;
-      renderRail({ agents: ALSO_SOMEBODY_ELSES, currentUsername: "rpo" });
+      renderRail({ agents: ALSO_SOMEBODY_ELSES, currentUsername: "owner" });
       await openRow("Agent");
 
       expect(screen.queryByTestId("personal-agents-withheld")).not.toBeNull();
@@ -536,7 +536,7 @@ describe("the Agent row", () => {
     }
 
     it("offers it on a task assigned to me", async () => {
-      renderRail({ agents: MINE, draft: { ...draft, assignee: "rpo" }, currentUsername: "rpo" });
+      renderRail({ agents: MINE, draft: { ...draft, assignee: "owner" }, currentUsername: "owner" });
 
       expect((await agentOptions()).join("|")).toContain("My own agent");
       expect(screen.queryByTestId("personal-agents-withheld")).toBeNull();
@@ -545,14 +545,14 @@ describe("the Agent row", () => {
     // The shape the server refuses. Asserted on the option list rather than on the note, so a
     // version that printed the sentence and still offered the control would fail.
     it("withholds it on a task assigned to somebody else", async () => {
-      renderRail({ agents: MINE, draft: { ...draft, assignee: "claude" }, currentUsername: "rpo" });
+      renderRail({ agents: MINE, draft: { ...draft, assignee: "claude" }, currentUsername: "owner" });
 
       expect((await agentOptions()).join("|")).not.toContain("My own agent");
     });
 
     // …and the other half: withholding it without saying so is the silent refusal, just moved
     it("says why it is not there, rather than shortening the list in silence", async () => {
-      renderRail({ agents: MINE, draft: { ...draft, assignee: "claude" }, currentUsername: "rpo" });
+      renderRail({ agents: MINE, draft: { ...draft, assignee: "claude" }, currentUsername: "owner" });
 
       expect(screen.getByTestId("personal-agents-withheld").textContent).toMatch(
         /personal agent only runs on a task you have assigned to yourself/i
@@ -561,7 +561,7 @@ describe("the Agent row", () => {
 
     // Nobody's task is not my task, and it is also what a released task looks like
     it("withholds it on an unassigned task", async () => {
-      renderRail({ agents: MINE, currentUsername: "rpo" });
+      renderRail({ agents: MINE, currentUsername: "owner" });
 
       expect((await agentOptions()).join("|")).not.toContain("My own agent");
       expect(screen.queryByTestId("personal-agents-withheld")).not.toBeNull();
@@ -575,9 +575,9 @@ describe("the Agent row", () => {
     it("offers it as soon as the draft assigns the task to me, before anything is saved", async () => {
       renderRail({
         agents: MINE,
-        draft: { ...draft, assignee: "rpo" },
+        draft: { ...draft, assignee: "owner" },
         stored: { agent: null, assignee: null, assignedBy: null, status: "todo" },
-        currentUsername: "rpo",
+        currentUsername: "owner",
       });
 
       expect((await agentOptions()).join("|")).toContain("My own agent");
@@ -592,7 +592,7 @@ describe("the Agent row", () => {
       renderRail({
         agents: MINE,
         draft: { ...draft, assignee: "claude", agent: "a3" },
-        currentUsername: "rpo",
+        currentUsername: "owner",
       });
 
       expect(
@@ -605,7 +605,7 @@ describe("the Agent row", () => {
     // Nothing to withhold, nothing to explain: the note must not appear on a board whose agents are
     // all the project's or the instance's
     it("says nothing when there is no personal agent to withhold", () => {
-      renderRail({ agents: AGENTS, draft: { ...draft, assignee: "claude" }, currentUsername: "rpo" });
+      renderRail({ agents: AGENTS, draft: { ...draft, assignee: "claude" }, currentUsername: "owner" });
 
       expect(screen.queryByTestId("personal-agents-withheld")).toBeNull();
     });
@@ -625,7 +625,7 @@ describe("the Agent row", () => {
 
     // The same guard from the other side: a reader who is not the assignee is not the assignee
     it("withholds it from a reader the app cannot name, on somebody's task", async () => {
-      renderRail({ agents: MINE, draft: { ...draft, assignee: "rpo" }, currentUsername: null });
+      renderRail({ agents: MINE, draft: { ...draft, assignee: "owner" }, currentUsername: null });
 
       expect((await agentOptions()).join("|")).not.toContain("My own agent");
     });
@@ -663,7 +663,7 @@ describe("the Agent row", () => {
         agents: AGENTS,
         draft: { ...draft, assignee: "claude", agent: "a9" },
         stored: CARRIED,
-        currentUsername: "rpo",
+        currentUsername: "owner",
         columns: BOARD,
         ...over,
       });
@@ -731,7 +731,7 @@ describe("the Agent row", () => {
         stored: {
           agent: { _id: "a2", name: "With security review" },
           assignee: { _id: "u2", username: "claude", fullName: "Claude Code" },
-          assignedBy: { _id: "u1", username: "rpo", fullName: "Rafal Podles" },
+          assignedBy: { _id: "u1", username: "owner", fullName: "Owner Name" },
           status: "ready",
         } as unknown as ApiTask,
         columns: BOARD,
@@ -753,7 +753,7 @@ describe("the Agent row", () => {
  * opening sentence, so a text matcher would pass with the wrong branch on screen.
  */
 describe("the agent picker says when nothing will run the task", () => {
-  const RAFAL = { _id: "u1", username: "rpo", fullName: "Rafal Podles" } as ApiUser;
+  const OWNER = { _id: "u1", username: "owner", fullName: "Owner Name" } as ApiUser;
   const AGENT = [{ _id: "a1", name: "Default" }] as React.ComponentProps<
     typeof PropertyRail
   >["agents"];
@@ -767,11 +767,11 @@ describe("the agent picker says when nothing will run the task", () => {
     renderRail({
       agents: AGENT,
       columns: BOARD,
-      draft: { ...draft, agent: "a1", assignee: "rpo", ...over },
+      draft: { ...draft, agent: "a1", assignee: "owner", ...over },
       stored: {
         agent: "a1",
-        assignee: RAFAL,
-        assignedBy: { ...RAFAL },
+        assignee: OWNER,
+        assignedBy: { ...OWNER },
         status: "ready",
         ...stored,
       } as ApiTask,
@@ -861,7 +861,7 @@ describe("the agent picker says when nothing will run the task", () => {
   // The verdict depends on assignedBy, which only the server writes. Judging an unsaved draft
   // would tell somebody who just picked an assignee that their own task will not run.
   it("says nothing while the draft has an edit the server has not seen", () => {
-    withStored({ assignee: null }, { assignee: "rpo" });
+    withStored({ assignee: null }, { assignee: "owner" });
 
     expect(screen.queryByTestId("handover-notice")).toBeNull();
   });
@@ -887,15 +887,15 @@ describe("the agent picker says when nothing will run the task", () => {
  * rail asks for one.
  */
 describe("re-assigning to record an assigner the board never had", () => {
-  const RAFAL = { _id: "u1", username: "rpo", fullName: "Rafal Podles" } as ApiUser;
+  const OWNER = { _id: "u1", username: "owner", fullName: "Owner Name" } as ApiUser;
 
   function railFor(stored: Partial<Omit<ApiTask, "status">> & { status?: string }) {
     const onRepairAssigner = vi.fn();
     renderRail({
       agents: [{ _id: "a1", name: "Default" }] as React.ComponentProps<typeof PropertyRail>["agents"],
       columns: BOARD,
-      draft: { ...draft, agent: "a1", assignee: "rpo" },
-      stored: { agent: "a1", assignee: RAFAL, assignedBy: { ...RAFAL }, status: "ready", ...stored } as ApiTask,
+      draft: { ...draft, agent: "a1", assignee: "owner" },
+      stored: { agent: "a1", assignee: OWNER, assignedBy: { ...OWNER }, status: "ready", ...stored } as ApiTask,
       onRepairAssigner,
     });
     return onRepairAssigner;
@@ -904,9 +904,9 @@ describe("re-assigning to record an assigner the board never had", () => {
   it("forces the write when the assignee already on the task is picked again", async () => {
     const repair = railFor({ assignedBy: undefined });
     await openRow("Assignee");
-    await pick(/Rafal Podles/);
+    await pick(/Owner Name/);
 
-    expect(repair).toHaveBeenCalledWith("rpo");
+    expect(repair).toHaveBeenCalledWith("owner");
   });
 
   // Nothing to record, so nothing to force: the ordinary diff already declines to write this, and
@@ -915,7 +915,7 @@ describe("re-assigning to record an assigner the board never had", () => {
   it("leaves a task whose assigner is recorded alone", async () => {
     const repair = railFor({});
     await openRow("Assignee");
-    await pick(/Rafal Podles/);
+    await pick(/Owner Name/);
 
     expect(repair).not.toHaveBeenCalled();
   });

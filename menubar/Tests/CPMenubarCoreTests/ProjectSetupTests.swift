@@ -33,7 +33,7 @@ final class ProjectSetupTests: XCTestCase {
 
     private let sandbox = ProjectOffer(
         project: "p2", key: "SB", name: "Sandbox",
-        repositoryUrl: "https://github.com/rafalpodles/ventures")
+        repositoryUrl: "https://github.com/owner/ventures")
 
     func testItClonesTheProjectAndGrantsTheCheckout() throws {
         let git = Git()
@@ -47,7 +47,7 @@ final class ProjectSetupTests: XCTestCase {
             git.calls.first,
             [
                 "git", "-c", "protocol.ext.allow=never", "-c", "protocol.file.allow=never",
-                "clone", "--", "https://github.com/rafalpodles/ventures", "/checkouts/SB",
+                "clone", "--", "https://github.com/owner/ventures", "/checkouts/SB",
             ])
     }
 

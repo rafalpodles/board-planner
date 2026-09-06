@@ -16,7 +16,7 @@ const entry = {
   field: "name",
   oldValue: "Old",
   newValue: "New",
-  user: { _id: "u1", username: "rpo", fullName: "Rafal Podles" },
+  user: { _id: "u1", username: "owner", fullName: "Owner Name" },
   createdAt: "2026-08-01T00:00:00Z",
 };
 
@@ -30,7 +30,7 @@ describe("AuditSection", () => {
   it("names the user who made the change", async () => {
     api.get.mockResolvedValue([entry]);
     render(<AuditSection projectId="TP" active />);
-    await waitFor(() => expect(screen.getByText("rpo")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("owner")).toBeTruthy());
   });
 
   // typeof null === "object", so a deleted user used to take the populated branch and throw

@@ -53,8 +53,8 @@ import { signIn } from "./session";
  */
 
 const PROTOCOL = "1";
-const REPOSITORY = "https://github.com/rafalpodles/board-planner";
-const SECOND_REPOSITORY = "https://github.com/rafalpodles/board-planner-site";
+const REPOSITORY = "https://github.com/owner/board-planner";
+const SECOND_REPOSITORY = "https://github.com/owner/board-planner-site";
 const CHECKOUT = "/Users/somebody/code/board-planner";
 // The run seed() leaves holding TP-1 — mirrored, not imported, because seed.ts writes the literal
 const HELD_RUN_ID = "e2e-run-0001";
@@ -1014,7 +1014,7 @@ test("a machine that quarantined a checkout says so on the fleet screen, not `re
   // ready. Without it a cell that failed to render anything at all would satisfy the assertions
   // below by never containing the word.
   await heartbeat(request, {
-    preflight: { ok: true, account: "rafalpodles", checks: [{ name: "gh", ok: true, detail: "" }] },
+    preflight: { ok: true, account: "owner", checks: [{ name: "gh", ok: true, detail: "" }] },
   });
 
   await signIn(page);
@@ -1025,7 +1025,7 @@ test("a machine that quarantined a checkout says so on the fleet screen, not `re
   await heartbeat(request, {
     preflight: {
       ok: false,
-      account: "rafalpodles",
+      account: "owner",
       checks: [
         { name: "gh", ok: true, detail: "" },
         {

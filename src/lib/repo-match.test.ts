@@ -4,24 +4,24 @@ import { matchRepo, normaliseRemote, projectRemotes, sameRepo } from "./repo-mat
 describe("normaliseRemote", () => {
   it("reduces every spelling of the same repository to one form", () => {
     const forms = [
-      "git@github.com:rafalpodles/board-planner.git",
-      "git@github.com:rafalpodles/board-planner",
-      "https://github.com/rafalpodles/board-planner.git",
-      "https://github.com/rafalpodles/board-planner",
-      "ssh://git@github.com/rafalpodles/board-planner.git",
-      "rafalpodles/board-planner",
+      "git@github.com:owner/board-planner.git",
+      "git@github.com:owner/board-planner",
+      "https://github.com/owner/board-planner.git",
+      "https://github.com/owner/board-planner",
+      "ssh://git@github.com/owner/board-planner.git",
+      "owner/board-planner",
     ];
 
     expect(new Set(forms.map(normaliseRemote))).toEqual(
-      new Set(["rafalpodles/board-planner"])
+      new Set(["owner/board-planner"])
     );
   });
 
   // The remote this repository is actually cloned with. A per-account ssh alias is invisible to the
   // host it resolves to, so matching on the raw string would never fire.
   it("sees through a per-account ssh host alias", () => {
-    expect(normaliseRemote("git@github-rafalpodles:rafalpodles/board-planner.git")).toBe(
-      "rafalpodles/board-planner"
+    expect(normaliseRemote("git@github-owner:owner/board-planner.git")).toBe(
+      "owner/board-planner"
     );
   });
 
@@ -32,8 +32,8 @@ describe("normaliseRemote", () => {
   });
 
   it("ignores case, since hosts do", () => {
-    expect(normaliseRemote("git@github.com:RafalPodles/Board-Planner.git")).toBe(
-      "rafalpodles/board-planner"
+    expect(normaliseRemote("git@github.com:OwnerName/Board-Planner.git")).toBe(
+      "ownername/board-planner"
     );
   });
 
@@ -69,27 +69,27 @@ describe("projectRemotes", () => {
 });
 
 describe("matchRepo", () => {
-  const project = { _id: "p1", githubRepo: "rafalpodles/board-planner" };
+  const project = { _id: "p1", githubRepo: "owner/board-planner" };
 
   // Returns what the worker sent, not the normalised form: the worker looks its own checkout up by
   // this string, and only recognises the one it reported.
   it("answers with the exact string the worker reported", () => {
     const reported = [
-      { remote: "git@github-rafalpodles:rafalpodles/board-planner.git", path: "/a" },
+      { remote: "git@github-owner:owner/board-planner.git", path: "/a" },
     ];
 
     expect(matchRepo(project, reported)).toBe(
-      "git@github-rafalpodles:rafalpodles/board-planner.git"
+      "git@github-owner:owner/board-planner.git"
     );
   });
 
   it("finds the match among unrelated checkouts", () => {
     const reported = [
       { remote: "git@github.com:someone/else.git", path: "/a" },
-      { remote: "https://github.com/rafalpodles/board-planner.git", path: "/b" },
+      { remote: "https://github.com/owner/board-planner.git", path: "/b" },
     ];
 
-    expect(matchRepo(project, reported)).toBe("https://github.com/rafalpodles/board-planner.git");
+    expect(matchRepo(project, reported)).toBe("https://github.com/owner/board-planner.git");
   });
 
   it("is null when the worker has no checkout of this repository", () => {
@@ -112,11 +112,11 @@ describe("matchRepo", () => {
   // their call — so the order they reported is the order honoured.
   it("takes the first reported checkout when a machine has two of the same repository", () => {
     const reported = [
-      { remote: "git@github.com:rafalpodles/board-planner.git", path: "/first" },
-      { remote: "https://github.com/rafalpodles/board-planner", path: "/second" },
+      { remote: "git@github.com:owner/board-planner.git", path: "/first" },
+      { remote: "https://github.com/owner/board-planner", path: "/second" },
     ];
 
-    expect(matchRepo(project, reported)).toBe("git@github.com:rafalpodles/board-planner.git");
+    expect(matchRepo(project, reported)).toBe("git@github.com:owner/board-planner.git");
   });
 
   it("matches through the gitlab field too", () => {
@@ -146,8 +146,8 @@ describe("hosts", () => {
 
   // An ssh alias resolves through this machine's ssh config, so it is not a hostname to compare
   it("does not treat a per-account ssh alias as a host", () => {
-    const project = { _id: "p1", githubRepo: "https://github.com/rafalpodles/board-planner" };
-    const aliased = [{ remote: "git@github-rafalpodles:rafalpodles/board-planner.git", path: "/a" }];
+    const project = { _id: "p1", githubRepo: "https://github.com/owner/board-planner" };
+    const aliased = [{ remote: "git@github-owner:owner/board-planner.git", path: "/a" }];
 
     expect(matchRepo(project, aliased)).toBe(aliased[0].remote);
   });

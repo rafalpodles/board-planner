@@ -54,13 +54,13 @@ function projectDoc(overrides: Record<string, unknown> = {}) {
 }
 
 function identityDoc() {
-  return { _id: IDENTITY_ID, username: "worker-w1", fullName: "Rafal · MacBook", role: "member" };
+  return { _id: IDENTITY_ID, username: "worker-w1", fullName: "Owner · MacBook", role: "member" };
 }
 
 // Two different accounts, because they answer two different questions: identity is which machine
 // acted, owner is whose machine it is — and only the owner's grants decide what it may reach.
 function ownerDoc() {
-  return { _id: OWNER_ID, username: "rpo", fullName: "Rafal", role: "member" };
+  return { _id: OWNER_ID, username: "owner", fullName: "Owner", role: "member" };
 }
 
 function workerRequest(headers: Record<string, string> = {}) {
@@ -307,7 +307,7 @@ describe("the grant is re-derived on every call", () => {
     );
 
     expect(accessibleProjectIds).toHaveBeenCalledWith(
-      expect.objectContaining({ _id: OWNER_ID, username: "rpo" })
+      expect.objectContaining({ _id: OWNER_ID, username: "owner" })
     );
   });
 });

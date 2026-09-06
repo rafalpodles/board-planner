@@ -15,7 +15,7 @@ const log = {
   field: "",
   oldValue: "",
   newValue: "",
-  user: { _id: "u1", username: "rpo", fullName: "Rafal Podles" },
+  user: { _id: "u1", username: "owner", fullName: "Owner Name" },
   createdAt: "2026-08-01T00:00:00Z",
 };
 
@@ -29,7 +29,7 @@ describe("ActivityTimeline", () => {
   it("names the user who acted", async () => {
     api.get.mockResolvedValue([log]);
     render(<ActivityTimeline projectId="TP" taskId="t1" />);
-    await waitFor(() => expect(screen.getByText(/Rafal Podles created this task/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Owner Name created this task/)).toBeTruthy());
   });
 
   // typeof null === "object", so a deleted user used to take the populated branch and throw

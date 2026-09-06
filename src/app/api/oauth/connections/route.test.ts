@@ -21,7 +21,7 @@ const ctx = () => ({ params: Promise.resolve({}) });
 
 beforeEach(() => {
   vi.clearAllMocks();
-  getAuthUser.mockResolvedValue({ _id: "u1", username: "rpo", role: "member" });
+  getAuthUser.mockResolvedValue({ _id: "u1", username: "owner", role: "member" });
   findOneAndDelete.mockResolvedValue({ _id: "c1" });
 });
 

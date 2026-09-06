@@ -22,14 +22,14 @@ final class DeviceEnrolmentTests: XCTestCase {
             body: #"{"deviceCode":"cpd_x","userCode":"BCDF-2345","verificationUrl":"https://app/enrol/BCDF2345","intervalMs":2000}"#,
             capture: { seen.value = $0 })
 
-        let started = try await sut.begin(machineName: "rpo-MacBook", machineHost: "mac.local")
+        let started = try await sut.begin(machineName: "owner-macbook", machineHost: "mac.local")
 
         XCTAssertEqual(started.userCode, "BCDF-2345")
         XCTAssertEqual(started.verificationUrl, "https://app/enrol/BCDF2345")
         XCTAssertEqual(seen.value?.url?.path, "/api/workers/enrolment/device")
         let body = try XCTUnwrap(seen.value?.httpBody)
         let sent = try JSONSerialization.jsonObject(with: body) as? [String: String]
-        XCTAssertEqual(sent?["name"], "rpo-MacBook")
+        XCTAssertEqual(sent?["name"], "owner-macbook")
         XCTAssertEqual(sent?["host"], "mac.local")
     }
 

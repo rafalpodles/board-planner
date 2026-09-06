@@ -57,7 +57,7 @@ describe("bindRepository", () => {
   // is the sink that would suffer if anything ever got past it. `join` normalises "..", so the
   // root has to be checked after it is computed, not before.
   it.each([
-    "../../../../Users/rpo/Library/LaunchAgents",
+    "../../../../Users/owner/Library/LaunchAgents",
     "..",
     "../sibling",
     "/etc",

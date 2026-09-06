@@ -141,18 +141,18 @@ describe("GET /api/admin/workers", () => {
     mockFleet([
       workerDoc({
         _id: "a1",
-        name: "rafal-mac",
-        owner: { _id: "u1", username: "rpo", fullName: "Rafal" },
+        name: "owner-mac",
+        owner: { _id: "u1", username: "owner", fullName: "Owner" },
       }),
       workerDoc({ _id: "a2", name: "orphan", owner: null }),
     ]);
 
     const json = await (await GET(request(), { params: Promise.resolve({}) })).json();
 
-    expect(json.find((w: { name: string }) => w.name === "rafal-mac").owner).toEqual({
+    expect(json.find((w: { name: string }) => w.name === "owner-mac").owner).toEqual({
       _id: "u1",
-      username: "rpo",
-      fullName: "Rafal",
+      username: "owner",
+      fullName: "Owner",
     });
     expect(json.find((w: { name: string }) => w.name === "orphan").owner).toBeNull();
   });

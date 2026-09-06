@@ -237,7 +237,7 @@ const PARTS: Record<string, () => Element> = {
   "shortcut hint": () => screen.getByText("N"),
 };
 
-// rpo's call: refresh survives on a phone; the icon and the button label pay for it
+// owner's call: refresh survives on a phone; the icon and the button label pay for it
 const ESSENTIAL = [
   "project name",
   "scope control",

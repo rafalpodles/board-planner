@@ -36,7 +36,7 @@ vi.mock("@/lib/repository", () => ({
 
 const { GET } = await import("./route");
 
-const MEMBER = { _id: "member-1", role: "member", fullName: "Rafal", username: "rpo" };
+const MEMBER = { _id: "member-1", role: "member", fullName: "Owner", username: "owner" };
 const MINE = "69a52e3b399b27d3cbb2c5a5";
 const THEIRS = "69a52e3b399b27d3cbb2c5b7";
 

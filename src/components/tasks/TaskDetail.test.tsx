@@ -5,7 +5,7 @@ import { TaskDetail } from "./TaskDetail";
 
 const { api, auth } = vi.hoisted(() => ({
   api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn() },
-  auth: { user: { _id: "u1", username: "rpo", fullName: "Rafal Podles" }, isAdmin: false },
+  auth: { user: { _id: "u1", username: "owner", fullName: "Owner Name" }, isAdmin: false },
 }));
 
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
@@ -286,7 +286,7 @@ describe("TaskDetail", () => {
         return Promise.resolve({
           ...task,
           recurrence: { frequency: "weekly", interval: 2 },
-          assignee: { _id: "u1", username: "rpo", fullName: "Rafal Podles" },
+          assignee: { _id: "u1", username: "owner", fullName: "Owner Name" },
           sprint: "s1",
           agent: { _id: "a1", name: "Default" },
         });
@@ -465,7 +465,7 @@ describe("TaskDetail, the Agent row's handover notice", () => {
     ...task,
     status: "todo",
     agent: "ag1",
-    assignee: { _id: "u1", username: "rpo", fullName: "Rafal Podles" },
+    assignee: { _id: "u1", username: "owner", fullName: "Owner Name" },
     assignedBy: { _id: "u2", username: "kmk", fullName: "Krzysiek" },
   };
 
@@ -517,7 +517,7 @@ describe("TaskDetail, the Agent row's handover notice", () => {
   // `stored` is: dropping it from either one alone is what a test on the other misses.
   const inTheBacklog = {
     status: "planned",
-    assignedBy: { _id: "u1", username: "rpo", fullName: "Rafal Podles" },
+    assignedBy: { _id: "u1", username: "owner", fullName: "Owner Name" },
   };
 
   it("carries the board's columns to the rail, naming a backlog task as not there yet", async () => {
@@ -550,7 +550,7 @@ describe("TaskDetail, the Agent row's handover notice", () => {
   it.each(["in_progress", "done"])(
     "says nothing about a task in %s, whatever the rest of its hand-over is",
     async (status) => {
-      serve({ status, assignedBy: { _id: "u1", username: "rpo", fullName: "Rafal Podles" } });
+      serve({ status, assignedBy: { _id: "u1", username: "owner", fullName: "Owner Name" } });
       renderDetail();
       await loaded();
 
@@ -561,7 +561,7 @@ describe("TaskDetail, the Agent row's handover notice", () => {
   // Nothing to say about a task whose assignee handed it to themselves — the everyday case, and a
   // notice on it would be on almost every task on the board
   it("says nothing when the hand-over is sound", async () => {
-    serve({ assignedBy: { _id: "u1", username: "rpo", fullName: "Rafal Podles" } });
+    serve({ assignedBy: { _id: "u1", username: "owner", fullName: "Owner Name" } });
     renderDetail();
     await loaded();
 
@@ -579,19 +579,19 @@ describe("TaskDetail, the Agent row's handover notice", () => {
  * worked: what broke is between the picker and the wire.
  */
 describe("TaskDetail, re-assigning a task whose assigner was never recorded", () => {
-  const RAFAL = { _id: "u1", username: "rpo", fullName: "Rafal Podles" };
+  const OWNER = { _id: "u1", username: "owner", fullName: "Owner Name" };
   const legacy = {
     ...task,
     status: "todo",
     agent: "ag1",
-    assignee: RAFAL,
+    assignee: OWNER,
     // The absence itself. A null would take the same branch, but an old document has no key at all.
     assignedBy: undefined,
   };
 
   function serve(over: Record<string, unknown> = {}) {
     api.get.mockImplementation((url: string) => {
-      if (url === "/api/projects/TP/assignable-users") return Promise.resolve([RAFAL, { _id: "u2", username: "claude", fullName: "Claude Code" }]);
+      if (url === "/api/projects/TP/assignable-users") return Promise.resolve([OWNER, { _id: "u2", username: "claude", fullName: "Claude Code" }]);
       if (url.startsWith("/api/agent")) return Promise.resolve([]);
       if (url.includes("/tasks/")) return Promise.resolve({ ...legacy, ...over });
       if (url.includes("/sprints")) return Promise.resolve([]);
@@ -611,9 +611,9 @@ describe("TaskDetail, re-assigning a task whose assigner was never recorded", ()
     renderDetail();
     await loaded();
 
-    await pickAssignee(/Rafal Podles/);
+    await pickAssignee(/Owner Name/);
 
-    expect(api.put).toHaveBeenCalledWith("/api/projects/TP/tasks/t1", { assignee: "rpo" });
+    expect(api.put).toHaveBeenCalledWith("/api/projects/TP/tasks/t1", { assignee: "owner" });
   });
 
   // The task is re-read afterwards, or the reader performs the repair and watches the complaint it
@@ -624,7 +624,7 @@ describe("TaskDetail, re-assigning a task whose assigner was never recorded", ()
     await loaded();
     const readsBefore = api.get.mock.calls.filter((c: unknown[]) => String(c[0]).includes("/tasks/")).length;
 
-    await pickAssignee(/Rafal Podles/);
+    await pickAssignee(/Owner Name/);
 
     await waitFor(() =>
       expect(
@@ -636,11 +636,11 @@ describe("TaskDetail, re-assigning a task whose assigner was never recorded", ()
   // The forced write is for the missing assigner and nothing else. A task that records one is
   // already correct, and re-picking on it must stay the no-op the diff makes it.
   it("sends nothing when the assigner is already recorded", async () => {
-    serve({ assignedBy: RAFAL });
+    serve({ assignedBy: OWNER });
     renderDetail();
     await loaded();
 
-    await pickAssignee(/Rafal Podles/);
+    await pickAssignee(/Owner Name/);
 
     expect(api.put).not.toHaveBeenCalled();
   });
@@ -661,7 +661,7 @@ describe("TaskDetail, whether the rail knows who is reading", () => {
   function serve(over: Record<string, unknown> = {}) {
     api.get.mockImplementation((url: string) => {
       if (url === "/api/projects/TP/assignable-users")
-        return Promise.resolve([{ _id: "u1", username: "rpo", fullName: "Rafal Podles" }]);
+        return Promise.resolve([{ _id: "u1", username: "owner", fullName: "Owner Name" }]);
       if (url === "/api/agents") return Promise.resolve([MINE]);
       if (url.startsWith("/api/agent")) return Promise.resolve([]);
       if (url.includes("/tasks/")) return Promise.resolve({ ...task, status: "todo", ...over });
@@ -670,7 +670,7 @@ describe("TaskDetail, whether the rail knows who is reading", () => {
     });
   }
 
-  const mine = { assignee: { _id: "u1", username: "rpo", fullName: "Rafal Podles" } };
+  const mine = { assignee: { _id: "u1", username: "owner", fullName: "Owner Name" } };
   const theirs = { assignee: { _id: "u2", username: "claude", fullName: "Claude Code" } };
 
   async function openSheet() {

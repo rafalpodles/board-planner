@@ -854,7 +854,7 @@ test.describe("Integrations · the save bar", () => {
   });
 
   /**
-   * BP-407. Delivery stays single-shot (rpo's call, see the ticket) — what changed is that the one
+   * BP-407. Delivery stays single-shot (owner's call, see the ticket) — what changed is that the one
    * attempt's outcome is no longer silent. Not exercised through a real delivery (BP-408 blocks
    * that): the seed writes the outcome `dispatchWebhooks` itself would have written, and this only
    * asserts the settings page reads it back correctly.

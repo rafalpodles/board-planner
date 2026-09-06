@@ -25,7 +25,7 @@ function project(over: Partial<ApiProject> = {}): ApiProject {
     description: "",
     icon: "",
     canAdmin: true,
-    repositoryUrl: "git@github.com:rafalpodles/board-planner.git",
+    repositoryUrl: "git@github.com:owner/board-planner.git",
     worker: {
       enabled: false,
       agent: null,

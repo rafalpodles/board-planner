@@ -46,7 +46,7 @@ import { signIn as arriveSignedIn, signInThroughForm } from "./session";
  */
 
 const PROTOCOL = "1";
-const REPOSITORY = "https://github.com/rafalpodles/board-planner";
+const REPOSITORY = "https://github.com/owner/board-planner";
 const CHECKOUT = "/Users/somebody/code/board-planner";
 const MACHINE = { name: "e2e-thinkpad", host: "e2e-thinkpad.local" };
 

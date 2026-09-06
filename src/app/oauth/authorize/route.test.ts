@@ -182,7 +182,7 @@ describe("POST /oauth/authorize login phase", () => {
         code_challenge_method: "S256",
         response_type: "code",
         scope: "mcp",
-        username: "rafal",
+        username: "owner",
         password: "guess",
       });
       return new Request("http://localhost/oauth/authorize", {
@@ -201,7 +201,7 @@ describe("POST /oauth/authorize login phase", () => {
         new Request("http://localhost/oauth/authorize", {
           method: "POST",
           headers: { "content-type": "application/json", "sec-fetch-site": "same-origin" },
-          body: JSON.stringify({ username: "rafal", password: "guess" }),
+          body: JSON.stringify({ username: "owner", password: "guess" }),
         })
       );
 

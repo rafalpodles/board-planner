@@ -45,13 +45,13 @@ const { default: WorkersPage } = await import("./page");
 function worker(over: Partial<ApiWorker> = {}): ApiWorker {
   return {
     _id: "w1",
-    name: "rafal-mac",
+    name: "owner-mac",
     host: "mac.home",
     platform: "darwin",
     version: "1.0.0",
     protocolVersion: 1,
     repos: [],
-    owner: { _id: "u1", username: "rpo", fullName: "Rafal Podles" },
+    owner: { _id: "u1", username: "owner", fullName: "Owner Name" },
     policy: { pollIntervalMs: 30_000 },
     policyOverrides: [],
     enabled: true,
@@ -100,15 +100,15 @@ describe("the fleet console's owner column", () => {
 
     render(<WorkersPage />);
 
-    expect(await screen.findByText("Rafal Podles")).toBeTruthy();
+    expect(await screen.findByText("Owner Name")).toBeTruthy();
   });
 
   it("falls back to the username when that account has no display name", async () => {
-    api.get.mockResolvedValue([worker({ owner: { _id: "u1", username: "rpo", fullName: "" } })]);
+    api.get.mockResolvedValue([worker({ owner: { _id: "u1", username: "owner", fullName: "" } })]);
 
     render(<WorkersPage />);
 
-    expect(await screen.findByText("rpo")).toBeTruthy();
+    expect(await screen.findByText("owner")).toBeTruthy();
   });
 
   // Located by its own control rather than by wording: the row for a healthy machine renders the
@@ -127,7 +127,7 @@ describe("the fleet console's owner column", () => {
 
     render(<WorkersPage />);
 
-    await screen.findByText("Rafal Podles");
+    await screen.findByText("Owner Name");
     expect(screen.queryByTestId("worker-no-owner")).toBeNull();
   });
 
@@ -138,7 +138,7 @@ describe("the fleet console's owner column", () => {
 
     render(<WorkersPage />);
 
-    await screen.findByText("Rafal Podles");
+    await screen.findByText("Owner Name");
     await waitFor(() => expect(screen.queryByText(/Approved for/i)).toBeNull());
   });
 });
@@ -180,8 +180,8 @@ describe("releasing a machine from its owner", () => {
     // The name of the machine and of the person losing it: a dialog that named neither could be
     // confirming any row in the table
     const dialog = await screen.findByRole("dialog");
-    expect(dialog.textContent).toContain("rafal-mac");
-    expect(dialog.textContent).toContain("Rafal Podles");
+    expect(dialog.textContent).toContain("owner-mac");
+    expect(dialog.textContent).toContain("Owner Name");
     expect(api.patch).not.toHaveBeenCalled();
   });
 

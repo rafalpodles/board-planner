@@ -9,7 +9,7 @@ const { api, toast } = vi.hoisted(() => ({
 
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/hooks/use-auth", () => ({
-  useAuth: () => ({ user: { username: "rpo", fullName: "Rafal Podles" } }),
+  useAuth: () => ({ user: { username: "owner", fullName: "Owner Name" } }),
 }));
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast }) }));
 // The guard's job is redirecting an anonymous visitor, which is not what this file is about
@@ -161,7 +161,7 @@ describe("the enrolment confirmation screen", () => {
   it("says whose account the machine will act under, and what it will reach", async () => {
     await show();
 
-    expect(screen.getByText(/Connecting as Rafal Podles/i)).toBeTruthy();
+    expect(screen.getByText(/Connecting as Owner Name/i)).toBeTruthy();
     // BP-374: the reach sits with the project list, where a reader looks for a scope list, rather
     // than in the footer below the buttons — which is the half of the screen it contradicted
     expect(screen.getByText(/reaches every project you can/i).closest("section")).toBeTruthy();

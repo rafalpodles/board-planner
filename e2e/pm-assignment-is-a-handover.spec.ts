@@ -16,9 +16,9 @@ import { signIn } from "./session";
  * BP-419. `claimNextTask` required assignee, `assignedBy` and the machine's owner to be one
  * person, and `assign_task` stamps `assignedBy` as the PM — so every task the PM assigned failed
  * that filter for ever. Silently: the claim is one `findOneAndUpdate`, a non-match and an empty
- * queue are the same 204, and the PM's own reply said `BP-x → @rafal` as though it had worked.
+ * queue are the same 204, and the PM's own reply said `BP-x → @owner` as though it had worked.
  *
- * rpo decided the PM's assignment is a real hand-over. This drives that end to end — the real chat,
+ * owner decided the PM's assignment is a real hand-over. This drives that end to end — the real chat,
  * the real agent loop, the real tool, the real claim route, the real board — because the defect
  * lived precisely in the seam between the tool that writes `assignedBy` and the filter that reads
  * it, and neither half is wrong on its own.

@@ -34,9 +34,9 @@ board's MCP conventions, the e2e suite, git and GitHub. On session start run `li
 see current work; when asked what to work on, list tasks and suggest the next one. When the user
 describes new work, ask whether it should be tracked and `create_task` if so.
 
-Every `gh` command here runs as `rafalpodles` and every commit is authored by
-`Rafał Podleś <rafalpodles@gmail.com>`; any other account on this machine is not a collaborator.
-The checks are in the skill's `references/git-github.md`.
+Every `gh` command here runs as this repository's owner, and every commit is authored by the
+identity in the repo-local git config; any other account on this machine is not a collaborator.
+Both are derived, never hard-coded — the checks are in the skill's `references/git-github.md`.
 
 ## Tech stack
 - Next.js 16 (App Router) + TypeScript

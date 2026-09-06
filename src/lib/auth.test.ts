@@ -37,7 +37,7 @@ const SESSION_TOKEN = "cps_" + "a".repeat(64);
 const MACHINE_TOKEN = "cpat_" + "b".repeat(64);
 
 function user(overrides: Record<string, unknown> = {}) {
-  return { _id: "u1", username: "rpo", role: "admin", ...overrides };
+  return { _id: "u1", username: "owner", role: "admin", ...overrides };
 }
 
 function sessionRow(overrides: Record<string, unknown> = {}) {
@@ -87,7 +87,7 @@ describe("getAuthUser — session cookie", () => {
 
     const result = await getAuthUser(withCookie(SESSION_TOKEN));
 
-    expect(result).toMatchObject({ username: "rpo" });
+    expect(result).toMatchObject({ username: "owner" });
     expect(result?.viaMachineCredential).toBe(false);
     expect(result?.sessionId).toBe("s1");
   });
@@ -183,20 +183,20 @@ describe("getAuthUser — an OAuth row that cannot be shown to be live", () => {
     userFindById.mockResolvedValue(user());
     await expect(
       getAuthUser(request({ authorization: `Bearer ${MACHINE_TOKEN}` }))
-    ).resolves.toMatchObject({ username: "rpo" });
+    ).resolves.toMatchObject({ username: "owner" });
   });
 });
 
 describe("getAuthUser — Basic auth is gone", () => {
   it("rejects a Basic header instead of verifying the password it carries", async () => {
-    const basic = Buffer.from("rpo:correct-horse").toString("base64");
+    const basic = Buffer.from("owner:correct-horse").toString("base64");
 
     expect(await getAuthUser(request({ authorization: `Basic ${basic}` }))).toBeNull();
     expect(bcryptCompare).not.toHaveBeenCalled();
   });
 
   it("does not fall back to a password check when a Basic header accompanies a dead cookie", async () => {
-    const basic = Buffer.from("rpo:correct-horse").toString("base64");
+    const basic = Buffer.from("owner:correct-horse").toString("base64");
 
     const result = await getAuthUser(
       withCookie(SESSION_TOKEN, { authorization: `Basic ${basic}` })
@@ -412,9 +412,9 @@ describe("verifyCredentials and the username oracle", () => {
     const onMiss = bcryptCompare.mock.calls.length;
 
     bcryptCompare.mockClear();
-    lookupReturns({ username: "rpo", password: "$2a$10$stored" });
+    lookupReturns({ username: "owner", password: "$2a$10$stored" });
     bcryptCompare.mockResolvedValue(true);
-    await verifyCredentials("rpo", "hunter2");
+    await verifyCredentials("owner", "hunter2");
 
     expect(bcryptCompare.mock.calls.length).toBe(onMiss);
   });
@@ -438,9 +438,9 @@ describe("verifyCredentials and the username oracle", () => {
   });
 
   it("still refuses a wrong password for a user that does exist", async () => {
-    lookupReturns({ username: "rpo", password: "$2a$10$stored" });
+    lookupReturns({ username: "owner", password: "$2a$10$stored" });
     bcryptCompare.mockResolvedValue(false);
 
-    expect(await verifyCredentials("rpo", "wrong")).toBeNull();
+    expect(await verifyCredentials("owner", "wrong")).toBeNull();
   });
 });

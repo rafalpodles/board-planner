@@ -24,9 +24,9 @@ private let SERVED = """
       "taskTimeoutMs": 1800000
     }
   ],
-  "githubAccount": "rafalpodles",
+  "githubAccount": "owner",
   "githubAccounts": [
-    { "login": "rafalpodles", "active": true },
+    { "login": "owner", "active": true },
     { "login": "other-account", "active": false }
   ],
   "offers": [
@@ -34,7 +34,7 @@ private let SERVED = """
       "project": "6a86bbe7c3cd8d57941081c7",
       "key": "SBR",
       "name": "Sandbox Rig",
-      "repositoryUrl": "/Users/rpo/bp-rig-375/origins/sandbox-rig.git"
+      "repositoryUrl": "/Users/owner/bp-rig-375/origins/sandbox-rig.git"
     }
   ]
 }
@@ -49,7 +49,7 @@ private let SERVED = """
     #expect(config.projects.first?.blocked == "")
     #expect(config.offers?.count == 1)
     #expect(config.offers?.first?.label == "Sandbox Rig · SBR")
-    #expect(config.githubAccount == "rafalpodles")
+    #expect(config.githubAccount == "owner")
 }
 
 // The worker has served `blocked` since BP-379 — the checkout failing the gates' checks, and since
