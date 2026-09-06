@@ -316,3 +316,64 @@ test("Escape closes the help even when a context menu closes on the same press",
   await expect(contextMenu(page)).toBeHidden();
   await expect(help(page)).toBeHidden();
 });
+
+/**
+ * BP-543. The board's keydown handler arbitrated only Escape (BP-522) — every other key it
+ * handles still reached the board underneath an open dialog, because the handler's only guard
+ * was the event target being a text field, and a dialog's own container is a DIV. Every one of
+ * these dialogs sets `aria-modal="true"`, which tells assistive technology nothing outside them
+ * exists; two keystrokes reaching the board underneath is exactly the broken promise that makes.
+ *
+ * Measured before the fix, with the help open: `j` then `Enter` navigated to
+ * `/projects/TP/tasks/1`, and `v` flipped the view toggle behind it.
+ */
+const boardToggle = (page: Page) => page.getByRole("button", { name: "Board", exact: true });
+
+test("j then Enter does not navigate away from under the help", async ({ page }) => {
+  await openBoard(page);
+
+  await page.keyboard.press("?");
+  await expect(help(page)).toBeVisible();
+
+  // `toHaveURL` resolves the moment it sees a match, and the board's own URL already matches
+  // before either key is pressed — so it would pass on the bug too, an instant before the
+  // navigation it was supposed to catch. The page the leak lands on fetches its data over the
+  // network, which is the one part of it slow enough to bound a wait on: a page still on the
+  // board two seconds later did not merely draw this one check too early.
+  const navigatedToATask = page
+    .waitForResponse((res) => new RegExp(`/projects/${PROJECT_KEY}/tasks/\\d+`).test(res.url()), {
+      timeout: 2_000,
+    })
+    .then(() => true)
+    .catch(() => false);
+
+  await page.keyboard.press("j");
+  await page.keyboard.press("Enter");
+
+  expect(await navigatedToATask).toBe(false);
+  await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_KEY}$`));
+  await expect(help(page)).toBeVisible();
+
+  // The control: the one key the board must still own while a dialog is open
+  await page.keyboard.press("?");
+  await expect(help(page)).toBeHidden();
+});
+
+test("v does not toggle the view behind the help", async ({ page }) => {
+  await openBoard(page);
+  await expect(boardToggle(page)).toHaveAttribute("aria-current", "true");
+
+  await page.keyboard.press("?");
+  await expect(help(page)).toBeVisible();
+
+  await page.keyboard.press("v");
+  // No bounded wait needed here unlike the j/Enter test above: setViewMode is a synchronous
+  // local-state and localStorage write with no network hop, so a leak would already be in the
+  // DOM by the time this round-trips back from the browser
+  await expect(boardToggle(page)).toHaveAttribute("aria-current", "true");
+  await expect(help(page)).toBeVisible();
+
+  // The control: the one key the board must still own while a dialog is open
+  await page.keyboard.press("?");
+  await expect(help(page)).toBeHidden();
+});
