@@ -113,13 +113,7 @@ function usesExtTransport(value: string): boolean {
 }
 
 function dangerousConfigEntry(listOutput: string): string | null {
-  for (const rawLine of listOutput.split("\n")) {
-    const line = rawLine.trim();
-    if (!line) continue;
-    const eq = line.indexOf("=");
-    const key = (eq === -1 ? line : line.slice(0, eq)).toLowerCase();
-    const value = eq === -1 ? "" : line.slice(eq + 1);
-
+  for (const { key, value } of nulRecords(listOutput)) {
     if (EXACT_DANGEROUS_KEYS.includes(key)) return key;
     if (key.startsWith("alias.")) return key;
     if (dangerousFamilyLeaf(key)) return key;
@@ -129,11 +123,11 @@ function dangerousConfigEntry(listOutput: string): string | null {
   return null;
 }
 
-function git(runner: Runner, cwd: string, args: string[]) {
+function git(runner: Runner, cwd: string, args: string[], extraEnv?: NodeJS.ProcessEnv) {
   return runner.run("git", gitArgs(args), {
     cwd,
     timeoutMs: GIT_TIMEOUT_MS,
-    env: { ...childEnv(), ...GIT_SAFE_ENV },
+    env: { ...childEnv(), ...GIT_SAFE_ENV, ...extraEnv },
   });
 }
 
@@ -148,7 +142,7 @@ function git(runner: Runner, cwd: string, args: string[]) {
 //
 // So the indirection is refused as itself below rather than read through. That also means nothing
 // of the operator's own included configuration is ever parsed by this scan.
-const CONFIG_LIST_ARGS = ["config", "--list", "--show-scope", "--no-includes"];
+const CONFIG_LIST_ARGS = ["config", "--list", "-z", "--show-scope", "--no-includes"];
 
 // The scopes the agent writes *inside the repository*, which this pipeline created for the run —
 // anything executable there is the agent's by construction. `global`, `system` and the `unknown`
@@ -168,21 +162,39 @@ interface ConfigEntry {
   raw: string;
 }
 
-function parseConfigList(output: string): ConfigEntry[] {
-  const entries: ConfigEntry[] = [];
-  for (const raw of output.split("\n")) {
-    if (!raw.trim()) continue;
-    const tab = raw.indexOf("\t");
-    if (tab === -1) continue;
-    const scope = raw.slice(0, tab);
-    const rest = raw.slice(tab + 1);
-    const eq = rest.indexOf("=");
-    entries.push({
-      scope,
-      key: (eq === -1 ? rest : rest.slice(0, eq)).toLowerCase(),
-      value: eq === -1 ? "" : rest.slice(eq + 1),
-      raw,
+// A config listing is NOT lines of `key=value`, and reading it as though it were is how the guard
+// this module exists to be got walked past. A subsection name may contain `=`: git lists such a
+// filter as `filter.a=b.smudge=<cmd>`, which split on its first `=` is the inert key `filter.a`
+// while git reads it as the filter it is and runs it on checkout. A value may contain a newline
+// for the same reason. Under `-z` the key ends at the record's first newline and the record ends
+// at a NUL, neither of which a key or a value can contain. Measured on git 2.50.1;
+// workspace.planted-config.integration.test.ts plants one through the plain CLI and watches it.
+function nulRecords(output: string): { key: string; value: string }[] {
+  const records: { key: string; value: string }[] = [];
+  for (const record of output.split("\0")) {
+    if (!record) continue;
+    const nl = record.indexOf("\n");
+    records.push({
+      key: (nl === -1 ? record : record.slice(0, nl)).toLowerCase(),
+      // A key git lists with no value at all — `[a] b` — is a record with no newline in it
+      value: nl === -1 ? "" : record.slice(nl + 1),
     });
+  }
+  return records;
+}
+
+// `--show-scope -z` frames each entry as two NUL-terminated fields: the scope, then the
+// `key\nvalue` record nulRecords reads.
+function parseConfigList(output: string): ConfigEntry[] {
+  const fields = output.split("\0");
+  const entries: ConfigEntry[] = [];
+  // Two at a time, stopping before a trailing half-pair: a truncated read must drop the entry it
+  // could not finish rather than pair a scope with the next entry's key.
+  for (let at = 0; at + 1 < fields.length; at += 2) {
+    const scope = fields[at];
+    const record = nulRecords(`${fields[at + 1]}\0`)[0];
+    if (!record) continue;
+    entries.push({ scope, key: record.key, value: record.value, raw: `${scope}\0${fields[at + 1]}` });
   }
   return entries;
 }
@@ -204,7 +216,7 @@ function executes(key: string, value: string): boolean {
 
 /**
  * Everything the effective config says before the agent has touched the checkout, as raw
- * `scope\tkey=value` lines. Held in this process and never written down: the agent runs as this
+ * NUL-framed `scope\0key\nvalue` records. Held in this process and never written down: the agent runs as this
  * uid with no filesystem sandbox, so a baseline on disk is a baseline it can edit. Same reason
  * `Worktree.baseSha` is carried rather than re-read.
  *
@@ -233,22 +245,41 @@ export async function configBaseline(
  * strictly more than the local-only scan it replaces — it adds the worktree scope and the
  * indirection — but a caller that can pass one closes `~/.gitconfig` too (BP-346).
  */
+/**
+ * What `plantedConfig` answers when git would not tell it. Named because the two answers are owed
+ * different treatment by a caller that acts on the finding: a key somebody planted repeats until a
+ * human removes it, while a config that could not be read is as likely to be a checkout that has
+ * just been moved, or a machine under load. Both refuse the run; only one of them says anything
+ * about the repository (BP-504).
+ */
+export const UNREADABLE_CONFIG = "an unreadable git config";
+
+/**
+ * `extraEnv` exists so a caller can be judged against the config git will actually use. The
+ * checkout in `workspace.create` runs with `GIT_CONFIG_GLOBAL=/dev/null`, and a scan that reads
+ * `~/.gitconfig` when the command it guards does not is answering a different question: measured,
+ * a single malformed line in the operator's global config makes `--local --list` exit 128, which
+ * this reads as unreadable and refuses — for every project on the machine, for ever, against
+ * checkouts `git worktree add` would have handled without complaint. Callers that DO pass a
+ * baseline want the machine scopes read, and pass nothing here.
+ */
 export async function plantedConfig(
   runner: Runner,
   cwd: string,
   baseline?: readonly string[] | null,
+  extraEnv?: NodeJS.ProcessEnv,
 ): Promise<string> {
   // Two questions, two calls. `--local --list` fails outside a checkout and `--list` does not — it
   // answers with the machine's global config instead — so widening the scan would have turned
   // "this is not a repository" into "this repository is clean" without anything going red.
   // Measured: exit 128 became exit 0 (BP-346).
-  const readable = await git(runner, cwd, ["config", "--local", "--list"]);
+  const readable = await git(runner, cwd, ["config", "--local", "--list"], extraEnv);
   if (readable.code !== 0 || readable.timedOut)
-    return "an unreadable git config";
+    return UNREADABLE_CONFIG;
 
-  const result = await git(runner, cwd, CONFIG_LIST_ARGS);
+  const result = await git(runner, cwd, CONFIG_LIST_ARGS, extraEnv);
   // Unreadable is not the same as clean: a config this cannot read is one it cannot clear either.
-  if (result.code !== 0 || result.timedOut) return "an unreadable git config";
+  if (result.code !== 0 || result.timedOut) return UNREADABLE_CONFIG;
 
   const entries = parseConfigList(result.stdout);
   const known = new Set(baseline ?? []);
@@ -337,6 +368,7 @@ export async function bindRepository(
     "config",
     "--local",
     "--list",
+    "-z",
   ]);
   if (config.code !== 0 || config.timedOut) {
     return {
@@ -344,6 +376,11 @@ export async function bindRepository(
       reason: `could not read git config in ${proposedPath}`,
     };
   }
+  // Narrower than the scan `workspace.create` makes: `--local --list` cannot see the worktree
+  // scope and this rule does not judge `include.path`, so a checkout carrying either binds here
+  // and is refused at run time instead — where, since BP-504, it quarantines the project. Aligning
+  // the two is its own ticket: it would refuse checkouts that bind today, so it needs its own
+  // sweep rather than a corner of this one.
   const dangerous = dangerousConfigEntry(config.stdout);
   if (dangerous) {
     return {

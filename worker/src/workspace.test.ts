@@ -6,9 +6,15 @@ import { describe, it, expect, vi } from "vitest";
 import { createWorkspace, reapOrphans, Workspace } from "./workspace.js";
 import { CommandResult, RunOpts } from "./exec.js";
 import { gitArgs } from "./git-safety.js";
+import { scopedConfigListZ } from "./config-list.fixtures.js";
+
+// Named separately because a test asserts the scan runs in it, and `config` is cast to `never`
+// to stand in for the whole WorkerConfig — reading a property back off that cast does not
+// typecheck.
+const REPO_PATH = "/repo";
 
 const config = {
-  repoPath: "/repo",
+  repoPath: REPO_PATH,
   worktreeRoot: "/worktrees",
   baseBranch: "main",
 } as never;
@@ -28,6 +34,7 @@ const REMOTE_URL = "https://git.example/acme/repo.git";
 const LS_REMOTE = `ls-remote -- ${REMOTE_URL} refs/heads/main`;
 const FETCH = `fetch --no-tags -- ${REMOTE_URL} main`;
 const LOCAL_REF = "rev-parse --verify main^{commit}";
+const CONFIG_LIST = "config --list -z --show-scope --no-includes";
 
 function fakeGit(responses: Record<string, Partial<CommandResult>>) {
   const run = vi.fn(async (_command: string, args: string[], _opts: RunOpts): Promise<CommandResult> => {
@@ -52,6 +59,10 @@ function baseFromRemote(sha: string, extra: Record<string, Partial<CommandResult
 
 function withRemote(runner: Parameters<typeof createWorkspace>[1], env: () => NodeJS.ProcessEnv = () => ({})) {
   return createWorkspace(config, runner, env, REMOTE_URL);
+}
+
+function ranAny(run: { mock: { calls: unknown[][] } }, fragment: string): boolean {
+  return run.mock.calls.some((call) => (call[1] as string[]).join(" ").includes(fragment));
 }
 
 function readsLocalRef(run: { mock: { calls: unknown[][] } }): boolean {
@@ -385,6 +396,139 @@ describe("createWorkspace", () => {
     for (const call of localCalls) {
       expect(call[2].env?.GH_TOKEN).toBeUndefined();
     }
+  });
+
+  /**
+   * BP-504. `git worktree add` checks files **out**, and a checkout is where `smudge` runs — so a
+   * `filter.<name>.smudge` in the shared `<main>/.git/config` executes inside this very call, on
+   * every attempt, before any gate has looked at anything. BP-403's guard sits in `commitAll`, far
+   * downstream of it. Measured against real git in the integration test beside this one; what these
+   * pin is that the scan comes first and that nothing else runs when it refuses.
+   */
+  describe("a checkout whose config carries an executable key", () => {
+    const PLANTED = {
+      [CONFIG_LIST]: { stdout: scopedConfigListZ("filter.z.smudge=touch /tmp/pwned") },
+    };
+
+    it("is refused, naming the key", async () => {
+      const { runner } = fakeGit(baseFromRemote("base1", PLANTED));
+
+      await expect(withRemote(runner).create("BP-1", "worker")).rejects.toMatchObject({
+        name: "PoisonedCheckoutError",
+        message: expect.stringContaining("filter.z.smudge"),
+      });
+    });
+
+    // The whole point of moving the scan here: the refusal is worth nothing if the checkout that
+    // runs the payload has already happened by the time it is made.
+    it("is refused before anything is checked out", async () => {
+      const { runner, run } = fakeGit(baseFromRemote("base1", PLANTED));
+
+      await expect(withRemote(runner).create("BP-1", "worker")).rejects.toThrow();
+
+      expect(ranAny(run, "worktree add"), "the worktree was created anyway").toBe(false);
+    });
+
+    // And before the remote is touched at all. A fetch runs inside the poisoned clone and is not
+    // free of it either — the run is over as soon as the key is seen.
+    it("is refused before the remote is asked anything", async () => {
+      const { runner, run } = fakeGit(baseFromRemote("base1", PLANTED));
+
+      await expect(withRemote(runner).create("BP-1", "worker")).rejects.toThrow();
+
+      expect(ranAny(run, "ls-remote"), "the remote was asked for the base ref").toBe(false);
+      expect(ranAny(run, "fetch"), "the poisoned clone was fetched into").toBe(false);
+    });
+
+    it("asks the shared checkout, which is where the key lives", async () => {
+      const { runner, run } = fakeGit(baseFromRemote("base1", PLANTED));
+
+      await expect(withRemote(runner).create("BP-1", "worker")).rejects.toThrow();
+
+      const scan = run.mock.calls.find((call) =>
+        (call[1] as string[]).join(" ").includes("config --list -z --show-scope")
+      );
+      expect((scan?.[2] as { cwd?: string })?.cwd).toBe(REPO_PATH);
+    });
+
+    /**
+     * The scan and the checkout are separate processes with a fetch — two network round-trips —
+     * between them, so a config that was clean when it was read can be poisoned by the time
+     * anything is checked out. Measured against the real thing: replanting 50ms after the first
+     * scan got the payload run five times out of five.
+     *
+     * The second scan does not close that race and nothing short of not sharing `.git` would; it
+     * shortens the window from two round-trips to one spawn. Driven here by answering the second
+     * listing differently from the first, which is the deterministic form of the same thing.
+     */
+    it("reads the config again immediately before checking anything out", async () => {
+      let listings = 0;
+      const run = vi.fn(async (_command: string, args: string[]): Promise<CommandResult> => {
+        const key = args.slice(HARDENING_PREFIX.length).join(" ");
+        const answer = (stdout = "") => ({ code: 0, stdout, stderr: "", timedOut: false });
+        if (key === CONFIG_LIST) {
+          listings += 1;
+          return answer(listings === 1 ? "" : scopedConfigListZ("filter.z.smudge=touch /tmp/pwned"));
+        }
+        if (key === "worktree list --porcelain") return answer("");
+        if (args.join(" ") === LS_REMOTE) return answer("base1\trefs/heads/main\n");
+        if (args.join(" ") === FETCH) return answer();
+        if (key === "rev-parse --verify base1^{commit}") return answer("base1\n");
+        return answer();
+      });
+
+      await expect(withRemote({ run }).create("BP-1", "worker")).rejects.toMatchObject({
+        name: "PoisonedCheckoutError",
+      });
+
+      expect(listings, "the config was read only once").toBeGreaterThan(1);
+      expect(ranAny(run, "worktree add"), "the checkout happened anyway").toBe(false);
+    });
+
+    // The control. Every assertion above holds just as well for a create() that refused every
+    // checkout, or for a fixture whose remote never answered.
+    it("still creates the worktree when the config carries nothing executable", async () => {
+      const { runner, run } = fakeGit(
+        baseFromRemote("base1", {
+          [CONFIG_LIST]: { stdout: scopedConfigListZ("core.bare=false\nfilter.z.required=true") },
+        })
+      );
+
+      const worktree = await withRemote(runner).create("BP-1", "worker");
+
+      expect(worktree.baseSha).toBe("base1");
+      expect(ranAny(run, "worktree add")).toBe(true);
+    });
+
+    // An unreadable config is not a clean one — plantedConfig already says so, and this is the
+    // path where believing otherwise checks the payload out.
+    it("is refused when the config cannot be read at all", async () => {
+      const { runner, run } = fakeGit(
+        baseFromRemote("base1", { "config --local --list": { code: 128, stderr: "not a repository" } })
+      );
+
+      await expect(withRemote(runner).create("BP-1", "worker")).rejects.toMatchObject({
+        name: "PoisonedCheckoutError",
+        // The kind, not only the class. Everything downstream keys on it — this one refuses the
+        // run and nothing more, while `planted` latches the project off until somebody restarts
+        // the worker. Asserted from a real unreadable answer rather than from the sentinel: a test
+        // that builds the error out of the same constant the code compares against proves only
+        // that a string equals itself, and would stay green if the sentinel ever drifted.
+        kind: "unreadable",
+      });
+      expect(ranAny(run, "worktree add")).toBe(false);
+    });
+
+    // The other half of the same assertion, so neither can pass by answering "unreadable" — or
+    // "planted" — to everything.
+    it("calls a key somebody planted planted, from the same path", async () => {
+      const { runner } = fakeGit(baseFromRemote("base1", PLANTED));
+
+      await expect(withRemote(runner).create("BP-1", "worker")).rejects.toMatchObject({
+        name: "PoisonedCheckoutError",
+        kind: "planted",
+      });
+    });
   });
 
   it("throws when git fails to create the worktree", async () => {

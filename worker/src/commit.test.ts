@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { commitAll } from "./commit.js";
+import { configListZ, scopedConfigListZ } from "./config-list.fixtures.js";
 
 type Result = { code: number; stdout?: string; stderr?: string };
 
@@ -31,8 +32,8 @@ function runnerReturning(...results: Result[]) {
 const clean = { code: 0, stdout: "" };
 // BP-346: the scan reads `--list --show-scope --no-includes`, so every line git returns is
 // `<scope>\t<key>=<value>` — a fixture without the scope describes an answer git no longer gives
-const local = (...lines: string[]) => lines.map((line) => `local\t${line}`).join("\n") + "\n";
-const readableConfig = { code: 0, stdout: "core.bare=false\n" };
+const local = (...lines: string[]) => scopedConfigListZ(lines.join("\n"));
+const readableConfig = { code: 0, stdout: configListZ("core.bare=false") };
 const noPlantedConfig = { code: 0, stdout: local("core.bare=false", "filter.lfs.required=true") };
 const dirty = { code: 0, stdout: " M src/a.ts\n" };
 

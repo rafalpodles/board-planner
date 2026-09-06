@@ -12,6 +12,7 @@ import { Heartbeat, HeartbeatDeps } from "./registration.js";
 import { createTelemetry } from "./telemetry.js";
 import { ClaimedTask } from "./types.js";
 import { createWorker, WorkerDeps } from "./wiring.js";
+import { scopedConfigListZ } from "./config-list.fixtures.js";
 
 const STATE_DIR = "/tmp/cp-wiring-test-state";
 
@@ -197,6 +198,10 @@ describe("the worker's lifecycle", () => {
 describe("telemetry, from the agent's stdout to the two sinks", () => {
   const REPO = "/repos/demo";
   const REMOTE = "git@github.com:owner/repo.git";
+  // A second checkout on the same machine, for the tests about what a quarantine covers
+  const OTHER_REPO = "/repos/other";
+  const OTHER_REMOTE = "git@github.com:owner/other.git";
+  const remoteFor = (cwd?: string) => (cwd === OTHER_REPO ? OTHER_REMOTE : REMOTE);
   const BASE_SHA = "cafef00d";
   const SERVER_RUN_ID = "run-minted-by-the-server";
   const AGENT_SECRET = "cpw_deadbeef0123456789abcdef01234567";
@@ -282,11 +287,20 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     claudeCalls: string[][] = [],
     onAgentStart?: (nth: number) => void,
     everyCall: string[][] = [],
-    remoteCalls: RemoteCall[] = []
+    remoteCalls: RemoteCall[] = [],
+    // What `config --list --show-scope` answers. Only that listing: `--local --list` is what
+    // bindRepository scans, and a key visible to both would be refused at binding time instead —
+    // which is the path BP-346 records as the one an include.path or worktree-scope key evades.
+    scopedConfig: string | Record<string, string> = ""
   ): Runner {
+    const scopedFor = (cwd?: string) =>
+      typeof scopedConfig === "string" ? scopedConfig : (scopedConfig[cwd ?? ""] ?? "");
     return {
       async run(command, args, opts) {
         everyCall.push([command, ...args]);
+        if (command === "git" && args.includes("--show-scope")) {
+          return { code: 0, stdout: scopedFor(opts.cwd), stderr: "", timedOut: false };
+        }
         // everyCall keeps argv only, and the base lookup's hardening lives entirely in its
         // environment — workspace.ts composes those two calls' env instead of their args.
         if (command === "git" && (args[0] === "ls-remote" || args[0] === "fetch")) {
@@ -315,7 +329,14 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         // bindRepository insists the path is its own toplevel; every other git call is content-free
         return {
           code: 0,
-          stdout: args.includes("rev-parse") ? REPO : args.includes("get-url") ? REMOTE : "",
+          // The directory it ran in, not a constant: bindRepository insists a path is its own
+          // toplevel, and a fixture answering the same path for every cwd cannot have a second
+          // checkout at all.
+          stdout: args.includes("rev-parse")
+            ? (opts.cwd ?? REPO)
+            : args.includes("get-url")
+              ? remoteFor(opts.cwd)
+              : "",
           stderr: "",
           timedOut: false,
         };
@@ -340,14 +361,32 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       stateFiles?: Record<string, string>;
       // Claimed in order, one per pass of the loop, then the queue runs dry
       tasks?: ClaimedTask[];
-      // The board refusing every claim outright, in the server's words (BP-512)
-      claimRefusal?: string;
+      // The board refusing the claim outright, in the server's words (BP-512). A string refuses
+      // every project; a map refuses only the projects it names, which is what it takes to put one
+      // project's board refusal next to a sibling's quarantine.
+      claimRefusal?: string | Record<string, string>;
       onAgentStart?: (nth: number) => void;
+      // What the checkout's scoped git config says, for the tests about a planted key
+      scopedConfig?: string | Record<string, string>;
+      // Written into repos.json; defaults to the single REPO every other test uses
+      repos?: string[];
+      // Replaces the single p1 assignment; each entry binds by remote the way the server's do
+      assignments?: { project: string; remote: string }[];
+      // How many passes the loop is allowed before it is stopped. One is a single pass, which is
+      // what almost every test here wants; two is what it takes to see whether a project is
+      // claimed from AGAIN.
+      passes?: number;
+      // Moves the clock on at each sleep, so a later pass really re-binds: refreshServerState is
+      // throttled by MIN_REFRESH_INTERVAL_MS and would otherwise return without doing anything,
+      // which makes "survives a rebind" a claim no test could see.
+      clockJumpOnSleepMs?: number;
     } = {}
   ) {
     let seenHeartbeat: HeartbeatDeps | undefined;
     const stateDir = mkdtempSync(join(tmpdir(), "cp-wiring-run-"));
-    writeFileSync(join(stateDir, "repos.json"), JSON.stringify({ repos: [REPO] }), { mode: 0o600 });
+    writeFileSync(join(stateDir, "repos.json"), JSON.stringify({ repos: opts.repos ?? [REPO] }), {
+      mode: 0o600,
+    });
 
     for (const [name, contents] of Object.entries(opts.stateFiles ?? {})) {
       writeFileSync(join(stateDir, name), contents, { mode: 0o600 });
@@ -362,11 +401,20 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     const queue = opts.tasks ?? [CLAIMED];
     const logError = vi.fn();
     let claims = 0;
+    let slept = 0;
+    // wiring reads Date.now() directly for the refresh throttle, so this is what lets a test move
+    // past it. Installed inside the try below rather than here: this file has no afterEach, so a
+    // spy installed before the worker is built would outlive a throw and stand for the rest of it.
+    let clockOffset = 0;
+    let serverFetch = vi.fn();
+    const wallClock = Date.now;
     let localConfig: (() => LocalConfigView) | undefined;
 
     const api = {
-      claim: vi.fn<ApiClient["claim"]>(async () => {
-        if (opts.claimRefusal) throw new ClaimRefused(opts.claimRefusal);
+      claim: vi.fn<ApiClient["claim"]>(async (projectId) => {
+        const refusal =
+          typeof opts.claimRefusal === "string" ? opts.claimRefusal : opts.claimRefusal?.[projectId];
+        if (refusal) throw new ClaimRefused(refusal);
         return queue[claims++] ?? null;
       }),
       setStatus: vi.fn<ApiClient["setStatus"]>().mockResolvedValue(undefined),
@@ -387,16 +435,27 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     let stop = (): void => {};
     const worker = createWorker({
       env: { ...ENV, CP_STATE_DIR: stateDir },
-      runner: streamingRunner(claudeCalls, opts.onAgentStart, everyCall, remoteCalls),
+      runner: streamingRunner(
+        claudeCalls,
+        opts.onAgentStart,
+        everyCall,
+        remoteCalls,
+        opts.scopedConfig
+      ),
       hostname: () => "host-1",
       // the loop only sleeps once it has nothing left to claim, which is one pass after the run
-      sleep: async () => stop(),
+      sleep: async () => {
+        clockOffset += opts.clockJumpOnSleepMs ?? 0;
+        if (++slept >= (opts.passes ?? 1)) stop();
+      },
       log: vi.fn(),
       logError,
       uid: 501,
       realpath: (path) => path,
       stat: () => ({ uid: 501, mode: 0o40700 }),
-      fetchImpl: vi.fn().mockResolvedValue({
+      // Held rather than inlined: refreshServerState is this call's only caller, so the count is
+      // how a test says whether a rebind actually happened instead of assuming the clock got it there.
+      fetchImpl: (serverFetch = vi.fn().mockResolvedValue({
         ok: true,
         status: 200,
         json: async () => ({
@@ -412,16 +471,15 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
           ],
           // Work policy travels with the assignment now: it describes the project, so two projects
           // on one machine can resolve differently.
-          assignments: [
-            {
-              project: "p1",
-              remote: opts.assignmentRemote ?? REMOTE,
-              ...(opts.extraAssignmentFields ?? {}),
-              ...(policy ? { policy } : {}),
-            },
-          ],
+          assignments: (
+            opts.assignments ?? [{ project: "p1", remote: opts.assignmentRemote ?? REMOTE }]
+          ).map((assignment) => ({
+            ...assignment,
+            ...(opts.extraAssignmentFields ?? {}),
+            ...(policy ? { policy } : {}),
+          })),
         }),
-      }) as unknown as typeof fetch,
+      })) as unknown as typeof fetch,
       createStore: (path) => memoryStore(path.endsWith("worker.json") ? IDENTITY : ""),
       createApi: () => api as unknown as ApiClient,
       createTelemetry: () => telemetry,
@@ -453,9 +511,11 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     });
     stop = () => worker.shutdown();
 
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => wallClock() + clockOffset);
     try {
       await worker.run();
     } finally {
+      clock.mockRestore();
       rmSync(stateDir, { recursive: true, force: true });
     }
 
@@ -474,6 +534,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       claudeArgs: claudeCalls[0] ?? [],
       localConfig,
       heartbeatDeps: seenHeartbeat,
+      rebinds: serverFetch.mock.calls.length,
     };
   }
 
@@ -1051,6 +1112,327 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       });
 
       expect(run.localConfig?.().projects[0].blocked).toContain("package-lock.json");
+    });
+
+    /**
+     * BP-504. A key git runs on checkout, planted in a scope `bindRepository`'s own scan does not
+     * read — the permanent window BP-346 records. The run refuses before `git worktree add` checks
+     * anything out, and the project is then quarantined, because refusing alone leaves the loop
+     * claiming the same clone on the next pass for ever.
+     */
+    describe("a checkout carrying a key git would run on checkout", () => {
+      const PLANTED = scopedConfigListZ("filter.z.smudge=touch /tmp/pwned", "worktree");
+
+      it("does not claim for that project again on the next pass", async () => {
+        const run = await runOneTask(undefined, undefined, {
+          scopedConfig: PLANTED,
+          tasks: [CLAIMED, CLAIMED],
+          passes: 2,
+        });
+
+        expect(run.api.claim).toHaveBeenCalledTimes(1);
+      });
+
+      // The control, and the reason the assertion above is about quarantine rather than about the
+      // loop merely backing off: with nothing planted, the same budget claims again. Counted as
+      // "more than once" rather than exactly twice — a pass that claimed something does not sleep
+      // before the next one, so the sleep budget is not the pass count.
+      it("keeps claiming over the same budget when nothing is planted", async () => {
+        const run = await runOneTask(undefined, undefined, {
+          tasks: [CLAIMED, CLAIMED],
+          passes: 2,
+        });
+
+        expect(run.api.claim.mock.calls.length).toBeGreaterThan(1);
+      });
+
+      /**
+       * The rebind is what would undo this, and it is why the map is not cleared there the way
+       * `unusable` is: that one is recomputed from a static check, while this one records that
+       * something planted an executable key in a checkout this machine binds. A re-scan reading
+       * clean thirty seconds later is exactly what re-planting produces.
+       */
+      it("stays quarantined across a rebind", async () => {
+        const run = await runOneTask(undefined, undefined, {
+          scopedConfig: PLANTED,
+          tasks: [CLAIMED, CLAIMED],
+          passes: 2,
+          // Past MIN_REFRESH_INTERVAL_MS, so a later pass genuinely re-binds rather than returning
+          // from the throttle
+          clockJumpOnSleepMs: 60_000,
+        });
+
+        // Asserted, not assumed. Without this the test is green whether or not a rebind ever
+        // happened — "no rebind" and "a rebind that preserved the quarantine" look identical from
+        // the claim count — so raising the throttle constant, or changing the sleep budget, would
+        // silently turn it into a copy of the test above.
+        expect(run.rebinds, "no rebind happened, so this proves nothing").toBeGreaterThan(1);
+        expect(run.api.claim).toHaveBeenCalledTimes(1);
+      });
+
+      // The control for the one above: the same two passes and the same clock jump, with nothing
+      // planted, keep claiming — so that assertion is about the quarantine surviving and not about
+      // a rebind that never happened.
+      it("re-binds and keeps claiming over that same jump when nothing is planted", async () => {
+        const run = await runOneTask(undefined, undefined, {
+          tasks: [CLAIMED, CLAIMED],
+          passes: 2,
+          clockJumpOnSleepMs: 60_000,
+        });
+
+        expect(run.rebinds).toBeGreaterThan(1);
+        expect(run.api.claim.mock.calls.length).toBeGreaterThan(1);
+      });
+
+      it("never checks anything out of the poisoned clone", async () => {
+        const run = await runOneTask(undefined, undefined, { scopedConfig: PLANTED });
+
+        expect(
+          run.everyCall.some((call) => call.join(" ").includes("worktree add")),
+          "the worktree was created anyway"
+        ).toBe(false);
+      });
+
+      /**
+       * The quarantine is keyed on the CHECKOUT, and this is why: `rebind` resolves a project's
+       * repository by remote, so several projects can share one path — and the poison is in that
+       * path's config, not in any project. Keyed per project, each sibling paid its own claim, its
+       * own refusal and its own window against a clone the machine already knew about.
+       */
+      it("covers every project bound to the same checkout, not only the one that hit it", async () => {
+        const run = await runOneTask(undefined, undefined, {
+          scopedConfig: PLANTED,
+          assignments: [
+            { project: "p1", remote: REMOTE },
+            { project: "p2", remote: REMOTE },
+          ],
+        });
+
+        const blocked = run.localConfig?.().projects ?? [];
+        expect(blocked).toHaveLength(2);
+        for (const project of blocked) {
+          expect(project.blocked, `project ${project.project} was left claimable`).toContain(
+            "filter.z.smudge"
+          );
+        }
+      });
+
+      /**
+       * And it is only the poisoned checkout. Every test above proves the quarantine reaches far
+       * enough — siblings on the same path, a second poisoned path — and none of them proved it
+       * stops there: quarantining every bound checkout on the machine the moment one is poisoned
+       * left the whole suite green. A machine with two repositories would go silent on both, and
+       * the second one is not compromised.
+       */
+      it("leaves a clean checkout on the same machine claimable", async () => {
+        const run = await runOneTask(undefined, undefined, {
+          repos: [REPO, OTHER_REPO],
+          assignments: [
+            { project: "p1", remote: REMOTE },
+            { project: "p2", remote: OTHER_REMOTE },
+          ],
+          scopedConfig: { [REPO]: PLANTED },
+          tasks: [CLAIMED, { ...CLAIMED, projectId: "p2", taskId: "t2" }],
+          passes: 2,
+        });
+
+        const projects = run.localConfig?.().projects ?? [];
+        expect(projects.find((project) => project.project === "p1")?.blocked).toContain(
+          "filter.z.smudge"
+        );
+        expect(
+          projects.find((project) => project.project === "p2")?.blocked,
+          "the clean checkout was quarantined along with the poisoned one"
+        ).toBe("");
+        // And not only on the screen: it is still claimed for.
+        expect(run.api.claim.mock.calls.map((call) => call[0])).toContain("p2");
+      });
+
+      // And it is per checkout rather than per machine: a second poisoned repository is quarantined
+      // on its own, so "the first one wins" cannot pass for this.
+      it("quarantines a second poisoned checkout too", async () => {
+        const run = await runOneTask(undefined, undefined, {
+          repos: [REPO, OTHER_REPO],
+          assignments: [
+            { project: "p1", remote: REMOTE },
+            { project: "p2", remote: OTHER_REMOTE },
+          ],
+          scopedConfig: { [REPO]: PLANTED, [OTHER_REPO]: PLANTED },
+          tasks: [CLAIMED, { ...CLAIMED, projectId: "p2", taskId: "t2" }],
+          passes: 2,
+        });
+
+        const blocked = run.localConfig?.().projects ?? [];
+        expect(blocked).toHaveLength(2);
+        for (const project of blocked) {
+          expect(project.blocked, `project ${project.project} was left claimable`).toContain(
+            "filter.z.smudge"
+          );
+        }
+      });
+
+      /**
+       * The console is where a person looks, and until this the answer lived only on the worker's
+       * own stderr: the report read `ready`, `bindingError` was empty, and the project simply
+       * stopped being claimed. The sibling map — projects whose checkout fails the gates — has
+       * reported itself through this list since BP-379.
+       */
+      it("reports itself as a failed check, so the console says the machine stopped on purpose", async () => {
+        const run = await runOneTask(undefined, undefined, { scopedConfig: PLANTED });
+
+        const report = run.heartbeatDeps?.preflight?.();
+        expect(report?.ok).toBe(false);
+        const check = report?.checks.find((c) => c.name === "checkout quarantined");
+        expect(check?.detail).toContain("filter.z.smudge");
+        expect(check?.detail).toContain(REPO);
+        expect(check?.detail, "the report does not say how to recover").toContain("restart");
+      });
+
+      // The control for the one above: a healthy machine does not report a quarantine it has not
+      // made — otherwise the assertion is about a check that is always there.
+      it("reports no such check when nothing is planted", async () => {
+        const run = await runOneTask(undefined, undefined, {});
+
+        const report = run.heartbeatDeps?.preflight?.();
+        expect(report?.checks.some((c) => c.name === "checkout quarantined")).toBe(false);
+      });
+
+      /**
+       * The one thing here no test pins, said rather than left for a mutation to find: which of the
+       * two reasons `blocked` shows when a project is BOTH gate-unusable and quarantined. A project
+       * that fails its own checks is never claimed from (BP-379), so it never reaches the run that
+       * quarantines — the state is unreachable today, and a test for it would have to build a
+       * machine that cannot exist. The order in `wiring.ts` is what it should say if a later change
+       * makes it reachable, not a behaviour this suite guarantees.
+       */
+      it("shows the gate requirement when that is the only reason, which is the reachable half", async () => {
+        const run = await runOneTask(undefined, undefined, {
+          readFile: (path) =>
+            path.endsWith("package.json") ? JSON.stringify({ scripts: { lint: "eslint" } }) : null,
+        });
+
+        expect(run.localConfig?.().projects[0].blocked).toContain("package-lock.json");
+      });
+
+      it("says on the socket why the project is not being worked on", async () => {
+        const run = await runOneTask(undefined, undefined, { scopedConfig: PLANTED });
+
+        const blocked = run.localConfig?.().projects[0].blocked;
+        expect(blocked).toContain("filter.z.smudge");
+        // The whole sentence, not the bare finding. This field sits in the menubar next to the
+        // gates' detail sentences and the board's own refusal, where `filter.z.smudge (worktree)`
+        // on its own says neither that the machine stopped on purpose nor what to do about it.
+        expect(blocked).toContain(REPO);
+        expect(blocked, "the way out is not on the screen a person is looking at").toContain(
+          "restart"
+        );
+      });
+
+      /**
+       * The board's own refusal (BP-512) is the third reason `blocked` can carry, and unlike the
+       * gate one it really can sit next to a quarantine. Not on the project that hit the poison —
+       * a successful claim clears its refusal before the run starts — but on a SIBLING bound to
+       * the same checkout: `p2`'s board refuses, then `p1`'s run poisons the checkout they share,
+       * and `p2` is dropped from the pass before its board is ever asked again. Its refusal is
+       * frozen at whatever the board last said, while the checkout is the thing an operator has to
+       * go and fix, so that is what the cockpit shows.
+       */
+      it("shows the quarantine over a sibling's older board refusal, which outlives it", async () => {
+        const run = await runOneTask(undefined, undefined, {
+          scopedConfig: PLANTED,
+          // p2 first: a machine fault ends the pass, so p1 has to be claimed after p2 has been
+          // refused, or the refusal is never recorded and this passes for the wrong reason.
+          assignments: [
+            { project: "p2", remote: REMOTE },
+            { project: "p1", remote: REMOTE },
+          ],
+          claimRefusal: { p2: "This board has no column meaning In progress, so nothing moves." },
+        });
+
+        const p2 = run.localConfig?.().projects.find((project) => project.project === "p2");
+        expect(p2?.blocked, "nothing was chosen between: no reason was recorded").not.toBe("");
+        expect(p2?.blocked).toContain("filter.z.smudge");
+      });
+
+      // The control: the same two projects and the same refusal, with nothing planted. Without it
+      // a refusal that named a project no assignment carries would leave the assertion above
+      // passing for the ordinary reason that the quarantine was the only reason set.
+      it("shows the board's refusal when that is all there is", async () => {
+        const run = await runOneTask(undefined, undefined, {
+          assignments: [
+            { project: "p2", remote: REMOTE },
+            { project: "p1", remote: REMOTE },
+          ],
+          claimRefusal: { p2: "This board has no column meaning In progress, so nothing moves." },
+        });
+
+        const projects = run.localConfig?.().projects ?? [];
+        expect(projects.find((project) => project.project === "p2")?.blocked).toBe(
+          "This board has no column meaning In progress, so nothing moves."
+        );
+        expect(
+          projects.find((project) => project.project === "p1")?.blocked,
+          "the sibling was blocked too, so the refusal above is not the only thing at work"
+        ).toBe("");
+      });
+
+      /**
+       * Once per checkout, not once per pass: an operator reading stderr for the reason a machine
+       * went quiet should find one line, not a line every poll interval for as long as the worker
+       * runs.
+       *
+       * What makes it so is the `assignments()` filter, NOT `quarantineProject`'s own early
+       * return — measured: removing that guard leaves this green, because a quarantined checkout
+       * is never claimed for again, so the function is never reached a second time. The guard is
+       * defensive against a caller that does not exist yet. This test pins the property an
+       * operator sees; it deliberately does not pin which of the two produces it, because either
+       * one alone is enough and a test that named one would be a test of the wrong thing.
+       */
+      it("says it once, however many passes go by", async () => {
+        const run = await runOneTask(undefined, undefined, {
+          scopedConfig: PLANTED,
+          tasks: [CLAIMED, CLAIMED],
+          passes: 3,
+          clockJumpOnSleepMs: 60_000,
+        });
+
+        const quarantineLines = run.logError.mock.calls
+          .map((call) => String(call[0]))
+          .filter((line) => line.startsWith("quarantining "));
+        expect(run.rebinds, "no rebind happened, so this proves nothing").toBeGreaterThan(1);
+        expect(quarantineLines).toHaveLength(1);
+      });
+
+      it("says it in the worker's own log too, with the finding and what an operator has to do", async () => {
+        const run = await runOneTask(undefined, undefined, { scopedConfig: PLANTED });
+
+        const said = run.logError.mock.calls.map((call) => String(call[0]));
+        const line = said.find((message) => message.startsWith("quarantining "));
+        // One line carrying all three: which checkout, what is in it, and the way out. Asserted on
+        // the same string rather than across three calls — a reader gets one line, not a set.
+        expect(line, `no quarantine line among ${JSON.stringify(said)}`).toBeDefined();
+        expect(line).toContain(REPO);
+        expect(line).toContain("filter.z.smudge");
+        expect(line).toContain("restarted");
+      });
+
+      /**
+       * The task is not the one at fault, and nothing ever resets execution.attempts.
+       *
+       * "release was called" is not the assertion: `reporter.requeued` releases too, with
+       * `{ refund: false }`, which is exactly the charging this must not do. So the absence of that
+       * option is what says the attempt came back.
+       */
+      it("hands the task back rather than charging it for the machine's compromise", async () => {
+        const run = await runOneTask(undefined, undefined, { scopedConfig: PLANTED });
+
+        expect(run.api.release).toHaveBeenCalled();
+        expect(run.api.release).not.toHaveBeenCalledWith(
+          expect.anything(),
+          expect.anything(),
+          expect.objectContaining({ refund: false })
+        );
+      });
     });
 
     it("claims as before from a repository that has what the gates need", async () => {
