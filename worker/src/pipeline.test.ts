@@ -388,6 +388,34 @@ describe("runTask", () => {
       expect(h.quarantineProject, "a transient read latched the project off").not.toHaveBeenCalled();
     });
 
+    /**
+     * The detail is what `recordRun` keeps and what the menubar's notification shows, and it
+     * outlives the run — so the two kinds must not share one sentence. They did: an unreadable
+     * config was recorded as "carries an executable key", asserting a finding never made.
+     */
+    it("records what was actually found, which for an unreadable config is not a key", async () => {
+      const h = harness();
+      h.workspace.create.mockRejectedValue(new PoisonedCheckoutError(UNREADABLE_CONFIG));
+
+      await runTask(h.deps, task);
+
+      const [, record] = h.recordRun.mock.calls.at(-1)!;
+      expect(record).toMatchObject({ detail: "the checkout's git config could not be read" });
+    });
+
+    // The control on the same assertion: a key that WAS found still says so.
+    it("records the key when there was one", async () => {
+      const h = harness();
+      h.workspace.create.mockRejectedValue(poisoned());
+
+      await runTask(h.deps, task);
+
+      const [, record] = h.recordRun.mock.calls.at(-1)!;
+      expect(record).toMatchObject({
+        detail: "the checkout's git config carries an executable key",
+      });
+    });
+
     it("says so in the worker's own log, where an operator sees it without opening the board", async () => {
       const logError = vi.fn();
       const h = harness({ logError });

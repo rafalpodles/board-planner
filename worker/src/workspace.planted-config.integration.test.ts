@@ -145,6 +145,45 @@ describe("workspace.create against a planted config", () => {
     );
   });
 
+  /**
+   * The scan has to be judged against the config the checkout will actually use, or it answers a
+   * different question. `git worktree add` runs with `GIT_CONFIG_GLOBAL=/dev/null`; a scan that
+   * still read `~/.gitconfig` inherited every failure of a file the checkout never opens — and one
+   * malformed line there makes `--local --list` exit 128, which the scan reads as "unreadable" and
+   * refuses. Not for this project: for every project on the machine, with the board told the
+   * checkout could not be vouched for.
+   *
+   * What it must be instead is the fault it is. `resolveBase` still shells out to a remote and
+   * that call does read the operator's global file, so the run is still refused here — as a base
+   * that could not be resolved, which the pipeline already charges and reports as a transport
+   * fault. The point of this test is the class, not the success: an operator's broken file must
+   * not be reported as a compromised checkout.
+   */
+  it(
+    "calls a malformed global config a base it could not resolve, not a poisoned checkout",
+    async () => {
+      const home = join(dir, "home");
+      mkdirSync(home, { recursive: true });
+      writeFileSync(join(home, ".gitconfig"), "[user\nname = broken\n");
+      const realHome = process.env.HOME;
+      process.env.HOME = home;
+
+      try {
+        // The premise: git really does refuse to answer at all with that file in place, so the
+        // scan below has something to survive
+        expect(() => git(main, "config", "--local", "--list")).toThrow();
+
+        await expect(workspaceFor(main).create("BP-1", "worker")).rejects.toMatchObject({
+          name: "BaseUnavailableError",
+        });
+      } finally {
+        if (realHome === undefined) delete process.env.HOME;
+        else process.env.HOME = realHome;
+      }
+    },
+    REAL_GIT_TIMEOUT_MS
+  );
+
   // The premise. Everything below is about preventing this, so it is asserted rather than assumed:
   // on this git, `git worktree add` runs the planted smudge filter.
   it("git worktree add runs a planted smudge filter, which is the whole danger", () => {
