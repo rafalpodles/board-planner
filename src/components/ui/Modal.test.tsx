@@ -310,6 +310,13 @@ describe("Modal dismissal, still intact", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("closes from the header button", () => {
+    const onClose = vi.fn();
+    renderModal({ onClose });
+    act(() => screen.getByRole("button", { name: "Close dialog" }).click());
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it("locks body scroll while open and releases it on close", () => {
     const { rerender } = render(<Trigger open />);
     expect(document.body.style.overflow).toBe("hidden");
@@ -490,5 +497,69 @@ describe("Modal, bare on a narrow screen", () => {
     expect(cls).toContain("max-h-[90vh]");
     expect(cls).toContain("rounded-t-2xl");
     expect(cls).not.toContain("h-dvh");
+  });
+});
+
+/**
+ * BP-565. A dialog's own three ways out — the scrim, Escape, the header × — belong to Modal, so no
+ * caller could gate them on its in-flight write: it disabled its buttons and the request could
+ * still be abandoned by clicking beside the dialog, leaving a later failure toast with nothing on
+ * screen to explain it.
+ */
+describe("Modal, while its caller's request is in flight", () => {
+  it("refuses Escape", () => {
+    const onClose = vi.fn();
+    renderModal({ onClose, closeDisabled: true });
+    press("Escape");
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("refuses a scrim click", () => {
+    const onClose = vi.fn();
+    const { container } = renderModal({ onClose, closeDisabled: true });
+    act(() => (container.firstElementChild as HTMLElement).click());
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  // Disabled rather than inert: a × that swallows clicks in silence reads as a broken dialog,
+  // which is what the Cancel button beside it already avoids by dimming.
+  it("shows the header button as disabled rather than swallowing the click", () => {
+    const onClose = vi.fn();
+    renderModal({ onClose, closeDisabled: true });
+    const close = screen.getByRole("button", { name: "Close dialog" }) as HTMLButtonElement;
+    expect(close.disabled).toBe(true);
+    expect(close.className).toContain("disabled:opacity-50");
+    act(() => close.click());
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  // The refusal lasts exactly as long as the request: a dialog that could not be dismissed
+  // afterwards would be a worse bug than the one this fixes.
+  it("takes all three back the moment the request lands", () => {
+    const onClose = vi.fn();
+    const { container, rerender } = render(
+      <Modal open onClose={onClose} title="Edit Sprint" closeDisabled>
+        <button>Save</button>
+      </Modal>
+    );
+    rerender(
+      <Modal open onClose={onClose} title="Edit Sprint" closeDisabled={false}>
+        <button>Save</button>
+      </Modal>
+    );
+
+    press("Escape");
+    act(() => (container.firstElementChild as HTMLElement).click());
+    act(() => screen.getByRole("button", { name: "Close dialog" }).click());
+    expect(onClose).toHaveBeenCalledTimes(3);
+  });
+
+  it("leaves a dialog that passes nothing exactly as it was", () => {
+    const onClose = vi.fn();
+    const { container } = renderModal({ onClose });
+    press("Escape");
+    act(() => (container.firstElementChild as HTMLElement).click());
+    act(() => screen.getByRole("button", { name: "Close dialog" }).click());
+    expect(onClose).toHaveBeenCalledTimes(3);
   });
 });
