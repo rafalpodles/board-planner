@@ -131,3 +131,36 @@ describe("stored credentials never leave their saved url", () => {
     expect(McpClientMock).not.toHaveBeenCalled();
   });
 });
+
+// The picker in Settings is only usable if it can say what each tool does. `listTools` returns a
+// description per tool and this route used to map it away, which is why the allowlist had to be
+// typed from memory (BP-569).
+describe("the tool list carries enough to choose from", () => {
+  const TOOLS = [
+    { name: "notion-search", description: "Search pages in the workspace" },
+    { name: "notion-update-page", description: "Append blocks to a page" },
+    { name: "notion-orphan" },
+  ];
+
+  beforeEach(() => {
+    McpClientMock.mockImplementation(() => ({
+      initialize: vi.fn().mockResolvedValue(undefined),
+      listTools: vi.fn().mockResolvedValue(TOOLS),
+    }));
+  });
+
+  it("returns each tool's description alongside its name", async () => {
+    const response = await POST(
+      request({ url: "https://mcp.example/mcp", authType: "bearer", authToken: "t" }),
+      ctx()
+    );
+    const body = await response.json();
+
+    expect(body.count).toBe(3);
+    expect(body.tools).toEqual([
+      { name: "notion-search", description: "Search pages in the workspace", readSafe: true },
+      { name: "notion-update-page", description: "Append blocks to a page", readSafe: true },
+      { name: "notion-orphan", description: "", readSafe: true },
+    ]);
+  });
+});

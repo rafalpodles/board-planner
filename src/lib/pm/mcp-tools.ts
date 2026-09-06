@@ -5,6 +5,7 @@ import { resolveMcpAuthToken } from "./config";
 import { refreshTokens } from "./mcp-oauth";
 import { McpClient, McpToolDef } from "./mcp-client";
 import { OrToolDefinition } from "./openrouter";
+import { assessToolBudget, describeToolBudget } from "./tool-budget";
 
 export const MAX_MCP_CALLS_PER_TURN = 20;
 const MCP_RESULT_MAX_CHARS = 8000;
@@ -195,6 +196,18 @@ export async function discoverMcpTools(projectId: string, servers: IPmMcpServer[
       });
     }
   }
+
+  // What a turn carries is decided by the remote servers, so a project that worked yesterday can
+  // break today with no deploy and no settings change. Said here, at the size the turn actually
+  // has, so the failure is diagnosable from logs alone (BP-569).
+  const budget = assessToolBudget(
+    runtime.serverNames.map((name) => ({
+      name,
+      count: [...runtime.tools.values()].filter((t) => t.serverName === name).length,
+    }))
+  );
+  if (budget.over) console.warn(`[pm/mcp] ${describeToolBudget(budget)}`);
+
   return runtime;
 }
 

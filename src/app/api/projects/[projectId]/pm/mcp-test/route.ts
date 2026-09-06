@@ -46,7 +46,11 @@ export const POST = withProjectOwner(async (request, { params }) => {
     return NextResponse.json({
       ok: true,
       count: tools.length,
-      tools: tools.map((t) => ({ name: t.name, readSafe: isReadSafe(t) })),
+      tools: tools.map((t) => ({
+        name: t.name,
+        description: t.description ?? "",
+        readSafe: isReadSafe(t),
+      })),
     });
   } catch (err) {
     return NextResponse.json(

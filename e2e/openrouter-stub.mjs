@@ -93,8 +93,13 @@ const server = createServer((req, res) => {
   req.on("data", (chunk) => (raw += chunk));
   req.on("end", () => {
     let messages = [];
+    let offeredTools = [];
     try {
-      messages = JSON.parse(raw).messages ?? [];
+      const body = JSON.parse(raw);
+      messages = body.messages ?? [];
+      // The names the model was OFFERED, which is the whole subject of BP-569 and is carried
+      // beside the conversation rather than inside it — no assertion on messages can see it.
+      offeredTools = (body.tools ?? []).map((t) => t?.function?.name).filter(Boolean);
     } catch {
       // A malformed request is the app's problem to report, not something to paper over
     }
@@ -111,6 +116,7 @@ const server = createServer((req, res) => {
         : (m?.content ?? []).map(kindOfPart);
     const users = messages.filter((m) => m?.role === "user");
     received = {
+      offeredTools,
       userBlocks: kindsOf(users[users.length - 1]),
       // Across the whole request, so a follow-up turn shows whether history replayed the picture
       images: messages.reduce(
