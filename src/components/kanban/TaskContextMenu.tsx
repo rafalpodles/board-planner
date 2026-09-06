@@ -105,26 +105,30 @@ export function TaskContextMenu({
           {c.label}
         </button>
       ))}
-      {onSprintChange && sprints.length > 0 && (
+      {onSprintChange && (sprints.length > 0 || currentSprint || selectedCount > 1) && (
         <>
           <div className="border-t border-border my-1" />
-          <div className="px-3 py-1.5 text-xs text-text-muted font-medium">
-            Move to sprint
-          </div>
-          {sprints.map((s) => (
-            <button
-              key={s._id}
-              disabled={selectedCount === 1 && s._id === currentSprint}
-              onClick={() => { onSprintChange(s._id); onClose(); }}
-              className="w-full text-left px-3 py-1.5 hover:bg-bg-input transition-colors
-                disabled:opacity-40 disabled:hover:bg-transparent disabled:cursor-default"
-            >
-              {s.name}
-              {s.status === "active" && (
-                <span className="text-xs text-primary ml-1">(Active)</span>
-              )}
-            </button>
-          ))}
+          {sprints.length > 0 && (
+            <>
+              <div className="px-3 py-1.5 text-xs text-text-muted font-medium">
+                Move to sprint
+              </div>
+              {sprints.map((s) => (
+                <button
+                  key={s._id}
+                  disabled={selectedCount === 1 && s._id === currentSprint}
+                  onClick={() => { onSprintChange(s._id); onClose(); }}
+                  className="w-full text-left px-3 py-1.5 hover:bg-bg-input transition-colors
+                    disabled:opacity-40 disabled:hover:bg-transparent disabled:cursor-default"
+                >
+                  {s.name}
+                  {s.status === "active" && (
+                    <span className="text-xs text-primary ml-1">(Active)</span>
+                  )}
+                </button>
+              ))}
+            </>
+          )}
           {(currentSprint || selectedCount > 1) && (
             <button
               onClick={() => { onSprintChange(null); onClose(); }}
