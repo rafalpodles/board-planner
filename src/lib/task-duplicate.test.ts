@@ -48,6 +48,17 @@ describe("duplicatePayload", () => {
     expect(payload.title).toBe(`Copy of ${longTitle}`.slice(0, 200));
   });
 
+  // A plain slice at the cap can land between the two halves of a surrogate pair. Placed so the
+  // emoji's high surrogate is the 200th character of "Copy of " + title, a naive slice keeps it
+  // alone — the clamp must drop it rather than hand back a string that serialises with a
+  // trailing U+FFFD.
+  it("drops a trailing lone surrogate instead of a mangled character", () => {
+    const longTitle = `${"A".repeat(191)}😀${"A".repeat(10)}`;
+    const payload = duplicatePayload({ ...task, title: longTitle } as unknown as ApiTask);
+    expect(payload.title).toBe(`Copy of ${"A".repeat(191)}`);
+    expect(payload.title.charCodeAt(payload.title.length - 1)).toBeLessThan(0xd800);
+  });
+
   // The three the product deliberately leaves behind, plus the status the server picks itself
   it("names neither the status, the assignee, the sprint nor the agent", () => {
     const payload = duplicatePayload({

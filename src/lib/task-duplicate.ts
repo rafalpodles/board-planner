@@ -14,6 +14,14 @@ export function undoneChecklist(items: { text: string }[] | undefined | null) {
   return (items || []).map((item) => ({ text: item.text, done: false }));
 }
 
+// A plain slice at the cap can split a surrogate pair in two; the lone high surrogate left behind
+// is valid JS but not valid Unicode, and becomes U+FFFD wherever the title is next serialised
+// (JSON, then BSON).
+function trimDanglingSurrogate(value: string): string {
+  const lastUnit = value.charCodeAt(value.length - 1);
+  return lastUnit >= 0xd800 && lastUnit <= 0xdbff ? value.slice(0, -1) : value;
+}
+
 type DuplicableTask = Pick<
   ApiTask,
   | "title"
@@ -49,7 +57,7 @@ type DuplicableTask = Pick<
  */
 export function duplicatePayload(task: DuplicableTask) {
   return {
-    title: `Copy of ${task.title}`.slice(0, TASK_TITLE_MAX_LENGTH),
+    title: trimDanglingSurrogate(`Copy of ${task.title}`.slice(0, TASK_TITLE_MAX_LENGTH)),
     description: task.description,
     priority: task.priority,
     category: task.category,
