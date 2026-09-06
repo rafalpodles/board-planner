@@ -274,6 +274,11 @@ function TaskDetailView({
         force ? { force: true } : undefined
       );
       toast("Task deleted", "success");
+      // Cleared rather than left to the screen going away: the flag now refuses the confirmation's
+      // own ways out, and "the component will unmount" is a promise about a navigation, not about
+      // this line (BP-565).
+      setDeleting(false);
+      setConfirmDelete(false);
       onClose();
     } catch (err) {
       // The same shape the status change already handles, and it has to be handled here for a

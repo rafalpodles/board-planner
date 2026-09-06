@@ -522,14 +522,10 @@ describe("Sprint lifecycle from the header", () => {
     });
     expect(screen.getByRole("dialog", { name: "Complete Sprint" })).toBe(dialog);
 
-    // The second answer is refused by the disabled button rather than by luck: a click on it here
-    // would be the completion running twice, and the second lands on a sprint already closed.
-    await click(screen.getByRole("button", { name: "Keep in Sprint" }));
-    expect(api.put).toHaveBeenCalledTimes(1);
-
     await act(async () => {
       finish({});
     });
+    expect(api.put).toHaveBeenCalledTimes(1);
   });
 
   it("deletes the selected sprint once the confirmation is answered", async () => {

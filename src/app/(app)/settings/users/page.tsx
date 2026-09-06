@@ -70,6 +70,16 @@ export default function UsersPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin, authLoading]);
 
+  // The list refresh that follows a write. Its own failure is not the write's failure — the write
+  // landed — so it is reported as what it is, and never as an unhandled rejection.
+  async function refreshUsers() {
+    try {
+      setUsers(await api.get("/api/users"));
+    } catch {
+      toast("Saved. The list could not be refreshed — reload the page to see it", "error");
+    }
+  }
+
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
     if (saving) return;
@@ -88,7 +98,7 @@ export default function UsersPage() {
     }
     setSaving(false);
     closeNew();
-    setUsers(await api.get("/api/users"));
+    await refreshUsers();
   }
 
   function openEdit(user: ApiUser) {
@@ -161,13 +171,15 @@ export default function UsersPage() {
     // Cleared with the PUT, before the refetch — see handleCreate.
     setEditSaving(false);
     closeEdit();
-    setUsers(await api.get("/api/users"));
+    // Before the refresh, not after it: the save is what the toast is about, and a refresh that
+    // fails must not swallow the one line telling somebody their password was changed.
     toast(
       passwordWasSet
         ? `Password set for ${username}. They were signed out everywhere.`
         : "Saved",
       "success"
     );
+    await refreshUsers();
   }
 
   async function handleDelete() {
@@ -182,8 +194,8 @@ export default function UsersPage() {
     }
     setDeleting(false);
     setConfirmDeleteUser(null);
-    setUsers(await api.get("/api/users"));
     toast("User deleted", "success");
+    await refreshUsers();
   }
 
   if (!isAdmin) return null;

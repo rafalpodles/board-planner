@@ -96,7 +96,9 @@ describe("deleting a comment", () => {
       false
     );
 
-    releaseReload([second]);
+    await act(async () => {
+      releaseReload([second]);
+    });
   });
 });
 

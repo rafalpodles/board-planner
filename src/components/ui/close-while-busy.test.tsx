@@ -3,6 +3,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, act } from "@testing-library/react";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { NewTaskModal } from "@/components/tasks/NewTaskModal";
+import { TaskForm } from "@/components/tasks/TaskForm";
 import {
   EditBlockDialog,
   NewAgentDialog,
@@ -345,5 +346,48 @@ describe("a dialog with a request in flight refuses Escape", () => {
       });
       view.unmount();
     }
+  });
+
+  /**
+   * The report goes through a ref so it survives a caller that passes an inline arrow: read from
+   * the deps directly, every render of that caller would tear the subscription down and rebuild it,
+   * telling the dialog it was free and then busy again — a flicker of an unlocked dialog in the
+   * middle of a write.
+   */
+  it("does not flicker the flag when its caller re-renders with a new callback", async () => {
+    api.get.mockResolvedValue([]);
+    api.post.mockImplementation(() => new Promise(() => {}));
+    const seen: boolean[] = [];
+
+    function Parent({ tick }: { tick: number }) {
+      return (
+        <>
+          <span>tick {tick}</span>
+          <TaskForm
+            projectId="p1"
+            projectKey="TP"
+            onSaved={() => {}}
+            onCancel={() => {}}
+            onBusyChange={(value) => seen.push(value)}
+          />
+        </>
+      );
+    }
+
+    const view = render(<Parent tick={1} />);
+    const title = screen.getByLabelText(/title/i) as HTMLInputElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(title, "One");
+      title.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      screen.getByRole("button", { name: "Create Task" }).click();
+    });
+    expect(seen).toEqual([false, true]);
+
+    await act(async () => {
+      view.rerender(<Parent tick={2} />);
+    });
+    expect(seen).toEqual([false, true]);
   });
 });

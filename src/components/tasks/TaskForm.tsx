@@ -128,7 +128,14 @@ export function TaskForm({
   }, [busy]);
 
   // A form torn down mid-request would otherwise leave the flag set on whoever owns it
-  useEffect(() => () => onBusyChangeRef.current?.(false), []);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      onBusyChangeRef.current?.(false);
+    };
+  }, []);
 
   const handleFileUpload = useCallback(
     async (file: File): Promise<string> => {
@@ -162,7 +169,9 @@ export function TaskForm({
         setCustomFieldValues((prev) => ({ ...prev, ...result.customFieldValues }));
       }
       setAiInsights(result);
-      toast("Fields filled by AI — review and save", "success");
+      // The fill is deliberately not gated (see `busy` above), so the form can be gone by now —
+      // and a line telling somebody to review fields they cannot see is worse than silence.
+      if (mounted.current) toast("Fields filled by AI — review and save", "success");
     } catch {
       toast("AI generation failed", "error");
     } finally {
