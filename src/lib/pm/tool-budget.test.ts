@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { assessToolBudget, describeToolBudget, estimateToolTokens, MCP_TOOL_BUDGET } from "./tool-budget";
+import {
+  assessToolBudget,
+  describeToolBudget,
+  estimateToolTokens,
+  MCP_TOOL_BUDGET,
+  TOKENS_PER_TOOL_ESTIMATE,
+} from "./tool-budget";
 
 describe("assessToolBudget", () => {
   it("counts every enabled server together, because the turn carries them together", () => {
@@ -56,10 +62,13 @@ describe("describeToolBudget", () => {
       ])
     );
 
-    expect(sentence).toContain("86");
-    expect(sentence).toContain(String(MCP_TOOL_BUDGET));
-    expect(sentence).toContain("github (44)");
-    expect(sentence).toContain("notion (42)");
+    // The whole sentence, not substrings of it: asserting only "86" and "40" left the claim it
+    // makes free to be inverted — "below the 40", "turns get faster" (BP-569 review 3)
+    expect(sentence).toBe(
+      "86 MCP tools would be sent to the model on every call of a turn, above the 40 this agent " +
+        "is sized for: github (44), notion (42). Turns get slower and may end without an answer. " +
+        "Narrow a server's tool list to fix it."
+    );
   });
 
   it("is silent when the project is within budget, so it can be rendered unconditionally", () => {
@@ -73,9 +82,11 @@ describe("estimateToolTokens", () => {
     expect(estimateToolTokens(13)).toBeLessThan(estimateToolTokens(86));
   });
 
-  it("lands in the order of magnitude the BP measurement showed for 86 tools", () => {
-    expect(estimateToolTokens(86)).toBeGreaterThan(20_000);
-    expect(estimateToolTokens(86)).toBeLessThan(60_000);
+  // Bounds wide enough to admit 233-697 tokens per tool proved nothing about the number; the
+  // constant is a stated estimate, so state it (BP-569 review 3)
+  it("is the measured per-tool estimate, times the count", () => {
+    expect(TOKENS_PER_TOOL_ESTIMATE).toBe(350);
+    expect(estimateToolTokens(86)).toBe(30_100);
   });
 });
 
@@ -97,5 +108,30 @@ describe("a server that contributes nothing", () => {
 
     expect(verdict.heaviest).toEqual([]);
     expect(describeToolBudget(verdict)).toBe("");
+  });
+});
+
+describe("a total that could not be counted in full", () => {
+  it("is presented as a floor rather than a figure", () => {
+    const sentence = describeToolBudget(
+      assessToolBudget([{ name: "github", count: 44 }], undefined, true)
+    );
+
+    expect(sentence).toContain("At least 44 MCP tools");
+  });
+
+  // The control: a complete count states the number plainly
+  it("is stated plainly when every server was reached", () => {
+    const sentence = describeToolBudget(assessToolBudget([{ name: "github", count: 44 }]));
+
+    expect(sentence).toContain("44 MCP tools");
+    expect(sentence).not.toContain("At least");
+  });
+});
+
+describe("the budget argument", () => {
+  it("is honoured, so a caller can ask about a different ceiling", () => {
+    expect(assessToolBudget([{ name: "a", count: 20 }], 10).over).toBe(true);
+    expect(assessToolBudget([{ name: "a", count: 20 }], 30).over).toBe(false);
   });
 });

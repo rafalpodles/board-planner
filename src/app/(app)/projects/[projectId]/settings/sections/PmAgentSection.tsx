@@ -27,7 +27,6 @@ interface McpServerDraft {
    * mcp-test answering after a removal wrote its result, success message and all, onto whichever
    * row had taken that index (BP-569 reviews, twice).
    */
-  rowId: string;
   name: string;
   url: string;
   authType: "none" | "bearer" | "oauth";
@@ -39,6 +38,26 @@ interface McpServerDraft {
   oauthStatus?: string;
   oauthClientId: string;
   oauthClientSecret: string;
+}
+
+/** What a catalogue is a fact about. `config.ts` refuses two servers sharing a name. */
+function catalogKey(server: {
+  name: string;
+  url: string;
+  authType: string;
+  authToken: string;
+  oauthStatus?: string;
+}): string {
+  // `oauthStatus` is part of it: `discoverMcpTools` refuses an oauth server with no token, so
+  // after Disconnect the turn carries nothing from it and a catalogue left on screen would be
+  // asserting tools that do not exist (BP-569 review 3).
+  return [
+    server.name.trim(),
+    server.url.trim(),
+    server.authType,
+    server.authToken,
+    server.oauthStatus ?? "",
+  ].join("|");
 }
 
 interface McpTransient {
@@ -72,10 +91,7 @@ function pmDraftFrom(p: ApiProject) {
     timezone: p.pm?.autonomy?.timezone || "Europe/Warsaw",
     handleNhr: p.pm?.autonomy?.handleNeedsHumanReview ?? false,
     mcpServers: (p.pm?.mcpServers || []).map(
-      (s, i): McpServerDraft => ({
-        // Derived from position at load and from a counter afterwards, so discarding an edit
-        // restores the same ids and the catalogues stay with their own rows
-        rowId: `saved-${i}`,
+      (s): McpServerDraft => ({
         name: s.name,
         url: s.url,
         authType: s.authType,
@@ -129,8 +145,17 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
       cancelled = true;
     };
   }, [api, projectId, isAdmin]);
+  /**
+   * Per-row test state, keyed by **what the row points at** rather than by where it sits.
+   *
+   * Three reviews in a row broke a positional key: removing a row slid every later row onto the
+   * previous row's catalogue; an mcp-test answering after a removal wrote onto whoever took that
+   * index; and a row id derived from position was re-minted on every save, which is the same bug
+   * again. A catalogue is a fact about a host and a credential, so that is the key. A reply for an
+   * identity no longer on screen lands on something nothing renders, a save leaves it alone, and
+   * Discard restores the row and its own catalogue together (BP-569).
+   */
   const [transient, setTransient] = useState<Record<string, McpTransient>>({});
-  const nextRowId = useRef(0);
   const [newLinkLabel, setNewLinkLabel] = useState("");
   const [newLinkUrl, setNewLinkUrl] = useState("");
 
@@ -182,13 +207,14 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
     Number(draft.value.reviewInterval)
   );
 
-  function setTransientAt(rowId: string, patch: McpTransient) {
-    setTransient((prev) => ({ ...prev, [rowId]: { ...prev[rowId], ...patch } }));
+  function setTransientAt(key: string, patch: McpTransient) {
+    setTransient((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
   }
 
   // Counted the way `discoverMcpTools` counts: ticked names when there are any, otherwise the
   // whole catalogue, and never a tool a server without `allowWrites` will drop anyway. A server
   // nobody has tested contributes nothing rather than a guess.
+  const enabledServers = servers.filter((s) => s.enabled);
   const budgetWarning = describeToolBudget(
     assessToolBudget(
       servers
@@ -196,34 +222,25 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
           name: serverRowNames[i],
           enabled: s.enabled,
           // The RAW catalogue, the same list the picker's own counter uses, so the two cannot
-          // print different numbers for one server (BP-569 review 2)
-          count: transient[s.rowId]?.catalog
-            ? carriedTools(transient[s.rowId]?.catalog, s.toolAllowlist, s.allowWrites).length
+          // print different numbers for one server
+          count: transient[catalogKey(s)]?.catalog
+            ? carriedTools(transient[catalogKey(s)]?.catalog, s.toolAllowlist, s.allowWrites).length
             : 0,
         }))
-        .filter((s) => s.enabled)
+        .filter((s) => s.enabled),
+      undefined,
+      // A server nobody could reach contributes an unknown number, so the total is a floor
+      enabledServers.some((s) => !transient[catalogKey(s)]?.catalog)
     )
   );
 
-  // Which server a catalogue came from is decided by these four fields. Changing any of them
-  // leaves the tools on screen describing a host that is no longer addressed, and ticking them
-  // writes an allowlist that matches nothing at turn time (BP-569 review).
-  const CATALOG_IDENTITY: (keyof McpServerDraft)[] = ["url", "name", "authType", "authToken"];
-
   function updateServer(index: number, patch: Partial<McpServerDraft>) {
-    const before = servers[index];
-    if (CATALOG_IDENTITY.some((key) => key in patch && patch[key] !== before[key])) {
-      setTransientAt(before.rowId, { catalog: undefined, testResult: "" });
-    }
     draft.set(
       "mcpServers",
       servers.map((s, i) => (i === index ? { ...s, ...patch } : s))
     );
   }
 
-  // `transient` is keyed by array position, so removing a row would otherwise slide every later
-  // row onto the catalogue of the one before it — the picker under one server listing another
-  // server's tools, and an allowlist saved from them matching nothing (BP-569 review).
   function removeServer(index: number) {
     draft.set("mcpServers", servers.filter((_, i) => i !== index));
   }
@@ -289,15 +306,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
 
   useDirtyGroup(
     { id: "pm-agent", section: "pm", label: "PM agent", count: draft.count },
-    {
-      save: async () => void (await savePm()),
-      // `transient` is not part of the draft, so a rewind would otherwise leave a catalogue
-      // fetched for an edited url sitting under the url it was reverted to (BP-569 review 2)
-      discard: () => {
-        draft.discard();
-        setTransient({});
-      },
-    }
+    { save: async () => void (await savePm()), discard: draft.discard }
   );
 
   /**
@@ -313,13 +322,18 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
     // Keyed on the SAVED servers, never on the draft. Watching the draft fires a discovery request
     // per keystroke while a url is being typed, and — worse — silently re-fills a catalogue the
     // edit was supposed to invalidate, so a stale list is indistinguishable from a fresh one.
-    if (!project.canAdmin || probed.current) return;
+    // Instance admin, not merely project owner: the allowlist controls the warning tells you to
+    // use are theirs alone, so anyone else would get an unactionable banner and a round of
+    // outbound requests spent on it (BP-569 review 3).
+    if (!isAdmin || probed.current) return;
     const saved = project.pm?.mcpServers ?? [];
     if (saved.length === 0) return;
     probed.current = true;
     saved.forEach((server, index) => {
       if (!server.enabled || !server.url?.trim()) return;
-      const rowId = `saved-${index}`;
+      // Keyed the same way the row will read it. The draft's authToken starts empty for a saved
+      // server, so this matches what the picker looks up.
+      const key = catalogKey({ ...server, authToken: "" });
       void (async () => {
         try {
           const res = await api.post(`/api/projects/${projectId}/pm/mcp-test`, {
@@ -327,20 +341,23 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
             url: server.url.trim(),
             authType: server.authType,
           });
-          setTransientAt(rowId, { catalog: res?.tools ?? [] });
+          setTransientAt(key, { catalog: res?.tools ?? [] });
         } catch {
           // A server that is down is the Test button's story to tell, not a banner on page load
         }
       })();
     });
-  }, [api, projectId, project]);
+  }, [api, projectId, project, isAdmin]);
 
   async function testServer(index: number) {
     const server = servers[index];
     // Captured before the await: the row may be removed or moved while this is in flight, and the
     // answer must land on the server it was asked about or on nothing at all
-    const { rowId } = server;
-    setTransientAt(rowId, { testing: true, testResult: "" });
+    // Captured before the await: the answer belongs to the host and credential it was asked
+    // about, so a row edited, discarded, removed or saved meanwhile is served by a different key
+    // and this reply lands where nothing reads it.
+    const key = catalogKey(server);
+    setTransientAt(key, { testing: true, testResult: "" });
     try {
       const res = await api.post(`/api/projects/${projectId}/pm/mcp-test`, {
         name: server.name.trim(),
@@ -348,13 +365,13 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
         authType: server.authType,
         authToken: server.authToken,
       });
-      setTransientAt(rowId, {
+      setTransientAt(key, {
         testing: false,
         catalog: res.tools || [],
         testResult: `✓ Connected — ${res.count} tools offered. Tick the ones the agent should get.`,
       });
     } catch (err) {
-      setTransientAt(rowId, {
+      setTransientAt(key, {
         testing: false,
         testResult: `✗ ${err instanceof Error ? err.message : "Connection failed"}`,
       });
@@ -363,18 +380,18 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
 
   async function connectOauth(index: number) {
     const serverName = servers[index].name.trim();
-    const { rowId } = servers[index];
-    setTransientAt(rowId, { connecting: true, testResult: "" });
+    const key = catalogKey(servers[index]);
+    setTransientAt(key, { connecting: true, testResult: "" });
     // Persist the draft first so Connect works without a manual save
     if (!(await savePm({ silent: true }))) {
-      setTransientAt(rowId, { connecting: false });
+      setTransientAt(key, { connecting: false });
       return;
     }
     try {
       const res = await api.post(`/api/projects/${projectId}/pm/mcp-oauth/start`, { name: serverName });
       window.location.href = res.authorizationUrl;
     } catch (err) {
-      setTransientAt(rowId, {
+      setTransientAt(key, {
         connecting: false,
         testResult: `✗ ${err instanceof Error ? err.message : "OAuth start failed"}`,
       });
@@ -641,7 +658,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
               : "External MCP servers the agent may read at the start of a turn. The instance admin manages which servers exist — you can connect, disconnect and test what's already set up."
           }
         >
-          {budgetWarning && (
+          {isAdmin && budgetWarning && (
             <p
               role="status"
               data-testid="mcp-tool-budget-warning"
@@ -734,16 +751,16 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                           variant="secondary"
                           size="sm"
                           aria-label={`${
-                            transient[server.rowId]?.connecting
+                            transient[catalogKey(server)]?.connecting
                               ? "Redirecting..."
                               : server.oauthStatus === "connected"
                                 ? "Reconnect"
                                 : "Connect"
                           } ${rowName}`}
-                          disabled={transient[server.rowId]?.connecting || !server.name.trim()}
+                          disabled={transient[catalogKey(server)]?.connecting || !server.name.trim()}
                           onClick={() => connectOauth(i)}
                         >
-                          {transient[server.rowId]?.connecting
+                          {transient[catalogKey(server)]?.connecting
                             ? "Redirecting..."
                             : server.oauthStatus === "connected"
                               ? "Reconnect"
@@ -782,8 +799,12 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                 )}
                 {isAdmin && (
                   <McpToolPicker
+                    // A new identity is a new picker: keyed by index, the filter text typed
+                    // against one server stayed applied to whichever row took that position
+                    // after a removal (BP-569 review 3).
+                    key={catalogKey(server)}
                     rowName={rowName}
-                    catalog={transient[server.rowId]?.catalog}
+                    catalog={transient[catalogKey(server)]?.catalog}
                     allowlist={server.toolAllowlist}
                     allowWrites={server.allowWrites}
                     onChange={(value) => updateServer(i, { toolAllowlist: value })}
@@ -809,17 +830,17 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                       variant="secondary"
                       size="sm"
                       aria-label={`${
-                        transient[server.rowId]?.testing ? "Testing..." : "Test connection"
+                        transient[catalogKey(server)]?.testing ? "Testing..." : "Test connection"
                       } for ${rowName}`}
-                      disabled={transient[server.rowId]?.testing || !server.url.trim()}
+                      disabled={transient[catalogKey(server)]?.testing || !server.url.trim()}
                       onClick={() => testServer(i)}
                     >
-                      {transient[server.rowId]?.testing ? "Testing..." : "Test connection"}
+                      {transient[catalogKey(server)]?.testing ? "Testing..." : "Test connection"}
                     </Button>
                   )}
                 </div>
-                {transient[server.rowId]?.testResult && (
-                  <p className="whitespace-pre-wrap text-xs text-text-muted">{transient[server.rowId]?.testResult}</p>
+                {transient[catalogKey(server)]?.testResult && (
+                  <p className="whitespace-pre-wrap text-xs text-text-muted">{transient[catalogKey(server)]?.testResult}</p>
                 )}
               </div>
               );
@@ -841,7 +862,6 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                 draft.set("mcpServers", [
                   ...servers,
                   {
-                    rowId: `new-${nextRowId.current++}`,
                     name: "",
                     url: "",
                     authType: "none",

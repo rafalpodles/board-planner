@@ -41,12 +41,16 @@ export interface ToolBudgetVerdict {
   budget: number;
   total: number;
   over: boolean;
+  /** Every contributing server, largest first. Not a top-N — the whole blame list. */
   heaviest: ServerToolCount[];
+  /** A server this caller could not count, so `total` is a floor rather than a figure. */
+  incomplete: boolean;
 }
 
 export function assessToolBudget(
   servers: ServerToolCount[],
-  budget: number = MCP_TOOL_BUDGET
+  budget: number = MCP_TOOL_BUDGET,
+  incomplete = false
 ): ToolBudgetVerdict {
   // A server contributing nothing is not responsible for a flood, and naming it in the blame list
   // was the difference between the UI's count and the agent's (BP-569 review).
@@ -57,6 +61,7 @@ export function assessToolBudget(
     total,
     over: total > budget,
     heaviest: [...contributing].sort((a, b) => b.count - a.count),
+    incomplete,
   };
 }
 
@@ -64,9 +69,13 @@ export function assessToolBudget(
 export function describeToolBudget(verdict: ToolBudgetVerdict): string {
   if (!verdict.over) return "";
   const blame = verdict.heaviest.map((s) => `${s.name} (${s.count})`).join(", ");
+  // "at least", because a server that could not be counted contributes an unknown number and the
+  // total is a floor. "would be" rather than "are": on the settings screen this describes the
+  // configuration on screen, which may not be the saved one (BP-569 review 3).
+  const count = verdict.incomplete ? `At least ${verdict.total}` : `${verdict.total}`;
   return (
-    `${verdict.total} MCP tools are sent to the model on every call of a turn, above the ${verdict.budget} ` +
-    `this agent is sized for: ${blame}. Turns get slower and may end without an answer. ` +
-    `Narrow a server's tool list to fix it.`
+    `${count} MCP tools would be sent to the model on every call of a turn, above the ` +
+    `${verdict.budget} this agent is sized for: ${blame}. Turns get slower and may end without an ` +
+    `answer. Narrow a server's tool list to fix it.`
   );
 }
