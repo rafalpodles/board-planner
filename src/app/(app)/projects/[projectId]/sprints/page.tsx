@@ -54,6 +54,7 @@ export default function SprintsPage() {
   const [saving, setSaving] = useState(false);
   const [completing, setCompleting] = useState<ApiSprint | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<ApiSprint | null>(null);
+  const [deletingSprint, setDeletingSprint] = useState(false);
   const [initialLoadDone, setInitialLoadDone] = useState(false);
   const [showVelocity, setShowVelocity] = useState(false);
   // The panes' own counts come straight from board.tasks, but board.applySprintChange can
@@ -136,13 +137,16 @@ export default function SprintsPage() {
   }
 
   async function handleDelete(sprintId: string) {
+    setDeletingSprint(true);
     try {
       await api.del(`/api/projects/${projectId}/sprints/${sprintId}`);
       toast("Sprint deleted", "success");
-      setConfirmDelete(null);
       board.reload();
     } catch {
       toast("Failed to delete sprint", "error");
+    } finally {
+      setDeletingSprint(false);
+      setConfirmDelete(null);
     }
   }
 
@@ -355,6 +359,7 @@ export default function SprintsPage() {
         title="Delete Sprint"
         message="Are you sure? Tasks in this sprint will be moved to backlog."
         confirmLabel="Delete"
+        loading={deletingSprint}
       />
     </div>
   );
