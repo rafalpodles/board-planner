@@ -340,11 +340,15 @@ export function Comments({
             </div>
           </div>
         ))}
-        {/* Three states, not one. A read still running is not an empty discussion — and it draws
-            nothing rather than a placeholder: this panel sits in a page whose sticky header depends
-            on the body being the only thing that scrolls, and a placeholder that appears and goes
-            resizes it under the reader (it broke e2e/sticky-task-header.spec.ts) */}
-        {reading ? null : loadFailed ? (
+        {/* Three states, not one: a read still running is not an empty discussion. It holds the
+            same one line the sentence takes rather than a spinner — this panel sits in a page whose
+            sticky header depends on the body being the only thing that scrolls, and anything that
+            resizes or animates here moves that page under the reader */}
+        {reading ? (
+          <p className="text-sm text-text-muted" aria-hidden>
+            &nbsp;
+          </p>
+        ) : loadFailed ? (
           <LoadFailed
             testId="comments-error"
             variant={comments.length ? "row" : "block"}
