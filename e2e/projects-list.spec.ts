@@ -1,7 +1,5 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import {
-  MEMBER_PASSWORD,
-  MEMBER_USERNAME,
   NEWEST_PROJECT_DESCRIPTION,
   NEWEST_PROJECT_ICON,
   NEWEST_PROJECT_KEY,
@@ -11,7 +9,6 @@ import {
   PROJECT_ID,
   PROJECT_KEY,
   PROJECT_NAME,
-  SECOND_PROJECT_ID,
   SECOND_PROJECT_KEY,
   SECOND_PROJECT_NAME,
   deleteProjectRow,
@@ -20,6 +17,7 @@ import {
   seedNewestProject,
   seedSecondProject,
 } from "./seed";
+import { SAME_ORIGIN } from "./api";
 import { signIn, signInThroughForm } from "./session";
 
 /**
@@ -84,8 +82,8 @@ test.describe("the boards a reader may reach", () => {
     await test.step("a card carries the board's name, key, icon and description", async () => {
       const newest = card(page, NEWEST_PROJECT_KEY);
       await expect(newest).toContainText(NEWEST_PROJECT_NAME);
-      await expect(newest).toContainText(NEWEST_PROJECT_KEY);
-      await expect(newest).toContainText(NEWEST_PROJECT_DESCRIPTION);
+      await expect(newest.locator("span.font-mono")).toHaveText(NEWEST_PROJECT_KEY);
+      await expect(newest.locator("p")).toHaveText(NEWEST_PROJECT_DESCRIPTION);
       await expect(newest.getByText(NEWEST_PROJECT_ICON)).toBeVisible();
 
       // The control for the two halves that are conditional: this board has neither, and the card
@@ -124,6 +122,11 @@ test.describe("the boards a reader may reach", () => {
   test("New Project is the admin's, and the member is not offered it", async ({ page }) => {
     await openProjects(page);
 
+    // The control for the negative below: the sidebar's "+" does exist, for somebody. Located by
+    // href inside the sidebar, because an accessible name matches case-insensitively and the
+    // header's own "New Project" would answer to "New project" too
+    await expect(page.locator('aside a[href="/projects/new"]')).toHaveCount(1);
+
     // In main, not the sidebar: the sidebar carries a second link to the same page, and the two
     // are gated separately
     await page.locator('main a[href="/projects/new"]').click();
@@ -133,7 +136,7 @@ test.describe("the boards a reader may reach", () => {
     await openProjects(page, "member");
     await expect(page.locator('main a[href="/projects/new"]')).toHaveCount(0);
     // The sidebar's "+" is the same gate on the same page, and is asserted nowhere else
-    await expect(page.getByRole("link", { name: "New project" })).toHaveCount(0);
+    await expect(page.locator('aside a[href="/projects/new"]')).toHaveCount(0);
   });
 });
 
@@ -181,6 +184,7 @@ test("a member reaches the create-a-board form, and is refused only after fillin
 
   await page.getByLabel("Project Name").fill("A board they may not create");
   await page.getByLabel("Project Key").fill("NOPE");
+  await page.getByLabel("Description").fill("Typed in full before anything refused it");
   const refused = page.waitForResponse(
     (response) => response.url().endsWith("/api/projects") && response.request().method() === "POST"
   );
@@ -201,4 +205,13 @@ test("the create form refuses a key the product accepts", async ({ page }) => {
   await key.fill("LONGERKEY");
   await expect(key).toHaveValue("LONGE");
   await expect(key).toHaveAttribute("maxlength", "5");
+
+  // The other half of the disagreement, so the ticket cannot be closed by narrowing the rule to
+  // five and leaving this green: the same key the field refuses to hold is one the product takes
+  const created = await page.request.post("/api/projects", {
+    headers: SAME_ORIGIN,
+    data: { name: "A key longer than the field allows", key: "TWENTYCHARACTERKEYXX" },
+  });
+  expect(created.status()).toBe(201);
+  expect((await created.json()).key).toBe("TWENTYCHARACTERKEYXX");
 });
