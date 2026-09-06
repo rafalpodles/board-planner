@@ -354,6 +354,8 @@ describe("editing while a disconnect is in flight", () => {
  * the connection is destroyed server-side, so Discard must not put "Connected" back.
  */
 describe("Discard after a disconnect", () => {
+  // Regression guard rather than a red test: the old `commit` moved the baseline too, so this
+  // held before the fix as well. Kept because `rebase` is the only thing holding it now.
   it("does not resurrect the connection", async () => {
     renderSection(true);
     api.post.mockResolvedValue({ ok: true });
@@ -369,5 +371,69 @@ describe("Discard after a disconnect", () => {
     );
     // The control: Connect is what an unconfigured row offers, so the row is still there
     expect(screen.getByRole("button", { name: "Connect notion" })).toBeTruthy();
+  });
+});
+
+/**
+ * The two windows the round trip opens, neither of which the first fixes covered (BP-574 review 2).
+ */
+describe("the rows moving under a disconnect", () => {
+  it("disconnects the row it was asked about, not whoever took its position", async () => {
+    renderSection(true, {
+      pm: {
+        enabled: true,
+        model: "",
+        contextNotes: "",
+        links: [],
+        dailyTurnCap: 0,
+        mcpServers: [
+          { name: "spare", url: "https://a.example/mcp", authType: "none", allowWrites: false, toolAllowlist: [], enabled: true, hasAuthToken: false },
+          { name: "notion", url: "https://n.example/mcp", authType: "oauth", allowWrites: false, toolAllowlist: [], enabled: true, hasAuthToken: false, oauthStatus: "connected", oauthClientId: "" },
+          { name: "linear", url: "https://l.example/mcp", authType: "oauth", allowWrites: false, toolAllowlist: [], enabled: true, hasAuthToken: false, oauthStatus: "connected", oauthClientId: "" },
+        ],
+      },
+    } as unknown as Partial<ApiProject>);
+
+    let land: (value: unknown) => void = () => {};
+    api.post.mockImplementation(() => new Promise((resolve) => (land = resolve)));
+
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect notion" }));
+    // The row above it goes away while the request is in flight, so every later index shifts
+    fireEvent.click(screen.getByRole("button", { name: "Remove spare" }));
+
+    land({ ok: true });
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("OAuth connection removed", "success"));
+
+    expect(screen.queryByRole("button", { name: "Disconnect notion" })).toBeNull();
+    // The control: linear, which took notion's old position, is untouched and still connected
+    expect(screen.getByRole("button", { name: "Disconnect linear" })).toBeTruthy();
+  });
+
+  it("does not roll back a save that landed during the round trip", async () => {
+    renderSection(true);
+    let landDisconnect: (value: unknown) => void = () => {};
+    api.post.mockImplementation(() => new Promise((resolve) => (landDisconnect = resolve)));
+
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect notion" }));
+    fireEvent.change(screen.getByLabelText(/Project context/i), { target: { value: "saved text" } });
+    expect(dirtyCount()).toBe(1);
+
+    // A save completes while the disconnect is still out
+    api.put.mockResolvedValue({
+      _id: "p1",
+      key: "TP",
+      name: "Test Project",
+      canAdmin: true,
+      pmAvailable: true,
+      pm: { enabled: true, model: "", contextNotes: "saved text", links: [], dailyTurnCap: 0, mcpServers: [] },
+    });
+    await register.mock.calls.at(-1)![0].save();
+    await waitFor(() => expect(dirtyCount()).toBe(0));
+
+    landDisconnect({ ok: true });
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("OAuth connection removed", "success"));
+
+    // A baseline captured before the save would come back here and make every saved field dirty
+    expect(dirtyCount()).toBe(0);
   });
 });
