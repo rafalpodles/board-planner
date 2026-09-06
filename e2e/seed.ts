@@ -1887,3 +1887,24 @@ export async function seedNewestProject() {
 
   await mongoose.disconnect();
 }
+
+/**
+ * BP-469. A grant for the seeded member on another board, so a test can put a second row in their
+ * sidebar. Without one the member reaches exactly one project, and `ProjectTree` hides its drag
+ * handles when there is nothing to reorder — which makes "a member cannot drag" pass whatever the
+ * gate does.
+ */
+export async function grantMemberOn(projectId: mongoose.Types.ObjectId) {
+  const db = (await connect()).db!;
+  const now = new Date();
+  await db.collection("grants").insertOne({
+    subject: MEMBER_ID,
+    relation: "member",
+    objectType: "project",
+    object: projectId,
+    createdBy: ADMIN_ID,
+    createdAt: now,
+    updatedAt: now,
+  });
+  await mongoose.disconnect();
+}
