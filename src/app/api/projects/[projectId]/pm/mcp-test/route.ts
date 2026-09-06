@@ -4,7 +4,8 @@ import { withProjectOwner } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { isAllowedMcpServerUrl } from "@/lib/url-validation";
 import { McpClient } from "@/lib/pm/mcp-client";
-import { isReadSafe, resolveServerToken } from "@/lib/pm/mcp-tools";
+import { resolveServerToken } from "@/lib/pm/mcp-tools";
+import { isReadSafe } from "@/lib/pm/read-safe";
 
 export const POST = withProjectOwner(async (request, { params }) => {
   await connectDB();
@@ -46,7 +47,11 @@ export const POST = withProjectOwner(async (request, { params }) => {
     return NextResponse.json({
       ok: true,
       count: tools.length,
-      tools: tools.map((t) => ({ name: t.name, readSafe: isReadSafe(t) })),
+      tools: tools.map((t) => ({
+        name: t.name,
+        description: t.description ?? "",
+        readSafe: isReadSafe(t),
+      })),
     });
   } catch (err) {
     return NextResponse.json(
