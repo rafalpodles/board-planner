@@ -246,6 +246,13 @@ test("focus moves into the help and Tab never reaches the sidebar behind it", as
   await expect(collapseSidebar(page)).toBeVisible();
 });
 
+/**
+ * Measured on the board before the help opens: `body` and `html` are both unscrollable there — the
+ * shell scrolls inside its own containers — so `overflow: hidden` has nothing to stop on this
+ * page and this asserts the lock, not movement. It is still the assertion worth having: the lock
+ * is what holds on any surface where the body *is* the scrollport, and asserting both halves means
+ * a pass is not the body having been unscrollable all along.
+ */
 test("the page behind the help does not scroll, and scrolls again once it closes", async ({
   page,
 }) => {
@@ -255,8 +262,6 @@ test("the page behind the help does not scroll, and scrolls again once it closes
   await expect(help(page)).toBeVisible();
   await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("hidden");
 
-  // The control: the lock is released, so a passing first half is not the body having been
-  // unscrollable all along
   await page.keyboard.press("Escape");
   await expect(help(page)).toBeHidden();
   await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("");
@@ -279,4 +284,35 @@ test("Escape closes the help without also clearing the selection underneath it",
   await page.keyboard.press("Escape");
   await expect(help(page)).toBeHidden();
   await expect(selectBox(page)).toHaveAttribute("aria-pressed", "true");
+});
+
+/**
+ * The fifth, and the one that made BP-530 more than a markup change.
+ *
+ * Routing the help through `Modal` gave away the ref that the hand-rolled version kept its
+ * `onClose` in. `useFocusTrap`'s keydown effect lists `onEscape` in its deps, and every caller
+ * passes an inline arrow — so any state write during an Escape dispatch re-renders the board, the
+ * trap tears its listener down and re-adds it mid-dispatch, and a listener added during a dispatch
+ * is not called for that event. That is BP-522's bug, one layer down.
+ *
+ * The card's context menu is the reachable way to cause the write: it keeps its own listener and
+ * registers no layer, so its `onClose` sets board state while the help's trap is subscribed. One
+ * Escape closed the menu and left the help open — worst for the reader this ticket is about, since
+ * `aria-modal` tells them the menu behind is not there.
+ *
+ * The fix belongs in `use-focus-trap.ts`, so it holds for every dialog, not just this one.
+ */
+test("Escape closes the help even when a context menu closes on the same press", async ({
+  page,
+}) => {
+  await openBoard(page);
+
+  await card(page).click({ button: "right" });
+  await expect(contextMenu(page)).toBeVisible();
+  await page.keyboard.press("?");
+  await expect(help(page)).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(contextMenu(page)).toBeHidden();
+  await expect(help(page)).toBeHidden();
 });
