@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   isObjectIdSegment,
   isTaskPath,
+  taskRefFromPathname,
   projectPath,
   projectRefFromPathname,
   taskPath,
@@ -102,5 +103,17 @@ describe("isTaskPath", () => {
     expect(isTaskPath("/my-tasks")).toBe(false);
     expect(isTaskPath("")).toBe(false);
     expect(isTaskPath(null)).toBe(false);
+  });
+});
+
+describe("taskRefFromPathname", () => {
+  it("reads the task off a task URL, and nothing off anything else", () => {
+    expect(taskRefFromPathname("/projects/TP/tasks/4")).toBe("4");
+    expect(taskRefFromPathname("/projects/TP/tasks/TP-4")).toBe("TP-4");
+
+    expect(taskRefFromPathname("/projects/TP")).toBeUndefined();
+    expect(taskRefFromPathname("/projects/TP/tasks")).toBeUndefined();
+    expect(taskRefFromPathname("/my-tasks")).toBeUndefined();
+    expect(taskRefFromPathname(null)).toBeUndefined();
   });
 });
