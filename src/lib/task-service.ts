@@ -788,13 +788,7 @@ export async function changeStatus(
     }
   }
 
-  const task = await Task.findOneAndUpdate(
-    { _id: taskId, project: projectId },
-    leavesColumn
-      ? [{ $set: { status, ...CLEAR_WORKER_ASSIGNEE } }, { $unset: RUN_FIELDS }]
-      : [{ $set: { status } }],
-    { returnDocument: "after", updatePipeline: true }
-  ).populate([
+  const CHANGE_STATUS_POPULATE = [
     { path: "assignee", select: "username fullName" },
     { path: "createdBy", select: "username fullName" },
     // `assignedBy` too, though nothing feeds this response to the Agent row today: handoverOf tells
@@ -802,9 +796,30 @@ export async function changeStatus(
     // "somebody else assigned it" printed over a task the machine is about to take. One line, and
     // it removes the whole class rather than documenting it.
     { path: "assignedBy", select: "username fullName" },
-  ]);
+  ];
+
+  const task = await Task.findOneAndUpdate(
+    // Guarded on the status just read, whenever the write means to leave it: two overlapping
+    // requests reading the same oldTask (a double-click, the board and the detail view, two
+    // workers) can then not both land. The loser's precondition stops matching the instant the
+    // winner's write commits, so only one of them ever reaches announceStatusChange below and
+    // mints a recurring task's next occurrence (BP-489).
+    { _id: taskId, project: projectId, ...(leavesColumn ? { status: oldTask.status } : {}) },
+    leavesColumn
+      ? [{ $set: { status, ...CLEAR_WORKER_ASSIGNEE } }, { $unset: RUN_FIELDS }]
+      : [{ $set: { status } }],
+    { returnDocument: "after", updatePipeline: true }
+  ).populate(CHANGE_STATUS_POPULATE);
 
   if (!task) {
+    if (leavesColumn) {
+      // Lost the race rather than deleted: report the state another request already put this
+      // task into, instead of a 404 for a task that plainly still exists.
+      const current = await Task.findOne({ _id: taskId, project: projectId }).populate(
+        CHANGE_STATUS_POPULATE
+      );
+      if (current) return { ok: true, data: current as ITask };
+    }
     return { ok: false, error: "Task not found", status: 404 };
   }
 
@@ -1206,13 +1221,23 @@ export async function updateTask(
   }
 
   const task = await Task.findOneAndUpdate(
-    { _id: taskId, project: projectId },
+    // Same guard as changeStatus, and for the same reason: the edit form reaches this path too,
+    // so a status leaving its column has to be guarded here as well or the race just moves to
+    // the writer nobody was watching (BP-489).
+    { _id: taskId, project: projectId, ...(leavesColumn ? { status: oldTask.status } : {}) },
     // One `$set`, so nothing decided after `setFields` was built can reach one arm and not the other
     { $set: setFields, ...(leavesColumn ? { $unset: UNSET_RUN } : {}) },
     { returnDocument: "after", runValidators: true, timestamps: !onlyOrder && !writesNothing }
   ).populate(taskPopulateFields);
 
   if (!task) {
+    if (leavesColumn) {
+      // Lost the race rather than deleted: see the identical branch in changeStatus.
+      const current = await Task.findOne({ _id: taskId, project: projectId }).populate(
+        taskPopulateFields
+      );
+      if (current) return { ok: true, data: current as ITask };
+    }
     return { ok: false, error: "Task not found", status: 404 };
   }
 

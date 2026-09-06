@@ -1868,6 +1868,99 @@ describe("a status change announces the same things whichever path made it", () 
   });
 });
 
+// BP-489. Two overlapping closes of the same recurring task both used to read the same
+// `oldTask.status` before either write landed, so both minted a next occurrence. Guarding each
+// write with the status just read means only one of two overlapping requests can ever match it.
+describe("two overlapping closes of the same recurring task (BP-489)", () => {
+  const board = {
+    key: "TP",
+    columns: [
+      { id: "doing", label: "Doing", role: "active", order: 1 },
+      { id: "shipped", label: "Shipped", role: "done", order: 2 },
+    ],
+  };
+
+  function setup(over: Record<string, unknown> = {}) {
+    vi.clearAllMocks();
+    const before = { _id: "t1", taskNumber: 7, status: "doing", title: "x", ...over };
+    // Distinct from `before` only in status: whoever wins the race is what a refetch reads back.
+    const current = { ...before, status: "shipped" };
+    findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+    findOne.mockReturnValue({
+      lean: () => Promise.resolve(before),
+      // The shape a real Mongoose query has: `.populate(...).lean()` is updateTask's own oldTask
+      // read (still `before`), while awaited directly — no further `.lean()` — it is the
+      // refetch-on-lost-race path reading back whichever status actually won.
+      populate: () => ({
+        lean: () => Promise.resolve(before),
+        then: (resolve: (v: unknown) => void) => resolve(current),
+      }),
+    });
+    findOneAndUpdate.mockReturnValue({ populate: () => Promise.resolve(current) });
+    updateMany.mockResolvedValue({ modifiedCount: 0 });
+    return before;
+  }
+
+  it("changeStatus guards its write with the status it just read", async () => {
+    const before = setup();
+    await changeStatus("p1", "t1", "shipped", "actor");
+
+    expect(findOneAndUpdate.mock.calls[0][0]).toMatchObject({ status: before.status });
+  });
+
+  it("updateTask guards its write the same way when the edit form carries a status", async () => {
+    const before = setup();
+    await updateTask("p1", "t1", { status: "shipped" }, "actor");
+
+    expect(findOneAndUpdate.mock.calls[0][0]).toMatchObject({ status: before.status });
+  });
+
+  // Only a write that means to leave the column is guarded — an unrelated field edit resending
+  // the status it already had must not start refusing on account of somebody else's transition.
+  it("does not guard a write that stays in its column", async () => {
+    setup();
+    await updateTask("p1", "t1", { title: "renamed" }, "actor");
+
+    expect(findOneAndUpdate.mock.calls[0][0]).not.toHaveProperty("status");
+  });
+
+  it("reports the current task instead of a 404 when the guarded write loses the race", async () => {
+    setup({ recurrence: { frequency: "weekly", interval: 1 } });
+    // The guard firing: some other request's write already moved the status this one still
+    // thinks is current, so the precondition no longer matches anything.
+    findOneAndUpdate.mockReturnValue({ populate: () => Promise.resolve(null) });
+
+    const result = await changeStatus("p1", "t1", "shipped", "actor");
+
+    expect(result.ok).toBe(true);
+    expect(result.ok === true && result.data.status).toBe("shipped");
+  });
+
+  it("a lost race announces nothing and mints no second occurrence", async () => {
+    setup({ recurrence: { frequency: "weekly", interval: 1 } });
+    findOneAndUpdate.mockReturnValue({ populate: () => Promise.resolve(null) });
+
+    const result = await changeStatus("p1", "t1", "shipped", "actor");
+
+    // Without this, reverting the null-handling branch back to a bare 404 leaves this test
+    // green: a 404 never calls the webhook or Task.create either, for the wrong reason.
+    expect(result.ok).toBe(true);
+    expect(dispatchWebhooks).not.toHaveBeenCalled();
+    expect(taskCreate).not.toHaveBeenCalled();
+  });
+
+  it("updateTask's lost race is silent in exactly the same way", async () => {
+    setup({ recurrence: { frequency: "weekly", interval: 1 } });
+    findOneAndUpdate.mockReturnValue({ populate: () => Promise.resolve(null) });
+
+    const result = await updateTask("p1", "t1", { status: "shipped" }, "actor");
+
+    expect(result.ok).toBe(true);
+    expect(dispatchWebhooks).not.toHaveBeenCalled();
+    expect(taskCreate).not.toHaveBeenCalled();
+  });
+});
+
 /**
  * BP-463: what the next occurrence should be, and when there should not be one.
  *
