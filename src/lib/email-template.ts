@@ -14,7 +14,6 @@ export interface EmailTaskCard {
 }
 
 export interface EmailContent {
-  /** First line mail clients show next to the subject in the list. */
   preheader: string;
   kicker: string;
   heading?: string;
@@ -22,14 +21,11 @@ export interface EmailContent {
   alert?: { tone: "warning" | "success"; lines: string[] };
   taskCard?: EmailTaskCard;
   quote?: { who: string; text: string };
-  /** A label/value table. A row carrying a url turns its label into the link to that thing. */
   rows?: { label: string; value: string; url?: string }[];
-  /** Values are monospace by default, which suits a host or an address and not a sentence. */
   proseRows?: boolean;
   outro?: string[];
   button?: { label: string; url: string };
   secondaryButton?: { label: string; url: string };
-  /** Repeats the primary button's target as text, for the clients that drop the button. */
   showButtonUrl?: boolean;
   footer: string[];
   footerLinks?: { label: string; url: string }[];
@@ -65,11 +61,6 @@ export function escapeHtml(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
-/**
- * A link that is neither http nor https is dropped rather than rendered: the values reaching here
- * come from configuration and from the database, and `javascript:` in an anchor is one stored
- * string away from being somebody else's click.
- */
 export function safeUrl(value: string | undefined): string | undefined {
   if (!value) return undefined;
   try {
@@ -83,10 +74,6 @@ export function safeUrl(value: string | undefined): string | undefined {
 const FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
 const MONO = "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace";
 
-// The mark is drawn rather than fetched: inline SVG is stripped by Gmail and Outlook, a remote
-// image is blocked by default in most clients, and a CID attachment puts a paperclip on every
-// notification. The tile is the icon's own blue, and the cards are its three opacities blended
-// against it up front, because opacity does not survive the trip.
 const MARK_TILE = "#3b82f6";
 const MARK_ROW_FILL = ["#ebf2fe", "#b1cdfb", "#89b4fa"];
 const MARK_COLUMN_CARDS = [2, 3, 1];
@@ -234,8 +221,6 @@ function renderHtml(c: EmailContent): string {
     );
   }
 
-  // The action comes before whatever reassures the reader about it: an "if it wasn't you" line
-  // sitting above the button reads as a reason not to press it.
   const primary = safeUrl(c.button?.url);
   const secondary = safeUrl(c.secondaryButton?.url);
   if (c.button && primary) {
@@ -313,7 +298,6 @@ function renderText(c: EmailContent): string {
     const card = [`${c.taskCard.key}${pills ? ` · ${pills}` : ""}`, c.taskCard.title];
     if (c.taskCard.meta) card.push(c.taskCard.meta);
     const url = safeUrl(c.taskCard.url);
-    // The button below carries the same address; printing it twice is noise in a text part
     if (url && url !== buttonUrl) card.push(url);
     blocks.push(card.join("\n"));
   }

@@ -7,10 +7,6 @@ import { withAuth, resolveProjectId } from "@/lib/middleware";
 import { check } from "@/lib/grants";
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
-// The whole multipart envelope, not the file: part headers, the boundary and the projectId field
-// come to a few hundred bytes, so the slack is generous rather than tuned. Its job is to bound
-// what the process allocates, which the file-size check below cannot do — that one runs after
-// formData() has already materialised every part.
 const MAX_UPLOAD_REQUEST_BYTES = MAX_FILE_SIZE + 64 * 1024;
 const TOO_LARGE = "File too large. Maximum size is 5MB.";
 
@@ -34,15 +30,8 @@ const ALLOWED_MIME_TYPES = new Set([
 export const POST = withAuth(async (request, { user }) => {
   await connectDB();
 
-  // Counted through, not just declared. The file.size check further down cannot be the bound:
-  // it runs twenty-nine lines and several round trips after the body has been materialised, so
-  // the 5 MB limit governs what reaches GridFS rather than what the process allocates — and a
-  // request that simply omits Content-Length walked past a header check on its own.
   const read = await readFormBody(request, MAX_UPLOAD_REQUEST_BYTES);
   if (!read.ok) {
-    // Translated, not passed through: this refusal is read by somebody who has just dragged a file
-    // in, and a byte count with no unit tells them nothing. The reader bounds the allocation; the
-    // sentence is this route's job, because only this route knows what the request was.
     return read.reason === "too-large"
       ? NextResponse.json({ error: TOO_LARGE }, { status: 413 })
       : read.response;
@@ -55,12 +44,9 @@ export const POST = withAuth(async (request, { user }) => {
     return NextResponse.json({ error: "No file provided" }, { status: 400 });
   }
 
-  // Recorded so the read side has an owner to check. Without it a file id is a bearer token for
-  // anyone who guesses it.
   if (!projectId) {
     return NextResponse.json({ error: "projectId is required" }, { status: 400 });
   }
-  // Callers hold a project key; grants are keyed on the id
   const project = await resolveProjectId(projectId);
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });

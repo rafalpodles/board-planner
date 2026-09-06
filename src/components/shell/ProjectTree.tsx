@@ -87,11 +87,6 @@ function SubItem({ href, icon, label, active, dot, pill }: SubItemProps) {
   );
 }
 
-/**
- * Carries useSortable for one project. The whole row is the handle here, so the
- * listeners go on the row while the sortable element is the wrapper that also holds
- * the expanded sub-items — otherwise the sub-items would not travel with it.
- */
 function SortableProject({
   id,
   disabled,
@@ -125,7 +120,6 @@ interface ProjectTreeProps {
   projects: ApiProject[];
   pathname: string;
   isAdmin: boolean;
-  /** Omitted for anyone who may not change the shared order */
   onReorder?: (orderedIds: string[]) => void;
 }
 
@@ -143,21 +137,13 @@ export function ProjectTree({
 
   const canReorder = !!onReorder && projects.length > 1;
   const sensors = useSensors(
-    // The whole row is the handle and it is full of links, so a drag only begins
-    // once the pointer has actually travelled — a plain click still navigates
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
-  // An expanded project is several times taller than a collapsed one, and dnd-kit
-  // shifts the others by the dragged element's height — so the tree lurches. Everything
-  // is collapsed for the duration and put back afterwards.
   const [expandedBeforeDrag, setExpandedBeforeDrag] = useState<string | null>(null);
 
   function handleDragStart() {
-    // manuallyExpanded, not expandedId: the latter falls back to the route's project,
-    // so storing it would pin an expansion the user never chose and kill
-    // expand-on-navigate for the rest of the session
     setExpandedBeforeDrag(manuallyExpanded);
     setManuallyExpanded("");
   }
@@ -291,10 +277,6 @@ export function ProjectTree({
                     dot={project.pm?.enabled}
                   />
                 )}
-                {/* Not gated on canAdmin since BP-371. That gate encoded a premise which has
-                    stopped being true — that this page holds nothing for a member — now that
-                    their own notification settings live there. The page hides every section they
-                    may not open and says so in as many words. */}
                 {(
                   <SubItem
                     href={`${base}/settings`}

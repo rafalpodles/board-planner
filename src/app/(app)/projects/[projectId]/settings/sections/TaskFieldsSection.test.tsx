@@ -23,14 +23,10 @@ function render(ui: React.ReactElement) {
   );
 }
 
-// The shape `use-api.ts` actually throws — a real Error with status/body riding along —
-// not a plain object, so a test asserting on `.message` behaviour stays honest.
 function apiError(message: string, status: number) {
   return Object.assign(new Error(message), { status, body: { error: message } });
 }
 
-// A real patchProject, so a create/archive/delete flow's effect on `project` is visible
-// on the next render instead of vanishing into a `vi.fn()`.
 function Harness({ initial }: { initial: ApiProject }) {
   const [project, setProject] = useState(initial);
   function patchProject(
@@ -53,8 +49,6 @@ function Harness({ initial }: { initial: ApiProject }) {
   );
 }
 
-// The real registry the save bar reads, so "how many edits are pending" is answered by the
-// same code the page uses rather than by an assertion about a mock.
 function DirtyHarness({ initial }: { initial: ApiProject }) {
   const [project, setProject] = useState(initial);
   const { register, unregister, pending, total } = useDirtyRegistry();
@@ -171,9 +165,6 @@ const noNumericFields: ApiCustomField[] = [
   },
 ];
 
-// Two live numeric fields, so archiving/deleting the designated one leaves the other
-// in place and the picker stays rendered — the exact condition under which a stale
-// `estimateFieldId` can hide behind option 0 ("None") by accident.
 const twoNumericFields: ApiCustomField[] = [
   {
     _id: numberFieldId,

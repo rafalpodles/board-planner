@@ -40,14 +40,6 @@ beforeEach(() => {
   } as unknown as mongoose.Connection);
 });
 
-/**
- * The second way to read a file out of GridFS, and the one with no test.
- *
- * Its own comment says leaving it ungated "made the ownership check on GET /api/uploads/[fileId]
- * bypassable outright" — and the BP-290 review proved the point by deleting that comparison and
- * running the whole suite green. The route-level gate this branch pinned is untouched by any of
- * it: the PM agent reaches the bytes without going through the route.
- */
 describe("loadAttachmentDataUri", () => {
   it("returns the image when the file belongs to the project asking for it", async () => {
     const uri = await loadAttachmentDataUri(attachment(), PROJECT);
@@ -61,7 +53,6 @@ describe("loadAttachmentDataUri", () => {
     expect(await loadAttachmentDataUri(attachment(), PROJECT)).toBeNull();
   });
 
-  // Files stored before the owner was recorded: unreadable rather than readable by everyone
   it.each([
     ["no metadata", null as unknown as Record<string, unknown>],
     ["metadata without a project", {}],
@@ -72,9 +63,6 @@ describe("loadAttachmentDataUri", () => {
     expect(await loadAttachmentDataUri(attachment(), PROJECT)).toBeNull();
   });
 
-  // The route refuses first and streams second; this used to drain the whole file and compare
-  // afterwards, so another board's member could spend the server's memory on files they could
-  // never see — and any log line added between the two would have leaked them
   it("does not read the bytes of a file it is going to refuse", async () => {
     bucketHas({ project: OTHER_PROJECT, contentType: "image/png" });
 
@@ -95,8 +83,6 @@ describe("loadAttachmentDataUri", () => {
     expect(find).not.toHaveBeenCalled();
   });
 
-  // The stored type decides, not the one the caller put in the attachment record — otherwise a
-  // caller names image/png over a PDF and the model is handed something else entirely
   it("takes the content type from the file, not from the caller", async () => {
     bucketHas({ project: PROJECT, contentType: "application/pdf" });
 
@@ -124,7 +110,6 @@ describe("buildUserContent", () => {
     expect(JSON.stringify(content)).not.toContain("base64");
   });
 
-  // An image on its own carries no words, and an empty text block is a shape providers reject
   it("sends the picture with no text block when nothing was typed", async () => {
     bucketHas({ project: PROJECT, contentType: "image/png" });
 
@@ -148,8 +133,6 @@ describe("buildUserContent", () => {
     expect(content.map((b) => b.type)).toEqual(["text", "image_url"]);
   });
 
-  // The empty-string fallback is what reaches the provider when no image survives, and for an
-  // image-only turn that is a turn carrying nothing at all
   it("falls back to the text, which for an image-only turn is empty", async () => {
     bucketHas({ project: OTHER_PROJECT, contentType: "image/png" });
 
@@ -164,7 +147,6 @@ describe("anyAttachmentReadable", () => {
     expect(await anyAttachmentReadable([attachment()], PROJECT)).toBe(true);
   });
 
-  // The arm the e2e cannot reach, and the one whose absence is a cross-board read
   it("refuses one that belongs to another board", async () => {
     bucketHas({ project: OTHER_PROJECT, contentType: "image/png" });
 
@@ -183,8 +165,6 @@ describe("anyAttachmentReadable", () => {
     expect(await anyAttachmentReadable([attachment({ fileId: "not-an-id" })], PROJECT)).toBe(false);
   });
 
-  // ObjectId takes hex in any case and stringifies it lowercase, so a map keyed on what the client
-  // typed misses every non-canonical spelling — and the file falls back to no mime at all
   it("takes the claimed mime for a legacy file however the id was spelled", async () => {
     bucketHas({ project: PROJECT });
 

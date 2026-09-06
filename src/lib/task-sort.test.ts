@@ -42,7 +42,6 @@ describe("sortTasks", () => {
     expect(keys(sortTasks(tasks, "priority", "asc"))).toEqual([2, 3, 1]);
   });
 
-  // Ascending due date means "soonest first", so an undated task belongs last
   it("sorts undated tasks last by due date", () => {
     const tasks = [
       task({ taskNumber: 1 }),
@@ -88,7 +87,6 @@ describe("sortTasks", () => {
     expect(keys(sortTasks(tasks, "manual", "asc"))).toEqual([3, 2, 1]);
   });
 
-  // Without a tiebreak, equal values let the order jitter between renders
   it("breaks ties by key so the order is stable", () => {
     const tasks = [
       task({ taskNumber: 3, priority: "high" }),
@@ -105,7 +103,6 @@ describe("sort vocabularies", () => {
     expect(LIST_SORT_FIELDS).toEqual(SORT_OPTIONS.map((o) => o.value));
   });
 
-  // The board groups by status and shows none of these columns
   it("keeps status, assignee, sprint and component off the board", () => {
     for (const field of ["status", "assignee", "sprint", "component"]) {
       expect(BOARD_SORT_FIELDS).not.toContain(field);
@@ -131,7 +128,6 @@ describe("sorting by a project field", () => {
     _id: "f-size",
     name: "Size",
     fieldType: "dropdown",
-    // Deliberately not alphabetical: the project's order is what matters
     options: [
       { id: "s", value: "Small", color: "#000", order: 0 },
       { id: "m", value: "Medium", color: "#000", order: 1 },
@@ -165,11 +161,9 @@ describe("sorting by a project field", () => {
       withField(2, { "f-size": "s" }),
       withField(3, { "f-size": "m" }),
     ];
-    // Alphabetically this would be Large, Medium, Small
     expect(sortTasks(tasks, "f-size", "asc", ctx).map((t) => t.taskNumber)).toEqual([2, 3, 1]);
   });
 
-  // A blank is not "smallest" — it is absent, and belongs at the bottom either way
   it("keeps empty values last in both directions", () => {
     const tasks = [
       withField(1, {}),
@@ -185,7 +179,6 @@ describe("sorting by a project field", () => {
     expect(sortTasks(tasks, "f-size", "asc", ctx).map((t) => t.taskNumber)).toEqual([2, 1]);
   });
 
-  // Built-in behaviour must not shift: undated has always flipped with direction
   it("leaves dueDate alone, where undated still flips", () => {
     const tasks = [
       { ...task({ taskNumber: 1 }), dueDate: undefined },

@@ -64,7 +64,6 @@ interface NavItemProps {
   collapsed: boolean;
   active?: boolean;
   badge?: React.ReactNode;
-  /** A row is a link, unless it acts on this page — then it is a button */
   href?: string;
   onClick?: () => void;
   keyshortcuts?: string;
@@ -125,7 +124,6 @@ interface SidebarProps {
   mobileOpen: boolean;
   onNavigate: () => void;
   onCloseMobile: () => void;
-  /** Focus goes back to whatever opened the drawer */
   menuButtonRef?: React.RefObject<HTMLElement | null>;
   onOpenSearch: () => void;
 }
@@ -176,14 +174,11 @@ export function Sidebar({
       const { count } = await api.get("/api/notifications/unread-count");
       setUnreadCount(count);
     } catch {
-      // silent
     }
   }, [api]);
 
   usePollWhileVisible(fetchUnreadCount, 30_000, !!user);
 
-  // Below md the sidebar is an overlay over the page, so it owes the page a
-  // modal's contract. Above md it is part of the layout and owes it nothing.
   const asideRef = useRef<HTMLElement>(null);
   const isMobile = useMediaQuery("(max-width: 767px)");
   const isDrawer = isMobile && mobileOpen;
@@ -197,7 +192,6 @@ export function Sidebar({
 
   if (!user) return null;
 
-  // The drawer is always full width, so the icon-only rail is a desktop-only state
   const compact = collapsed && !mobileOpen;
 
   const isActive = (href: string) => isNavItemActive(pathname, href);
@@ -250,9 +244,6 @@ export function Sidebar({
 
       <nav className="flex flex-1 flex-col gap-4 overflow-y-auto px-2.5 pb-2.5">
         <div>
-          {/* In the drawer this is a page like the two rows under it, because the phone's
-              magnifier goes to the same page and one screen must not offer two searches.
-              With a keyboard the palette is the better tool, so it stays. */}
           {isDrawer ? (
             <NavItem
               href="/search"

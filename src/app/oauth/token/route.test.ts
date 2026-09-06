@@ -40,12 +40,10 @@ describe("POST /oauth/token — refresh rotation", () => {
     expect(res.status).toBe(200);
     const filter = findOneAndDelete.mock.calls[0][0];
     expect(filter.refreshTokenHash).toBe(sha256(REFRESH));
-    // The checks the old find-then-validate path made must survive inside the atomic filter
     expect(filter.refreshExpiresAt).toEqual({ $gt: expect.any(Date) });
   });
 
   it("lets exactly one of two concurrent refreshes win", async () => {
-    // Mongo hands the row to one caller; the loser matches nothing
     let remaining = 1;
     findOneAndDelete.mockImplementation(async () => {
       if (remaining === 0) return null;
@@ -57,7 +55,6 @@ describe("POST /oauth/token — refresh rotation", () => {
     const statuses = [a.status, b.status].sort();
 
     expect(statuses).toEqual([200, 400]);
-    // One pair issued, never two — the defect was that both callers were served
     expect(create).toHaveBeenCalledTimes(1);
   });
 
@@ -90,12 +87,6 @@ describe("POST /oauth/token — refresh rotation", () => {
   });
 });
 
-/**
- * BP-444. This endpoint is the one a client reaches by itself the moment its access token lapses,
- * and `Request.formData()` throws a TypeError on any body that is not a form — which left an empty
- * 500 where RFC 6749 §5.2 has a 400 naming `invalid_request`. A client acts on the second and not
- * on the first, so the lapse became a person's problem rather than the client's.
- */
 describe("POST /oauth/token — a body it cannot parse", () => {
   const unparseable: [string, RequestInit][] = [
     [
@@ -116,7 +107,6 @@ describe("POST /oauth/token — a body it cannot parse", () => {
 
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ error: "invalid_request" });
-    // Refused before anything was consumed: a body nobody could read must not spend a grant
     expect(findOneAndDelete).not.toHaveBeenCalled();
     expect(create).not.toHaveBeenCalled();
   });

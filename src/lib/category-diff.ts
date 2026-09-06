@@ -5,7 +5,6 @@ export interface CategoryDraft {
 }
 
 export interface CategoryChange {
-  /** The name the server still holds — the PATCH keys on it, not on the new one */
   name: string;
   newName?: string;
   color: string;
@@ -17,11 +16,6 @@ export interface CategoryDiff {
   changed: CategoryChange[];
 }
 
-/**
- * What the save bar has to send for a drafted category list. The API is per-category —
- * there is no bulk PUT — so the draft is reconciled into one request per actual change
- * rather than rewriting the whole array.
- */
 export function categoryDiff(baseline: CategoryDraft[], next: CategoryDraft[]): CategoryDiff {
   const byId = new Map(baseline.filter((c) => c._id).map((c) => [c._id as string, c]));
   const keptIds = new Set(next.map((c) => c._id).filter(Boolean) as string[]);

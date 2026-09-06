@@ -93,8 +93,6 @@ export default function AdminAgentsPage() {
     }
   }
 
-  // Its own endpoint and its own button: it is a different setting from the PM
-  // defaults, and blanking it used to be a silent no-op with the save bar still lit
   async function saveAiModel() {
     const value = aiModel.trim();
     if (!value) {

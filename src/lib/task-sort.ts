@@ -2,10 +2,8 @@ import { ApiCustomField, ApiSprint, ApiTask, PRIORITY_ORDER, SortDir, SortField 
 import { normalizeOptions } from "./custom-fields";
 
 export interface SortContext {
-  /** Board columns in board order — the only sensible ordering for a status */
   statusOrder?: Map<string, number>;
   sprintById?: Map<string, ApiSprint>;
-  /** A sort key that is not a built-in field is a project field id */
   fieldById?: Map<string, ApiCustomField>;
 }
 
@@ -22,8 +20,6 @@ export function isEmptyFieldValue(value: unknown): boolean {
   );
 }
 
-// Dropdowns compare by the option's configured order, not alphabetically — that
-// order is what the project decided S < M < L means
 function compareFieldValues(a: unknown, b: unknown, field: ApiCustomField): number {
   switch (field.fieldType) {
     case "number":
@@ -56,7 +52,6 @@ function compare(a: ApiTask, b: ApiTask, field: string, ctx: SortContext): numbe
     return compareFieldValues(fieldValue(a, field), fieldValue(b, field), definition);
   }
   switch (field as SortField) {
-    // Mirrors the API's own ordering, so drag-and-drop reordering survives
     case "manual":
       return (
         (a.order ?? 0) - (b.order ?? 0) ||
@@ -83,7 +78,6 @@ function compare(a: ApiTask, b: ApiTask, field: string, ctx: SortContext): numbe
     }
     case "category":
       return a.category.localeCompare(b.category);
-    // Undated sorts last ascending, which is what "soonest first" means
     case "dueDate": {
       const at = a.dueDate ? new Date(a.dueDate).getTime() : Infinity;
       const bt = b.dueDate ? new Date(b.dueDate).getTime() : Infinity;
@@ -108,8 +102,6 @@ export function sortTasks(
   const sign = dir === "asc" ? 1 : -1;
   const definition = ctx.fieldById?.get(field);
 
-  // Applied before the direction sign, so a blank stays at the bottom either way.
-  // Built-in fields keep their own behaviour — dueDate has always flipped.
   function emptiesLast(a: ApiTask, b: ApiTask): number {
     if (!definition) return 0;
     const emptyA = isEmptyFieldValue(fieldValue(a, field));
@@ -117,8 +109,6 @@ export function sortTasks(
     if (emptyA === emptyB) return 0;
     return emptyA ? 1 : -1;
   }
-  // Task number is a stable, always-present tiebreak; without it equal keys make
-  // the order jitter between renders
   return [...tasks].sort(
     (a, b) => emptiesLast(a, b) || compare(a, b, field, ctx) * sign || a.taskNumber - b.taskNumber
   );

@@ -1,44 +1,8 @@
-/**
- * Rewrite the old product name in stored data, after the code was renamed.
- *
- *   npx tsx scripts/migrate-brand.ts scan            # default: changes nothing
- *   npx tsx scripts/migrate-brand.ts apply
- *
- * Against production, from a laptop — the app service's URI is on Railway's private
- * network, so go through the database service, and take the snapshot first:
- *
- *   railway run --service MongoDB -- sh -c 'MONGODB_URI="$MONGO_PUBLIC_URL" \
- *     npx tsx scripts/dump-collections.ts dump ./backups \
- *     projects,tasks,comments,workers,notifications,pmmessages,activitylogs'
- *   railway run --service MongoDB -- sh -c 'MONGODB_URI="$MONGO_PUBLIC_URL" npx tsx scripts/migrate-brand.ts scan'
- *   railway run --service MongoDB -- sh -c 'MONGODB_URI="$MONGO_PUBLIC_URL" npx tsx scripts/migrate-brand.ts apply'
- *
- * Production's database is literally named `test`, so it cannot be recognised by name —
- * read the document count this prints before trusting any verdict. Restoring is
- * `dump-collections.ts restore ./backups/<dir>`, which replaces those collections
- * wholesale and therefore also undoes anything written since the dump.
- *
- * Every collection and every string field is walked, rather than a list of fields
- * written up front: the development database carries almost none of this content, so
- * a hand-written list would have been drawn from the wrong sample and would miss
- * whatever production actually holds.
- *
- * Filesystem paths are left alone by default — see PATH_LIKE. A worker's repository
- * allowlist stores the absolute path of a checkout, and rewriting it while the
- * directory on disk still has its old name unbinds every repository that worker owns.
- * Pass --include-paths once the directory has actually been renamed.
- */
-
 import { MongoClient, type Document } from "mongodb";
 import { resolveUri, dbName } from "./mongo-uri";
 
 const OLD = new RegExp(["cla", "ude", "( ?-? ?)", "plan", "ner"].join(""), "gi");
 
-/**
- * Case and separator of the match decide the replacement, so identifiers stay identifiers
- * and prose stays prose. The closed-up capitalised form is the one that matters: it is
- * almost always prose a person or the PM agent reads, and it takes the space back.
- */
 function rename(text: string): string {
   return text.replace(OLD, (match, sep: string) => {
     const head = match.slice(0, 5);
@@ -48,23 +12,13 @@ function rename(text: string): string {
   });
 }
 
-/** The old deployment, which outlived the rename and still answers. */
 const OLD_HOST = /claude-planner-production\.up\.railway\.app/gi;
 const NEW_HOST = "app.board-planner.com";
 
-/** A value that is a path on somebody's disk, not prose about the product. */
 const PATH_LIKE = /^(\/|~\/|[A-Za-z]:\\)/;
 
-/**
- * Fields naming something that lives outside this database and did not get renamed with it.
- * A repository is the sharpest case: the project points at `rafalpodles/claude-planner`,
- * that is still the repository's name on GitHub, and rewriting it makes every pull-request
- * sync ask about a repository that does not exist. A redirect URI is registered with the
- * remote OAuth server, so changing this copy only makes the two disagree.
- */
 const EXTERNAL_IDENTIFIER = /(^|\.)(githubRepo|gitlabRepo|repositoryUrl|redirectUri)$/;
 
-/** The subset of those that a repository rename does make stale. */
 const REPOSITORY_FIELD = /(^|\.)(githubRepo|gitlabRepo|repositoryUrl)$/;
 
 interface Change {
@@ -87,9 +41,6 @@ function walk(
     const repoField = REPOSITORY_FIELD.test(path);
     if (external && !(repoField && includeRepo)) return;
     if (!includePaths && PATH_LIKE.test(value)) return;
-    // Host first: the generic rename would turn "claude-planner-production…" into
-    // "board-planner-production…", a hostname that resolves to nothing, and the host
-    // pattern would no longer match to correct it
     const after = rename(value.replace(OLD_HOST, NEW_HOST));
     if (after !== value) emit(path, value, after);
     return;
@@ -98,8 +49,6 @@ function walk(
     value.forEach((item, i) => walk(item, `${path}.${i}`, includePaths, includeRepo, emit));
     return;
   }
-  // Only plain objects: an ObjectId or a Date has no strings of ours inside it, and
-  // descending into one would produce a path that $set cannot address
   if (value && typeof value === "object" && value.constructor === Object) {
     for (const [key, child] of Object.entries(value)) {
       walk(child, path ? `${path}.${key}` : key, includePaths, includeRepo, emit);
@@ -117,8 +66,6 @@ async function main() {
   const args = process.argv.slice(2);
   const mode = args.find((a) => !a.startsWith("--")) ?? "scan";
   const includePaths = args.includes("--include-paths");
-  // The repository fields are excluded because they name a repository that did not get
-  // renamed with the product. Once it has been, this is how they catch up.
   const includeRepo = args.includes("--include-repo");
   if (mode !== "scan" && mode !== "apply") {
     throw new Error(`Unknown mode "${mode}" — expected scan or apply`);
@@ -130,8 +77,6 @@ async function main() {
   const db = client.db(dbName());
 
   const collections = (await db.listCollections().toArray()).map((c) => c.name).sort();
-  // Printed before any verdict: an empty database and a finished migration both report
-  // "nothing to change", and only the row counts tell them apart
   console.log(`connection : ${source}`);
   console.log(`database   : ${db.databaseName}`);
   console.log(`collections: ${collections.length}`);
@@ -161,7 +106,6 @@ async function main() {
 
   const byField = new Map<string, Change[]>();
   for (const c of changes) {
-    // Array indices collapse so a report reads "checklist[].text", not one line per item
     const key = `${c.collection}.${c.path.replace(/\.\d+(?=\.|$)/g, "[]")}`;
     (byField.get(key) ?? byField.set(key, []).get(key)!).push(c);
   }
@@ -185,8 +129,6 @@ async function main() {
     return;
   }
 
-  // Grouped per document so each one takes a single round trip, and so a document
-  // with several changed fields can never be left half-rewritten
   const perDoc = new Map<string, { collection: string; id: unknown; sets: Record<string, string> }>();
   for (const c of changes) {
     const key = `${c.collection}:${String(c.id)}`;

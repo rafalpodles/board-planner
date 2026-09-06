@@ -13,14 +13,10 @@ const ACTOR = "507f1f77bcf86cd799439013";
 const ADMIN = "507f1f77bcf86cd799439014";
 const NOTIFICATION_PROJECT = "507f1f77bcf86cd799439021";
 
-/** Who holds a grant on the project, per test. The delivery filter reads this through grants.ts. */
 let granted: string[] = [];
-/** Stored role per recipient. "admin" reaches every board without a grant row existing. */
 let roles: Record<string, string> = {};
-/** Makes the access lookup reject, so the fail-closed branch can be exercised. */
 let accessLookupFails = false;
 
-/** Per-test notification preferences, layered over the mailbox fixture. */
 let prefs: Record<string, Record<string, unknown>> = {};
 
 const MAILBOXES: Record<string, { email: string; fullName: string }> = {
@@ -40,8 +36,6 @@ vi.mock("@/models/grant", () => ({
       if (accessLookupFails) {
         return { select: () => ({ lean: async () => { throw new Error("no database"); } }) };
       }
-      // Honours objectType and object, so a query that forgot either would return grants it has
-      // no business returning and the tests below would notice.
       if (filter?.objectType !== "project" || filter?.object !== NOTIFICATION_PROJECT) {
         return { select: () => ({ lean: async () => [] }) };
       }
@@ -56,9 +50,6 @@ vi.mock("@/models/grant", () => ({
     },
   },
 }));
-// Query-aware because two callers share it: grants.ts asks for stored roles, the mail fan-out
-// asks who wants mail and passes a projection as the second argument. Answering both with one
-// list would make the access filter untestable.
 vi.mock("@/models/user", () => ({
   User: {
     find: (...a: unknown[]) => {
@@ -71,9 +62,6 @@ vi.mock("@/models/user", () => ({
             lean: async () =>
               asked
                 .filter((id) => roles[id])
-                // Honoured, so re-adding `role: "admin"` to the access query — which would make
-                // every recipient an admin and the filter a no-op — fails here too, not only in
-                // grants.test.ts.
                 .filter((id) => filter.role === undefined || filter.role === roles[id])
                 .map((id) => ({ _id: id, role: roles[id] })),
           }),
@@ -83,9 +71,6 @@ vi.mock("@/models/user", () => ({
         lean: async () =>
           asked
             .filter((id) => MAILBOXES[id])
-            // Preferences decide per recipient now rather than filtering inside the query, so the
-            // fan-out fixture carries them. The default is an ordinary account that predates the
-            // grid: emailNotifications is its stored preference and nothing has been migrated.
             .map((id) => ({
               _id: id,
               ...MAILBOXES[id],
@@ -188,8 +173,6 @@ describe("notification emails", () => {
     expect(mail.text).toContain("you were mentioned in a comment on BP-142");
   });
 
-  // A build-machine literal is what NEXT_PUBLIC_APP_URL would have offered here (BP-316), so an
-  // unconfigured instance sends the mail without a link rather than with a wrong one.
   it("still sends when the instance has no configured origin, minus the link", async () => {
     selfOrigin.mockReturnValue(null);
     await createNotifications(NOTIFICATION);
@@ -200,8 +183,6 @@ describe("notification emails", () => {
     expect(mail.html).toContain("Session cookie survives a password change");
   });
 
-  // Somebody on the digest hears about this in one message tomorrow morning; sending both would
-  // make the digest a duplicate rather than a replacement
   it("skips the people who chose the daily digest", async () => {
     prefs[ASSIGNEE] = { emailDigest: true };
 
@@ -212,8 +193,6 @@ describe("notification emails", () => {
     expect(to).toEqual(["watcher@example.com"]);
   });
 
-  // The bell hides the row; it does not stop the write. The digest is assembled from these
-  // documents, so a skipped insert would take tomorrow's mail down with today's bell.
   it("still stores a notification the bell is not allowed to show", async () => {
     prefs[WATCHER] = {
       notifications: {
@@ -243,18 +222,13 @@ describe("notification emails", () => {
     await createNotifications({ ...NOTIFICATION, recipientIds: [WATCHER] });
     expect(sendEmail).not.toHaveBeenCalled();
 
-    // The bell still rings for it — one channel muted for one board is not the whole row
     expect(insertMany.mock.calls[0][0][0]).toMatchObject({ inApp: true });
 
-    // And with the override gone, the same event reaches them
     prefs[WATCHER] = {};
     await createNotifications({ ...NOTIFICATION, recipientIds: [WATCHER] });
     await sentMails();
   });
 
-  // Every writer calls createNotifications without awaiting it, so anything that escapes is an
-  // unhandled rejection — which ends the process rather than losing one notification. A username
-  // reaching the recipient list is enough to cast: `new ObjectId("admin")` throws.
   it("does not reject when a recipient is not an id", async () => {
     await expect(
       createNotifications({ ...NOTIFICATION, recipientIds: ["admin"] })
@@ -268,7 +242,6 @@ describe("notification emails", () => {
     expect(insertMany.mock.calls[0][0][0]).toMatchObject({ title: NOTIFICATION.title });
   });
 
-  // Anything the notification path throws is the notification's problem, not the caller's
   it("does not reject when the preference read fails", async () => {
     userFind.mockImplementationOnce(() => {
       throw new Error("mongo is having a bad afternoon");
@@ -285,22 +258,6 @@ describe("notification emails", () => {
   });
 });
 
-/**
- * Both fan-outs are started and walked away from: notify() has already answered the request that
- * caused them. A rejection escaping either one is an unhandled rejection, which ends the process
- * rather than losing a single notification — so each has a .catch(), and each .catch() was held up
- * by nothing.
- *
- * Every failure below is an implementation that THROWS rather than mockRejectedValue. That one
- * builds its rejected promise when the test sets it up; vitest attaches a handler there and the
- * test then passes with the .catch() deleted, which is the only thing it exists to prove.
- *
- * Recorded gap: the per-recipient `sendEmail(...).catch(() => {})` inside the mail fan-out cannot
- * be pinned this way. It swallows silently — no log line, no effect on the loop, which is not
- * awaited either — so nothing distinguishes the guarded version from the unguarded one except an
- * unhandled rejection arriving at the runtime. Pinning it needs a process-level
- * "unhandledRejection" listener, which is a different kind of test from these.
- */
 describe("the fan-outs nobody awaits", () => {
   const CHAT_CONNECTED = {
     notifications: {
@@ -321,11 +278,8 @@ describe("the fan-outs nobody awaits", () => {
       title: NOTIFICATION.title,
       email: NOTIFICATION.email,
     });
-    // The recipient query casts to ObjectId, so these ids are not the strings above. vitest prints
-    // an ObjectId as its quoted hex, which makes a mismatch here read as an exact match in the diff
     const { users } = chat as { users: Array<{ _id: unknown }> };
     expect(users.map((user) => String(user._id))).toEqual([WATCHER]);
-    // Mail was off in that grid, so the two channels are decided separately rather than together
     expect(sendEmail).not.toHaveBeenCalled();
   });
 
@@ -389,9 +343,6 @@ describe("assigneeIdOf", () => {
   });
 });
 
-// BP-328. Watch membership is acquired by commenting and never expires, so a contractor removed
-// from the board keeps every watch they accumulated. The rows are kept deliberately — a re-add
-// restores the feed — which is exactly why delivery, not the watcher list, has to do the refusing.
 describe("delivery to somebody who can no longer reach the board", () => {
   function recipientIdsOf(call: unknown[]) {
     return (call[0] as { recipient: string }[]).map((row) => String(row.recipient));
@@ -432,9 +383,6 @@ describe("delivery to somebody who can no longer reach the board", () => {
     expect(sendEmail).not.toHaveBeenCalled();
   });
 
-  // The choice is stated in a comment in the source and was defended by nothing: turning the
-  // refusal back into delivery-to-everybody kept every test green, which is exactly the edit
-  // somebody chasing "notifications go missing when Mongo hiccups" would make.
   it("delivers to nobody when it cannot find out who may be told", async () => {
     accessLookupFails = true;
 

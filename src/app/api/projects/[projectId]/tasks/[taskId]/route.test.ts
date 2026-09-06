@@ -33,8 +33,6 @@ vi.mock("@/lib/middleware", () => ({
         ...(ctx as object),
         user: {
           _id: "u1",
-          // The role the *request's* principal carries. getAuthUser degrades a scoped token's role
-          // to member in memory, so this is where that degradation has to be visible.
           role: req.headers.get("x-role") ?? "member",
           viaMachineCredential: req.headers.get("x-machine") !== null,
         },
@@ -73,7 +71,6 @@ const HELD = {
 beforeEach(() => {
   vi.clearAllMocks();
   updateTask.mockResolvedValue({ ok: true, data: { _id: TASK } });
-  // The route reads only the two fields the hold check needs, so the chain is select().lean()
   taskFindOne.mockReturnValue({
     select: () => ({ lean: () => Promise.resolve({ _id: TASK, taskNumber: 7, execution: {} }) }),
   });
@@ -82,8 +79,6 @@ beforeEach(() => {
   heldRunRefusal.mockResolvedValue(null);
 });
 
-// BP-320: PATCH .../status refused force from a machine credential; PUT .../tasks/:id reaches the
-// identical code path with the identical flag and did not. Same outcome, one door locked.
 describe("PUT .../tasks/:taskId and force", () => {
   it("refuses force from a machine credential", async () => {
     const res = await PUT(request({ status: "done", force: true }, true), ctx());
@@ -114,16 +109,6 @@ describe("PUT .../tasks/:taskId and force", () => {
   });
 });
 
-
-/**
- * BP-345 had this route work out whether the caller could choose a task's agent and pass the answer
- * down, because choosing one could then arm a machine belonging to somebody else. BP-358 moved that
- * boundary into the claim — a machine takes only what its own owner assigned to themselves — and
- * the choice went back to whoever may edit the task, which `withProjectAccess` already answers.
- *
- * Asserted on the whole argument list rather than on a role: what changed is that the route stopped
- * having an opinion, and a test naming one index could not tell "false" from "gone".
- */
 describe("PUT .../tasks/:taskId and the agent", () => {
   const AGENT = "69a52e3b399b27d3cbb2c5a5";
 
@@ -147,9 +132,6 @@ describe("PUT .../tasks/:taskId and the agent", () => {
     expect(updateTask).toHaveBeenCalledWith("p1", TASK, { agent: AGENT }, "u1", false);
   });
 
-  // A scoped token's role is degraded to member in memory by getAuthUser, and the route no longer
-  // reads it at all — so the two requests above have to be indistinguishable here, not merely both
-  // permitted
   it("says the same thing whoever asks", async () => {
     await PUT(roleOf("member"), ctx());
     await PUT(roleOf("admin"), ctx());
@@ -158,11 +140,6 @@ describe("PUT .../tasks/:taskId and the agent", () => {
   });
 });
 
-/**
- * BP-337. Three writers refuse to take a task off a running worker and demand `force`; DELETE was
- * the fourth and asked nothing, while reaching a stronger outcome than any of them — the task is
- * not moved, it is gone, with the comments the run was writing into it.
- */
 describe("DELETE .../tasks/:taskId and the run hold", () => {
   it("refuses a task a run holds, with the 409 shape the other writers give", async () => {
     heldRunRefusal.mockResolvedValue(HELD);
@@ -181,7 +158,6 @@ describe("DELETE .../tasks/:taskId and the run hold", () => {
 
     expect(res.status).toBe(200);
     expect(taskDeleteOne).toHaveBeenCalled();
-    // Not even asked: forcing is the answer to the question, so the refusal is not computed
     expect(heldRunRefusal).not.toHaveBeenCalled();
   });
 
@@ -193,10 +169,6 @@ describe("DELETE .../tasks/:taskId and the run hold", () => {
     expect(taskDeleteOne).not.toHaveBeenCalled();
   });
 
-  /**
-   * The control. Without it "refuses held tasks" and "delete is broken" are the same observation,
-   * and the ordinary case is the one every board click takes.
-   */
   it("still deletes an unheld task, with no body at all on the request", async () => {
     const res = await DELETE(deleteRequest(), ctx());
 
@@ -204,10 +176,6 @@ describe("DELETE .../tasks/:taskId and the run hold", () => {
     expect(taskDeleteOne).toHaveBeenCalledWith({ _id: TASK, project: "p1" });
   });
 
-  /**
-   * PUT has this assertion and DELETE did not, which is the BP-320 shape again: `!force` would let
-   * `{ force: "yes" }` past the hold check AND past machineMayNotForce, which tests `=== true`.
-   */
   it("treats a force that is not literally true as no force at all", async () => {
     heldRunRefusal.mockResolvedValue(HELD);
 
@@ -217,8 +185,6 @@ describe("DELETE .../tasks/:taskId and the run hold", () => {
     expect(taskDeleteOne).not.toHaveBeenCalled();
   });
 
-  // The ticket's own premise is that the task goes "with the comments the run was writing into
-  // it", and nothing asserted that half — before this change or after it
   it("takes the comments, activity, notifications and inbound links with it", async () => {
     await DELETE(deleteRequest(), ctx());
 

@@ -7,7 +7,6 @@ import { OAuthToken } from "@/models/oauthToken";
 import { OAuthCode } from "@/models/oauthCode";
 import { OAuthConsent } from "@/models/oauthConsent";
 
-// Registered OAuth clients (via Dynamic Client Registration). Admin only.
 export const GET = withAdmin(async () => {
   await connectDB();
 
@@ -47,7 +46,6 @@ export const DELETE = withAdmin(async (request) => {
     return NextResponse.json({ error: "Client not found" }, { status: 404 });
   }
 
-  // Cascade: revoke everything issued to this client so no orphaned tokens keep working.
   await OAuthToken.deleteMany({ clientId: client.clientId });
   await OAuthCode.deleteMany({ clientId: client.clientId });
   await OAuthConsent.deleteMany({ clientId: client.clientId });

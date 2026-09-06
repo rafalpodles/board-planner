@@ -1,13 +1,6 @@
 import Foundation
 import CPMenubarCore
 
-// The half of BP-378 that touches the disk. The choice is made in a browser and arrives here as a
-// catalogue on the socket; this turns the difference between it and the machine into clones and
-// deletions, one project at a time, saying what happened to each.
-//
-// Deliberately not silent. A clone takes minutes and a deletion cannot be undone, so every step
-// leaves a line the Repositories pane renders — a spinner that ends with a different list is not
-// an account of what was done.
 @MainActor
 @Observable
 final class ProjectSyncRunner {
@@ -18,17 +11,8 @@ final class ProjectSyncRunner {
 
     private let file = ReposFile(path: ReposFile.defaultPath())
 
-    /// `isBusy` answers "is the worker running a task", asked at the moment it is called — what it
-    /// asks is the caller's business. A question rather than an answer: the value used to be
-    /// sampled before the pass, and a clone takes minutes, so a worker that picked up a task in
-    /// between had its checkout deleted underneath it. `SyncPass` asks again before each removal
-    /// (BP-424).
     func sync(catalogue: [ProjectCatalogueRow], isBusy: @escaping () async -> Bool) async {
         guard !running else { return }
-        // Claimed here rather than after the plan is built: reading every checkout's origin awaits,
-        // and a second pass entering during that await used to clear this guard as well. Not
-        // introduced by BP-424, but its `isBusy` calls put more suspension points inside the pass,
-        // and a pass that can run twice is a pass that can delete twice.
         running = true
         defer { running = false }
 
@@ -72,8 +56,6 @@ final class ProjectSyncRunner {
         steps = []
     }
 
-    /// What each allowlisted checkout says its origin is — the only way to tell which project a
-    /// directory belongs to, since the socket never carries a path.
     private func originsOf(_ paths: [String], toolPath: String) async -> [String: String] {
         await Task.detached {
             var found: [String: String] = [:]

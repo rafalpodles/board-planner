@@ -1,13 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { matchPRsToTasks } from "./github";
 
-/**
- * A task key is built from the project's current key, so renaming the key renames every
- * task at once — while the branches and pull-request titles already on GitHub keep the
- * prefix they were created with. Without the former keys, a rename silently unlinks the
- * entire history: nothing errors, the sync just quietly matches less than it used to.
- */
-
 const pr = (over: Partial<{ number: number; title: string; ref: string }> = {}) => ({
   number: over.number ?? 1,
   title: over.title ?? "Some change",
@@ -49,7 +42,6 @@ describe("matchPRsToTasks", () => {
     expect(matchPRsToTasks([pr({ ref: "zz-7/other" })], "BP", ["CP"])).toEqual([]);
   });
 
-  // Keys are not format-validated, so one containing regex syntax must not widen the match
   it("treats a key with regex characters literally", () => {
     expect(matchPRsToTasks([pr({ ref: "cX-5/x" })], "C(", ["C."])).toEqual([]);
     expect(matchPRsToTasks([pr({ ref: "c(-5/x" })], "C(")).toHaveLength(1);

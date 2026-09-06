@@ -6,10 +6,6 @@ import { Agent } from "@/models/agent";
 import { Project } from "@/models/project";
 import { isRunnable, normaliseComposition } from "@/lib/agent-rules";
 
-// Its own route rather than a field on the worker policy: policy is instance-admin only and travels
-// in the assignment payload, and this is neither — a project admin picks it. Since BP-358 it does
-// not ride the claim either: the task's own agent is the only thing a claim resolves, and this is
-// the agent the task picker offers first.
 export const PUT = withProjectAccess(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
@@ -20,16 +16,11 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
 
   const body = await request.json();
   const raw = (body as { agentId?: unknown }).agentId;
-  // Absent, null, or the wrong type is a malformed request and not a request to clear. Coercing
-  // it to "" made `{}` and a typo'd key answer 200 and null the field — "did not say" and
-  // "asked to clear" cannot be the same wire message on a route an API token can reach.
   if (typeof raw !== "string") {
     return NextResponse.json({ error: "agentId is required" }, { status: 400 });
   }
   const agentId = raw;
 
-  // The empty string, and only that, clears it. A default that could be set and never unset left
-  // a project stuck with a suggestion it had outgrown, and the picker with no way back (BP-458).
   if (!agentId) {
     await Project.updateOne({ _id: projectId }, { $set: { "worker.agent": null } });
     return NextResponse.json({ ok: true });

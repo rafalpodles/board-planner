@@ -29,7 +29,6 @@ describe("assertPublicDestination", () => {
     await expect(assertPublicDestination("https://hooks.slack.com/x")).resolves.toBeInstanceOf(URL);
   });
 
-  // BP-303: no DNS resolution at all, so localtest.me reached 127.0.0.1 with no redirect
   it("refuses a public name that resolves inward", async () => {
     lookup.mockResolvedValue([{ address: "127.0.0.1" }]);
 
@@ -72,7 +71,6 @@ describe("assertPublicDestination", () => {
     await expect(assertPublicDestination("https://nope.example/x")).rejects.toThrow(/resolve/);
   });
 
-  // The carve-out isAllowedMcpServerUrl already makes for local MCP servers
   it("allows loopback only when the caller asks for it", async () => {
     await expect(assertPublicDestination("http://localhost:3001/mcp")).rejects.toThrow(
       BlockedDestinationError
@@ -94,8 +92,6 @@ describe("safeFetch", () => {
     );
   });
 
-  // BP-303: not one caller passed redirect:"manual", so the guard only ever saw the
-  // URL as configured while Node followed the 302 to the metadata service
   it("refuses a redirect that points at a private address", async () => {
     fetchMock.mockResolvedValueOnce(redirect("http://169.254.169.254/latest/meta-data/"));
 
@@ -132,8 +128,6 @@ describe("safeFetch", () => {
     expect(forwarded.get("content-type")).toBe("application/json");
   });
 
-  // BP-317: the drop was a denylist of this app's own two headers, so GitLab's PRIVATE-TOKEN — the
-  // one caller in the repo that authenticates with anything else — was replayed to the new origin.
   it.each([
     ["authorization", "Bearer secret"],
     ["private-token", "glpat-secret"],
@@ -164,8 +158,6 @@ describe("safeFetch", () => {
     expect(forwarded.get("user-agent")).toBe("bp");
   });
 
-  // origin carries the scheme, so this is the same host and still a different origin — the
-  // credential would otherwise go out in clear text
   it("drops credentials on an https to http downgrade to the same host", async () => {
     fetchMock.mockResolvedValueOnce(redirect("http://hooks.slack.com/x"));
 
@@ -182,8 +174,6 @@ describe("safeFetch", () => {
     expect(new Headers(fetchMock.mock.calls[1][1].headers).get("authorization")).toBe("Bearer secret");
   });
 
-  // 307 and 308 preserve the method and the body, so stripping headers alone let the body cross
-  // intact — and these bodies are refresh_token=…, client_secret=… and webhook payloads
   it.each([307, 308])("refuses to replay a %i body to another origin", async (status) => {
     fetchMock.mockResolvedValueOnce(redirect("https://collector.example/", status));
 
@@ -206,8 +196,6 @@ describe("safeFetch", () => {
     expect(fetchMock.mock.calls[1][1].body).toBe("grant_type=x");
   });
 
-  // A cross-origin 302 on a POST becomes a GET with no body, which is the existing rule and is
-  // still fine — nothing is replayed
   it("still follows a cross-origin 302 by dropping the method and body", async () => {
     fetchMock.mockResolvedValueOnce(redirect("https://elsewhere.example/y", 302));
 
@@ -224,12 +212,7 @@ describe("safeFetch", () => {
   });
 });
 
-// BP-317: the 500 characters that reach the log were sliced off a string the process had already
-// materialised in full, so an integration host answering an error with a huge body could exhaust
-// the container while being politely refused.
 describe("reading an upstream error body", () => {
-  // Large but finite on purpose: an endless stream would make an unbounded read hang rather than
-  // fail, and a test that hangs is a worse signal than one that fails
   function countedStream(chunkCount: number, onCancel?: () => void) {
     const encoder = new TextEncoder();
     const pulled = { count: 0 };
@@ -262,9 +245,6 @@ describe("reading an upstream error body", () => {
     expect(cancelled).toHaveBeenCalled();
   });
 
-  // The budget was tested before each read, so the last chunk was taken whole and the allocation
-  // bound was maxBytes plus one chunk. Both existing cases used 1 KB chunks against a 4 KB budget,
-  // so total landed exactly on the bound and the final trim was a no-op (BP-317 review).
   it("cuts a chunk that is larger than the whole budget", async () => {
     const oversized = new Response(
       new ReadableStream({
@@ -279,7 +259,6 @@ describe("reading an upstream error body", () => {
     expect((await readBoundedText(oversized, 4096)).length).toBe(4096);
   });
 
-  // A character split by the cut is dropped rather than becoming U+FFFD in the log
   it("does not leave a replacement character where it stopped", async () => {
     const multibyte = new Response(
       new ReadableStream({
@@ -291,7 +270,6 @@ describe("reading an upstream error body", () => {
       { status: 500 }
     );
 
-    // 5 bytes is two whole two-byte characters and half of a third
     expect(await readBoundedText(multibyte, 5)).toBe("ąą");
   });
 
@@ -318,8 +296,6 @@ describe("reading an upstream error body", () => {
     expect(await readBoundedText(broken, 4096)).toBe("");
   });
 
-  // The bound has to be on what is allocated, not on what is printed — slicing after the fact is
-  // what this replaced, and it logs an identical line
   it("does not materialise the whole body just to log 500 characters of it", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const { pulled, response } = countedStream(10_000);

@@ -21,7 +21,6 @@ interface ColumnPickerProps {
 export function ColumnPicker({ hidden, onChange, customFields = [] }: ColumnPickerProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  // Shared with the Filters panel next to it, which had the mirror image of this defect (BP-501)
   const panel = usePanelClamp(open);
 
   useEffect(() => {
@@ -45,7 +44,6 @@ export function ColumnPicker({ hidden, onChange, customFields = [] }: ColumnPick
   const builtIn = columns.filter((c) => !c.field);
   const fromProject = columns.filter((c) => c.field);
   const fallback = defaultHidden(customFields);
-  // Compared as sets: lengths alone called any three hidden columns "default"
   const isDefault =
     hidden.length === fallback.length && fallback.every((id) => hidden.includes(id));
 
@@ -93,7 +91,6 @@ export function ColumnPicker({ hidden, onChange, customFields = [] }: ColumnPick
             </label>
           ))}
 
-          {/* Kept apart, so it is obvious which columns this project invented */}
           {fromProject.length > 0 && (
             <>
               <p className="mt-2 px-2 pb-1 pt-1 text-[10.5px] font-bold uppercase tracking-wider text-text-muted">

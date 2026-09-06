@@ -20,7 +20,6 @@ const ctx = () => ({ params: Promise.resolve({ projectId: PROJECT_ID }) });
 
 type Column = { id: string; label: string; color: string; role: string; order: number };
 
-/** The board as stored, and the tasks standing in it, keyed by column id. */
 function board(columns: Column[], tasksByColumn: Record<string, number[]> = {}) {
   const doc = { key: "TP", columns, save: vi.fn(async () => {}) };
   projectFindById.mockResolvedValue(doc);
@@ -53,7 +52,6 @@ const col = (id: string, label: string, role = "backlog", order = 0): Column => 
   order,
 });
 
-/** What a save stores, as `id:label` pairs, which is the only thing these tests are about. */
 const idsAndLabels = (body: unknown) =>
   (body as Column[]).map((c) => `${c.id}:${c.label}`);
 
@@ -63,12 +61,6 @@ beforeEach(() => {
   check.mockResolvedValue(true);
 });
 
-/**
- * BP-536. The id loop is a pure function of (stored board, payload), and the whole content of the
- * fix is how it behaves under payloads the editor cannot produce but an API token can. Each of
- * these costs a millisecond; the two shapes a person can reach are covered end-to-end as well, in
- * `e2e/project-settings.spec.ts`.
- */
 describe("PUT columns · which column ends up with which id", () => {
   const stored = [
     col("todo", "To Do", "approved", 0),
@@ -116,7 +108,6 @@ describe("PUT columns · which column ends up with which id", () => {
       keep[2],
     ]);
 
-    // Served, the loser leaves its own id and lands on `todo_2` — a live column's
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/cannot claim the same id/);
   });
@@ -134,7 +125,6 @@ describe("PUT columns · which column ends up with which id", () => {
     expect(res.status).toBe(200);
     const ids = (res.body as Column[]).map((c) => c.id);
     expect(new Set(ids).size).toBe(ids.length);
-    // Neither live column is displaced by any of the three
     expect(idsAndLabels(res.body)).toContain("todo:To Do");
     expect(idsAndLabels(res.body)).toContain("todo_2:Todo (2)");
   });

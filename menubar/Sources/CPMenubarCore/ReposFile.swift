@@ -39,8 +39,6 @@ public struct ReposFile: Sendable {
             withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700])
         try data.write(to: url, options: .atomic)
-        // .atomic writes a temporary file and renames, so the mode has to be set after the rename —
-        // before it, this would chmod a file that no longer exists.
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
     }
 }

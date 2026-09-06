@@ -12,7 +12,6 @@ const pmOauthStateSchema = new Schema<IPmOauthState>(
   { timestamps: { createdAt: true, updatedAt: false } }
 );
 
-// Pending authorizations expire after 10 minutes
 pmOauthStateSchema.index({ createdAt: 1 }, { expireAfterSeconds: 600 });
 
 export const PmOauthState: Model<IPmOauthState> =

@@ -14,7 +14,6 @@ describe("maskSecretUrl", () => {
     );
   });
 
-  // A value that does not parse must not be echoed back on the assumption it is harmless
   it("returns a bare mask for something that is not a URL", () => {
     expect(maskSecretUrl("not a url at all")).toBe("••••");
   });
@@ -99,9 +98,6 @@ describe("sanitizeProjectSecrets", () => {
     expect(webhook).not.toHaveProperty("url");
   });
 
-  // Every board older than CP-246 still stores owner and admins: the schema paths went away with
-  // no backfill, and Mongoose keeps unmapped keys in _doc, which toObject() clones whole. All three
-  // project serialisation paths funnel through here, so this is the one place that can stop them.
   it("drops the legacy owner and admins keys a pre-CP-246 document still carries", () => {
     const sanitized: Record<string, unknown> = sanitizeProjectSecrets({
       _id: "p1",

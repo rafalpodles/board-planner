@@ -1,21 +1,9 @@
 import { IPmAutonomy } from "@/types";
 
-// An unattended turn may not put work onto a machine. Since BP-419 this list is what enforces that
-// for the built-in tools: the claim used to refuse every PM assignment whatever this list said, and
-// a PM hand-over is now real (bounded by whose instruction it was), so withholding assign_task here
-// is load-bearing rather than a tidy-up.
-//
-// It is a list of NAMES, and that is its limit: BP-321 found MCP tools are exposed as
-// `mcp_<server>_<tool>`, so nothing here could ever name them and an unattended turn kept full
-// write access to a project's MCP server. That half is enforced by capability instead — runPmTurn's
-// `autonomous` flag withholds every write-capable MCP tool — and the two are separate on purpose,
-// because `add_comment` is a write this list deliberately allows a board review to keep.
 export const BOARD_REVIEW_DISALLOWED_TOOLS = ["change_status", "create_task", "assign_task"];
 
 export const NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS = ["change_status", "assign_task"];
 
-// Moved to lib/time when the daily digest needed the same three, and re-exported here so the
-// PM's own callers and tests keep their import path
 import { dayKeyInTimezone, hourInTimezone, isValidTimezone } from "@/lib/time";
 export { hourInTimezone, dayKeyInTimezone, isValidTimezone };
 

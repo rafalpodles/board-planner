@@ -31,15 +31,12 @@ describe("policyRows", () => {
     expect(row(rows, "model")).toMatchObject({ value: "haiku", overridden: true });
   });
 
-  // The whole reason the override list exists: a stored 400 and a chosen 400 are the same bytes.
   it("marks a pinned field as overridden even though it equals the default", () => {
     const rows = view({ policyOverrides: ["maxDiffLines"] });
 
     expect(row(rows, "maxDiffLines")).toMatchObject({ value: "400", overridden: true });
   });
 
-  // An inherited field will run under whatever the default becomes, not under the copy that was
-  // materialised into the document when it was created.
   it("shows the default for an inherited field, not the stored copy", () => {
     const rows = view({ policy: { maxDiffLines: 999 } });
 
@@ -56,8 +53,6 @@ describe("policyRows", () => {
     expect(row(view({}), "taskTimeoutMs").value).toBe("1800s");
   });
 
-  // The split itself: how long a task may take describes the work, how often a machine asks
-  // describes the machine. Neither list should be able to show the other's field.
   it("keeps machine settings out of the project's rows, and work settings out of the machine's", () => {
     const projectFields = view({}).map((r) => r.field);
     const workerFields = workerPolicyRows({ policy: {}, policyOverrides: [] }).map((r) => r.field);
@@ -84,6 +79,3 @@ describe("policyRows", () => {
   });
 });
 
-// The policy has no boolean fields left. autoMerge and reviewGate were the two, and both are now
-// properties of a composition — a Merge step, and a Reviewed gate standing after the last write.
-// The on/off rendering stays in worker-policy-view for whatever boolean comes next.

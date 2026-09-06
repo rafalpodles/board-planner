@@ -20,8 +20,6 @@ private func scratch() throws -> String {
     #expect(try file.read() == "rafalpodles")
 }
 
-// github-account.ts reads {"account": "..."}; any other shape and the pin is silently ignored,
-// which is a worker pushing as the wrong identity with nothing on screen to say so.
 @Test func writesTheExactJsonShapeTheWorkerExpects() throws {
     let path = try scratch()
     try GithubAccountFile(path: path).write("rafalpodles")
@@ -32,8 +30,6 @@ private func scratch() throws -> String {
     #expect(parsed?["account"] == "rafalpodles")
 }
 
-// Picking "whichever gh has active" back is a real choice, not the absence of one: it has to
-// survive a relaunch the same way a pinned login does.
 @Test func clearingThePinLeavesAFileTheWorkerReadsAsUnpinned() throws {
     let path = try scratch()
     let file = GithubAccountFile(path: path)

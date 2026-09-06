@@ -36,9 +36,6 @@ beforeEach(() => {
   projectFindById.mockResolvedValue(null);
 });
 
-// The callback this flow ends in trusts only the single-use state row and never re-checks
-// who completes it — so anyone who reaches this route gets a real authorizationUrl and can
-// rewire the project's stored OAuth connection to their own external account.
 describe("POST /api/projects/[projectId]/pm/mcp-oauth/start", () => {
   it("admits a project owner past the guard", async () => {
     check.mockResolvedValue(true);

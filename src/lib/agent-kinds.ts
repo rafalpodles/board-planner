@@ -1,7 +1,3 @@
-// Deliberately free of imports: the settings form renders these in the browser and the seed builds
-// the catalog rows from them on the server. Same reasoning as worker-policy.ts — one list, so the
-// form and the seeded row cannot drift.
-
 export interface ParamSpec {
   key: string;
   label: string;
@@ -16,7 +12,6 @@ export interface GateKind {
   name: string;
   description: string;
   params: ParamSpec[];
-  /** What a gate of this kind is seeded with, and what a new one starts from. */
   defaults: Record<string, string>;
 }
 
@@ -40,9 +35,6 @@ export const GATE_KINDS: GateKind[] = [
     key: "protected-paths",
     name: "Protected files",
     description: "Refuses a change to files a later step runs, or loads as its own instructions.",
-    // A parameter listed here is one the worker reads. "Also protect" and "Also count as a test"
-    // were offered before either gate could act on them, which is a form the operator fills in and
-    // nothing obeys — worse than not offering it. They come back with the gates (BP-343).
     params: [],
     defaults: {},
   },
@@ -88,7 +80,6 @@ export const GATE_KINDS: GateKind[] = [
   },
 ];
 
-// What a step may touch. The worker owns these: the UI names one, it never composes a tool list.
 export const CAPABILITIES = [
   { value: "read-only", label: "Read only", hint: "Can read the repository. Cannot change anything." },
   { value: "edit", label: "Read and write", hint: "Can change files. The worker commits afterwards." },

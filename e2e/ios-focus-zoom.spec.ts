@@ -2,22 +2,12 @@ import { test, expect, type Page } from "@playwright/test";
 import { PROJECT_KEY, seed } from "./seed";
 import { signIn as arriveSignedIn } from "./session";
 
-/**
- * BP-495. iOS Safari zooms the whole page when a text-entry control whose computed size is under
- * 16px takes focus, and does not zoom back when the keyboard closes — the app stays magnified
- * until the reader pinches out. The floor lives in `globals.css`, gated on a coarse pointer.
- *
- * Chromium cannot perform the zoom, so what is asserted here is the condition that causes it,
- * on every control a phone can reach. The zoom itself was confirmed by hand in iOS Safari.
- */
-
 test.beforeEach(seed);
 
 const signIn = arriveSignedIn;
 
 const IOS_FLOOR = 16;
 
-/** Every visible control that iOS would zoom for, with the size that decides it */
 async function textEntryControls(page: Page) {
   return page.evaluate(() => {
     const zoomable = (el: Element) => {
@@ -39,7 +29,6 @@ async function textEntryControls(page: Page) {
   });
 }
 
-/** The rule is gated on touch, so a run that is not emulating it would prove nothing */
 async function expectTouchEmulated(page: Page) {
   const coarse = await page.evaluate(
     () => matchMedia("(hover: none) and (pointer: coarse)").matches,
@@ -59,7 +48,6 @@ test.describe("on a phone", () => {
     await expectTouchEmulated(page);
 
     const controls = await textEntryControls(page);
-    // An empty list would satisfy the assertion below without meaning anything
     expect(controls.length, "no controls found — the selector, not the page, is wrong").toBeGreaterThan(0);
     expect(controls.filter((c) => c.fontSize < IOS_FLOOR)).toEqual([]);
   });
@@ -76,10 +64,6 @@ test.describe("on a phone", () => {
     expect(controls.filter((c) => c.fontSize < IOS_FLOOR)).toEqual([]);
   });
 
-  /**
-   * The other half of the claim. Raising every control everywhere would also pass the tests
-   * above, and would be a different change from the one that was made.
-   */
   test("a button is left alone — it never triggered the zoom", async ({ page }) => {
     await signIn(page);
     await page.goto(`/projects/${PROJECT_KEY}`);

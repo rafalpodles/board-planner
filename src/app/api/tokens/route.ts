@@ -10,10 +10,6 @@ import { notifyCredentialCreated } from "@/lib/security-mail";
 import { ApiToken } from "@/models/apiToken";
 import { Project } from "@/models/project";
 
-/**
- * Not awaited by the handler, and it asks whether mail is configured before it asks the database
- * anything: the scope is only ever read to fill a line in a message nobody may be sending.
- */
 async function announceToken(
   owner: { email: string; username: string },
   name: string,
@@ -68,16 +64,11 @@ export const POST = withAuth(async (request, { user }) => {
     scope = [...new Set(allowedProjects)];
   }
 
-  // A minted token is never wider than the credential minting it. Omitting allowedProjects used to
-  // mean "unscoped", so a token scoped to one project could mint itself the owner's whole account
-  // in a single call — including instance admin, since an unscoped token keeps its role.
   const minterScope = (user.tokenScope || []).map(String);
   if (minterScope.length > 0 && scope.length === 0) {
     scope = minterScope;
   }
 
-  // A token can only be scoped to projects its owner can access — and a scoped token may not
-  // mint one that reaches past its own scope, which accessibleProjectIds already intersects.
   if (scope.length > 0) {
     const ids = await accessibleProjectIds(user);
     const accessible = await Project.find(ids === null ? {} : { _id: { $in: ids } })
@@ -93,7 +84,6 @@ export const POST = withAuth(async (request, { user }) => {
     }
   }
 
-  // Generate token: cp_ + 40 random hex chars
   const rawToken = `cp_${crypto.randomBytes(20).toString("hex")}`;
   const prefix = rawToken.substring(0, 11); // "cp_" + 8 hex
   const tokenHash = await bcrypt.hash(rawToken, 10);
@@ -108,7 +98,6 @@ export const POST = withAuth(async (request, { user }) => {
 
   void announceToken(user, token.name, scope);
 
-  // Return the raw token ONCE — it's never stored or retrievable again
   return NextResponse.json({
     _id: token._id,
     name: token.name,
@@ -123,8 +112,6 @@ export const DELETE = withAuth(async (request, { user }) => {
   await connectDB();
 
   const { id } = await request.json();
-  // Typed, not merely truthy: a JSON body can carry an operator object, and {"$ne": null} would
-  // delete an arbitrary token of the caller's own rather than the one named
   if (typeof id !== "string" || !isValidObjectId(id)) {
     return NextResponse.json({ error: "Token id is required" }, { status: 400 });
   }

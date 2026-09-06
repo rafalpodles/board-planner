@@ -33,9 +33,6 @@ export function NotificationsSection({ project }: SectionProps) {
   const [loaded, setLoaded] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
 
-  // The id, not the URL segment. Every link into a board is built from the project key
-  // (`/projects/BP/settings`), and the stored override names an ObjectId — comparing the two
-  // silently reported "following your global settings" over a live override nobody could clear.
   const id = String(project._id);
 
   useEffect(() => {
@@ -44,9 +41,6 @@ export function NotificationsSection({ project }: SectionProps) {
       .then((prefs: Prefs) => {
         const own = prefs.projects.find((p) => p.project === id);
         setGlobalMatrix(prefs.defaults);
-        // Shown as stored, chat included. With nothing connected it does not deliver — that is
-        // decided at send time now — and quietly rewriting somebody's grid on the way to the
-        // screen would misreport what they chose.
         setMatrix(own?.matrix ?? prefs.defaults);
         setOverriding(!!own);
         setChatConfigured(prefs.chat.configured);
@@ -56,9 +50,6 @@ export function NotificationsSection({ project }: SectionProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  // Switching on copies what is in force right now, rather than following the global grid
-  // afterwards: a project somebody has tuned should not shift under them later. It is written
-  // immediately, so the switch means the same thing after a reload as it did before one.
   async function toggleOverride(next: boolean) {
     const previous = matrix;
     setOverriding(next);

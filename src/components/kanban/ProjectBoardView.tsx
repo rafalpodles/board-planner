@@ -23,11 +23,7 @@ import { NewTaskModal } from "@/components/tasks/NewTaskModal";
 interface ProjectBoardViewProps {
   board: ProjectBoard;
   readOnly?: boolean;
-  // Omit for the project's own default; pass null to render nothing instead
   emptyState?: ReactNode;
-  // Overrides board.viewMode for this render and disables the "v" toggle. For a host
-  // page that renders no view switcher of its own, so a stored "list" preference from
-  // elsewhere can't strand it with no way back.
   pinViewMode?: "board" | "list";
 }
 
@@ -90,8 +86,6 @@ export function ProjectBoardView({
 
   const [filteredTasks, setFilteredTasks] = useState<ApiTask[]>([]);
   const [contextMenu, setContextMenu] = useState<{ taskId: string; x: number; y: number } | null>(null);
-  // One owner for both views: the filter bar's dropdown and the list's column
-  // headers set the same value, and it survives switching between them
   const [sortField, setSortField] = useState<SortKey>("manual");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [hiddenColumns, setHiddenColumns] = useState<ListColumnId[]>([]);
@@ -119,9 +113,6 @@ export function ProjectBoardView({
     function handleKeyDown(e: KeyboardEvent) {
       const tag = (e.target as HTMLElement).tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-      // BP-522/BP-543: an open layer owns every key but "?", Escape included — clearing the
-      // selection under the bulk-delete confirm used to relabel it "delete 0 tasks" and report
-      // success having deleted nothing
       if (openLayerCount() > 0 && e.key !== "?") return;
 
       const noMod = !e.metaKey && !e.ctrlKey && !e.altKey;
@@ -152,7 +143,6 @@ export function ProjectBoardView({
         reload();
         return;
       }
-      // J/K navigation in list view — the board draws no indicator for focusedTaskIndex (BP-544)
       const isListView = viewMode === "list";
       if (e.key === "j" && noMod && isListView) {
         e.preventDefault();
@@ -247,9 +237,6 @@ export function ProjectBoardView({
         onFilter={setFilteredTasks}
       />
 
-      {/* board.tasks still holds the previous scope's list until its own request lands —
-          swapping the task area in for a beat rather than showing those stale cards.
-          The header and filter bar above stay put; only this region blanks. */}
       {loadedScope !== scope ? (
         <div className="flex justify-center py-12" role="status" aria-label="Loading tasks">
           <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
@@ -274,8 +261,6 @@ export function ProjectBoardView({
               </div>
             ))}
 
-          {/* Without this the empty state sits above a strip of zero-count columns.
-              ListView already returns null when it has no tasks; Board did not. */}
           {tasks.length > 0 && (
           <div className={`lg:flex-1 lg:min-h-0 ${viewMode === "board" ? "lg:overflow-hidden" : "lg:overflow-y-auto"}`}>
           {viewMode === "board" ? (
@@ -340,13 +325,9 @@ export function ProjectBoardView({
         </>
       )}
 
-      {/* readOnly can flip true while this menu is already open; contextMenu state does
-          not reset itself, so withholding the menu here — not just the handler that opens
-          it — is what actually closes the window. The two dialogs below need it too. */}
       {!readOnly && contextMenu && (() => {
         const task = tasks.find((t) => t._id === contextMenu.taskId);
         if (!task) return null;
-        // Right-clicking inside the selection acts on all of it; outside it acts on that task alone
         const bulk = selectedTasks.has(contextMenu.taskId) ? selectedTasks.size : 1;
         return (
           <TaskContextMenu
@@ -399,9 +380,6 @@ export function ProjectBoardView({
         loading={deleting}
       />
 
-      {/* The delete was refused for the same reason, and asks separately because the cost is not
-          the same one: a forced move takes the task off the worker, a forced delete takes the
-          task. */}
       <ConfirmDialog
         open={!!heldDelete}
         onClose={() => {
@@ -418,8 +396,6 @@ export function ProjectBoardView({
         confirmLabel="Delete anyway"
       />
 
-      {/* The move was refused because a worker is running the task. Taking it costs that run,
-          so it needs a deliberate click rather than a link in a toast that disappears. */}
       <ConfirmDialog
         open={!!heldMove}
         onClose={() => {
@@ -450,7 +426,6 @@ export function ProjectBoardView({
           }}
         />
       )}
-
 
       <ShortcutHelp
         open={showShortcutHelp}

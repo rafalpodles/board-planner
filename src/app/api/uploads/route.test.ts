@@ -49,7 +49,6 @@ beforeEach(() => {
   check.mockResolvedValue(true);
   resolveProjectId.mockResolvedValue(PROJECT);
 
-  // The upload stream is a writable that finishes as soon as it is piped into
   const { Writable } = require("stream");
   openUploadStream.mockImplementation(() => {
     const stream = new Writable({ write: (_c: unknown, _e: unknown, cb: () => void) => cb() });
@@ -64,11 +63,6 @@ beforeEach(() => {
   } as unknown as mongoose.Connection);
 });
 
-/**
- * The read side can only check an owner if the write side recorded one. Both halves lived in the
- * routes with no test on either, so this drives the write half: whether the caller is allowed to
- * put a file on that board at all, and whether the board is written down afterwards.
- */
 describe("POST /api/uploads", () => {
   it("stores the project on the file, which is what the read side checks", async () => {
     const response = await POST(request(form({ file: png(), projectId: "BP" })), ctx());
@@ -79,7 +73,6 @@ describe("POST /api/uploads", () => {
     expect(uploadedMetadata().uploadedBy).toBe("u1");
   });
 
-  // Without an owner a file id is a bearer token for anyone who guesses it
   it("refuses an upload that names no project", async () => {
     const response = await POST(request(form({ file: png() })), ctx());
 
@@ -114,8 +107,6 @@ describe("POST /api/uploads", () => {
     expect(openUploadStream).not.toHaveBeenCalled();
   });
 
-  // The grant is keyed on the id; callers hold a key. Storing the key would make the read-side
-  // check compare a key against an id and refuse the owner their own file.
   it("records the resolved id, not the key the caller typed", async () => {
     await POST(request(form({ file: png(), projectId: "BP" })), ctx());
 

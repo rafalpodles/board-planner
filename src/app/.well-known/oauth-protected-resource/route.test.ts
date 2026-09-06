@@ -18,9 +18,6 @@ afterEach(() => {
   process.env = { ...ORIGINAL };
 });
 
-// BP-316 moved authorization_servers to configuration and left `resource` derived from
-// x-forwarded-host — on the one of the two documents that asks to be cached for an hour. MCP
-// clients use that value as the RFC 8707 audience when they request a token.
 describe("GET /.well-known/oauth-protected-resource", () => {
   it("names the configured origin as the resource, whatever host the request claims", async () => {
     process.env.APP_ORIGIN = "https://board.example.com";
@@ -41,7 +38,6 @@ describe("GET /.well-known/oauth-protected-resource", () => {
     expect(JSON.stringify(await res.json())).not.toContain("evil.example");
   });
 
-  // The finding turned on this header: a poisoned entry is served to every client for the hour
   it("is still cacheable, which is why the body must not depend on the request", async () => {
     process.env.APP_ORIGIN = "https://board.example.com";
 
@@ -54,8 +50,6 @@ describe("GET /.well-known/oauth-protected-resource", () => {
     expect((await GET(request())).status).toBe(500);
   });
 
-  // Without it a browser MCP client sees an opaque CORS error rather than the message that names
-  // the variable — and the message is there for exactly that operator
   it("keeps the cross-origin header on the failure it added", async () => {
     const res = await GET(request());
 

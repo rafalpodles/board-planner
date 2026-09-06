@@ -33,7 +33,6 @@ describe("NotificationsPage", () => {
     await waitFor(() => expect(screen.getByText(/Kasia Nowak/)).toBeTruthy());
   });
 
-  // typeof null === "object", so a deleted actor or project used to be dereferenced
   it("renders a notification whose actor was deleted", async () => {
     api.get.mockResolvedValue([{ ...notification, actor: null }]);
     render(<NotificationsPage />);

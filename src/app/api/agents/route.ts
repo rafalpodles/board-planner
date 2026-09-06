@@ -8,7 +8,6 @@ import { compositionRefusal, toApiAgent, visibleAgents } from "@/lib/agent-servi
 import { normaliseComposition } from "@/lib/agent-rules";
 import { AgentComposition } from "@/types";
 
-// The editor shows these before you save, but the editor is not the only way in.
 async function refusalFor(composition: AgentComposition) {
   const refusal = await compositionRefusal(composition);
   return refusal ? NextResponse.json(refusal, { status: 400 }) : null;
@@ -17,7 +16,6 @@ async function refusalFor(composition: AgentComposition) {
 export const GET = withAuth(async (_request, { user }) => {
   await connectDB();
 
-  // null means every project, which is what an instance admin gets
   const scoped = await accessibleProjectIds(user);
   const projectIds =
     scoped ?? (await Project.find({}, "_id").lean()).map((p) => String(p._id));
@@ -35,8 +33,6 @@ export const POST = withAuth(async (request, { user }) => {
 
   const projectId = typeof body.projectId === "string" ? body.projectId : "";
   if (projectId) {
-    // A project agent runs on that project's repository, so authoring one is an administrative act
-    // on the project rather than something any member may do.
     if (!(await check(user, projectId, "admin"))) {
       return NextResponse.json(
         { error: "Only a project admin can add an agent to a project" },

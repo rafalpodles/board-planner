@@ -39,23 +39,13 @@ function draftFrom(field?: ApiCustomField): FieldDraft {
 }
 
 interface CustomFieldFormProps {
-  /** Absent when creating. Its presence is the only difference between the two modes. */
   field?: ApiCustomField;
   onSubmit: (draft: FieldDraft) => Promise<void>;
   onCancel: () => void;
 }
 
-/**
- * One form for creating and editing a field.
- *
- * They used to be two unrelated forms over the same object, which is why three of the
- * four flags existed only after the field had been created, and why the type had a
- * hardcoded `=== "dropdown"` branch that left multiselect impossible to make.
- */
 export function CustomFieldForm({ field, onSubmit, onCancel }: CustomFieldFormProps) {
   const [draft, setDraft] = useState<FieldDraft>(() => draftFrom(field));
-  // The visible label is the name, pointed at the control rather than left beside it — the way
-  // `Select` does it. Without this the field announced as "combo box, text" (BP-498).
   const typeId = useId();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -88,8 +78,6 @@ export function CustomFieldForm({ field, onSubmit, onCancel }: CustomFieldFormPr
     try {
       await onSubmit({ ...draft, name: draft.name.trim() });
     } catch (e) {
-      // Stays open and keeps what was typed: the old editor closed on failure and
-      // silently dropped the edit
       setError(e instanceof Error ? e.message : "Could not save the field.");
     } finally {
       setSaving(false);
@@ -186,7 +174,6 @@ export function CustomFieldForm({ field, onSubmit, onCancel }: CustomFieldFormPr
                 set("options", [
                   ...draft.options,
                   {
-                    // No id: the server mints one. Sending "" used to become the id.
                     id: "",
                     value: "",
                     color: nextColour(draft.options.map((o) => o.color)),

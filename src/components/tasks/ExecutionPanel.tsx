@@ -11,8 +11,6 @@ interface ExecutionPanelProps {
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 
-// One definition for every view that judges a run: the card, the list row and this panel.
-// Re-exported because callers already import them from here.
 import { QUIET_MS, ageAt, runLook } from "@/lib/run-state";
 export { QUIET_MS, ageAt };
 
@@ -22,8 +20,6 @@ export function durationLabel(ms: number): string {
   if (ms < HOUR) return `${Math.floor(ms / MINUTE)}m`;
   return `${Math.floor(ms / HOUR)}h ${Math.floor((ms % HOUR) / MINUTE)}m`;
 }
-
-
 
 export function ExecutionPanel({ execution }: ExecutionPanelProps) {
   const { phase, phaseAt, startedAt, asOf, workerId, workerName } = execution ?? {};
@@ -41,9 +37,6 @@ export function ExecutionPanel({ execution }: ExecutionPanelProps) {
     return () => clearInterval(timer);
   }, [phase]);
 
-  // No phase means no run: the field is unset the moment a task leaves the active column, so an
-  // absent phase is never a stale one. A worker that has claimed but not yet reported still shows,
-  // as "starting", so a held task is never silently invisible.
   if (!phase && !workerId) return null;
 
   const quietFor = ageAt(phaseAt, asOf, sinceFetch);
@@ -63,9 +56,6 @@ export function ExecutionPanel({ execution }: ExecutionPanelProps) {
           aria-hidden="true"
         />
         <span className="font-medium">{phase ?? "starting"}</span>
-        {/* Two clocks that mean different things: during the agent stage every tool call refreshes
-            phaseAt, so its age is time since the last sign of life, not time spent. Only startedAt
-            answers "how long has this been going". */}
         {running && <span className="text-text-muted">· running {running}</span>}
         {silent && (
           <span className={quiet ? "text-warning" : "text-text-muted"}>

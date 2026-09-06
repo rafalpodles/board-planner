@@ -11,11 +11,6 @@ interface IconPickerProps {
   dirty?: boolean;
 }
 
-/**
- * A popover instead of forty always-open buttons. The old picker put every icon inline
- * in the card — forty tab stops announced as forty independent toggles, and the field
- * below it pushed off the screen.
- */
 export function IconPicker({ value, onChange, label, dirty }: IconPickerProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");

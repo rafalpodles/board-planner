@@ -54,11 +54,7 @@ function formatDate(value: string): string {
   });
 }
 
-// The claim takes a task or it does not, and logs nothing either way. An agent chosen on a task no
-// machine will touch is the one state nobody could diagnose: the card looks entirely normal.
 function HandoverNotice({ handover }: { handover: Handover | null }) {
-  // "No agent" is the ordinary case and the default — it is what the picker already says, and
-  // repeating it as a warning would put a notice on almost every task on the board.
   if (!handover || handover.runs || handover.reason === "no-agent") return null;
 
   const message =
@@ -67,14 +63,8 @@ function HandoverNotice({ handover }: { handover: Handover | null }) {
       : handover.reason === "unassigned"
       ? "Nothing will run this. A machine takes only work its owner assigned to themselves — assign it to yourself."
       : handover.reason === "assigner-unrecorded"
-        // Named rather than addressed to the reader: the server records the assigner only when the
-        // person doing the assigning is the one being assigned, so telling a colleague to "assign
-        // it again" would be handing them a gesture that writes nothing.
         ? "Nothing will run this. It was assigned before the board recorded who hands work over; its assignee can record that by assigning it to themselves again."
         : handover.reason === "pm-assigned-for-someone-else"
-        // The PM may hand work over, but only on the assignee's own instruction: the chat is open
-        // to every project member, and otherwise asking it to assign a colleague's task would
-        // start a run on that colleague's machine.
         ? "Nothing will run this. The PM assigned it on somebody else's instruction — a machine runs a PM hand-over only for the person who asked for it."
         : `Nothing will run this. ${handover.by ?? "Somebody else"} assigned it, and a machine takes only work its owner assigned to themselves.`;
 
@@ -95,35 +85,16 @@ interface PropertyRailProps {
   users: ApiUserSummary[];
   sprints: ApiSprint[];
   agents: ApiAgent[];
-  /** This task's board. A project agent runs on its own board's tasks and nowhere else. */
   projectId: string;
-  /** Offered first in the picker once a machine is being chosen; never a fallback */
   projectDefaultAgent?: string;
-  /**
-   * The task as stored, not as edited. Whether a machine will take it depends on `assignedBy`,
-   * which only the server writes — so a draft mid-edit has no answer, and judging one would
-   * describe a state that has never existed.
-   */
   stored: Pick<ApiTask, "agent" | "assignee" | "assignedBy" | "status">;
-  /** The board's own columns — a claim is defined in terms of their roles, not their names */
   columns?: AnyColumn[];
-  /**
-   * Writes the assignee a task already carries. Auto-save sends the diff, so re-picking the person
-   * already on the task sends nothing at all — and that is the repair the notice below prints for a
-   * task whose assigner was never recorded, which made the instruction untrue in the view giving it.
-   */
   onRepairAssigner: (username: string | null) => void;
-  /**
-   * Whoever is reading. Required rather than optional: a call site that forgot it would silently
-   * stop offering this person their own agents everywhere, which looks exactly like having none.
-   */
   currentUsername: string | null;
-  /** Full rows, not names: the chip and the picker dot are tinted by the project's colour */
   categories: ApiProjectCategory[];
   customFields: ApiCustomField[];
   reporter: string | null;
   onDelete: () => void;
-  /** Sheet rows are taller and the delete affordance sits beside the sheet's Done */
   touch?: boolean;
 }
 
@@ -145,71 +116,27 @@ export function PropertyRail({
   onDelete,
   touch = false,
 }: PropertyRailProps) {
-  /**
-   * Someone assigned before they lost access is still this task's assignee, and the roster this
-   * view is handed holds only people who reach the board. Combobox resolves its closed-state label
-   * out of `options` and hands `undefined` when nothing matches, so such an assignee rendered as
-   * "Unassigned" — the rail saying the task belongs to nobody while the server has it assigned.
-   * ListView has carried a comment about exactly this for as long as it has had the row.
-   *
-   * Added back as a VALUE. They stay pickable, which is deliberate and matches what the API does:
-   * re-sending the assignee already stored is allowed, and only a move to somebody who cannot
-   * reach the board is refused. Offering a control that 400s on click would be worse than either.
-   */
   const shown = assigneeToShow(users, draft.assignee, stored.assignee);
   const offeredUsers =
     shown && !users.some((u) => u.username === shown.username) ? [...users, shown] : users;
   const sprint = sprints.find((s) => s._id === draft.sprint);
   const fields = sortedFields(activeFields(customFields));
   const selectableSprints = sprints.filter((s) => s.status !== "completed");
-  // Suppressed while the draft and the stored task disagree: the answer changes as soon as the
-  // pending edit saves, and a hint that contradicts what the person just typed is worse than none.
   const storedAgent = refIdOf(stored.agent);
   const pending =
     (draft.agent ?? null) !== storedAgent ||
     (draft.assignee ?? null) !== (stored.assignee?.username ?? null);
   const handover = pending ? null : handoverOf(stored, columns);
-  // Read off the stored task rather than off `handover`, which is suppressed mid-edit and orders
-  // the column requirement first: the repair is about what the document is missing, not about
-  // which sentence won the right to be shown.
   const assignerUnrecorded = !!stored.assignee && !stored.assignedBy;
-  /**
-   * A personal agent is a composition nobody vetted — anyone may compose one out of the admin's
-   * blocks — so the server runs it only on a task its owner assigned to themselves. Offering one
-   * elsewhere would be a control that 400s on click: the reader is told what the server refused
-   * and offered a retry that fails the same way.
-   *
-   * Keyed on the DRAFT assignee, which is what the same save will send, so taking a task on and
-   * picking your own agent in one gesture works. The agent already on the task stays listed
-   * whatever it is, or the row would name "No agent" for a task that is carrying one.
-   */
   const ownTask = !!currentUsername && draft.assignee === currentUsername;
   const onThisTask = (a: ApiAgent) => a._id === draft.agent;
   const mayRunForThisPerson = (a: ApiAgent) => a.scope !== "user" || ownTask || onThisTask(a);
-  /**
-   * The same reasoning one scope across. `/api/agents` sends the project agents of every project
-   * the reader can reach — every one of them, for an instance admin — and the server refuses any
-   * whose project is not this task's (`agentUsableOnProject`). Offered here, they were a control
-   * that 400s on click, with a retry whose only possible outcome is the same refusal.
-   */
   const mayRunOnThisBoard = (a: ApiAgent) =>
     a.scope !== "project" || a.projectId === projectId || onThisTask(a);
   const offeredAgents = agents.filter((a) => mayRunForThisPerson(a) && mayRunOnThisBoard(a));
-  /**
-   * Set, and not among the agents this reader may choose — which after the filter above means
-   * `/api/agents` never sent it at all — somebody else's personal agent, or a project
-   * agent on a board this reader cannot reach. Withholding it as an OPTION is right; hiding the current VALUE is not, and the picker
-   * does exactly that, rendering "No agent" over the very field the consent model rests on. So the
-   * row stops being a picker and becomes what it can honestly be: the name, and why it is not
-   * yours to choose. Re-offering it instead would be a control that 400s on click.
-   */
   const notOffered = !!draft.agent && !agents.some((a) => a._id === draft.agent);
   const notOfferedName =
     stored.agent && typeof stored.agent === "object" ? stored.agent.name : null;
-  // Not while the row is a read-only name: a note explaining a shortened list, printed where there
-  // is no list, is the same kind of lie one row up.
-  // Counted on the personal rule alone. Comparing the two lengths would print "your own agents are
-  // not offered here" over a list shortened by another board's agent, which is a different fact.
   const personalAgentsWithheld = !notOffered && agents.some((a) => !mayRunForThisPerson(a));
 
   return (
@@ -245,9 +172,6 @@ export function PropertyRail({
           )}
         </ComboboxRow>
 
-        {/* Whoever may edit the task. It was instance-admin under BP-345, when choosing an agent
-            could arm a machine belonging to somebody else; a claim now takes only what its own
-            owner assigned to themselves, so the routing holds that boundary instead of the bar. */}
         {notOffered ? (
           <FieldRow label="Agent" touch={touch}>
             <span data-testid="agent-not-offered" className="truncate">
@@ -503,15 +427,11 @@ interface CustomFieldRowProps {
 function CustomFieldRow({ field, value, onChange, touch }: CustomFieldRowProps) {
   const [editing, setEditing] = useState(false);
   const options = orderedOptions(field);
-  // The form marked required fields; losing the marker with the form would make a
-  // required field indistinguishable from an optional one
   const label = field.required ? `${field.name} *` : field.name;
 
   if (field.fieldType === "checkbox") {
     return (
       <FieldRow label={label} touch={touch}>
-        {/* The row already names the field on its left, so the switch carries the name
-            for a screen reader and nothing visible */}
         <Switch
           labelHidden
           label={label}
@@ -592,13 +512,6 @@ function CustomFieldRow({ field, value, onChange, touch }: CustomFieldRowProps) 
   const inputType =
     field.fieldType === "number" ? "number" : field.fieldType === "date" ? "date" : "text";
 
-  // Typed in the row rather than in a popup: there is nothing to choose from, so a panel
-  // only put a second box on top of the one you were already looking at. Chromeless until
-  // hovered or focused, so a column of values does not read as a column of form fields.
-  //
-  // Rounded only while it is not being edited. roundForDisplay says never to feed its
-  // result back into anything that stores, and an editable control does exactly that —
-  // one keystroke on a field holding 1.005 would commit the 1.01 it was showing.
   const shown =
     value === undefined || value === ""
       ? ""
@@ -615,8 +528,6 @@ function CustomFieldRow({ field, value, onChange, touch }: CustomFieldRowProps) 
         placeholder="Empty"
         onFocus={() => setEditing(true)}
         onBlur={() => setEditing(false)}
-        // A number input takes the wheel while focused, so scrolling the rail past a
-        // field you had just clicked silently rewrote it
         onWheel={(e) => e.currentTarget.blur()}
         onChange={(e) =>
           onChange(

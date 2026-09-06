@@ -23,8 +23,6 @@ private func scratchDefaults() -> UserDefaults {
     #expect(resolved == "/rig/state")
 }
 
-// The case the whole type exists for: launched from Finder or a login item, there is no
-// environment at all, and only a stored setting can point the app at a non-default worker.
 @Test func prefersTheStoredSettingSoAFinderLaunchFindsTheSocket() {
     let defaults = scratchDefaults()
     StateDirectory.set("/operators/choice", defaults: defaults)

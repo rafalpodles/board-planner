@@ -51,7 +51,6 @@ const { GET, PUT, DELETE } = await import("./route");
 const PROJECT = "69a52e3b399b27d3cbb2c5a5";
 const params = Promise.resolve({ projectId: PROJECT });
 
-// Real object ids: PUT rejects anything else before it queries (BP-304)
 const U1 = "507f1f77bcf86cd799439011";
 const U2 = "507f1f77bcf86cd799439012";
 const GHOST = "507f1f77bcf86cd799439013";
@@ -198,9 +197,6 @@ describe("PUT members", () => {
     expect(res.status).toBe(200);
   });
 
-  // BP-304: {"$ne": null} resolved to an arbitrary user, which both sidestepped the
-  // machine-account exclusion and wrote over whichever grant row Mongo returned first —
-  // on a board with two owners the last-owner guard never fires.
   it("refuses a Mongo operator in place of a userId", async () => {
     const res = await PUT(put({ userId: { $ne: null }, relation: "member" }), { params });
     expect(res.status).toBe(400);
@@ -227,10 +223,6 @@ describe("DELETE members", () => {
     });
   });
 
-  // BP-546's shape, one route over and found by the review of that fix: the last-owner check
-  // compared the raw query value while the stored subject is lower-case hex, so the same id
-  // shouted skipped the 409 — and `Grant.deleteOne` cast it back and removed the row, leaving a
-  // board with no owner at all.
   it("refuses to remove the last owner however the id is spelled", async () => {
     grantCountDocuments.mockResolvedValue(1);
     grantFindLean.mockResolvedValue([{ subject: U2, relation: "owner" }]);
@@ -249,9 +241,6 @@ describe("DELETE members", () => {
     expect(grantDeleteOne).not.toHaveBeenCalled();
   });
 
-  // BP-328. The watcher rows stay, so a re-add restores the feed; what does not stay is the
-  // backlog already addressed to them, which the read filter would otherwise have to keep
-  // refusing forever.
   it("clears the pending notifications this board had queued for them", async () => {
     const url = `http://x/api/projects/${PROJECT}/members?userId=${U2}`;
     await DELETE(new Request(url, { method: "DELETE" }), { params });
@@ -262,10 +251,6 @@ describe("DELETE members", () => {
     });
   });
 
-  // Found by an independent security review of this branch. Access is not the same thing as a
-  // grant row — an instance admin reaches every board without one — so deleting the grant of
-  // somebody whose access comes from `role: "admin"` removes nothing while still emptying their
-  // feed. That made the route a repeatable way for a board owner to silence instance oversight.
   it("leaves the backlog of somebody who still reaches the board without a grant", async () => {
     recipientsWithAccess.mockResolvedValue([U2]);
     const url = `http://x/api/projects/${PROJECT}/members?userId=${U2}`;
@@ -293,8 +278,6 @@ describe("DELETE members", () => {
     expect(notificationDeleteMany).not.toHaveBeenCalled();
   });
 
-  // The grant is already gone by the time this runs, so a failure here must not become a failed
-  // response — the caller would be told the removal did not happen when it did.
   it("still reports the removal when it cannot tell whether they keep access", async () => {
     recipientsWithAccess.mockRejectedValue(new Error("no database"));
     const url = `http://x/api/projects/${PROJECT}/members?userId=${U2}`;

@@ -13,8 +13,6 @@ vi.mock("@/lib/auth", () => ({
   getAuthUser,
   RateLimitError: class RateLimitError extends Error {},
 }));
-// `check` is stubbed because withProjectOwner itself is not what is under test here — only which
-// need it asks grants.check for.
 vi.mock("@/lib/grants", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/grants")>();
   return { ...actual, check };
@@ -38,11 +36,6 @@ beforeEach(() => {
   lean.mockResolvedValue([]);
 });
 
-/**
- * BP-549. The settings screen only offers this section at `project.canAdmin`
- * (`check(user, projectId, "admin")`) — the route has to ask grants for the same thing, or a
- * member reads via the API exactly what the screen withholds from them.
- */
 describe("GET audit", () => {
   it("checks admin-level access, not mere board access", async () => {
     await GET(new Request("http://x"), { params });

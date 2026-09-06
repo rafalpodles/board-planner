@@ -7,8 +7,6 @@ import { selfOrigin } from "@/lib/session";
 import { APP_NAME } from "@/lib/brand";
 import { User } from "@/models/user";
 
-// A mail server refusing AUTH sometimes quotes the offending command back, and that command
-// carries SMTP_PASS. One line, capped, keeps the diagnosis without the credential.
 function firstLine(err: unknown): string {
   const message = err instanceof Error ? err.message : "The mail server refused the message";
   return message.split("\n")[0].slice(0, 200);
@@ -22,11 +20,6 @@ export const GET = withAdmin(async (_request, { user }) => {
   return NextResponse.json(emailSettingsSummary());
 });
 
-/**
- * Sends to the requesting admin's own address and nowhere else. A field for the recipient would
- * turn an authenticated instance into a mailer for arbitrary addresses, and the question this
- * answers — does mail leave this deployment — needs no such field.
- */
 export const POST = withAdmin(async (_request, { user }) => {
   if (user.viaMachineCredential) {
     return NextResponse.json({ error: "Interactive admin session required" }, { status: 403 });
@@ -72,15 +65,9 @@ export const POST = withAdmin(async (_request, { user }) => {
       html,
     });
   } catch (err) {
-    // Nothing was contacted, so this is not the mail server's answer. The screen reads the status
-    // to decide which of the two it says, and 502 here would blame a server that never heard us.
     if (err instanceof EmailNotConfiguredError) {
       return NextResponse.json({ error: err.message }, { status: 409 });
     }
-    // The whole point of the endpoint: what the mail server actually said. Everywhere else this
-    // is swallowed, which is why a misconfigured deployment looks exactly like a working one.
-    // Trimmed, because a server rejecting AUTH sometimes echoes the offending command back — and
-    // that command carries SMTP_PASS, which this screen deliberately never shows.
     console.error("Test email failed:", err);
     return NextResponse.json(
       { error: firstLine(err) },

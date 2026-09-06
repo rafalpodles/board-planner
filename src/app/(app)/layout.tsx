@@ -44,8 +44,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             />
           )}
 
-          {/* inert while the drawer is open: the scrim hides the page visually, but
-              without this Tab walks straight past the drawer into it */}
           <div className="flex h-dvh min-w-0 flex-1 flex-col" inert={navOpen || undefined}>
             <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2 md:hidden">
               <button
@@ -71,14 +69,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               </div>
             </div>
 
-            {/* tabIndex makes the target focusable, or the skip link moves the
-                viewport without moving focus and the next Tab starts from the top again */}
             <main
               id="main-content"
               tabIndex={-1}
-              // Barely any padding on a phone: this sat 24px above every page's own header, which
-              // on the board is 24px of nothing between the app bar and the project's name. The
-              // desktop value comes back at sm.
               className="relative flex flex-1 flex-col overflow-y-auto px-2 py-2 md:px-4 md:py-6"
             >
               {children}

@@ -54,9 +54,6 @@ describe("GET /api/auth/me", () => {
     expect((await GET(request())).status).toBe(401);
   });
 
-  // This route is what the app asks on every load to decide whether anyone is signed in, so its
-  // 401 is the one that sends people to a sign-in page. During an outage that page cannot sign
-  // them in either, which is how a database restart read as "your account is gone" (BP-362).
   it("answers 503 when the database is unreachable", async () => {
     failsWith(new DatabaseUnavailableError(new Error("ECONNREFUSED")));
 

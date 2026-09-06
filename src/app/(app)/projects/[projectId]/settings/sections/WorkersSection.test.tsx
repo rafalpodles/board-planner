@@ -72,9 +72,6 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-// Both settings described a routing model BP-358 replaced: one nominated user per project, and a
-// switch widening the claim to unassigned work. A task now goes to the machine of the person it
-// was assigned to, so neither has anything left to say.
 describe("WorkersSection", () => {
   it("offers neither a nominee nor a claim scope", async () => {
     renderSection(true);
@@ -91,8 +88,6 @@ describe("WorkersSection", () => {
     expect(screen.getByText(/let workers run tasks for this project/i)).not.toBeNull();
   });
 
-  // The hint used to describe a scope; it now has to describe routing on its own, or it promises a
-  // choice the settings screen no longer offers
   it("describes the new routing on the enable switch's hint", async () => {
     renderSection(true);
     await waitFor(() => expect(screen.queryByText("Loading…")).toBeNull());
@@ -126,8 +121,6 @@ function answerWithRuns(...runs: Record<string, unknown>[]) {
   );
 }
 
-// BP-432: the detail was written by the worker on every exit and read by nobody. It was already in
-// this response — only the rendering was missing.
 describe("what a finished run said on the way out", () => {
   it("renders the detail on the run's row", async () => {
     answerWithRuns(run());
@@ -139,8 +132,6 @@ describe("what a finished run said on the way out", () => {
     );
   });
 
-  // The control: a refusal files the gate's key and leaves the detail empty, so a blank here is the
-  // record being what it is rather than the rendering failing
   it("names the gate on a refusal, which records no detail", async () => {
     answerWithRuns(run({ outcome: "refused", refusedBy: "diff-size", detail: "" }));
 
@@ -151,22 +142,12 @@ describe("what a finished run said on the way out", () => {
   });
 });
 
-
-/**
- * BP-458. Four things wrong with one control: it offered agents from boards this project is not,
- * swallowed the server's refusal in a bare `catch`, showed an empty box when no default was set,
- * and could not be cleared once one was.
- */
 describe("the project's default agent", () => {
-  // The settings route's param is the project KEY while ApiAgent.projectId is the ObjectId, so
-  // these must differ — with both "p1" the implementation could compare the wrong one and pass.
   const OURS = { _id: "a1", name: "Ours", scope: "project", projectId: PROJECT_OID, projectName: "Test Project", description: "" };
   const THEIRS = { _id: "a2", name: "Theirs", scope: "project", projectId: "68b0000000000000000000zz".slice(0, 24), projectName: "Other Board", description: "" };
   const GLOBAL = { _id: "a3", name: "Default", scope: "global", projectId: null, projectName: null, description: "" };
   const MINE = { _id: "a4", name: "My own", scope: "user", projectId: null, projectName: null, description: "" };
 
-  // Found by the heading beside it, not by one of its options: keying on "No default" made every
-  // test in here go red when that option was removed, so one mutation lit four lamps.
   function picker() {
     const heading = screen.getByText("Default agent");
     return heading.parentElement!.querySelector("select") as HTMLSelectElement;
@@ -177,7 +158,6 @@ describe("the project's default agent", () => {
     renderSection(true);
 
     const options = [...picker().querySelectorAll("option")].map((o) => o.textContent || "");
-    // The control: withholding everything would satisfy the negatives on its own
     expect(options.join("|")).toContain("Ours");
     expect(options.join("|")).toContain("Default");
     expect(options.join("|")).not.toContain("Theirs");
@@ -200,9 +180,6 @@ describe("the project's default agent", () => {
     const select = picker();
     expect(select.value).toBe("a3");
 
-    // Through the option a person can actually pick. `fireEvent.change` with a raw value sets the
-    // select directly and works even when no such option is rendered — which left this green with
-    // the "No default" option deleted, proving only that the handler forwards its argument.
     const clearOption = [...select.querySelectorAll("option")].find((o) => o.value === "");
     expect(clearOption, "there is no option a person could pick to clear it").toBeTruthy();
     fireEvent.change(select, { target: { value: clearOption!.value } });
@@ -220,7 +197,6 @@ describe("the project's default agent", () => {
 
     await waitFor(() => expect(toast).toHaveBeenCalled());
     expect(toast.mock.calls[0][0]).toContain("nothing in it yet");
-    // and the control is back where it was
     await waitFor(() => expect(picker().value).toBe(""));
   });
 });

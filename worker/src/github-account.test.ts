@@ -48,15 +48,11 @@ describe("parseGhAccounts", () => {
     expect(parseGhAccounts(output)).toEqual([{ login: "octocat", active: true }]);
   });
 
-  // gh prints the status banner on stderr for some subcommands and stdout for others, and an
-  // unauthenticated machine prints neither shape. Nothing to parse is not a parse failure.
   it("reads nothing out of an unauthenticated machine", () => {
     expect(parseGhAccounts("You are not logged into any GitHub hosts.")).toEqual([]);
     expect(parseGhAccounts("")).toEqual([]);
   });
 
-  // The "Active account:" line belongs to the account named above it. Reading it as a property of
-  // the whole output would mark every account active on a two-account machine.
   it("attaches each active flag to the account it follows", () => {
     const reversed = `github.com
   ✓ Logged in to github.com account first (keyring)
@@ -86,8 +82,6 @@ describe("usableAccount", () => {
     });
   });
 
-  // With nothing pinned the worker behaves exactly as it did before this existed: whatever gh has
-  // active. A machine with one account never sees a difference.
   it("falls back to gh's active account when nothing is pinned", () => {
     expect(usableAccount(accounts, "")).toEqual({
       login: "other-account",
@@ -115,7 +109,6 @@ describe("pinnedAccount", () => {
     expect(pinnedAccount(read, "/state")).toBe("rafalpodles");
   });
 
-  // Both shapes of "not there": the worker's own reader answers null, a plain fs read throws
   it("is empty when the file is absent", () => {
     expect(pinnedAccount(() => null, "/state")).toBe("");
     expect(
@@ -125,8 +118,6 @@ describe("pinnedAccount", () => {
     ).toBe("");
   });
 
-  // A half-written file must not stop a worker that was running fine without one. The pin is an
-  // optimisation of an identity gh already holds, never the only copy of anything.
   it("is empty when the file is unreadable json", () => {
     expect(pinnedAccount(() => "{ not json", "/state")).toBe("");
     expect(pinnedAccount(() => JSON.stringify({ account: 7 }), "/state")).toBe("");
@@ -154,8 +145,6 @@ describe("resolveGhToken", () => {
     expect(deps.run).not.toHaveBeenCalled();
   });
 
-  // The caller decides what an unresolvable pin means — preflight refuses it, delivery falls back
-  // to gh's own resolution. Neither wants an exception thrown through it.
   it("resolves nothing when gh refuses", async () => {
     const deps = runner({ code: 1, stderr: "no such user" });
     await expect(resolveGhToken(deps, "/usr/bin/gh", "ghost", {})).resolves.toBe("");

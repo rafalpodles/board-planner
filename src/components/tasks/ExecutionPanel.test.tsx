@@ -6,9 +6,6 @@ import { ExecutionPanel, ageAt, durationLabel } from "./ExecutionPanel";
 const SERVER_NOW = "2026-08-03T12:00:00.000Z";
 const before = (ms: number) => new Date(Date.parse(SERVER_NOW) - ms).toISOString();
 
-// A whole run as the API serialises it, including the fields the panel must NOT surface. Building
-// the fixture from the narrow shape instead would let the panel render something the wire really
-// carries while the test stayed green — which is how the earlier version of this test passed.
 function payload(overrides: Record<string, unknown> = {}) {
   return {
     workerId: "w-laptop",
@@ -40,8 +37,6 @@ describe("durationLabel", () => {
 });
 
 describe("ageAt", () => {
-  // The reader's clock is never compared with the server's: the age is measured server-side and
-  // only advanced locally. A browser minutes off in either direction must not change the verdict.
   it("measures against the server's clock, not the reader's", () => {
     expect(ageAt(before(30_000), SERVER_NOW, 0)).toBe(30_000);
   });
@@ -70,9 +65,6 @@ describe("ExecutionPanel", () => {
     expect(screen.getByText(/last sign of life 12s ago/)).toBeTruthy();
   });
 
-  // The reason the panel has this shape: lastError is only ever written as "", and attempts counts
-  // attempts spent rather than an attempt number, so neither can be rendered as if it meant
-  // something. The fixture carries both, exactly as the API does.
   it("renders no attempt count and no last error, though the wire carries both", () => {
     const { container } = render(<ExecutionPanel execution={payload()} />);
 
@@ -93,8 +85,6 @@ describe("ExecutionPanel", () => {
     expect(container.querySelector(".animate-pulse")).toBeTruthy();
   });
 
-  // A worker killed mid-run keeps its phase until the lease expires, and the lease is only swept
-  // when some worker next polls that project — so a pulsing "live" dot would lie for up to 2h
   it("stops claiming a run is alive once it has gone quiet", () => {
     const { container } = render(<ExecutionPanel execution={payload({ phaseAt: before(20 * 60_000) })} />);
 
@@ -103,9 +93,6 @@ describe("ExecutionPanel", () => {
     expect(container.querySelector(".bg-warning")).toBeTruthy();
   });
 
-  // Claim writes workerId and startedAt; phase arrives only with the first telemetry event. Showing
-  // nothing in that window would hide a task a worker is actively holding — and the fleet console
-  // calls the same state "starting".
   it("shows a claimed run that has not reported a phase yet", () => {
     render(<ExecutionPanel execution={payload({ phase: undefined, phaseAt: null })} />);
 
@@ -133,7 +120,6 @@ describe("naming the machine", () => {
     expect(container.textContent).not.toContain("w-laptop");
   });
 
-  // Better a raw id than nothing: the operator can still match it against the fleet console.
   it("falls back to the id when no name came back", () => {
     render(<ExecutionPanel execution={payload()} />);
 

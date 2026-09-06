@@ -2,8 +2,6 @@ import XCTest
 @testable import CPMenubarCore
 
 final class RemoteMatchTests: XCTestCase {
-    // The forms git itself accepts interchangeably. Treating these as different repositories is
-    // how a machine gets offered a second clone of something it already has.
     func testItTreatsTheFormsOfOneAddressAsOne() {
         let forms = [
             "git@github.com:rafalpodles/board-planner.git",
@@ -21,7 +19,6 @@ final class RemoteMatchTests: XCTestCase {
         }
     }
 
-    // The other direction is worse: pairing a project with somebody else's checkout
     func testItKeepsDifferentRepositoriesApart() {
         XCTAssertFalse(RemoteMatch.same(
             "git@github.com:rafalpodles/board-planner.git",
@@ -34,13 +31,10 @@ final class RemoteMatchTests: XCTestCase {
             "git@github.com:someoneelse/repo.git"))
     }
 
-    // A local path is a remote too — it is what a rig clones from
     func testItMatchesALocalPath() {
         XCTAssertTrue(RemoteMatch.same("/Users/rpo/origins/sandbox.git", "/Users/rpo/origins/sandbox"))
     }
 
-    // Nothing matches nothing. An empty remote is a checkout git could not answer for, and pairing
-    // it with a project that also has no address would connect two absences.
     func testEmptyMatchesNothing() {
         XCTAssertFalse(RemoteMatch.same("", ""))
         XCTAssertFalse(RemoteMatch.same("", "git@github.com:o/r.git"))

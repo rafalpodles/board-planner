@@ -1,17 +1,3 @@
-/**
- * One line naming the request an uncaught error came out of.
- *
- * BP-444 spent its expensive half here: the incident's only trace was `⨯ TypeError: Content-Type
- * was not one of …` with `at ignore-listed frames` and no path, no method and no hint that a
- * credential was involved — so "which request was that?" had to be answered by guessing. Next's
- * `onRequestError` hook knows all three; nothing was reading it.
- *
- * What it must never print is the credential itself. The token is read only to say which KIND was
- * presented, query parameters appear by name and never by value — `/oauth/authorize` and the
- * callback both carry a live authorization code in theirs — and the error's own message is
- * scrubbed, because a cast error quotes the value it choked on.
- */
-
 export type ErrorRequest = {
   path: string;
   method: string;
@@ -20,8 +6,6 @@ export type ErrorRequest = {
 
 export type ErrorContext = { routePath?: string; routeType?: string };
 
-// Every credential this instance issues, by prefix: cp_ (API token), cpat_/cprt_ (OAuth access and
-// refresh) and cps_ (session). Kept as one pattern so a message and a header cannot disagree.
 const CREDENTIAL = /\b(cp|cpat|cprt|cps)_[A-Za-z0-9._-]+/g;
 
 const MAX_MESSAGE = 300;
@@ -31,7 +15,6 @@ function header(request: ErrorRequest, name: string): string {
   return Array.isArray(value) ? (value[0] ?? "") : (value ?? "");
 }
 
-/** Which kind of credential was presented, never which one. */
 function credentialKind(request: ErrorRequest): string {
   const authorization = header(request, "authorization");
   if (authorization) {
@@ -43,7 +26,6 @@ function credentialKind(request: ErrorRequest): string {
   return header(request, "cookie") ? "cookie" : "none";
 }
 
-/** The names, so a malformed request can be told from a well-formed one, and never the values. */
 function queryKeys(path: string): string {
   const query = path.slice(path.indexOf("?") + 1);
   if (!path.includes("?") || !query) return "";

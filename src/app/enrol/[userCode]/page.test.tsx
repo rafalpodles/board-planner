@@ -12,7 +12,6 @@ vi.mock("@/hooks/use-auth", () => ({
   useAuth: () => ({ user: { username: "rpo", fullName: "Rafal Podles" } }),
 }));
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast }) }));
-// The guard's job is redirecting an anonymous visitor, which is not what this file is about
 vi.mock("@/components/AuthGuard", () => ({
   AuthGuard: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
@@ -58,10 +57,6 @@ async function chooseTheProject() {
 beforeEach(() => vi.clearAllMocks());
 afterEach(cleanup);
 
-/**
- * BP-358: this screen stopped being admin-only, so it stopped being a place where somebody decides
- * on the instance's behalf. It confirms one machine, for one person, against one repository.
- */
 describe("the enrolment confirmation screen", () => {
   it("asks which repository the machine should set up first", async () => {
     await show();
@@ -70,8 +65,6 @@ describe("the enrolment confirmation screen", () => {
     expect(screen.getByText("rig-laptop")).toBeTruthy();
   });
 
-  // The presets wrote the project's default agent — a project-wide setting — from a screen about
-  // one person's laptop. After BP-358 that field decides only what the task picker offers first.
   it("no longer asks how much the machine should do on its own", async () => {
     await show();
 
@@ -91,11 +84,6 @@ describe("the enrolment confirmation screen", () => {
     );
   });
 
-  /**
-   * A project with machines switched off takes the enrolment and then runs nothing, and nothing on
-   * the machine itself can explain that. Located by its own testid rather than by wording: the
-   * card renders several other blocks of prose in the same place.
-   */
   describe("a project that will not run it", () => {
     it("warns when machines are off and this person cannot turn them on", async () => {
       await show({
@@ -122,8 +110,6 @@ describe("the enrolment confirmation screen", () => {
       expect(screen.queryByTestId("workers-off-warning")).toBeNull();
     });
 
-    // Nothing is chosen yet, so there is nothing to warn about — warning here would put a red box
-    // on the screen before the person has done anything
     it("stays quiet before a project is picked", async () => {
       await show({
         projects: [{ ...view().projects[0], workersEnabled: false, canEnable: false }],
@@ -141,8 +127,6 @@ describe("the enrolment confirmation screen", () => {
       expect(screen.queryByTestId("belongs-to-somebody-else")).toBeNull();
     });
 
-    // Registration refuses this, so saying so before the click beats a toast afterwards. Located by
-    // testid: both banners sit in the same place and open the same way.
     it("says outright that somebody else's will be refused", async () => {
       await show({ existingWorker: { mine: false } });
 
@@ -162,8 +146,6 @@ describe("the enrolment confirmation screen", () => {
     await show();
 
     expect(screen.getByText(/Connecting as Rafal Podles/i)).toBeTruthy();
-    // BP-374: the reach sits with the project list, where a reader looks for a scope list, rather
-    // than in the footer below the buttons — which is the half of the screen it contradicted
     expect(screen.getByText(/reaches every project you can/i).closest("section")).toBeTruthy();
   });
 });

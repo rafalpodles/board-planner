@@ -12,9 +12,6 @@ final class CloneStepTests: XCTestCase {
                 run: { tool, args, _ in
                     self.calls.append([tool] + args)
                     for (needle, result) in self.results where args.contains(needle) { return result }
-                    // An ordinary checkout answers both of these with the same relative `.git`.
-                    // Without it every stub would look like a directory git cannot describe, which
-                    // CloneStep now refuses to adopt (BP-422)
                     if args.contains("--git-dir") || args.contains("--git-common-dir") {
                         return (0, ".git")
                     }
@@ -39,15 +36,10 @@ final class CloneStepTests: XCTestCase {
             ])
     }
 
-    // Keyed on the project rather than the repository, so two projects sharing one repository get
-    // two clones. Accepted deliberately — worth being explicit rather than discovering it.
     func testTheDestinationIsTheProjectKey() {
         XCTAssertEqual(CloneStep.destination(parent: "/a", projectKey: "TP"), "/a/TP")
     }
 
-    // The worker pushes to origin with --force-with-lease and has no notion of a fork, so read-only
-    // access is fatal. Today it fails after the agent has worked and six gates have passed, which
-    // is the worst possible moment to find out.
     func testItRefusesACloneItCannotPushTo() {
         let git = Git()
         git.results["push"] = (128, "remote: Write access to repository not granted.")
@@ -69,7 +61,6 @@ final class CloneStepTests: XCTestCase {
         XCTAssertTrue(push!.contains("--dry-run"), "the check must not write to anyone's repository")
     }
 
-    // Re-entering the step must not fail on its own earlier success — the whole flow is resumable
     func testAnExistingCloneIsReusedAndRefreshed() {
         let git = Git()
         git.present = ["/p/TP/.git"]
@@ -81,11 +72,6 @@ final class CloneStepTests: XCTestCase {
         XCTAssertFalse(git.calls.contains { $0.contains("clone") }, "cloning over an existing one would be destructive")
     }
 
-    /// BP-422. A linked worktree has a `.git` — a file rather than a directory, which `exists`
-    /// cannot tell apart — and answers `remote get-url`, `fetch` and `push --dry-run` exactly as
-    /// its repository does, so every other check here passed on one. Adopting it hands the app a
-    /// directory inside a repository it does not own, and unticking the project then deletes that
-    /// repository.
     func testItRefusesToAdoptALinkedWorktree() {
         let git = Git()
         git.present = ["/p/TP/.git"]
@@ -101,8 +87,6 @@ final class CloneStepTests: XCTestCase {
         XCTAssertFalse(git.calls.contains { $0.contains("fetch") }, "and it refuses before touching the network")
     }
 
-    /// An answer git could not give is not an ordinary checkout — the same rule CheckoutRemoval
-    /// applies, and for the same reason: unexamined is not clean.
     func testItRefusesToAdoptADirectoryGitWillNotDescribe() {
         let git = Git()
         git.present = ["/p/TP/.git"]
@@ -111,9 +95,6 @@ final class CloneStepTests: XCTestCase {
         guard case .failed(let reason) = git.step().run(
             repositoryURL: "https://github.com/o/r", parent: "/p", projectKey: "TP")
         else { return XCTFail("expected a refusal") }
-        // Without this the test passes when the exit-code guard is gone: the stubbed error text
-        // resolves to a path that is not `.git`, so the answer becomes "linked worktree" and the
-        // outcome is still `.failed` — the right verdict for the wrong reason (BP-422 review)
         XCTAssertTrue(reason.contains("could not say"), reason)
     }
 
@@ -138,13 +119,6 @@ final class CloneStepTests: XCTestCase {
         XCTAssertTrue(reason.contains("repository not found"))
     }
 
-    // BP-399. Both arguments come from the server — repositoryUrl and the project's key travel in
-    // the catalogue the app reads off the worker's socket — and both are spent on the operator's
-    // own machine at their uid. Same class as BP-327, one package over.
-
-    // `ext::` hands the URL to a program, and git 2.50 only refuses it because protocol.ext.allow
-    // defaults to never. That default is the operator's to change, so the shape is refused here
-    // rather than left resting on it. Measured: with the transport permitted, the program runs.
     func testItRefusesARemoteWhoseTransportRunsAProgram() {
         for url in ["ext::sh -c touch /tmp/pwned", "git://evil.invalid/x", "file:///tmp/x", "/tmp/local/repo"] {
             let git = Git()
@@ -185,9 +159,6 @@ final class CloneStepTests: XCTestCase {
         }
     }
 
-    // NSString.appendingPathComponent does not normalise "..", so the key decided where the
-    // checkout landed — and ProjectSetup then writes that path into repos.json, which is the
-    // allowlist deciding where the worker may run anything at all.
     func testItRefusesAProjectKeyThatIsNotASingleDirectoryName() {
         for key in ["../../../../Users/rpo/Library/LaunchAgents", "..", "a/b", ".hidden", "", "-x"] {
             let git = Git()
@@ -214,8 +185,6 @@ final class CloneStepTests: XCTestCase {
         }
     }
 
-    // git reads an option-shaped positional as an option. The shape check above is the gate; this
-    // is the second line, so a future caller that loosens the gate does not silently reopen it.
     func testItSeparatesTheCloneArgumentsFromGitsOptions() {
         let git = Git()
 
@@ -232,11 +201,6 @@ final class CloneStepTests: XCTestCase {
         XCTAssertLessThan(separator, target)
     }
 
-    // Measured on git 2.50.1, spawned the way the app spawns it. The operator's own ~/.gitconfig is
-    // not an attacker's, but it is a lever an attacker can steer into: `url.*.insteadOf` rewrites a
-    // perfectly ordinary https remote to git://, and core.gitProxy then names a program git runs.
-    // A URL-shape check cannot see that rewrite — the string it inspects is a real https URL — so
-    // the transport is closed on the command line as well.
     func testItRefusesTheTransportsThatRunAProgram() {
         let git = Git()
 
@@ -256,9 +220,6 @@ final class CloneStepTests: XCTestCase {
 }
 
 final class GitSafeEnvironmentTests: XCTestCase {
-    // core.gitProxy is the one key that cannot be won in the config: git keeps the FIRST value it
-    // finds, so the operator's ~/.gitconfig outranks any -c override. The environment is the layer
-    // that wins, and an empty value there means "no proxy" rather than "fall through".
     func testItEmptiesTheProxyCommandRatherThanLeavingItToTheConfig() {
         let hardened = GitSafeEnvironment.apply(to: ["PATH": "/usr/bin"])
 
@@ -273,11 +234,6 @@ final class GitSafeEnvironmentTests: XCTestCase {
         XCTAssertEqual(hardened["GH_TOKEN"], "gho_x")
     }
 
-    /// BP-422 review, measured through this app's own spawn path: `GIT_COMMON_DIR` in the
-    /// inherited environment makes a healthy repository read as a linked worktree and refuses to
-    /// remove it, and `GIT_DIR` makes every question the removal guard asks get answered about a
-    /// different repository while the path it authorises for deletion is still the one it was
-    /// given — the only measured way to defeat that guard.
     func testItDoesNotInheritTheVariablesThatPointGitAtAnotherRepository() {
         let hardened = GitSafeEnvironment.apply(to: [
             "PATH": "/usr/bin",
@@ -291,14 +247,10 @@ final class GitSafeEnvironmentTests: XCTestCase {
         XCTAssertNil(hardened["GIT_COMMON_DIR"])
         XCTAssertNil(hardened["GIT_WORK_TREE"])
         XCTAssertNil(hardened["GIT_INDEX_FILE"])
-        // Removed, not emptied: an empty GIT_DIR is a git dir named "", not an absent one
         XCTAssertFalse(hardened.keys.contains("GIT_DIR"))
         XCTAssertEqual(hardened["PATH"], "/usr/bin", "the control — hardening is not a wipe")
     }
 
-    // ~/.gitconfig is deliberately NOT taken out of the picture, unlike the worker's delivery path:
-    // this runs during onboarding, and dropping it would take the operator's credential helper and
-    // any core.sshCommand deploy key with it, at the one moment a failure is hardest to diagnose.
     func testItLeavesTheOperatorsOwnConfigReadable() {
         XCTAssertNil(GitSafeEnvironment.apply(to: [:])["GIT_CONFIG_GLOBAL"])
     }

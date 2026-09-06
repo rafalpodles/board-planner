@@ -11,7 +11,6 @@ interface SprintHeaderProps {
   sprints: ApiSprint[];
   doneCount: number;
   totalCount: number;
-  /** False when the board defines no column meaning Done, so `doneCount` is 0 for a reason */
   canMeasureDone?: boolean;
   estimate?: { total: number; done: number; label: string };
   readOnly: boolean;
@@ -156,10 +155,6 @@ export function SprintHeader({
           {sprint.goal && <p className="mt-0.5 text-sm text-text-muted">{sprint.goal}</p>}
         </div>
 
-        {/* readOnly means "don't fumble a finished sprint", not an integrity boundary — the
-            server enforces nothing about completed sprints. Reopening one is a separate
-            question nobody has decided, so Activate/Complete stay withheld; Edit and Delete
-            are ordinary sprint metadata edits and stay available regardless. */}
         <div className="flex shrink-0 items-center gap-1">
           {!closed && (
             <>
@@ -234,14 +229,10 @@ export function SprintHeader({
             {doneCount}/{totalCount}
           </span>
         ) : (
-          // 0/N here would be a statement about the sprint. It is a statement about the board: no
-          // column carries the Done role, so nothing can ever count as finished (BP-311).
           <span data-testid="sprint-progress-unmeasurable" className="text-warning">
             no Done column — progress cannot be measured
           </span>
         )}
-        {/* Gated on the same answer: `estimateDone` filters by the same empty done ids, so this
-            span read "0/34 points" beside a sentence saying the count is impossible */}
         {canMeasureDone && estimate && (
           <span
             data-testid="sprint-estimate-progress"

@@ -18,13 +18,6 @@ import {
 } from "@/lib/enrolment";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 
-// Authenticated by a single-use enrolment token, NOT by an admin session or an admin API token.
-//
-// The reason is the laptop, not this route. A worker runs the coding agent at the same uid with
-// Read and `bypassPermissions`, so anything on that disk is readable by the agent. While this was
-// withAdmin, the credential the laptop had to hold was an unscoped instance-admin token — enough to
-// PATCH lockedByInstance and lift the worker's own kill switch. An enrolment token is spent by the
-// first registration and is useless afterwards, so reading it off disk buys nothing.
 function bearerOf(request: Request): string {
   const header = request.headers.get("authorization") ?? "";
   return header.startsWith("Bearer ") ? header.slice(7).trim() : "";
@@ -33,16 +26,9 @@ function bearerOf(request: Request): string {
 export async function POST(request: Request) {
   await connectDB();
 
-  // Shape is checked before the token is spent: an operator gets one enrolment token, and burning
-  // it on a missing field would mean minting another. Nothing here discloses anything a caller
-  // without a token could not already read in the error text.
   const read = await readJsonBody(request);
   if (!read.ok) return read.response;
   const body = read.value;
-  // Capped and stripped like the device flow does: whoever holds a valid enrolment token chooses
-  // these, and they now land in an audit list an operator reads when something is already wrong —
-  // and become the machine's own fullName, so a control or bidi character has nowhere left to
-  // survive from (BP-413).
   const name = typeof body.name === "string"
     ? stripControlCharacters(body.name).trim().slice(0, 120)
     : "";
@@ -61,14 +47,9 @@ export async function POST(request: Request) {
 
   const consumed = await consumeEnrolmentToken(bearerOf(request));
   if (!consumed.ok) {
-    // One message for every failure: telling a caller whether a token was real but spent, or never
-    // existed, turns this into an oracle for guessing.
     return NextResponse.json({ error: "Invalid or spent enrolment token" }, { status: 401 });
   }
 
-  // The same refusal the browser flow makes: a machine that already belongs to somebody else is
-  // not re-registered, whoever holds the token. The token is spent by now either way, which is the
-  // right way round — it makes a token aimed at a colleague's hostname cost the attempt.
   let registered;
   try {
     registered = await registerWorker({
@@ -76,7 +57,6 @@ export async function POST(request: Request) {
       host,
       platform: String(body.platform ?? ""),
       version: String(body.version ?? ""),
-      // Names the machine's identity after the person who enrolled it — "Rafal · MacBook"
       owner: await enrolmentTokenOwner(consumed.tokenId),
       ownerId: (await enrolmentTokenOwnerId(consumed.tokenId)) ?? undefined,
     });
@@ -90,9 +70,6 @@ export async function POST(request: Request) {
 
   await attachWorkerToEnrolment(consumed.tokenId, String(worker._id));
 
-  // No user: the caller here is the machine, holding a token and no session. Which is the fact
-  // worth recording — a token minted for one person and spent on an unexpected host is the shape
-  // of a leaked enrolment.
   void logInstanceAudit({
     action: "enrolment_token_spent",
     target: worker.name,
@@ -103,11 +80,7 @@ export async function POST(request: Request) {
     workerId: String(worker._id),
     credential,
     heartbeatMs: WORKER_HEARTBEAT_MS,
-    // Only what an operator set: everything else resolves against the worker's own
-    // DEFAULT_POLICY, so raising a default reaches every machine that never pinned it
     policy: overriddenWorkerPolicy(worker),
-    // Empty by design: a freshly registered worker has reported no checkouts yet, so there is
-    // nothing to match a project against. The first heartbeat carries its inventory and gets them.
     assignments: [],
   });
 }

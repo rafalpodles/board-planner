@@ -48,8 +48,6 @@ export function TaskContextMenu({
     function handleKey(e: KeyboardEvent) {
       if (e.key === "Escape") onCloseRef.current();
     }
-    // BP-522: a dep on onClose resubscribes mid-dispatch, and a listener added during a
-    // dispatch never sees that event
     document.addEventListener("mousedown", handleClick);
     document.addEventListener("keydown", handleKey);
     return () => {
@@ -58,7 +56,6 @@ export function TaskContextMenu({
     };
   }, []);
 
-  // Adjust position to stay within viewport
   useEffect(() => {
     if (!ref.current) return;
     const rect = ref.current.getBoundingClientRect();

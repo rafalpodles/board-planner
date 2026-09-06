@@ -7,15 +7,6 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { CommandResult, Runner, RunOpts } from "./exec.js";
 import { createWorker } from "./wiring.js";
 
-// Everything in wiring.test.ts replaces the api client with an object literal, so the loop it
-// proves is the wiring agreeing with a mock. Here the client is the real one from api.ts, talking
-// over a real socket to a server that answers the way src/app/api/workers/[workerId]/events does —
-// applied:false when the run recorded on the task is no longer the one sending. Real: api.ts,
-// telemetry.ts, registration.ts, control.ts, local-server.ts, outbox.ts, the pipeline and every
-// module it drives, and the identity on disk. Stubbed: the Runner — no git, npm, gh or claude
-// process is ever spawned — and the board itself, which is a hand-written HTTP surface rather than
-// Next and Mongo.
-
 const PROJECT_ID = "6512f0a1b2c3d4e5f6a70001";
 const TASK_ID = "6512f0a1b2c3d4e5f6a70002";
 const WORKER_ID = "6512f0a1b2c3d4e5f6a70003";
@@ -27,7 +18,6 @@ const REMOTE = "git@github.com:owner/repo.git";
 const TOOL_DIR = "/opt/cp-integration-bin";
 const BASE_SHA = "cafef00d";
 
-// What the board resolves the project's default agent into, and sends whole on the claim
 const CLAIMED_AGENT = {
   agentId: "6512f0a1b2c3d4e5f6a70003",
   name: "Default",
@@ -59,8 +49,6 @@ interface RecordedEvent {
 const OBJECT_ID = /^[0-9a-f]{24}$/;
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
 
-// src/lib/task-service.ts phaseFrom, so a phase this worker sends that the real route would refuse
-// is refused here too instead of quietly counting as delivered
 function phaseFrom(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const phase = value.trim();
@@ -92,7 +80,6 @@ function startBoard() {
 
   let registered = false;
   let claimed = false;
-  // The task's execution subdocument, the only server state the refusal turns on
   const execution = {
     attempts: 1,
     workerId: "",
@@ -106,8 +93,6 @@ function startBoard() {
     response.end(JSON.stringify(body));
   }
 
-  // src/lib/task-service.ts recordTaskPhase: matched on the run, not on the credential, and guarded
-  // against an event overtaken by a later one
   function record(taskId: string, runId: string, seq: number, phase: string): boolean {
     const applied =
       taskId === TASK_ID &&
@@ -143,8 +128,6 @@ function startBoard() {
         return;
       }
 
-      // Everything else travels on the credential registration minted, and names this worker in
-      // both the header and — where there is one — the path
       if (
         request.headers.authorization !== `Bearer ${MINTED_CREDENTIAL}` ||
         request.headers["x-worker-id"] !== WORKER_ID ||
@@ -208,8 +191,6 @@ function startBoard() {
           return;
         }
         claimed = true;
-        // The board mints the run and stores it; the id the worker proposed is not the one every
-        // later event is authorized against
         execution.workerId = WORKER_ID;
         execution.runId = SERVER_RUN_ID;
         execution.phaseSeq = undefined;
@@ -246,8 +227,6 @@ function startBoard() {
       await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
       return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     },
-    // A person dragging the card out of the active column with force. changeStatus clears the run
-    // from the task, and that is the whole of what the worker gets told.
     takeTheTask(): void {
       execution.runId = "";
       execution.phase = "";
@@ -323,7 +302,6 @@ const RESULT_LINE = `${JSON.stringify({
   result: JSON.stringify(RESULT_PAYLOAD),
 })}\n`;
 
-// 17 bytes, a tick apart, the way a real pipe flushes
 function pipeFlushes(text: string): string[] {
   const parts: string[] = [];
   for (let index = 0; index < text.length; index += 17) parts.push(text.slice(index, index + 17));
@@ -333,8 +311,6 @@ function pipeFlushes(text: string): string[] {
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// How long the agent goes on talking after the board has taken the task. Bounded so that a worker
-// which never stops finishes its run and fails these tests on the outcome, rather than hanging.
 const AGENT_TALK_LIMIT = 80;
 
 function ok(stdout = ""): CommandResult {
@@ -377,7 +353,6 @@ async function runWorkerAgainstTheBoard(opts: { takeTheTask: boolean }): Promise
       await tick();
     }
 
-    // What the operator's own cockpit can see while the run is live, read over the real socket
     await readCockpit(join(stateDir, "worker.sock")).then(
       (status) => {
         cockpit = status;
@@ -406,7 +381,6 @@ async function runWorkerAgainstTheBoard(opts: { takeTheTask: boolean }): Promise
 
   const runner: Runner = {
     async run(command, args, runOpts) {
-      // preflight resolving a tool through a login shell, then running it
       if (args[0] === "-lc") return ok(`${TOOL_DIR}/${(args[1] ?? "").split(" ").pop() ?? ""}`);
       if (args[0] === "--version") return ok("1.0.0");
       if (args[0] === "auth" && args[1] === "status") {
@@ -423,11 +397,7 @@ async function runWorkerAgainstTheBoard(opts: { takeTheTask: boolean }): Promise
       }
       if (command === "claude") return agent(runOpts);
       if (args[0] === "ls-remote") return ok(`${BASE_SHA}\t${args[args.length - 1]}\n`);
-      // workspace.ts verifies the fetched sha with `rev-parse --verify <sha>^{commit}` before
-      // trusting it as the base; collectDiff then refuses anything that is not an object id, so
-      // this has to answer with one rather than the toplevel path every other rev-parse call gets
       if (args.includes("--verify")) return ok(`${BASE_SHA}\n`);
-      // bindRepository insists the path is its own toplevel; the inventory needs the remote
       if (args.includes("rev-parse")) return ok(REPO);
       if (args.includes("get-url")) return ok(REMOTE);
       return ok();
@@ -444,12 +414,9 @@ async function runWorkerAgainstTheBoard(opts: { takeTheTask: boolean }): Promise
       HOME: stateDir,
     },
     runner,
-    // the loop only sleeps once it has nothing left to claim, which is one pass after the run
     sleep: async () => stop(),
     log: () => {},
     logError: (message) => errors.push(message),
-    // the bound repository is fictional, so its ownership and its manifest are the two things this
-    // machine cannot answer for itself
     uid: 501,
     realpath: (path) => path,
     stat: () => ({ uid: 501, mode: 0o40700 }),
@@ -459,7 +426,6 @@ async function runWorkerAgainstTheBoard(opts: { takeTheTask: boolean }): Promise
         : path.endsWith("package-lock.json")
           ? "{}"
           : null,
-    // the real one would rewrite this process's own PATH
     setPath: (value) => pathRepairs.push(value),
   });
   stop = () => worker.shutdown();
@@ -481,8 +447,6 @@ describe("a task taken from a live run, over a real HTTP surface", () => {
     report = await runWorkerAgainstTheBoard({ takeTheTask: true });
   }, 30_000);
 
-  // Preconditions, asserted rather than assumed: everything below is about a run that only exists
-  // because this machine enrolled, reported what it has, was given an assignment and bound it.
   it("registers, reports this machine, binds and claims", () => {
     expect(report.board.isRegistered()).toBe(true);
     expect(report.board.heartbeats).toHaveLength(1);
@@ -496,8 +460,6 @@ describe("a task taken from a live run, over a real HTTP surface", () => {
     expect(report.board.events.length).toBeGreaterThan(0);
   });
 
-  // The refusal has to be the server's own rule firing, not a request it could not read. Both lists
-  // are empty or the applied:false under test never meant what the test says it means.
   it("is refused for the reason the board refuses, not for a malformed or unauthorized request", () => {
     expect(report.board.unauthorized).toEqual([]);
     expect(report.board.malformed).toEqual([]);
@@ -519,9 +481,6 @@ describe("a task taken from a live run, over a real HTTP surface", () => {
     expect(report.agentTalked).toBeLessThan(AGENT_TALK_LIMIT);
   });
 
-  // Released, not gate-rejected: the run ended where the refusal arrived, so the branch was never
-  // judged and the task carries no verdict. The phase feed is lossy by design — dropWhenBusy keeps
-  // one post in flight — so what the run did is read off the writes that are not allowed to be lost.
   it("returns the task to the queue and reports no verdict on it", () => {
     expect(report.board.calls).toContain(
       `POST /api/projects/${PROJECT_ID}/tasks/${TASK_ID}/release`
@@ -538,7 +497,6 @@ describe("a task taken from a live run, over a real HTTP surface", () => {
     expect(said[0]).toContain(TASK_ID);
   });
 
-  // The second sink, on the socket the menubar app reads, fed from the same bus as the events above
   it("shows the operator's own socket the run that was in flight", () => {
     expect(report.cockpitError).toBe("");
     expect(report.cockpit?.current?.phase).toBe("agent");
@@ -546,8 +504,6 @@ describe("a task taken from a live run, over a real HTTP surface", () => {
   });
 });
 
-// Without this the suite could not tell "the worker stopped because the board took the task" from
-// "the worker stops". Same worker, same board, same agent — only the card is left alone.
 describe("the same run when the board leaves the task on it", () => {
   let report: RunReport;
 

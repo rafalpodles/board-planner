@@ -58,8 +58,6 @@ describe("withProjectAccess", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  // Everything downstream queries Mongo with params.projectId, so the key has to be resolved
-  // before it is authorised — authorising the key itself would ask about a project id that is not one
   it("resolves a project key to its id before deciding, and hands the id on", async () => {
     projectFindOne.mockReturnValue({ select: () => Promise.resolve({ _id: PROJECT_ID }) });
     const handler = vi.fn().mockResolvedValue(new Response("ok"));
@@ -70,7 +68,6 @@ describe("withProjectAccess", () => {
     expect(await handler.mock.calls[0][1].params).toEqual({ projectId: PROJECT_ID });
   });
 
-  // An unknown key must look the same to a non-admin as one they cannot reach
   it("answers an unresolvable project with 403 to a member and 404 to an instance admin", async () => {
     projectFindOne.mockReturnValue({ select: () => Promise.resolve(null) });
     const handler = vi.fn();

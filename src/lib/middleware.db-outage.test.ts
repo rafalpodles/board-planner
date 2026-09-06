@@ -19,10 +19,6 @@ function request(): Request {
 
 const params = () => Promise.resolve({});
 
-// Deliberately not mockRejectedValue: that builds the rejected promise when the test sets it up
-// rather than when the code under test calls it, and vitest then reports it as an unhandled
-// rejection and fails the test whatever the middleware answered. Every case here passed and failed
-// for the wrong reason until this was an implementation that throws when called.
 function failsWith(error: unknown) {
   getAuthUser.mockImplementation(async () => {
     throw error;
@@ -30,11 +26,6 @@ function failsWith(error: unknown) {
 }
 
 describe("withAuth when the database is unreachable", () => {
-  // A block body, not `() => getAuthUser.mockReset()`: mockReset returns the mock, a function
-  // that vitest then treats as this hook's teardown and calls after every test. That stray
-  // call runs whatever implementation the test installed, and an implementation that throws
-  // becomes a rejection nobody awaits — reported as an unhandled rejection against the test,
-  // which fails whatever the middleware actually answered.
   beforeEach(() => {
     getAuthUser.mockReset();
   });
@@ -49,8 +40,6 @@ describe("withAuth when the database is unreachable", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  // A 401 is what the browser client acts on: it clears the session and the guard redirects. The
-  // status is the whole mechanism by which an outage became a logout.
   it("says nothing about the session, and asks to be retried", async () => {
     failsWith(new DatabaseUnavailableError(new Error("ECONNREFUSED")));
 
@@ -98,8 +87,6 @@ describe("withAuth when the database is unreachable", () => {
     );
   });
 
-  // withAdmin and every project gate compose onto withAuth, so they inherit this — asserted rather
-  // than assumed, because the role check reads `user.role` and there is no user to read
   it("is inherited by withAdmin, which never reaches its role check", async () => {
     failsWith(new DatabaseUnavailableError(new Error("down")));
     const handler = vi.fn();
@@ -123,8 +110,6 @@ describe("withAuth beyond the credential", () => {
     return error;
   }
 
-  // Credential resolution is one of many database touches behind withAuth. resolveProjectId, the
-  // grant check and every route body come after it, and those answered 500 with no Retry-After.
   it("answers 503 when the handler itself cannot reach the database", async () => {
     const handler = vi.fn(async () => {
       throw driverError("MongoServerSelectionError");
@@ -169,9 +154,6 @@ describe("withAuth and the failure a live connection produces", () => {
     getAuthUser.mockReset();
   });
 
-  // For the first seconds after a database goes away mongoose still reports the connection as live,
-  // so connectDB never sees it and the error is the driver's own class rather than the wrapper. An
-  // instanceof check answered 401 for exactly the window a restart actually occupies.
   it("answers 503 to a raw driver error, not only to its own wrapper", async () => {
     const error = new Error("connect ECONNREFUSED 127.0.0.1:27017");
     error.name = "MongooseServerSelectionError";

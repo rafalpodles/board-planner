@@ -17,29 +17,15 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   await connectDB();
 
   const projectOid = new mongoose.Types.ObjectId(projectId);
-  // One window definition for both the buckets and their labels, so a count can
-  // never land under a week it does not belong to
   const now = Date.now();
   const weekStarts = Array.from({ length: WEEKS }, (_, i) => now - (WEEKS - i) * WEEK_MS);
   const since = new Date(weekStarts[0]);
 
-  // Difficulty is an ordinary project field since CP-213. Reading the old column
-  // here would report values frozen at the moment CP-214 removed the dual-write.
   const project = await Project.findById(projectId, "customFields columns").lean();
   const difficultyField = (project?.customFields || []).find(
     (f) => f.name.toLowerCase() === "difficulty"
   );
-  // Columns are project-defined since BP-128, so "finished" is a role and not the id `done`.
-  // A board that renamed or replaced its last column read 0 completed, 0% and an empty
-  // velocity chart — three headline numbers, all of them silently wrong (BP-446).
   const doneIds = columnIdsWithRole(project, "done");
-  // An option's stored value is its id, which survives a rename while `value` moves; and an
-  // option minted by the editor since CP-211 carries `slug-xxxxxx`. Either reaches the chart
-  // as a label nobody recognises unless it is resolved here (BP-447).
-  // Through `normalizeOptions`, which every other reader of these options goes through: the field
-  // is `Mixed` so that pre-CP-211 shapes survive, and a bare `{id}` or a plain string reaches here
-  // intact. Mapping them by hand labelled those tasks the literal "undefined" — and merged two
-  // such options into one bar with their counts added together.
   const difficultyLabels = new Map(
     normalizeOptions(difficultyField?.options as Parameters<typeof normalizeOptions>[0]).map(
       (o) => [o.id, o.value] as const
@@ -72,8 +58,6 @@ export const GET = withProjectAccess(async (_request, { params }) => {
       },
       "createdAt updatedAt status"
     ).lean(),
-    // What "used by N tasks" costs before a field is deleted. $objectToArray keeps this
-    // to operators MongoDB 4.4 has.
     Task.aggregate([
       { $match: { project: projectOid } },
       { $project: { pairs: { $objectToArray: { $ifNull: ["$customFieldValues", {}] } } } },
@@ -90,7 +74,6 @@ export const GET = withProjectAccess(async (_request, { params }) => {
 
   const data = breakdowns[0] || { total: 0, done: 0, statusPairs: [], categoryPairs: [], difficultyPairs: [], assigneePairs: [] };
 
-  // Count breakdowns from arrays
   const statusBreakdown: Record<string, number> = {};
   for (const s of TASK_STATUSES) statusBreakdown[s] = 0;
   for (const s of data.statusPairs) statusBreakdown[s] = (statusBreakdown[s] || 0) + 1;
@@ -98,18 +81,13 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   const categoryBreakdown: Record<string, number> = {};
   for (const c of data.categoryPairs) categoryBreakdown[c] = (categoryBreakdown[c] || 0) + 1;
 
-  // A project that renamed or removed the field has no split to show, which the
-  // chart renders as its empty state rather than as zeroes
   const difficultyBreakdown: Record<string, number> = {};
   for (const d of data.difficultyPairs || []) {
     if (d === null || d === undefined || d === "") continue;
-    // Falls back to the stored id: an option deleted from the field still labels its tasks
-    // with something a reader can act on rather than dropping them off the chart
     const label = difficultyLabels.get(String(d)) ?? String(d);
     difficultyBreakdown[label] = (difficultyBreakdown[label] || 0) + 1;
   }
 
-  // assigneePairs is already in hand, so names are the only thing still missing
   const assigneeCounts = new Map<string, number>();
   for (const assignee of data.assigneePairs) {
     const id = assignee ? assignee.toString() : "";
@@ -133,8 +111,6 @@ export const GET = withProjectAccess(async (_request, { params }) => {
     if (!date) return -1;
     const index = Math.floor((date.getTime() - weekStarts[0]) / WEEK_MS);
     if (index < 0) return -1;
-    // The newest window is closed at the top, so a timestamp at or slightly past
-    // `now` — clock skew between the database and this process — still counts
     return Math.min(index, WEEKS - 1);
   };
 

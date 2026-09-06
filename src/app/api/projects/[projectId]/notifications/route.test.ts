@@ -44,8 +44,6 @@ beforeEach(() => {
   });
 });
 
-// BP-304: the POST path parsed the url and checked the type, the PUT path assigned
-// name, webhookUrl and events straight from the body
 describe("PUT /api/projects/:projectId/notifications", () => {
   it("refuses a non-string webhookUrl", async () => {
     const res = await PUT(request({ channelId: "c1", webhookUrl: { $ne: null } }), ctx());

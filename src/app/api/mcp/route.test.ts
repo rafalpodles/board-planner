@@ -3,7 +3,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const connectDB = vi.fn();
 const getAuthUser = vi.fn();
 
-// The real module, so DatabaseUnavailableError is the class the route checks against
 vi.mock("@/lib/db", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/db")>()),
   connectDB,
@@ -14,8 +13,6 @@ vi.mock("@/lib/auth", () => ({
   RateLimitError: class RateLimitError extends Error {},
 }));
 vi.mock("@/lib/mcp/tools", () => ({ registerPlannerTools: vi.fn() }));
-// Only the transport is stubbed. withMcpAuth stays real, because the thing under test is what it
-// puts in the 401 and what it hands the handler — a mock of it would assert my own arrangement.
 vi.mock("mcp-handler", async (importOriginal) => {
   const actual = await importOriginal<typeof import("mcp-handler")>();
   return {
@@ -48,10 +45,6 @@ afterEach(() => {
   process.env = { ...ORIGINAL };
 });
 
-// BP-303 left `getPublicOrigin(req)` as a `??` fallback here, so a token holder sending
-// X-Forwarded-Host had the server fetch that address and hand back the body. BP-316 removed it —
-// and the review then showed the whole fix could be reverted with a green suite, because this
-// route had no test at all.
 describe("POST /api/mcp", () => {
   const forged = { "x-forwarded-host": "evil.example", forwarded: "host=evil.example" };
 
@@ -63,8 +56,6 @@ describe("POST /api/mcp", () => {
     expect(body.auth.extra.baseUrl).toBe("https://board.example.com");
   });
 
-  // This 401 is the first thing an MCP client sees and is what it follows to find the two
-  // discovery documents, so a header-derived pointer routes around the documents themselves
   it("points the discovery hint in its 401 at the configured origin", async () => {
     const res = await POST(request(forged));
 
@@ -81,8 +72,6 @@ describe("POST /api/mcp", () => {
     expect((await POST(request({ authorization: "Bearer cpat_x" }))).status).toBe(401);
   });
 
-  // withMcpAuth turns any throw out of verifyToken into `invalid_token`, which reads as an expired
-  // credential; the message naming the variable to set never leaves the server log
   it("says the origin is unconfigured instead of blaming the client's token", async () => {
     delete process.env.PUBLIC_ORIGIN;
 
@@ -91,7 +80,6 @@ describe("POST /api/mcp", () => {
 
     expect(res.status).toBe(500);
     expect(body.error_description).toMatch(/PUBLIC_ORIGIN/);
-    // Not "unconfigured, so fall back to what the caller says" — that was the shape of the bug
     expect(JSON.stringify(body)).not.toContain("evil.example");
   });
 });
@@ -109,10 +97,6 @@ describe("POST /api/mcp when the database is unreachable", () => {
     return error;
   }
 
-  // The shape a real restart takes. For the first seconds mongoose still reports the connection as
-  // live, so nothing can be checked beforehand — the query inside verifyToken is what fails, and
-  // withMcpAuth's catch-all called that `invalid_token`: a client then discards a working OAuth
-  // token and walks the whole flow again for one that fails the same way (BP-362 review).
   it("answers 503, not invalid_token, when the query fails mid-request", async () => {
     failsWith(driverError("MongoServerSelectionError"));
 
@@ -166,7 +150,6 @@ describe("POST /api/mcp when the database is unreachable", () => {
 
     const response = await POST(request({ authorization: "Bearer cpat_x" }));
 
-    // withMcpAuth owns whatever this is; what matters is that it is not reported as a 503
     expect(response.status).not.toBe(503);
   });
 

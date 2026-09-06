@@ -13,9 +13,6 @@ function ResetForm() {
   const fromUrl = useSearchParams().get("token") ?? "";
   const [token] = useState(fromUrl);
 
-  // Off the address bar as soon as it is held: same-origin requests send the full URL in Referer
-  // under this app's referrer policy, so the token would reach the proxy's access log, and it
-  // would sit in browser history and on screen during a screen share.
   useEffect(() => {
     if (fromUrl) window.history.replaceState(null, "", "/reset");
   }, [fromUrl]);
@@ -77,10 +74,6 @@ function ResetForm() {
     return (
       <div role="status" className="w-full max-w-sm text-center">
         <h1 className="text-2xl font-bold mb-2">Your password is set</h1>
-        {/* "Every other session" would be wrong here — nobody is signed in on this screen, and
-            whoever knew the old password has just been signed out too, which is usually the point */}
-        {/* "Signed out on every device" and not "everywhere": API tokens are a separate credential
-            and survive this, which the documentation says plainly rather than this screen */}
         <p className="text-sm text-text-muted mb-6">
           You have been signed out on every device. Sign in with your new password.
         </p>

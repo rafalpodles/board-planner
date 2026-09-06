@@ -14,8 +14,6 @@ export function enrolmentMintBody(rawLabel: string): { label?: string } {
   return label ? { label } : {};
 }
 
-// An unreadable expiry reads as expired: telling an operator a token is still live when we cannot
-// tell sends them to a worker machine with a string that will be refused on arrival.
 export function enrolmentExpiry(expiresAt: string, now: number = Date.now()): EnrolmentExpiry {
   const deadline = new Date(expiresAt).getTime();
   if (Number.isNaN(deadline)) return { expired: true, text: "expiry unknown" };

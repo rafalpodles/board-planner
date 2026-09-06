@@ -27,12 +27,8 @@ export function useApi() {
       noteApiStatus(res.status);
 
       if (!res.ok) {
-        // Only a 401. A 5xx means the server could not answer, and clearing the session on that is
-        // what turned an outage into a logout (BP-362).
         if (res.status === 401) onUnauthorized();
         const error = await res.json().catch(() => ({ error: res.statusText }));
-        // Message stays the whole error for every existing caller; status and body ride along
-        // for the few that need to tell one refusal from another rather than just report it
         throw Object.assign(new Error(error.error || res.statusText), {
           status: res.status,
           body: error,
@@ -54,12 +50,8 @@ export function useApi() {
       noteApiStatus(res.status);
 
       if (!res.ok) {
-        // Only a 401. A 5xx means the server could not answer, and clearing the session on that is
-        // what turned an outage into a logout (BP-362).
         if (res.status === 401) onUnauthorized();
         const error = await res.json().catch(() => ({ error: res.statusText }));
-        // Message stays the whole error for every existing caller; status and body ride along
-        // for the few that need to tell one refusal from another rather than just report it
         throw Object.assign(new Error(error.error || res.statusText), {
           status: res.status,
           body: error,
@@ -71,7 +63,6 @@ export function useApi() {
     [onUnauthorized, noteApiStatus]
   );
 
-  // Raw streaming POST (SSE): returns the Response so callers can read the body
   const stream = useCallback(
     async (url: string, body: unknown): Promise<Response> => {
       const res = await fetch(url, {

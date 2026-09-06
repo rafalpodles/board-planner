@@ -11,11 +11,8 @@ interface DescriptionSectionProps {
   value: string;
   onChange: (value: string) => void;
   onFileUpload: (file: File) => Promise<string>;
-  /** Narrow screens show three lines behind a Show more, so the criteria stay in reach */
   collapsible?: boolean;
-  /** The board this text belongs to, so a written task key becomes a link to that task */
   scope?: ReferenceScope | null;
-  /** Autocomplete for @ and the board's key, so the description offers what the composer does */
   triggers?: Trigger[];
 }
 
@@ -30,7 +27,6 @@ export function DescriptionSection({
   const [editing, setEditing] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
-  // Clamped on narrow screens only — the rail layout has room for the whole thing
   const clamped = collapsible && !expanded ? "line-clamp-3 lg:line-clamp-none" : "";
 
   return (

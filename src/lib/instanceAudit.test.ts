@@ -29,8 +29,6 @@ describe("logInstanceAudit", () => {
     });
   });
 
-  // A worker spends its enrolment token during registration, where the caller is a machine with no
-  // session. An entry nobody can attribute is still worth more than no entry.
   it("stores a null actor rather than refusing an entry no user made", async () => {
     await logInstanceAudit({ action: "enrolment_token_spent", target: "rig-laptop" });
 
@@ -43,9 +41,6 @@ describe("logInstanceAudit", () => {
     });
   });
 
-  // BP-539. The reference stops naming anybody the moment that account is deleted, which used to
-  // rewrite every row they wrote as "system" — the word this log reserves for a machine. Stored
-  // beside it, so the row outlives its actor the way it already outlives its subject.
   it("stores the actor's username beside the reference", async () => {
     await logInstanceAudit({
       action: "user_deleted",
@@ -59,9 +54,6 @@ describe("logInstanceAudit", () => {
     );
   });
 
-  // The property the callers depend on to write `void logInstanceAudit(...)` without a catch of
-  // their own: an audit row that could fail the action it records would be worse than the gap it
-  // closes, and an unhandled rejection would take the process down instead.
   it("swallows a failing write rather than rejecting", async () => {
     create.mockRejectedValue(new Error("mongo is down"));
 

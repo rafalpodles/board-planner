@@ -22,7 +22,6 @@ import Testing
     #expect(parseHead(Data("garbage\r\n\r\n".utf8)) == nil)
 }
 
-// A body may hold \r\n\r\n of its own; only the first one ends the header.
 @Test func splitsOnTheFirstTerminatorNotTheLast() throws {
     let raw = Data("HTTP/1.1 200 OK\r\n\r\n{\"a\":\"x\r\n\r\ny\"}".utf8)
     let head = try #require(parseHead(raw))
@@ -30,8 +29,6 @@ import Testing
     #expect(String(data: raw.dropFirst(head.headerLength), encoding: .utf8) == "{\"a\":\"x\r\n\r\ny\"}")
 }
 
-// Node answers every socket route with Transfer-Encoding: chunked — `response.end(json)` sets no
-// Content-Length. curl hides this; a hand-written client must not. Found against a running worker.
 @Test func reportsWhetherTheBodyIsChunked() throws {
     let chunked = try #require(parseHead(Data(
         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n".utf8)))
@@ -69,7 +66,6 @@ import Testing
     #expect(second.finished == true)
 }
 
-// The failure this whole path exists for: a read(2) boundary landing inside a chunk.
 @Test func holdsAnIncompleteChunkUntilTheRestArrives() {
     var buffer = Data("b\r\nhel".utf8)
     #expect(dechunk(from: &buffer).data.isEmpty)

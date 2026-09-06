@@ -1,7 +1,5 @@
 name: Menubar
 
-# Its own workflow, path-filtered, because this is the only job that needs a macOS runner and
-# those bill at ten times the rate. The app's 81 tests were running nowhere before this.
 on:
   push:
     paths:
@@ -29,9 +27,6 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 26
-      # Building and testing the Swift never saw the defect this covers: `make app` assembled a
-      # bundle with no worker in it, which fails at the end of onboarding rather than at build time.
-      # Assembling it here is the only place that difference shows.
       - name: The assembled app carries a worker
         run: |
           make app

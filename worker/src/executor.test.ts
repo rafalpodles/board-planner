@@ -5,17 +5,10 @@ import { parseStream, StreamEvent } from "./stream.js";
 import { claimedTask } from "./__fixtures__/task.js";
 import { workerConfig } from "./__fixtures__/config.js";
 
-// Whole but for the policy fields, which the tests below leave unset on purpose — model and
-// fallbackModel are optional on WorkerConfig, and what the executor does without them is the thing
-// under test. It used to be a three-field literal cast through unknown, which also hid nine missing
-// *required* fields: the day the executor reads one of those, every test here would have handed it
-// undefined and stayed green.
 const config = workerConfig();
 
 const task = claimedTask({ description: "Do it well", acceptanceCriteria: ["works"] });
 
-// What the pipeline hands one writing step. The brief carries the block's prompt and models; the
-// tool list is not in it, and never comes from the server.
 const options = {
   task,
   worktreePath: "/wt",
@@ -28,7 +21,6 @@ const options = {
   },
 };
 
-// a real `claude -p --output-format stream-json --verbose` run, captured verbatim
 const FIXTURE = readFileSync(new URL("./__fixtures__/stream-success.ndjson", import.meta.url), "utf8");
 
 const FIXTURE_RESULT = {
@@ -119,7 +111,6 @@ describe("createExecutor", () => {
     expect(outcome).toEqual({ kind: "result", result: FIXTURE_RESULT });
   });
 
-  // Bash was in the list only so the agent could commit; the worker does that now
   it("gives the implementer no shell", async () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 
@@ -129,8 +120,6 @@ describe("createExecutor", () => {
     expect(args[args.indexOf("--tools") + 1]).toBe("Read Edit Write Grep Glob");
   });
 
-  // The catalog and the UI both promise a read-only block "cannot change anything". Nothing tested
-  // the list that promise rests on — every case in this file ran with capability "edit".
   it("gives a read-only step no way to change anything", async () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 
@@ -148,7 +137,6 @@ describe("createExecutor", () => {
     }
   });
 
-  // The block's prompt is editable from the board; the framing around it is not
   it("keeps the untrusted-data framing ahead of the block's own prompt", async () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 
@@ -162,7 +150,6 @@ describe("createExecutor", () => {
     expect(prompt.indexOf("untrusted party")).toBeLessThan(prompt.indexOf("tidy the imports"));
   });
 
-  // An agent told to commit and unable to would report itself blocked
   it("tells the agent the worker commits, since it no longer can", async () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 
@@ -182,7 +169,6 @@ describe("createExecutor", () => {
     expect(args).toContain("--verbose");
   });
 
-  // policy.model / policy.fallbackModel, all the way down to the argv the CLI is actually given
   it("runs the model the policy names, not a hardcoded one", async () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
     const policyConfig = { ...config, model: "haiku", fallbackModel: "opus" };
@@ -194,8 +180,6 @@ describe("createExecutor", () => {
     expect(args[args.indexOf("--fallback-model") + 1]).toBe("opus");
   });
 
-  // Nothing typechecks a WorkerConfig assembled in a test or by an older worker build, so an unset
-  // field arrives as undefined rather than as an error
   it("falls back to the models it has always used when the policy names none", async () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 
@@ -206,8 +190,6 @@ describe("createExecutor", () => {
     expect(args[args.indexOf("--fallback-model") + 1]).toBe("sonnet");
   });
 
-  // `--model ""` is not "no model": the CLI takes the empty string as the value and refuses the run,
-  // so a blank policy field would fail every task this worker claims
   it("never hands the CLI an empty model flag", async () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
     const blank = { ...config, model: "   ", fallbackModel: "" };
@@ -272,9 +254,6 @@ describe("createExecutor", () => {
     expect(outcome).toEqual({ kind: "result", result: payload });
   });
 
-  // Faithful translation of the pre-migration payload: the only added field is `type`, which the
-  // stream shape requires. No is_error, no subtype — nothing has ever established that a real limit
-  // sets them, so classification must not depend on them
   it("classifies an exit-0 usage-limit response as its own outcome", async () => {
     const { runner } = runnerReturning({
       code: 0,
@@ -299,8 +278,6 @@ describe("createExecutor", () => {
     expect(await createExecutor(config, runner).execute(options)).toEqual({ kind: "usage_limit" });
   });
 
-  // The agent writes `result`, so a task about this detection code can put the phrase there. A free
-  // refund loops without sleeping, so this must stay an error
   it("does not take the agent's own prose about usage limits as a usage limit", async () => {
     const { runner } = runnerReturning({
       code: 0,
@@ -319,8 +296,6 @@ describe("createExecutor", () => {
     expect(outcome.kind).toBe("error");
   });
 
-  // --fallback-model sonnet means an opus limit can be announced on stderr while the run goes on to
-  // finish on sonnet. Reading stderr before the payload would throw that completed work away
   it("keeps a run that finished on the fallback model after the CLI announced a limit", async () => {
     const payload = {
       status: "completed",
@@ -383,9 +358,6 @@ describe("createExecutor", () => {
     });
   });
 
-  // stdout carries the content of every file the agent read, and the phrase lives in this
-  // repository's own source — reading it back must not look like a usage limit, or a task touching
-  // the worker refunds its attempt and the loop retries it immediately, for free, forever
   it("does not read a usage limit out of file content the agent looked at", async () => {
     const stdout = fixtureWithToolResult(
       "1\tfunction isUsageLimit(text: string): boolean {\n2\t  return /usage limit reached/i.test(text);\n3\t}"
@@ -511,9 +483,6 @@ describe("reporting the stream as it arrives", () => {
     return { runner: { run } as never, run };
   }
 
-  // The strongest statement available: whatever the pipe does to the line boundaries, the run
-  // reports exactly the events a parse of the finished output would have found — no duplicate from
-  // a re-parsed prefix, no line lost to the split that cut it in half.
   it.each([1, 3, 17, 512, 1_000_000])(
     "reports the same events as a whole-output parse when the pipe flushes every %i bytes",
     async (size) => {
@@ -545,10 +514,6 @@ describe("reporting the stream as it arrives", () => {
     expect(seen).toEqual([{ type: "system", subtype: "init" }]);
   });
 
-  // An unbounded buffer is the hazard: one line is one event, and a tool_result for a large Read
-  // can be tens of megabytes. Blocking the event loop on it means the missed heartbeat is the one
-  // carrying the kill switch. The line here is VALID json, so it would be forwarded if it were
-  // kept — an invalid one is skipped either way and proves nothing.
   it("gives up on a single line too large to be telemetry, then resynchronises", async () => {
     const enormous = `${JSON.stringify({ type: "system", subtype: "init", pad: "x".repeat(1_200_000) })}\n`;
     const good = `${JSON.stringify({ type: "system", subtype: "compact_boundary" })}\n`;
@@ -562,7 +527,6 @@ describe("reporting the stream as it arrives", () => {
 
     await createExecutor(config, { run } as never).execute({ ...options, onEvent: (event) => seen.push(event) });
 
-    // the oversized event never arrives, and the next whole line still does
     expect(seen).toEqual([{ type: "system", subtype: "compact_boundary" }]);
   });
 
@@ -606,8 +570,6 @@ describe("the environment handed to the agent", () => {
     vi.unstubAllEnvs();
   });
 
-  // The agent runs with bypassPermissions and has Bash. Anything in this environment is
-  // something it can read and use — CP_API_TOKEN would let it write to the board as the operator
   it("carries no credential from the worker's own process", async () => {
     vi.stubEnv("CP_API_TOKEN", "cp_secret");
     vi.stubEnv("GH_TOKEN", "gho_secret");

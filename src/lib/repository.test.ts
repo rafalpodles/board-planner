@@ -8,7 +8,6 @@ describe("projectRepositoryUrl", () => {
     );
   });
 
-  // The fallback is what lets the app deploy before the migration has run
   it("falls back to the legacy GitHub field, made absolute", () => {
     expect(projectRepositoryUrl({ githubRepo: "owner/repo" })).toBe("https://github.com/owner/repo");
   });
@@ -67,9 +66,6 @@ describe("repositoryProvider", () => {
     expect(repositoryProvider({ repositoryUrl: "https://gitlab.com/group/thing" })).toBe("gitlab");
   });
 
-  // The case the task flagged: a self-hosted GitLab has neither github.com nor gitlab.com in its
-  // host, so the host alone cannot classify it. gitlabHost is the hint, and it already exists —
-  // every GitLab API call goes to ${gitlabHost}/api/v4, so a self-hosted project must already set it.
   it("recognises a self-hosted GitLab through the host that project already configured", () => {
     expect(
       repositoryProvider({
@@ -113,8 +109,6 @@ describe("repositoryProvider", () => {
     expect(repositoryProvider({})).toBe("");
   });
 
-  // An ssh host alias resolves only through that machine's ssh config, so nothing here can know
-  // what it points at
   it("does not classify a per-account ssh alias", () => {
     expect(repositoryProvider({ repositoryUrl: "git@github-work:owner/repo.git" })).toBe("");
   });
@@ -124,8 +118,6 @@ describe("repositoryProvider", () => {
   });
 });
 
-// Matching and provider derivation want different things out of the same fields, and conflating
-// them is how a project on a self-hosted git quietly stops being matched to its worker.
 describe("repositoryCandidates", () => {
   it("offers the one URL once a project has been migrated", () => {
     expect(
@@ -144,9 +136,6 @@ describe("repositoryCandidates", () => {
     ]);
   });
 
-  // The regression this guards: a bare owner/repo has no host, which sameRepo reads as "any host".
-  // Making it absolute for the provider's benefit would narrow it to github.com and strand every
-  // task on a project whose repository is actually somewhere else.
   it("does not make a bare legacy value absolute, which would narrow what it matches", () => {
     expect(repositoryCandidates({ githubRepo: "owner/repo" })).toEqual(["owner/repo"]);
     expect(projectRepositoryUrl({ githubRepo: "owner/repo" })).toBe("https://github.com/owner/repo");

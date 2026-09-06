@@ -11,9 +11,6 @@ function frameOf(call: unknown[]): string {
   return new TextDecoder().decode(call[0] as Uint8Array);
 }
 
-// Each test uses a worker id nobody else in this file touches — the module holds one shared,
-// unreset Map for the whole process, so reusing an id across tests would let one test's leftover
-// registration leak into the next.
 describe("worker-events", () => {
   it("does nothing when publishing to a worker with no open stream", () => {
     expect(() => publishToWorker("w-absent", { command: "pause" })).not.toThrow();

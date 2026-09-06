@@ -6,8 +6,6 @@ const createSession = vi.fn();
 const revokeSession = vi.fn();
 const revokeUserSessions = vi.fn();
 
-// The real module, so DatabaseUnavailableError is the class the route checks against — a bare
-// stub makes `instanceof` throw inside the catch instead of answering
 vi.mock("@/lib/db", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/db")>()),
   connectDB,
@@ -70,8 +68,6 @@ beforeEach(async () => {
   vi.clearAllMocks();
   connectDB.mockResolvedValue(undefined);
   await resetRateLimits();
-  // The per-address cases below send X-Forwarded-For, which counts only where the operator says a
-  // proxy writes it. The unconfigured case has its own tests further down (BP-318).
   process.env.TRUSTED_PROXY_HOPS = "1";
   delete process.env.COOKIE_ALLOW_INSECURE;
   delete process.env.APP_ORIGIN;
@@ -172,9 +168,6 @@ describe("POST /api/auth/login — credentials", () => {
     const refused = await POST(request());
 
     expect(refused.status).toBe(429);
-    // Refused before the credential is read, which is what bounds the bcrypt work. The cost is that
-    // this refusal can be aimed where the key is shared — BP-353 answers that with a way out
-    // (a password change clears the counter), not by moving this check.
     expect(verifyCredentials).not.toHaveBeenCalled();
   });
 
@@ -207,12 +200,9 @@ describe("POST /api/auth/login — credentials", () => {
     verifyCredentials.mockResolvedValue(null);
     for (let attempt = 0; attempt < 40; attempt++) await POST(from(`victim-${attempt}`));
 
-    // A real login of the attacker's own account, from the same address
     verifyCredentials.mockResolvedValue(USER);
     expect((await POST(from("mine"))).status).toBe(200);
 
-    // If success had cleared the source counter the budget would be back to zero and this would
-    // keep answering 401 forever
     verifyCredentials.mockResolvedValue(null);
     let refusedAt = -1;
     for (let attempt = 0; attempt < 30; attempt++) {
@@ -235,7 +225,6 @@ describe("POST /api/auth/login — credentials", () => {
     verifyCredentials.mockResolvedValue(null);
     let refusedAt = -1;
     for (let attempt = 0; attempt < 60; attempt++) {
-      // One try per account, so every account counter stays at 1 and only the source accumulates
       if ((await POST(from(`victim-${attempt}`))).status === 429) {
         refusedAt = attempt;
         break;
@@ -250,9 +239,6 @@ describe("POST /api/auth/login — credentials", () => {
     expect(verifyCredentials).not.toHaveBeenCalled();
   });
 
-  // The whole point of BP-318, and the case the rest of this file cannot show because it sets
-  // TRUSTED_PROXY_HOPS: with no proxy configured the header is not an identity, so rotating it
-  // buys nothing. Before the fix each value was a fresh bucket and this loop never saw a 429.
   it("does not sell a fresh bucket for a forged address when no proxy is configured", async () => {
     delete process.env.TRUSTED_PROXY_HOPS;
     verifyCredentials.mockResolvedValue(null);
@@ -312,7 +298,6 @@ describe("POST /api/auth/login — credentials", () => {
 
     expect(elsewhere.status).toBe(200);
   });
-
 
   it("rejects a malformed body before touching the password check", async () => {
     expect((await POST(request({ "sec-fetch-site": "same-origin" }, "{"))).status).toBe(400);
@@ -385,8 +370,6 @@ describe("POST /api/auth/login — cookie", () => {
 });
 
 describe("POST /api/auth/login — the database is unreachable", () => {
-  // Reaching for the throttle counters is the first thing the route does that needs the database,
-  // so an outage lands before any credential is looked at
   function databaseIsDown() {
     connectDB.mockImplementation(async () => {
       throw new DatabaseUnavailableError(new Error("connect ECONNREFUSED 127.0.0.1:27017"));
@@ -401,8 +384,6 @@ describe("POST /api/auth/login — the database is unreachable", () => {
     expect(response.status).toBe(503);
   });
 
-  // This is the page somebody was sent to *by* the outage. Telling them their password is wrong is
-  // how a database restart turned into a support request about lost accounts (BP-362).
   it("does not tell anyone their credentials were rejected", async () => {
     databaseIsDown();
 

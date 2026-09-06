@@ -1,13 +1,5 @@
 import crypto from "crypto";
 
-// AES-256-GCM encryption for secrets at rest (e.g. project GitHub tokens).
-// ENCRYPTION_KEY is the key new secrets are written with; ENCRYPTION_KEYS_OLD
-// is a comma-separated list of retired keys kept so a rotation can still read
-// what they wrote. Both are 32 bytes, hex or base64.
-//
-// The v2 envelope carries a key id, so a value names the key that wrote it.
-// v1 values carry no id and are tried against every configured key.
-
 const PREFIX_V1 = "enc:v1:";
 const PREFIX_V2 = "enc:v2:";
 
@@ -47,11 +39,6 @@ function allKeys(): EncryptionKey[] {
   return keys.filter((k): k is EncryptionKey => k !== null);
 }
 
-/**
- * A malformed key used to yield null and be treated as "not configured", so a
- * deployment that fumbled the variable was indistinguishable from one that never
- * set it — and wrote plaintext either way.
- */
 export function assertEncryptionConfig(): void {
   const raw = process.env.ENCRYPTION_KEY?.trim();
 
@@ -126,7 +113,6 @@ export function decryptSecret(value: string): string {
 
   if (!value.startsWith(PREFIX_V1)) return value; // legacy plaintext
 
-  // v1 carries no key id, so every configured key is a candidate
   const keys = allKeys();
   if (keys.length === 0) {
     throw new Error("ENCRYPTION_KEY is required to decrypt a stored secret");
@@ -135,7 +121,6 @@ export function decryptSecret(value: string): string {
     try {
       return open(value.slice(PREFIX_V1.length), key.material);
     } catch {
-      // GCM rejected this key — try the next
     }
   }
   throw new Error(

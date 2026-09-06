@@ -29,7 +29,6 @@ describe("categoryDiff", () => {
     expect(diff.added).toEqual([]);
   });
 
-  // The PATCH takes the original name, so the diff has to carry it rather than the new one
   it("reports a rename against the name the server still knows", () => {
     const diff = categoryDiff([bug, doc], [{ ...bug, name: "defect" }, doc]);
 

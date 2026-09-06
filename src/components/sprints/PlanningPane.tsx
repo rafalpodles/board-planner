@@ -51,8 +51,6 @@ export function PlanningPane({
   const buttonRefs = useRef(new Map<string, HTMLButtonElement>());
   const prevIds = useRef<string[]>(tasks.map((t) => t._id));
 
-  // A move unmounts the button that triggered it, dropping focus to <body>. Send it to
-  // whichever button now sits at the same position, or the pane itself once the list is empty.
   useEffect(() => {
     const ids = tasks.map((t) => t._id);
     const removedIndex = prevIds.current.findIndex((id) => !ids.includes(id));

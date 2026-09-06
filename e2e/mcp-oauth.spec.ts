@@ -24,23 +24,6 @@ import {
   type RedirectReceiver,
 } from "./mcp";
 
-/**
- * BP-396 — the MCP handshake an editor performs against this instance, driven the way a client
- * performs it rather than the way it is easiest to assert: the 401 first, the discovery documents
- * that 401 points at, dynamic registration, the consent screen in a real browser, the code
- * exchanged with PKCE, and finally tools called over the credential that came out of it.
- *
- * Nothing is stubbed. This instance is its own authorization server, and the MCP tools call its
- * own API back over the same token (`PlannerClient(baseUrl, auth.token)`), so the scope granted on
- * the consent screen is still load-bearing three hops later — which is what the second project
- * exists to prove.
- */
-
-/**
- * Registration and consent, stopping at the code. Separate from `authorize()` because the token
- * endpoint claims a code on its first sight of it, spent or not — so any test about what that
- * endpoint refuses needs a code of its own.
- */
 async function authorizationCode(
   page: Page,
   request: APIRequestContext,
@@ -92,8 +75,6 @@ test.describe("MCP OAuth handshake", () => {
 
     expect(response.status()).toBe(401);
 
-    // Followed rather than pattern-matched: this header is the only thing a client is given, and a
-    // pointer that parses but does not resolve would pass a `toContain`.
     const challenge = response.headers()["www-authenticate"] ?? "";
     const pointer = /resource_metadata="([^"]+)"/.exec(challenge)?.[1];
     expect(pointer, challenge).toBe(`${baseURL}/.well-known/oauth-protected-resource`);
@@ -101,7 +82,6 @@ test.describe("MCP OAuth handshake", () => {
     const resourceDoc = await request.get(new URL(pointer!).pathname);
     expect(resourceDoc.status()).toBe(200);
     const resource = await resourceDoc.json();
-    // BP-316: both fields are configuration, never x-forwarded-host
     expect(resource.resource).toBe(baseURL);
     expect(resource.authorization_servers).toContain(baseURL);
 
@@ -149,7 +129,6 @@ test.describe("MCP OAuth handshake", () => {
   }) => {
     const { accessToken } = await authorize(page, request, { projects: "all" });
 
-    // The client landed back on its own redirect endpoint rather than on an error page
     await expect(page.locator("#landed")).toBeVisible();
 
     const session = new McpSession(request, accessToken);
@@ -164,18 +143,11 @@ test.describe("MCP OAuth handshake", () => {
     const tasks = await session.callTool("list_tasks", { project: PROJECT_KEY });
     expect(tasks.text).toContain(HELD_TASK_TITLE);
 
-    // The control for the limited-token test below: authorized for everything, this account
-    // reaches both seeded boards
     const projects = await session.callTool("list_projects");
     const keys = ((projects.parsed ?? []) as { key: string }[]).map((p) => p.key);
     expect(keys).toEqual(expect.arrayContaining([PROJECT_KEY, SECOND_PROJECT_KEY]));
   });
 
-  /**
-   * BP-497. `update_task` was called with `checklist`, which it does not declare — zod stripped the
-   * key, the tool wrote nothing, and the answer was 200 with the task back and `updatedAt` bumped.
-   * The response was not the tell and cannot be: the check is the read-back.
-   */
   test("a parameter the tool does not declare is refused, and nothing moves", async ({
     page,
     request,
@@ -186,8 +158,6 @@ test.describe("MCP OAuth handshake", () => {
 
     const before = await session.callTool("get_task", { taskKey: SIBLING_TASK_KEY });
 
-    // `description` is declared and rides along on purpose: with it the update is not empty, so
-    // the other refusal in this tool — "named nothing to change" — cannot be what answers
     const refused = await session.callTool("update_task", {
       taskKey: SIBLING_TASK_KEY,
       description: "should not land either",
@@ -202,7 +172,6 @@ test.describe("MCP OAuth handshake", () => {
     expect(after.parsed.updatedAt).toBe(before.parsed.updatedAt);
     expect(after.parsed.description).toBe(before.parsed.description);
 
-    // The control. Without it a tool that refused everything would read exactly like this passing
     const written = await session.callTool("update_task", {
       taskKey: SIBLING_TASK_KEY,
       description: "written through a parameter it does declare",
@@ -227,26 +196,17 @@ test.describe("MCP OAuth handshake", () => {
 
     const projects = await session.callTool("list_projects");
     const keys = ((projects.parsed ?? []) as { key: string }[]).map((p) => p.key);
-    // This account is an instance admin and reaches both boards — the test above proves it with
-    // the same call. Only the one ticked on the consent screen may come back here.
     expect(keys).toContain(PROJECT_KEY);
     expect(keys).not.toContain(SECOND_PROJECT_KEY);
 
-    // Naming the board by key only re-tests the filter above — `getProjectByKey` resolves through
-    // the listing (`PlannerClient`), so a key it cannot see is a key it cannot use. Worth one
-    // assertion for the user-visible outcome, no more than that.
     const byKey = await session.callTool("list_tasks", { project: SECOND_PROJECT_KEY });
     expect(byKey.raw.result?.isError ?? byKey.raw.error).toBeTruthy();
     expect(JSON.stringify(byKey.raw)).not.toContain(SECOND_PROJECT_NAME);
 
-    // Naming it by id is the independent one: `get_project` tries /api/projects/:id first, which is
-    // the per-project route and its own access check, reached without the listing having any say.
     const byId = await session.callTool("get_project", { identifier: String(SECOND_PROJECT_ID) });
     expect(byId.raw.result?.isError ?? byId.raw.error).toBeTruthy();
     expect(JSON.stringify(byId.raw)).not.toContain(SECOND_PROJECT_NAME);
 
-    // The same two calls at the granted board work, so the refusals are the scope and not a broken
-    // tool
     const grantedTasks = await session.callTool("list_tasks", { project: PROJECT_KEY });
     expect(grantedTasks.text).toContain(HELD_TASK_TITLE);
     const grantedProject = await session.callTool("get_project", { identifier: String(PROJECT_ID) });
@@ -278,10 +238,8 @@ test.describe("MCP OAuth handshake", () => {
       await page.goto(`/oauth/authorize?${query.toString()}`);
       await expect(page.getByRole("heading", { name: "Authorization error" })).toBeVisible();
       await expect(page.getByText("Unknown client or unregistered redirect_uri.")).toBeVisible();
-      // Not a sign-in form: the refusal comes before anybody is asked for a password
       await expect(page.locator("#u")).toHaveCount(0);
 
-      // The control: the same request with the registered address gets the sign-in form
       query.set("redirect_uri", receiver.url);
       await page.goto(`/oauth/authorize?${query.toString()}`);
       await expect(page.locator("#u")).toBeVisible();
@@ -338,8 +296,6 @@ test.describe("MCP OAuth handshake", () => {
     try {
       const { code, clientId, verifier } = await authorizationCode(page, request, receiver);
 
-      // RFC 6749 §4.1.3. The authorization was issued for one address; an exchange naming another
-      // is the shape of a stolen code being redeemed from somewhere else.
       const elsewhere = `${new URL(receiver.url).origin.replace(/:\d+$/, ":1")}/callback`;
       const exchanged = await request.post("/oauth/token", {
         form: {
@@ -402,14 +358,6 @@ test.describe("MCP OAuth handshake", () => {
     expect(status).toBe(401);
   });
 
-  /**
-   * BP-444 reported every MCP call answering 500 while a credential was stale, and the refusal
-   * paths measure 401 throughout — including this one, but only because mcp-handler catches
-   * everything `verifyToken` throws. `error_description` is what tells the two apart: a refusal
-   * this instance decided says "No authorization provided", a throw the library rescued says
-   * "Invalid token". Asserting it is the difference between a test that watches the fix and one
-   * that only watches the status code, which is identical either way.
-   */
   test("a token row with no expiry is refused as a credential, not rescued from a throw", async ({
     page,
     request,
@@ -431,16 +379,9 @@ test.describe("MCP OAuth handshake", () => {
     expect(response.status()).toBe(401);
     const challenge = response.headers()["www-authenticate"] ?? "";
     expect(challenge, challenge).toContain('error_description="No authorization provided"');
-    // The pointer a client follows to re-authorise has to survive the refusal
     expect(challenge).toContain("resource_metadata=");
   });
 
-  /**
-   * The endpoint a client reaches by itself the moment its access token lapses. `formData()` throws
-   * on anything that is not a form, and the throw was uncaught: an empty 500 where RFC 6749 §5.2
-   * has a 400 naming `invalid_request`. A client acts on the second and not on the first, which is
-   * what turned a lapsed credential into a person's problem (BP-444).
-   */
   test("the token endpoint refuses a body it cannot parse with 400, not 500", async ({
     page,
     request,
@@ -456,7 +397,6 @@ test.describe("MCP OAuth handshake", () => {
       expect(await refused.json()).toMatchObject({ error: "invalid_request" });
     }
 
-    // The control: the refusal is about the encoding, and a real refresh still rotates
     const refreshed = await request.post("/oauth/token", {
       form: { grant_type: "refresh_token", refresh_token: refreshToken, client_id: clientId },
     });

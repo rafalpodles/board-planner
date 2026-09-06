@@ -1,11 +1,4 @@
 // @vitest-environment happy-dom
-//
-// The read-only flag reaches Board and ListView through roughly a dozen independent
-// ternaries in ProjectBoardView, one per write-carrying prop. Nothing stops a fifteenth
-// prop, added later, from being wired straight through and forgotten. This test does not
-// know the list in advance: it captures every prop ProjectBoardView actually passes and
-// requires each one to be named on a small read-safe allowlist, or be undefined under
-// readOnly. An unlisted write prop fails loudly instead of shipping quietly.
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, cleanup } from "@testing-library/react";
 import { ProjectBoardView } from "./ProjectBoardView";
@@ -110,8 +103,6 @@ function makeBoard(overrides: Partial<ProjectBoard> = {}): ProjectBoard {
   };
 }
 
-// Everything ProjectBoardView hands down that is not a write. A prop must be named here
-// on purpose; anything else has to come back undefined once readOnly is set.
 const BOARD_READ_SAFE_PROPS = new Set([
   "tasks",
   "projectKey",

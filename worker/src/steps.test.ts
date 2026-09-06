@@ -23,9 +23,6 @@ function ctx(over: Partial<StepContext> = {}) {
     lastResult: completed,
   };
   const baseSha = over.baseSha ?? "base";
-  // Mirrors an untampered checkout: the range holds exactly state.commits, and HEAD is their
-  // newest — or baseSha itself when this run made none. Individual tests override `runner` when
-  // they need to exercise the guard's refusal path.
   const runner = {
     run: vi.fn(async (_command: string, args: string[]) => {
       if (args.includes("rev-list")) {
@@ -97,8 +94,6 @@ describe("runStep — a model step", () => {
     });
   });
 
-  // Telemetry is how the board shows a run is alive and the only place cost is measured; a step
-  // that drops it makes a forty-minute agent look like a hung one
   it("forwards the event stream, so tool use still reaches the board", async () => {
     const c = ctx();
     await runStep(entry({ capability: "edit" }), c);
@@ -129,8 +124,6 @@ describe("runStep — a model step", () => {
     }
   });
 
-  // The comment on that try/catch says letting it throw would destroy the only copy of the work,
-  // and nothing exercised it: the commit spy in this file could not reject
   it("turns a failed commit into the step's own error rather than letting it throw", async () => {
     const c = ctx({
       commit: vi.fn(async () => {
@@ -168,8 +161,6 @@ describe("runStep — a model step", () => {
     expect(c.state.commits).toEqual([]);
   });
 
-  // A no-op edit step must not tell the push step there is something to deliver, and must not tell
-  // an exit after it that the worktree holds work worth keeping.
   it("does not record committed when the step committed nothing", async () => {
     const c = ctx({ commit: vi.fn(async () => "") });
 
@@ -178,8 +169,6 @@ describe("runStep — a model step", () => {
     expect(c.state.committed).toBe(false);
   });
 
-  // committed is sticky across steps: a later no-op edit step must not erase what an earlier one
-  // already committed, or an exit after it would destroy the only copy of that work.
   it("keeps committed true when a later step commits nothing", async () => {
     const c = ctx({ commit: vi.fn().mockResolvedValueOnce("sha1").mockResolvedValueOnce("") });
 
@@ -189,7 +178,6 @@ describe("runStep — a model step", () => {
     expect(c.state.committed).toBe(true);
   });
 
-  // The gate context takes one result and a composed agent produces several
   it("remembers the most recent result and summary for the gates that follow", async () => {
     const c = ctx();
     await runStep(entry({ capability: "edit" }), c);
@@ -215,8 +203,6 @@ describe("runStep — a worker action", () => {
     expect(c.delivery.push).toHaveBeenCalledWith("/wt", "cp-1/x", "", undefined);
   });
 
-  // RunState.commits is documented "oldest first", and the push step reads its *last* element —
-  // so that ordering is load-bearing, not incidental
   it("pushes the newest of several commits, not the first", async () => {
     const c = ctx({ commit: vi.fn().mockResolvedValueOnce("sha1").mockResolvedValueOnce("sha2") });
 
@@ -238,7 +224,6 @@ describe("runStep — a worker action", () => {
     expect(c.state.merged).toBe(true);
   });
 
-  // The composition rules refuse this shape on save, but a snapshot may predate them
   it("refuses a merge step with no pull request to merge", async () => {
     const c = ctx();
     const outcome = await runStep(entry({ key: "merge", deterministic: true }), c);

@@ -17,8 +17,6 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        {/* Runs before first paint, so the resolved theme is on <html> with no flash.
-            Mirrors resolveTheme in ThemeProvider — change both together. */}
         <script
           dangerouslySetInnerHTML={{
             __html:

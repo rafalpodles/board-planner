@@ -5,7 +5,6 @@ import { Combobox, ComboboxOption } from "./Combobox";
 
 interface MultiSelectProps {
   label?: string;
-  /** Accessible name when there is no visible label */
   ariaLabel?: string;
   value: string[];
   options: ComboboxOption[];
@@ -15,10 +14,6 @@ interface MultiSelectProps {
   disabled?: boolean;
 }
 
-/**
- * The form-shaped sibling of `Select`, for a field that takes several values. Wears
- * `Select`'s chrome and `Combobox`'s panel, so a form does not mix two kinds of picker.
- */
 export function MultiSelect({
   label,
   ariaLabel,

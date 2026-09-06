@@ -14,19 +14,6 @@ import {
 } from "./seed";
 import { signIn } from "./session";
 
-/**
- * BP-533. BP-521 fixed the two ways the detail view itself opens another task, by having the
- * route say which surface was drawing it. ⌘K and the PM widget are mounted in the shell, above
- * both task routes, so they could not be told — and the address cannot answer it either, since
- * with the modal open the URL is already the task's. The page now publishes the fact instead.
- *
- * The two tests that open from the task page leave it again afterwards: a soft navigation keeps
- * an unmatched slot's state, so a test that stops at "the destination is here" cannot see the
- * modal parked behind it, waiting to be drawn over the board (BP-521). Their controls open the
- * same task from the board, where the modal must still swap and leave the board underneath —
- * which is what a fix that reached too far would break.
- */
-
 const taskDialog = (page: Page) =>
   page.getByRole("dialog").filter({ has: page.getByLabel("Task title") });
 
@@ -45,7 +32,6 @@ async function withDb<T>(fn: (db: mongoose.mongo.Db) => Promise<T>): Promise<T> 
   }
 }
 
-/** A PM turn that already happened, with a chip pointing at a task. */
 async function pmAnswerLinking(taskKey: string) {
   await withDb(async (db) => {
     await db.collection("projects").updateOne({ _id: PROJECT_ID }, { $set: { "pm.enabled": true } });
@@ -53,7 +39,6 @@ async function pmAnswerLinking(taskKey: string) {
       project: PROJECT_ID,
       role: "assistant",
       content: "Moved it along.",
-      // The thread is private, so without this the reader is shown nothing (src/lib/pm/thread.ts)
       triggeredBy: ADMIN_ID,
       trigger: { type: "chat", taskKey: "" },
       actions: [{ tool: "update_task", taskKey, summary: `Updated ${taskKey}`, at: new Date() }],
@@ -116,7 +101,6 @@ test.describe("a PM chip", () => {
 
     await openAPmChip(page, `${PROJECT_KEY}-${HELD_TASK_NUMBER}`);
 
-    // A chip links by key, not by number — the same task, spelled the way the PM wrote it
     await expect(page).toHaveURL(new RegExp(`/tasks/${PROJECT_KEY}-${HELD_TASK_NUMBER}$`));
     await expect(page.getByLabel("Task title")).toHaveValue(HELD_TASK_TITLE);
     await expect(page.getByRole("dialog")).toHaveCount(0);
@@ -133,7 +117,6 @@ test.describe("a PM chip", () => {
 
     await openAPmChip(page, `${PROJECT_KEY}-${HELD_TASK_NUMBER}`);
 
-    // A chip links by key, not by number — the same task, spelled the way the PM wrote it
     await expect(page).toHaveURL(new RegExp(`/tasks/${PROJECT_KEY}-${HELD_TASK_NUMBER}$`));
     await expect(taskDialog(page).getByLabel("Task title")).toHaveValue(HELD_TASK_TITLE);
     await expect(taskDialog(page)).toHaveCount(1);

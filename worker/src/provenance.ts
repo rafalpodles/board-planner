@@ -4,8 +4,6 @@ import { GIT_SAFE_ENV, gitArgs } from "./git-safety.js";
 
 const GIT_TIMEOUT_MS = 60_000;
 
-// commitAll is the only thing in this worker that commits, so a run knows every sha it created.
-// Anything else between the base and HEAD was put there by the thing being judged.
 export async function unexpectedHistory(
   runner: Runner,
   worktreePath: string,

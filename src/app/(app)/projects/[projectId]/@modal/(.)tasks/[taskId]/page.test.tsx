@@ -31,10 +31,6 @@ describe("the intercepting task modal", () => {
     expect(screen.queryByText("asked for TP/9")).not.toBeNull();
   });
 
-  /**
-   * The params belong to the layout the modal was intercepted into, which is the board being left.
-   * Taking the project from there and the task from the URL named two different tasks (BP-540).
-   */
   it("takes both halves from the address, not the params of the board being left", () => {
     pathname = "/projects/SB/tasks/1";
     render(<TaskDetailModal />);

@@ -17,9 +17,6 @@ vi.mock("@/models/worker", () => ({
 }));
 vi.mock("@/lib/worker-user", () => ({ ensureWorkerUser }));
 vi.mock("@/models/user", () => ({ User: { findById: userFindById } }));
-// The real grants module runs on top of this: what a machine may reach is what its owner may
-// reach, and mocking that answer instead of the collection under it would assert the wiring
-// against itself.
 vi.mock("@/models/grant", () => ({ Grant: { find: grantFind } }));
 
 const {
@@ -39,9 +36,6 @@ const {
   WORKER_HEARTBEAT_MS,
 } = await import("./worker-service");
 
-// Reach is resolved from the owner's grants by the caller and handed in, so every case that is not
-// about reach says "the owner can reach this project" and varies something else. Passed explicitly
-// rather than defaulted inside verdictFor, whose own default denies.
 const verdictFor = (...args: Parameters<typeof rawVerdictFor>) =>
   rawVerdictFor(
     args[0],
@@ -57,7 +51,6 @@ const fresh = new Date(now.getTime() - 1000);
 const PROJECT_ID = "69a52e3b399b27d3cbb2c5a5";
 const REMOTE = "git@github.com:owner/repo.git";
 
-// A project the worker may serve: enabled, and naming a repository this machine reports.
 function project(overrides: Record<string, unknown> = {}) {
   return {
     _id: PROJECT_ID,
@@ -97,8 +90,6 @@ describe("verdictFor", () => {
     expect((verdict as { reason: string }).reason).toMatch(pattern);
   });
 
-  // The version the request speaks, not the one frozen into the record at registration --
-  // otherwise a worker upgraded after a server bump is rejected forever with no way back
   it("refuses a request speaking an older protocol", () => {
     expect(verdictFor(worker(), project(), PROTOCOL_VERSION - 1, now).ok).toBe(false);
   });
@@ -120,8 +111,6 @@ describe("verdictFor", () => {
     expect(verdictFor(worker({ lastSeenAt: null }), project(), PROTOCOL_VERSION, now).ok).toBe(false);
   });
 
-  // new Date("not-a-date").getTime() is NaN, and NaN > WORKER_STALE_MS is false --
-  // the old `> WORKER_STALE_MS` check failed open on an unparseable timestamp
   it("refuses a worker whose lastSeenAt does not parse as a date", () => {
     const verdict = verdictFor(worker({ lastSeenAt: "not-a-date" }), project(), PROTOCOL_VERSION, now);
 
@@ -129,10 +118,6 @@ describe("verdictFor", () => {
     expect((verdict as { reason: string }).reason).toMatch(/reported/i);
   });
 
-
-  // String(undefined) === String(undefined): a caller passing no project id must not match
-  // an assignment that also has no project, however that assignment came to be malformed
-  // A project that could not be loaded must refuse, not fall through to "assigned"
   it("refuses when the project could not be resolved at all", () => {
     const verdict = verdictFor(worker(), null, PROTOCOL_VERSION, now);
 
@@ -140,7 +125,6 @@ describe("verdictFor", () => {
     expect((verdict as { reason: string }).reason).toMatch(/not enabled/i);
   });
 
-  // The project names a repository this machine does not have, so being enabled is not enough
   it("refuses an enabled project whose repository this machine lacks", () => {
     const verdict = verdictFor(worker(), project({ githubRepo: "someone/else" }), PROTOCOL_VERSION, now);
 
@@ -148,21 +132,16 @@ describe("verdictFor", () => {
     expect((verdict as { reason: string }).reason).toMatch(/no checkout/i);
   });
 
-  // A project naming no repository must never match the first checkout a machine happens to have
   it("refuses a project that names no repository at all", () => {
     const nameless = project({ githubRepo: "", gitlabRepo: "" });
 
     expect(verdictFor(worker(), nameless, PROTOCOL_VERSION, now).ok).toBe(false);
   });
 
-  // A worker heartbeating every WORKER_STALE_MS would race its own staleness check
   it("heartbeats comfortably inside the staleness window", () => {
     expect(WORKER_HEARTBEAT_MS * 2).toBeLessThan(WORKER_STALE_MS);
   });
 
-  // The enrolment screen says "The machine acts under this account". Until BP-358 that was a display
-  // name; a machine enrolled before it has no owner, and there is no safe guess — a fallback to the
-  // old project-wide nominee would keep the race it replaces alive indefinitely.
   it("refuses a machine with no owner", () => {
     const verdict = verdictFor(
       worker({ owner: null }),
@@ -186,14 +165,11 @@ describe("verifyWorkerCredential", () => {
 
   beforeEach(() => findById.mockReset());
 
-  // An unauthenticated request must not be able to throw a CastError through the handler
   it("rejects a malformed worker id without touching the database", async () => {
     expect(await verifyWorkerCredential("not-an-object-id", "cpw_x")).toBeNull();
     expect(findById).not.toHaveBeenCalled();
   });
 
-  // bcryptjs rejects its returned promise on a non-string argument -- without this guard
-  // that becomes an unhandled rejection instead of a clean refusal
   it("rejects a non-string credential without touching the database", async () => {
     expect(await verifyWorkerCredential(workerId, undefined as unknown as string)).toBeNull();
     expect(findById).not.toHaveBeenCalled();
@@ -205,8 +181,6 @@ describe("verifyWorkerCredential", () => {
     expect(await verifyWorkerCredential(workerId, "cpw_x")).toBeNull();
   });
 
-  // credentialHash is select: false on the schema; a plain findById would compare against
-  // undefined and reject every valid credential
   it("asks for credentialHash explicitly, since the schema hides it by default", async () => {
     const select = vi.fn().mockResolvedValue(null);
     findById.mockReturnValue({ select });
@@ -232,15 +206,11 @@ describe("verifyWorkerCredential", () => {
   });
 });
 
-// BP-358: this is the write both enrolment doors funnel through — the device-approval flow and the
-// token flow both call registerWorker, and this is the only place either of them sets `owner`.
 describe("registerWorker", () => {
   const REGISTERED = { _id: "w1" };
   const OWNER_ID = "6a732075133f935b19154cd2";
   const SOMEBODY_ELSE = "6a732075133f935b19154cd3";
 
-  // ObjectIds compare by identity in JavaScript and by value in MongoDB, so both sides are put in
-  // the form the database compares them in before the filter is judged.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function byValue(value: any): any {
     if (value instanceof Types.ObjectId) return String(value);
@@ -251,10 +221,6 @@ describe("registerWorker", () => {
     return value;
   }
 
-  // The real thing: a unique index on {name, host} plus an upsert. A filter that does not match the
-  // stored document makes the upsert attempt an insert, and the index answers with a duplicate key.
-  // Judged through mongoose's own matcher rather than by reading the filter, because what is under
-  // test is whether MongoDB admits that document — the shape of the `$or` says nothing about it.
   function storedMachine(doc: Record<string, unknown> | null) {
     workerFindOne.mockReturnValue({
       select: () => ({ lean: () => Promise.resolve(doc ? { owner: doc.owner ?? null } : null) }),
@@ -286,10 +252,6 @@ describe("registerWorker", () => {
     expect(update.$set.owner.equals(ownerId)).toBe(true);
   });
 
-  // The property both enrolment doors rely on: a re-registration (e.g. a heartbeat-triggered
-  // re-register, or a token-door registration with no admin in the request) must not wipe out an
-  // owner a previous registration already set. Only setting the key when ownerId is given is what
-  // makes that true — a stray `owner: null` here would silently orphan every re-registered machine.
   it("never clears an existing owner when ownerId is omitted", async () => {
     await registerWorker({ name: "rig", host: "mac.home", platform: "darwin", version: "1.0.0" });
 
@@ -297,13 +259,6 @@ describe("registerWorker", () => {
     expect(update.$set).not.toHaveProperty("owner");
   });
 
-  /**
-   * BP-358 made enrolling self-service, and registration upserts on name+host. Without this, anyone
-   * signed in could enrol "somebody's machine": the enrolment-start route is unauthenticated and
-   * takes an arbitrary name and host, so guessing a colleague's hostname would mint a new
-   * credential for their machine — stopping the process running there, whose stored credential is
-   * then rejected — and inherit that record's reported checkout paths.
-   */
   describe("a machine that already belongs to somebody", () => {
     it("refuses to re-register it for a different person", async () => {
       alreadyThere(SOMEBODY_ELSE);
@@ -311,14 +266,9 @@ describe("registerWorker", () => {
       await expect(
         registerWorker({ name: "rig", host: "mac.home", platform: "", version: "", ownerId: OWNER_ID })
       ).rejects.toBeInstanceOf(WorkerAlreadyOwned);
-      // The identity is not touched either: renaming the machine account would retro-label every
-      // comment it has ever authored
       expect(ensureWorkerUser).not.toHaveBeenCalled();
     });
 
-    // Read-then-write would let two registrations racing on the same name+host both see it
-    // unowned, and the second would silently overwrite the first's owner. The decision is the
-    // filter, so the loser gets a duplicate key from the unique index instead.
     it("refuses through the update filter rather than a prior read", async () => {
       alreadyThere(SOMEBODY_ELSE);
 
@@ -328,8 +278,6 @@ describe("registerWorker", () => {
       expect(findOneAndUpdate).toHaveBeenCalled();
     });
 
-    // A person re-enrolling their own laptop is the everyday case — a reinstall, a new state
-    // directory — and must keep working
     it("lets its own owner register it again", async () => {
       alreadyThere(OWNER_ID);
 
@@ -338,9 +286,6 @@ describe("registerWorker", () => {
       expect(findOneAndUpdate).toHaveBeenCalled();
     });
 
-    // Compared as strings, because one side is an ObjectId off a lean document and the other is
-    // the id the route stringified — comparing them by identity would refuse every owner their own
-    // machine
     it("recognises its owner through an ObjectId", async () => {
       alreadyThere(new Types.ObjectId(OWNER_ID));
 
@@ -359,7 +304,6 @@ describe("registerWorker", () => {
   });
 
   describe("adopting a machine nobody owns", () => {
-    // The documented recovery for an enrolment predating BP-358, and for one an admin released
     it("is allowed", async () => {
       alreadyThere(null);
 
@@ -368,9 +312,6 @@ describe("registerWorker", () => {
       expect(findOneAndUpdate.mock.calls[0][1].$set.owner).toBeInstanceOf(Types.ObjectId);
     });
 
-    // Those paths are on the previous owner's disk and mean nothing here. The record is handed back
-    // with its own inventory on the first heartbeat, which is what a fresh registration already
-    // promises by answering with no assignments.
     it("does not inherit the last owner's reported checkouts", async () => {
       alreadyThere(null);
 
@@ -380,8 +321,6 @@ describe("registerWorker", () => {
       expect(findOneAndUpdate.mock.calls[0][1].$set.bindingError).toBe("");
     });
 
-    // A machine registering for the first time has nothing to inherit, and blanking repos there
-    // would be describing a record that does not exist
     it("leaves a first registration's fields alone", async () => {
       await registerWorker({ name: "rig", host: "mac.home", platform: "", version: "", ownerId: OWNER_ID });
 
@@ -390,13 +329,6 @@ describe("registerWorker", () => {
   });
 });
 
-// Two live workers pointed at the same checkout both create worktrees in it and both run `git` in
-// it. The claim is atomic so they will not take the same task, but the working tree is not — one
-// run's checkout moves under the other's feet.
-// Assignment is no longer stored: it is the project being enabled AND its owner being able to
-// reach it AND this machine reporting a checkout of its repository.
-// BP-305/BP-358: a remote is public information and the worker reports its own, so having the
-// checkout must not become permission to serve every enabled project
 describe("the owner's reach, not the reported repos", () => {
   const reported = [{ remote: REMOTE, path: "/repo" }];
 
@@ -413,8 +345,6 @@ describe("the owner's reach, not the reported repos", () => {
     expect(verdictFor(worker(), project(), PROTOCOL_VERSION, fresh, [], []).ok).toBe(false);
   });
 
-  // Null is the answer accessibleProjectIds gives an instance admin, and reading it as "reaches
-  // nothing" would strand every admin-owned machine
   it("admits an owner under no restriction at all", () => {
     expect(verdictFor(worker(), project(), PROTOCOL_VERSION, fresh, [], null)).toEqual({ ok: true });
   });
@@ -425,8 +355,6 @@ describe("the owner's reach, not the reported repos", () => {
   });
 });
 
-// BP-358: the stored approved list is gone, so this is now the only thing standing between a
-// machine and every project on the instance.
 describe("ownerReachableProjectIds", () => {
   beforeEach(() => {
     userFindById.mockReset();
@@ -434,15 +362,11 @@ describe("ownerReachableProjectIds", () => {
     grantFind.mockReturnValue({ select: () => ({ lean: () => Promise.resolve([]) }) });
   });
 
-  // An ownerless machine is the pre-BP-358 enrolment. Falling back to anything wider would keep
-  // the race this design replaces alive indefinitely.
   it("reaches nothing for a machine with no owner", async () => {
     expect(await ownerReachableProjectIds({ owner: null })).toEqual([]);
     expect(userFindById).not.toHaveBeenCalled();
   });
 
-  // A deleted account is not an absent restriction: populate renders null, and typeof null is
-  // "object", so a truthiness check on the ref alone would read it as a live owner
   it("reaches nothing when the owner's account is gone", async () => {
     userFindById.mockResolvedValue(null);
 
@@ -520,22 +444,15 @@ describe("assignmentsFor", () => {
     ]);
   });
 
-  // BP-358: an ownerless machine must be offered nothing, not merely refused at claim time — a
-  // non-empty list here is what sends the worker's own loop into a claim it cannot win. Its reach
-  // is the empty list ownerReachableProjectIds answers with, not a separate flag.
   it("offers nothing to a machine reaching nothing, whatever it would otherwise match", () => {
     expect(assignmentsFor(reported, [project()], [])).toEqual([]);
   });
 
-  // Null means no restriction, and a machine whose owner is an instance admin must still be
-  // offered its checkouts rather than treated as reaching nothing
   it("offers every enabled, matching project when there is no restriction", () => {
     expect(assignmentsFor(reported, [project()], null).map((a) => a.project)).toEqual([PROJECT_ID]);
   });
 });
 
-// Two machines each serving the same project is fine and useful — the claim is atomic. The real
-// hazard is two worker processes on ONE machine sharing a working tree.
 describe("contested checkouts", () => {
   const REPO = { remote: REMOTE, path: "/repo" };
   const claimant = (over: Record<string, unknown> = {}) => ({
@@ -550,8 +467,6 @@ describe("contested checkouts", () => {
     ...over,
   });
 
-  // The bug this replaced: the old predicate was symmetric, so both processes stood down and both
-  // machines idled with a green console.
   it("makes exactly one of two live claimants lose the checkout", () => {
     const older = claimant({ _id: "w1", name: "older", createdAt: new Date("2026-01-01") });
     const newer = claimant({ _id: "w2", name: "newer", createdAt: new Date("2026-02-01") });
@@ -594,7 +509,6 @@ describe("contested checkouts", () => {
     expect(usableRepos(mine, [older], now)).toEqual([other]);
   });
 
-  // A disabled or locked worker is not running, so it must not hold a checkout hostage
   it("does not let a disabled worker keep a checkout", () => {
     const disabled = claimant({ _id: "w1", name: "off", enabled: false, createdAt: new Date("2020-01-01") });
 
@@ -602,8 +516,6 @@ describe("contested checkouts", () => {
   });
 });
 
-// The claim has to be refused too, not merely the assignment withheld: an assignment the worker
-// already holds from an earlier refresh would otherwise still let it claim into a shared tree.
 describe("verdictFor and a contested checkout", () => {
   const older = {
     _id: "w0",
@@ -632,9 +544,6 @@ describe("verdictFor and a contested checkout", () => {
   });
 });
 
-// The point of tracking overrides: a field nobody set must follow the default, so raising a default
-// reaches every worker that never pinned it. Sending the whole stored policy defeats that — the
-// worker's applyPolicy takes every field present and the default never wins again.
 describe("overriddenWorkerPolicy", () => {
   it("sends nothing at all when the operator has set nothing", () => {
     expect(overriddenWorkerPolicy(worker({ policy: { pollIntervalMs: 5000 }, policyOverrides: [] })))
@@ -649,7 +558,6 @@ describe("overriddenWorkerPolicy", () => {
     ).toEqual({ pollIntervalMs: 5000 });
   });
 
-  // Work policy belongs to the project now; a stray copy on a worker document must not travel
   it("never sends a field that is no longer a machine setting", () => {
     const legacy = worker({
       policy: { pollIntervalMs: 5000, model: "haiku", taskTimeoutMs: 900000 },
@@ -660,9 +568,6 @@ describe("overriddenWorkerPolicy", () => {
   });
 });
 
-// BP-375. assignmentsFor answers "what can this machine work on now", which is deliberately silent
-// about a project it could serve if somebody cloned the repository — so the app had no way to offer
-// one, and the second project meant a git clone in a terminal nothing on screen mentions.
 describe("offersFor", () => {
   const OTHER_ID = "69a52e3b399b27d3cbb2c5a6";
   const reported = [{ remote: REMOTE, path: "/repo" }];
@@ -682,14 +587,10 @@ describe("offersFor", () => {
     ]);
   });
 
-  // The list is what the app renders as "things you can add". A project already being served is not
-  // one of them, and showing it would invite a second clone of a repository the machine has.
   it("says nothing about a project whose checkout this machine already reports", () => {
     expect(offersFor(reported, [project({ key: "BP", name: "Board Planner" })], [PROJECT_ID])).toEqual([]);
   });
 
-  // The same two gates an assignment passes. An offer the claim would refuse is worse than no offer:
-  // it ends in a clone, a checkout on disk, and a machine that still does nothing.
   it("offers nothing the assignment itself would refuse", () => {
     expect(offersFor(reported, [candidate({ worker: { enabled: false } })], [OTHER_ID])).toEqual([]);
     expect(offersFor(reported, [candidate()], [])).toEqual([]);
@@ -700,8 +601,6 @@ describe("offersFor", () => {
     expect(offersFor(reported, [candidate({ githubRepo: "", repositoryUrl: "" })], [OTHER_ID])).toEqual([]);
   });
 
-  // An ownerless machine reaches nothing — the same rule assignmentsFor applies, and the reason the
-  // reach is passed in rather than derived here.
   it("offers nothing to a machine whose owner reaches nothing", () => {
     expect(offersFor(reported, [candidate()], [])).toEqual([]);
   });
@@ -711,9 +610,6 @@ describe("offersFor", () => {
   });
 });
 
-// BP-378. offersFor answers "what could this machine take on", which is deliberately silent about
-// everything already served and everything switched off — so a list of checkboxes, where the
-// connected ones are ticked and a disabled project can still be picked, cannot be built from it.
 describe("catalogueFor", () => {
   const OTHER_ID = "69a52e3b399b27d3cbb2c5a6";
   const NO_REPO_ID = "69a52e3b399b27d3cbb2c5a7";
@@ -746,16 +642,12 @@ describe("catalogueFor", () => {
     });
   });
 
-  // The whole point of the screen: a project nobody has switched on yet is still offered, because
-  // the person confirming in the browser is the one who can switch it on.
   it("lists a project whose workers are switched off, and says so", () => {
     const [row] = catalogueFor(reported, [switchedOff()], [OTHER_ID], undefined);
 
     expect(row).toMatchObject({ key: "SB", workersEnabled: false, servedHere: false, available: true });
   });
 
-  // Shown rather than hidden — "where is my project" is the worse question, and this one has an
-  // answer the operator can act on.
   it("lists a project that names no repository as unavailable", () => {
     const [row] = catalogueFor(reported, [noRepo()], [NO_REPO_ID], undefined);
 
@@ -767,8 +659,6 @@ describe("catalogueFor", () => {
     expect(catalogueFor(reported, [candidate()], ["somebody-else"], undefined)).toEqual([]);
   });
 
-  // Never chosen is not the same as chose-nothing: reading an absent selection as "wants none"
-  // would make the first render of the screen propose deleting every checkout on the machine.
   it("treats a machine that has never used the screen as wanting what it already serves", () => {
     const rows = catalogueFor(reported, [served(), candidate()], null, undefined);
 
@@ -779,9 +669,7 @@ describe("catalogueFor", () => {
   it("reads the stored selection once there is one", () => {
     const rows = catalogueFor(reported, [served(), candidate()], null, [OTHER_ID]);
 
-    // Picked but not yet cloned — this is the row the app acts on
     expect(rows.find((r) => r.key === "SB")).toMatchObject({ servedHere: false, wanted: true });
-    // Served but no longer wanted — this is the row that gets removed
     expect(rows.find((r) => r.key === "BP")).toMatchObject({ servedHere: true, wanted: false });
   });
 

@@ -64,10 +64,6 @@ async function auxClick(el: Element, init: MouseEventInit = {}) {
   return event;
 }
 
-// React runs every delegated handler from one listener on the node it was rooted
-// at. Under the App Router that node is `document` — exactly where the board page
-// registers its own keydown listener — so a listener added here reproduces the
-// same-node collision that stopPropagation cannot resolve.
 function reactRoot(el: Element): Element {
   for (let node: Element | null = el; node; node = node.parentElement) {
     if (Object.keys(node).some((k) => k.startsWith("__reactContainer"))) return node;
@@ -148,8 +144,6 @@ describe("TaskCard, opening in a new tab", () => {
     expect(event.defaultPrevented).toBe(false);
   });
 
-  // A middle press fires mousedown then auxclick, never click, so the card must
-  // leave both alone for the browser's own open-in-new-tab to survive
   it("leaves middle-click to the browser", async () => {
     const onClick = vi.fn();
     const onSelect = vi.fn();
@@ -217,8 +211,6 @@ describe("TaskCard copy link", () => {
     expect(copy.closest("a")).toBeNull();
   });
 
-  // The corner is set on the wrapper: Tailwind orders `relative` after `absolute`, so a
-  // position passed to the button itself loses to the one it carries for its touch target
   it("clears the checkbox's corner rather than sitting under it", () => {
     const corner = () =>
       screen.getByRole("button", { name: "Copy link to TP-7" }).parentElement!.className;
@@ -261,7 +253,6 @@ describe("TaskCard drag", () => {
 });
 
 describe("TaskCard execution state", () => {
-  // Server-measured ages: asOf is when the payload was serialised, phaseAt the last report
   const asOf = "2026-08-01T12:00:00Z";
   const secondsAgo = (s: number) => new Date(Date.parse(asOf) - s * 1000).toISOString();
 
@@ -288,7 +279,6 @@ describe("TaskCard execution state", () => {
     );
   });
 
-  // A worker that has claimed but not yet reported still holds the task
   it("shows a claimed run that has not reported a phase yet", () => {
     renderCard({ task: withRun({ workerId: "w1" }) });
     expect(screen.getByText("starting")).toBeTruthy();
@@ -302,8 +292,6 @@ describe("TaskCard execution state", () => {
     expect(screen.queryByTestId("card-run-quiet")).toBeNull();
   });
 
-  // The run holds the task for up to two hours; a worker that died mid-run keeps its runId
-  // that whole time, so elapsed silence — not the field's presence — decides "live"
   it("stops calling a run live once the worker goes quiet", () => {
     const card = renderCard({
       task: withRun({ workerName: "mac-mini", phase: "agent", phaseAt: secondsAgo(20 * 60) }),
@@ -326,18 +314,12 @@ describe("TaskCard execution state", () => {
     expect(screen.getByTestId("card-run-live")).toBeTruthy();
   });
 
-  // Phase events are fire-and-forget, so a worker can claim a task and die before reporting.
-  // Measuring silence from the claim is what stops the card lying for the whole lease.
   it("calls a claimed run quiet when it never reported and the claim is old", () => {
     renderCard({ task: withRun({ workerId: "w1", phaseAt: null, startedAt: secondsAgo(30 * 60) }) });
     expect(screen.getByTestId("card-run-quiet")).toBeTruthy();
     expect(screen.queryByTestId("card-run-live")).toBeNull();
   });
 
-  // Asserts the class list only. The cascade — whether the run outline lets `border-primary`
-  // and `.cat-card` survive — is what actually broke once, and happy-dom loads no stylesheet,
-  // so nothing here can catch a repeat. Kept because losing a class from the list is its own
-  // regression; deliberately NOT named as if it guarded the cascade.
   it("emits the run class alongside the selected and category classes", () => {
     const selectedCard = renderCard({ task: running, selected: true });
     expect(selectedCard.className).toContain("task-running");
@@ -365,9 +347,6 @@ describe("TaskCard context menu", () => {
     expect(event.defaultPrevented).toBe(true);
   });
 
-  // A read-only board withholds onContextMenu entirely (rather than passing a no-op), so a
-  // card offers no app menu — but it must not also swallow the browser's own (open in new
-  // tab, copy link) by preventing default with nothing to show in its place.
   it("leaves the browser's own menu alone when no handler is given", async () => {
     const card = renderCard();
     const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });

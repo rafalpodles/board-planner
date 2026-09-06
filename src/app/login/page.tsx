@@ -15,27 +15,18 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [isRegister, setIsRegister] = useState(false);
-  // null until the server answers. Hidden while unknown and hidden on a failure: offering to
-  // create the first administrator on an instance that already has one is the bug (BP-268), and
-  // the sign-in form below works either way.
   const [unclaimed, setUnclaimed] = useState<boolean | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
   const router = useRouter();
 
-  // Asked of the server rather than guessed. This decides what is offered, not what is allowed:
-  // POST /api/users counts the users itself and refuses a second bootstrap whatever this says, so
-  // re-opening the form from the DOM buys nothing.
   useEffect(() => {
     let live = true;
     fetch("/api/auth/instance")
       .then((res) => (res.ok ? res.json() : { unclaimed: false }))
       .then((data) => live && setUnclaimed(data.unclaimed === true))
       .catch((err) => {
-        // Says why rather than failing silently: on a fresh instance whose database is flapping,
-        // the operator otherwise gets a sign-in page with no way to create the first account and
-        // no explanation. A reload retries it.
         console.warn("could not ask whether this instance has been claimed", err);
         if (live) setUnclaimed(false);
       });
@@ -51,7 +42,6 @@ export default function LoginPage() {
 
     try {
       if (isRegister) {
-        // Bootstrap first user
         const res = await fetch("/api/users", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -124,7 +114,6 @@ export default function LoginPage() {
           </Button>
         </form>
 
-        {/* Only when signing in: it answers nothing on a form that is creating an account */}
         {!isRegister && (
           <p className="mt-4 text-center text-sm">
             <Link href="/forgot" className="text-text-muted underline hover:text-text">

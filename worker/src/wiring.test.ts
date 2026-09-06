@@ -20,9 +20,6 @@ interface RemoteCall {
   env: NodeJS.ProcessEnv;
 }
 
-// GIT_CONFIG_COUNT/KEY_n/VALUE_n is how hardenedGitConfig carries config in the environment. Read
-// back the way git reads it, so the assertion is about the configuration that reaches git and not
-// about the spelling of a variable name.
 function gitConfigPairs(env: NodeJS.ProcessEnv): [string, string][] {
   const count = Number(env.GIT_CONFIG_COUNT ?? 0);
   const pairs: [string, string][] = [];
@@ -63,8 +60,6 @@ function fakeHeartbeat(bindingErrors: string[] = []): Heartbeat {
   };
 }
 
-// Everything the wiring reaches for, replaced. No process ever spawns, no socket ever binds and no
-// request ever leaves — what is under test is which component each seam was joined to.
 function harness(overrides: Partial<WorkerDeps> = {}) {
   const heartbeat = fakeHeartbeat();
   const local: LocalServer = { ready: Promise.resolve(), close: vi.fn().mockResolvedValue(undefined) };
@@ -115,17 +110,12 @@ function harness(overrides: Partial<WorkerDeps> = {}) {
 }
 
 describe("the local socket's place in the wiring", () => {
-  // The two server channels deliver the same standing command, so they must share the guard that
-  // tells a redelivery from a fresh instruction.
   it("gives both server channels the one guarded dispatcher", () => {
     const { seen } = harness();
 
     expect(seen.heartbeat?.handlers).toBe(seen.control?.handlers);
   });
 
-  // The socket still goes through commands.ts — a socket handed loop.pause() would skip the
-  // acknowledgement — but by the local entry point. Handing it the server's record would order this
-  // laptop's clock against the server's, and a fast laptop would drop a board-issued stop.
   it("keeps the socket out of the guard the server's clock writes to", () => {
     const { seen } = harness();
 
@@ -172,9 +162,6 @@ describe("the worker's lifecycle", () => {
     expect(local.close).toHaveBeenCalledTimes(1);
   });
 
-  // Since children run in their own session, a terminal Ctrl-C reaches only the worker. Without an
-  // abort, shutdown is a flag checked between tasks — so stopping could mean waiting out the whole
-  // task timeout with the agent still working.
   it("keeps claiming when the socket cannot be opened at all", async () => {
     const { worker, logError } = harness({
       startLocalServer: () => ({
@@ -191,9 +178,6 @@ describe("the worker's lifecycle", () => {
   });
 });
 
-// Nothing below is mocked between the agent's stdout and the two sinks. Everything part B built is
-// inert until this join exists, and in part A every whole-branch defect lived in exactly this kind
-// of seam: a producer in one task, a consumer in another, and no test that ran both at once.
 describe("telemetry, from the agent's stdout to the two sinks", () => {
   const REPO = "/repos/demo";
   const REMOTE = "git@github.com:owner/repo.git";
@@ -211,8 +195,6 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     acceptanceCriteria: [],
     attempts: 1,
     runId: SERVER_RUN_ID,
-    // The default agent, as the server resolves it: today's pipeline, one entry per stage. The
-    // blocks name no model, so the project's policy is still what these tests are reading.
     agent: {
       agentId: "a1",
       name: "Default",
@@ -230,7 +212,6 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     },
   };
 
-  // The task the worker moves on to, so a refusal that settles late has a live run to endanger
   const NEXT_TASK: ClaimedTask = { ...CLAIMED, taskId: "t2", taskKey: "CP-10", taskNumber: 10 };
 
   const RESULT_PAYLOAD = {
@@ -241,8 +222,6 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     blockedReason: "",
   };
 
-  // Shaped like the captured fixture: an init event that summarises to nothing, one tool call whose
-  // input carries a secret, and the final result.
   const AGENT_STREAM = `${[
     { type: "system", subtype: "init" },
     {
@@ -271,7 +250,6 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     .map((event) => JSON.stringify(event))
     .join("\n")}\n`;
 
-  // 17 bytes: small enough that every line is cut, and a tick apart, the way a real pipe flushes
   function pipeFlushes(text: string): string[] {
     const parts: string[] = [];
     for (let index = 0; index < text.length; index += 17) parts.push(text.slice(index, index + 17));
@@ -287,8 +265,6 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     return {
       async run(command, args, opts) {
         everyCall.push([command, ...args]);
-        // everyCall keeps argv only, and the base lookup's hardening lives entirely in its
-        // environment — workspace.ts composes those two calls' env instead of their args.
         if (command === "git" && (args[0] === "ls-remote" || args[0] === "fetch")) {
           remoteCalls.push({ args, env: opts.env ?? {} });
         }
@@ -301,18 +277,12 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
           }
           return { code: 0, stdout: AGENT_STREAM, stderr: "", timedOut: false };
         }
-        // The base is resolved off the wire now, so ls-remote has to answer with the ref it was
-        // asked for; whether the *right* ref is picked out is gate-integrity's subject, on real git
         if (args[0] === "ls-remote") {
           return { code: 0, stdout: `${BASE_SHA}\t${args[args.length - 1]}\n`, stderr: "", timedOut: false };
         }
-        // workspace.ts verifies the fetched sha with `rev-parse --verify <sha>^{commit}` before
-        // trusting it as the base; collectDiff then refuses anything that is not an object id, so
-        // this has to answer with one rather than the content-free "" every other call gets
         if (args.includes("--verify")) {
           return { code: 0, stdout: `${BASE_SHA}\n`, stderr: "", timedOut: false };
         }
-        // bindRepository insists the path is its own toplevel; every other git call is content-free
         return {
           code: 0,
           stdout: args.includes("rev-parse") ? REPO : args.includes("get-url") ? REMOTE : "",
@@ -323,11 +293,6 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     };
   }
 
-  // One full pass of the real loop: register, refresh, bind, claim, run, and stop. The diff comes
-  // back empty, so the run ends where most real ones do — rejected at a gate, not merged.
-  // postEvent is deliberately a plain function, never a vi.fn: a spy attaches its own handler to
-  // whatever it returns, which quietly settles a rejection the source left unhandled — and that is
-  // exactly the failure this suite has to be able to see.
   async function runOneTask(
     postEvent: ApiClient["postEvent"] = async () => ({ applied: true }),
     policy?: Record<string, unknown>,
@@ -335,12 +300,8 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       assignmentRemote?: string;
       extraAssignmentFields?: Record<string, unknown>;
       readFile?: (path: string) => string | null;
-      // Written into the run's own state directory before the worker starts, the way an operator's
-      // choices already sit there — repos.json, worker.json, and now the pinned GitHub account
       stateFiles?: Record<string, string>;
-      // Claimed in order, one per pass of the loop, then the queue runs dry
       tasks?: ClaimedTask[];
-      // The board refusing every claim outright, in the server's words (BP-512)
       claimRefusal?: string;
       onAgentStart?: (nth: number) => void;
     } = {}
@@ -389,7 +350,6 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       env: { ...ENV, CP_STATE_DIR: stateDir },
       runner: streamingRunner(claudeCalls, opts.onAgentStart, everyCall, remoteCalls),
       hostname: () => "host-1",
-      // the loop only sleeps once it has nothing left to claim, which is one pass after the run
       sleep: async () => stop(),
       log: vi.fn(),
       logError,
@@ -400,8 +360,6 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         ok: true,
         status: 200,
         json: async () => ({
-          // What this machine could set up but has not — read only by the socket, never by the
-          // claim loop
           offers: [
             {
               project: "p2",
@@ -410,8 +368,6 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
               repositoryUrl: "https://github.com/owner/sandbox",
             },
           ],
-          // Work policy travels with the assignment now: it describes the project, so two projects
-          // on one machine can resolve differently.
           assignments: [
             {
               project: "p1",
@@ -425,10 +381,6 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       createStore: (path) => memoryStore(path.endsWith("worker.json") ? IDENTITY : ""),
       createApi: () => api as unknown as ApiClient,
       createTelemetry: () => telemetry,
-      // A checkout with what the gates need, unless a test says otherwise. Left to the real
-      // filesystem this described a repository with no lockfile and no scripts — which since
-      // BP-379 is one the worker declines to claim from, so every run test would be asserting
-      // against a machine that correctly refuses to work.
       readFile:
         opts.readFile ??
         ((path: string) =>
@@ -436,8 +388,6 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
             ? "{}"
             : path.endsWith("package.json")
               ? JSON.stringify({ scripts: { build: "tsc", test: "vitest" } })
-              // Everything else still comes off the real filesystem, which is how the state
-              // directory written by `stateFiles` reaches the worker.
               : existsSync(path)
                 ? readFileSync(path, "utf8")
                 : null),
@@ -477,9 +427,6 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     };
   }
 
-  // Children run in their own session since the process-group change, so a terminal Ctrl-C reaches
-  // only the worker. loop.stop() alone is a flag checked between tasks, which would mean waiting out
-  // a run that can last the full task timeout with the agent still working.
   it("aborts the run in flight when the worker is asked to shut down", async () => {
     const stateDir = mkdtempSync(join(tmpdir(), "cp-shutdown-"));
     writeFileSync(join(stateDir, "repos.json"), JSON.stringify({ repos: [REPO] }), { mode: 0o600 });
@@ -492,8 +439,6 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       async run(command, args, opts) {
         if (command === "claude") {
           shutdown();
-          // shutdown aborts synchronously, so the signal is already aborted by the time we look —
-          // registering a listener first and only then calling shutdown would wait forever
           if (!opts.signal?.aborted) {
             await new Promise<void>((resolve) => opts.signal?.addEventListener("abort", () => resolve()));
           }
@@ -511,8 +456,6 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       env: { ...ENV, CP_STATE_DIR: stateDir },
       runner: hangingRunner,
       hostname: () => "host-1",
-      // reaching this at all means the abort did not end the run — without it the loop spins with
-      // nothing to claim and never yields, which starves even the test timeout
       sleep: async () => {
         reachedSleep = true;
         worker.shutdown();
@@ -522,8 +465,6 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       uid: 501,
       realpath: (path) => path,
       stat: () => ({ uid: 501, mode: 0o40700 }),
-      // A checkout the gates would accept: since BP-379 the loop declines to claim from one that
-      // fails checkRepo, and this test is about aborting a run, not about refusing to start one.
       readFile: (path: string) =>
         path.endsWith("package-lock.json")
           ? "{}"
@@ -562,16 +503,6 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     expect(reachedSleep).toBe(false);
   });
 
-  // runTask signals "machine-fault" when the base branch cannot be resolved — the loop is meant to
-  // read that off the seam this worker wires them together through and end the pass without
-  // sleeping. A wiring bug that drops the disposition (`execute` declared Promise<void> and the
-  // pipeline's return value never handed back) type-checks silently, because Promise<void> is
-  // assignable to Promise<void | "machine-fault">, and produces a hot loop instead: the worker
-  // claims again immediately with no poll interval on an unreachable remote.
-  // ls-remote is where resolveFreshBase reads the base branch off the wire; failing it is what
-  // turns workspace.create's failure into a transport-kind BaseUnavailableError, i.e. a machine
-  // fault. Every other call is the content-free catch-all the rest of this file's runners use to
-  // satisfy bindRepository/checkRepo.
   const unreachableRemote: Runner = {
     async run(_command, args) {
       if (args[0] === "ls-remote") {
@@ -650,19 +581,10 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
   it("stops claiming for the cycle, without sleeping mid-pass, when the base branch cannot be resolved", async () => {
     const { counts } = await runAgainstUnreachableRemote({ passes: 1 });
 
-    // A propagated machine-fault ends the pass on the very claim that hit it: one claim, then
-    // sleep. The bug this guards claims a fault as ordinary work instead, so the loop skips the
-    // sleep and claims again immediately — it would only give up once the queue itself ran dry,
-    // claiming a second time (and finding nothing left) before ever sleeping.
     expect(counts.claims).toBe(1);
     expect(counts.sleeps).toBe(1);
   });
 
-  // Three passes over the same unresolvable base, which is what a laptop that lost its wifi does
-  // all night. The reporter dedupes a repeated release comment, but it is built per run, so the
-  // memory behind that dedupe has to be wired somewhere that outlives one — otherwise every poll
-  // writes the card another identical comment and fires another webhook, Slack message and
-  // notification with it: ~120 an hour at the default interval.
   it("comments once about a base it cannot resolve, however many passes hit the same fault", async () => {
     const { api, counts } = await runAgainstUnreachableRemote({ passes: 3, endlessQueue: true });
 
@@ -672,10 +594,6 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     expect(api.comment.mock.calls[0][2]).toMatch(/Returned to the queue: .*could not resolve base branch main/s);
   });
 
-  // The whole run, as the board would see it: the three stage boundaries it got past, the three
-  // events its own agent produced, and the three gates it reached before the empty diff was
-  // rejected. Nothing is dropped here because every emission is separated by at least one await,
-  // which is all dropWhenBusy's single in-flight slot needs to clear.
   it("carries a pipeline stage boundary to the server", async () => {
     const { api, phases } = await runOneTask();
 
@@ -683,21 +601,15 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     expect(phases).toEqual([
       "claiming",
       "worktree",
-      // the block the run is on, then the three events its own agent produced under it
       "step:implement",
       "agent",
       "agent",
-      // protected-paths first: it is what decides whether the agent was allowed to write the files
-      // the build and test gates would go on to execute
       "gates:protected-paths",
       "gates:diff-size",
       "gates:test-presence",
     ]);
   });
 
-  // An outcome is durable and reaches the board through reporter.ts and its outbox. Letting one
-  // onto this feed posts `phase: undefined` against a live run — the shape the phase field is
-  // matched on — and spends the single in-flight slot the next real phase needs.
   it("keeps outcomes off the server's phase feed, which carries stages only", async () => {
     const { posted } = await runOneTask();
 
@@ -706,22 +618,16 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     expect(posted.map((event) => event.phase)).not.toContain(undefined);
   });
 
-  // The pipeline names "agent" exactly once, at the stage boundary. Every further one was produced
-  // by parsing the agent's stdout mid-run, so more than one is proof the stream reached the server.
   it("carries an event off the agent's own stream to the server", async () => {
     const { phases, telemetry } = await runOneTask();
 
     expect(phases.filter((phase) => phase === "agent").length).toBeGreaterThan(1);
-    // and it really is the stream: only a parsed tool_use can produce a tool
     expect(telemetry.recent()).toContainEqual({
       phase: "agent",
       tool: { name: "Edit", target: "src/a.ts" },
     });
   });
 
-  // The whole path in one pass — the server's own policy JSON, through applyPolicy and configFor,
-  // into the argv of the process that does the work. This is the join no unit test can see: config
-  // knows the policy, executor knows the flag, and until now nothing carried one to the other.
   it("runs the agent on the model the server's policy names", async () => {
     const { claudeArgs } = await runOneTask(undefined, {
       model: "haiku",
@@ -732,9 +638,6 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     expect(claudeArgs[claudeArgs.indexOf("--fallback-model") + 1]).toBe("opus");
   });
 
-  // BP-373. `gh auth switch` is global machine state any terminal can flip, so the identity a run
-  // pushes as has to be resolved by name at the start of that run rather than left to whichever
-  // account gh happens to have active when delivery reaches the remote.
   it("resolves the pinned github account's token by name before the run", async () => {
     const { everyCall } = await runOneTask(undefined, undefined, {
       stateFiles: { "github.json": JSON.stringify({ account: "rafalpodles" }) },
@@ -749,35 +652,21 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     ]);
   });
 
-  // The seam gate-integrity.integration.test.ts cannot reach: that test mirrors what this call site
-  // composes rather than calling it, so a createWorkspace(...) that stopped passing
-  // remoteFetchEnv(...) would leave it green. The lookup's `git fetch` runs inside the checkout,
-  // whose config a previous run's agent can write, and an `[url "ext::<program> %S"] insteadOf =
-  // <the pinned URL>` there runs that program holding GH_TOKEN, GITHUB_TOKEN and SSH_AUTH_SOCK —
-  // measured. protocol.ext.allow=never is what refuses it, and nothing but hardenedGitConfig() puts
-  // it in this environment; a plain { GH_TOKEN, GITHUB_TOKEN } would authenticate just as well and
-  // carry none of it.
   it("gives the base lookup the hardened git environment, not merely a token", async () => {
     const { remoteCalls } = await runOneTask();
 
-    // Both halves of the lookup, and named rather than counted: an empty list would satisfy every
-    // assertion below it.
     expect(remoteCalls.map((call) => call.args[0])).toEqual(["ls-remote", "fetch"]);
     for (const call of remoteCalls) {
       expect(gitConfigPairs(call.env)).toContainEqual(["protocol.ext.allow", "never"]);
     }
   });
 
-  // Opt-in. Asking gh for "the token" with nothing pinned would hand back the active account's,
-  // which is the very thing being pinned away from.
   it("asks gh for no token at all when no account is pinned", async () => {
     const { everyCall } = await runOneTask();
 
     expect(everyCall.filter((call) => call.includes("token"))).toEqual([]);
   });
 
-  // A pin the keyring cannot answer for must not take the run down with it: delivery falls back to
-  // gh's own resolution, and the reason is on the operator's log rather than inside a 403 later.
   it("says so and carries on when the pinned account has no token to give", async () => {
     const { logError } = await runOneTask(undefined, undefined, {
       stateFiles: { "github.json": JSON.stringify({ account: "logged-out-account" }) },
@@ -788,11 +677,6 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     );
   });
 
-  // Same join as the model test below, one surface further on: the server's policy has to reach the
-  // socket the operator's own cockpit reads, or the app shows defaults while the run uses something
-  // else. config knows the policy and local-server serves it; nothing carried one to the other.
-  // Reporting one "model" would show an operator a value no run is using once two projects on one
-  // machine resolve differently, so the socket reports each bound project instead.
   it("serves each project's own resolved policy on the socket, not the startup defaults", async () => {
     const { localConfig } = await runOneTask(undefined, {
       model: "haiku",
@@ -804,8 +688,6 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       apiUrl: "https://app.example.com",
       workerName: "worker-1",
       projectCount: 1,
-      // Asserted against the producer, not only against a fixture: local-server serves this object
-      // untransformed, so nothing else would notice the field being dropped or renamed here
       pollIntervalMs: 30_000,
     });
     expect(localConfig?.().projects).toEqual([
@@ -818,8 +700,6 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     ]);
   });
 
-  // BP-375. The app can only offer to set up a project it has heard of, and assignments carry only
-  // the ones already working — so the socket has to carry the other half.
   it("serves the projects it could set up but has no checkout of", async () => {
     const { localConfig } = await runOneTask();
 
@@ -833,8 +713,6 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     ]);
   });
 
-  // The cockpit's Connection tab answers "which account did that push act as" from this, so it has
-  // to be the live pin rather than the value preflight read when the process started.
   it("serves the pinned github account on the socket, and never a token", async () => {
     const { localConfig } = await runOneTask(undefined, undefined, {
       stateFiles: { "github.json": JSON.stringify({ account: "rafalpodles" }) },
@@ -896,9 +774,6 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     expect(posted.length).toBe(afterTheRun);
   });
 
-  // emit() is called synchronously from inside a pipeline stage, so a rejection nobody handles is
-  // an unhandledRejection, and Node's default action for one is to end the process. Asserted on the
-  // process, because the run finishes either way and only the missing rejection tells them apart.
   it("leaves no unhandled rejection when the server refuses every event", async () => {
     const unhandled: unknown[] = [];
     const record = (reason: unknown): void => {
@@ -911,7 +786,6 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     let run;
     try {
       run = await runOneTask(refusing);
-      // unhandledRejection is reported at the end of a turn, so give it one
       await new Promise((resolve) => setTimeout(resolve, 50));
     } finally {
       process.off("unhandledRejection", record);
@@ -919,32 +793,22 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
 
     expect(unhandled).toEqual([]);
     expect(run.posted.length).toBeGreaterThan(0);
-    // and the run still reached the board with its verdict
     expect(run.api.setStatus).toHaveBeenCalledWith("p1", "t1", "in_review");
   });
 
-  // A task can be taken from a running worker: changeStatus refuses while a run holds it, but a
-  // person can override with force, and the server then clears the run from the task. Every phase
-  // post after that comes back applied:false — the only sign the worker gets that the rest of this
-  // run is tokens spent on work whose result will be refused.
   describe("a task taken from the run that holds it", () => {
     it("stops the run when the server says it no longer holds the task", async () => {
       const run = await runOneTask(async (event) => ({ applied: event.phase !== "agent" }));
 
-      // released, not gate-rejected: the run ended where the refusal arrived
       expect(run.api.release).toHaveBeenCalledWith("p1", "t1");
       expect(run.api.setStatus).not.toHaveBeenCalledWith("p1", "t1", "in_review");
       expect(run.phases.some((phase) => phase.startsWith("gates:"))).toBe(false);
-      // said once, not once per phase still in flight while the run unwinds
       const lost = run.logError.mock.calls.filter(([message]) =>
         message.includes("no longer has run")
       );
       expect(lost).toHaveLength(1);
     });
 
-    // The server answers applied:false for an overtaken event too, and a post that settles after
-    // its own run has ended is indistinguishable from one. Ending the run in flight on it would
-    // kill the next task's run — real work, for a refusal that concerns the previous one.
     it("leaves the run in flight alone when the refusal belongs to the run before it", async () => {
       let deliverLate = (): void => {};
       const late = new Promise<{ applied: boolean }>((resolve) => {
@@ -957,7 +821,6 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         undefined,
         {
           tasks: [CLAIMED, NEXT_TASK],
-          // the first task's refusal lands while the second task's run is the one in flight
           onAgentStart: (nth) => {
             if (nth === 2) deliverLate();
           },
@@ -979,7 +842,6 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         event.phase === "agent" ? late : { applied: true }
       );
 
-      // the loop has stopped by now, so there is no run for a refusal to be about
       deliverLate();
       await new Promise((resolve) => setImmediate(resolve));
 
@@ -988,8 +850,6 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     });
   });
 
-  // The invariant the whole change exists to protect, and the one that had no test: an assignment
-  // naming a remote this machine does not have must bind nothing and say why.
   describe("the server can never name a directory here", () => {
     it("binds nothing and reports the reason when the remote is not on this machine", async () => {
       const run = await runOneTask(undefined, undefined, {
@@ -1000,9 +860,6 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       expect(run.bindingErrors.join(" ")).toMatch(/no checkout of git@github\.com:someone\/else\.git/);
     });
 
-    // The gates run `npm ci` and `npm run build` unconditionally, so a repository without a
-    // lockfile or without those scripts fails every task forever. It can only be checked once a
-    // repository is bound, so the report has to pick it up on rebind rather than at startup.
     it("adds the bound repository's own shortcomings to the report", async () => {
       const run = await runOneTask(undefined, undefined, {
         readFile: (path) =>
@@ -1017,9 +874,6 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       expect(report?.checks.find((c) => c.name === "package-lock.json")?.detail).toContain(REPO);
     });
 
-    // BP-379. Found by running it: MP-75 was claimed from a repository with no lockfile and no
-    // test script, an agent worked for sixteen minutes, and the run died at a gate whose reason
-    // checkRepo had already reported at binding time.
     it("does not claim from a repository its own checks already failed", async () => {
       const run = await runOneTask(undefined, undefined, {
         readFile: (path) =>
@@ -1042,8 +896,6 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       expect(run.logError).toHaveBeenCalledWith(expect.stringContaining("package-lock.json"));
     });
 
-    // "Why is this machine sitting on a project and doing nothing" has to be answerable from the
-    // cockpit, not only from a log line that scrolled past.
     it("says on the socket why the project is not being worked on", async () => {
       const run = await runOneTask(undefined, undefined, {
         readFile: (path) =>
@@ -1065,8 +917,6 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       expect(run.localConfig?.().projects[0].blocked).toBe("");
     });
 
-    // The other answer to the same question (BP-512): a checkout that is fine, on a board that
-    // refuses to claim at all. The cockpit has to show the board's reason in the same place.
     it("says on the socket why the board itself refused the claim", async () => {
       const run = await runOneTask(undefined, undefined, {
         claimRefusal: "This board has no column meaning In progress, so nothing moves.",
@@ -1094,7 +944,6 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       expect(report?.checks.filter((c) => repoNames.includes(c.name) && !c.ok)).toEqual([]);
     });
 
-    // A server that sends a path alongside the remote must not get one used
     it("ignores a path the server sends alongside the remote", async () => {
       const run = await runOneTask(undefined, undefined, {
         extraAssignmentFields: { proposedPath: "/etc", path: "/etc" },
@@ -1105,9 +954,6 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
   });
 });
 
-// The check is only worth having if what it resolves actually reaches the child. Resolving
-// `claude` through a login shell and then spawning a child whose PATH cannot see it is the exact
-// failure mode this task exists to close: preflight green, every task failing.
 describe("preflight's place in the wiring", () => {
   const RESOLVED = {
     git: "/opt/homebrew/bin/git",

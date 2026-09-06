@@ -20,7 +20,6 @@ private func scratch() throws -> String {
     #expect(try file.read() == ["/Users/rpo/code/a", "/Users/rpo/code/b"])
 }
 
-// repos.ts reads {"repos": [...]}; any other shape means every binding is silently refused.
 @Test func writesTheExactJsonShapeReposTsExpects() throws {
     let path = try scratch()
     try ReposFile(path: path).write(["/tmp/x"])

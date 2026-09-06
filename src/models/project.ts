@@ -33,9 +33,6 @@ const customFieldSchema = new Schema(
   {
     name: { type: String, required: true, trim: true },
     fieldType: { type: String, enum: CUSTOM_FIELD_TYPES, required: true },
-    // Mixed, not a subdocument schema: options stored before CP-211 are plain
-    // strings, and casting them to the new shape silently discards them. Shape is
-    // enforced in lib/custom-fields.ts, which also converts the legacy form.
     options: { type: [Schema.Types.Mixed], default: [] },
     required: { type: Boolean, default: false },
     order: { type: Number, default: 0 },
@@ -60,9 +57,6 @@ const projectSchema = new Schema<IProject>(
       uppercase: true,
       trim: true,
     },
-    // Every key this project has answered to. A task key is built from the current one, so
-    // renaming it renames all of them at once — while the branches and pull requests that
-    // already exist keep the old prefix forever. Matching those needs the old key kept.
     formerKeys: {
       type: [String],
       default: [],
@@ -94,8 +88,6 @@ const projectSchema = new Schema<IProject>(
       type: [customFieldSchema],
       default: [],
     },
-    // Which custom field's numeric value sums as this project's estimate; "" means it
-    // doesn't. Kept in sync by the custom-fields route when that field is archived or deleted.
     estimateFieldId: {
       type: String,
       default: "",
@@ -105,10 +97,6 @@ const projectSchema = new Schema<IProject>(
         url: { type: String, required: true, trim: true },
         events: { type: [{ type: String, enum: WEBHOOK_EVENTS }], default: WEBHOOK_EVENTS },
         enabled: { type: Boolean, default: true },
-        // Single-shot delivery, deliberately (BP-407) — the same fire-and-forget choice the
-        // activity log and dispatchNotifications already make, so the outcome of the one attempt
-        // has to be visible somewhere rather than retried. No default on lastStatus/lastError:
-        // absent means never attempted, which reads correctly as blank rather than as "ok".
         lastAttemptAt: { type: Date, default: null },
         lastStatus: { type: String, enum: ["ok", "failed"] },
         lastError: { type: String, default: "" },
@@ -127,12 +115,10 @@ const projectSchema = new Schema<IProject>(
     },
     pm: {
       enabled: { type: Boolean, default: false },
-      // Instance-admin kill switch: overrides `enabled` and cannot be cleared from project settings
       lockedByInstance: { type: Boolean, default: false },
       model: { type: String, default: "" },
       contextNotes: { type: String, default: "" },
       dailyTurnCap: { type: Number, default: 0 },
-      // 0 is no ceiling, and is the default on purpose — see resolveDailyTokenCap (BP-284)
       dailyTokenCap: { type: Number, default: 0 },
       autonomy: {
         dailyReview: { type: Boolean, default: false },
@@ -180,9 +166,6 @@ const projectSchema = new Schema<IProject>(
         default: [],
       },
     },
-    // Whether workers may run this project, and how. The repository path is deliberately absent:
-    // a worker reports the checkouts it has and matches this project by its remote, so the server
-    // never names a directory on someone else's machine.
     worker: {
       enabled: { type: Boolean, default: false },
       policy: {
@@ -196,21 +179,14 @@ const projectSchema = new Schema<IProject>(
         fallbackModel: { type: String, default: "sonnet" },
         reviewModel: { type: String, default: "opus" },
       },
-      // A plain field, not a policy one, and since BP-358 not a fallback either: an agent travels
-      // on the claim response resolved from the TASK, and this is only the one the task picker
-      // offers first. A task naming no agent is one a person is doing.
       agent: { type: Schema.Types.ObjectId, ref: "Agent", default: null },
       policyOverrides: { type: [String], default: [] },
     },
-    // The one place a project names its repository, whoever hosts it. The provider is derived from
-    // the host — see src/lib/repository.ts.
     repositoryUrl: {
       type: String,
       default: "",
       trim: true,
     },
-    // Superseded by repositoryUrl and no longer read or written by the app; kept so the migration
-    // is reversible until scripts/migrate-repository-url.ts has run everywhere.
     githubRepo: {
       type: String,
       default: "",
@@ -257,7 +233,6 @@ const projectSchema = new Schema<IProject>(
       type: Number,
       default: 0,
     },
-    // Sparse ordering: reordering rewrites only the projects that moved
     sortOrder: {
       type: Number,
       default: 0,

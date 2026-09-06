@@ -56,8 +56,6 @@ export function TaskFieldsSection({
   patchProject,
   stats,
 }: SectionProps) {
-  // Deleting a category, field or template is admin-only on the server; offering the
-  // control to a member stages a removal that only fails when the save runs
   const canDelete = !!project.canAdmin;
   const api = useApi();
   const { toast } = useToast();
@@ -67,7 +65,6 @@ export function TaskFieldsSection({
   );
   const [creatingEstimateField, setCreatingEstimateField] = useState(false);
 
-  // Explicit, because a row added here has no _id until it is saved
   const categories = useDraft<{ categories: CategoryDraft[] }>({
     categories: (project.categories || []).map((c) => ({
       _id: c._id,
@@ -75,7 +72,6 @@ export function TaskFieldsSection({
       color: c.color,
     })),
   });
-  // "new" opens the create form; a field id opens the same form over that field
   const [fieldForm, setFieldForm] = useState<"new" | string | null>(null);
   const templates = useDraft<{ templates: ApiTaskTemplate[] }>({
     templates: project.taskTemplates || [],
@@ -101,8 +97,6 @@ export function TaskFieldsSection({
         );
         let saved = project.categories || [];
         try {
-          // Renames first: a name freed by a rename may be the one an added row wants,
-          // and a removal checks the tasks still holding the old name
           for (const change of diff.changed) {
             saved = await api.patch(
               `/api/projects/${projectId}/categories`,
@@ -120,10 +114,6 @@ export function TaskFieldsSection({
               name,
             });
           }
-          // commit, not rebase: on success the server's answer is the whole truth, and the
-          // rows it just created carry ids the draft has never seen. Moving the baseline
-          // alone would leave those as a difference, so the save bar would never close and
-          // the next Save would re-issue a diff that had already been applied.
           patchProject({ categories: saved });
           categories.commit({
             categories: saved.map((c) => ({
@@ -135,8 +125,6 @@ export function TaskFieldsSection({
           toast("Categories saved", "success");
         } catch (err) {
           fail(err, "Failed to save categories");
-          // Whatever landed before the failure is real, so the baseline moves — but the
-          // edits that did not land stay on screen rather than being thrown away
           patchProject({ categories: saved });
           categories.rebase({
             categories: saved.map((c) => ({
@@ -167,8 +155,6 @@ export function TaskFieldsSection({
         let saved = project.taskTemplates || [];
         try {
           for (const row of diff.added) {
-            // Same reason as the changed path: a name this draft remembers may have been
-            // renamed by the categories group in this very save
             const { category, ...rest } = row;
             const live = categories.value.categories.some((c) => c.name === category);
             saved = await api.post(`/api/projects/${projectId}/templates`, {
@@ -177,10 +163,6 @@ export function TaskFieldsSection({
             });
           }
           for (const row of diff.changed) {
-            // Categories may have been renamed by their own group in this same save, so a
-            // name this draft still remembers can already be gone
-            // The categories group may be saving renames in this same pass and `project` has
-            // not caught up, so its own draft is where the new names are
             const live = categories.value.categories.some(
               (c) => c.name === row.category,
             );
@@ -209,8 +191,6 @@ export function TaskFieldsSection({
     },
   );
 
-  // Throws rather than toasting: the form stays open on failure and shows the reason
-  // beside the field, instead of closing and dropping what was typed
   async function addCustomField(draft: FieldDraft) {
     const customFields: ApiCustomField[] = await api.post(
       `/api/projects/${projectId}/custom-fields`,
@@ -324,8 +304,6 @@ export function TaskFieldsSection({
           }
           renderRow={(cat, i) => (
             <>
-              {/* Input renders a w-full wrapper, so it needs a sized box or it pushes
-                  everything after it onto the next line */}
               <div className="min-w-0 flex-1 sm:w-[240px] sm:flex-none sm:shrink-0">
                 <Input
                   value={cat.name}
@@ -546,9 +524,6 @@ export function TaskFieldsSection({
                       <label className="mb-1 block text-sm font-medium text-text-muted">
                         Category
                       </label>
-                      {/* The draft, not the project: a rename staged in the categories
-                          group above has not reached `project` yet, and the save sends
-                          whatever this picker holds */}
                       <Combobox
                         label="Template category"
                         value={tpl.category}

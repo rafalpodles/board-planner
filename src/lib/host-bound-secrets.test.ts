@@ -17,9 +17,6 @@ function labels(updates: Record<string, unknown>, before = stored) {
   return tokensInvalidatedByHostChange(updates, before).map((p) => p.label);
 }
 
-// BP-315: the token is unreadable through the API, but the host it is sent to was an ordinary
-// editable field — so repointing the host and triggering a sync delivered the cleartext
-// credential to an address of the caller's choosing.
 describe("tokensInvalidatedByHostChange", () => {
   it("invalidates the token when its host moves", () => {
     expect(labels({ gitlabHost: "https://collector.attacker.example" })).toEqual(["GitLab"]);
@@ -44,7 +41,6 @@ describe("tokensInvalidatedByHostChange", () => {
     expect(labels({ gitlabHost: "https://gitlab.example.com" })).toEqual([]);
   });
 
-  // Cosmetic differences are not a move, or every ordinary save would clear the token
   it.each([
     "https://gitlab.example.com/",
     "https://GitLab.Example.com",
@@ -53,8 +49,6 @@ describe("tokensInvalidatedByHostChange", () => {
     expect(labels({ gitlabHost: host })).toEqual([]);
   });
 
-  // The stored value is a base URL that both callers append to verbatim, so a self-hosted instance
-  // moved from /gitlab to /apps/x is a new destination for the PAT — not the same host (review)
   it("treats a path change on the same origin as a move", () => {
     expect(labels({ gitlabHost: "https://gitlab.example.com/subpath" })).toEqual(["GitLab"]);
   });
@@ -79,9 +73,6 @@ describe("tokensInvalidatedByHostChange", () => {
     ]);
   });
 
-  // The route reads `before` with .lean(), which does not apply the schema default, while the form
-  // posts that default on every save. Comparing the two literally threw away a working token on a
-  // save that never touched the host (BP-315 review).
   it.each([
     ["absent", undefined],
     ["empty", ""],
@@ -104,8 +95,6 @@ describe("tokensInvalidatedByHostChange", () => {
   });
 });
 
-// The warning the settings form shows before the save, which used to answer a different question
-// from the rule it warns about — in both directions, and with no test at all
 describe("clearsStoredToken", () => {
   const GL = "https://gitlab.com";
 
@@ -128,8 +117,6 @@ describe("clearsStoredToken", () => {
     expect(clearsStoredToken("https://gitlab.acme.com", GL, "glpat-fresh", GL)).toBe(false);
   });
 
-  // The save posts the token only when it is non-empty after trimming, so whitespace is no token —
-  // and reading the box untrimmed silenced the warning on exactly the edit that clears it
   it("does not count whitespace as a replacement token", () => {
     expect(clearsStoredToken("https://gitlab.acme.com", GL, "   ", GL)).toBe(true);
   });
@@ -142,7 +129,6 @@ describe("clearsStoredToken", () => {
 });
 
 describe("sameEndpoint", () => {
-  // Two MCP servers on one origin are two servers, so unlike sameOrigin the path counts
   it("distinguishes paths on the same origin", () => {
     expect(sameEndpoint("https://a.example/mcp", "https://a.example/other")).toBe(false);
     expect(sameEndpoint("https://a.example/mcp", "https://a.example/mcp")).toBe(true);
@@ -170,8 +156,6 @@ describe("sameOrigin", () => {
     expect(sameOrigin("https://a.example", "https://b.example")).toBe(false);
   });
 
-  // Two values that cannot be parsed are only the same host if they are the same string —
-  // returning true for both would make every unparseable host look unchanged
   it("compares unparseable values as opaque strings", () => {
     expect(sameOrigin("not a url", "not a url")).toBe(true);
     expect(sameOrigin("not a url", "also not a url")).toBe(false);

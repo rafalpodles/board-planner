@@ -1,16 +1,10 @@
 import { ApiClient } from "./api.js";
 import { RunRecord } from "./run-record.js";
 
-// A report that cannot be delivered is worse than a failed run: the merge already happened, so
-// the task sits in the active column where claimNextTask can never pick it up again. Merging to
-// main also redeploys the app, which makes the report right after a merge the one most likely to
-// fail — so it has to survive the process, not just the request.
 export type OutboxOp =
   | { kind: "comment"; projectId: string; taskId: string; body: string }
   | { kind: "status"; projectId: string; taskId: string; status: string }
   | { kind: "release"; projectId: string; taskId: string; refund: boolean }
-  // A record posted after a merge hits the same redeploy the comment does, and it is the only
-  // trace the run leaves — losing it makes a finished run indistinguishable from one that never ran.
   | { kind: "run"; projectId: string; record: RunRecord };
 
 interface Entry {
@@ -86,7 +80,6 @@ export function createOutbox(store: Store, log: Log = (m) => console.error(m)): 
     add(op) {
       const entries = load();
       entries.push({ op, attempts: 0 });
-      // Oldest first: a report about a task from an hour ago matters less than the current one
       save(entries.slice(-MAX_ENTRIES));
     },
 
@@ -104,8 +97,6 @@ export function createOutbox(store: Store, log: Log = (m) => console.error(m)): 
       let blocked = false;
 
       for (const entry of entries) {
-        // Order matters within a task — a status move before its comment reads as an empty
-        // decision — so one failure stops the drain rather than reordering around it
         if (blocked) {
           remaining.push(entry);
           continue;

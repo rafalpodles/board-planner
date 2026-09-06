@@ -2,22 +2,6 @@ import { test, expect, type Page } from "@playwright/test";
 import { ADMIN_PASSWORD, ADMIN_USERNAME, PROJECT_KEY, seed } from "./seed";
 import { signIn as arriveSignedIn } from "./session";
 
-/**
- * BP-340. Every field in every modal drew its focus ring along the top and bottom only: the modal
- * body scrolls, a scrollport clips whatever its descendants paint outside it, and a full-width
- * field sits flush against that edge.
- *
- * Two things this deliberately does NOT do. It does not diff screenshots — that found the bug, but
- * it is slow and reports a field merely *covered* by an open modal as clipped. And it does not grep
- * the source for `focus:ring-*`: the unit guard already does that, and the class of bug survives it
- * anyway, because a correct `.focus-ring` in a new flush scroller is clipped exactly as hard. An
- * outline is not spared — measured, both mechanisms lose both sides.
- *
- * So the question asked here is geometric: does what the focus treatment paints fit inside the
- * nearest scrollport, on the axis that does not scroll? A field scrolled out of view vertically is
- * not a defect; a field whose ring has nowhere to go sideways is.
- */
-
 test.beforeEach(seed);
 
 const signIn = arriveSignedIn;
@@ -30,10 +14,6 @@ type FieldReport = {
   free: Record<string, number>;
 };
 
-/**
- * Resolved in the page, from the stylesheets rather than from a live `:focus` — Playwright can
- * focus one element at a time, and this has to answer for every field on the screen at once.
- */
 const COLLECT = () => {
   const hidden = (el: Element) => {
     let p: Element | null = el;
@@ -67,7 +47,6 @@ const COLLECT = () => {
     if (rules) walk(rules);
   }
 
-  /** What the focus treatment paints outside the border box, in px, and whether it paints at all. */
   const treatment = (el: Element) => {
     let outlineWidth = 0;
     let outlineOffset = 0;
@@ -93,8 +72,6 @@ const COLLECT = () => {
         recolours = true;
       }
     }
-    // Tailwind's ring is a box-shadow whose spread the shorthand hides behind custom properties;
-    // the class name is the honest source for how far out it lands.
     const classes = el.getAttribute("class") ?? "";
     const ring = /(?:^|\s|:)ring-(\d+)\b/.exec(classes);
     const ringGrow = ring && !/ring-inset/.test(classes) ? parseFloat(ring[1]) : 0;
@@ -106,15 +83,6 @@ const COLLECT = () => {
     };
   };
 
-  /**
-   * The nearest ancestor whose overflow makes it a scrollport, and which axes genuinely scroll.
-   *
-   * Not `overflow-x: auto` — that is the trap. Setting `overflow-y: auto` computes `overflow-x` to
-   * `auto` too, so a plain vertical scroller *claims* both axes, and a check that skips whatever
-   * "scrolls" ends up skipping everything and asserting nothing. Whether the content actually
-   * overflows the axis is the honest question: if it does not, the axis never moves, and a ring
-   * clipped there can never be scrolled into view.
-   */
   const scrollport = (el: Element) => {
     let p = el.parentElement;
     while (p && p !== document.documentElement) {
@@ -164,8 +132,6 @@ const COLLECT = () => {
         top: rect.top - (pr.top + parseFloat(ps.borderTopWidth)),
         bottom: pr.bottom - parseFloat(ps.borderBottomWidth) - rect.bottom,
       };
-      // Only the axis that does not scroll: on a vertical scroller a field below the fold has a
-      // negative bottom margin and is perfectly fine, it is simply further down the content.
       const axes = [
         ...(port.scrollsX ? [] : ["left", "right"]),
         ...(port.scrollsY ? [] : ["top", "bottom"]),
@@ -184,11 +150,6 @@ async function fieldsOn(page: Page): Promise<FieldReport[]> {
   return page.evaluate(COLLECT);
 }
 
-/**
- * Fields whose lack of an outward indicator is a decision, not an oversight. `SearchLayer` says so
- * in a comment: its input is focused from the moment the layer opens and the caret marks it, where
- * a ring would read as a validation error.
- */
 const NO_INDICATOR_BY_DESIGN = [/Search tasks and projects/];
 
 const SCREENS: { name: string; open: (page: Page) => Promise<unknown> }[] = [
@@ -197,8 +158,6 @@ const SCREENS: { name: string; open: (page: Page) => Promise<unknown> }[] = [
     open: async (page) => {
       await page.goto(`/projects/${PROJECT_KEY}`);
       await page.getByRole("button", { name: /New task/ }).click();
-      // AI Assist renders only once /ai/generate-task has answered, and it contributes a field of
-      // its own — so collecting the inventory before it lands audits a different screen
       await expect(page.getByPlaceholder("Describe what you need")).toBeVisible();
       await expect(page.getByRole("dialog")).toBeVisible();
     },

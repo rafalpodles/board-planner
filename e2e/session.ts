@@ -7,21 +7,6 @@ import {
   OWNER_SESSION_TOKEN,
 } from "./seed";
 
-/**
- * Arriving already signed in.
- *
- * Every spec used to carry its own copy of a sign-in helper — 31 of them, 236 calls, each one a
- * page load, two fills, a submit and a redirect. seed() wipes the database before every test, so
- * a cookie could not survive from one to the next and the form had to be driven again.
- *
- * seed() now lays down the session row itself, which makes signing in one cookie. The cookie is
- * `__Host-` prefixed and so must carry Secure, which Chrome accepts over http on localhost
- * because localhost is a trustworthy origin.
- *
- * This does NOT navigate: the caller goes wherever its test is about. Use `signInThroughForm`
- * where the form is the subject — the auth, password and reset specs — so the real path keeps a
- * reader.
- */
 const COOKIE_NAME = "__Host-bp_session";
 
 type Who = "admin" | "member" | "owner";
@@ -29,10 +14,6 @@ type Who = "admin" | "member" | "owner";
 const TOKENS: Record<Who, string> = {
   admin: ADMIN_SESSION_TOKEN,
   member: MEMBER_SESSION_TOKEN,
-  // A genuine project owner — a Grant `relation: "owner"` on the seeded board, with no standing
-  // on the instance at all. Distinct from "admin": that bypasses grant resolution entirely via
-  // `principal.instanceAdmin`, so it cannot exercise the `grant === "owner"` branch a
-  // `withProjectOwner` route actually depends on for anyone who isn't an instance admin.
   owner: OWNER_SESSION_TOKEN,
 };
 
@@ -53,18 +34,12 @@ export async function signInContext(context: BrowserContext, who: Who = "admin")
     },
   ]);
 
-  // The form helper this replaced ended on `toHaveURL(/\/projects/)`, and that was the suite's
-  // only proof that anybody was signed in. Setting a cookie proves nothing on its own: against a
-  // signed-out page the suite's many `toBeHidden`/`toHaveCount(0)` assertions pass vacuously. So
-  // the session is resolved once here — `context.request` shares the cookie jar — for one GET
-  // rather than the page load, two fills and a redirect it stands in for.
   const me = await context.request.get("/api/auth/me");
   expect(me.status(), `the seeded ${who} session did not authenticate — did this spec seed()?`).toBe(
     200
   );
 }
 
-/** The real form. Only for specs whose subject is signing in. */
 export async function signInThroughForm(
   page: Page,
   username = ADMIN_USERNAME,

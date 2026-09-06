@@ -20,31 +20,6 @@ import {
 } from "./seed";
 import { signIn as arriveSignedIn, signInThroughForm } from "./session";
 
-/**
- * BP-392. What a machine costs a person: connecting one, stopping one, and reading what it did.
- *
- * `claim-ownership.spec.ts` covers what a machine may *take* — forty-three tests of it — and none
- * of that goes near a screen. `worker-enrolment-name.spec.ts` covers one lens on this flow, that a
- * hostile name never reaches a reader. This file is the rest: the handshake as the two people in
- * it perform it, the switches an admin uses to stop a machine, and the telemetry that comes back.
- * Nothing here restates a claim rule or a sanitising rule.
- *
- * The pairing every test is built on: **a credential is not proved by appearing in a list.** It is
- * proved by the same credential being taken on a real request before a switch is thrown, and
- * refused on the same request afterwards. A screen showing "Locked" over a machine that carries on
- * working is the failure this file exists to catch.
- *
- * Three notes on the fixture:
- *
- * - **The repository is written directly.** A project names one through Integrations, which has
- *   its own coverage; here it is a precondition — and the enrolment's refusal of a project that
- *   names none is itself asserted below.
- * - **`x-cp-protocol` is sent because the machine sends it.** The start route answers 409 to a
- *   mismatch, so leaving it off would test the refusal instead of the handshake.
- * - **This file needs its own database and port band.** It counts workers and reads a fleet-wide
- *   screen, so a second suite sharing the database does not make it wrong — it makes it fail.
- */
-
 const PROTOCOL = "1";
 const REPOSITORY = "https://github.com/rafalpodles/board-planner";
 const CHECKOUT = "/Users/somebody/code/board-planner";
@@ -74,7 +49,6 @@ const signIn = (page: Page, username: string, password: string) =>
       ? arriveSignedIn(page, "member")
       : signInThroughForm(page, username, password);
 
-/** The machine's half: it has nothing to authenticate with yet, which is the point of this route. */
 async function machineAsksToEnrol(request: APIRequestContext, machine = MACHINE) {
   const response = await request.post("/api/workers/enrolment/device", {
     headers: { ...SAME_ORIGIN, "x-cp-protocol": PROTOCOL },
@@ -82,11 +56,9 @@ async function machineAsksToEnrol(request: APIRequestContext, machine = MACHINE)
   });
   expect(response.status(), await response.text()).toBe(201);
   const started = await response.json();
-  // Port-agnostic: the server builds this from NEXT_PUBLIC_APP_URL and the suite moves ports
   return { ...started, path: new URL(started.verificationUrl).pathname };
 }
 
-/** The machine polling for its answer, exactly as the app on it does. */
 async function machineCollects(request: APIRequestContext, deviceCode: string) {
   return request.post("/api/workers/enrolment/device/token", {
     headers: SAME_ORIGIN,
@@ -107,12 +79,10 @@ function asMachine(machine: Machine) {
   };
 }
 
-/** A real request on the machine's own credential — the one thing that proves it is worth having. */
 async function machineReadsItsWork(request: APIRequestContext, machine: Machine) {
   return request.get(`/api/workers/${machine.workerId}`, { headers: asMachine(machine) });
 }
 
-/** The machine reporting the checkouts it has. What the server matches a project's remote against. */
 async function machineReportsCheckouts(
   request: APIRequestContext,
   machine: Machine,
@@ -125,7 +95,6 @@ async function machineReportsCheckouts(
   expect(response.status(), await response.text()).toBe(200);
 }
 
-/** The whole handshake, ending with a machine that holds a working credential. */
 async function enrolAMachine(
   page: Page,
   request: APIRequestContext,
@@ -142,12 +111,6 @@ async function enrolAMachine(
   return collected.json();
 }
 
-/**
- * What the server chose for this machine, as against what the machine told the server.
- *
- * Scoped to these three fields deliberately. The payload also echoes `repos` back, which is the
- * machine's own report and is the one direction a path legitimately travels.
- */
 function decidedByTheServer(view: {
   assignments: unknown;
   offers: unknown;
@@ -164,7 +127,6 @@ function fleetRow(page: Page, name: string) {
   return page.getByRole("row").filter({ hasText: name }).first();
 }
 
-/** A finished run, filed by the machine that ran it — the only writer of this record in production. */
 async function machineRecordsRun(
   request: APIRequestContext,
   machine: Machine,
@@ -188,7 +150,6 @@ async function machineRecordsRun(
   expect(response.status(), await response.text()).toBe(201);
 }
 
-/** The policy chips are a row of their own beneath the machine's, so they are found by what they say. */
 function policyRow(page: Page) {
   return page.getByRole("row").filter({ hasText: "pollIntervalMs" }).first();
 }
@@ -208,19 +169,15 @@ test("a machine is connected by the person sitting at it, and the credential it 
 }) => {
   const started = await machineAsksToEnrol(request);
 
-  // Nobody has approved anything yet, so the machine has nothing
   const tooEarly = await machineCollects(request, started.deviceCode);
   expect(tooEarly.status()).toBe(200);
   expect((await tooEarly.json()).state).toBe("pending");
 
-  // A member, not an admin: enrolment is self-service, and whoever confirms it owns the machine
   await signIn(page, MEMBER_USERNAME, MEMBER_PASSWORD);
   await page.goto(started.path);
 
   await expect(page.getByRole("heading", { name: "Connect this machine?" })).toBeVisible();
   await expect(page.getByText(MACHINE.name)).toBeVisible();
-  // The code on the screen has to be the code on the machine — that comparison is the whole
-  // security of this exchange, and it is the operator who performs it
   await expect(page.getByText(started.userCode)).toBeVisible();
 
   await page.getByRole("radio").first().check();
@@ -234,31 +191,22 @@ test("a machine is connected by the person sitting at it, and the credential it 
   expect(enrolled.projectKey).toBe(PROJECT_KEY);
   expect(enrolled.repositoryUrl).toBe(REPOSITORY);
 
-  // The credential is worth something: a real request the server answers
   const answer = await machineReadsItsWork(request, enrolled);
   expect(answer.status(), await answer.text()).toBe(200);
   const view = await answer.json();
 
-  // Nothing is assigned yet, and the machine is told where to clone *from* rather than where to
-  // put it — an offer is an address
   expect(view.assignments).toHaveLength(0);
   expect(JSON.stringify(view.offers)).toContain(REPOSITORY);
   expect(decidedByTheServer(view)).not.toContain("path");
 
-  // Now it has the checkout, so there is an assignment for the next assertion to be about. Without
-  // this the "no path" check below reads an empty array and cannot fail — a mutation that added a
-  // path to every assignment the server sends left it green, which is how this control got here.
   await machineReportsCheckouts(request, enrolled, [{ remote: REPOSITORY, path: CHECKOUT }]);
   const serving = await (await machineReadsItsWork(request, enrolled)).json();
   expect(serving.assignments.length).toBeGreaterThan(0);
   expect(JSON.stringify(serving.assignments)).toContain(REPOSITORY);
 
-  // And still no path in anything the server decides: where the checkout lives stays the machine's
-  // own business, and it travels one way only — the machine reported it a moment ago.
   expect(decidedByTheServer(serving)).not.toContain("path");
   expect(JSON.stringify(serving.repos)).toContain(CHECKOUT);
 
-  // And the machine belongs to the person who confirmed it, which is what decides its reach
   expect(String((await workerRow(MACHINE.name))?.owner)).toBe(String(MEMBER_ID));
 });
 
@@ -288,7 +236,6 @@ test("a project that names no repository cannot be chosen, and says why", async 
 
   await expect(page.getByText(/No project names a repository yet/)).toBeVisible();
   await expect(page.getByRole("radio")).toHaveCount(0);
-  // Nothing to choose means nothing to confirm, rather than a button that fails afterwards
   await expect(page.getByRole("button", { name: "Connect it" })).toBeDisabled();
 });
 
@@ -296,9 +243,6 @@ test("the project pick is framed as a first checkout, not as what the machine ma
   page,
   request,
 }) => {
-  // BP-374. Nothing here is about mechanism — `assignmentsFor` recomputes a machine's reach on
-  // every heartbeat and no test of that changes. It is about a screen that sits where an OAuth
-  // scope list sits and asked a scope-shaped question above a control that grants no scope.
   const started = await machineAsksToEnrol(request);
   await signIn(page, MEMBER_USERNAME, MEMBER_PASSWORD);
   await page.goto(started.path);
@@ -309,25 +253,17 @@ test("the project pick is framed as a first checkout, not as what the machine ma
   ).toBeVisible();
   await expect(page.getByText(/which project should it work on/i)).toHaveCount(0);
 
-  // Read where a reader looks for the scope list. The footer said this before and still may; what
-  // this asserts is that the sentence is beside the control it qualifies, which is the whole ticket
   await expect(pick.getByText(/reaches every project you can/)).toBeVisible();
 
-  // Still a choice of one. The wording moved towards "first", which is exactly the direction that
-  // invites somebody to make this a multi-select the approve route cannot honour — it takes one id
   await expect(pick.getByRole("radio")).toHaveCount(1);
   await expect(pick.getByRole("checkbox")).toHaveCount(0);
 
   await pick.getByRole("radio").first().check();
   await page.getByRole("button", { name: "Connect it" }).click();
 
-  // And the question the operator was left holding is answered where they end up, naming the screen
-  // that answers it — the ticked list BP-378 added, not the Preferences pane it replaced
   await expect(page.getByRole("heading", { name: "Connected" })).toBeVisible();
   await expect(page.getByText(/Settings . Workers/)).toBeVisible();
 
-  // The control: saying a different thing is not the same as granting a different thing. The
-  // machine still gets one project's repository, and it is the one that was ticked.
   const collected = await machineCollects(request, started.deviceCode);
   const enrolled = await collected.json();
   expect(enrolled.projectKey).toBe(PROJECT_KEY);
@@ -340,7 +276,6 @@ test("the kill switch stops a credential that was working a moment ago", async (
 }) => {
   const machine = { workerId: String(WORKER_ID), credential: WORKER_CREDENTIAL };
 
-  // The control, on the same credential and the same request as the refusal below
   expect((await machineReadsItsWork(request, machine)).status()).toBe(200);
 
   await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
@@ -351,11 +286,8 @@ test("the kill switch stops a credential that was working a moment ago", async (
 
   const refused = await machineReadsItsWork(request, machine);
   expect(refused.status()).toBe(403);
-  // The machine is told to stop rather than to retry: without `abort` a killed worker sits in a
-  // poll loop against a server that will never answer it
   expect((await refused.json()).abort).toBe(true);
 
-  // And the switch is a switch, not a one-way door
   await row.getByRole("button", { name: "Locked" }).click();
   await expect(row.getByRole("button", { name: "Lock", exact: true })).toBeVisible();
   expect((await machineReadsItsWork(request, machine)).status()).toBe(200);
@@ -371,7 +303,6 @@ test("switching a machine off refuses it in the same way", async ({ page, reques
   await row.getByRole("button", { name: "On", exact: true }).click();
   await expect(row.getByRole("button", { name: "Off", exact: true })).toBeVisible();
 
-  // Two switches, two tests: removing either half of the guard reddens exactly one of them
   expect((await machineReadsItsWork(request, machine)).status()).toBe(403);
 });
 
@@ -382,7 +313,6 @@ test("releasing a machine leaves it claiming nothing, and says so on the row", a
   await signIn(page, MEMBER_USERNAME, MEMBER_PASSWORD);
   const enrolled = await enrolAMachine(page, request);
   await machineReportsCheckouts(request, enrolled, [{ remote: REPOSITORY, path: CHECKOUT }]);
-  // The control for the assertion at the end: while it has an owner, it has work
   expect((await (await machineReadsItsWork(request, enrolled)).json()).assignments.length)
     .toBeGreaterThan(0);
 
@@ -397,8 +327,6 @@ test("releasing a machine leaves it claiming nothing, and says so on the row", a
   await expect(row.getByTestId("worker-no-owner")).toHaveText("no owner — claims nothing");
   expect((await workerRow(MACHINE.name))?.owner ?? null).toBeNull();
 
-  // The credential still answers — releasing is about whose work it may take, not about killing the
-  // process on that machine. What it no longer has is anybody's reach.
   const answer = await machineReadsItsWork(request, enrolled);
   expect(answer.status()).toBe(200);
   expect((await answer.json()).assignments).toHaveLength(0);
@@ -412,8 +340,6 @@ test("a machine already enrolled to somebody else is refused, and the screen say
   await signIn(page, MEMBER_USERNAME, MEMBER_PASSWORD);
   await enrolAMachine(page, request);
 
-  // The same name and host, now offered to a different account. The start route is
-  // unauthenticated and takes any name, so this is a guess anybody could make.
   const second = await machineAsksToEnrol(request);
   const adminContext = await browser.newContext();
   try {
@@ -423,9 +349,6 @@ test("a machine already enrolled to somebody else is refused, and the screen say
 
     await expect(adminPage.getByTestId("belongs-to-somebody-else")).toBeVisible();
 
-    // Said before the click, and then meant. Asserted on the status of the request the click makes:
-    // a screen that stays put is also what a click that never fired looks like, and that is exactly
-    // what this test did until a mutation of the ownership filter went unnoticed.
     await adminPage.getByRole("radio").first().check();
     const [attempt] = await Promise.all([
       adminPage.waitForResponse(
@@ -453,8 +376,6 @@ test("how often a machine asks is pinned on the machine, and the machine reads i
   await expect(policyRow(page).getByText("30s")).toBeVisible();
   await expect(policyRow(page).getByText("default", { exact: true }).first()).toBeVisible();
 
-  // No screen edits this yet — the fleet page shows it and the app on the machine owns it — so the
-  // gesture is the request that screen would make, carrying the admin's own session
   const patched = await page.request.patch(`/api/workers/${WORKER_ID}`, {
     headers: SAME_ORIGIN,
     data: { pollIntervalMs: 90_000 },
@@ -463,11 +384,8 @@ test("how often a machine asks is pinned on the machine, and the machine reads i
 
   await page.reload();
   await expect(policyRow(page).getByText("90s")).toBeVisible();
-  // "set" rather than "default": a value pinned so a later change to the default cannot move it is
-  // exactly what an operator is doing here, and only policyOverrides records that intent
   await expect(policyRow(page).getByText("set", { exact: true })).toBeVisible();
 
-  // The half that matters: the machine is told, on the route it actually reads
   const answer = await machineReadsItsWork(request, {
     workerId: String(WORKER_ID),
     credential: WORKER_CREDENTIAL,
@@ -482,8 +400,6 @@ test("the fleet page shows what a machine is running and when it was last heard 
   await page.goto("/settings/workers");
 
   const row = fleetRow(page, WORKER_NAME);
-  // The phase lives on the task and the machine on the worker; this column is the join, and the
-  // only place a person can see that a machine is mid-run rather than idle
   await expect(row.getByText(HELD_TASK_KEY, { exact: true })).toBeVisible();
   await expect(row.getByText(RUN_PHASE, { exact: true })).toBeVisible();
   await expect(row.getByText("stale")).toHaveCount(0);
@@ -500,13 +416,8 @@ test("a run refused for too large a diff is reported by the machine and read by 
   page,
   request,
 }) => {
-  // Enrolled rather than seeded: a machine writes history as itself, and only registration gives it
-  // the identity that write path requires — a seeded credential is refused with "no identity yet",
-  // which a hand-made fixture would have quietly hidden.
   await signIn(page, MEMBER_USERNAME, MEMBER_PASSWORD);
   const machine = await enrolAMachine(page, request);
-  // A machine may write a project's history only where it serves that project, and it is the
-  // machine that says where: it reports its checkouts and the server matches their remotes.
   await machineReportsCheckouts(request, machine, [{ remote: REPOSITORY, path: CHECKOUT }]);
 
   const reported = await request.post(`/api/projects/${PROJECT_KEY}/runs`, {
@@ -530,18 +441,11 @@ test("a run refused for too large a diff is reported by the machine and read by 
   await page.goto(`/projects/${PROJECT_KEY}/settings?section=workers`);
 
   const run = page.getByRole("row").filter({ hasText: HELD_TASK_KEY }).first();
-  // Named, not counted: "a run failed" is not what a person needs. Which gate refused is the
-  // difference between raising the limit and rewriting the change.
   await expect(run.getByText("Refused: diff-size")).toBeVisible();
   await expect(run.getByText("4 min")).toBeVisible();
   await expect(run.getByText("$0.42")).toBeVisible();
 });
 
-/**
- * BP-432. The detail a run leaves behind was written on every exit and rendered nowhere: the fleet
- * page reports a run in flight, and every exit clears the run identity it reads from. The account
- * of a finished run — why it ended the way it did — was reachable only through a Mongo shell.
- */
 test("what a finished run said is read from the fleet page, not out of the database", async ({
   page,
   request,
@@ -552,8 +456,6 @@ test("what a finished run said is read from the fleet page, not out of the datab
 
   const REASON = "the build failed: 2 tests red in src/lib/gates.test.ts";
   await machineRecordsRun(request, machine, { outcome: "failed", detail: REASON });
-  // The control: a refusal files its reason as the gate's name and leaves the detail empty, so a
-  // blank there is expected rather than a detail that failed to render
   await machineRecordsRun(request, machine, { outcome: "refused", refusedBy: "diff-size" });
 
   await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
@@ -562,8 +464,6 @@ test("what a finished run said is read from the fleet page, not out of the datab
 
   await expect(page.getByRole("heading", { name: "Run history" })).toBeVisible();
   await expect(page.getByTestId("run-detail")).toHaveText(REASON);
-  // The machine is the first question a bad run raises, and it is stored on the run rather than
-  // implied by the screen
   await expect(page.getByRole("row").filter({ hasText: "Failed" }).first()).toContainText(
     MACHINE.name
   );

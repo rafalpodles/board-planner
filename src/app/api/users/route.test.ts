@@ -42,11 +42,6 @@ beforeEach(() => {
   getAuthUser.mockResolvedValue({ _id: "a1", role: "admin", username: "rafal" });
 });
 
-/**
- * BP-538. The log knew that somebody had changed their display name and not that the account
- * existed. `target` is the username rather than a reference, because this row has to still name
- * them once the account is gone — which is the other row this ticket added.
- */
 describe("the row an account's creation leaves", () => {
   it("names the account and the administrator who made it", async () => {
     await post({ ...VALID, username: "newcomer" });
@@ -60,8 +55,6 @@ describe("the row an account's creation leaves", () => {
     });
   });
 
-  // The first account on an instance is made by whoever reaches the login screen, so there is no
-  // actor to name — and the row has to say which case it was, because this one is an administrator
   it("says so when the account is the instance's first, and names nobody", async () => {
     countDocuments.mockResolvedValue(0);
     getAuthUser.mockResolvedValue(null);
@@ -87,11 +80,6 @@ describe("the row an account's creation leaves", () => {
   });
 });
 
-/**
- * A username reaches a notification title and from there the markup of a Slack or Discord
- * message, where `@everyone` pings a room and `>` and `#` change what the reader is looking at
- * (BP-401). The rule is at the source because escaping at each sink kept missing one.
- */
 describe("the username an account may be given", () => {
   it.each([
     ["a mass mention", "@everyone"],
@@ -107,7 +95,6 @@ describe("the username an account may be given", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
-  // Without this the refusals above would pass on a route that refuses everything
   it("accepts an ordinary name, and stores it trimmed and lower-cased", async () => {
     const res = await post({ ...VALID, username: "  Nowak  " });
 
@@ -115,7 +102,6 @@ describe("the username an account may be given", () => {
     expect(create.mock.calls[0][0].username).toBe("nowak");
   });
 
-  // The instance mints these itself, so a rule that refused them would break enrolment
   it("accepts the shape of a machine account this instance creates", async () => {
     const res = await post({ ...VALID, username: "worker-6a7309535eb49af333b85a04" });
 
@@ -123,11 +109,6 @@ describe("the username an account may be given", () => {
   });
 });
 
-/**
- * The same rule, on the other half of the field's life. This route used to check `fullName` for
- * truthiness only, so a name of nothing but spaces reached the schema, was trimmed to "" there,
- * and came back as a `required` ValidationError — a 400 delivered as a 500 (BP-410).
- */
 describe("the display name an account may be given", () => {
   it.each([
     ["a name of nothing but spaces", "   "],
@@ -143,7 +124,6 @@ describe("the display name an account may be given", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
-  // Without this the refusals above would pass on a route that refuses everything
   it("accepts a name an allowlist would have refused, and stores it trimmed", async () => {
     const res = await post({
       username: "nowak",

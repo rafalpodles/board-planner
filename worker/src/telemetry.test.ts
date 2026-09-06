@@ -15,7 +15,6 @@ const FIXTURE = readFileSync(new URL("./__fixtures__/stream-success.ndjson", imp
 
 const SECRET = "cpw_deadbeef0123456789abcdef01234567";
 
-// The envelope of a real assistant event, verbatim from the fixture except for the content blocks.
 function assistantEvent(content: unknown[]): StreamEvent {
   return {
     type: "assistant",
@@ -99,8 +98,6 @@ describe("summarise — what a tool call is allowed to reveal", () => {
     }
   });
 
-  // Naming the key is not enough: the tool_use block is summarised whether or not the call then
-  // failed, so an agent can put anything in file_path and never care that it does not resolve
   it("refuses a file_path that is really a file body", () => {
     const body = `const token = "${SECRET}";\nexport const answer = 41;\n`;
     const event = assistantEvent([toolUse("Read", { file_path: body })]);
@@ -117,8 +114,6 @@ describe("summarise — what a tool call is allowed to reveal", () => {
     expect(summarise(event)).toEqual({ phase: "agent", tool: { name: "Read" } });
   });
 
-  // `FOO=secret npm run build` is ordinary debugging behaviour, and this repo's CLAUDE.md documents
-  // exactly which variables an agent would prefix
   it("refuses an env-var prefix standing where the executable should be", () => {
     const event = assistantEvent([toolUse("Bash", { command: `MONGODB_URI=mongodb+srv://u:${SECRET}@host npm run build` })]);
 
@@ -378,9 +373,6 @@ describe("outcome updates", () => {
     expect(seen).toEqual([{ outcome: "gateRejected", taskKey: "CP-1", detail: "build" }]);
   });
 
-  // Found against a running worker, not by a test: /status served `recent.at(-1)`, so six hours
-  // after a run finished the socket still reported `current: {phase: "push"}` and a panel reading
-  // it showed "working" forever. A phase outlives the run it described; an outcome ends it.
   it("has no current phase before anything has run", () => {
     expect(createTelemetry().current()).toBeNull();
   });

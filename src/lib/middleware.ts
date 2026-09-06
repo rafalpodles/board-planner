@@ -18,24 +18,10 @@ type AuthenticatedHandler = (
   context: {
     params: Promise<Record<string, string>>;
     user: IUser;
-    /**
-     * Set only when this request authenticated as a worker and the credential was verified
-     * against exactly this id. Handlers must use THIS and never read `x-worker-id` themselves:
-     * a session cookie with no Bearer takes the person branch, where that header is attacker-set
-     * and unverified (BP-336).
-     */
     workerId?: string;
   }
 ) => Promise<NextResponse | Response>;
 
-/**
- * The database could not be answered from, which is not the caller's fault and must not read as one.
- *
- * 503 rather than 401, because the browser client treats a 401 as "your session is gone" and clears
- * it — so an outage used to sign everybody out, and the sign-in they were sent to failed too, with
- * nothing anywhere naming the real cause (BP-362). Retry-After is short: the connection is retried
- * on the next request now that a failed one is no longer cached.
- */
 export function databaseUnavailable(): NextResponse {
   return NextResponse.json(
     { error: "The database is unreachable. This is not a problem with your session." },
@@ -55,9 +41,6 @@ export function withAuth(handler: AuthenticatedHandler) {
       if (e instanceof ProvenanceError) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
-      // isDatabaseUnreachable, not an instanceof: a database that dies while the app is
-      // connected fails from the query rather than from connectDB, and that error is the
-      // driver's own class (BP-362 review)
       if (isDatabaseUnreachable(e)) return databaseUnavailable();
       throw e;
     }
@@ -66,9 +49,6 @@ export function withAuth(handler: AuthenticatedHandler) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // The handler too, not only the credential: resolveProjectId, the grant check and every route
-    // body reach the database after this point, and a 500 there withholds the Retry-After a machine
-    // client needs — while the middleware's own comment promised a 503 (BP-362 review)
     try {
       return await handler(request, { ...context, user });
     } catch (e) {
@@ -108,12 +88,8 @@ export function withWorker(
     if (!worker) {
       return NextResponse.json({ error: "Worker credential rejected" }, { status: 401 });
     }
-    // credentialHash is only loaded to verify the credential above; clear it so no
-    // downstream handler can spread it into a response
     worker.credentialHash = "";
 
-    // The path segment is authoritative on /api/workers/:id, so a credential must not act on
-    // someone else's record just because the route happens to carry an id
     const params = await context.params;
     if (params.workerId && params.workerId !== String(worker._id)) {
       return NextResponse.json({ error: "Not your worker" }, { status: 403 });
@@ -123,8 +99,6 @@ export function withWorker(
   };
 }
 
-// "146" or "CP-146" — the project is already pinned by the projectId segment,
-// so only the number is used and any key prefix is decoration
 const TASK_NUMBER_PATTERN = /^(?:[A-Za-z][A-Za-z0-9_-]*-)?(\d{1,9})$/;
 
 export async function resolveProjectId(identifier: string): Promise<string | null> {
@@ -150,7 +124,6 @@ export async function resolveTaskId(
   return task ? task._id.toString() : null;
 }
 
-// Handlers query Mongo with params.projectId/taskId, so they must always see ObjectIds
 async function withResolvedIds(
   context: { params: Promise<Record<string, string>>; user: IUser },
   params: Record<string, string>,
@@ -169,8 +142,6 @@ async function withResolvedIds(
       };
     }
     const taskId = await resolveTaskId(projectId, params.taskId);
-    // A well-formed number that matches nothing is a miss, not a malformed request.
-    // ObjectIds resolve without a lookup, so those still 404 from the handler.
     if (!taskId) {
       return {
         ok: false,
@@ -183,8 +154,6 @@ async function withResolvedIds(
   return { ok: true, context: { ...context, params: Promise.resolve(resolved) } };
 }
 
-// An unknown identifier must look the same to a non-admin as one they cannot
-// reach, otherwise the 400/403 split turns into a project-key oracle
 function unresolvedProject(user: IUser) {
   return user.role === "admin"
     ? NextResponse.json({ error: "Project not found" }, { status: 404 })
@@ -211,19 +180,6 @@ export function withProjectOwner(handler: AuthenticatedHandler) {
   });
 }
 
-// A worker reports on the tasks it runs with its own credential, rather than a second, static API
-// token. The reason the second token cannot work: a worker's grant is recomputed every heartbeat
-// from the checkouts it reports crossed with every enabled project, while a project-scoped API
-// token is a list fixed when it was minted. Enable a second project and the worker is assigned it
-// on its cpw_ credential while its cp_ token cannot write there — the task claims, the report 403s,
-// and it sits in the active column until the lease expires.
-//
-// So the grant is re-derived here on every call, which makes the scope track the assignments by
-// construction. Deliberately NOT the full claim-time verdict: a worker that lost a contested
-// checkout must still be able to report the outcome of a task it already holds, or refusing it
-// would strand that task — the failure this whole design keeps working to avoid.
-// Keyed on runId, not workerId: workerId is left behind as history when a run ends, so a finished
-// task would otherwise go on granting its worker access to the project for good.
 async function holdsARunIn(projectId: string, workerId: string): Promise<boolean> {
   return (
     (await Task.exists({
@@ -265,12 +221,6 @@ export function withProjectAccessOrWorker(handler: AuthenticatedHandler) {
       !!project?.worker?.enabled &&
       canServe(reachable, String(project._id)) &&
       matchRepo(project as never, worker.repos ?? []);
-    // A run this machine is holding right now goes through even when the answer above is no. That
-    // is the paragraph at the top of this function, honoured for a case BP-358 introduced: the
-    // reach is its owner's, so revoking a grant — or deploying this at all, since every machine
-    // enrolled before BP-358 has no owner — would otherwise 403 the status, release and comment
-    // routes of a task already in flight, and leave it in the active column until the two-hour
-    // lease swept it and spent an attempt.
     if (!assigned && !(await holdsARunIn(projectId, String(worker._id)))) {
       return NextResponse.json(
         { error: "this worker is not assigned to this project" },
@@ -278,8 +228,6 @@ export function withProjectAccessOrWorker(handler: AuthenticatedHandler) {
       );
     }
 
-    // It acts as its own identity, so a comment it leaves is authored by the machine rather than by
-    // whoever's credential it was holding — the audit trail CP-241 exists to keep honest.
     const identity = worker.identity ? await User.findById(worker.identity) : null;
     if (!identity) {
       return NextResponse.json({ error: "this worker has no identity yet" }, { status: 403 });

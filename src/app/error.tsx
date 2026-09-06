@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/Button";
 
 const FEEDBACK_MS = 2000;
 
-/** Next's own types promise an Error; its client code says it does not guarantee one. */
 function readReport(error: unknown): { message: string; report: string } {
   const carried = (error ?? {}) as { message?: unknown; stack?: unknown; digest?: unknown };
   const text = (value: unknown) => (typeof value === "string" && value.trim() ? value : "");
@@ -18,8 +17,6 @@ function readReport(error: unknown): { message: string; report: string } {
 
   return {
     message: message || "The page could not be rendered.",
-    // A thrown string or object carries none of the three, and a report of "" copied to the
-    // clipboard under a button that says Copied is worse than saying there is nothing to copy
     report: report || "Nothing was reported beyond the failure itself.",
   };
 }
@@ -30,8 +27,6 @@ export default function GlobalError({
   reset,
 }: {
   error: Error & { digest?: string };
-  // Stable since Next 16.3 and what the docs ask for: it re-fetches before re-rendering, where
-  // reset only re-renders — which for a server component means the same broken payload again
   retry?: () => void;
   reset: () => void;
 }) {
@@ -87,8 +82,6 @@ export default function GlobalError({
         <Button type="button" onClick={() => (retry ?? reset)()}>
           Try again
         </Button>
-        {/* The boundary replaces the whole shell — sidebar, navigation and all — so without this
-            the only way out of a failure that repeats is the browser's back button */}
         <Link href="/projects" className="focus-ring rounded-lg px-3 py-2 text-sm text-text-muted hover:text-text">
           Go to projects
         </Link>

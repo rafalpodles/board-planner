@@ -2,25 +2,6 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 import { PROJECT_KEY, SIBLING_TASK_NUMBER, seed } from "./seed";
 import { signIn } from "./session";
 
-/**
- * BP-532. A Combobox closed itself on the same click that opened it.
- *
- * The panel is fixed to the viewport, so anything that moves the trigger has to close it. But a
- * scroll *event* is delivered at the next rendering opportunity rather than when the scrolling
- * happened, so a scroll already applied before the panel opened still arrived at the listener the
- * open had just attached. The panel opened and closed within one tick and the listbox was never
- * usable.
- *
- * In the wild that is the browser scrolling a half-hidden trigger into view as it takes focus on
- * mousedown — which is why it only showed near the bottom edge of a scrolling page, and why it read
- * as flaky: whether the event lands before or after the click handler is a race, and both orders
- * were observed on the same page. These tests scroll and click in one task, so the losing order is
- * the only one.
- *
- * Both halves are asserted, because a picker that simply never closed would satisfy the first one
- * alone: the panel survives the scroll that opened it, and still closes for a later one.
- */
-
 const taskUrl = `/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`;
 const PICKER = "Priority";
 
@@ -34,7 +15,6 @@ async function openTask(page: Page) {
 
 const listbox = (page: Page) => page.getByRole("listbox", { name: PICKER });
 
-/** Counts scroll events the way the listener under test sees them: capture phase, any container. */
 async function countScrolls(page: Page) {
   await page.evaluate(() => {
     const w = window as Window & { __scrolls?: number };
@@ -46,7 +26,6 @@ async function countScrolls(page: Page) {
 const scrollWasDelivered = (page: Page) =>
   page.waitForFunction(() => ((window as Window & { __scrolls?: number }).__scrolls ?? 0) > 0);
 
-/** The trigger's own scroll container, or the document when it has none. */
 const scrollerOf = (trigger: Locator) =>
   trigger.evaluateHandle((el) => {
     let node: HTMLElement | null = el.parentElement;
@@ -58,12 +37,6 @@ const scrollerOf = (trigger: Locator) =>
     return document.scrollingElement as HTMLElement;
   });
 
-/**
- * Scrolls the trigger's container and clicks it in the same task, so the scroll event is queued
- * before the panel exists and delivered after it does. Reports what actually happened: a scroll
- * that moved nothing — or moved the container without moving the trigger — would leave the test
- * asserting something much weaker than it claims.
- */
 const clickAfterScrollingInTheSameTask = (trigger: Locator) =>
   trigger.evaluate((el) => {
     let node: HTMLElement | null = el.parentElement;
@@ -94,8 +67,6 @@ test("a scroll already applied when the picker opens does not close it again", a
     "the trigger did not move, so this covers an unrelated scroll rather than the reported one"
   ).toBe(true);
 
-  // The event, not a stopwatch. The bug is that this listener *receives* it, so a test that only
-  // waited a while would go green the day delivery changed, over a reintroduced bug
   await scrollWasDelivered(page);
   await expect(listbox(page)).toBeVisible();
   await expect(trigger).toHaveAttribute("aria-expanded", "true");
@@ -125,8 +96,6 @@ test("a scroll that moves the trigger while the picker is open still closes it",
 test("a scroll that closes the picker hands focus back rather than dropping it on the body", async ({
   page,
 }) => {
-  // Short, so the rail the picker sits in scrolls clear off the top: on a full-height viewport
-  // this page has barely 30px of scroll and the trigger never leaves the screen
   await page.setViewportSize({ width: 1280, height: 400 });
   await openTask(page);
 
@@ -147,8 +116,6 @@ test("a scroll that closes the picker hands focus back rather than dropping it o
   await expect(listbox(page)).toBeHidden();
 
   await expect(trigger).toBeFocused();
-  // Handing focus back must not undo the scroll that caused it: focusing an off-screen trigger
-  // without `preventScroll` drags the page back against the gesture
   expect(await scroller.evaluate((el) => el.scrollTop)).toBe(parked);
 });
 
@@ -161,8 +128,6 @@ test("the listbox takes focus on the first open, so the keyboard reaches it stra
   const options = listbox(page);
   await expect(options).toBeVisible();
 
-  // The listbox itself, not the panel around it: that wrapper carries no role and no name, so a
-  // reader would be told nothing about what had just taken focus
   await expect(options).toBeFocused();
 
   const highlighted = async () => {
@@ -171,9 +136,6 @@ test("the listbox takes focus on the first open, so the keyboard reaches it stra
     return Number(id!.split("-").pop());
   };
   const first = await highlighted();
-  // The highlight starts on the selected option and wraps, so the next one is only `first + 1`
-  // while that is not the last: computed rather than assumed, or reseeding the task's priority
-  // would turn this red for a reason that has nothing to do with the keyboard
   const count = await options.getByRole("option").count();
   expect(count, "one option, so the next one and this one are the same").toBeGreaterThan(1);
 
@@ -191,10 +153,6 @@ test("clicking the panel itself keeps focus inside it", async ({ page }) => {
   await expect(options).toBeFocused();
   const panel = options.locator("xpath=..");
 
-  // The panel's right edge, which is the strip belonging to the wrapper rather than to the search
-  // box or the listbox — measured, because the listbox covers the top border entirely. Focus
-  // landing on the body here takes the arrow keys with it: they scroll the page, and that scroll
-  // is what then dismisses the picker the person was aiming at
   const box = (await panel.boundingBox())!;
   const edge = { x: box.x + box.width - 0.5, y: box.y + box.height / 2 };
   expect(

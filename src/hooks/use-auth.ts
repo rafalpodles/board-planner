@@ -15,32 +15,17 @@ export type LoginResult = { ok: true } | { ok: false; reason: string };
 const UNREACHABLE =
   "Cannot reach the server right now. Your account is fine — try again in a moment.";
 
-// mongoose connects with the driver's default server-selection timeout of 30 s, so an outage would
-// otherwise leave the first load spinning that long with nothing said — the very "it looks broken"
-// experience this is here to remove. Give up sooner and call it what it is.
 const WHO_AM_I_TIMEOUT_MS = 8_000;
 
 export interface AuthState {
   user: ApiUser | null;
   isAdmin: boolean;
   isLoading: boolean;
-  /**
-   * The server could not answer, which is not the same as nobody being signed in.
-   *
-   * Kept apart from `user` because the guard redirects on `!user`, and the sign-in page it
-   * redirects to is served by the same instance that just failed — so folding the two together
-   * turned a database outage into a logout nobody could undo (BP-362).
-   */
   outage: boolean;
   login: (username: string, password: string) => Promise<LoginResult>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   onUnauthorized: () => void;
-  /**
-   * Every API answer the app receives. Somebody already signed in is not sent back through
-   * /api/auth/me, so without this the shell had no idea an outage was under way and each screen
-   * reported its own generic failure instead (BP-362 review).
-   */
   noteApiStatus: (status: number) => void;
 }
 
@@ -69,12 +54,9 @@ export function useAuthProvider(): AuthState {
         setOutage(false);
         return;
       }
-      // Only a 401 is evidence about the session. A 5xx says the answer never arrived.
       if (res.status === 401) setUser(null);
       setOutage(res.status >= 500);
     } catch {
-      // The request did not complete at all — timed out, or never left. The same class of thing as
-      // a 503, and equally not a signed-out state.
       setOutage(true);
     }
   }, []);
@@ -107,9 +89,6 @@ export function useAuthProvider(): AuthState {
       const body = await res.json().catch(() => null);
       const reason = typeof body?.error === "string" ? body.error : null;
 
-      // The server's own words, so a locked-out account and an unreachable database each say what
-      // they are. Flattening every failure to "Invalid credentials" is what made an outage look
-      // like a bad password.
       if (res.status >= 500) {
         setOutage(true);
         return { ok: false, reason: reason ?? UNREACHABLE };
@@ -129,18 +108,13 @@ export function useAuthProvider(): AuthState {
 
   const onUnauthorized = useCallback(() => {
     setUser(null);
-    // The server answered, so it is reachable; leaving a stale outage set would show somebody the
-    // "having trouble" panel on their way to a sign-in screen that works
     setOutage(false);
   }, []);
 
   const noteApiStatus = useCallback((status: number) => {
-    // Any answer below 500 proves the instance is answering, whatever it thinks of the request
     setOutage(status >= 500);
   }, []);
 
-  // Preferences saved elsewhere in the app have to reach the cached user, or a
-  // client-side navigation keeps rendering the value from page load
   const refreshUser = useCallback(async () => {
     await fetchUser();
   }, [fetchUser]);

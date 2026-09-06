@@ -15,6 +15,5 @@ export interface SectionProps {
   ) => void;
   replaceProject: (next: ApiProject) => void;
   isAdmin: boolean;
-  /** Null until the first section that needs a count is opened */
   stats: SettingsStats | null;
 }

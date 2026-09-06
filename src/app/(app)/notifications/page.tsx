@@ -37,7 +37,6 @@ export default function NotificationsPage() {
         }
         setHasMore(data.length === 30);
       } catch {
-        // silent
       } finally {
         setLoading(false);
       }
@@ -54,7 +53,6 @@ export default function NotificationsPage() {
       await api.patch("/api/notifications/read", {});
       setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
     } catch {
-      // silent
     }
   }
 

@@ -12,8 +12,6 @@ vi.mock("@/lib/auth", () => ({
   getAuthUser,
   RateLimitError: class RateLimitError extends Error {},
 }));
-// `check` is stubbed because withProjectOwner itself is not what is under test here — only which
-// need it asks grants.check for.
 vi.mock("@/lib/grants", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/grants")>();
   return { ...actual, check };
@@ -38,11 +36,6 @@ beforeEach(() => {
   dailyPmSpend.mockResolvedValue({ calls: 0, tokens: 0, cap: 0, stepLimitHits: 0 });
 });
 
-/**
- * BP-562. Same shape as BP-549: the settings screen only offers PM usage inside its
- * `projectAdmin` section (`project.canAdmin`, i.e. `check(user, projectId, "admin")`), so the
- * route has to ask for the same thing or a member reads via the API what the screen withholds.
- */
 describe("GET pm/usage", () => {
   it("checks admin-level access, not mere board access", async () => {
     await GET(new Request("http://x"), { params });

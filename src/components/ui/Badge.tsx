@@ -31,7 +31,6 @@ interface BadgeProps {
   children: React.ReactNode;
   variant?: "status" | "priority" | "category" | "default";
   value?: string;
-  // Explicit colour (hex) for project-defined categories; overrides the built-in maps
   color?: string;
   className?: string;
 }

@@ -1,19 +1,12 @@
-/**
- * One position in the agent the claim resolved. The prompt and the parameter values travel; a tool
- * list never does — `capability` is a name this side maps to a list of its own, so a server cannot
- * widen what a step may do.
- */
 export interface SnapshotEntry {
   key: string;
   kind: "step" | "gate";
   name: string;
-  /** step only */
   prompt?: string;
   capability?: "read-only" | "edit";
   model?: string;
   fallbackModel?: string;
   deterministic?: boolean;
-  /** gate only */
   gateKind?: string;
   params?: Record<string, string>;
 }
@@ -33,11 +26,7 @@ export interface ClaimedTask {
   description: string;
   acceptanceCriteria: string[];
   attempts: number;
-  // Resolved by the server at claim time and sent whole, not by reference: the agent can be edited
-  // or deleted while this run holds the task, and a run has to mean what it meant when it started.
   agent: AgentSnapshot;
-  // The run recorded on the task itself, read back from the claim response. Every phase event is
-  // authorized against it, so a locally invented value would simply be dropped by the server.
   runId: string;
 }
 
@@ -60,22 +49,12 @@ export interface DiffStats {
   changedFiles: string[];
   patch: string;
   truncated: boolean;
-  /**
-   * The symlinks the change adds or rewrites, with what they point at. `--numstat` renders a
-   * symlink as one added line in a file of that name, indistinguishable from an ordinary one-line
-   * file — measured — so a gate reading `changedFiles` alone cannot see that the change added a
-   * door out of the checkout (BP-509).
-   */
   symlinks: { path: string; target: string }[];
-  // The commit the diff was taken against, resolved once to an object id rather than left as the
-  // ref `HEAD`. The review gate checks this out to read the change, so "what the reviewer saw" and
-  // "what the gates judged" are the same commit by construction (BP-404).
   headSha: string;
 }
 
 export interface GateContext {
   worktreePath: string;
-  /** See Worktree.configBaseline — what the config said before the agent ran (BP-346). */
   configBaseline?: readonly string[] | null;
   task: ClaimedTask;
   result: ExecutionResult;

@@ -24,19 +24,11 @@ const MAX_CLIENT_NAME = 80;
 const MAX_REDIRECT_URIS = 10;
 const REGISTRATIONS_PER_WINDOW = 10;
 
-// No provenance check: RFC 7591 registration is meant to be called cross-origin and by non-browser
-// clients, which send neither Sec-Fetch-Site nor a matching Origin. Refusing them breaks MCP
-// onboarding, and the guard buys nothing — the endpoint is unauthenticated, takes no cookie, and
-// answers Access-Control-Allow-Origin: *, so a forged call gains what curl already would.
 export async function POST(req: Request) {
   await connectDB();
 
-  // Unauthenticated and public by design, so the only bound on how far the client
-  // collection can be grown is the caller's address
   const clientIp = getClientIp(req);
   const throttleKey = sourceKey(clientIp ?? "-", "oauth_register");
-  // With no address every caller shares this key, so the per-address figure would let one of them
-  // hold registration closed for the whole instance
   const ceiling = anonymousMultiplier(clientIp, REGISTRATIONS_PER_WINDOW);
   if (await isRateLimited(throttleKey, ceiling)) {
     return NextResponse.json(

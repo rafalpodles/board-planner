@@ -17,7 +17,6 @@ vi.mock("@/models/task", () => ({ Task: { find: taskFind } }));
 const { GET } = await import("./route");
 
 const ADMIN = { _id: "admin-1", role: "admin", tokenScoped: false };
-// The fleet spans every project, so owning one is not a way in
 const PROJECT_OWNER = { _id: "owner-1", role: "member", tokenScoped: false };
 
 function workerDoc(overrides: Record<string, unknown> = {}) {
@@ -128,9 +127,6 @@ describe("GET /api/admin/workers", () => {
     expect(workerFind).not.toHaveBeenCalled();
   });
 
-  // BP-358: the owner decides everything a machine may reach, and an ownerless one reaches nothing
-  // while looking identical to an idle healthy one. The console cannot show a name the route does
-  // not ask for, and an unpopulated ref serialises as a bare id.
   it("asks for the owner's name alongside the fleet", async () => {
     await GET(request(), { params: Promise.resolve({}) });
 
@@ -157,8 +153,6 @@ describe("GET /api/admin/workers", () => {
     expect(json.find((w: { name: string }) => w.name === "orphan").owner).toBeNull();
   });
 
-  // An id with no name is what an unpopulated ref looks like, and rendering it would put "6a70…"
-  // in the column that exists to answer whose machine this is
   it("reports no owner rather than an id when the ref was not populated", async () => {
     mockFleet([workerDoc({ _id: "a1", name: "unpopulated", owner: "6a732075133f935b19154cd2" })]);
 
@@ -186,8 +180,6 @@ describe("GET /api/admin/workers", () => {
     expect(json.find((w: { name: string }) => w.name === "stale-worker").stale).toBe(true);
   });
 
-  // Phase lives on the task, so a worker document alone cannot answer "what is it doing" — the
-  // route has to join, and the fleet console has nothing to render without it
   it("reports the task a worker is running, with its phase", async () => {
     mockFleet([workerDoc({ _id: "a1", name: "busy" })]);
     mockRunning([runningTask("a1")]);
@@ -234,8 +226,6 @@ describe("GET /api/admin/workers", () => {
     expect(taskFind).not.toHaveBeenCalled();
   });
 
-  // Every exit from the active column clears the run identity, so a task with no runId is not being
-  // run by anyone — asking for one is what keeps a finished task off the console
   it("only asks for tasks whose run identity is still set", async () => {
     mockFleet([workerDoc({ _id: "a1" })]);
 
@@ -244,9 +234,6 @@ describe("GET /api/admin/workers", () => {
     expect(taskFind.mock.calls[0][0]["execution.runId"]).toEqual({ $nin: [null, ""] });
   });
 
-  // A worker killed mid-run leaves its task claimed until the lease is swept, so the same worker
-  // can match an abandoned task and the one it is really running. Without an order the server
-  // decides, and it can settle on the dead one — reporting work the worker gave up hours ago.
   it("prefers the newest claim when a worker matches more than one task", async () => {
     mockFleet([workerDoc({ _id: "a1" })]);
     mockRunning([runningTask("a1")]);
@@ -256,9 +243,6 @@ describe("GET /api/admin/workers", () => {
     expect(sorts[0]).toEqual({ "execution.startedAt": -1 });
   });
 
-  // The projection and the populate path are invisible to this mock, so they are asserted rather
-  // than exercised: dropping project from the select would degrade every taskKey to "?-161" in
-  // production while every test here stayed green.
   it("asks for the fields the task key is built from", async () => {
     mockFleet([workerDoc({ _id: "a1" })]);
     mockRunning([runningTask("a1")]);

@@ -20,22 +20,13 @@ interface MyTask {
   category: string;
   updatedAt: string;
   project: { _id: string; name: string; key: string; icon?: string };
-  // Resolved by the server from each task's own project, because this list spans boards that agree
-  // on roles and on nothing else. Null when the task sits in a column that no longer exists.
   statusRole: ColumnRole | null;
   statusLabel: string;
   statusColor: string | null;
 }
 
-/**
- * What the endpoint actually answers. A task whose board has been deleted arrives with no project
- * at all, and such a row can be neither grouped, named nor linked to — so it never becomes a
- * MyTask.
- */
 type IncomingTask = Omit<MyTask, "project"> & { project: MyTask["project"] | null };
 
-// By what a column means, not by what it is called. Keyed on ids this ordered seven names and put
-// every custom column last, so a renamed board sorted arbitrarily against its own workflow.
 const orderOf = (task: MyTask) =>
   task.statusRole ? ROLE_ORDER[task.statusRole] : Object.keys(ROLE_ORDER).length;
 
@@ -49,8 +40,6 @@ export default function MyTasksPage() {
   const loadSeq = useRef(0);
 
   const load = useCallback(() => {
-    // A request overtaken by a later one applies nothing: without this, a retry that succeeds is
-    // replaced by the failure of the load it replaced, or the other way round
     const seq = ++loadSeq.current;
     setLoading(true);
     api
@@ -75,7 +64,6 @@ export default function MyTasksPage() {
   const filtered = hideDone ? tasks.filter((t) => t.statusRole !== "done") : tasks;
   const sorted = [...filtered].sort((a, b) => orderOf(a) - orderOf(b));
 
-  // Group by project
   const grouped: Record<string, { project: MyTask["project"]; tasks: MyTask[] }> = {};
   for (const task of sorted) {
     const pid = task.project._id;
@@ -93,8 +81,6 @@ export default function MyTasksPage() {
     );
   }
 
-  // Not the empty state: "no tasks assigned to you" is a claim about this person's work, and a
-  // request that never answered supports no claim about it at all
   if (failed) {
     return (
       <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
@@ -178,9 +164,6 @@ export default function MyTasksPage() {
   );
 }
 
-// The project's own colour, not a guess from a fixed list of ids. The switch this replaces had a
-// branch per seeded column and a fallback for everything else, so every custom column on every
-// board rendered as "planned" grey.
 function statusAccent(task: MyTask): string {
   return task.statusColor || "var(--color-status-planned)";
 }

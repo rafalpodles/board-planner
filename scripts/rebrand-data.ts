@@ -1,28 +1,3 @@
-/**
- * The whole data rebrand in one run: snapshot, migrate, verify.
- *
- *   npx tsx scripts/rebrand-data.ts            # dumps and reports, writes nothing
- *   npx tsx scripts/rebrand-data.ts --apply
- *
- * Add --key CP=BP to change a project's key in the same run. That renames every one of
- * its tasks at once, since a task key is built from it and never stored — see
- * migrate-project-key.ts for what it does to keep the old references working.
- *
- * Against production, from a laptop — the app service's URI is on Railway's private
- * network, so this has to go through the database service:
- *
- *   railway run --service MongoDB -- sh -c 'MONGODB_URI="$MONGO_PUBLIC_URL" npx tsx scripts/rebrand-data.ts'
- *   railway run --service MongoDB -- sh -c 'MONGODB_URI="$MONGO_PUBLIC_URL" npx tsx scripts/rebrand-data.ts --apply'
- *
- * The snapshot is taken **before** anything is written, even on a dry run, and covers
- * every collection rather than a list written by hand — the migration walks the whole
- * database, so a partial dump would read as a safety net without being one.
- *
- * The steps are the existing scripts, run as they would be run by hand. They are not
- * imported and re-implemented here: each one already refuses an empty database, prints
- * which database answered, and has been exercised on its own.
- */
-
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -57,8 +32,6 @@ function main() {
 
   console.log(apply ? "Rebranding stored data — snapshot, migrate, verify." : "Dry run — a snapshot is still taken.");
 
-  // A dry run stops after the reports, so it must not number its steps out of a plan it
-  // will not carry out — "1/5" that ends at 2 reads as a script that gave up
   const steps = apply ? (keyArg ? 6 : 4) : keyArg ? 3 : 2;
   run(`1/${steps}  Snapshot every collection`, ["scripts/dump-collections.ts", "dump", BACKUP_ROOT, "all"]);
   const backup = newestBackup();
@@ -92,8 +65,6 @@ function main() {
     );
   }
 
-  // Last, and only once the name migration has verified: the key change renames every task
-  // in the project, and doing that on top of a half-finished rename would be hard to read
   if (keyArg) run(`6/${steps}  Change the project key`, ["scripts/migrate-project-key.ts", fromKey, toKey, "--apply"]);
 
   console.log(`\n${"─".repeat(72)}`);

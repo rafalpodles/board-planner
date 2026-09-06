@@ -13,8 +13,6 @@ vi.mock("./worker-service", async (importOriginal) => {
   return { ...actual, verifyWorkerCredential };
 });
 vi.mock("./auth", () => ({ getAuthUser, RateLimitError: class extends Error {} }));
-// The person branch consults check(); the worker branch consults accessibleProjectIds() through
-// ownerReachableProjectIds, because a machine reaches exactly what its owner reaches (BP-358)
 vi.mock("./grants", () => ({ check, accessibleProjectIds }));
 vi.mock("@/models/project", () => ({
   Project: { findById: projectFindById, findOne: vi.fn() },
@@ -37,8 +35,6 @@ function workerDoc(overrides: Record<string, unknown> = {}) {
     lockedByInstance: false,
     identity: IDENTITY_ID,
     repos: [{ remote: REMOTE, path: "/checkout" }],
-    // BP-305/BP-358: the reported repos narrow what this machine's owner can reach, they never
-    // stand in for it
     owner: OWNER_ID,
     ...overrides,
   };
@@ -57,8 +53,6 @@ function identityDoc() {
   return { _id: IDENTITY_ID, username: "worker-w1", fullName: "Rafal · MacBook", role: "member" };
 }
 
-// Two different accounts, because they answer two different questions: identity is which machine
-// acted, owner is whose machine it is — and only the owner's grants decide what it may reach.
 function ownerDoc() {
   return { _id: OWNER_ID, username: "rpo", fullName: "Rafal", role: "member" };
 }
@@ -84,7 +78,6 @@ beforeEach(() => {
     Promise.resolve(String(id) === OWNER_ID ? ownerDoc() : identityDoc())
   );
   accessibleProjectIds.mockResolvedValue([PROJECT_ID]);
-  // Nothing in flight unless a test says so
   taskExists.mockResolvedValue(null);
 });
 
@@ -98,8 +91,6 @@ describe("a worker reporting with its own credential", () => {
     expect(handler).toHaveBeenCalled();
   });
 
-  // Comments are authored by whoever the handler is handed. Without this a worker's note on a task
-  // reads as though a person wrote it — the falsified audit trail CP-241 exists to end.
   it("acts as the machine's own identity, not as anyone's account", async () => {
     const handler = vi.fn().mockResolvedValue(new Response("ok"));
 
@@ -108,7 +99,6 @@ describe("a worker reporting with its own credential", () => {
     expect(handler.mock.calls[0][1].user.username).toBe("worker-w1");
   });
 
-  // The kill switch and every other act that needs a person at a keyboard key on this
   it("marks the request as made by a machine credential", async () => {
     const handler = vi.fn().mockResolvedValue(new Response("ok"));
 
@@ -117,10 +107,6 @@ describe("a worker reporting with its own credential", () => {
     expect(handler.mock.calls[0][1].user.viaMachineCredential).toBe(true);
   });
 
-  // BP-335/BP-336: handlers must never read x-worker-id themselves — a session cookie with no
-  // Bearer takes the person branch, where that header is attacker-set and unverified. So the
-  // middleware hands down the id it actually verified, and the route tests that mock this away
-  // cannot prove it does.
   it("hands the handler the worker id it verified the credential against", async () => {
     const handler = vi.fn().mockResolvedValue(new Response("ok"));
 
@@ -135,7 +121,6 @@ describe("a worker reporting with its own credential", () => {
     check.mockResolvedValue(true);
     projectFindById.mockReturnValue({ select: () => ({ _id: PROJECT_ID }) });
 
-    // A cookie session — no Bearer — carrying a forged x-worker-id
     const forged = new Request(`https://example.com/api/projects/${PROJECT_ID}/tasks/t1/comments`, {
       method: "POST",
       headers: { "x-worker-id": "w1" },
@@ -143,8 +128,6 @@ describe("a worker reporting with its own credential", () => {
 
     await withProjectAccessOrWorker(handler)(forged, context());
 
-    // Without this the two `?.` below short-circuit to undefined when the handler was never
-    // reached, so the assertion would pass for the wrong reason if any gate above it changed
     expect(handler).toHaveBeenCalled();
     expect(handler.mock.calls[0]?.[1]?.workerId).toBeUndefined();
   });
@@ -171,8 +154,6 @@ describe("the grant is re-derived on every call", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  // This is what a static project-scoped token could not do: the scope has to follow the
-  // assignments, not a list fixed when the token was minted
   it("refuses a project whose repository this machine does not report", async () => {
     verifyWorkerCredential.mockResolvedValue(
       workerDoc({ repos: [{ remote: "git@github.com:someone/else.git", path: "/x" }] })
@@ -209,8 +190,6 @@ describe("the grant is re-derived on every call", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  // BP-358: what the stored approved list used to answer. Resolved live, so a revoked grant reaches
-  // the machine on its next call instead of leaving an approval behind that nothing revisits.
   it("refuses a project this machine's owner cannot reach", async () => {
     accessibleProjectIds.mockResolvedValue(["some-other-project"]);
     const handler = vi.fn();
@@ -225,18 +204,9 @@ describe("the grant is re-derived on every call", () => {
 
     expect((await withProjectAccessOrWorker(handler)(workerRequest(), context())).status).toBe(403);
     expect(handler).not.toHaveBeenCalled();
-    // Not merely refused by an empty grant list: the owner is never looked up at all
     expect(accessibleProjectIds).not.toHaveBeenCalled();
   });
 
-  /**
-   * The paragraph at the top of withProjectAccessOrWorker: a worker must still be able to report
-   * the outcome of a task it already holds, or refusing it strands that task in the active column
-   * until the two-hour lease sweeps it and spends an attempt.
-   *
-   * BP-358 made that reachable in a new way — the reach is the OWNER's, and every machine enrolled
-   * before BP-358 has none, so on the day this deploys every in-flight run would 403.
-   */
   describe("a run this machine is already holding", () => {
     it("reports through even though its owner reaches nothing", async () => {
       verifyWorkerCredential.mockResolvedValue(workerDoc({ owner: null }));
@@ -257,8 +227,6 @@ describe("the grant is re-derived on every call", () => {
       expect((await withProjectAccessOrWorker(handler)(workerRequest(), context())).status).toBe(200);
     });
 
-    // runId, not workerId: workerId is left behind as history when a run ends, so keying on it
-    // would let a finished task grant its worker access to the project for good
     it("asks for a live run, in this project, held by this worker", async () => {
       verifyWorkerCredential.mockResolvedValue(workerDoc({ owner: null }));
       taskExists.mockResolvedValue({ _id: "t1" });
@@ -275,8 +243,6 @@ describe("the grant is re-derived on every call", () => {
       });
     });
 
-    // The exemption is for a task in flight, not a standing grant: with nothing held, an
-    // unreachable project is still refused
     it("does not become a way in once the run has ended", async () => {
       verifyWorkerCredential.mockResolvedValue(workerDoc({ owner: null }));
       const handler = vi.fn();
@@ -285,8 +251,6 @@ describe("the grant is re-derived on every call", () => {
       expect(handler).not.toHaveBeenCalled();
     });
 
-    // A disabled or locked machine is refused before any of this: the kill switch is not a
-    // permissions question and must not be softened by holding a task
     it("does not let a killed worker report either", async () => {
       verifyWorkerCredential.mockResolvedValue(workerDoc({ lockedByInstance: true }));
       taskExists.mockResolvedValue({ _id: "t1" });
@@ -297,9 +261,6 @@ describe("the grant is re-derived on every call", () => {
     });
   });
 
-  // The identity is a `worker-<id>` machine account with no grants of its own. Reading reach off it
-  // rather than off the owner would refuse every project on the instance, and both accounts are
-  // members, so nothing about the outcome distinguishes them — only who was asked.
   it("asks the owner's account what it may reach, not the machine's own identity", async () => {
     await withProjectAccessOrWorker(vi.fn().mockResolvedValue(new Response("ok")))(
       workerRequest(),
@@ -313,8 +274,6 @@ describe("the grant is re-derived on every call", () => {
 });
 
 describe("what it does with anything that is not a worker", () => {
-  // A rejected worker credential must not quietly fall through to the person path, where the same
-  // Bearer string would be tried as an API token
   it("rejects a bad worker credential rather than retrying it as a person", async () => {
     verifyWorkerCredential.mockResolvedValue(null);
     const handler = vi.fn();

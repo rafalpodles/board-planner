@@ -33,8 +33,6 @@ const LABELS: Record<string, string> = {
 type PolicyValue = string | number | boolean;
 type Draft = Record<string, PolicyValue>;
 
-// Moved onto the block that does the thing: size thresholds are the Size gate's, review is the
-// Reviewed gate's presence and parameters, and the models belong to the step that calls them.
 const MOVED_TO_BLOCKS = new Set([
   "autoMerge",
   "maxDiffLines",
@@ -48,8 +46,6 @@ const MOVED_TO_BLOCKS = new Set([
 const FIELDS = Object.keys(PROJECT_POLICY_DEFAULTS).filter((f) => !MOVED_TO_BLOCKS.has(f));
 const DEFAULTS = PROJECT_POLICY_DEFAULTS as unknown as Record<string, PolicyValue>;
 
-// An inherited field shows the default rather than the stored copy of it: the two diverge once a
-// default changes, and the default is what a worker will actually run under.
 function draftFrom(project: ApiProject): Draft {
   const stored = (project.worker?.policy ?? {}) as unknown as Record<string, PolicyValue>;
   const pinned = new Set(project.worker?.policyOverrides ?? []);
@@ -61,9 +57,7 @@ function draftFrom(project: ApiProject): Draft {
 }
 
 export function WorkersSection({ projectId, project, replaceProject, isAdmin }: SectionProps) {
-  // A <p> beside a control is not its name (BP-498)
   const defaultAgentId = useId();
-  // One useId for the whole policy list; the field name makes each row's id unique
   const policyFieldId = useId();
   const store = useStore();
   const agentApi = useApi();
@@ -84,9 +78,6 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
       await agentApi.put(`/api/projects/${projectId}/agent`, { agentId });
     } catch (error) {
       setDefaultAgent(previous);
-      // The control snapping back on its own said nothing at all, and the server's refusals are
-      // specific — which board the agent belongs to, or that it has nothing in it yet. `save()`
-      // in this same component already toasts, so this is the pattern beside it.
       toast(error instanceof Error ? error.message : "Could not set the default agent", "error");
     }
   };
@@ -95,8 +86,6 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
 
   const [workers, setWorkers] = useState<ApiWorker[] | null>(null);
   const draft = useDraft<Draft>(draftFrom(project));
-  // Un-pinning is intent, not a value, so it cannot live in the draft's diff: a field reset to the
-  // default is byte-identical to one that was already inheriting it.
   const [unpinned, setUnpinned] = useState<Set<string>>(new Set());
   const pinned = new Set(project.worker?.policyOverrides ?? []);
 
@@ -157,7 +146,6 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
     setUnpinned((prev) => new Set(prev).add(field));
   }
 
-  // Editing pins the field again, so a reset followed by a change does not send both
   function editField(field: string, value: PolicyValue): void {
     draft.set(field, value);
     setUnpinned((prev) => {
@@ -168,8 +156,6 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
     });
   }
 
-  // Which machines could serve this project. A worker offers a checkout; the operator granted it
-  // locally in repos.json, and no path is ever set from here.
   const offering = (workers ?? []).filter((w) =>
     (w.repos ?? []).some((r) => wanted.some((candidate) => sameRepo(candidate, r.remote)))
   );
@@ -244,11 +230,9 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
             const value = draft.value[field];
             const label = LABELS[field] ?? field;
             const fieldId = `${policyFieldId}-${field}`;
-            // What the row will mean once saved, not what is stored right now
             const inherits = unpinned.has(field) || (!pinned.has(field) && !draft.isDirty(field));
             return (
               <div key={field} className="flex items-center gap-3">
-                {/* A boolean carries its own label, so the shared one would say it twice */}
                 {typeof value !== "boolean" && (
                   <label htmlFor={fieldId} className="w-52 text-sm">
                     {label}
@@ -263,8 +247,6 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
                   />
                 ) : (
                   <Input
-                    // Controlled: an uncontrolled input keeps showing the old number after a reset
-                    // or a discard, under a label that has already changed
                     id={fieldId}
                     value={String(value)}
                     className="flex-1"
@@ -285,11 +267,6 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
                     disabled={!isAdmin}
                     onClick={() => resetField(field)}
                     className="text-xs text-primary hover:underline w-24 text-left disabled:text-text-muted disabled:no-underline"
-                    // One per pinned field, and "set · reset" is the same on every one of them.
-                    // `title` is a tooltip, not a name — the aria-label below is what wins, and it
-                    // keeps the visible text at the FRONT: WCAG 2.5.3 asks that what a
-                    // voice-control user can see is what they can say, so "click set reset" still
-                    // reaches this button.
                     aria-label={`set · reset ${label}`}
                     title="Follow the default again"
                   >
@@ -363,8 +340,6 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
                         className={`px-3 py-2 ${endedBadly(run) ? "text-danger" : "text-success"}`}
                       >
                         {endState(run)}
-                        {/* What the run said on the way out. It was written to the database and
-                            rendered nowhere, so the only way to read it was a Mongo shell. */}
                         {run.detail && (
                           <span
                             data-testid="run-detail"

@@ -40,8 +40,6 @@ describe("PageHeader", () => {
   });
 });
 
-// The redesign normalised the board and left its siblings behind; this is what
-// stops the next page from quietly reintroducing the old block
 describe("no page reintroduces the old header idiom", () => {
   const APP = join(process.cwd(), "src/app/(app)");
 

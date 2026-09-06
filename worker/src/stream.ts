@@ -59,7 +59,6 @@ export function parseStream(stdout: string): StreamEvent[] {
     try {
       parsed = JSON.parse(trimmed);
     } catch {
-      // a killed process leaves a partial last line, and the CLI prints upgrade notices unprompted
       continue;
     }
     if (typeof parsed !== "object" || parsed === null) continue;

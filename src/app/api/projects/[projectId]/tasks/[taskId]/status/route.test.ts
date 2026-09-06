@@ -4,11 +4,6 @@ const changeStatus = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/task-service", () => ({ changeStatus }));
-// Models the real middleware rather than deriving one fact from another: the worker branch needs a
-// Bearer AND x-worker-id and yields a verified workerId; a cp_/cpat_ token is a machine credential
-// with NO verified worker id; a cookie session is a person. The old mock defined
-// viaMachineCredential AS the presence of x-worker-id, which made the machine-without-header case —
-// the one that turned out to be a hole — impossible to express (BP-336).
 vi.mock("@/lib/middleware", () => ({
   withProjectAccessOrWorker:
     (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
@@ -50,9 +45,6 @@ beforeEach(() => {
 });
 
 describe("PATCH .../tasks/:taskId/status", () => {
-  // BP-305: force was read from the body regardless of principal, so a worker credential
-  // could take a task off another machine mid-run. CLAUDE.md already records the principle
-  // for the PM agent: an unattended agent must not take work off a machine.
   it("refuses force from a machine credential", async () => {
     const res = await PATCH(request({ status: "todo", force: true }, "worker"), ctx());
 
@@ -60,7 +52,6 @@ describe("PATCH .../tasks/:taskId/status", () => {
     expect(changeStatus).not.toHaveBeenCalled();
   });
 
-  // BP-335: the hold refused the holder's own report, so every worker success path 409'd
   it("hands the verified worker id down so the holder is not refused its own report", async () => {
     const res = await PATCH(request({ status: "in_review" }, "worker"), ctx());
 
@@ -81,10 +72,6 @@ describe("PATCH .../tasks/:taskId/status", () => {
     });
   });
 
-  // Every case above sends the header and the verified id as the same value, so a revert to
-  // `request.headers.get("x-worker-id")` in the route left all three green. This is the case that
-  // separates them: a cookie session takes the person branch, where nothing has checked that header
-  // — and under the revert it would collect the holder exemption and move a held task with no force.
   it("does not take a worker id from a header the middleware never verified", async () => {
     const forged = new Request("https://app.example.com/api/projects/p1/tasks/t1/status", {
       method: "PATCH",
@@ -101,7 +88,6 @@ describe("PATCH .../tasks/:taskId/status", () => {
     });
   });
 
-  // A machine credential that is not a worker: no verified id, so no exemption either
   it("gives an API token no worker id", async () => {
     await PATCH(request({ status: "in_review" }, "machineToken"), ctx());
 

@@ -51,8 +51,6 @@ export function BoardSection({ projectId, project, patchProject, stats }: Sectio
       columns.map((c, i) => {
         if (i !== index) return c;
         const next = { ...c, ...patch };
-        // Moving the escalation column out of review would otherwise relocate the hand-off
-        // to whichever review column happens to sort first, silently
         return next.role === "review" ? next : { ...next, triggersPmReview: false };
       })
     );
@@ -92,13 +90,9 @@ export function BoardSection({ projectId, project, patchProject, stats }: Sectio
     }
   );
 
-  // An unsaved column has no id, and an <option> without a value falls back to its
-  // label — picking it matched nothing and silently cleared the hand-off
   const reviewColumns = columns.filter((c) => c.role === "review" && c.id);
   const escalation = escalationColumnId(columns);
   const explicit = columns.some((c) => c.triggersPmReview);
-  // The flag used to be a per-column checkbox, so a project could carry several. Only one
-  // survives the next save of this section, and it is not obvious which
   const strandedFlags = flaggedColumnIds(effectiveColumns(project.columns)).filter(
     (id) => id !== escalation
   );
@@ -212,9 +206,6 @@ export function BoardSection({ projectId, project, patchProject, stats }: Sectio
         ))}
       </div>
 
-      {/* The board this warns about can no longer be *created* — the columns endpoint refuses to
-          remove the last Done column — but one saved before that rule existed still needs telling,
-          and this is the screen where it is repaired. */}
       {!draft.value.columns.some((c) => c.role === "done") && (
         <div className="mb-3 flex gap-2 rounded-lg border-l-2 border-warning bg-warning/10 px-3 py-2 text-sm">
           <span aria-hidden>⚠</span>

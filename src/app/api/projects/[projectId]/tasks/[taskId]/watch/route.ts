@@ -3,7 +3,6 @@ import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { Task } from "@/models/task";
 
-// Toggle watch — adds user if not watching, removes if already watching
 export const POST = withProjectAccess(async (_request, { params, user }) => {
   const { projectId, taskId } = await params;
   await connectDB();

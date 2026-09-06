@@ -20,8 +20,6 @@ describe("abortableSleep", () => {
     expect(settled).toHaveBeenCalled();
   });
 
-  // The point of the whole change: resolving early is not enough, because a pending setTimeout is a
-  // referenced handle and the process will not exit while one is outstanding
   it("clears the timer on abort rather than leaving a handle the event loop still waits on", async () => {
     vi.useFakeTimers();
     const controller = new AbortController();

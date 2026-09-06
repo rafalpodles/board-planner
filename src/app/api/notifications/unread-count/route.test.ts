@@ -34,8 +34,6 @@ function filterUsed() {
   return countDocuments.mock.calls.at(-1)?.[0] as Record<string, unknown>;
 }
 
-// The badge is a read too: a count that still moves tells a removed member the board is busy,
-// and every one of those rows opens in the feed (BP-328).
 describe("GET /api/notifications/unread-count", () => {
   beforeEach(() => {
     getAuthUser.mockReset();
@@ -44,7 +42,6 @@ describe("GET /api/notifications/unread-count", () => {
     getAuthUser.mockImplementation(async () => ({ _id: READER, role: "member" }));
   });
 
-  // Two boards, so that counting only the first stays a failure rather than a green run.
   it("counts every project the reader can still reach, not just one", async () => {
     const res = await GET(request(), noParams);
 

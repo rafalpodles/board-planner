@@ -3,8 +3,6 @@ import bcrypt from "bcryptjs";
 import { connectDB } from "./db";
 import { EnrolmentToken } from "@/models/enrolmentToken";
 
-// Long enough that guessing is hopeless, prefixed so a leaked string is recognisable in a log and
-// so the lookup does not have to bcrypt-compare every row.
 const PREFIX = "cpe_";
 const PREFIX_LENGTH = PREFIX.length + 8;
 
@@ -36,8 +34,6 @@ export async function mintEnrolmentToken(
   return { token, expiresAt };
 }
 
-// Who enrolled this machine, used to name its identity — "Rafal · MacBook". Empty rather than
-// throwing: a machine whose enroller has since been deleted still needs a working identity.
 export async function enrolmentTokenOwner(tokenId: string): Promise<string> {
   await connectDB();
   const token = await EnrolmentToken.findById(tokenId).populate("createdBy", "fullName username").lean();
@@ -45,16 +41,12 @@ export async function enrolmentTokenOwner(tokenId: string): Promise<string> {
   return owner?.fullName?.trim() || owner?.username?.trim() || "";
 }
 
-// Who enrolled this machine, as the id the owner claim keys on — not the display name above.
 export async function enrolmentTokenOwnerId(tokenId: string): Promise<string | null> {
   await connectDB();
   const token = await EnrolmentToken.findById(tokenId).select("createdBy").lean();
   return token?.createdBy ? String(token.createdBy) : null;
 }
 
-// Spending is a single conditional update, not read-then-write: two workers handed the same string
-// would both pass a read check and both register, which is exactly the second live worker this
-// credential exists to prevent.
 export async function consumeEnrolmentToken(
   token: string,
   now = new Date()
@@ -68,7 +60,6 @@ export async function consumeEnrolmentToken(
   for (const candidate of candidates) {
     if (!(await bcrypt.compare(token, candidate.tokenHash))) continue;
 
-    // Expiry is reported before spending, so an operator sees why it failed rather than "used"
     if (candidate.expiresAt.getTime() <= now.getTime()) return { ok: false, reason: "expired" };
 
     const spent = await EnrolmentToken.findOneAndUpdate(

@@ -1,11 +1,6 @@
 import XCTest
 @testable import CPMenubarCore
 
-/// Real git against real repositories. The rest of `CheckoutRemovalTests` stubs `RunGit`, which is
-/// the right shape for asserting the guard's own logic — but this file asks a question only git can
-/// answer: whether `git status` in a checkout can see uncommitted work that lives in one of its
-/// linked worktrees. A stub would answer whatever it was told.
-// Free function, not a method: CheckoutRemoval.RunGit is @Sendable, and an XCTestCase is not.
 @Sendable private func realGit(_ cwd: String, _ args: [String]) -> (code: Int32, output: String) {
     let task = Process()
     task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
@@ -49,13 +44,6 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
         super.tearDown()
     }
 
-
-    /// Everything the other guards want satisfied — a real remote with the commit pushed to it —
-    /// so a refusal from `check` can only be about the worktree. The first attempt at this file
-    /// skipped the remote and both tests refused for "commits on no remote": a fixture that cannot
-    /// isolate the guard under test proves nothing about it.
-    /// git reports `/private/var/…` where NSTemporaryDirectory gives `/var/…`, so an unresolved
-    /// comparison passes on a substring and reads stricter than it is.
     private func resolved(_ path: String) -> String {
         (path as NSString).resolvingSymlinksInPath
     }
@@ -75,8 +63,6 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
         return (checkout, worktree)
     }
 
-    /// The premise the whole bug rests on, asserted separately so a failure here is legible as
-    /// "git changed" rather than as "the guard changed".
     func testGitStatusInTheCheckoutCannotSeeAWorktreesUncommittedWork() {
         let (checkout, worktree) = repoWithWorktree()
 
@@ -91,8 +77,6 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
             "this is the premise: the checkout's status is blind to the worktree's working tree")
     }
 
-    /// The bug. The guard is asked about the checkout, says go, and hands back the worktree that is
-    /// about to be deleted with a day's uncommitted work in it.
     func testItRefusesWhenALinkedWorktreeHasUncommittedWork() {
         let (checkout, worktree) = repoWithWorktree()
         FileManager.default.createFile(
@@ -109,16 +93,11 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
             "the refusal has to name the worktree the operator never chose: \(reason)")
     }
 
-
-    /// The guard has to look at every worktree, not the first one. A machine that works this
-    /// repository's way has one per task, so "checks the first" and "checks them all" differ by
-    /// exactly the work that gets deleted.
     func testItLooksPastTheFirstWorktree() {
         let (checkout, first) = repoWithWorktree()
         let second = dir + "/cp-worktrees/BP-2"
         _ = git(checkout, ["worktree", "add", "-q", "-b", "bp-2/worker", second])
 
-        // The first stays clean on purpose: a guard that stopped after it would say go.
         FileManager.default.createFile(
             atPath: second + "/unsaved.txt", contents: Data("the second worktree's work\n".utf8))
 
@@ -130,11 +109,6 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
         XCTAssertFalse(reason.contains(resolved(first)), "and not the clean one")
     }
 
-    // MARK: - BP-422: the granted path is itself a linked worktree
-
-    /// Premise one. This is why the subdirectory guard cannot see the case: a linked worktree is a
-    /// work tree, and `--show-toplevel` answers with the worktree's own path, so the comparison
-    /// against the granted path succeeds on a checkout looking at itself.
     func testShowToplevelInAWorktreeAnswersWithTheWorktree() {
         let (_, worktree) = repoWithWorktree()
 
@@ -144,11 +118,6 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
         XCTAssertEqual(resolved(toplevel), resolved(worktree))
     }
 
-    /// Premise two. `git worktree list` names the repository's main checkout first, whichever
-    /// worktree it is run from — which is what put the repository at the top of the deletion list.
-    /// Asserted separately so a failure here reads as "git changed", not "the guard changed".
-    // Driven with `-z`, like production: the property is about git's ordering and holds either way,
-    // but pinning it on output the app no longer parses is how a test and its subject drift.
     func testWorktreeListNamesTheMainCheckoutFirstEvenFromAWorktree() {
         let (checkout, worktree) = repoWithWorktree()
 
@@ -161,8 +130,6 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
             "the whole listing was: \(listing)")
     }
 
-    /// Premise three, and the discriminator the fix rests on: the two answers agree in a repository
-    /// and differ in a worktree. `CloneStep` reads the same pair.
     func testGitDirAndCommonDirTellARepositoryFromItsWorktree() {
         let (checkout, worktree) = repoWithWorktree()
 
@@ -177,9 +144,6 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
         XCTAssertEqual(kind(worktree), .linkedWorktree)
     }
 
-    /// The bug. `repos.json` holds the worktree, the operator unticks the project, and the list
-    /// handed back for deletion opens with the repository nobody named — whose `.git` holds the
-    /// object store every other worktree of it shares.
     func testItRefusesToRemoveAPathThatIsItselfALinkedWorktree() {
         let (checkout, worktree) = repoWithWorktree()
 
@@ -189,27 +153,16 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
             XCTFail("expected a refusal, got \(verdict) — the repository at \(checkout) would be deleted")
             return
         }
-        // Not `contains("worktree")`: every neighbouring refusal in this file says that word too —
-        // "one of its worktrees", "could not list the worktrees of" — so it would pass for a guard
-        // that had stopped telling the two apart (BP-422 review)
         XCTAssertTrue(
             reason.contains("is a linked worktree"),
             "the refusal has to say what the path is, not just that it is not allowed: \(reason)")
     }
 
-    /// Belt and braces, and the second half of the ticket: whatever the verdict, the list of things
-    /// to delete may never contain a repository's main checkout.
-    ///
-    /// Written as a switch with no silent arm on purpose. The first version was `if case .go`, and
-    /// against this branch `check` refuses — so the body never ran and the test executed no
-    /// assertion at all while reading like a guard (BP-422 review).
     func testNoVerdictAboutAWorktreeEverNamesTheMainCheckout() {
         let (checkout, worktree) = repoWithWorktree()
 
         switch removal().check(path: worktree, workerIsBusy: false) {
         case .refused(let reason):
-            // Live in this arm too, so the test is never merely silent: the refusal is about the
-            // worktree the operator named, not about the repository behind it
             XCTAssertFalse(
                 reason.contains(resolved(checkout)),
                 "the refusal names the repository rather than the path it was asked about: \(reason)")
@@ -220,8 +173,6 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
         }
     }
 
-    /// The control. Without it, a guard that refused everything would pass the test above and this
-    /// file would prove nothing.
     func testItStillAllowsRemovingACheckoutWhoseWorktreesAreClean() {
         let (checkout, worktree) = repoWithWorktree()
 
@@ -232,14 +183,6 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
         XCTAssertEqual(worktrees.count, 1, "the clean worktree is still taken with it")
     }
 
-    /// BP-427. `worktree list --porcelain` terminates each attribute with a newline, so a worktree
-    /// whose path contains one spans two lines and the parser keeps the prefix — `…/we` out of the
-    /// `…/we\nird` this test creates. The truncated path names nothing on disk, so the `exists`
-    /// filter drops it and the verdict is `.go(worktrees: [])`: the removal then reports having
-    /// deleted the checkout while that worktree is still there. A success that left something
-    /// behind, rather than the partial removal covered elsewhere in the ticket.
-    ///
-    /// Only real git can answer this: a stub would emit whatever shape it was handed.
     func testAWorktreeWhosePathContainsANewlineComesBackWhole() {
         let dir = NSTemporaryDirectory() + "bp427-" + UUID().uuidString
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)

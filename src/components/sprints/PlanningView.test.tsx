@@ -20,8 +20,6 @@ const project = {
   name: "Test Project",
   columns: [
     { id: "todo", label: "To Do", color: "#3b82f6", role: "approved", order: 0 },
-    // A done-role column under an id nothing hardcodes — pins that filtering goes through
-    // columnIdsWithRole rather than a literal "done" comparison
     { id: "shipped", label: "Shipped", color: "#22c55e", role: "done", order: 1 },
   ],
   categories: [],
@@ -63,8 +61,6 @@ const projectWithEstimate = {
   customFields: [{ _id: "f1", name: "Story points", fieldType: "number" }],
 } as unknown as ApiProject;
 
-// One of the three sits in the done-role column; while the filter box is empty it is the
-// difference between this list's length and the "Backlog (2)" count the pane shows
 const backlogTasks = [
   {
     _id: "t1",
@@ -104,8 +100,6 @@ const backlogTasks = [
   },
 ] as ApiTask[];
 
-// Every field the hook exposes; PlanningView only reads project/tasks/sprints/applySprintChange,
-// but it is typed to take the whole ProjectBoard
 function makeBoard(overrides: Partial<ProjectBoard> = {}): ProjectBoard {
   return {
     project,
@@ -154,9 +148,6 @@ function makeBoard(overrides: Partial<ProjectBoard> = {}): ProjectBoard {
   };
 }
 
-// Only "text/plain" carries the dragged task's id, mirroring the one key PlanningPane
-// actually reads — a stub that answers every key alike would never notice the source
-// asking for the wrong one.
 function dataTransferFor(taskId: string) {
   return { getData: (key: string) => (key === "text/plain" ? taskId : "") };
 }
@@ -171,7 +162,6 @@ async function renderPlanning(overrides: Partial<ProjectBoard> = {}) {
 
   const board = makeBoard(overrides);
   const view = render(<PlanningView projectId="p1" board={board} sprintId="s1" />);
-  // The backlog fetch is the async part; everything else is already on `board`
   await screen.findByText("Backlog (2)");
   return view;
 }
@@ -242,8 +232,6 @@ describe("PlanningView", () => {
     expect(toast).toHaveBeenCalledWith("Failed to move task", "error");
   });
 
-  // The clicked button unmounts the instant its task leaves the pane, dropping focus to
-  // <body> — this pins that PlanningPane sends it somewhere useful instead
   it("moves focus to the next action button when a move unmounts the one that had it", async () => {
     await renderPlanning();
     const firstButton = screen.getByRole("button", {
@@ -294,8 +282,6 @@ describe("PlanningView", () => {
     expect(api.put).not.toHaveBeenCalled();
   });
 
-  // PlanningPane's onDrop reads the id off "text/plain" specifically; a stub that answers
-  // any key would never notice the source asking for a different one
   it("ignores a drop whose payload sits under a key the pane never asked for", async () => {
     await renderPlanning();
     fireEvent.drop(screen.getByTestId("planning-pane-sprint"), {
@@ -304,9 +290,6 @@ describe("PlanningView", () => {
     expect(api.put).not.toHaveBeenCalled();
   });
 
-  // onDragOver must call preventDefault, or the browser's native HTML5 DnD contract never
-  // permits a drop at that position in the first place — fireEvent returns false exactly
-  // when the default was prevented, mirroring Board.test.tsx:221's own drag-over check
   it("prevents the default drag-over so a drop can land", async () => {
     await renderPlanning();
     const notPrevented = fireEvent.dragOver(screen.getByTestId("planning-pane-sprint"));
@@ -331,7 +314,6 @@ describe("PlanningView", () => {
       },
     ] as ApiSprint[];
 
-    // loadedScope still says "s1": board.tasks has not caught up with the new sprint yet
     rerender(
       <PlanningView
         projectId="p1"
@@ -421,9 +403,6 @@ describe("PlanningView estimate", () => {
     expect(screen.getByText("Sprint 12 (1) · 0 Story points")).toBeTruthy();
   });
 
-  // Reachable through a migration, a bulk import, or a direct database edit — never through
-  // the API, which clears estimateFieldId along with the field — but a task can still carry
-  // a leftover value under the dangling id. That must not paint a blank-labelled total.
   it("shows nothing about the estimate when the designated field no longer exists on the project", async () => {
     const projectWithDanglingEstimate = {
       ...project,
@@ -461,9 +440,6 @@ describe("PlanningView estimate", () => {
 
     expect(screen.getByText("Sprint 12 (2) · 8 Story points")).toBeTruthy();
 
-    // "Fix the login redirect" now lives in PlanningView's own sprintOverlay state (it was
-    // never part of the static board.tasks fixture), so removing it here is real local state
-    // changing, not the mocked board.applySprintChange no-op the removal-only case would hit
     fireEvent.click(
       screen.getByRole("button", { name: "Remove Fix the login redirect from the sprint" })
     );

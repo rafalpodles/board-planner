@@ -46,8 +46,6 @@ function renderSidebar(
   );
 }
 
-// jsdom/happy-dom answer every media query with false, so the drawer branch only
-// runs when matchMedia is told the viewport is narrow
 function setViewport(mobile: boolean) {
   window.matchMedia = ((query: string) => ({
     matches: mobile && query.includes("max-width"),
@@ -102,11 +100,9 @@ describe("Sidebar", () => {
     localStorage.setItem("sidebar-collapsed", "1");
     renderSidebar({ mobileOpen: false });
     await waitFor(() => expect(screen.queryByText("My Tasks")).toBeNull());
-    // The icon still has to name itself for anyone hovering the rail
     expect(screen.getByTitle("My Tasks")).toBeTruthy();
   });
 
-  // The drawer is always 260px wide, so a stored collapse must not strip its labels
   it("keeps labels when the drawer is open, even if collapse is stored", async () => {
     localStorage.setItem("sidebar-collapsed", "1");
     renderSidebar({ mobileOpen: true });
@@ -138,8 +134,6 @@ describe("Sidebar", () => {
     expect(screen.getByText("My Tasks")).toBeTruthy();
   });
 
-  // The Settings row this used to assert on left with the Instance group (CP-216);
-  // the rule itself is covered by nav-active.test.ts and the collapsed-rail case
   it("marks only the nav item the route belongs to", async () => {
     nav.pathname = "/my-tasks";
     renderSidebar();
@@ -148,8 +142,6 @@ describe("Sidebar", () => {
     expect(screen.getByText("Notifications").closest("a")?.getAttribute("aria-current")).toBeNull();
   });
 
-  // The expanded sidebar hands the Projects group to ProjectTree; only the
-  // collapsed rail still renders a single flat entry
   it("falls back to one All projects entry on the collapsed rail", async () => {
     localStorage.setItem("sidebar-collapsed", "1");
     nav.pathname = "/projects/TP/tasks/1";
@@ -159,8 +151,6 @@ describe("Sidebar", () => {
   });
 });
 
-// The drawer painted a scrim and blocked the page visually, but owed it none of
-// a modal's actual contract: Escape did nothing and Tab walked straight past it
 describe("Sidebar as a mobile drawer", () => {
   afterEach(() => setViewport(false));
 
@@ -260,8 +250,6 @@ describe("Sidebar as a mobile drawer", () => {
   });
 });
 
-// CP-197 moved search out of the sidebar into a single centered layer; what is
-// left here is a trigger, and the nav must never be replaced by results again
 describe("Sidebar search row", () => {
   it("opens the search layer instead of searching in place", async () => {
     const onOpenSearch = vi.fn();
@@ -272,7 +260,6 @@ describe("Sidebar search row", () => {
     expect(onOpenSearch).toHaveBeenCalled();
   });
 
-  // It stopped being a field when it stopped searching; looking like one was the lie
   it("looks like the other nav rows, not like an input", async () => {
     renderSidebar();
     const row = await screen.findByRole("button", { name: "Search" });
@@ -282,8 +269,6 @@ describe("Sidebar search row", () => {
     expect(row.querySelector("kbd")).toBeNull();
   });
 
-  // BP-494: the phone's magnifier opens /search, so a drawer row that opened the palette
-  // instead put two different searches on one screen.
   it("is a link to the search page in the drawer, and a palette trigger otherwise", async () => {
     setViewport(true);
     renderSidebar({ mobileOpen: true });
@@ -339,8 +324,6 @@ describe("Sidebar search row", () => {
   });
 });
 
-// CP-216: the same page hangs off the user menu, so the Instance group was
-// one entry pretending to be a section
 describe("Sidebar instance settings", () => {
   it("offers no Instance group in the nav", async () => {
     renderSidebar();

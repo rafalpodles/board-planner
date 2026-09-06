@@ -1,7 +1,6 @@
 import { ApiCustomField, SortDir, SortField, SortKey } from "@/types";
 import { ListColumnId, defaultHidden, sanitizeHidden } from "./list-columns";
 
-/** Range for number and date fields; `value` carries every other type */
 export interface FieldFilter {
   value?: string;
   from?: string;
@@ -9,7 +8,6 @@ export interface FieldFilter {
 }
 
 export interface BoardFilterValues {
-  /** Keyed by field id, so the built-in keys stay a closed set */
   fields: Record<string, FieldFilter>;
   assignee: string;
   category: string;
@@ -25,10 +23,6 @@ export interface PersistedBoardFilters {
   hiddenColumns: ListColumnId[];
 }
 
-/**
- * Sentinel for "has no assignee" in the assignee filter. Not "" — that already means
- * "any assignee" — and the "@" keeps it out of reach of a real username.
- */
 export const UNASSIGNED = "@none";
 
 export const EMPTY_FILTERS: BoardFilterValues = {
@@ -39,7 +33,6 @@ export const EMPTY_FILTERS: BoardFilterValues = {
   dateRange: "",
 };
 
-/** The built-in keys only — `fields` is a map and is counted separately */
 export type BuiltInFilterKey = Exclude<keyof BoardFilterValues, "fields">;
 
 export const FILTER_KEYS = Object.keys(EMPTY_FILTERS).filter(
@@ -50,7 +43,6 @@ export function isFieldFilterSet(filter: FieldFilter | undefined): boolean {
   return !!(filter?.value || filter?.from || filter?.to);
 }
 
-/** Drops filters whose field is gone or archived, so none survives where it cannot be cleared */
 export function sanitizeFieldFilters(
   raw: unknown,
   customFields: ApiCustomField[]
@@ -76,16 +68,10 @@ function str(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-// The standalone "My tasks" toggle became filters.assignee. A stored myTasks:true
-// has to carry over, or everyone using it silently loses their filter on upgrade.
 export function migratePersistedFilters(
   raw: unknown,
   currentUsername?: string,
-  // Passed so a hidden project-field column survives a reload, and an archived
-  // field's entry is dropped instead of lingering where nobody can clear it
   customFields: ApiCustomField[] = [],
-  // Undefined means "not known yet" and leaves the filter alone; a list means a name
-  // outside it was renamed away and the filter has to go with it
   categories?: string[]
 ): PersistedBoardFilters {
   if (!raw || typeof raw !== "object") {
@@ -101,7 +87,6 @@ export function migratePersistedFilters(
     filters.category = "";
   }
 
-  // An explicit assignee is a later, more specific choice than the legacy toggle
   if (blob.myTasks === true && !filters.assignee && currentUsername) {
     filters.assignee = currentUsername;
   }

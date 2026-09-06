@@ -33,7 +33,6 @@ beforeEach(() => {
   vi.clearAllMocks();
   create.mockResolvedValue({});
   find.mockResolvedValue([]);
-  // The default is a token nobody has spent: the conditional update matches and returns the row
   findOneAndUpdate.mockImplementation((filter) =>
     Promise.resolve(filter.usedAt === null ? { _id: "e1" } : null)
   );
@@ -77,8 +76,6 @@ describe("consumeEnrolmentToken", () => {
     );
   });
 
-  // The whole point of the credential: two laptops handed the same string must not both register.
-  // A read-then-write check would let both through; the conditional update lets exactly one.
   it("refuses a token another worker already spent", async () => {
     const token = "cpe_" + "b".repeat(48);
     find.mockResolvedValue([await row(token)]);
@@ -113,7 +110,6 @@ describe("consumeEnrolmentToken", () => {
     });
   });
 
-  // A row can share the prefix without being the token: the hash is what decides.
   it("refuses a token whose hash does not match a same-prefix row", async () => {
     const issued = "cpe_" + "f".repeat(48);
     const guessed = "cpe_" + "f".repeat(47) + "0";
@@ -133,10 +129,6 @@ describe("consumeEnrolmentToken", () => {
   });
 });
 
-// BP-358: the token door's half of "a machine belongs to a person" — registerWorker gets ownerId
-// from here. A fixture returning createdBy as a plain string would never catch a dropped
-// String(...) cast, since a string coerced through String() is itself; it has to be a real
-// ObjectId, the shape a non-populated ref field actually has coming out of a lean query.
 describe("enrolmentTokenOwnerId", () => {
   it("returns the token creator's id as a string", async () => {
     const createdBy = new Types.ObjectId("6a732075133f935b19154cd2");

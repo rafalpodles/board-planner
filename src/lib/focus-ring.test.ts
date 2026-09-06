@@ -21,7 +21,6 @@ describe("focus-ring utility", () => {
     expect(css).toMatch(/\.focus-ring-inset:focus-visible\s*\{/);
   });
 
-  // Both themes retune --color-primary, so the outline follows without a second rule
   it("draws with the primary token rather than a colour literal", () => {
     const rule = css.slice(css.indexOf(".focus-ring:focus-visible"));
     const body = rule.slice(0, rule.indexOf("}"));
@@ -30,8 +29,6 @@ describe("focus-ring utility", () => {
   });
 });
 
-// Killing the browser's outline without drawing something in its place leaves a
-// control that is focusable but invisible to anyone navigating by keyboard
 describe("no control strips its outline without a replacement", () => {
   const REPLACEMENTS = [
     "focus-ring",
@@ -42,24 +39,14 @@ describe("no control strips its outline without a replacement", () => {
     "outline-primary",
   ];
 
-  // The rule assumes a control whose focus is invisible without an outline. A text
-  // input is the one case where that is false: it is marked by its own caret. Each
-  // exemption is listed here with its reason, so adding one is a reviewable act
-  // rather than a class quietly slipping past the regex.
-  // `placeholder:` pins each exemption to the text field it was granted for, so an
-  // outline stripped from a button in the same file still fails.
   const CARET_MARKS_FOCUS = [
     {
       file: "components/search/SearchLayer.tsx",
       onlyOn: "placeholder:",
-      // focused from the moment the layer opens; a box around it for the whole
-      // search reads as a validation error rather than as focus
     },
     {
       file: "components/ui/Combobox.tsx",
       onlyOn: "placeholder:",
-      // same as above: the panel focuses it on open, so the ring would be on for the
-      // whole life of the dropdown, framing a field nobody has typed in yet
     },
   ];
 
@@ -81,7 +68,6 @@ describe("no control strips its outline without a replacement", () => {
     ).toEqual([]);
   });
 
-  // An exemption that stops matching is an exemption nobody is checking any more
   it.each(CARET_MARKS_FOCUS)("$file still has the field its exemption was granted for", (e) => {
     const lines = readFileSync(join(SRC, e.file), "utf8").split("\n");
     const exempted = lines.filter(

@@ -23,22 +23,13 @@ export default function ProfilePage() {
   const [loaded, setLoaded] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
 
-  // Trimmed and lowercased the way the server normalises it, so the password prompt does not
-  // appear for a stray capital that will not change anything
   const emailChanged = loadFailed ? false : email.trim().toLowerCase() !== savedEmail;
-  // Trimmed the way the server normalises it, so trailing whitespace is not a change to refresh
-  // the shell over
   const nameChanged = loadFailed ? false : fullName.trim() !== savedFullName;
 
-  // A response can arrive after somebody has started typing — a slow connection, or simply a
-  // second request in flight — and applying it then throws their edit away mid-sentence. The
-  // baseline still moves, because it is what "changed" is measured against; only the field they
-  // are holding is left alone.
   const edited = useRef(false);
 
   useEffect(() => {
     if (!user) return;
-    // Fetch fresh user data
     api
       .get("/api/auth/me")
       .then((data: { email?: string; fullName?: string }) => {
@@ -51,9 +42,6 @@ export default function ProfilePage() {
         setLoaded(true);
       })
       .catch(() => {
-        // Without the stored address there is no way to tell a real change from a no-op, and the
-        // old behaviour offered Save anyway — which the server refuses, asking for a password
-        // there is no field for
         setLoadFailed(true);
         setLoaded(true);
       });
@@ -73,13 +61,9 @@ export default function ProfilePage() {
       setFullName(fullName.trim());
       setCurrentPassword("");
       edited.current = false;
-      // The shell renders the name from the cached user, so without this it keeps showing the old
-      // one until a full reload — on the one screen where somebody is watching for it to change
       if (nameChanged) await refreshUser();
       toast("Profile updated", "success");
     } catch (err) {
-      // The server's own words: "Current password is incorrect" is worth reading, where a generic
-      // failure leaves somebody retyping a password that was right
       const message = err instanceof Error ? err.message : "";
       toast(message || "Failed to update profile", "error");
     } finally {
@@ -164,8 +148,6 @@ export default function ProfilePage() {
             saving ||
             loadFailed ||
             !fullName.trim() ||
-            // Nothing to save is not something to offer: the route writes only what differs, so
-            // this used to answer 200 having written nothing
             (!nameChanged && !emailChanged) ||
             (emailChanged && !currentPassword.trim())
           }

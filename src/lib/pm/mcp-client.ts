@@ -1,6 +1,5 @@
 import { safeFetch, readBoundedJson, MAX_RESPONSE_BYTES } from "@/lib/safe-fetch";
 
-// Mirrors the carve-out isAllowedMcpServerUrl makes for local MCP servers outside production
 const MCP_DESTINATION = { allowLoopback: process.env.NODE_ENV !== "production" };
 
 const PROTOCOL_VERSION = "2025-03-26";
@@ -128,22 +127,14 @@ export class McpClient {
         signal: controller.signal,
       }, MCP_DESTINATION);
     } catch {
-      // Notifications are best-effort; some servers reject them entirely.
     } finally {
       clearTimeout(timer);
     }
   }
 }
 
-/**
- * One event without a separator grows this buffer forever, so a hostile MCP server could hold the
- * connection open and stream until the process died. The cap is far above any real tool result
- * (BP-317).
- */
 const MAX_SSE_BUFFER_BYTES = 4 * 1024 * 1024;
 
-/** Bytes off the socket, not `buffer.length` — that counts UTF-16 units, which a peer sending
- * three-byte characters can stretch to three times the advertised budget (BP-317 review). */
 function bytesOf(chunk: Uint8Array | undefined): number {
   return chunk?.byteLength ?? 0;
 }
@@ -169,8 +160,6 @@ async function readSseResponse(res: Response, id: number): Promise<JsonRpcMessag
       while ((sep = buffer.match(/\r?\n\r?\n/))) {
         const rawEvent = buffer.slice(0, sep.index);
         buffer = buffer.slice((sep.index ?? 0) + sep[0].length);
-        // The budget is on one unterminated event, not on the stream: a server that keeps sending
-        // complete events is behaving, however many it sends
         bytesBuffered = Buffer.byteLength(buffer);
         const data = rawEvent
           .split(/\r?\n/)
@@ -182,7 +171,6 @@ async function readSseResponse(res: Response, id: number): Promise<JsonRpcMessag
           const message = JSON.parse(data) as JsonRpcMessage;
           if (message && message.id === id) return message;
         } catch {
-          // Ignore non-JSON events
         }
       }
     }

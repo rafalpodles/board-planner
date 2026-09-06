@@ -37,8 +37,6 @@ export async function POST(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // This route authenticates by hand (it streams SSE) and so never passes through
-  // withProjectAccess, which is where key -> id resolution normally happens
   const { projectId: projectRef } = await params;
   const projectId = projectRef ? await resolveProjectId(projectRef) : null;
   if (!projectId) {
@@ -72,9 +70,6 @@ export async function POST(
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
-  // Empty is allowed when something is attached: an image on its own is a turn, and the Send button
-  // has always offered it (BP-451). The attachments themselves are validated below, so an empty
-  // message with an empty array is still refused.
   const carriesAttachment = Array.isArray(attachments) && attachments.length > 0;
   if (typeof message !== "string") {
     return NextResponse.json(
@@ -124,8 +119,6 @@ export async function POST(
       });
     }
 
-    // Better a clear refusal than a provider error the user cannot act on. Unknown
-    // capability (network failure, unlisted model) is allowed through rather than blocked.
     const model = await resolvePmModel(project.pm.model);
     if ((await modelAcceptsImages(model)) === false) {
       return NextResponse.json(
@@ -143,8 +136,6 @@ export async function POST(
     );
   }
 
-  // The second ceiling, in the units the operator pays in. Off unless configured, so this refuses
-  // nothing that works today (BP-284).
   const spend = await dailyPmSpend(projectId, project.pm);
   if (spend.over) {
     return NextResponse.json(
@@ -160,12 +151,6 @@ export async function POST(
 
   const triggeredByUserId = String(user._id);
 
-  // One turn per project even though conversations are private — the agent writes to a
-  // board everyone shares
-  // After the cap, because that refusal is a count this request already had to make and this one is
-  // a GridFS round trip. An image-only turn stands or falls on the image: everything above checks
-  // the *shape* of an attachment, so a well-formed fileId naming no file would otherwise start a
-  // turn whose user content is the empty string (BP-451 review).
   if (!message.trim() && !(await anyAttachmentReadable(parsedAttachments, projectId))) {
     return NextResponse.json(
       { error: "That image could not be read. Attach it again, or type a message." },
@@ -192,7 +177,6 @@ export async function POST(
         try {
           controller.enqueue(encoder.encode(payload));
         } catch {
-          // Client disconnected — keep the turn running; results land in pmmessages
           closed = true;
         }
       };
@@ -228,7 +212,6 @@ export async function POST(
           try {
             controller.close();
           } catch {
-            // already closed by the client
           }
         }
       })();

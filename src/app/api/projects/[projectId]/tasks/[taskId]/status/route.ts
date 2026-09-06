@@ -8,14 +8,8 @@ export const PATCH = withProjectAccessOrWorker(async (request, { params, user, w
   const { projectId, taskId } = await params;
   await connectDB();
 
-  // `force` is how a person says "take the task from that worker" after being told it is running.
-  // Opt-in per request rather than a setting: the refusal is only useful if it is the default.
   const { status, force } = await request.json();
 
-  // Never for a machine credential. CLAUDE.md already records that the PM agent gets no force
-  // because "an unattended agent must not take work off a machine"; a worker is exactly such an
-  // agent, and force here took a task off another worker mid-run (BP-305). The rule moved into
-  // one named place once BP-320 found the sibling route missing it.
   if (machineMayNotForce(user, force)) {
     return NextResponse.json({ error: MACHINE_FORCE_REFUSAL }, { status: 403 });
   }

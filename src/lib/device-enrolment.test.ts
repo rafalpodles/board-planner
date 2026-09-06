@@ -15,7 +15,6 @@ vi.mock("./db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/deviceEnrolment", () => ({
   DeviceEnrolment: { create, findOne, find, findOneAndUpdate, updateOne, countDocuments, deleteMany },
 }));
-// The poll now also reads the approved project, so the app knows what to clone
 vi.mock("@/models/project", () => ({
   Project: { findById: () => ({ select: () => ({ lean: projectLean }) }) },
 }));
@@ -35,11 +34,6 @@ function candidates(rows: unknown[]) {
   find.mockReturnValue({ limit: () => Promise.resolve(rows) });
 }
 
-// The eviction query: find(live).sort(...).limit(n).select("_id").lean()
-//
-// limit() honours its argument. A mock that ignored it returned every row it was given whatever the
-// source asked for, so the deleteMany assertion below was reading the fixture rather than the
-// arithmetic — .limit(1) left the collection permanently over its ceiling and the test stayed green.
 function oldestPending(rows: unknown[]) {
   select.mockImplementation(() => ({ lean: () => Promise.resolve(taken) }));
   let taken: unknown[] = [];
@@ -68,7 +62,6 @@ describe("starting an enrolment", () => {
     expect(started.userCode).toMatch(/^[BCDFGHJKMNPQRSTVWXZ23456789]{8}$/);
   });
 
-  // The device code is the app's half of the exchange and is what the credential is handed to
   it("stores only a hash of the device code", async () => {
     const started = await startDeviceEnrolment({ machineName: "MacBook", machineHost: "" });
     const stored = create.mock.calls[0][0];
@@ -91,8 +84,6 @@ describe("starting an enrolment", () => {
     expect(started.expiresAt.getTime() - now.getTime()).toBe(15 * 60 * 1000);
   });
 
-  // The user code is short by design, so a collision has to be retried rather than assumed away —
-  // handing a second machine someone else's approval is the failure that matters here
   it("retries on a duplicate user code instead of failing the machine", async () => {
     create.mockRejectedValueOnce(Object.assign(new Error("dup"), { code: 11000 }));
     create.mockResolvedValueOnce({});
@@ -108,9 +99,6 @@ describe("starting an enrolment", () => {
   });
 });
 
-// BP-305: the poll used to load 200 rows and bcrypt.compare each one — 85ms apiece, ~17s of CPU
-// per unauthenticated request, with the attacker supplying the rows through the equally
-// unauthenticated start endpoint
 describe("the cost of a poll", () => {
   it("narrows candidates by the indexed prefix instead of a 200-row window", async () => {
     await pollDeviceEnrolment("cpd_" + "a".repeat(64));
@@ -127,8 +115,6 @@ describe("the cost of a poll", () => {
     expect(create.mock.calls[0][0].deviceCodePrefix).toBe(started.deviceCode.slice(0, 12));
   });
 
-  // BP-322: the ceiling counted everybody's rows and refused the caller who hit it, so twenty
-  // anonymous posts closed enrolment for every genuine operator until they reaped.
   it("does not refuse an operator because the window is full", async () => {
     countDocuments.mockResolvedValue(MAX_PENDING_ENROLMENTS);
     oldestPending([{ _id: "oldest" }]);
@@ -137,7 +123,6 @@ describe("the cost of a poll", () => {
 
     expect(started.userCode).toBeTruthy();
     expect(create).toHaveBeenCalled();
-    // At exactly the ceiling one row has to go, or the collection sits one over it from here on
     expect(deleteMany.mock.calls[0][0]).toMatchObject({ _id: { $in: ["oldest"] } });
   });
 
@@ -147,20 +132,12 @@ describe("the cost of a poll", () => {
 
     await startDeviceEnrolment({ machineName: "MacBook", machineHost: "" });
 
-    // Ascending, so it is the oldest that goes. Descending would evict the row the operator is
-    // holding at that moment and leave the flood's own rows in place.
     expect(sort).toHaveBeenCalledWith({ createdAt: 1 });
-    // Expired rows reap on Mongo's own schedule, so counting them would let the ceiling be held
-    // down by rows that are already dead
     expect(find.mock.calls[0][0]).toEqual({
       status: "pending",
       expiresAt: { $gt: expect.any(Date) },
     });
     expect(select).toHaveBeenCalledWith("_id");
-    // The delete carries the same filter as the find. On ids alone, a row approved in between is
-    // removed with its credential and the machine polls for something nobody can hand it.
-    // Three ids, because it is two over the ceiling and one more is about to be created. Asking
-    // for fewer leaves the collection over its ceiling for good.
     expect(deleteMany.mock.calls[0][0]).toEqual({
       status: "pending",
       expiresAt: { $gt: expect.any(Date) },
@@ -212,14 +189,11 @@ describe("polling for the credential", () => {
       state: "approved",
       workerId: "w1",
       credential: "cpw_secret",
-      // What the app clones, and where it puts it — <folder>/<projectKey>
       repositoryUrl: "https://github.com/o/r",
       projectKey: "TP",
     });
   });
 
-  // Single use. The credential is cleared in the same conditional update that returns it, so two
-  // polls racing cannot both come away holding it.
   it("claims the credential with a conditional update, not a read then a write", async () => {
     const { deviceCode, doc } = await row();
     candidates([doc]);
@@ -248,7 +222,6 @@ describe("polling for the credential", () => {
     expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 
-  // A code that was never issued must look exactly like one that has been spent
   it("answers the same for a device code nobody ever issued", async () => {
     candidates([]);
 

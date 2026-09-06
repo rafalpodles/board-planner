@@ -13,7 +13,6 @@ interface SettingsGroup {
   sections: { id: string; label: string }[];
 }
 
-// Each admin page guards itself; hiding the group here only keeps the nav honest
 const GROUPS: SettingsGroup[] = [
   {
     title: "Account",

@@ -57,8 +57,6 @@ describe("POST /api/admin/email", () => {
     );
   });
 
-  // A recipient field would make an authenticated instance a mailer for arbitrary addresses. The
-  // body is ignored entirely, so a caller cannot smuggle one in.
   it("ignores any recipient the caller supplies", async () => {
     const res = await POST(
       new Request("http://x/api/admin/email", {
@@ -84,8 +82,6 @@ describe("POST /api/admin/email", () => {
     expect(sendEmailOrThrow).not.toHaveBeenCalled();
   });
 
-  // The whole point of the endpoint: everywhere else this failure is swallowed, which is why a
-  // misconfigured deployment is indistinguishable from a working one
   it("hands back what the mail server actually said", async () => {
     sendEmailOrThrow.mockRejectedValueOnce(
       new Error("Error upgrading connection with STARTTLS: 502 5.5.1 Command not implemented")
@@ -97,8 +93,6 @@ describe("POST /api/admin/email", () => {
     expect((await res.json()).error).toContain("STARTTLS");
   });
 
-  // Not 502: nothing was contacted, and the screen reads the status to decide whether to blame a
-  // mail server. "The mail server refused it" above "No mail server is configured" is nonsense.
   it("separates having no mail server from a mail server saying no", async () => {
     const { EmailNotConfiguredError } = await import("@/lib/email");
     sendEmailOrThrow.mockRejectedValueOnce(new EmailNotConfiguredError());
@@ -127,9 +121,6 @@ describe("GET /api/admin/email", () => {
     expect(body.host).toBe("smtp.example.com");
   });
 
-  // The route forwards whatever the summary returns, so it cannot be the thing that keeps the
-  // password out — that guarantee belongs to emailSettingsSummary and is asserted in email.test.ts
-  // against the real function. What this proves is that the route adds nothing of its own.
   it("adds nothing to what the summary returned", async () => {
     emailSettingsSummary.mockReturnValueOnce({
       configured: true,

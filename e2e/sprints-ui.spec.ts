@@ -26,29 +26,6 @@ import {
 } from "./seed";
 import { signIn as arriveSignedIn } from "./session";
 
-/**
- * BP-389. Sprints away from the planning drag, which is e2e/sprint-planning.spec.ts: creating,
- * editing, activating, closing and deleting one through the screens, the velocity chart on totals
- * a real aggregation produced, and the selected sprint surviving a reload.
- *
- * `column-roles.spec.ts` already closes a sprint **by API**, including on a board whose done-role
- * column is called something else. Nothing here repeats that. What does belong here is the case
- * the two tickets meet on: a board with no done-role column at all, closed from the screen — every
- * task counts as unfinished then, the one sitting in the column still labelled Done included.
- *
- * That case leans on the planning backlog rather than on the header's counts, and deliberately: the
- * counts agree with `GET /sprints` whatever the browser thinks, so a page that stopped reasoning
- * about roles and echoed the server would satisfy them. Which backlog tasks are *offered* is the one
- * thing on that board only the browser decides (BP-441).
- *
- * Give this run its own database and port block; the fixture empties whatever it is pointed at:
- *   E2E_PORT=4060 PM_STUB_PORT=4061 AI_STUB_PORT=4062 WEBHOOK_RECEIVER_PORT=4063 \
- *   E2E_MONGODB_URI=mongodb://localhost:27017/bp389_e2e npx playwright test e2e/sprints-ui.spec.ts
- *
- * Every assertion about a write is taken from the database rather than from the screen it was made
- * on: a name that only ever existed in React state would look identical to one that was saved.
- */
-
 const sprintsUrl = `/projects/${PROJECT_KEY}/sprints`;
 const tasksPath = `/api/projects/${PROJECT_KEY}/tasks`;
 const boardApiPrefix = `/api/projects/${PROJECT_KEY}/`;
@@ -59,7 +36,6 @@ function sprintList(page: Page): Locator {
   return page.getByRole("navigation", { name: "Sprint list" });
 }
 
-/** A row in the sprint list; its accessible name carries the counts too ("Sprint 7 1/2"). */
 function sprintRow(page: Page, name: string): Locator {
   return sprintList(page).getByRole("button", { name: new RegExp(`^${name}\\b`) });
 }
@@ -80,14 +56,12 @@ function planningBacklog(page: Page): Locator {
   return page.getByTestId("planning-pane-backlog");
 }
 
-/** The planning view, which a completed sprint does not offer — hence always on a live one. */
 async function openPlanning(page: Page, sprintId: string) {
   await page.goto(`${sprintsUrl}?sprint=${sprintId}&view=planning`);
   await expect(planningBacklog(page)).toBeVisible();
   await expect(planningBacklog(page).getByText("Loading…")).toHaveCount(0);
 }
 
-/** The board's own GET /sprints poll is constant, so a write is matched by method. */
 function sprintWrite(page: Page, method: "POST" | "PUT" | "DELETE"): Promise<Response> {
   return page.waitForResponse(
     (r) =>
@@ -117,9 +91,6 @@ test.describe("creating and editing a sprint from the form", () => {
     await page.getByRole("button", { name: "New Sprint" }).click();
     const form = page.getByRole("dialog", { name: "New Sprint" });
 
-    // Computed in the browser from the sprints it just fetched: "Sprint 8" is the latest-ending
-    // one, and "Sprint 12" is the highest-numbered. Reading 13 here would mean the suggestion
-    // follows whichever number is biggest rather than whichever sprint runs last.
     await expect(form.getByLabel("Name")).toHaveValue("Sprint 9");
 
     const startInput = form.locator('input[type="date"]').first();
@@ -201,8 +172,6 @@ test.describe("creating and editing a sprint from the form", () => {
     const after = await storedSprint(LIFECYCLE_CURRENT_ID);
     expect(after?.name).toBe("Sprint 7 — mast week");
     expect(after?.goal).toBe("Raise the mast");
-    // The form re-submits both dates on every edit, through a round trip that drops the time of
-    // day. The day itself must survive: a rename that walks a sprint's dates is a real bug.
     const day = (value: unknown) => new Date(String(value)).toISOString().substring(0, 10);
     expect(day(after?.startDate)).toBe(day(before?.startDate));
     expect(day(after?.endDate)).toBe(day(before?.endDate));
@@ -223,15 +192,11 @@ test.describe("creating and editing a sprint from the form", () => {
     expect((await activated).status()).toBe(200);
 
     await expect(statusBadge(page)).toHaveText("Active");
-    // Only one sprint runs at a time, and the server says so by *completing* the other one — a
-    // side effect nothing on this screen announces, so the list is where a person meets it
     await expect(
       sprintList(page)
         .getByRole("group", { name: "Completed" })
         .getByRole("button", { name: new RegExp(`^${LIFECYCLE_CURRENT_NAME}\\b`) })
     ).toBeVisible();
-    // Three closed sprints is OLDER_COMPLETED_THRESHOLD exactly; a fourth would hide one of them
-    // behind this disclosure and the assertion above would read as a product bug
     await expect(sprintList(page).getByRole("button", { name: /^Show \d+ older/ })).toHaveCount(0);
 
     expect((await storedSprint(LIFECYCLE_PLANNED_ID))?.status).toBe("active");
@@ -263,7 +228,6 @@ test.describe("creating and editing a sprint from the form", () => {
     expect((await deleted).status()).toBe(200);
 
     expect(await storedSprint(LIFECYCLE_CURRENT_ID)).toBeNull();
-    // Both of them, done and undone alike: a deleted sprint keeps nobody's work
     expect(await storedTaskSprint(LIFECYCLE_FINISHED_TASK_NUMBER)).toBeNull();
     expect(await storedTaskSprint(LIFECYCLE_UNFINISHED_TASK_NUMBER)).toBeNull();
 
@@ -279,7 +243,6 @@ test.describe("closing a sprint from the header", () => {
     await signIn(page);
     await openSprints(page);
     await expect(progress(page)).toHaveText("1/2");
-    // The control for the two absences asserted after the close
     await expect(page.getByRole("button", { name: "Planning", exact: true })).toHaveCount(1);
 
     await page.getByRole("button", { name: "Complete", exact: true }).click();
@@ -322,8 +285,6 @@ test.describe("closing a sprint from the header", () => {
     expect((await closed).status()).toBe(200);
 
     await expect(statusBadge(page)).toHaveText("Completed");
-    // The control for the test above: the same close, the other button, and the unfinished task
-    // that moved there stays where it was
     expect(await storedTaskSprint(LIFECYCLE_UNFINISHED_TASK_NUMBER)).toBe(
       String(LIFECYCLE_CURRENT_ID)
     );
@@ -337,15 +298,12 @@ test.describe("closing a sprint from the header", () => {
     await signIn(page);
     await openPlanning(page, String(LIFECYCLE_CURRENT_ID));
 
-    // The control for the board below. The server hands the browser every task with no sprint,
-    // this one included; leaving it out is PlanningView's own reading of the column's role.
     await expect(planningBacklog(page)).not.toContainText(LIFECYCLE_BACKLOG_DONE_TASK_TITLE);
     await expect(
       planningBacklog(page).locator(
         `a[href="/projects/${PROJECT_KEY}/tasks/${LIFECYCLE_BACKLOG_DONE_TASK_NUMBER}"]`
       )
     ).toHaveCount(0);
-    // Not an empty pane mistaken for a filtered one
     await expect(planningBacklog(page).locator("a[href*='/tasks/']").first()).toBeVisible();
   });
 
@@ -365,8 +323,6 @@ test.describe("closing a sprint from the header", () => {
     });
 
     await openSprints(page);
-    // Since BP-311 the header says why it cannot count rather than printing 0/2, which was a
-    // statement about the sprint where the truth is about the board
     await expect(page.getByTestId("sprint-progress-unmeasurable")).toHaveText(
       /no Done column/i
     );
@@ -393,8 +349,6 @@ test.describe("velocity", () => {
 
     await page.getByRole("button", { name: "Velocity" }).click();
     const chart = page.getByRole("img", { name: /^Velocity across completed sprints/ });
-    // Sprint 5 also carries an unfinished task worth 4, so 8 here is *delivered* points rather
-    // than committed ones — the aggregation's $cond, which no fixture of one task can tell apart
     await expect(chart).toHaveAttribute(
       "aria-label",
       `Velocity across completed sprints: ${LIFECYCLE_PAST_ONE_NAME} ${LIFECYCLE_PAST_ONE_DELIVERED}, ${LIFECYCLE_PAST_TWO_NAME} ${LIFECYCLE_PAST_TWO_DELIVERED}`
@@ -406,7 +360,6 @@ test.describe("velocity", () => {
       const heights = await bars.evaluateAll((nodes) =>
         nodes.map((node) => Number(node.getAttribute("height")))
       );
-      // Measured against each other rather than against BAR_TRACK_PX, which is a cosmetic choice
       expect(heights[0] / heights[1]).toBe(
         LIFECYCLE_PAST_ONE_DELIVERED / LIFECYCLE_PAST_TWO_DELIVERED
       );
@@ -417,7 +370,6 @@ test.describe("velocity", () => {
     page,
     request,
   }) => {
-    // Reopened through the API rather than reseeded: this is the same board, one sprint short
     const reopened = await request.put(
       `/api/projects/${PROJECT_KEY}/sprints/${LIFECYCLE_PAST_ONE_ID}`,
       { headers: ADMIN_AUTH, data: { status: "planned" } }
@@ -427,7 +379,6 @@ test.describe("velocity", () => {
     await signIn(page);
     await openSprints(page);
 
-    // One completed sprint is enough for the page to offer the chart, and not enough to draw one
     await page.getByRole("button", { name: "Velocity" }).click();
     await expect(
       page.getByText("Velocity appears once there are two completed sprints.")
@@ -460,10 +411,6 @@ test.describe("which sprint the page opens on", () => {
   test("a malformed sprint id in the URL is never asked for, and falls back", async ({ page }) => {
     await signIn(page);
 
-    // Two guards stand between a bad bookmark and the database: this page validates the id against
-    // the sprints it fetched before it scopes anything to it, and the tasks endpoint refuses a
-    // value that is not an ObjectId with a 400. The second is why nothing here watches for a 500 —
-    // what is watched instead is the first: any refusal at all means the page asked anyway.
     const answered: string[] = [];
     const refused: string[] = [];
     page.on("response", (response) => {
@@ -478,9 +425,6 @@ test.describe("which sprint the page opens on", () => {
     await expect(selectedSprintName(page)).toHaveText(LIFECYCLE_CURRENT_NAME);
     await expect(page).toHaveURL(new RegExp(`sprint=${LIFECYCLE_CURRENT_ID}`));
 
-    // The positive control: the page did fetch this board's tasks, and it asked for the sprint it
-    // fell back to. Without it an empty `refused` would also be what a listener watching the wrong
-    // path, or a page that fetched nothing at all, looks like.
     const taskFetches = answered.filter((entry) => entry.includes(tasksPath));
     expect(taskFetches.length).toBeGreaterThan(0);
     for (const entry of taskFetches) {
@@ -492,14 +436,10 @@ test.describe("which sprint the page opens on", () => {
   test("a well-formed id for a sprint that is gone falls back to the active one", async ({
     page,
   }) => {
-    // The other half of a stale bookmark: this one passes every validation and simply is not on
-    // the board any more, so nothing refuses it — resolveSelectedSprint is the only thing that can
     const deleted = String(LIFECYCLE_PAST_ONE_ID).replace(/.$/, "9");
     expect(deleted).not.toBe(String(LIFECYCLE_PAST_ONE_ID));
 
     await signIn(page);
-    // Not through openSprints: a page that accepted the id renders a spinner for ever, and the
-    // helper would time out on a locator instead of naming the fallback that failed
     await page.goto(`${sprintsUrl}?sprint=${deleted}`);
 
     await expect(page).toHaveURL(new RegExp(`sprint=${LIFECYCLE_CURRENT_ID}`));

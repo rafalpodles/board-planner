@@ -2,16 +2,8 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 import { ADMIN_PASSWORD, ADMIN_USERNAME, seed } from "./seed";
 import { signIn as arriveSignedIn } from "./session";
 
-/**
- * BP-351. The cards truncated every ordinary name — "E2E Me…" for "E2E Member" — because three
- * fixed columns left 145px for a name plus its role pill, which needs 165px, while an empty
- * column sat beside them.
- */
-
 const signIn = arriveSignedIn;
 
-// Whether the browser is hiding characters, which is what "truncated" means here. `toBeVisible`
-// cannot see it: an ellipsised name is fully visible and still unreadable.
 function overflows(name: Locator) {
   return name.evaluate((el) => el.scrollWidth > el.clientWidth);
 }
@@ -30,13 +22,10 @@ test("a user card shows the whole display name", async ({ page }) => {
 
   const member = cardName(page, "E2E Member");
   await expect(member).toBeVisible();
-  // The name this ticket was filed over, rendered as "E2E Me…"
   expect(await overflows(member)).toBe(false);
   expect(await overflows(cardName(page, "E2E Admin"))).toBe(false);
 });
 
-// The control. Without it "nothing is truncated" would also pass on a screen that cannot truncate
-// at all — and `truncate` is deliberately still there, as the fallback for a name no card can hold.
 test("a name too long for any card still truncates rather than breaking the row", async ({
   page,
 }) => {
@@ -54,8 +43,6 @@ test("a name too long for any card still truncates rather than breaking the row"
   await expect(name).toBeVisible();
   expect(await overflows(name)).toBe(true);
 
-  // And the row it sits in did not grow to fit it — the card is the same width as its neighbour,
-  // which is the thing `truncate` is there to protect
   const widths = await page
     .locator("p.font-medium")
     .evaluateAll((els) => els.map((el) => (el.parentElement as HTMLElement).clientWidth));

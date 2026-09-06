@@ -1,9 +1,6 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { connectControl, ControlDeps, WorkerCommand } from "./control.js";
 
-// Delivers the given chunks, then hangs — like a live connection that has said everything it has
-// so far but stays open. Frame-parsing tests use this so no reconnect is ever scheduled, which
-// would otherwise race the assertions below.
 function openStream(chunks: string[]): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   let i = 0;
@@ -14,7 +11,6 @@ function openStream(chunks: string[]): ReadableStream<Uint8Array> {
   });
 }
 
-// Delivers the given chunks, then ends — like a dropped connection.
 function closingStream(chunks: string[]): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   let i = 0;
@@ -149,10 +145,6 @@ describe("connectControl — frame parsing", () => {
   });
 
   it("sends the worker credential, X-Worker-Id and X-CP-Protocol headers", async () => {
-    // Declared with the arguments it is called with, not none: this is the one test that reads
-    // mock.calls, and a zero-argument stub gives an empty tuple to destructure. signal is in the
-    // type though nothing here reads it — control.close() has no other way to end the request, so a
-    // stub that denies it would make the next test of that a compile error in the mock.
     const fetchImpl = vi.fn(
       async (
         _url: string,
@@ -176,15 +168,9 @@ describe("connectControl — frame parsing", () => {
   });
 });
 
-// Driven with fake timers and manual advances, never vi.waitFor's real-time polling: the backoff
-// delays are exact numbers here, and polling against them would race a live clock.
 describe("connectControl — reconnect scheduling", () => {
   it("schedules a reconnect with backoff after the stream ends, growing on repeated immediate EOF, without throwing", async () => {
     vi.useFakeTimers();
-    // Every connect gets a fresh, already-closing stream: an HTTP 200 whose body ends without
-    // ever delivering a byte, on every attempt. This is the case the backoff-reset bug hid in —
-    // resetting on response.ok alone (rather than on data actually being read) made every retry
-    // look "successful" and collapsed the backoff back to the base delay each time.
     const fetchImpl = vi.fn(async () => ({ ok: true, status: 200, body: closingStream([]) }));
     const control = connectControl(
       depsWith({ fetchImpl: fetchImpl as unknown as typeof fetch, reconnectDelayMs: 1000 })
@@ -199,9 +185,6 @@ describe("connectControl — reconnect scheduling", () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
 
-    // Second cycle: the delay must double, not collapse back to the base — this is the part a
-    // single-cycle assertion cannot tell apart from the bug, since the first delay is 1000ms
-    // either way.
     await vi.advanceTimersByTimeAsync(1999);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
 

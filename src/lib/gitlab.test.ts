@@ -1,12 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { matchMRsToTasks, parseGitlabRepo } from "./gitlab";
 
-/**
- * BP-429. `matchPRsToTasks` took `formerKeys` and this did not: the GitLab half was written from the
- * GitHub half and the argument was left behind. A renamed project's merge requests simply stopped
- * being found — nothing errored, nothing warned, and the link history thinned out at the rename.
- */
-
 const mr = (
   over: Partial<{
     iid: number;
@@ -62,9 +56,6 @@ describe("matchMRsToTasks", () => {
   });
 
   it("does not let a key be read as a regex", () => {
-    // "B." unescaped matches "bx-7"; escaped it matches only a literal "B.". Asserting the branch
-    // that DOES contain "b." would pass either way — the fixture would be doing the work, not the
-    // escaping. src/lib/github.test.ts had this right and this was written weaker.
     expect(matchMRsToTasks([mr({ branch: "bx-7/any-letter" })], "BP", ["B."])).toEqual([]);
     expect(matchMRsToTasks([mr({ branch: "b.-7/literal" })], "BP", ["B."])).toHaveLength(1);
   });
@@ -79,7 +70,6 @@ describe("matchMRsToTasks", () => {
   });
 
   it("ignores an empty former key instead of matching every branch with a number", () => {
-    // Without the filter the alternation becomes "(?:BP|)[- ](\\d+)", which matches "chore-3"
     expect(matchMRsToTasks([mr({ branch: "chore-3/unrelated" })], "BP", [""])).toEqual([]);
   });
 

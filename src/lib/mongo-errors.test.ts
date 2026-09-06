@@ -21,8 +21,6 @@ describe("duplicateKeyField", () => {
     expect(duplicateKeyField(err)).toBe("username");
   });
 
-  // `""` is falsy, so a caller writing `if (duplicateKeyField(err))` would turn a real collision
-  // back into an unhandled 500 — the failure this returns "unknown" to avoid
   it("still reports a collision it cannot name", () => {
     const err = Object.assign(new Error("E11000"), { code: 11000 });
 

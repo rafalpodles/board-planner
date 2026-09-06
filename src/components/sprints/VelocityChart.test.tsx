@@ -18,8 +18,6 @@ function sprint(over: Partial<ApiSprint> & { _id: string }): ApiSprint {
   } as ApiSprint;
 }
 
-// Deliberately out of chronological order, so a component that trusts array order
-// rather than sorting would fail every ordering assertion below.
 const threeCompleted: ApiSprint[] = [
   sprint({ _id: "c", name: "Sprint 12", startDate: "2026-03-01T00:00:00Z", estimateDone: 20 }),
   sprint({ _id: "a", name: "Sprint 10", startDate: "2026-01-01T00:00:00Z", estimateDone: 13 }),

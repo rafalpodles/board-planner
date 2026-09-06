@@ -1,22 +1,3 @@
-/**
- * Change a project's key, and keep everything that referred to it working.
- *
- *   npx tsx scripts/migrate-project-key.ts CP BP           # reports, writes nothing
- *   npx tsx scripts/migrate-project-key.ts CP BP --apply
- *
- * A task key is never stored — it is built as `${project.key}-${taskNumber}` wherever one
- * is shown. So this single field renames all of a project's tasks at once, and everything
- * that quoted the old key stays behind:
- *
- *   - Pull requests and branches on GitHub keep their `cp-…` prefix forever. The old key
- *     is appended to `formerKeys`, which is what matchPRsToTasks reads so those keep
- *     linking. Losing that is silent: the sync simply matches less than it used to.
- *   - Prose that says "CP-250" is rewritten to "BP-250", because it is pointing at a task
- *     that now answers to the new name.
- *   - Prose that says "cp-250/slug" is a **branch name** and is left alone — that branch
- *     still exists under exactly that name.
- */
-
 import { MongoClient } from "mongodb";
 import { resolveUri, dbName } from "./mongo-uri";
 import { isValidProjectKey, PROJECT_KEY_RULE } from "../src/lib/identifiers";
@@ -30,14 +11,8 @@ interface Rewrite {
 }
 
 function referenceRewriter(from: string, to: string) {
-  // Uppercase only: that alone separates a task reference from a branch name, since every
-  // branch here is lowercase. An earlier version also refused a following slash, which read
-  // "CP-213/CP-214" — two task references — as a branch and left the first one behind.
   const reference = new RegExp(`\\b${from}-(\\d+)\\b`, "g");
 
-  // A placeholder rather than a number — "cp-<n>/<slug>" is documentation of the branch
-  // convention, and the convention follows the key. "cp-213/generic-field-activity" is a
-  // branch that exists under exactly that name and stays.
   const convention = new RegExp(`\\b${from}(-<(?:n|number)>)`, "gi");
 
   return (text: string) =>
@@ -70,9 +45,6 @@ async function main() {
   const apply = args.includes("--apply");
   if (!from || !to) throw new Error("Usage: migrate-project-key.ts <FROM> <TO> [--apply]");
   if (from === to) throw new Error("The two keys are the same");
-  // The API refuses a key the router could not route, or one carrying chat-message markup
-  // (BP-401). This script writes through the driver, so it is the one remaining way to install
-  // such a key — and an operator typing it by hand is exactly who would.
   if (!isValidProjectKey(to)) throw new Error(PROJECT_KEY_RULE);
 
   const { uri, source } = resolveUri();
@@ -83,8 +55,6 @@ async function main() {
   console.log(`connection : ${source}`);
   console.log(`database   : ${db.databaseName}`);
 
-  // Accept a project that has already moved to the new key: the key write and the text
-  // repointing are separate passes, and text can be left behind by an earlier run
   let project = await db.collection("projects").findOne({ key: from });
   const alreadyMoved = !project;
   if (!project) project = await db.collection("projects").findOne({ key: to, formerKeys: from });
@@ -135,8 +105,6 @@ async function main() {
     return;
   }
 
-  // The key and its history move together: a key changed without its predecessor recorded
-  // is the one state from which the pull-request links cannot be recovered
   if (!alreadyMoved) {
     await db.collection("projects").updateOne(
       { _id: project._id },

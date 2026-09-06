@@ -1,17 +1,4 @@
 #!/usr/bin/env bash
-#
-# Rename the checkout directory, and everything that points at it by absolute path.
-#
-#   scripts/rename-checkout.sh            # reports, moves nothing
-#   scripts/rename-checkout.sh --apply
-#
-# Run this from OUTSIDE any session working in the directory — a shell, an editor or an
-# agent with this as its working directory will be left pointing at a path that no longer
-# exists. That is also why it is a script you run rather than something the agent does.
-#
-# The one that is easy to miss: Claude Code keys a project's memory and session history on
-# the absolute path, so renaming the checkout without moving that directory orphans every
-# note taken about this project. It is moved here too.
 
 set -euo pipefail
 
@@ -59,8 +46,6 @@ echo
 
 for f in "${CONFIGS[@]}"; do
   [ -f "$f" ] || continue
-  # A backup beside the file, not in the repo: one such copy has already been committed by
-  # an `git add -A` that did not know it was there
   cp "$f" "$f.before-rename"
   sed -i '' 's#Projects/ClaudePlanner#Projects/BoardPlanner#g' "$f"
   say "$(basename "$f") repointed (backup: $f.before-rename)"

@@ -4,20 +4,6 @@ import { ADMIN_AUTH } from "./api";
 import { claimNextTask } from "@/lib/task-service";
 import { ADMIN_ID, E2E_MONGODB_URI, PROJECT_ID, PROJECT_KEY, seed } from "./seed";
 
-/**
- * BP-227. Columns have been project-defined since BP-128, and automation is meant to key on a
- * column's semantic role. Eight places still compared against literal ids, so a board that was
- * renamed or rebuilt behaved as if its columns meant nothing.
- *
- * Everything here runs against a board with **no seeded ids at all**. That is the point: with
- * `todo`/`in_progress`/`done` present, an implementation that still hardcodes them passes every
- * assertion, which is how this survived long enough to be found by an audit rather than by a test.
- *
- * The sprint close gets the sharpest one because it is the only case that moves somebody's work:
- * finished tasks looked unfinished and were dragged into the next sprint.
- */
-
-// Deliberately nothing a hardcoded id could match
 const COLUMNS = [
   { id: "icebox", label: "Icebox", color: "#6b7280", role: "backlog", order: 0 },
   { id: "ready", label: "Ready", color: "#3b82f6", role: "approved", order: 1 },
@@ -71,7 +57,6 @@ test.beforeEach(async () => {
   const handle = await db();
 
   await handle.collection("projects").updateOne({ _id: PROJECT_ID }, { $set: { columns: COLUMNS } });
-  // Every seeded task sits in a column this board no longer has, which would muddy the counts
   await handle.collection("tasks").deleteMany({ project: PROJECT_ID });
 
   await handle.collection("sprints").insertMany([
@@ -126,7 +111,6 @@ test.describe("closing a sprint on a board with no column called done", () => {
     const after = async (id: mongoose.Types.ObjectId) =>
       (await handle.collection("tasks").findOne({ _id: id }))?.sprint;
 
-    // The whole defect: "shipped" is not literally "done", so this task looked unfinished
     expect(String(await after(finished))).toBe(String(SPRINT_ID));
     expect(String(await after(unfinished))).toBe(String(NEXT_SPRINT_ID));
   });
@@ -158,7 +142,6 @@ test.describe("closing a sprint on a board with no column called done", () => {
     });
     expect(await one.json()).toMatchObject({ taskCount: 3, doneCount: 2 });
 
-    // The same number computed a second way, in an aggregation rather than a count
     const list = await request.get(`/api/projects/${PROJECT_KEY}/sprints`, { headers: ADMIN_AUTH });
     const sprint = (await list.json()).find(
       (s: { _id: string }) => s._id === String(SPRINT_ID)
@@ -180,13 +163,10 @@ test.describe("My Tasks across boards that agree on roles and nothing else", () 
     const done = tasks.find((t: { status: string }) => t.status === "shipped");
     const active = tasks.find((t: { status: string }) => t.status === "building");
 
-    // Resolved by the server, because this list spans projects and the page has no board to
-    // consult. Without it "hide done" kept showing finished work on any renamed board.
     expect(done).toMatchObject({ statusRole: "done", statusLabel: "Shipped", statusColor: "#22c55e" });
     expect(active).toMatchObject({ statusRole: "active", statusLabel: "Building" });
   });
 
-  // Work left behind by a deleted column: named rather than hidden, and it must not read as done
   test("a task whose column is gone keeps its raw status and no role", async ({ request }) => {
     await addTask("a_column_that_was_deleted", { assignee: ADMIN_ID });
 
@@ -200,8 +180,6 @@ test.describe("My Tasks across boards that agree on roles and nothing else", () 
     });
   });
 
-  // The board was loaded to answer one question per task; shipping it per row would be the same
-  // waste pointed the other way
   test("does not ship a copy of every board alongside the tasks", async ({ request }) => {
     await addTask("building", { assignee: ADMIN_ID });
 
@@ -212,23 +190,15 @@ test.describe("My Tasks across boards that agree on roles and nothing else", () 
   });
 });
 
-/**
- * BP-280. The worker's claim gate reads "finished" off the done role. On the seeded board the
- * finished column is literally called `done`, so an implementation that hardcoded that id would
- * pass every blocker test written there. This board's finished column is `shipped`.
- */
 test.describe("a worker claiming on a board with no column called done", () => {
   const WORKER = "w-column-roles";
 
   test.beforeEach(async () => {
-    // connectDB reads this when it is called, not when the module loads
     process.env.MONGODB_URI = E2E_MONGODB_URI;
   });
 
   test("waits for its blocker until that blocker reaches Shipped", async () => {
     const blocker = await addTask("checking", { order: 1 });
-    // BP-358: claimable only once it is already the owner's own self-assignment, and only once it
-    // names an agent — neither of which this blocker test is about, so both are just fixed givens
     const blocked = await addTask("ready", {
       blockedBy: [blocker],
       order: 2,

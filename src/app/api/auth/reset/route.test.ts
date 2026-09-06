@@ -57,10 +57,6 @@ beforeEach(async () => {
 });
 
 describe("POST /api/auth/reset", () => {
-  // BP-347/BP-353. The login throttle refuses on the account key before reading the credential, and
-  // where there is no client address that key is shared by every caller — so "I could not get in, so
-  // I reset it" ends in the correct new password being refused, and a link that was just spent
-  // looking broken. A reset is the answer to being locked out, so it has to lift the lockout.
   it("lifts a login lockout, including one filled from an address the resetter never used", async () => {
     const fromSomebodyElse = lockoutKey("203.0.113.9", "rafal");
     const shared = lockoutKey("-", "rafal");
@@ -105,7 +101,6 @@ describe("POST /api/auth/reset", () => {
       { _id: "u1" },
       { $set: { password: "new-hash" } }
     );
-    // Whoever knew the old password is signed out — usually the reason somebody is resetting
     expect(revokeUserSessions).toHaveBeenCalledWith("u1");
     expect(logInstanceAudit).toHaveBeenCalledWith(
       expect.objectContaining({ action: "user_password_reset_by_email", target: "rafal" })
@@ -127,8 +122,6 @@ describe("POST /api/auth/reset", () => {
     expect(revokeUserSessions).not.toHaveBeenCalled();
   });
 
-  // Spending the link on a password the server was always going to refuse would send somebody
-  // back to their inbox for a second one
   it("checks the password before the token is spent", async () => {
     const res = await POST(post({ token: "cpr_good", newPassword: "short" }));
 
@@ -151,7 +144,6 @@ describe("POST /api/auth/reset", () => {
     expect(userUpdateOne).not.toHaveBeenCalled();
   });
 
-  // A worker identity has a random hash precisely so nobody can sign in as it
   it("refuses to sign in a machine account", async () => {
     accountIs({ _id: "u1", username: "worker-1", kind: "machine" });
 

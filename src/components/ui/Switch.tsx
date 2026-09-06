@@ -6,12 +6,9 @@ interface SwitchProps {
   checked: boolean;
   onChange: (checked: boolean) => void;
   label: string;
-  /** Says what turning it on actually does; replaces the hover-only title attributes */
   hint?: string;
   disabled?: boolean;
   dirty?: boolean;
-  /** For a row that already names the setting beside the control — the label stays the
-   *  accessible name rather than being dropped */
   labelHidden?: boolean;
 }
 

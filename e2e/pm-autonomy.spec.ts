@@ -11,16 +11,6 @@ import {
 } from "./seed";
 import { signIn } from "./session";
 
-/**
- * BP-391, the half of the PM agent nobody types into: the settings that let it act unattended,
- * and the one trigger that fires without a person present.
- *
- * The autonomous review is the only turn a test cannot script from the chat box — the prompt is
- * built by the server (`buildNeedsHumanReviewPrompt`), so there is nowhere to put a directive.
- * The stub answers that prompt by its opening line instead, and does the one thing the turn is
- * allowed to do: leave a comment. See the note in `e2e/openrouter-stub.mjs`.
- */
-
 const SETTINGS = `/projects/${PROJECT_KEY}/settings?section=pm`;
 const BOARD = `/projects/${PROJECT_KEY}`;
 
@@ -61,11 +51,8 @@ const scheduleSwitch = (page: Page) =>
 const escalationSwitch = (page: Page) =>
   page.getByRole("switch", { name: 'Review tasks that land in "Needs human review"' });
 
-/** The interval picker, reached the way a person reaches it */
 const reviewInterval = (page: Page) => page.getByLabel("How often");
 
-/** The input is `sr-only` under a label that swallows the pointer, so the click goes to the label
- *  — the same way `field-history.spec.ts` drives one. */
 async function flip(toggle: ReturnType<typeof scheduleSwitch>) {
   await toggle.locator("xpath=ancestor::label[1]").click();
 }
@@ -75,13 +62,6 @@ async function openPmSettings(page: Page) {
   await expect(page.getByRole("heading", { name: "When it acts on its own" })).toBeVisible();
 }
 
-/**
- * Saves and waits for the server, not for the button.
- *
- * `SaveBar` relabels its button to "Saving..." while the request is in flight, so waiting for
- * "Save changes" to disappear returns at click time and the assertion after it reads the state
- * before the write.
- */
 async function saveSettings(page: Page) {
   const saved = page.waitForResponse(
     (r) => r.request().method() === "PUT" && r.url().includes("/api/projects/") && r.ok()
@@ -111,8 +91,6 @@ test.describe("the autonomy form", () => {
     await openPmSettings(page);
     await flip(scheduleSwitch(page));
 
-    // Nothing on the server produces this sentence: the hours are derived in the page from the
-    // first hour and the interval, which is what makes it worth reading here.
     await expect(page.getByText(/One review a day, at 09:00 in Europe\/Warsaw/)).toBeVisible();
 
     await reviewInterval(page).selectOption("12");
@@ -137,7 +115,6 @@ test.describe("the autonomy form", () => {
     await page.getByLabel("Timezone").fill("Europe/London");
     await saveSettings(page);
 
-    // Read back from the server, which is the only thing that settles a save
     const pm = await storedPm();
     expect(pm.autonomy).toMatchObject({
       dailyReview: true,
@@ -146,17 +123,12 @@ test.describe("the autonomy form", () => {
       timezone: "Europe/London",
     });
 
-    // And the form shows it again on the way back in, rather than only in its own state
     await page.reload();
     await expect(scheduleSwitch(page)).toBeChecked();
     await expect(page.getByLabel("First review at")).toHaveValue("7");
     await expect(page.getByLabel("Timezone")).toHaveValue("Europe/London");
   });
 
-  /**
-   * BP-454. Both fields accepted values `validatePmConfig` answers 400 for, and the preview line
-   * read them back as though it had understood — "…at 09:00, 21:00 in Warsaw" for the typo.
-   */
   test("refuses a timezone the server cannot read, at the field, before the save", async ({
     page,
   }) => {
@@ -164,19 +136,15 @@ test.describe("the autonomy form", () => {
     await openPmSettings(page);
     await flip(scheduleSwitch(page));
 
-    // The control first: a real zone is accepted and the preview names it
     await page.getByLabel("Timezone").fill("Europe/London");
     await expect(page.getByText(/in Europe\/London/)).toBeVisible();
 
     await page.getByLabel("Timezone").fill("Warsaw");
     await expect(page.getByText("Not a timezone this server knows: Warsaw")).toBeVisible();
-    // and the preview stops echoing it back inside a sentence about what will happen
     await expect(page.getByText(/in Warsaw/)).toHaveCount(0);
     await expect(page.getByText(/reviews? a day/)).toHaveCount(0);
     await expect(page.getByText(/Name a timezone this server knows/)).toBeVisible();
 
-    // Nothing is sent: the field already says what is wrong, and a 400 would say it again a
-    // round trip later without naming the field.
     let sent = 0;
     page.on("request", (r) => {
       if (r.method() === "PUT" && r.url().includes("/api/projects/")) sent += 1;
@@ -185,15 +153,11 @@ test.describe("the autonomy form", () => {
     await page.waitForTimeout(700);
     expect(sent, "the form posted a body the server would refuse").toBe(0);
 
-    // The positive control, and it is the whole test: a counter that cannot rise reads exactly
-    // like a refusal that works. Fixing the field and saving must move it.
     await page.getByLabel("Timezone").fill("Europe/London");
     await saveSettings(page);
     expect(sent, "the listener never observes a PUT, so the zero above proves nothing").toBe(1);
   });
 
-  // Clearing the field is how a person removes a typo, and the server has no fallback for "":
-  // its `??` never fires on an empty string, so this was the likeliest way to hit the 400.
   test("an emptied timezone is refused too, and is not what gets posted", async ({ page }) => {
     await signIn(page);
     await openPmSettings(page);
@@ -203,8 +167,6 @@ test.describe("the autonomy form", () => {
     await expect(page.getByText(/A review has to run somewhere/)).toBeVisible();
   });
 
-  // A value typed and then undone by switching the schedule off used to go on refusing every
-  // later save, through a toast about a field no longer on screen.
   test("an unreadable timezone stops mattering once the schedule is off", async ({ page }) => {
     await signIn(page);
     await openPmSettings(page);
@@ -216,7 +178,6 @@ test.describe("the autonomy form", () => {
     await flip(scheduleSwitch(page));
     await saveSettings(page);
 
-    // and what reached the server is the zone the project already had, not the typo
     const stored = (await storedPm()) as { autonomy: { timezone: string } };
     expect(stored.autonomy.timezone).toBe("Europe/Warsaw");
   });
@@ -226,7 +187,6 @@ test.describe("the autonomy form", () => {
     await openPmSettings(page);
 
     const cap = page.getByLabel("Turns per day");
-    // The control: a whole number in range is accepted and saves
     await cap.fill("40");
     await expect(page.getByText(/whole number of turns/)).toHaveCount(0);
     await saveSettings(page);
@@ -237,8 +197,6 @@ test.describe("the autonomy form", () => {
       await expect(page.getByText(/whole number of turns/), bad).toBeVisible();
     }
 
-    // Pressing Save is the part that matters. Without it this only proved the error renders —
-    // the early return could be deleted and the test would stay green.
     let sent = 0;
     page.on("request", (r) => {
       if (r.method() === "PUT" && r.url().includes("/api/projects/")) sent += 1;
@@ -249,11 +207,6 @@ test.describe("the autonomy form", () => {
     expect((await storedPm()).dailyTurnCap).toBe(40);
   });
 
-  /**
-   * BP-453. The cap counted from the *host's* midnight, so the hint could not have said which
-   * day it meant. Now it names the board's own zone, and says a turn the model failed still
-   * counts — the decision that ticket asked to be recorded and made visible.
-   */
   test("the turn-cap hint names the board's own day, and follows it when it changes", async ({
     page,
   }) => {
@@ -264,8 +217,6 @@ test.describe("the autonomy form", () => {
     await expect(hint).toContainText("Europe/Warsaw");
     await expect(hint).toContainText("a turn the model failed");
 
-    // The control, and the reason this is not an assertion about a hardcoded string: change the
-    // board's zone through the form and the sentence has to follow it.
     await flip(scheduleSwitch(page));
     await page.getByLabel("Timezone").fill("Asia/Tokyo");
     await saveSettings(page);
@@ -285,7 +236,6 @@ test.describe("the autonomy form", () => {
 
     const pm = await storedPm();
     expect((pm.autonomy as Record<string, unknown>).handleNeedsHumanReview).toBe(true);
-    // The schedule was not touched, so it must not have been switched on alongside
     expect((pm.autonomy as Record<string, unknown>).dailyReview).toBe(false);
   });
 });
@@ -304,7 +254,6 @@ test.describe("a task that lands in Needs Human Review", () => {
     await expect(page.getByTestId("column-needs_human_review").locator(`a[href*="/tasks/${SIBLING_TASK_NUMBER}"]`)).toBeVisible();
   }
 
-  /** The comments on the escalated task, as the API returns them. */
   async function comments(page: Page): Promise<{ body: string; author: string }[]> {
     const task = await page.request.get(
       `/api/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`,
@@ -324,16 +273,12 @@ test.describe("a task that lands in Needs Human Review", () => {
     await signIn(page);
     await escalate(page);
 
-    // The drain is fire-and-forget, so this is polled rather than read once
     await expect
       .poll(async () => (await comments(page)).map((c) => `${c.author}: ${c.body}`), {
         timeout: 30_000,
       })
       .toEqual(["PM Agent: Reviewed on the way in: this is answerable from the board."]);
 
-    // And read where a person would read it. The API answer above is the sharp assertion — it can
-    // say the comment is the agent's and nobody else's — but a comment nobody can see on the task
-    // is not a review, so the page gets its own look.
     await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
     await expect(
       page.getByText("Reviewed on the way in: this is answerable from the board.")
@@ -351,9 +296,6 @@ test.describe("a task that lands in Needs Human Review", () => {
       .toBe(1);
 
     await page.goto(`/projects/${PROJECT_KEY}/pm`);
-    // Not "Scheduled review", and not a plain chat turn: the thread says where it came from.
-    // Both halves of the exchange carry the mark — the server's prompt and the agent's answer —
-    // so the whole turn reads as automatic rather than only its reply.
     const mark = page.getByText(`Auto review: ${SIBLING_TASK_KEY}`);
     await expect(mark.first()).toBeVisible();
     await expect(mark).toHaveCount(2);
@@ -365,16 +307,12 @@ test.describe("a task that lands in Needs Human Review", () => {
     await escalate(page);
     await expect.poll(async () => (await comments(page)).length, { timeout: 30_000 }).toBe(1);
 
-    // The person reads it where it was left for them. This is the half of "reviewed by a human"
-    // that a status change on its own does not cover: the review has to be legible on the task,
-    // under the agent's name, before moving the card means anything.
     await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
     await expect(
       page.getByText("Reviewed on the way in: this is answerable from the board.")
     ).toBeVisible();
     await expect(page.getByText("PM Agent").first()).toBeVisible();
 
-    // ...and only then moves it on, which is the whole point of the column
     await page.goto(BOARD);
     const card = page.locator(`a[href="/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}"]`);
     await card.click({ button: "right" });
@@ -386,30 +324,18 @@ test.describe("a task that lands in Needs Human Review", () => {
       page.getByTestId("column-ready_to_test").locator(`a[href*="/tasks/${SIBLING_TASK_NUMBER}"]`)
     ).toBeVisible();
 
-    // Leaving the column is not a second escalation, and nothing reviews it again
     await page.waitForTimeout(8_000);
     expect(await comments(page)).toHaveLength(1);
   });
 
   test("is left alone when the switch is off", async ({ page }) => {
-    // The control. Same board, same move, one switch apart — without it a mis-wired fixture
-    // that never triggers anything reads exactly like a working switch.
-    //
-    // Worth knowing what it does and does not prove: `handleNeedsHumanReview` is read twice, once
-    // where the trigger is queued (`triggers.ts:45`) and once where it is run (`:117`). Removing
-    // either one alone leaves this test green, and both together turn it red. So it watches the
-    // behaviour, not a particular line, and either guard on its own is enough to hold it.
     await signIn(page);
     await escalate(page);
 
-    // The drain starts immediately on the status change rather than on a scheduler tick, and the
-    // positive case above has its comment posted within about four seconds. Eight is twice that.
     await page.waitForTimeout(8_000);
     expect(await comments(page)).toEqual([]);
 
     await page.goto(`/projects/${PROJECT_KEY}/pm`);
-    // Anchored on the empty thread: the chat renders a spinner until its messages arrive, and an
-    // absence asserted against a spinner is an absence of everything
     await expect(
       page.getByText(
         "Talk to the PM: ask it to break a feature into tasks, refine a backlog or report on project state."
@@ -435,8 +361,6 @@ test.describe("when the agent is not available", () => {
   });
 
   test("an instance lock says so, and deliberately offers no link", async ({ page }) => {
-    // Project settings cannot clear an instance lock, so a "Go to settings" link would be a
-    // dead end. The absence is the feature, which is why it is asserted rather than assumed.
     await pmSettings({ lockedByInstance: true });
     await signIn(page);
     await page.goto(`/projects/${PROJECT_KEY}/pm`);
@@ -448,17 +372,6 @@ test.describe("when the agent is not available", () => {
 });
 
 test.describe("the chat that follows you around", () => {
-  /**
-   * The widget decides whether to draw itself only after it has fetched the project, so a bare
-   * `toHaveCount(0)` is satisfied by a widget that has not started rather than by one that chose
-   * not to appear — with `onPmPage` forced to false the first version of this test stayed green.
-   *
-   * Counting `/api/projects/TP` responses was the second version and was no better: `PmChat`
-   * alone asks twice on the PM page (once for the project, once from `refreshTaskMap` before the
-   * first answer lands), and on the board the page's own request satisfies any threshold the
-   * widget was supposed to. So the wait is for the network to go quiet, which is the only signal
-   * that covers both.
-   */
   const fab = (page: Page) => page.getByRole("button", { name: /PM chat$/ });
 
   test("opens from the board and answers there, and is absent on the PM page itself", async ({
@@ -479,12 +392,9 @@ test.describe("the chat that follows you around", () => {
       page.getByText("PM Agent", { exact: true }).last().locator("xpath=..")
     ).toContainText("Answered in the corner.");
 
-    // Two controls carry that name — the panel's own ✕ and the floating button, whose label
-    // flips while the panel is open. The ✕ is the one inside the panel.
     await page.getByRole("button", { name: "Close PM chat" }).first().click();
     await expect(page.getByText(/^🤖 PM — /)).toHaveCount(0);
 
-    // On the full page the button would be a door to the room you are standing in
     await page.goto(`/projects/${PROJECT_KEY}/pm`);
     await expect(page.getByPlaceholder(/Message the PM/)).toBeVisible();
     await page.waitForLoadState("networkidle");
@@ -497,7 +407,6 @@ test.describe("the chat that follows you around", () => {
     await page.goto(BOARD);
     await expect(page.getByRole("heading", { name: /E2E Run Conflict Board/ })).toBeVisible();
 
-    // Same reason as above: the widget has to have asked before its silence means anything
     await page.waitForLoadState("networkidle");
     await expect(fab(page)).toHaveCount(0);
   });

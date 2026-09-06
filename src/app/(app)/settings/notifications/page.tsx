@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/Button";
 import { NotificationMatrixEditor } from "@/components/settings/NotificationMatrix";
 import { NotificationMatrix, PERSONAL_CHAT_KINDS, PersonalChatKind } from "@/types";
 
-
 function messageOf(err: unknown, fallback: string): string {
   const message = err instanceof Error ? err.message.trim() : "";
   return message || fallback;
@@ -33,7 +32,6 @@ export default function NotificationsPage() {
   const [loaded, setLoaded] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
 
-  // Delivery needs both a service and an address; either alone sends nothing and says nothing
   const chatReady = !!chatKind && (chatConfigured || !!webhookUrl.trim());
 
   useEffect(() => {
@@ -61,8 +59,6 @@ export default function NotificationsPage() {
         defaults: matrix,
         chat: {
           kind: chatKind,
-          // A blank field on a screen that already has a webhook means "leave it alone", not
-          // "delete it" — the stored value never comes back here to be resent
           webhookUrl: webhookUrl.trim() || (chatConfigured ? "__kept__" : ""),
         },
       });
@@ -70,8 +66,6 @@ export default function NotificationsPage() {
       setChatConfigured(chatConfigured || !!webhookUrl.trim());
       toast("Notification settings saved", "success");
     } catch (err) {
-      // The server's refusals name what to do — "connect Slack or Discord first", "that service
-      // needs its own webhook address". Swallowing them left every one reading as a shrug.
       toast(messageOf(err, "Failed to save notification settings"), "error");
     } finally {
       setSaving(false);
@@ -157,9 +151,6 @@ export default function NotificationsPage() {
               onClick={() => {
                 const next = chatKind === kind ? "" : kind;
                 setChatKind(next);
-                // The ticks stay: with nothing connected they simply do not deliver, and they
-                // start working again if a webhook comes back. Clearing the address field matters
-                // though — it is about to be hidden, and sending one for no service is refused.
                 if (!next) setWebhookUrl("");
               }}
               className={`focus-ring rounded-lg border px-3 py-1.5 text-sm capitalize transition-colors ${

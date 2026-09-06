@@ -40,7 +40,6 @@ describe("createOutbox", () => {
     expect(outbox.pending()).toBe(0);
   });
 
-  // The whole reason this exists: the process can die between the merge and the report
   it("survives a restart, because a new instance reads the same store", async () => {
     const store = memoryStore();
     createOutbox(store, vi.fn()).add({ kind: "comment", projectId: "CP", taskId: "t1", body: "merged" });
@@ -61,7 +60,6 @@ describe("createOutbox", () => {
     expect(outbox.pending()).toBe(1);
   });
 
-  // A status move that lands before its comment reads as a decision with no reason given
   it("stops draining at the first failure rather than reordering around it", async () => {
     const store = memoryStore();
     const outbox = createOutbox(store, vi.fn());
@@ -86,7 +84,6 @@ describe("createOutbox", () => {
     expect(api.comment).toHaveBeenCalledWith("CP", "t1", "merged");
   });
 
-  // Otherwise one permanently rejected report blocks every later one forever
   it("gives up on a report the server will never accept", async () => {
     const store = memoryStore();
     const log = vi.fn();

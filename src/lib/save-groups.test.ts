@@ -20,8 +20,6 @@ describe("saveAllGroups", () => {
     expect(log).toEqual(["A", "B"]);
   });
 
-  // The bar used to await each group in turn with no catch, so one rejection abandoned
-  // every group behind it — and each section swallows its own errors, so it looked saved
   it("saves the groups behind a failing one", async () => {
     const log: string[] = [];
     const failed = await saveAllGroups([

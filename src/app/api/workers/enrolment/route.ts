@@ -5,17 +5,8 @@ import { mintEnrolmentToken } from "@/lib/enrolment";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
 
-// Each mint writes a row and costs a bcrypt hash. Its device-flow sibling has been rate-limited and
-// capped since BP-305; the asymmetry did not matter while this was withAdmin and does now.
 const MINTS_PER_WINDOW = 10;
 
-// Minting requires an interactive session, never an API token. An API token can be read off a disk
-// the agent can also read, and one that could mint enrolment tokens would hand back the very power
-// this credential exists to remove.
-//
-// Not withAdmin since BP-358: the token names its creator, registration makes that person the
-// machine's owner, and a machine reaches only what its owner reaches. Requiring an admin would gate
-// the headless path on something the browser path stopped needing, and grant no less.
 export const POST = withAuth(async (request, { user }) => {
   await connectDB();
 
@@ -34,8 +25,6 @@ export const POST = withAuth(async (request, { user }) => {
 
   const { token, expiresAt } = await mintEnrolmentToken(String(user._id), label);
 
-  // The token itself never goes near this log — it is returned once and only its hash is stored,
-  // and an audit row is exactly the wrong place to undo that
   void logInstanceAudit({
     action: "enrolment_token_minted",
     target: label || "unlabelled",
@@ -44,6 +33,5 @@ export const POST = withAuth(async (request, { user }) => {
     detail: `Expires ${expiresAt.toISOString()}`,
   });
 
-  // Returned once and never retrievable again — only its hash is stored
   return NextResponse.json({ token, expiresAt: expiresAt.toISOString() }, { status: 201 });
 });

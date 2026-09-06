@@ -5,23 +5,15 @@ import { PALETTE, colourName } from "@/lib/palette";
 interface SwatchPickerProps {
   value: string;
   onChange: (hex: string) => void;
-  /** Names the group for a screen reader — "Colour for In Progress" beats "Colour" */
   label: string;
   disabled?: boolean;
 }
 
-/**
- * Replaces the three `<input type="color">` controls that opened the OS dialog at three
- * different sizes. A fixed set, because the value is rendered as foreground text and an
- * unconstrained picker lets someone make their own chip unreadable.
- */
 export function SwatchPicker({ value, onChange, label, disabled }: SwatchPickerProps) {
   const selected = value?.toLowerCase();
 
   return (
     <div>
-      {/* Fixed column width, not grid-cols-10: fractional columns collapse to whatever
-          the container gives them, and a narrow popover squashed this to 19px squares */}
       <div
         role="group"
         aria-label={label}

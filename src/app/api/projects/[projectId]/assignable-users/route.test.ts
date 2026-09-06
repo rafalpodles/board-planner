@@ -11,8 +11,6 @@ vi.mock("@/lib/auth", () => ({
   getAuthUser,
   RateLimitError: class RateLimitError extends Error {},
 }));
-// `check` is stubbed because withProjectAccess is not what is under test here; everything else in
-// grants stays real, so the filter this route builds is the one the module actually produces.
 vi.mock("@/lib/grants", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/grants")>();
   return { ...actual, check, accessibleProjectIds: vi.fn() };
@@ -42,11 +40,6 @@ beforeEach(() => {
   userFindLean.mockResolvedValue([]);
 });
 
-/**
- * BP-400. This list is what the picker and the @mention autocomplete offer, and it replaced an
- * endpoint that asked no question at all. The query is asserted rather than the response, because
- * a filter quietly dropped here widens the list without any test data noticing.
- */
 describe("GET assignable-users", () => {
   it("asks only for people this board reaches, plus instance admins", async () => {
     grantFindLean.mockResolvedValue([{ subject: U1 }]);
@@ -62,18 +55,12 @@ describe("GET assignable-users", () => {
     );
   });
 
-  /**
-   * A worker identity is an author and an assignee, never somebody a person picks from a list —
-   * and PUT /members refuses to grant one, so no fixture would ever contain one to catch this
-   * being dropped. The query is the only place it can be checked.
-   */
   it("never offers a machine account", async () => {
     await GET(new Request("http://x"), { params });
 
     expect(userFind.mock.calls[0][0]).toMatchObject({ kind: { $ne: "machine" } });
   });
 
-  /** Names and handles, and nothing else: no e-mail address, no role, no notification settings. */
   it("sends only what naming somebody needs", async () => {
     await GET(new Request("http://x"), { params });
 

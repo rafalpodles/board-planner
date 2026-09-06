@@ -33,7 +33,6 @@ describe("AuditSection", () => {
     await waitFor(() => expect(screen.getByText("rpo")).toBeTruthy());
   });
 
-  // typeof null === "object", so a deleted user used to take the populated branch and throw
   it("falls back to system when the user was deleted", async () => {
     api.get.mockResolvedValue([{ ...entry, user: null }]);
     render(<AuditSection projectId="TP" active />);

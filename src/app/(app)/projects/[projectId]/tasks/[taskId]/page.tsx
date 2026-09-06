@@ -16,10 +16,6 @@ export default function TaskDetailPage() {
   useCanonicalUrl(loaded?.project.key, loaded?.task.taskNumber);
   useDeclareTaskPage();
 
-  // The same card the intercepting modal draws, so both routes render one view.
-  // `flex-1 min-h-0`: the card takes the height <main> has and the task scrolls inside the
-  // card, which is what holds the header still. <main> is left with nothing to scroll, so
-  // there is no page-level overscroll to drag the header either.
   return (
     <div
       className="mx-auto flex min-h-0 w-full max-w-[1240px] flex-1 flex-col overflow-clip

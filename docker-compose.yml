@@ -1,6 +1,5 @@
 services:
   mongo:
-    # 4.4 on purpose: the aggregations avoid 5.0-only operators and this keeps that honest
     image: mongo:4.4
     restart: unless-stopped
     volumes:
@@ -25,16 +24,10 @@ services:
       - "${APP_PORT:-3000}:3000"
     environment:
       MONGODB_URI: ${MONGODB_URI:-mongodb://mongo:27017/boardplanner}
-      # Compose binds localhost over plain HTTP, where a Secure cookie is discarded — drop this once the instance is behind TLS
       COOKIE_ALLOW_INSECURE: ${COOKIE_ALLOW_INSECURE:-1}
       APP_ORIGIN: ${APP_ORIGIN:-http://localhost:${APP_PORT:-3000}}
-      # 0 unless something in front of the app appends to X-Forwarded-For — the login throttle
-      # keys on it, and an unset value means the header is ignored rather than trusted
       TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-0}
-      # This instance's own address. Behind a proxy, set it to the public one — APP_ORIGIN is a
-      # list and cannot say which entry that is, and NEXT_PUBLIC_APP_URL is baked into the image
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:${APP_PORT:-3000}}
-      # Everything below is optional — leave it empty and the feature stays off
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       PM_MODEL: ${PM_MODEL:-}

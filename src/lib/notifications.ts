@@ -222,7 +222,6 @@ export async function dispatchNotifications(
         body,
         signal: AbortSignal.timeout(10_000),
       }).catch(() => {
-        // Notification delivery failures are silently ignored
       });
     }
   } catch {

@@ -10,15 +10,9 @@ interface MobileCommentBarProps {
   projectId: string;
   taskId: string;
   onPosted: () => void;
-  /** The board's key, so this composer offers task references like the wide one does */
   projectKey?: string;
 }
 
-/**
- * The phone's comment box: pinned to the bottom of the task for the whole scroll,
- * because commenting is the common action and hunting for the field at the end of
- * the page is the thing the design set out to remove.
- */
 export function MobileCommentBar({
   projectId,
   taskId,
@@ -30,8 +24,6 @@ export function MobileCommentBar({
   const [body, setBody] = useState("");
   const [posting, setPosting] = useState(false);
 
-  // A phone comments through this bar and never sees the wide composer, so wiring the autocomplete
-  // only there left the whole feature — including @mention, which predates it — off mobile entirely
   const triggers = useEditorTriggers(projectId, projectKey);
 
   async function post() {

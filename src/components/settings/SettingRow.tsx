@@ -3,20 +3,10 @@
 interface SettingRowProps {
   label: string;
   hint?: string;
-  /** Set when the control is a single form element, so the label focuses it */
   htmlFor?: string;
   children: React.ReactNode;
 }
 
-/**
- * One geometry for every setting: label and explanation beside the control above 640px,
- * stacked below it. Replaces the per-card layouts that made two adjacent sections look
- * like two different products.
- *
- * The control column is capped rather than filling the card. Uncapped, a full-width
- * input stretched the width of the page while a lone button floated at the 40% mark
- * with nothing aligned to it — every control now starts and ends on the same two lines.
- */
 export function SettingRow({ label, hint, htmlFor, children }: SettingRowProps) {
   const Label = htmlFor ? "label" : "div";
 

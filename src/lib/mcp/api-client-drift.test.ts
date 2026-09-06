@@ -5,23 +5,9 @@ import { PlannerClient } from "./planner-client";
 
 const STANDALONE = join(process.cwd(), "mcp-server/src/api-client.ts");
 
-/**
- * mcp-server ships a copy of PlannerClient. It is built as its own package and `vitest.config.ts`
- * scopes `include` to `src/**`, so a fix applied to one and not the other compiles clean on both
- * sides and nothing says a word — which is how the unencoded path interpolation BP-316 removed here
- * stayed in place there.
- *
- * So this checks the two files agree, and checks it by shape rather than by matching source text:
- * the first version of this guard passed if `seg` was defined and never called, and only saw paths
- * built from a template literal starting with `/api/` (BP-316 review).
- */
 describe("the standalone MCP client does not drift from PlannerClient", () => {
   const source = readFileSync(STANDALONE, "utf8");
 
-  // The first version stopped at `[^,)]+`, so it truncated the captured expression at the closing
-  // paren of the FIRST seg(...) — every path yielded zero interpolations and the filter below could
-  // never flag anything. It survived its mutation only by accident: removing seg() removes the
-  // paren too, which let the capture run on to the end. Match to the closing quote instead.
   function pathExpressions(): string[] {
     return [...source.matchAll(/this\.request\(\s*"[A-Z]+"\s*,\s*(`[^`]*`|"[^"]*")/g)].map(
       ([, expr]) => expr.trim()
@@ -32,13 +18,10 @@ describe("the standalone MCP client does not drift from PlannerClient", () => {
     return [...expr.matchAll(/\$\{([^}]*)\}/g)].map(([, inner]) => inner.trim());
   }
 
-  // Guards the guard. A scan that stops seeing anything goes quiet rather than failing, which is
-  // precisely how the check below was broken while looking healthy.
   it("can actually see the interpolated segments", () => {
     expect(pathExpressions().flatMap(interpolationsIn).length).toBeGreaterThanOrEqual(11);
   });
 
-  // `${query}` is an already-built query string appended after the path, not a segment
   it("routes every id it puts in a path through an encoder", () => {
     const unencoded = pathExpressions().filter((expr) => {
       const concatenated = expr.includes("+");
@@ -58,8 +41,6 @@ describe("the standalone MCP client does not drift from PlannerClient", () => {
     };
   }
 
-  // Stubbed even though the guard should throw first: without it, a regression here stops being a
-  // test failure and starts being four real outbound requests
   async function withStubbedFetch(run: () => Promise<void>): Promise<string[]> {
     const calls: string[] = [];
     const original = globalThis.fetch;
@@ -76,7 +57,6 @@ describe("the standalone MCP client does not drift from PlannerClient", () => {
     return calls;
   }
 
-  // The fix for BP-339 had to land in both copies, and "I edited both files" is not evidence
   it.each(["..", ".", "", "a/../b", "//attacker.example/x"])(
     "refuses the segment %o in both clients, and fetches nothing",
     async (value) => {
@@ -105,8 +85,6 @@ describe("the standalone MCP client does not drift from PlannerClient", () => {
     );
   });
 
-  // resolveTaskKey lives in mcp-server/src/index.ts rather than on its client — the one divergence
-  // that is deliberate. Anything else appearing here means a method was added on one side only.
   it("still offers every method the in-app client does", async () => {
     const { ApiClient } = await import("../../../mcp-server/src/api-client");
     const missing = Object.getOwnPropertyNames(PlannerClient.prototype)
@@ -117,19 +95,10 @@ describe("the standalone MCP client does not drift from PlannerClient", () => {
   });
 });
 
-/**
- * BP-497 landed the same strict-input fix in both copies. What the standalone server *does* is
- * driven for real in standalone-tools.test.ts, under its own SDK and its own zod major; what no
- * test there can see is the two helper files drifting apart, because each side would still pass
- * its own assertions.
- */
 describe("the standalone MCP server keeps the strict input the in-app one has", () => {
   const IN_APP_HELPER = join(process.cwd(), "src/lib/mcp/strict-input.ts");
   const STANDALONE_HELPER = join(process.cwd(), "mcp-server/src/strict-input.ts");
 
-  // The two packages are on different zod majors, which is why the helper passes both spellings
-  // of the hook rather than branching — that is what lets the file be identical rather than merely
-  // similar, and identical is the only version of this a single assertion can hold
   it("ships a byte-identical copy of the helper", () => {
     expect(readFileSync(STANDALONE_HELPER, "utf8")).toBe(readFileSync(IN_APP_HELPER, "utf8"));
   });

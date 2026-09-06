@@ -9,7 +9,6 @@ export const THEME_STORAGE_KEY = "theme";
 export const DARK_QUERY = "(prefers-color-scheme: dark)";
 
 interface ThemeContextValue {
-  /** What is actually applied, with "system" already resolved */
   theme: Theme;
   preference: ThemePreference;
   setPreference: (preference: ThemePreference) => void;
@@ -30,7 +29,6 @@ export function readStoredPreference(): ThemePreference {
     const stored = localStorage.getItem(THEME_STORAGE_KEY);
     if (stored === "light" || stored === "dark" || stored === "system") return stored;
   } catch {
-    // Safari in private mode throws on localStorage
   }
   return "system";
 }
@@ -47,8 +45,6 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     setPreferenceState(readStoredPreference());
-    // The inline script in the document head already resolved and applied a theme;
-    // adopting it keeps the first render's label from disagreeing with the page
     const applied = document.documentElement.getAttribute("data-theme");
     if (applied === "light" || applied === "dark") setTheme(applied);
     setMounted(true);
@@ -68,7 +64,6 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     try {
       localStorage.setItem(THEME_STORAGE_KEY, preference);
     } catch {
-      // Safari in private mode throws on localStorage
     }
 
     if (preference !== "system") return;

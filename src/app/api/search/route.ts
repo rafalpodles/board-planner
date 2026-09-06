@@ -6,7 +6,6 @@ import { Task } from "@/models/task";
 import { DEFAULT_PRIORITY } from "@/types";
 import "@/models/project";
 
-// Lean queries skip schema defaults, so tasks predating the priority field need it applied here
 function withPriorityDefault<T extends { priority?: string }>(tasks: T[]): T[] {
   return tasks.map((t) => ({ ...t, priority: t.priority ?? DEFAULT_PRIORITY }));
 }
@@ -23,17 +22,14 @@ export const GET = withAuth(async (request, { user }) => {
 
   const filter: Record<string, unknown> = {};
 
-  // Members can only see tasks from their allowed projects
   if (user.role !== "admin") {
     const allowed = (await accessibleProjectIds(user)) ?? [];
     filter.project = { $in: allowed };
   }
 
-  // Check if query looks like a task key (e.g. "CP-12")
   const keyMatch = q.match(/^([A-Z]{1,10})-(\d+)$/i);
 
   if (keyMatch) {
-    // Search by exact task key
     const projectKey = keyMatch[1].toUpperCase();
     const taskNumber = parseInt(keyMatch[2], 10);
 
@@ -42,7 +38,6 @@ export const GET = withAuth(async (request, { user }) => {
       .populate("assignee", "username fullName")
       .lean();
 
-    // Filter by project key (populated)
     const matched = tasks.filter(
       (t) =>
         t.project &&
@@ -54,7 +49,6 @@ export const GET = withAuth(async (request, { user }) => {
     return NextResponse.json(withPriorityDefault(matched));
   }
 
-  // Text search on title and description
   const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const regex = { $regex: escaped, $options: "i" };
   filter.$or = [{ title: regex }, { description: regex }];

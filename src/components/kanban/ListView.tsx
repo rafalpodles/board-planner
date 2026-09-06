@@ -53,22 +53,18 @@ interface ListViewProps {
   focusedIndex?: number;
   selectedTasks?: Set<string>;
   selectionMode?: boolean;
-  /** Owned by the board page, so this and the filter bar cannot disagree */
   sortField?: SortKey;
   sortDir?: SortDir;
   onSortChange?: (field: SortKey, dir: SortDir) => void;
   hiddenColumns?: ListColumnId[];
   customFields?: ApiCustomField[];
-  /** Empty for anyone whose user list failed to load; the cell stays read-only */
   assignableUsers?: ApiUserSummary[];
   onTaskClick: (taskId: string) => void;
   onStatusChange?: (taskId: string, status: string) => void;
   onAssigneeChange?: (taskId: string, username: string) => void | Promise<void>;
   onTaskSelect?: (taskId: string) => void;
   onTaskContextMenu?: (taskId: string, x: number, y: number) => void;
-  /** Receives every visible row's id in its new order; only reachable under manual sort */
   onReorder?: (orderedIds: string[]) => void;
-  /** Each turns its column into a picker; omit one and that cell stays read-only */
   onPriorityChange?: (taskId: string, priority: string) => void;
   onCategoryChange?: (taskId: string, category: string) => void;
   onSprintChange?: (taskId: string, sprintId: string | null) => void;
@@ -105,11 +101,6 @@ interface SortableRowState {
   isDragging: boolean;
 }
 
-/**
- * Carries useSortable for one row. A render prop rather than a component per row:
- * the row body needs a dozen values from the list, and threading them through props
- * would be a bigger change than the drag itself.
- */
 function SortableRow({
   id,
   disabled,
@@ -139,11 +130,6 @@ const PRIORITY_OPTIONS: ComboboxOption[] = Object.entries(PRIORITY_LABELS).map(
   ([value, label]) => ({ value, label })
 );
 
-/**
- * A cell whose value comes from a fixed set. Without a handler it renders exactly
- * what it did before, so a column the caller cannot write stays read-only rather
- * than offering a picker that would fail.
- */
 function EnumCell({
   value,
   options,
@@ -244,19 +230,12 @@ export function ListView({
     );
   }
 
-  // No local sort: the rows arrive in the order the board page decided
   const sorted = tasks;
 
-  // Any other sort would recompute the order on the next render and throw the drop
-  // away, so the handle only appears once the list is showing manual order. The
-  // direction matters too: descending manual reverses the rows, which would make a
-  // drop reindex them backwards — reachable only from a sort saved before the
-  // direction toggle was disabled for manual.
   const canReorder =
     !!onReorder && sortField === "manual" && sortDir === "asc" && sorted.length > 1;
 
   const sensors = useSensors(
-    // A few pixels of travel before a drag starts, so clicking the grip stays a click
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
@@ -283,8 +262,6 @@ export function ListView({
     const active = sortField === column;
     return (
       <th
-        // A clickable th is invisible to a keyboard and announces nothing; the
-        // button carries the interaction and aria-sort carries the state
         aria-sort={
           active ? (sortDir === "asc" ? "ascending" : "descending") : "none"
         }
@@ -334,7 +311,6 @@ export function ListView({
     <DndContext
       sensors={sensors}
       collisionDetection={closestCenter}
-      // The rows only ever move up and down, and never out of the table
       modifiers={[restrictToVerticalAxis, restrictToParentElement]}
       onDragEnd={handleDragEnd}
     >
@@ -343,10 +319,6 @@ export function ListView({
       strategy={verticalListSortingStrategy}
     >
     <div className="my-4 border border-border rounded-lg overflow-hidden">
-      {/* A live horizontal scroller for the first time: until the breakpoint hiding went, a
-          display:none cell took no width and there was nothing past the edge. The two guards the
-          board's scroller carries come with it — without overscroll-x-contain, panning to the end
-          of a row chains into the browser's back gesture */}
       <div className="overflow-x-auto overscroll-x-contain" style={{ WebkitOverflowScrolling: "touch" }}>
         <table className="w-full text-sm">
           <thead>
@@ -476,9 +448,6 @@ export function ListView({
                 >
                   {canReorder && (
                     <td className="px-1 py-2 align-middle">
-                      {/* The handle is the drag source, not the row: the row opens the
-                          task on click and carries inline selects that a draggable
-                          ancestor would make awkward to operate */}
                       <button
                         type="button"
                         ref={setHandleRef}
@@ -527,20 +496,9 @@ export function ListView({
                     </span>
                   </td>
                   <td
-                    // overflow-hidden on the cell too: the column can be squeezed
-                    // narrower than the title's min width, and the div alone would
-                    // then paint its overflow across the next cell
-                    // The pointer lives on the title alone: the row opens the task,
-                    // but a hand over the selects and the drag grip reads as wrong
                     className="px-2 py-2 font-medium w-full min-w-44 lg:min-w-0 max-w-0 overflow-hidden cursor-pointer"
                     title={task.title}
                   >
-                    {/* Dropped from lg up, where 6ae1505 chose a squeezed title over a row that
-                        scrolls sideways. Below it the choice goes the other way, because the
-                        squeeze is worse there: measured with the six default columns, 768 gives a
-                        53px title without the floor and a 176px one with it, at the cost of a
-                        597px row in a 474px scrollport. From about 900 the floor stops binding —
-                        the title is over 176px on its own — so this only decides small screens */}
                     <div className="truncate w-full">{task.title}</div>
                   </td>
                   {show("status") && (
@@ -658,8 +616,6 @@ export function ListView({
                             </span>
                           </span>
                         );
-                        // The picker replaces the link to the sprints page: one cell
-                        // cannot be both, and changing the sprint is the commoner act
                         if (onSprintChange) return inner;
                         return projectId ? (
                           <Link
@@ -720,19 +676,13 @@ export function ListView({
                   {fieldColumns.map((column) => {
                     const field = column.field!;
                     const text = fieldCellText(task.customFieldValues, field);
-                    // orderedOptions, not field.options: it sorts them and gives the
-                    // legacy string form the same {id, value, color} shape
                     const options = orderedOptions(field);
                     const raw = task.customFieldValues?.[field._id];
-                    // The stored value is the option's id, never its label — the label
-                    // is what validateCustomFieldValues rejects
                     const chosen = Array.isArray(raw)
                       ? raw.map(String)
                       : raw === undefined || raw === null || raw === ""
                         ? []
                         : [String(raw)];
-                    // Only single-choice fields: a multiselect needs a control that
-                    // can hold several values, which this picker cannot
                     const choices =
                       field.fieldType === "dropdown"
                         ? [
@@ -810,8 +760,6 @@ function AssigneeCell({
   const current =
     task.assignee && typeof task.assignee === "object" ? task.assignee.username : "";
 
-  // Someone assigned before they lost access is still this task's assignee, and a
-  // select whose value is absent from its options silently shows the wrong person
   const options =
     !current || users.some((u) => u.username === current)
       ? users
@@ -837,8 +785,6 @@ function AssigneeCell({
       }}
       label={`Assignee for ${taskKey}: ${task.title}`}
       disabled={saving}
-      // The avatar is small and otherwise reads as a static badge; the ring is what
-      // says it opens something
       triggerClassName={`rounded-full transition hover:ring-2 hover:ring-primary/40 ${
         saving ? "opacity-50" : ""
       }`}

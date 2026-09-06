@@ -157,7 +157,6 @@ export default function TokensPage() {
         Tokens use <code>Bearer</code> authentication.
       </p>
 
-      {/* Create token */}
       <div className="bg-bg-card border border-border rounded-lg p-4 mb-6">
         <h2 className="font-semibold mb-3">Create New Token</h2>
         <div className="flex gap-2">
@@ -208,7 +207,6 @@ export default function TokensPage() {
         </div>
       </div>
 
-      {/* Show new token once */}
       {newToken && (
         <div className="bg-warning/10 border border-warning/30 rounded-lg p-4 mb-6">
           <p className="text-sm font-medium text-warning mb-2">
@@ -242,7 +240,6 @@ export default function TokensPage() {
         </div>
       )}
 
-      {/* Token list */}
       {tokens.length === 0 ? (
         <p className="text-text-muted text-center py-8">No tokens yet.</p>
       ) : (
@@ -285,7 +282,6 @@ export default function TokensPage() {
         </div>
       )}
 
-      {/* OAuth connections */}
       <div className="mt-8">
         <h2 className="text-lg font-semibold mb-1">Connected apps (OAuth)</h2>
         <p className="text-sm text-text-muted mb-3">
@@ -322,7 +318,6 @@ export default function TokensPage() {
         )}
       </div>
 
-      {/* OAuth clients (admin) */}
       {isAdmin && (
         <div className="mt-8">
           <h2 className="text-lg font-semibold mb-1">OAuth clients</h2>

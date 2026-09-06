@@ -12,13 +12,6 @@ import {
 import { signIn } from "./session";
 import { expectToast, recordToasts } from "./toasts";
 
-/**
- * BP-468 — the definition half of custom fields, and task templates, driven from the settings
- * screen. The values half lives in field-history.spec.ts; the board's columns and categories in
- * project-settings.spec.ts. Every write here is read back from the server, because the section
- * repaints from its own draft before anything has landed.
- */
-
 const SETTINGS = `/projects/${PROJECT_KEY}/settings`;
 const boardUrl = `/projects/${PROJECT_KEY}`;
 
@@ -66,14 +59,12 @@ async function readTask(request: APIRequestContext, taskNumber: number) {
   return res.json();
 }
 
-/** The collapsed row of one field: the nearest block around its name that carries an Edit button. */
 function fieldRow(page: Page, name: string): Locator {
   return page
     .locator(`span:text-is("${name}")`)
     .locator("xpath=ancestor::div[.//button[normalize-space()='Edit']][1]");
 }
 
-/** ui/Select's label is not associated with its control, so the picker is reached through the wrapper. */
 function selectLabelled(scope: Locator | Page, label: string): Locator {
   return scope.locator(`div:has(> label:text-is('${label}')) > select`);
 }
@@ -157,7 +148,6 @@ test.describe("custom fields", () => {
       const refused = fieldWrite(page, "POST");
       await page.getByRole("button", { name: "Create field" }).click();
       expect((await refused).status()).toBe(409);
-      // The form shows the server's refusal inline, under the name
       await expect(page.getByText("Field with this name already exists")).toBeVisible();
       expect((await storedFields(request)).map((f) => f.name)).toEqual(["Platform"]);
     });
@@ -168,7 +158,6 @@ test.describe("custom fields", () => {
     request,
   }) => {
     const difficulty = String(FIELDS.difficulty._id);
-    // One task holds a value for the field the dialog will be asked about
     await seedCustomFields({ [difficulty]: "aa-large" });
     await openFields(page);
 
@@ -201,7 +190,6 @@ test.describe("custom fields", () => {
       expect((await archived).status()).toBe(200);
       await expect(dialog).toBeHidden();
 
-      // Archived, not deleted: the field and the value are both still there
       expect((await storedFields(request)).find((f) => f.name === "Difficulty")?.archived).toBe(true);
       expect((await readTask(request, SIBLING_TASK_NUMBER)).customFieldValues[difficulty]).toBe("aa-large");
     });
@@ -216,7 +204,6 @@ test.describe("custom fields", () => {
       await expect(page.locator('span:text-is("Difficulty")')).toHaveCount(0);
       expect((await storedFields(request)).map((f) => f.name)).not.toContain("Difficulty");
       expect((await readTask(request, SIBLING_TASK_NUMBER)).customFieldValues).not.toHaveProperty(difficulty);
-      // The control: the other fields are exactly where they were
       expect((await storedFields(request)).map((f) => f.name)).toContain("Platforms");
     });
   });
@@ -235,13 +222,10 @@ test.describe("custom fields", () => {
 
     await page.goto(boardUrl);
     const cardOf = (n: number) => page.locator(`[data-column-body] a[href="/projects/${PROJECT_KEY}/tasks/${n}"]`);
-    // The task holding the value shows it; the one without is the control
     await expect(cardOf(SIBLING_TASK_NUMBER)).toContainText("L");
     await expect(cardOf(1)).toBeVisible();
     await expect(cardOf(1)).not.toContainText("L");
 
-    // A field column is off by default and offered by the column picker; a field not marked
-    // In the list is not offered at all (Points is the control)
     await page.getByRole("button", { name: "List", exact: true }).click();
     await page.getByRole("button", { name: "Choose columns" }).click();
     const columns = page.getByRole("group", { name: "Columns" });
@@ -250,13 +234,11 @@ test.describe("custom fields", () => {
     await expect(page.getByRole("columnheader", { name: /Difficulty/ })).toBeVisible();
     await expect(page.locator("tr", { hasText: "Free to move" })).toContainText("L");
 
-    // Archived, the field leaves the card again
     await openFields(page);
     const archived = fieldWrite(page, "PATCH");
     await fieldRow(page, "Difficulty").getByRole("button", { name: "Archive" }).click();
     expect((await archived).status()).toBe(200);
     await page.goto(boardUrl);
-    // The view mode is remembered, so the board comes back as the list
     await page.getByRole("button", { name: "Board", exact: true }).click();
     await expect(cardOf(SIBLING_TASK_NUMBER)).toBeVisible();
     await expect(cardOf(SIBLING_TASK_NUMBER)).not.toContainText("L");
@@ -311,7 +293,6 @@ test.describe("custom fields", () => {
 });
 
 test.describe("task templates", () => {
-  /** The row of the nth template on the screen: the block around its name input that carries Edit/Done. */
   function templateRow(page: Page, index: number): Locator {
     return page
       .locator('input[aria-label="Template name"]')
@@ -329,19 +310,12 @@ test.describe("task templates", () => {
       await page.getByRole("button", { name: "+ Add template" }).click();
       const nameInput = page.getByLabel("Template name");
       await nameInput.fill("Bug report");
-      // The row's own button reads Edit until it is open and Done after, so the row is found
-      // by either
       const row = nameInput.locator(
         "xpath=ancestor::div[.//button[normalize-space()='Edit' or normalize-space()='Done']][1]"
       );
       await row.getByRole("button", { name: "Edit" }).click();
       await row.getByLabel("Title template").fill("Bug: ");
-      // "doc", not the seed's first category: a new template defaults to that one, so picking it
-      // would prove nothing about the picker
       const picker = row.getByRole("combobox", { name: "Template category" });
-      // Clicked where it stands, at the bottom edge of the settings container. Until BP-532 that
-      // closed the picker on the same click and this needed a scroll to the middle first; the
-      // plain click is now the test, and this is the settings surface it covers
       await picker.click();
       const options = page.getByRole("listbox", { name: "Template category" });
       await expect(options).toBeVisible();
@@ -398,8 +372,6 @@ test.describe("task templates", () => {
 
     await test.step("renaming its category and editing it in the same save leaves it on the new name", async () => {
       await openFields(page);
-      // The category first: both groups go dirty, and one Save has to carry the rename across
-      // to a template whose draft still remembers the old name
       const names = await page.getByLabel("Category name").evaluateAll((els) =>
         els.map((el) => (el as HTMLInputElement).value)
       );
@@ -426,7 +398,6 @@ test.describe("task templates", () => {
       expect(project.categories.map((c) => c.name)).toContain("guide");
       expect(project.categories.map((c) => c.name)).not.toContain("doc");
       expect(project.taskTemplates[0]).toMatchObject({ name: "Bug report", title: "Defect: ", category: "guide" });
-      // And the task made from it moved with the category
       expect((await readTask(request, createdNumber)).category).toBe("guide");
     });
 
@@ -442,7 +413,6 @@ test.describe("task templates", () => {
       await expectToast(page, "Template with this name already exists");
       expect((await storedProject(request)).taskTemplates).toHaveLength(1);
 
-      // The row is still there to correct, and the save bar still open
       await expect(page.getByLabel("Template name").last()).toHaveValue("Bug report");
       await page.getByLabel("Template name").last().fill("Bug report (short)");
       const posted = page.waitForResponse(
@@ -485,8 +455,6 @@ test.describe("board columns", () => {
     await recordToasts(page);
     await expect(columnNames(page)).toHaveCount(7);
 
-    // seed(): TP-4 in To Do, TP-1 and TP-3 in In Progress, TP-2 in In Review — from /stats,
-    // which nothing else in the suite reads for these counts
     await expect(columnRow(page, 1)).toContainText("1 task");
     await expect(columnRow(page, 2)).toContainText("2 tasks");
     await expect(columnRow(page, 3)).toContainText("1 task");

@@ -31,9 +31,6 @@ function context(diff: Partial<DiffStats> = {}, task: Partial<ClaimedTask> = {})
   };
 }
 
-// BP-404: the gate asks git two things before it reviews — whether the checkout's config carries
-// anything git would run while checking out, and then for the checkout itself — so the reviewer is
-// no longer the first call, and these tests find it by name rather than by index.
 function claudeStdout(stdout: string, overrides: Partial<CommandResult> = {}) {
   const run = vi.fn<Runner["run"]>(async (command) =>
     command === "git"
@@ -152,8 +149,6 @@ describe("reviewGate", () => {
     await reviewGate(runner, TIMEOUT_MS).run(context());
 
     const args = claudeCall(run)[1];
-    // --tools, not --allowedTools: the latter only skips the permission prompt, so it left the
-    // reviewer able to write while this test said otherwise
     expect(args[args.indexOf("--tools") + 1]).toBe("Read Grep Glob");
     expect(args).not.toContain("--allowedTools");
     expect(args).toContain("--strict-mcp-config");
@@ -209,12 +204,6 @@ describe("reviewGate", () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  /**
-   * BP-404 review. The clean checkout does not close the instruction channel on its own: measured
-   * on CLI 2.1.248, a CLAUDE.md planted in the checkout's PARENT was obeyed, and the agent is
-   * handed TMPDIR and writes unsandboxed. --safe-mode is what closes it — CLAUDE.md from the cwd
-   * and every directory above it, ~/.claude/CLAUDE.md, settings hooks, skills, plugins.
-   */
   it("starts the reviewer with every discovered instruction channel disabled", async () => {
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 
@@ -223,13 +212,6 @@ describe("reviewGate", () => {
     expect(claudeCall(run)[1]).toContain("--safe-mode");
   });
 
-  /**
-   * A tripwire, not a requirement. The reviewer inherits HOME because the CLI authenticates from
-   * the logged-in session there, and the agent can write under it — so ~/.claude is a channel
-   * --safe-mode closes by flag rather than by reach. This asserts the *inheritance* so that the
-   * day BP-349 changes it, whoever changes it reads this comment. Do not "fix" this by deleting
-   * the assertion: it is recording a known limit, not asking for one.
-   */
   it("still inherits HOME, so BP-349's surface is closed by --safe-mode and not by isolation", async () => {
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 
@@ -238,8 +220,6 @@ describe("reviewGate", () => {
     expect(claudeCall(run)[2].env?.HOME).toBe(process.env.HOME);
   });
 
-  // Without this the gate reviews an EMPTY directory and can return approved: the checkout failed,
-  // nothing was written to it, and the reviewer reads a tree with no change in it (BP-404 review)
   it("refuses when the checkout could not be made, rather than reviewing nothing", async () => {
     const run = vi.fn<Runner["run"]>(async (command, args) =>
       command === "git" && args.includes("worktree") && args.includes("add")
@@ -254,9 +234,6 @@ describe("reviewGate", () => {
     expect(run.mock.calls.find(([command]) => command === "claude")).toBeUndefined();
   });
 
-  // `git worktree add` fires .git/hooks/post-checkout — measured — and core.hooksPath=/dev/null is
-  // the only thing that stops it. gitArgs is where that flag comes from, so the checkout call has
-  // to go through it like every other git call here
   it("hardens the checkout call itself, not only the calls that read", async () => {
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 
@@ -267,7 +244,6 @@ describe("reviewGate", () => {
     expect(gitCall(run, "worktree")[2].env?.GIT_CONFIG_NOSYSTEM).toBe("1");
   });
 
-  // A stop has to reach the checkout too: it is a git process of unbounded duration on a large repo
   it("passes the signal to the checkout, not only to the reviewer", async () => {
     const controller = new AbortController();
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
@@ -285,12 +261,6 @@ describe("reviewGate", () => {
     expect(claudeCall(run)[2].timeoutMs).toBe(TIMEOUT_MS);
   });
 
-  /**
-   * BP-404. The CLI loads CLAUDE.md, .claude/ and .mcp.json from its cwd as instructions, and a
-   * committed one-line .gitignore naming CLAUDE.md makes an untracked CLAUDE.md invisible to
-   * `diff --numstat` and to `status --porcelain` alike. Starting the reviewer anywhere the agent
-   * could write is the whole bug, so the assertion is about where it does NOT run.
-   */
   it("does not review in the worktree the agent wrote in", async () => {
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 
@@ -306,18 +276,10 @@ describe("reviewGate", () => {
 
     const [, addArgs] = gitCall(run, "worktree");
     expect(addArgs).toContain("--detach");
-    // The object id collectDiff resolved, so the reviewer reads the commit the gates judged
     expect(addArgs).toContain(context().diff.headSha);
-    // and the reviewer's cwd is that checkout rather than any other directory
     expect(claudeCall(run)[2].cwd).toBe(addArgs[addArgs.length - 2]);
   });
 
-  /**
-   * A checkout runs smudge filters, so it is an execution point in the same sense staging is —
-   * `[filter "z"] smudge = <script>` plus `* filter=z` in .git/info/attributes runs that script as
-   * this process's uid, measured through `git worktree add`. BP-403 put this scan before staging;
-   * this is the same scan before the checkout.
-   */
   it("refuses rather than checking out when the config carries something git would run", async () => {
     const run = vi.fn<Runner["run"]>(async (command, args) =>
       command === "git" && args.includes("--list")
@@ -334,7 +296,6 @@ describe("reviewGate", () => {
     expect(run.mock.calls.find(([command]) => command === "claude")).toBeUndefined();
   });
 
-  // A review checkout left behind is a copy of the change sitting in a world-readable tmpdir
   it("removes the checkout afterwards, including when the reviewer rejected the change", async () => {
     const { runner, run } = claudeReturning({ approved: false, reason: "no" });
 
@@ -359,8 +320,6 @@ describe("reviewGate", () => {
   it("keeps the operator's own credentials out of the reviewer's environment", async () => {
     vi.stubEnv("CP_API_TOKEN", "cp_operator_credential");
     vi.stubEnv("GH_TOKEN", "gh_operator_credential");
-    // stubbed rather than read back from process.env: on a machine without HOME the assertion
-    // would compare undefined to undefined and hold whatever the gate did
     vi.stubEnv("HOME", "/Users/someone");
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 

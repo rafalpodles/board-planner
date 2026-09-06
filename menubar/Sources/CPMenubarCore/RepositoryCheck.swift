@@ -1,12 +1,5 @@
 import Foundation
 
-// The folder the worker will keep its checkouts in — not a checkout. The worker gets its own clone
-// rather than borrowing the operator's: it registers worktrees inside whatever it is handed and
-// reaps directories beside them, a hazard that has already bitten in this repository, and it drags
-// in uncommitted work and switched branches with it.
-//
-// Every problem below is a plausible first pick, and each one otherwise surfaces only as a string
-// in the fleet console after the machine has already been enrolled.
 public struct RepositoryProblem: Equatable, Sendable {
     public let summary: String
     public let fix: String
@@ -20,7 +13,6 @@ public struct RepositoryProblem: Equatable, Sendable {
 public struct RepositoryInspection: Sendable {
     public let exists: Bool
     public let isDirectory: Bool
-    /// The path with every symlink resolved. Equal to the pick when there was nothing to resolve.
     public let resolved: String
     public let hasGitDirectory: Bool
     public let posixPermissions: Int
@@ -56,8 +48,6 @@ public enum RepositoryCheck {
             ]
         }
 
-        // The worker resolves and compares real paths, so a symlinked pick is not the directory it
-        // will end up working in — and the mismatch only shows up once it refuses to bind.
         if inspection.resolved != path {
             found.append(
                 RepositoryProblem(
@@ -67,8 +57,6 @@ public enum RepositoryCheck {
             )
         }
 
-        // Picking a checkout is the mistake this design exists to prevent, so it is named rather
-        // than silently accepted
         if inspection.hasGitDirectory {
             found.append(
                 RepositoryProblem(
@@ -87,8 +75,6 @@ public enum RepositoryCheck {
             )
         }
 
-        // The agent runs with the operator's own rights inside this tree; anything group- or
-        // world-writable widens who can change what it is about to execute.
         if inspection.posixPermissions & 0o022 != 0 {
             found.append(
                 RepositoryProblem(

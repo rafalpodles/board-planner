@@ -1,8 +1,5 @@
 import Foundation
 
-// Not a feature — a way to check, on this machine and from a script, what SMAppService actually
-// does from inside a bundle. The PATH and login-item behaviour only appear in that configuration,
-// and finding out during signing would mean finding out behind a blocker.
 enum LoginItemCommand {
     static func runIfRequested() {
         let arguments = ProcessInfo.processInfo.arguments
@@ -24,9 +21,6 @@ enum LoginItemCommand {
                 exit(1)
             }
         case "--preflight":
-            // Runs the whole spawn path from inside the bundle: login shell to find node, then node
-            // to run the worker's own preflight. Under the hardened runtime this is the thing
-            // CP-239 flagged as a risk, so it needs to be checkable without clicking anything.
             do {
                 let checkout = arguments.count > 2 ? arguments[2] : FileManager.default.currentDirectoryPath
                 let report = try WorkerProcess.preflight(checkout: checkout)

@@ -8,13 +8,6 @@ import {
 } from "./seed";
 import { signIn as arriveSignedIn } from "./session";
 
-/**
- * BP-494. `/search` carried a second copy of the search: it ran only on submit, and a late
- * response could overwrite a newer one. It now renders from `useSearch`, the palette's hook.
- *
- * Nothing here presses Enter — that is the point.
- */
-
 test.beforeEach(seed);
 
 const signIn = arriveSignedIn;
@@ -32,7 +25,6 @@ test("typing alone searches — no Enter, no submit", async ({ page }) => {
   const box = searchBox(page);
   await expect(box).toBeVisible();
 
-  // The control: an empty box shows nothing, so a hit below cannot be something already on screen
   await expect(page.getByText(DECOY_TASK_TITLE)).toHaveCount(0);
 
   const answered = page.waitForResponse(
@@ -42,7 +34,6 @@ test("typing alone searches — no Enter, no submit", async ({ page }) => {
   await answered;
 
   await expect(page.getByText(DECOY_TASK_TITLE)).toBeVisible();
-  // Enter was never pressed, and the box still holds what was typed
   await expect(box).toHaveValue("review");
 });
 
@@ -53,7 +44,6 @@ test("the address follows the box, and a shared link still searches", async ({ p
   await searchBox(page).pressSequentially("review", { delay: 40 });
   await expect(page).toHaveURL(/\/search\?q=review$/);
 
-  // The same address, arrived at cold: it must search on its own
   await page.goto("/search?q=review");
   await expect(searchBox(page)).toHaveValue("review");
   await expect(page.getByText(DECOY_TASK_TITLE)).toBeVisible();
@@ -65,22 +55,14 @@ test("a project is a result too, as it is in the palette", async ({ page }) => {
 
   await searchBox(page).pressSequentially(PROJECT_KEY, { delay: 40 });
 
-  // Scoped: the sidebar links every project too, and the claim is about the results
   const results = page.locator("#main-content");
   await expect(results.getByRole("heading", { name: "Projects" })).toBeVisible();
   await expect(results.getByRole("link", { name: new RegExp(PROJECT_NAME) })).toBeVisible();
 });
 
-/**
- * The reason the page could not simply keep its own fetch: with two requests in flight, the
- * slower one used to land last and win. The route below makes that ordering certain rather
- * than hoping for it.
- */
 test("a late answer for an earlier query cannot overwrite a newer one", async ({ page }) => {
   await signIn(page);
 
-  // The two queries must match *different* tasks, or a stale answer would put the same row
-  // back on screen and the assertion could not tell the two apart.
   const STALE = "already";
   const CURRENT = "free to";
 
@@ -93,7 +75,6 @@ test("a late answer for an earlier query cannot overwrite a newer one", async ({
   await page.goto("/search");
   const box = searchBox(page);
 
-  // Long enough past the 250ms debounce for the request to be in flight, and stalled
   await box.fill(STALE);
   await page.waitForTimeout(700);
 
@@ -101,7 +82,6 @@ test("a late answer for an earlier query cannot overwrite a newer one", async ({
   await expect(page.getByText(SIBLING_TASK_TITLE)).toBeVisible();
   await expect(page.getByText(DECOY_TASK_TITLE)).toHaveCount(0);
 
-  // The stalled answer lands here. Unguarded, it replaces what is on screen with its own.
   await page.waitForTimeout(3500);
   await expect(page.getByText(SIBLING_TASK_TITLE)).toBeVisible();
   await expect(page.getByText(DECOY_TASK_TITLE)).toHaveCount(0);
@@ -118,13 +98,10 @@ test("on a phone the drawer's Search is the same page the magnifier opens", asyn
   const searchRow = drawer.getByRole("link", { name: "Search" });
   await expect(searchRow).toHaveAttribute("href", "/search");
 
-  // The drawer slides in on a transform. Clicking mid-slide lands on the scrim behind it and
-  // quietly does nothing — which cost a run to diagnose, on a loaded machine.
   await expect.poll(async () => (await drawer.boundingBox())?.x).toBe(0);
 
   await searchRow.click();
   await expect(page).toHaveURL(/\/search$/);
-  // A page, not the palette laid over the board
   await expect(page.getByRole("heading", { name: "Search", level: 1 })).toBeVisible();
   await expect(searchBox(page)).toBeVisible();
 });
@@ -133,7 +110,6 @@ test("with a keyboard, Search still opens the palette", async ({ page }) => {
   await signIn(page);
   await page.goto(`/projects/${PROJECT_KEY}`);
 
-  // The desktop sidebar's row is a button, and it must not have become a link
   const row = page.getByRole("button", { name: "Search" });
   await expect(row).toBeVisible();
   await row.click();

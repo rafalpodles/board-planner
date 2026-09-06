@@ -9,12 +9,6 @@ interface Row {
 }
 
 describe("useDraft baseline", () => {
-  /**
-   * The reason this exists: settings lists reconcile on save by diffing the draft
-   * against a baseline. They used to diff against the live `project`, which any other
-   * group's save replaces — so a row that arrived underneath looked like one the user
-   * had deleted, and the save issued a DELETE for it.
-   */
   it("exposes the values the draft started from", () => {
     const rows: Row[] = [{ _id: "1", name: "A" }];
     const { result } = renderHook(() => useDraft({ rows }));
@@ -44,8 +38,6 @@ describe("useDraft baseline", () => {
     expect(result.current.count).toBe(0);
   });
 
-  // A save that fails part-way must adopt what landed without throwing away the edits
-  // that did not: commit() moves both sides, which reverted the user's work
   it("moves the baseline on rebase and leaves the draft alone", () => {
     const { result } = renderHook(() =>
       useDraft<{ rows: Row[] }>({ rows: [{ _id: "1", name: "A" }] })

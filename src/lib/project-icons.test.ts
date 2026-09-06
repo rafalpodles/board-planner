@@ -3,8 +3,6 @@ import { ICON_GROUPS, iconGroupsCoverWhitelist, searchIcons } from "./project-ic
 import { PROJECT_ICONS } from "@/types";
 
 describe("project icon groups", () => {
-  // The server rejects anything outside PROJECT_ICONS, so a grouped icon that is not on
-  // the whitelist would offer a choice that fails on save
   it("covers the whitelist exactly, with no duplicates", () => {
     expect(iconGroupsCoverWhitelist()).toBe(true);
     const grouped = ICON_GROUPS.flatMap((g) => g.icons.map((i) => i.icon));

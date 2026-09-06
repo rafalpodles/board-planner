@@ -26,9 +26,7 @@ interface TaskLinksProps {
   projectKey: string;
   task: ApiTask;
   onChanged: () => void;
-  /** The project's columns, so a linked task's status reads as its board label */
   columns?: Column[];
-  /** Rendered beside "Add dependency" */
   actions?: ReactNode;
 }
 
@@ -106,7 +104,6 @@ export function TaskLinks({
   const relatedFrom = task.relatedFrom || [];
   const relatesTo = [
     ...relations.filter((r) => r.type === "relates"),
-    // "relates" is symmetric, so an incoming link belongs in the same list
     ...relatedFrom.filter((r) => r.type === "relates"),
   ];
   const duplicates = relations.filter((r) => r.type === "duplicates");
@@ -245,10 +242,6 @@ export function TaskLinks({
           </select>
           <input
             type="text"
-            // A placeholder is not a name, and it is gone the moment somebody types.
-            // "to link" rather than the placeholder's bare "Search tasks": the shell's own search
-            // is called "Search tasks and projects", and two boxes whose names are prefixes of
-            // each other are ambiguous by voice and to any substring locator.
             aria-label="Search tasks to link"
             value={search}
             onChange={(e) => setSearch(e.target.value)}

@@ -6,11 +6,6 @@ import { RepoInventory } from "./config.js";
 import { Runner } from "./exec.js";
 import { gitArgs, GIT_SAFE_ENV } from "./git-safety.js";
 
-// A repository path is a capability grant, not configuration: a .git/config the operator didn't
-// write can make `git status` alone run an attacker's command via core.fsmonitor, core.pager,
-// diff.external, core.sshCommand or filter.*. Every rule below runs in this exact order and
-// refuses at the first failure, cheapest checks first, nothing touching git until the rest pass.
-
 export interface RepoDeps {
   runner: Runner;
   readAllowlist: () => string;
@@ -26,8 +21,6 @@ type BindResult =
 
 const GIT_TIMEOUT_MS = 60_000;
 
-// macOS canonicalises /etc, /tmp and /var to /private/*, so both forms of each are listed —
-// otherwise a proposedPath spelled with the canonical form would slip past the alias.
 const SENSITIVE_ROOTS = [
   join(homedir(), "Library"),
   join(homedir(), ".ssh"),
@@ -41,18 +34,6 @@ const SENSITIVE_ROOTS = [
   "/private/tmp",
 ];
 
-// The allowlist entry the operator picked, plus realpath below, is the actual security boundary —
-// it is what stops a server (or whoever compromised it) from pointing the worker at a directory of
-// its choosing. This denylist is a cheap, one-time defence in depth against a directory that was
-// ALREADY hostile when the operator approved it; it is deliberately NOT exhaustive and cannot be
-// made exhaustive by adding more keys. Two structural reasons bound it, not just missing entries:
-// `git config --local --list` prints `include.path=<file>` but never that file's contents, so any
-// key below can be smuggled through one level of indirection and this line scan will never see it
-// — enumeration cannot close that gap, only the allowlist can. And once a repository is bound the
-// agent holds `git` in its own tool allowlist, so it can set any config key it likes inside that
-// worktree; this scan runs once, before the agent ever touches the checkout. Match only the
-// subkeys git actually executes, so a legitimate Git-LFS or gitattributes repository is not refused
-// for an inert sibling key — and do not chase completeness here; that game is already lost.
 const EXACT_DANGEROUS_KEYS = [
   "core.fsmonitor",
   "core.pager",
@@ -64,9 +45,6 @@ const EXACT_DANGEROUS_KEYS = [
   "diff.external",
 ];
 
-// <family>.<name>.<leaf> keys whose value git runs as a command. Everything else under these
-// sections (filter.*.required, diff.*.binary/xfuncname/algorithm, merge.*.name, ...) is inert and
-// must be allowed. remote.*.receivepack/uploadpack fire on this module's own push/fetch.
 const EXECUTABLE_LEAVES: Record<string, string[]> = {
   "filter.": ["clean", "smudge", "process"],
   "diff.": ["textconv", "command"],
@@ -95,12 +73,6 @@ function dangerousFamilyLeaf(key: string): boolean {
   return false;
 }
 
-// protocol.<name>.allow (or the bare protocol.allow default) does not itself hold a command, but
-// paired with a remote.*.url using the ext:: transport it makes git run one — ext defaults to
-// "never" precisely because it executes a program, and local config can override that default.
-// "never" is the explicitly safe value and must not be refused; anything else (always, user, or an
-// unrecognised value) is treated as permissive, since this module's own git calls are the
-// user-initiated case "user" allows.
 function isPermissiveProtocolAllow(key: string, value: string): boolean {
   const isAllowKey =
     key === "protocol.allow" ||
@@ -137,28 +109,10 @@ function git(runner: Runner, cwd: string, args: string[]) {
   });
 }
 
-// `--show-scope` because the answer depends on who could have written the entry, and
-// `--no-includes` because following an include is worse than not following it: measured on git
-// 2.50.1, `--list` defaults includes ON, the included value is labelled with the *including*
-// file's scope, and the file's content can be replaced between the scan and the use —
-//
-//     scan sees:  credential.helper=echo benign
-//     (the include file is rewritten)
-//     git uses:   !sh -c '…'
-//
-// So the indirection is refused as itself below rather than read through. That also means nothing
-// of the operator's own included configuration is ever parsed by this scan.
 const CONFIG_LIST_ARGS = ["config", "--list", "--show-scope", "--no-includes"];
 
-// The scopes the agent writes *inside the repository*, which this pipeline created for the run —
-// anything executable there is the agent's by construction. `global`, `system` and the `unknown`
-// scope git reports for command-line and environment values are the operator's machine, where a
-// credential helper is ordinary: measured on a normally-configured Mac, the effective config
-// carries five executable keys, every one of them legitimate and every one of them a match for
-// the rules below. Judging those without a baseline refuses the machine, not the attacker.
 const REPO_SCOPES = ["local", "worktree"];
 
-// include.path and includeIf.* carry no program themselves; they carry the file that does.
 const INDIRECTION_KEYS = ["include.path", "includeif."];
 
 interface ConfigEntry {
@@ -202,15 +156,6 @@ function executes(key: string, value: string): boolean {
   return false;
 }
 
-/**
- * Everything the effective config says before the agent has touched the checkout, as raw
- * `scope\tkey=value` lines. Held in this process and never written down: the agent runs as this
- * uid with no filesystem sandbox, so a baseline on disk is a baseline it can edit. Same reason
- * `Worktree.baseSha` is carried rather than re-read.
- *
- * `null` when git could not answer. That is not "clean" and not "everything is new" — it means the
- * scan falls back to judging the repository's own scopes, which it can always judge on their own.
- */
 export async function configBaseline(
   runner: Runner,
   cwd: string,
@@ -220,34 +165,16 @@ export async function configBaseline(
   return parseConfigList(result.stdout).map((entry) => entry.raw);
 }
 
-/**
- * The key the agent planted, or "" if it planted none.
- *
- * Two rules, because two questions. Inside the repository — `local` and `worktree`, both of which
- * this pipeline created for this run — anything that executes is the agent's, and so is any
- * `include.path` pointing somewhere this cannot vouch for. Outside it, on the operator's own
- * machine, only what *appeared since* `baseline` counts: a `gh` credential helper in `~/.gitconfig`
- * is why the guard exists at all, not evidence against the run.
- *
- * Without a baseline the machine scopes are not judged. That is deliberate and it is still
- * strictly more than the local-only scan it replaces — it adds the worktree scope and the
- * indirection — but a caller that can pass one closes `~/.gitconfig` too (BP-346).
- */
 export async function plantedConfig(
   runner: Runner,
   cwd: string,
   baseline?: readonly string[] | null,
 ): Promise<string> {
-  // Two questions, two calls. `--local --list` fails outside a checkout and `--list` does not — it
-  // answers with the machine's global config instead — so widening the scan would have turned
-  // "this is not a repository" into "this repository is clean" without anything going red.
-  // Measured: exit 128 became exit 0 (BP-346).
   const readable = await git(runner, cwd, ["config", "--local", "--list"]);
   if (readable.code !== 0 || readable.timedOut)
     return "an unreadable git config";
 
   const result = await git(runner, cwd, CONFIG_LIST_ARGS);
-  // Unreadable is not the same as clean: a config this cannot read is one it cannot clear either.
   if (result.code !== 0 || result.timedOut) return "an unreadable git config";
 
   const entries = parseConfigList(result.stdout);
@@ -352,9 +279,6 @@ export async function bindRepository(
     };
   }
 
-  // registration.ts refuses a workerId that is not an ObjectId; this is the sink that would suffer
-  // if anything ever got past it, and the only place that can still tell. `join` normalises "..",
-  // so containment has to be judged after the path is built rather than on the segment before it.
   const container = join(dirname(proposedPath), "cp-worktrees");
   const worktreeRoot = resolve(container, deps.workerId);
   if (!worktreeRoot.startsWith(`${container}${sep}`)) {
@@ -366,8 +290,6 @@ export async function bindRepository(
   return { ok: true, path: proposedPath, worktreeRoot };
 }
 
-// Mirrors config.ts's readSecretFile discipline: repos.json decides what code can run on this
-// machine, so a copy readable by group or others is refused, the same as a loose SSH key.
 export function createAllowlistReader(stateDir: string): () => string {
   const path = join(stateDir, "repos.json");
   return () => {
@@ -381,14 +303,6 @@ export function createAllowlistReader(stateDir: string): () => string {
   };
 }
 
-// What this machine offers, read from repos.json and resolved to each checkout's origin. Reported
-// upward so the server can match a project by remote; the path travels only for display, and never
-// comes back down.
-//
-// Returns a reason rather than an empty list when the file cannot be read. The two are not the
-// same: an operator who emptied repos.json meant it, whereas a mode-644 file or a missing state
-// directory is a fault — and reporting [] for a fault made the server wipe its stored inventory,
-// leaving a worker that looked live, enabled and error-free while claiming nothing.
 export type InventoryResult =
   { ok: true; repos: RepoInventory[] } | { ok: false; reason: string };
 
@@ -414,8 +328,6 @@ export async function repoInventory(
   const repos: RepoInventory[] = [];
   for (const path of allowlist) {
     if (typeof path !== "string" || !isAbsolute(path)) continue;
-    // A directory that has gone away, or has no origin, is simply not offered — one bad entry must
-    // not cost this machine every other checkout it could serve.
     const result = await git(deps.runner, path, [
       "remote",
       "get-url",

@@ -4,12 +4,6 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { ADMIN_PASSWORD, ADMIN_USERNAME } from "./seed";
 
-/**
- * The MCP client an editor is, driven over the real transport against /api/mcp, and the OAuth
- * flow that mints its credential (BP-396). One rig for the handshake spec and the tools spec, so
- * the two cannot drift into driving different clients.
- */
-
 export const MCP_HEADERS = {
   Accept: "application/json, text/event-stream",
   "Content-Type": "application/json",
@@ -33,11 +27,6 @@ export type RedirectReceiver = {
   close: () => Promise<void>;
 };
 
-/**
- * A real OAuth client's redirect endpoint. The consent page hands the code over by navigating the
- * browser there itself (BP-383), so something has to be listening: a dead port would leave the
- * test reading a code out of a Chrome error page, which is not what a client does.
- */
 export async function redirectReceiver(): Promise<RedirectReceiver> {
   let land!: (params: URLSearchParams) => void;
   const captured = new Promise<URLSearchParams>((resolve) => (land = resolve));
@@ -51,15 +40,6 @@ export async function redirectReceiver(): Promise<RedirectReceiver> {
 
   return {
     url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/callback`,
-    /**
-     * A flow that never redirects — a consent screen that re-renders with an error, say — would
-     * otherwise hang until the test's own timeout, which says nothing about where it stopped.
-     *
-     * The clock starts here rather than when the receiver is built: everything before this point
-     * is Turbopack compiling /oauth/register, /oauth/authorize and the login POST on first use,
-     * which is why the config allows 90s for a navigation. A timer armed at construction would
-     * expire during a legitimate cold start and report it as a missing redirect.
-     */
     waitForRedirect: (ms = 30_000) =>
       Promise.race([
         captured,
@@ -79,7 +59,6 @@ export type RpcMessage = {
   error?: { message: string };
 };
 
-/** The transport answers JSON or an SSE frame depending on the call; both carry one JSON-RPC message. */
 export function rpcMessage(body: string): RpcMessage {
   const trimmed = body.trim();
   const payload = trimmed.startsWith("{")
@@ -92,8 +71,6 @@ export function rpcMessage(body: string): RpcMessage {
   try {
     return JSON.parse(payload);
   } catch {
-    // A refusal's body is composed by mcp-handler, not by this repo, and a test that only wants
-    // the status must not die parsing it
     return {};
   }
 }
@@ -152,7 +129,6 @@ export class McpSession {
     return body;
   }
 
-  /** Tool results arrive as text content; every planner tool puts JSON in it. */
   async callTool(name: string, args: Record<string, unknown> = {}): Promise<ToolCall> {
     const { status, body } = await this.call("tools/call", { name, arguments: args });
     const content = (body.result?.content ?? []) as { type: string; text: string }[];
@@ -166,7 +142,6 @@ export class McpSession {
   }
 }
 
-/** Registration, consent and the code exchange — the flow a client walks once, per test that needs a token. */
 export async function authorize(
   page: Page,
   request: APIRequestContext,
@@ -202,9 +177,6 @@ export async function authorize(
       await page.check('input[name="access"][value="all"]');
     } else {
       await page.check('input[name="access"][value="limited"]');
-      // Every board this account reaches is offered. Asserted rather than assumed: the point of
-      // ticking one is that another was there to leave unticked. The count is seed() plus
-      // seedSecondProject() — a project added to seed() itself belongs in this number.
       await expect(page.locator('input[name="projects"]')).toHaveCount(2);
       for (const projectId of options.projects) {
         await page.check(`input[name="projects"][value="${projectId}"]`);

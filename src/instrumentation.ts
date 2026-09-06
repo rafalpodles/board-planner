@@ -1,18 +1,8 @@
 import { type Instrumentation } from "next";
 import { describeRequestError } from "@/lib/request-error-log";
 
-// Must live under src/, not at the repo root, even though Turbopack accepts either. The check that
-// decides whether `standalone` output *packages* this file enumerates the app directory's parent —
-// `src/` here — without recursing, so a root-level copy is invisible to it: the build succeeds, the
-// chunk is emitted, and `.next/standalone` simply has no instrumentation.js. `next start` (Railway)
-// still runs it; the Dockerfile, which copies only `.next/standalone`, silently boots without the
-// PM scheduler or any seeding (BP-356).
 export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
-    // Read here so a fumbled value is one startup failure naming the variable, and so an operator
-    // can see which answer the instance settled on — the throttle keys on it, and getting it wrong
-    // is silent in both directions (BP-318). This lived in a second copy of this file under src/
-    // that Next never loaded, so it had never once been printed (BP-356).
     const { trustedProxyHops } = await import("@/lib/client-ip");
     const hops = trustedProxyHops();
     console.log(
@@ -43,24 +33,10 @@ export async function register() {
         console.log(`Seeded default columns on ${seededColumns.modifiedCount} project(s)`);
       }
 
-      // Caught here rather than left to the outer handler: the backfill and the PM scheduler are
-      // below this line, so an unhandled seed failure would skip both — and be logged as a
-      // connection problem, which it is not. An instance without the catalog cannot run a worker
-      // but is otherwise usable.
       const { seedAgents } = await import("@/lib/agent-seed");
       await seedAgents().catch((error) => {
         console.error("Failed to seed the agent catalog:", error);
       });
-
-      // The backfill that stood here set `worker.agent` to the shipped Default on every project
-      // where it was null — on **every start**, not once. It existed so the task picker's first
-      // suggestion always pointed at a real agent, and BP-458 makes that unnecessary: no default
-      // is now a state the picker names ("No default — the task picker starts empty") and one a
-      // project admin can deliberately choose. Left in place it undid that choice at the next
-      // restart, because the schema defaults the field to null and a cleared project is therefore
-      // indistinguishable from one that never had a default.
-      //
-      // Projects it already reached keep what it wrote; removing it unsets nothing.
 
       const { startPmScheduler } = await import("@/lib/pm/scheduler");
       startPmScheduler();
@@ -73,19 +49,11 @@ export async function register() {
         console.log(`Digest scheduler started — ${digestHour()}:00 ${digestTimezone()}`);
       }
     } catch (err) {
-      // Don't crash the server on a transient boot-time DB hiccup;
-      // route handlers reconnect lazily via connectDB().
       console.error("Startup MongoDB connection failed (will retry on demand):", err);
     }
   }
 }
 
-/**
- * Next calls this for every error a route handler or render lets escape. Without it the only trace
- * is the stack Next prints, which names neither the path nor the method — the gap that made BP-444
- * expensive to diagnose. Synchronous and console-only on purpose: an error reporter that awaits a
- * network call is one more thing to fail while something is already failing.
- */
 export const onRequestError: Instrumentation.onRequestError = (error, request, context) => {
   console.error(describeRequestError(error, request, context));
 };

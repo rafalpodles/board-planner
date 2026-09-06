@@ -33,8 +33,6 @@ const { resetRateLimits, lockoutKey, recordFailedAttempt, isRateLimited, ANONYMO
 
 const SESSION_ID = "sess-1";
 
-// Distinct ids: these stand for different people, and the throttle is now keyed on the account, so
-// one shared _id made every case in this file share one counter.
 function browserUser(username: string) {
   return { _id: `u1-${username}`, username, role: "member", sessionId: SESSION_ID };
 }
@@ -98,7 +96,6 @@ describe("PUT /api/users/me/password", () => {
     getAuthUser.mockResolvedValue(browserUser("locked-out"));
     compare.mockResolvedValue(false);
 
-    // The threshold is crossed by the failure that reaches it, so that attempt already answers 429
     let refusals = 0;
     for (let i = 0; i < 10; i++) {
       if ((await PUT(put(), ctx())).status === 429) refusals++;
@@ -106,8 +103,6 @@ describe("PUT /api/users/me/password", () => {
     expect(refusals).toBeGreaterThan(0);
     expect(compare).toHaveBeenCalledTimes(10);
 
-    // Refusal here is safe and stays a refusal: the request already proves possession of this
-    // account's session, so nobody else can aim it
     compare.mockClear();
     compare.mockResolvedValue(true);
     const res = await PUT(put(), ctx());
@@ -118,9 +113,6 @@ describe("PUT /api/users/me/password", () => {
     expect(revokeUserSessions).not.toHaveBeenCalled();
   });
 
-  // BP-353. Not the exit for somebody already locked out — a lockout means no session — but it is
-  // one of the three password paths, and the sweep has to work from here too or the rule is only
-  // partly true.
   it("lifts the account's login lockout, from every address it was filled from", async () => {
     const shared = lockoutKey("-", "changer");
     const fromElsewhere = lockoutKey("203.0.113.9", "changer");

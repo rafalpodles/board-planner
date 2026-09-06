@@ -10,9 +10,6 @@ import { timeAgo } from "@/lib/time";
 import { endedBadly, endState } from "@/lib/run-outcome";
 import { ApiFleetRun } from "@/types";
 
-// A run's detail is the only durable account of why it ended the way it did — the gate's reason,
-// the pull request it opened, the sentence the agent gave for handing the task back. The fleet page
-// shows the phase of a run in flight and nothing at all once it is over; this is the other half.
 export default function FleetRunsPage() {
   const api = useApi();
   const router = useRouter();
@@ -96,8 +93,6 @@ export default function FleetRunsPage() {
                     <td className="px-3 py-2 text-text-muted whitespace-nowrap">
                       {run.agentName || "—"}
                     </td>
-                    {/* A run written before the machine reported itself, or by hand through the
-                        API, has no worker — and a blank cell is the honest answer for it */}
                     <td className="px-3 py-2 text-text-muted whitespace-nowrap">
                       {run.workerName || "—"}
                     </td>
@@ -126,8 +121,6 @@ export default function FleetRunsPage() {
                         </p>
                       ) : (
                         <p data-testid="run-detail-empty" className="text-xs text-text-muted">
-                          {/* A refusal puts its reason in the gate's name, so the empty detail on
-                              one is expected rather than missing */}
                           {run.refusedBy
                             ? `The ${run.refusedBy} gate refused it and said nothing further.`
                             : "Nothing was recorded about how this run ended."}

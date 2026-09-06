@@ -10,11 +10,6 @@ import {
 } from "react";
 import { PRIORITIES, Priority } from "@/types";
 
-/**
- * Grows a textarea to fit its text. Measured before layout gives the element a width,
- * every character wraps onto its own line and the bogus height gets baked in — so the
- * measurement is skipped until there is a width, and repeated whenever the width changes.
- */
 export function useAutoGrow(ref: RefObject<HTMLTextAreaElement | null>, value: string) {
   useEffect(() => {
     const el = ref.current;
@@ -28,7 +23,6 @@ export function useAutoGrow(ref: RefObject<HTMLTextAreaElement | null>, value: s
 
     fit();
 
-    // Width only: reacting to our own height change would loop
     let lastWidth = el.clientWidth;
     const observer = new ResizeObserver(() => {
       if (el.clientWidth === lastWidth) return;
@@ -40,7 +34,6 @@ export function useAutoGrow(ref: RefObject<HTMLTextAreaElement | null>, value: s
   }, [ref, value]);
 }
 
-/** A one-line-looking field that wraps instead of scrolling its text out of sight */
 export function GrowingTextarea({
   value,
   onChange,
@@ -57,7 +50,6 @@ export function GrowingTextarea({
   className?: string;
   placeholder?: string;
   "aria-label"?: string;
-  /** Lets a caller reach the element too — the autocomplete needs it to move the caret. */
   textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
 }) {
   const own = useRef<HTMLTextAreaElement>(null);
@@ -130,7 +122,6 @@ const PRIORITY_ACCENT: Record<Priority, string> = {
   urgent: "var(--color-priority-urgent)",
 };
 
-/** Signal-strength bars — one per priority level, filled up to the current one */
 export function PriorityBars({ priority }: { priority: Priority }) {
   const level = PRIORITIES.indexOf(priority);
   return (
@@ -170,15 +161,6 @@ export function ProgressBar({ done, total }: { done: number; total: number }) {
   );
 }
 
-/**
- * True once the watched element has scrolled out of the top of `root`. Measuring against the
- * scroll box rather than the viewport is what makes it exact: the header sits flush on that
- * box's top edge, so "gone from the box" and "gone behind the header" are the same moment at
- * any viewport offset. An IntersectionObserver rather than a scroll listener: it fires twice
- * per crossing instead of once per frame, so nothing recomputes while the page is moving. A
- * callback ref, not a RefObject, because the element this watches only mounts once the task
- * has loaded.
- */
 export function useScrolledBehind(root: Element | null) {
   const [node, setNode] = useState<Element | null>(null);
   const [behind, setBehind] = useState(false);
@@ -188,7 +170,6 @@ export function useScrolledBehind(root: Element | null) {
 
     const observer = new IntersectionObserver(
       ([entry]) => {
-        // Scrolled off the top and merely below the fold both read as "not intersecting"
         const above = entry.boundingClientRect.top < (entry.rootBounds?.top ?? 0);
         setBehind(!entry.isIntersecting && above);
       },

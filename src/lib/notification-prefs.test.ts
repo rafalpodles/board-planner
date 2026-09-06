@@ -19,8 +19,6 @@ const allOff = (): NotificationMatrix =>
   ) as NotificationMatrix;
 
 describe("an account that predates the grid", () => {
-  // The whole migration story: no document is rewritten, so the old booleans have to keep
-  // producing exactly today's behaviour
   it("keeps the bell on every row it used to ring, and follows emailNotifications for mail", () => {
     const m = defaultMatrix({ emailNotifications: true });
 
@@ -29,9 +27,6 @@ describe("an account that predates the grid", () => {
     }
   });
 
-  // The row is new, so there is no behaviour to preserve — and the legacy default is the one
-  // place a new row could subscribe every existing account to a firehose by being added. Adding
-  // task_created to legacyMatrix alongside the rest is exactly the edit that would do it.
   it("is not subscribed to every task on every board it can reach", () => {
     const m = defaultMatrix({ emailNotifications: true });
 
@@ -68,7 +63,6 @@ describe("resolving one event for one project", () => {
     expect(resolveChannels(user, P2, "mentioned")).toEqual({ inApp: true, email: false, chat: false });
   });
 
-  // Stored defaults win over the legacy boolean, or saving the grid would appear to do nothing
   it("ignores emailNotifications once defaults are stored", () => {
     expect(resolveChannels(user, P1, "comment_added").email).toBe(false);
   });
@@ -93,8 +87,6 @@ describe("what the project screen shows", () => {
     expect(hasOverride(user, P1)).toBe(false);
   });
 
-  // Turning the switch on copies what is in force now, so a later change to the global grid does
-  // not reach into a project somebody has already tuned
   it("seeds a new override from the values in force", () => {
     expect(matrixInForce(user, P1).mentioned).toEqual({ inApp: true, email: true, chat: false });
     expect(matrixInForce(user, P2).mentioned).toEqual({ inApp: false, email: false, chat: false });
@@ -121,9 +113,6 @@ describe("normalising what a client sends", () => {
   });
 });
 
-// The digest asks this before it builds anything. Asking only the global grid dropped anyone who
-// had switched mail off globally and on for one project — and since the immediate mail is already
-// suppressed for a digest subscriber, they got nothing at all.
 describe("whether any grid asks for mail", () => {
   it("counts a project override that turns mail on, with the global grid silent", () => {
     const user = {
@@ -151,12 +140,6 @@ describe("whether any grid asks for mail", () => {
   });
 });
 
-/**
- * Whether chat can deliver is derived here rather than written into the grids. Storing it meant
- * disconnecting had to rewrite the global grid and every project override, and each attempt cost
- * something — a wholesale $set regenerated subdocument ids, a row-by-row one wrote by an index a
- * concurrent request could shift, and the screen disabled the checkbox that would have undone it.
- */
 describe("chat delivery follows the connection, not the stored tick", () => {
   const ticked = {
     notifications: {
@@ -187,7 +170,6 @@ describe("chat delivery follows the connection, not the stored tick", () => {
     expect(resolveChannels(whole, P1, "mentioned").chat).toBe(true);
   });
 
-  // The tick itself is never rewritten — the reader's choice survives a connection coming and going
   it("leaves the other channels of the row alone", () => {
     expect(resolveChannels(ticked, P1, "mentioned")).toEqual({
       inApp: true,

@@ -15,17 +15,6 @@ import {
 } from "./seed";
 import { signIn as arriveSignedIn } from "./session";
 
-/**
- * CP-250: a task's history ignored every field the project defines, which since CP-213 is most of
- * what people edit. These tests cover the two halves separately — what gets written when a field
- * is edited, and how the timeline reads it back — because a defect in either one is invisible from
- * the other side.
- *
- * The values asserted here are the *displayed* ones. Every fixture option deliberately has an id
- * that differs from its text, so a regression that logged storage keys would fail rather than
- * quietly write `zz-small` into somebody's history.
- */
-
 const TASK_URL = `/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`;
 
 type Entry = { action: string; field: string; oldValue: string; newValue: string };
@@ -36,54 +25,37 @@ test.beforeEach(async () => {
 
 const signIn = arriveSignedIn;
 
-/** Only the entries this suite is about: the fixture's own edits, never the seed's own noise. */
 async function fieldEntries(name?: string): Promise<Entry[]> {
   const all = await storedActivity(SIBLING_TASK_ID);
   const names: string[] = Object.values(FIELDS).map((f) => f.name);
   return all.filter((e) => (name ? e.field === name : names.includes(e.field)));
 }
 
-/** Waits for the autosave rather than for a fixed delay, and returns what it wrote. */
 async function entriesAfterSave(expected: number, name?: string): Promise<Entry[]> {
   await expect.poll(async () => (await fieldEntries(name)).length, { timeout: 15_000 }).toBe(expected);
   return fieldEntries(name);
 }
 
-/** The row itself, whichever shape it has — the picker button, or the field's own container. */
 function fieldRow(page: Page, name: string): Locator {
   return page
     .getByText(name, { exact: true })
     .locator("xpath=ancestor::*[self::button or self::div][1]");
 }
 
-/** The rows a value is typed into rather than chosen from: text, number, date. */
 function fieldInput(page: Page, name: string): Locator {
   return page.locator(`input[aria-label="${name}"]`);
 }
 
-/**
- * Waits for the rail to show what was just saved before the next step touches it. Without this
- * the next edit can read a draft the server response has not caught up with yet, and a second
- * selection lands on top of a value that has been rolled back — which is how "iOS, Web" became
- * "iOS" on a CI runner while passing on a faster laptop every time.
- */
 async function expectRailShows(page: Page, name: string, text: string, type: string) {
-  // A yes/no field is a switch, so its state is the checked flag rather than any text — the
-  // "Yes"/"No" here is what the history entry says, which the caller asserts separately
   if (type === "checkbox") {
     await expect(page.getByRole("switch", { name })).toBeChecked({ checked: text === "Yes" });
     return;
   }
-  // Text, number and date are typed in the row: the value lives in the input, not in the
-  // row's text, and an empty one shows its placeholder
   if (type === "text" || type === "number" || type === "date") {
     await expect(fieldInput(page, name)).toHaveValue(text);
     return;
   }
   const row = fieldRow(page, name);
-  // Compared piece by piece: a multiselect draws one chip per option, so the row reads "iOSWeb"
-  // where the history entry reads "iOS, Web". Same value, two renderings — the ordering guarantee
-  // is asserted on the entry itself.
   for (const piece of text ? text.split(", ") : ["Empty"]) {
     await expect(row).toContainText(piece);
   }
@@ -102,11 +74,9 @@ async function chooseOption(page: Page, field: string, option: string) {
 async function toggleChip(page: Page, field: string, option: string) {
   const panel = await openPicker(page, field);
   await panel.getByRole("option", { name: option, exact: true }).click();
-  // The panel stays open for a second pick; close it so the next row is clickable
   await page.keyboard.press("Escape");
 }
 
-/** The switch: its own input is sr-only, so the click goes to the label wrapping it. */
 async function setCheckbox(page: Page, field: string, on: boolean) {
   const toggle = page.getByRole("switch", { name: field, exact: true });
   if ((await toggle.isChecked()) !== on) {
@@ -117,31 +87,21 @@ async function setCheckbox(page: Page, field: string, on: boolean) {
 async function typeValue(page: Page, field: string, value: string) {
   const input = fieldInput(page, field);
   await input.fill(value);
-  // Blurring commits it the way leaving the field does, and returns a number row to the
-  // rounded reading it shows when it is not being edited
   await input.blur();
 }
 
 async function openHistory(page: Page): Promise<Locator> {
   await page.goto(TASK_URL);
   await page.getByRole("tab", { name: /^History/ }).click();
-  // "Show all" exists only above five entries, so whether it is there has to be read AFTER the
-  // entries arrive. isVisible() does not wait, and answers false on a panel that is still
-  // fetching — leaving the history truncated and the assertion below hunting for a row that was
-  // never expanded into view. The empty-state line is also the loading state, so its going is
-  // what says the entries are in.
   const panel = page.locator("#task-panel-history");
   await expect(panel).toBeVisible();
   await expect(panel.getByText("No history yet")).toBeHidden();
 
   const showAll = page.getByRole("button", { name: /Show all \d+ entries/ });
   if (await showAll.isVisible()) await showAll.click();
-  // Scoped on purpose: the rail alongside shows each field's *current* name and value, so a
-  // page-wide assertion about a renamed field would be answered by the rail, not by the history.
   return panel;
 }
 
-/** A PUT through the app's own API — the path MCP, the PM agent and the board all end up on. */
 async function putFields(request: APIRequestContext, values: Record<string, unknown>) {
   const response = await request.put(
     `/api/projects/${PROJECT_ID}/tasks/${SIBLING_TASK_ID}`,
@@ -156,15 +116,6 @@ const ALL_VALUES = {
   [String(FIELDS.notes._id)]: "kept",
 };
 
-// ---------------------------------------------------------------------------
-// Every field type, through its whole life: unset, set, changed, cleared
-// ---------------------------------------------------------------------------
-
-/**
- * One entry per field type the product offers, so coverage cannot quietly depend on somebody
- * remembering to add a test when a type is added. Each case drives the widget a person actually
- * uses and states the text the history is expected to carry — never the stored value.
- */
 const LIFECYCLES = [
   {
     type: "dropdown",
@@ -180,14 +131,12 @@ const LIFECYCLES = [
     name: "Platforms",
     steps: [
       { act: (p: Page) => toggleChip(p, "Platforms", "Web"), from: "", to: "Web" },
-      // iOS is first in the project's order though it is picked second — the entry must say so
       { act: (p: Page) => toggleChip(p, "Platforms", "iOS"), from: "Web", to: "iOS, Web" },
       { act: (p: Page) => toggleChip(p, "Platforms", "Web"), from: "iOS, Web", to: "iOS" },
       { act: (p: Page) => toggleChip(p, "Platforms", "iOS"), from: "iOS", to: "" },
     ],
   },
   {
-    // No empty state of its own: the rail draws an unset box exactly like an unticked one
     type: "checkbox",
     name: "Spike?",
     steps: [
@@ -200,7 +149,6 @@ const LIFECYCLES = [
     name: "Points",
     steps: [
       { act: (p: Page) => typeValue(p, "Points", "5"), from: "", to: "5" },
-      // Zero is a value, and the falsy one that a truthiness check would swallow
       { act: (p: Page) => typeValue(p, "Points", "0"), from: "5", to: "0" },
       { act: (p: Page) => typeValue(p, "Points", ""), from: "0", to: "" },
     ],
@@ -243,18 +191,11 @@ for (const { type, name, steps } of LIFECYCLES) {
       await expectRailShows(page, name, step.to, type);
     }
 
-    // Nothing else moved: a field no lifecycle touches must stay silent throughout
     expect(await fieldEntries("Retired")).toEqual([]);
   });
 }
 
-// ---------------------------------------------------------------------------
-// Edge cases the widgets cannot produce, driven through the same server endpoint
-// ---------------------------------------------------------------------------
-
 test("a save that carries every field unchanged records nothing", async ({ page, request }) => {
-  // The shape the board's inline edit, MCP and the PM agent all send: they merge the task's
-  // current values with the one they are changing, so N-1 fields arrive unchanged every time
   await seedCustomFields(ALL_VALUES);
   await signIn(page);
 
@@ -279,8 +220,6 @@ test("an explicit false on a checkbox nobody ever ticked records nothing", async
   page,
   request,
 }) => {
-  // The rail draws never-set and false identically, so logging this would announce a change to
-  // the state already on screen
   await seedCustomFields();
   await signIn(page);
 
@@ -337,10 +276,6 @@ test("reordering a card on the board records nothing at all", async ({ page, req
   expect(await storedActivity(SIBLING_TASK_ID)).toEqual([]);
 });
 
-// ---------------------------------------------------------------------------
-// How the timeline reads it back
-// ---------------------------------------------------------------------------
-
 test("the history says which field changed and what it became", async ({ page }) => {
   await seedCustomFields({ [String(FIELDS.difficulty._id)]: "zz-small" });
   await signIn(page);
@@ -377,8 +312,6 @@ test("a field named with punctuation still reads as a sentence", async ({ page }
   await expect(history.getByText("E2E Admin changed Spike? from No to Yes")).toBeVisible();
 });
 
-// The criterion the implementation satisfies by construction — entries store the name and the
-// text as snapshots — but which nothing was proving until this test.
 test("renaming a field afterwards does not rewrite the history already written about it", async ({
   page,
 }) => {
@@ -394,7 +327,6 @@ test("renaming a field afterwards does not rewrite the history already written a
   const history = await openHistory(page);
 
   await expect(history.getByText("E2E Admin changed Difficulty from S to L")).toBeVisible();
-  // The rail now reads "Size" and "Extra Large"; the entry written before the rename must not
   await expect(history.getByText(/Size/)).toHaveCount(0);
   await expect(history.getByText(/Extra Large/)).toHaveCount(0);
 });
@@ -422,8 +354,6 @@ test("the note left by a recurrence reads as a note, not as a field somebody edi
   await seedCustomFields();
   await signIn(page);
 
-  // A real recurrence: the task is given one, then moved to the done column, which is what makes
-  // createNextRecurrence write its note
   await request.put(`/api/projects/${PROJECT_ID}/tasks/${SIBLING_TASK_ID}`, {
     headers: ADMIN_AUTH,
     data: { recurrence: { frequency: "weekly", interval: 1, endDate: null } },
@@ -443,16 +373,6 @@ test("the note left by a recurrence reads as a note, not as a field somebody edi
   await expect(history.getByText(/changed recurrence from/)).toHaveCount(0);
 });
 
-// ---------------------------------------------------------------------------
-// The other writers: MCP names a field by its label, never by its id
-// ---------------------------------------------------------------------------
-
-/**
- * An MCP client — and the PM agent, through the same resolver — knows a field as the word a human
- * gave it. That is a different path into the same update: name to id, then the option's text to
- * the option's id. Everything the widgets exercise is bypassed here, so a break in resolution
- * would leave every test above green.
- */
 async function callMcp(request: APIRequestContext, name: string, args: Record<string, unknown>) {
   const response = await request.post("/api/mcp", {
     headers: { ...ADMIN_AUTH, Accept: "application/json, text/event-stream" },
@@ -483,8 +403,6 @@ test("MCP changing one field leaves the others it merged along untouched", async
   page,
   request,
 }) => {
-  // update_task merges the task's current values with the one field it was given, so every other
-  // field arrives unchanged on the wire — exactly the shape that must stay silent
   await seedCustomFields(ALL_VALUES);
   await signIn(page);
 
@@ -505,7 +423,6 @@ test("MCP naming a multiselect option records the project's wording, not the cli
   await seedCustomFields();
   await signIn(page);
 
-  // Lowercase on the wire; the entry must carry the option's own text
   await callMcp(request, "update_task", {
     taskKey: `${PROJECT_KEY}-${SIBLING_TASK_NUMBER}`,
     fields: { Platforms: ["web", "ios"] },
@@ -516,19 +433,6 @@ test("MCP naming a multiselect option records the project's wording, not the cli
   ]);
 });
 
-// ---------------------------------------------------------------------------
-// The PM agent, driven through a real turn against a stubbed model
-// ---------------------------------------------------------------------------
-
-/**
- * The one writer the tests above reach only by proxy. A PM turn is the whole chain — the chat
- * box, the SSE stream, the agent loop, tool dispatch, `updateTask` — and the model is the only
- * part replaced (see e2e/openrouter-stub.mjs). What the agent "decides" travels inside the
- * message, between << and >>, so this reads as a person typing and the stub does no guessing.
- *
- * The point is attribution: an unattended agent editing somebody's board has to leave its name
- * on what it changed, not the name of whoever happened to be signed in.
- */
 async function askPm(page: Page, prompt: string, call: Record<string, unknown>) {
   await page.goto(`/projects/${PROJECT_KEY}/pm`);
   const box = page.getByPlaceholder(/Message the PM/);
@@ -558,7 +462,6 @@ test("a PM turn records its field change under the agent's own name", async ({ p
 });
 
 test("a PM turn that changes one field stays silent about the rest", async ({ page }) => {
-  // The agent's own merge of current values, which is the shape most likely to spray noise
   await seedCustomFields(ALL_VALUES);
   await signIn(page);
 
@@ -575,19 +478,6 @@ test("a PM turn that changes one field stays silent about the rest", async ({ pa
   ]);
 });
 
-// ---------------------------------------------------------------------------
-// A status change sets off the same things whichever way it was made
-// ---------------------------------------------------------------------------
-
-/**
- * BP-253. The board PATCHes a status; the task edit form PUTs the whole task with the status
- * inside it. Only the first path created the next occurrence of a recurring task, so a weekly
- * task closed from the detail view quietly stopped recurring — same act, same destination
- * column, two outcomes, and nothing on screen to say which one you had just performed.
- *
- * The scenario above deliberately uses the status endpoint. This one uses the form's, which is
- * the path that was broken, and the reason the earlier test could not cover it.
- */
 async function tasksInProject(request: APIRequestContext): Promise<{ taskNumber: number; title: string }[]> {
   const response = await request.get(`/api/projects/${PROJECT_ID}/tasks`, { headers: ADMIN_AUTH });
   expect(response.status()).toBe(200);
@@ -608,7 +498,6 @@ test("closing a recurring task from the edit form creates its next occurrence", 
     data: { recurrence: { frequency: "weekly", interval: 1, endDate: null } },
   });
 
-  // The form's own endpoint, carrying the status in the body — not PATCH /status
   const closed = await request.put(`/api/projects/${PROJECT_ID}/tasks/${SIBLING_TASK_ID}`, {
     headers: ADMIN_AUTH,
     data: { status: "done" },
@@ -637,7 +526,6 @@ test("closing a task that does not recur creates nothing", async ({ page, reques
   });
   expect(closed.status()).toBe(200);
 
-  // Poll for a while so a late arrival still fails this rather than slipping in afterwards
   await new Promise((resolve) => setTimeout(resolve, 3_000));
   expect((await tasksInProject(request)).length).toBe(before.length);
 });

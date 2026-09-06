@@ -17,15 +17,10 @@ export const GET = withAuth(async (_request, { user }) => {
   const accessibleIds = await accessibleProjectIds(user);
   const filter = accessibleIds === null ? {} : { _id: { $in: accessibleIds } };
 
-  // Manual order first; anything never dragged keeps its default 0 and falls
-  // back to newest-first, which is the order this list had before CP-180
   const projects = await Project.find(filter)
     .populate("createdBy", "username fullName")
     .sort({ sortOrder: 1, createdAt: -1 });
 
-  // The sidebar renders on every route, so its per-project badges have to come
-  // from this one request. Two flat queries joined in memory rather than a
-  // $lookup with an inline pipeline, which needs MongoDB 5.0.
   const ids = projects.map((p) => p._id);
   const [taskStats, activeSprints] = await Promise.all([
     Task.aggregate([
@@ -69,7 +64,6 @@ export const POST = withAdmin(async (request, { user }) => {
     );
   }
 
-  // Stored uppercase, so validate what will be stored rather than what was typed
   const storedKey = String(key).trim().toUpperCase();
   if (!isValidProjectKey(storedKey)) {
     return NextResponse.json({ error: PROJECT_KEY_RULE }, { status: 400 });
@@ -80,8 +74,6 @@ export const POST = withAdmin(async (request, { user }) => {
     key: storedKey,
     description: description || "",
     createdBy: user._id,
-    // A fresh project looks like a fresh project always did — the difference is
-    // that all three are now editable and removable (CP-213)
     customFields: legacyFieldSeeds({}),
   });
 

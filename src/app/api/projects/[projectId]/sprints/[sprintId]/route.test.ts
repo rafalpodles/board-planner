@@ -12,10 +12,6 @@ const sprintUpdateMany = vi.fn();
 const taskUpdateMany = vi.fn();
 const taskCountDocuments = vi.fn();
 
-// The mock answers from the FILTER it was given, not from a queue the test primed. That is the
-// whole point: a lookup that forgot `project` finds nothing here, so dropping that term — which is
-// the defect BP-314 exists to fix — fails the tests by construction rather than needing an
-// assertion somebody could forget to write.
 const OWNED_BY_THIS_PROJECT = new Set([OUR_SPRINT, OUR_OTHER_SPRINT]);
 
 function answerFor(query: { _id?: unknown; project?: unknown } | undefined) {
@@ -74,9 +70,6 @@ beforeEach(() => {
   taskCountDocuments.mockResolvedValue(0);
 });
 
-// BP-314: the two Task.updateMany calls ran BEFORE the ownership check, and the filter carried no
-// `project`, so a member of any board could empty a sprint on a board they cannot read and get a
-// 404 that read as "nothing happened". A test asserting only the 404 would pass against that code.
 describe("PUT .../sprints/[sprintId] — a sprint of another project", () => {
   it("refuses without touching a single task", async () => {
     const res = await PUT(
@@ -134,9 +127,6 @@ describe("PUT .../sprints/[sprintId] — our own sprint", () => {
     expect(taskUpdateMany).not.toHaveBeenCalled();
   });
 
-  // The first version of this fix validated the destination inside the second branch, so a body
-  // carrying both flags emptied the sprint to the backlog and *then* answered 400 — the same
-  // write-then-refuse shape, reintroduced inside its own fix.
   it("refuses both flags together without running the backlog sweep first", async () => {
     const res = await PUT(
       request({

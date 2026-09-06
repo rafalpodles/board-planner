@@ -4,15 +4,6 @@ import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { APP_NAME } from "./brand";
 
-/**
- * The name this product used to carry is somebody else's trademark, which is what forced the
- * rename — so it coming back is not a style slip, it is the problem returning. Only a scan
- * notices: a hardcoded wordmark renders perfectly, and no test about behaviour would fail.
- *
- * The pattern is assembled from pieces so that this file, the one thing that has to describe
- * the old name, does not itself contain it.
- */
-
 const SRC = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OLD_NAME = new RegExp(["cla", "ude", " ?-? ?", "plan", "ner"].join(""), "i");
 

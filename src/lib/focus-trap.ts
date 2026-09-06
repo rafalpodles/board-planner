@@ -9,9 +9,6 @@ const FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(", ");
 
-// Every overlay shares z-50, so the one last in the DOM is painted in front and
-// owns Escape and Tab. The drawer registers here too, or a dialog opened from
-// inside it would fight it for both.
 const openLayers: HTMLElement[] = [];
 
 export function registerLayer(el: HTMLElement): () => void {
@@ -36,8 +33,6 @@ export function topmostLayer(): HTMLElement | undefined {
   );
 }
 
-// The selector matches markup; only these checks tell us what a keyboard user
-// can actually reach — a link inside a display:none branch is not a tab stop.
 export function tabbablesWithin(container: HTMLElement): HTMLElement[] {
   const rendered = new Map<Element, boolean>();
 
@@ -60,7 +55,6 @@ export function tabbablesWithin(container: HTMLElement): HTMLElement[] {
   );
 }
 
-/** Returns true when the event was handled and the caller should stop. */
 export function cycleTabWithin(container: HTMLElement, e: KeyboardEvent): boolean {
   const focusable = tabbablesWithin(container);
   const active = document.activeElement;

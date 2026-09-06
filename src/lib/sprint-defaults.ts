@@ -28,8 +28,6 @@ export function latestSprint(sprints: ApiSprint[]): ApiSprint | null {
   );
 }
 
-// "Sprint 1" → "Sprint 2". Empty when there is no trailing number to increment,
-// so we never propose a duplicate of the previous name.
 export function nextSprintName(sprints: ApiSprint[]): string {
   const latest = latestSprint(sprints);
   if (!latest) return "Sprint 1";
@@ -51,7 +49,6 @@ export function nextSprintDates(
   const previousStart = latest.startDate.substring(0, 10);
   const previousEnd = latest.endDate.substring(0, 10);
   const duration = Math.max(1, daysBetween(previousStart, previousEnd));
-  // Chain onto the previous sprint, unless it already ended in the past
   const start = previousEnd > toDateInput(today) ? previousEnd : toDateInput(today);
   return { startDate: start, endDate: addDays(start, duration) };
 }
@@ -68,7 +65,6 @@ export function overlappingSprint(
       if (!sprint.startDate || !sprint.endDate) return false;
       const otherStart = sprint.startDate.substring(0, 10);
       const otherEnd = sprint.endDate.substring(0, 10);
-      // Touching endpoints are intentional chaining, not an overlap
       return startDate < otherEnd && endDate > otherStart;
     }) ?? null
   );

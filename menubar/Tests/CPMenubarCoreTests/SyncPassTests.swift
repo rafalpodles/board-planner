@@ -1,13 +1,6 @@
 import XCTest
 @testable import CPMenubarCore
 
-/// BP-424. A pass clones first and deletes second, and `busy` used to be one value sampled before
-/// either. A clone takes minutes, so a worker idle when the pass began and running by the time the
-/// deletions were reached had its checkout removed underneath it.
-///
-/// These drive the whole pass, so the thing under test is the ordering rather than any one guard.
-/// Real git and a real directory for the case that ends in a deletion — a stub would answer
-/// whatever it was told, and what needs proving is that a directory does or does not survive.
 @Sendable private func realGit(_ cwd: String, _ args: [String]) -> (code: Int32, output: String) {
     let task = Process()
     task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
@@ -42,12 +35,6 @@ final class SyncPassTests: XCTestCase {
         try? FileManager.default.removeItem(atPath: root)
     }
 
-    // MARK: - the world
-
-    /// A checkout every other guard is happy with — committed, and pushed to a real remote.
-    /// Without the remote, `CheckoutRemoval` refuses for "commits on no remote" and the controls
-    /// below assert a refusal while believing they assert a deletion. CheckoutRemovalWorktreeTests
-    /// carries the same warning; I walked into it anyway.
     private func checkout(_ name: String) throws -> String {
         let path = root + "/" + name
         let origin = root + "/" + name + ".git"
@@ -62,7 +49,6 @@ final class SyncPassTests: XCTestCase {
         return path
     }
 
-    // No name, so `label` is the key alone and the assertions read as the key rather than "NEW · NEW"
     private func offer(_ key: String) -> ProjectOffer {
         ProjectOffer(project: key, key: key, name: "", repositoryUrl: "https://example.test/\(key).git")
     }
@@ -82,8 +68,6 @@ final class SyncPassTests: XCTestCase {
         CheckoutRemoval(run: { args, cwd in realGit(cwd, args) })
     }
 
-    // MARK: - the bug
-
     func testAWorkerThatBecomesBusyDuringTheCloneKeepsItsCheckout() async throws {
         let path = try checkout("held")
         let grants = Grants()
@@ -94,7 +78,6 @@ final class SyncPassTests: XCTestCase {
             plan: SyncPlan(
                 add: [offer("NEW")],
                 remove: [PlannedRemoval(project: offer("OLD"), path: path)]),
-            // The clone is where the minutes go, and where the worker picks up a task.
             add: { _ in
                 busy = true
                 return .success("\(self.root)/new")
@@ -118,8 +101,6 @@ final class SyncPassTests: XCTestCase {
         XCTAssertEqual(grants.forgotten, [], "and it still has its grant")
     }
 
-    /// The one that separates "read once before the removals" from "read before each removal".
-    /// A fix that sampled once after the clones would pass everything above and fail here.
     func testTheQuestionIsAskedAgainBetweenTwoRemovals() async throws {
         let first = try checkout("first")
         let second = try checkout("second")
@@ -135,7 +116,6 @@ final class SyncPassTests: XCTestCase {
                     PlannedRemoval(project: offer("TWO"), path: second),
                 ]),
             add: { _ in .success("") },
-            // Idle for the first question, running by the second: a removal takes time too.
             isBusy: {
                 defer { busy = true }
                 return busy
@@ -153,8 +133,6 @@ final class SyncPassTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: first), "the first one went")
         XCTAssertTrue(FileManager.default.fileExists(atPath: second), "the second one stayed")
     }
-
-    // MARK: - the controls
 
     func testAnIdleWorkerThroughoutStillGetsItsRemoval() async throws {
         let path = try checkout("stale")
@@ -212,8 +190,6 @@ final class SyncPassTests: XCTestCase {
             removal: removal,
             onStep: { steps.append($0) })
 
-        // The step, not just the count: a `.failed` would also be one step, and would also leave
-        // the directory where it is.
         XCTAssertEqual(
             steps,
             [
@@ -246,8 +222,6 @@ final class SyncPassTests: XCTestCase {
                 .removed(project: "OLD", path: path),
             ])
     }
-
-    // MARK: - the question that cannot be answered
 
     func testASocketThatWillNotAnswerCountsAsBusy() async {
         struct Down: Error {}

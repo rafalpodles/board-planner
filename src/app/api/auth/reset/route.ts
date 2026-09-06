@@ -32,13 +32,6 @@ export async function POST(request: Request) {
   const refusal = provenanceRefusal(request);
   if (refusal) return refusal;
 
-  // Ahead of the body for the same reason it is ahead of bcrypt: the read is work too (BP-322).
-  // Guessing 32 random bytes is not the worry; unmetered work is. Two indexed reads and a bcrypt
-  // per anonymous request is a bill anybody can run up.
-  //
-  // The cost of counting here is that a request refused later for its own reasons — a password
-  // under the minimum, a body that is not JSON — spends a slot too. That is the intended trade:
-  // the alternative leaves the cheapest way to spend the server's time the one way that is free.
   const clientIp = getClientIp(request);
   const throttleKey = sourceKey(clientIp ?? "-", "password-reset-use");
   if (await isRateLimited(throttleKey, anonymousMultiplier(clientIp, ATTEMPTS_PER_SOURCE))) {
@@ -57,8 +50,6 @@ export async function POST(request: Request) {
   if (typeof token !== "string" || typeof newPassword !== "string") {
     return NextResponse.json({ error: "token and newPassword are required" }, { status: 400 });
   }
-  // Before the token is spent, so a password the server would refuse does not cost somebody their
-  // one-time link and send them back to their inbox for another
   if (newPassword.length < MIN_PASSWORD_LENGTH) {
     return NextResponse.json(
       { error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` },
@@ -68,8 +59,6 @@ export async function POST(request: Request) {
 
   await connectDB();
 
-  // Hashed before the token is spent, for the same reason the length is checked first: bcrypt
-  // throwing after the claim would leave the person with a dead link and their old password
   const hashed = await bcrypt.hash(newPassword, PASSWORD_COST_FACTOR);
 
   const outcome = await consumeResetToken(token);
@@ -79,41 +68,23 @@ export async function POST(request: Request) {
 
   const user = await User.findById(outcome.userId).select("username kind email");
   if (!user) {
-    // The account was deleted between the link being sent and used. The token is spent either way.
     return NextResponse.json({ error: REFUSALS.unknown }, { status: 400 });
   }
-  // An account that became a machine identity after the link was issued must not be signed into
   if (user.kind === "machine") {
     return NextResponse.json({ error: REFUSALS.unknown }, { status: 400 });
   }
 
-  // Every session, including whoever is signed in on the old password — which is the case somebody
-  // resetting a password they believe was stolen is trying to end
   await revokeUserSessions(user._id);
 
   try {
     await User.updateOne({ _id: user._id }, { $set: { password: hashed } });
   } catch (err) {
-    // The claim is one-shot, so a write that fails here would otherwise leave somebody signed out
-    // of everything, holding a dead link, with their old password still in force and no way back
     await releaseResetToken(token).catch(() => {});
     throw err;
   }
 
-  // "I could not get in, so I reset it" has to end with getting in. The login throttle refuses on
-  // the account key before reading the credential, and that key is shared by every caller where
-  // there is no client address — so without this, the correct new password is refused for the rest
-  // of the window and the link that was just spent looks broken (BP-347).
-  //
-  // Immediately after the write and before anything else, because everything below can reject: a
-  // throw between the two would leave the password changed, the link spent, and the lockout
-  // standing — the exact state this call exists to prevent (BP-353 review).
   await clearAccountAttempts(user.username).catch(() => {});
 
-  // Every other link too, and only once the password is safely written. Issuing is a delete
-  // followed by a create, so two requests racing leave two live links; without this, resetting
-  // with the second leaves the first able to set the password again, in an inbox the person may
-  // not control.
   await invalidateResetTokens(user._id);
 
   void logInstanceAudit({
@@ -121,13 +92,9 @@ export async function POST(request: Request) {
     user: user._id,
     actorUsername: user.username,
     target: user.username,
-    // The address, because "was that me?" is the whole question this row exists to answer, and a
-    // row saying only that it happened cannot answer it
     detail: clientIp ? `from ${clientIp}` : "from an unknown address",
   });
 
-  // The other half of "was that me?": the audit row answers it for an administrator reading the
-  // log, and this answers it for the person whose account it is.
   void notifyPasswordChanged({
     email: user.email,
     username: user.username,

@@ -36,8 +36,6 @@ vi.mock("@/models/deviceEnrolment", () => ({
 const { POST } = await import("./route");
 
 const PROJECT_ID = "69a52e3b399b27d3cbb2c5a5";
-// An ordinary member connecting their own laptop — the case admin approval used to stand in front
-// of, and the one the whole of BP-358 is about.
 const MEMBER = { _id: "member-1", role: "member", fullName: "Rafal Podles", username: "rpo" };
 const ADMIN = { _id: "admin-1", role: "admin", fullName: "Ada", username: "ada" };
 
@@ -74,8 +72,6 @@ function ctx(userCode = "ABCD-1234") {
   return { params: Promise.resolve({ userCode }) };
 }
 
-// Reach is a grant; committing the project to machines is not — that is instance-admin, decided by
-// the account's role, exactly as PUT /api/projects/:id has it.
 function grants(access: boolean) {
   check.mockResolvedValue(access);
 }
@@ -95,9 +91,6 @@ beforeEach(() => {
   denyDeviceEnrolment.mockResolvedValue(true);
 });
 
-// BP-358: this is "the path people actually take" — one click connects a machine, and the person
-// confirming is who that machine belongs to. There is no admin approval step in front of it any
-// more: a machine runs only its owner's own work, inside permissions that person already holds.
 describe("POST /api/workers/enrolment/device/:userCode/approve", () => {
   it("passes the person confirming as the machine's owner, by name and by id", async () => {
     await POST(request({ projectId: PROJECT_ID }), ctx());
@@ -122,7 +115,6 @@ describe("POST /api/workers/enrolment/device/:userCode/approve", () => {
     );
   });
 
-  // The removed gate: MEMBER has role "member", so an admin-gated route answers 403 here.
   it("registers the machine for an ordinary member and returns its id", async () => {
     const response = await POST(request({ projectId: PROJECT_ID }), ctx());
 
@@ -130,8 +122,6 @@ describe("POST /api/workers/enrolment/device/:userCode/approve", () => {
     expect(await response.json()).toMatchObject({ state: "approved", workerId: "w1" });
   });
 
-  // The machine is told what to clone, so a project this person cannot reach must not have its
-  // repository address handed over. 404 rather than 403: existence is the thing being hidden.
   it("refuses a project the person confirming cannot reach", async () => {
     grants(false);
 
@@ -142,10 +132,6 @@ describe("POST /api/workers/enrolment/device/:userCode/approve", () => {
   });
 
   describe("committing the project to machines", () => {
-    // Still a project-admin decision with its own audit row: a member connecting their laptop does
-    // not make it on the project's behalf.
-    // A project OWNER, not just any member: owning a project is what would make this look like a
-    // project-admin decision, and PUT /api/projects/:id refuses them too
     it("leaves the switch alone for a member, even one who owns the project", async () => {
       const response = await POST(request({ projectId: PROJECT_ID }), ctx());
 
@@ -183,7 +169,6 @@ describe("POST /api/workers/enrolment/device/:userCode/approve", () => {
       );
     });
 
-    // A member connecting to an already-enabled project still gets a machine that will run
     it("reports the switch as on when somebody else already turned it on", async () => {
       projectSelect.mockResolvedValue(project({ worker: { enabled: true } }));
 
@@ -193,9 +178,6 @@ describe("POST /api/workers/enrolment/device/:userCode/approve", () => {
     });
   });
 
-  // The preset used to write project.worker.agent — the project's default. After BP-358 that field
-  // only decides which agent the task picker offers first, so an enrolling person would have been
-  // silently changing a project-wide suggestion for everyone from a screen about their own laptop.
   it("does not write a project-wide agent from the enrolment", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
 
@@ -215,8 +197,6 @@ describe("POST /api/workers/enrolment/device/:userCode/approve", () => {
     });
   });
 
-  // Still not something a machine can do for itself: a credential readable off the worker's disk
-  // must not be able to enrol a second one.
   it("refuses a machine credential", async () => {
     getAuthUser.mockResolvedValue({ ...MEMBER, viaMachineCredential: true });
 

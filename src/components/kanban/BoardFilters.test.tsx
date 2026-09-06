@@ -65,9 +65,6 @@ describe("BoardFilters", () => {
     expect(screen.getByPlaceholderText(/Search tasks, or TP-128/)).toBeTruthy();
   });
 
-  // happy-dom has no layout engine, so this guards the contract that keeps the
-  // row single at a 663px content column: search must be free to shrink below
-  // its target width rather than forcing Select onto a second line
   it("gives search a shrinkable basis under its target width", () => {
     const { container } = renderFilters();
     const searchBox = container.firstElementChild!.firstElementChild!;
@@ -85,7 +82,6 @@ describe("BoardFilters", () => {
     expect(popover.querySelectorAll("select").length).toBe(4);
   });
 
-  // Sprint is scope and lives in the board header — it must not reappear here
   it("has no sprint control anywhere", async () => {
     renderFilters();
     await openPopover();
@@ -172,8 +168,6 @@ describe("BoardFilters", () => {
     });
   });
 
-  // The migration this release depends on. The popover starts closed, so what a
-  // returning user actually sees is the count pill and a narrowed board.
   it("restores a legacy myTasks toggle as the assignee filter", async () => {
     localStorage.setItem(
       "board-filters:TP",
@@ -191,8 +185,6 @@ describe("BoardFilters", () => {
     expect(screen.getByLabelText("Remove rpo filter")).toBeTruthy();
   });
 
-  // Search sits in the resting row, outside the popover, so clearing filters
-  // must not throw away what the user typed
   it("keeps the search text when clearing filters", async () => {
     renderFilters();
     const search = screen.getByPlaceholderText(/Search tasks/) as HTMLInputElement;
@@ -254,7 +246,6 @@ describe("BoardFilters field filters", () => {
     });
   }
 
-  // The picker's only entry would be "All", so it could never narrow anything
   it("hides an option field that has no options", () => {
     openFilters([field({ options: [] })]);
     expect(screen.queryByLabelText("Component")).toBeNull();
@@ -267,7 +258,6 @@ describe("BoardFilters field filters", () => {
     expect(screen.getByLabelText("Component")).toBeTruthy();
   });
 
-  // These carry their own values rather than a list, so emptiness means nothing
   it("keeps a text field with no options", () => {
     openFilters([field({ fieldType: "text", name: "Notes" })]);
     expect(screen.getByLabelText("Notes")).toBeTruthy();
@@ -275,7 +265,6 @@ describe("BoardFilters field filters", () => {
 });
 
 describe("BoardFilters unassigned", () => {
-  // "" already means "any assignee", so the empty case needs a value of its own
   it("keeps only tasks with nobody assigned", async () => {
     const { onFilter } = renderFilters();
     act(() => {

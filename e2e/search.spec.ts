@@ -30,33 +30,9 @@ import {
 } from "./seed";
 import { signIn as arriveSignedIn, signInThroughForm } from "./session";
 
-/**
- * BP-386. Two readers, one query: the admin reaches both boards, the member holds a grant on TP
- * only, and SEARCH_WORD matches a task on each. Every leak assertion below is paired with the
- * admin control that sees the same task — a silent list caused by a mis-wired fixture reads
- * exactly like a silent list caused by the filter.
- *
- * Two grant surfaces, not one: task hits are filtered by the endpoint, project hits are filtered
- * out of what /api/projects hands the client. They are driven separately.
- *
- * Give this run its own database. The fixture empties whatever it is pointed at, so a sibling
- * suite on the default one wipes the corpus mid-run and the failure impersonates a search bug:
- *   E2E_PORT=4010 PM_STUB_PORT=4011 E2E_MONGODB_URI=mongodb://localhost:27017/bp386_e2e
- *
- * The task's "/search page filters" names something that does not exist — that page has a query
- * box and a list grouped by project, and no filter controls of any kind. The clause is covered
- * only in the sense that the two things which do narrow that list, the grant and the query, are
- * both driven. Nothing was written for the clause itself.
- */
-
 const TITLE_HIT_KEY = `${PROJECT_KEY}-${TITLE_HIT_NUMBER}`;
 const BODY_HIT_KEY = `${PROJECT_KEY}-${BODY_HIT_NUMBER}`;
 
-/**
- * A 500 is a response too, and both consumers swallow a failed search into an empty list — so a
- * predicate matching on the URL alone lets "the search is broken" pass as "nothing matched".
- * Pinning the query as well keeps a stale answer from satisfying the next question.
- */
 const searchFor = (text: string) => (r: { url(): string; status(): number }) => {
   const url = new URL(r.url());
   return (
@@ -80,30 +56,17 @@ const layerOf = (page: Page) => page.getByRole("dialog", { name: "Search" });
 const options = (page: Page) => layerOf(page).getByRole("option");
 const layerInput = (page: Page) => layerOf(page).getByLabel("Search tasks and projects");
 
-/**
- * The ⌘K listener is registered in a client effect, so the shortcut does nothing against a page
- * that has merely been painted. The board's cards arrive from a client fetch, which is what says
- * React is running here — five tests failed on that race before this wait existed.
- */
 async function openBoard(page: Page) {
   await page.goto(`/projects/${PROJECT_KEY}`);
   await expect(page.getByText(HELD_TASK_TITLE).first()).toBeVisible();
 }
 
-/**
- * Same problem on a page with no cards to wait for. Waiting on a shell request would not settle
- * it — a response predicate pinned to a path matches the one the previous page already had in
- * flight. AuthGuard renders null until the client has resolved the session, so this input being
- * on screen at all is the guarantee, and it comes from the component rather than from timing.
- */
 async function openSearchPage(page: Page, url = "/search") {
   await page.goto(url);
   await expect(page.getByPlaceholder("Search tasks by title, description, or key")).toBeVisible();
 }
 
 async function openLayer(page: Page) {
-  // Hovering an option moves the cursor, and Playwright leaves the pointer wherever the last
-  // click put it — which is inside the dialog's box at this viewport
   await page.mouse.move(0, 0);
   await page.keyboard.press("ControlOrMeta+k");
   const layer = layerOf(page);
@@ -111,7 +74,6 @@ async function openLayer(page: Page) {
   return layer;
 }
 
-/** Results render off whatever the hook is already holding, so every query waits for its answer */
 async function query(page: Page, text: string) {
   const answered = page.waitForResponse(searchFor(text));
   await layerInput(page).fill(text);
@@ -131,23 +93,17 @@ test.describe("the ⌘K layer", () => {
     await openBoard(page);
 
     await openLayer(page);
-    // Nothing typed yet: the layer says what it wants rather than showing an empty list
     await expect(layerOf(page).getByText("Type at least 2 characters to search")).toBeVisible();
 
     await page.keyboard.press("ControlOrMeta+k");
     await expect(layerOf(page)).toBeHidden();
 
     await openLayer(page);
-    // Two independent handlers close on Escape — the input's own onKeyDown and useFocusTrap — so
-    // what this proves is that one of them is live, never which. Deleting either leaves it green.
     await page.keyboard.press("Escape");
     await expect(layerOf(page)).toBeHidden();
 
     await page.keyboard.press("/");
     await expect(layerOf(page)).toBeVisible();
-    // No assertion here that the slash was swallowed: at keydown the layer is unmounted, so there
-    // is nothing focused for the default action to type into and an empty box proves nothing.
-    // The test below is where preventDefault and the typing-target guard are actually driven.
   });
 
   test("/ pressed inside a text field types, and does not open the layer", async ({ page }) => {
@@ -156,16 +112,12 @@ test.describe("the ⌘K layer", () => {
 
     const input = page.getByPlaceholder("Search tasks by title, description, or key");
 
-    // The control, on this page rather than another: with focus outside a text field the shortcut
-    // does fire here. Both assertions below hold on a page where nothing is wired up at all.
     await page.getByRole("heading", { name: "Search" }).click();
     await page.keyboard.press("/");
     await expect(layerOf(page)).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(layerOf(page)).toBeHidden();
 
-    // The guard this drives is the one that keeps a slash typed into a task title from hijacking
-    // the keystroke. Nothing else in either suite reaches it.
     await input.click();
     await page.keyboard.press("/");
 
@@ -184,14 +136,9 @@ test.describe("the ⌘K layer", () => {
     });
 
     await layerInput(page).fill("z");
-    // This message is on screen from the moment the layer opens, so it is a statement about the
-    // state, not evidence that the keystroke was handled — the request counter below is that.
     await expect(layerOf(page).getByText("Type at least 2 characters to search")).toBeVisible();
-    // The 250ms debounce has to be allowed to fire; a request that never fires cannot be awaited
     await page.waitForTimeout(1_000);
 
-    // Then a witness with an order rather than a duration: the same input one character longer
-    // does reach the server, and anything the short query had sent would have landed before it.
     await query(page, SEARCH_WORD);
     await expect(options(page).first()).toBeVisible();
     expect(requested).toBe(false);
@@ -202,10 +149,8 @@ test.describe("the ⌘K layer", () => {
     await openBoard(page);
     await openLayer(page);
 
-    // Stored capitalised, queried lower case
     await query(page, SEARCH_WORD);
     await expect(options(page).filter({ hasText: TITLE_HIT_TITLE })).toHaveCount(1);
-    // Carries the word only in its description
     await expect(options(page).filter({ hasText: BODY_HIT_TITLE })).toHaveCount(1);
 
     await query(page, TITLE_HIT_KEY);
@@ -218,12 +163,10 @@ test.describe("the ⌘K layer", () => {
     await openBoard(page);
     await openLayer(page);
 
-    // Unescaped this is a character class and matches every title holding a "v" or a "2"
     await query(page, META_QUERY);
     await expect(options(page)).toHaveCount(1);
     await expect(options(page).first()).toContainText(META_HIT_TITLE);
 
-    // And the other polarity: unescaped this matches the whole board
     await query(page, META_WILDCARD);
     await expect(layerOf(page).getByText("No matches")).toBeVisible();
   });
@@ -234,7 +177,6 @@ test.describe("the ⌘K layer", () => {
     await openLayer(page);
     await query(page, SEARCH_WORD);
 
-    // Newest first, and this board's hits before the other board's
     await expect(options(page).nth(0)).toContainText(TITLE_HIT_TITLE);
     await expect(options(page).nth(1)).toContainText(BODY_HIT_TITLE);
     await expect(options(page).nth(0)).toHaveAttribute("aria-selected", "true");
@@ -258,7 +200,6 @@ test.describe("the ⌘K layer", () => {
     await openLayer(page);
     await query(page, SEARCH_WORD);
 
-    // Enter is swallowed while the list is empty, and the response lands before React commits it
     await expect(options(page).nth(0)).toContainText(TITLE_HIT_TITLE);
 
     await page.keyboard.press("Enter");
@@ -304,9 +245,6 @@ test.describe("the ⌘K layer", () => {
     await openBoard(page);
     await openLayer(page);
 
-    // The word is in neither title. Without this pair the description arm of the endpoint's $or
-    // is never asked to respect a project boundary at all — every leak assertion in this file
-    // matches on a title — so pushing the filter into one arm of the $or would stay green.
     await query(page, BODY_ONLY_WORD);
     await expect(options(page).filter({ hasText: BODY_HIT_TITLE })).toHaveCount(1);
     await expect(options(page).filter({ hasText: OTHER_HIT_TITLE })).toHaveCount(1);
@@ -339,7 +277,6 @@ test.describe("the ⌘K layer", () => {
     await openLayer(page);
     await query(page, SEARCH_WORD);
 
-    // The two this reader may see, so the absence below is a filtered list and not an empty one
     await expect(options(page).filter({ hasText: TITLE_HIT_TITLE })).toHaveCount(1);
     await expect(options(page).filter({ hasText: BODY_HIT_TITLE })).toHaveCount(1);
 
@@ -352,9 +289,6 @@ test.describe("the ⌘K layer", () => {
     await openBoard(page);
     await openLayer(page);
 
-    // Both boards have a task number 1. For an admin the project filter is empty, so comparing
-    // the populated project key is the only thing keeping the other board's TP-1 out — and the
-    // member's test below would blame the grant filter for that failure, never this one.
     await query(page, HELD_TASK_KEY);
     await expect(options(page)).toHaveCount(1);
     await expect(options(page).first()).toContainText(HELD_TASK_TITLE);
@@ -366,7 +300,6 @@ test.describe("the ⌘K layer", () => {
     await openBoard(page);
     await openLayer(page);
 
-    // The key path is a separate branch of the endpoint, with its own copy of the filter
     await query(page, TITLE_HIT_KEY);
     await expect(options(page)).toHaveCount(1);
 
@@ -379,20 +312,11 @@ test.describe("the ⌘K layer", () => {
     await openBoard(page);
     await openLayer(page);
 
-    // Without this, the member's silence above could equally mean SB-1 is unfindable by anyone —
-    // a wrong task number, or a key whose case the branch never matches
     await query(page, OTHER_HIT_KEY);
     await expect(options(page)).toHaveCount(1);
     await expect(options(page).first()).toContainText(OTHER_HIT_TITLE);
   });
 
-  /**
-   * One word, both grant surfaces. Project hits never touch /api/search — they are matched
-   * client-side out of what /api/projects handed the shell — so this is the second place a grant
-   * has to hold. Both boards are named "… Board" and the other board's task says "other board",
-   * which is what lets the negative and its control share a single response: a query that stopped
-   * matching for some reason unrelated to grants would take the control down with it.
-   */
   const BOTH_SURFACES = "board";
 
   test("one query, both surfaces: the admin sees the other project and its task", async ({
@@ -418,7 +342,6 @@ test.describe("the ⌘K layer", () => {
     await openLayer(page);
 
     await query(page, BOTH_SURFACES);
-    // The control and the two negatives are the same list, built from the same answer
     await expect(options(page)).toHaveCount(1);
     await expect(options(page).first()).toContainText(PROJECT_NAME);
     await expect(options(page).filter({ hasText: OTHER_PROJECT_NAME })).toHaveCount(0);
@@ -430,7 +353,6 @@ test.describe("the /search page", () => {
   const pageInput = (page: Page) =>
     page.getByPlaceholder("Search tasks by title, description, or key");
 
-  /** The rows under one project's heading, rather than every link on the page */
   const group = (page: Page, projectName: string): Locator =>
     page
       .getByRole("heading", { name: new RegExp(projectName) })
@@ -448,8 +370,6 @@ test.describe("the /search page", () => {
     await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
     await arriveWith(page, SEARCH_WORD);
 
-    // Scoped to the group, not the page: two headings and two page-wide counts would still pass
-    // with every hit filed under the wrong board
     await expect(group(page, PROJECT_NAME).getByRole("link")).toHaveCount(2);
     await expect(group(page, PROJECT_NAME).getByText(TITLE_HIT_TITLE)).toBeVisible();
     await expect(group(page, PROJECT_NAME).getByText(OTHER_HIT_TITLE)).toHaveCount(0);
@@ -462,13 +382,10 @@ test.describe("the /search page", () => {
     await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
     await arriveWith(page, LEGACY_HIT_WORD);
 
-    // Nothing wrote a priority on this task; the endpoint applies the default on the way out
     const row = results(page).filter({ hasText: LEGACY_HIT_TITLE });
     await expect(row).toHaveCount(1);
     await expect(row).toContainText("Medium");
 
-    // The default is applied at two call sites and the text search only reaches one. Found by key,
-    // the same task goes through the other — where a missing default renders an empty badge.
     await arriveWith(page, LEGACY_HIT_KEY);
     const byKey = results(page).filter({ hasText: LEGACY_HIT_TITLE });
     await expect(byKey).toHaveCount(1);
@@ -488,7 +405,6 @@ test.describe("the /search page", () => {
     await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
     await openSearchPage(page);
 
-    // BP-494: the box searches as it changes, so there is no Enter in this test on purpose
     const answered = page.waitForResponse(searchFor(BODY_HIT_KEY));
     await pageInput(page).fill(BODY_HIT_KEY);
     await answered;
@@ -498,12 +414,6 @@ test.describe("the /search page", () => {
     await expect(results(page).first()).toContainText(BODY_HIT_TITLE);
   });
 
-  /**
-   * BP-406: handleSubmit used to fire performSearch itself, on top of the effect that watches
-   * ?q — the same request twice for one submit, both landing, the second silently replacing the
-   * first's identical answer. waitForResponse elsewhere in this file takes the first match, so
-   * it would not have caught a duplicate; only a count does.
-   */
   test("a settled query fires exactly one request", async ({ page }) => {
     await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
     await openSearchPage(page);
@@ -516,7 +426,6 @@ test.describe("the /search page", () => {
     const answered = page.waitForResponse(searchFor(SEARCH_WORD));
     await pageInput(page).fill(SEARCH_WORD);
     await answered;
-    // A duplicate fired by the effect re-running would land within one tick of the first
     await page.waitForTimeout(500);
 
     expect(count).toBe(1);
@@ -526,8 +435,6 @@ test.describe("the /search page", () => {
     await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
     await openSearchPage(page);
 
-    // The control first: this form does submit, so the silence below is the floor and not a page
-    // that never woke up
     const answered = page.waitForResponse(searchFor(SEARCH_WORD));
     await pageInput(page).fill(SEARCH_WORD);
     await answered;
@@ -542,8 +449,6 @@ test.describe("the /search page", () => {
     await pageInput(page).fill("z");
     await page.waitForTimeout(1_000);
 
-    // A second valid query, awaited, so the silence about "z" is an ordering fact and not a
-    // guess about how long a shared machine takes
     const witnessed = page.waitForResponse(searchFor(LEGACY_HIT_WORD));
     await pageInput(page).fill(LEGACY_HIT_WORD);
     await witnessed;

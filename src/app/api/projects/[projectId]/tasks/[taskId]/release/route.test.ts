@@ -4,11 +4,6 @@ const releaseTask = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/task-service", () => ({ releaseTask }));
-// Models the real middleware rather than deriving one fact from another: the worker branch needs a
-// Bearer AND x-worker-id and yields a verified workerId; a cp_/cpat_ token is a machine credential
-// with NO verified worker id; a cookie session is a person. The old mock defined
-// viaMachineCredential AS the presence of x-worker-id, which made the machine-without-header case —
-// the one that turned out to be a hole — impossible to express (BP-336).
 vi.mock("@/lib/middleware", () => ({
   withProjectAccessOrWorker:
     (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
@@ -49,8 +44,6 @@ beforeEach(() => {
   releaseTask.mockResolvedValue({ _id: "t1" });
 });
 
-// BP-305: releaseTask filtered on "held by SOME run", so worker A could release worker B's
-// task mid-run — spending its attempt, or with refund:false parking it in escalation
 describe("POST .../tasks/:taskId/release", () => {
   it("scopes a worker's release to the tasks it holds", async () => {
     const res = await POST(request({}, "worker"), ctx());
@@ -72,9 +65,6 @@ describe("POST .../tasks/:taskId/release", () => {
     expect(releaseTask).toHaveBeenCalledWith("p1", "t1", { refund: true });
   });
 
-  // The worker id is not self-asserted: the middleware verified the credential against it
-  // BP-336: a cp_/cpat_ token is a machine credential that never carries x-worker-id, so keying
-  // the scope on the header let it through to the broad release of whatever run held the task.
   it("refuses a machine credential that carries no verified worker id", async () => {
     const res = await POST(request({}, "machineToken"), ctx());
 

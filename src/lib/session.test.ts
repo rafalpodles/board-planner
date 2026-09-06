@@ -73,7 +73,6 @@ describe("COOKIE_ALLOW_INSECURE parsing", () => {
     expect(allowsInsecureCookie()).toBe(false);
   });
 
-  // A Boolean(process.env.X) implementation passes every happy path and fails exactly here
   it.each(["false", "0", "", "no", "off", "true", "yes", " 1", "1 ", "01"])(
     "leaves secure mode on for %o",
     (value) => {
@@ -301,9 +300,6 @@ describe("resolveSession", () => {
   });
 
   it("does not write at exactly the throttle boundary", async () => {
-    // Frozen: the row is built from one Date.now() and the boundary is evaluated from another, and
-    // the comparison is a strict >. Any real time passing between the two puts the row past the
-    // boundary and it slides — which passed locally and failed on slower CI.
     vi.useFakeTimers();
     try {
       found(
@@ -395,9 +391,6 @@ describe("revocation", () => {
 
 describe("readSessionCookie — duplicate names", () => {
   it("takes neither when the header carries two cookies of the active name", () => {
-    // Two of one name means one was set for a parent domain — the shadowing __Host- prevents and
-    // the unprefixed name cannot. Which one wins is browser ordering, so trusting either is a
-    // coin flip on whose session the request runs as.
     const header = `__Host-bp_session=attacker; __Host-bp_session=victim`;
     expect(readSessionCookie(header)).toBeNull();
   });
@@ -457,9 +450,6 @@ describe("buildSessionCookie — Max-Age follows the absolute cap", () => {
   });
 });
 
-// BP-316: this app's own origin used to be read off x-forwarded-host in two places — the MCP tool
-// client's base URL and the PM OAuth redirect_uri. On a deployment with no proxy in front that
-// header is whatever the caller sends.
 describe("selfOrigin", () => {
   const ORIGINAL = { ...process.env };
 
@@ -480,9 +470,6 @@ describe("selfOrigin", () => {
     expect(selfOrigin()).toBe("https://board.example.com");
   });
 
-  // APP_ORIGIN is an allowlist. Nothing orders it, the compose file's own default is localhost,
-  // and listing the LAN origin first is the natural thing to do — so a list is not an address, and
-  // taking [0] published localhost as this instance's issuer (BP-316 review).
   it("refuses to pick an address out of a multi-origin allowlist", () => {
     process.env.APP_ORIGIN = "http://localhost:3000,https://board.example.com";
 
@@ -496,32 +483,22 @@ describe("selfOrigin", () => {
     expect(selfOrigin()).toBe("https://board.example.com");
   });
 
-  // NEXT_PUBLIC_* is inlined at build time, so in the shipped bundle this leg is a literal from the
-  // build machine — and the Dockerfile defaults it to http://localhost:3000. As a fallback it was
-  // always truthy, which turned the intended 500 into a discovery document advertising localhost,
-  // cached for an hour. It is not a source at all now, and this test would have been green either
-  // way under vitest, which does no build-time substitution (BP-316 review).
   it("does not use the build-time app URL, which cannot be corrected at runtime", () => {
     process.env.NEXT_PUBLIC_APP_URL = "http://localhost:3000";
 
     expect(selfOrigin()).toBeNull();
   });
 
-  // The point of the whole change: no header, no guess, no default that happens to work in dev
   it("returns null rather than guessing when nothing is configured", () => {
     expect(selfOrigin()).toBeNull();
   });
 
-  // This value used to feed an equality test, where a schemeless origin failed safe. It is now
-  // interpolated into discovery endpoints and into a redirect_uri registered with third parties.
   it.each(["PUBLIC_ORIGIN", "APP_ORIGIN"])("returns null for a schemeless %s", (variable) => {
     process.env[variable] = "app.example.com";
 
     expect(selfOrigin()).toBeNull();
   });
 
-  // new URL() takes these without throwing and reports origin === "null" — a truthy string, so
-  // every "not configured" guard passes and the endpoints come out as `null/oauth/token`
   it.each([
     "board.example.com:8443",
     "localhost:3000",

@@ -106,8 +106,6 @@ describe("useOpenTask", () => {
     });
 
     it("is only another board when the two names really differ", () => {
-      // The same board, spelt in two cases. The URL is a task's, but no task *page* is mounted —
-      // this is the modal over the board — so nothing here asks for a document load.
       pathname = "/projects/tp/tasks/2";
       render(<Opener href="/projects/TP/tasks/5" />);
 

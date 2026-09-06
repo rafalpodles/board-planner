@@ -19,10 +19,6 @@ const COMMAND_LABELS: Record<WorkerCommand, { pending: string; applied: string }
   stop: { pending: "Stopping…", applied: "Stopped" },
 };
 
-// The worker only proves a command took effect by acking it over heartbeat, so this
-// must never report "applied" from commandIssuedAt alone — that would claim a worker
-// is paused while it could still be mid-merge. "Newer than", not "at least as new
-// as": an ack timestamped exactly at the issue timestamp has not yet proven anything.
 export function commandStatus(worker: CommandStateWorker, now: number = Date.now()): CommandStatus | null {
   if (!worker.command) return null;
   const issuedAt = worker.commandIssuedAt ? new Date(worker.commandIssuedAt).getTime() : null;

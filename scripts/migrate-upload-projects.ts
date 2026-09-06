@@ -1,28 +1,3 @@
-/**
- * BP-294: stamp every existing upload with the project it belongs to.
- *
- * Usage:
- *   MONGODB_URI=... npx tsx scripts/migrate-upload-projects.ts --dry-run
- *   MONGODB_URI=... npx tsx scripts/migrate-upload-projects.ts
- *
- * Against production, through the database service — the app service's URI is on Railway's
- * private network and does not resolve from a laptop. The connection name differs per service,
- * so resolveUri() finds the reachable one rather than requiring MONGODB_URI by name:
- *   railway run --service MongoDB -- npx tsx scripts/migrate-upload-projects.ts --dry-run
- *
- * Uploads recorded no owner, so the read path had nothing to check and served any file to any
- * authenticated caller. Uploads made from now on carry their project; these are the ones made
- * before, and they are unreadable until stamped.
- *
- * Doing this offline rather than on demand is the point. Resolving an owner per request means
- * searching whatever embeds the file, and that search is attacker-controlled: anyone who knows a
- * file id can reference it from their own board and claim it. Run once, by an operator, against a
- * corpus nobody is editing, the same search is safe — and a file that resolves to more than one
- * project is reported rather than guessed at.
- *
- * Timing. Run it BEFORE the deploy. Files stamped early are still readable under the old code,
- * which checks nothing; files left unstamped after the deploy return 404 to their own owners.
- */
 import mongoose from "mongoose";
 import { dbName, resolveUri } from "./mongo-uri";
 import { Comment } from "../src/models/comment";
@@ -85,12 +60,10 @@ async function main() {
     const projects = await projectsReferencing(id);
 
     if (projects.size === 0) {
-      // Named, not just listed: an id alone cannot tell you whether losing it matters
       orphans.push(`${id}  ${describe(file)}`);
       continue;
     }
     if (projects.size > 1) {
-      // Guessing here is what the request-path version did, and it is how a file gets taken
       ambiguous.push(`${id} -> ${[...projects].join(", ")}`);
       continue;
     }

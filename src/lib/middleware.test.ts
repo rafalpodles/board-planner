@@ -118,8 +118,6 @@ describe("withWorker", () => {
     expect(res.status).toBe(200);
   });
 
-  // select: false only suppresses the default query projection; once verifyWorkerCredential
-  // re-selects it, the hash survives on the document unless withWorker clears it explicitly
   it("clears credentialHash before handing the worker to the handler", async () => {
     verifyWorkerCredential.mockResolvedValue({ _id: "w1", credentialHash: "$2a$10$realhash" });
     const handler = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));

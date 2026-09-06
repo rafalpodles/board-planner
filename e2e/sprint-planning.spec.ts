@@ -19,12 +19,6 @@ import {
 } from "./seed";
 import { signIn as arriveSignedIn } from "./session";
 
-/**
- * BP-207: the planning view's two panes accept a dragged task, but every existing check of that
- * path drives it through fireEvent.drop in happy-dom, which skips the dragover negotiation the
- * real drop handler depends on. This is the first coverage of the gesture through a real browser.
- */
-
 test.beforeEach(async () => {
   await seed();
   await seedSprintPlanning();
@@ -59,16 +53,6 @@ async function readTask(request: APIRequestContext, taskNumber: number) {
   return res.json();
 }
 
-/**
- * Chromium runs a native drag on the OS, so Playwright's mouse produces no dragstart/drop in the
- * page (see e2e/run-conflict.spec.ts for the fuller explanation). The events are dispatched by
- * hand instead, sharing one live DataTransfer between the card and the pane.
- *
- * Unlike the board's columns, a planning pane has no insertion marker to prove the dragover was
- * even seen — the pane's own onDragOver only calls preventDefault, with no visible feedback. So
- * there is nothing to assert here beyond dispatching the sequence; the outcome is checked by the
- * caller, in two independent places (the two panes' counts, and the server's own copy of the task).
- */
 async function dragCardToPane(page: Page, card: Locator, pane: Locator) {
   const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
   await card.dispatchEvent("dragstart", { dataTransfer });
@@ -83,9 +67,6 @@ test("dragging a task from the backlog into the sprint pane adds it to the sprin
   request,
 }) => {
   await test.step("the server is talking to the e2e database", async () => {
-    // A project keyed TP exists in the development database too. This runs before the browser
-    // touches anything, so a dev server that ignored MONGODB_URI fails here rather than writing
-    // into whatever the developer is using.
     const res = await request.get(`/api/projects/${PROJECT_KEY}`, { headers: ADMIN_AUTH });
     expect(res.status()).toBe(200);
     const project = await res.json();
@@ -144,9 +125,6 @@ test("dragging a task from the sprint pane back to the backlog removes it from t
     await expect(cardsIn(sprint)).toHaveCount(2);
     await expect(sprintCard).toBeVisible();
     await expect(sprintProgress(page)).toHaveText("1/2");
-    // The backlog pane fetches on its own, separately from the sprint's own tasks (see
-    // PlanningView) — read its count only once that request has landed, or backlogCountBefore
-    // below can catch it mid-"Loading…" and read zero.
     await expect(backlog.getByText("Loading…")).toHaveCount(0);
   });
 

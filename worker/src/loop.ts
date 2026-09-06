@@ -4,20 +4,10 @@ import { ClaimedTask } from "./types.js";
 
 export interface LoopDeps {
   pollIntervalMs: () => number;
-  // The project ids currently claimable, read fresh on every pass — a worker may serve more than
-  // one project, and an admin can add or remove an assignment while this loop is already running
   assignments: () => string[];
   api: ApiClient;
-  // "machine-fault" says the run failed for a reason that has nothing to do with the task and will
-  // repeat on the next one — an unreachable remote, say. Claiming onward would walk the whole
-  // approved queue through a failure none of those tasks caused, so the pass ends and the worker
-  // waits out its poll interval instead.
   execute: (task: ClaimedTask) => Promise<void | "machine-fault">;
-  // The signal is aborted by stop(); a sleep that ignores it delays every shutdown by up to a full
-  // poll interval, which at the default 30 s outlasts launchd's 20 s exit timeout
   sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
-  // Undelivered reports go out before new work is claimed: a stranded task from the last cycle
-  // matters more than starting another one
   drain?: () => Promise<void>;
   log?: (message: string) => void;
 }
@@ -28,7 +18,6 @@ export interface Loop {
   pause(): void;
   resume(): void;
   paused(): boolean;
-  /** Why the board refused this project's last claim, or empty when it did not. */
   unclaimable(projectId: string): string;
 }
 
@@ -37,13 +26,7 @@ export function createLoop(deps: LoopDeps): Loop {
   const stopping = new AbortController();
   let running = true;
   let pausedState = false;
-  // The assignment whose run reported the last machine fault. assignments() is stable in order, so
-  // without this a project that faults on every pass keeps the head of the list and no assignment
-  // behind it is ever claimed for again — starvation for as long as the fault lasts, not for one
-  // pass. Starting the next pass after that project puts it last instead.
   let faultedLast: string | null = null;
-  // Boards that refused the last claim outright, by the reason the server gave. Kept so the reason
-  // is logged once rather than every poll, and so the menubar can show it (BP-512).
   const refused = new Map<string, string>();
 
   function passOrder(assignments: string[]): string[] {
@@ -67,11 +50,6 @@ export function createLoop(deps: LoopDeps): Loop {
         }
 
         if (!pausedState) {
-          // Every assignment gets its own attempt and its own try/catch: a project that cannot be
-          // claimed from, or a task that blows up, must not cost a sibling project its turn in this
-          // pass — that would starve whichever assignment comes last in the list. A machine fault
-          // is the one thing that does end the pass, because it is the machine and not the project
-          // that is broken; passOrder is what keeps that from starving a sibling across passes.
           for (const projectId of passOrder(deps.assignments())) {
             if (!running) return;
             try {
@@ -87,15 +65,11 @@ export function createLoop(deps: LoopDeps): Loop {
               }
             } catch (error) {
               if (error instanceof ClaimRefused) {
-                // The board is what is broken, not this worker, and it stays broken until somebody
-                // edits its columns — so said once per reason, not once per poll
                 if (refused.get(projectId) !== error.message) {
                   refused.set(projectId, error.message);
                   log(`not claiming for project ${projectId}: ${error.message}`);
                 }
               } else {
-                // runTask reports its own failures to the board, so anything reaching here is the
-                // worker itself breaking — the next pass is the only recovery available
                 log(`worker cycle failed for ${projectId}: ${String(error)}`);
               }
             }
@@ -103,8 +77,6 @@ export function createLoop(deps: LoopDeps): Loop {
         }
 
         if (!running) return;
-        // A machine fault outranks work done earlier in the pass: the fault is what the next claim
-        // would hit, so the pass ends here whatever else succeeded before it.
         if (claimedAny && !machineFault) continue;
         await deps.sleep(deps.pollIntervalMs(), stopping.signal);
       }

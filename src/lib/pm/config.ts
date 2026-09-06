@@ -49,9 +49,6 @@ export function validatePmConfig(
   ) {
     return { valid: false, error: "pm.dailyTurnCap must be an integer 0-1000 (0 = server default)" };
   }
-  // A ceiling in tokens, so the bound is a different order from the turn cap's. 0 is no ceiling.
-  // Without this the field never reaches the value below, and the input that sets it reports
-  // success while writing nothing (BP-284).
   const dailyTokenCap = pm.dailyTokenCap ?? 0;
   if (
     typeof dailyTokenCap !== "number" ||
@@ -145,7 +142,6 @@ export function validatePmConfig(
       allowWrites: server.allowWrites === true,
       toolAllowlist: toolAllowlist.map((t: string) => t.trim()),
       enabled: server.enabled !== false,
-      // Transient manual-override fields, consumed by mergeMcpServerTokens
       ...(oauthClientId ? { oauthClientId } : {}),
       ...(oauthClientSecret ? { oauthClientSecret } : {}),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -168,7 +164,6 @@ export function validatePmConfig(
   if (!isValidTimezone(timezone)) {
     return { valid: false, error: `pm.autonomy.timezone is not a valid IANA timezone: ${timezone}` };
   }
-  // Server-managed: the PUT body must never set it, the route carries the stored value across
   const autonomy: IPmAutonomy = {
     dailyReview: rawAutonomy.dailyReview === true,
     reviewHour,
@@ -226,10 +221,6 @@ export function mergeMcpServerTokens(
   const merged: IPmMcpServer[] = [];
   for (const server of incoming) {
     const prior = stored.get(server.name);
-    // Carried forward only while the URL is unchanged. A credential is issued for one server, so
-    // moving the URL and keeping it pointed the stored secret at the new address (BP-315). The
-    // comparison normalises a trailing slash and case, because a hard 400 on a cosmetic retype is
-    // paid for by re-entering a token the admin may not hold.
     const sameServer = !!prior && sameEndpoint(prior.url, server.url);
     const carriedOver = sameServer ? prior.authToken ?? "" : "";
     const authToken = server.authToken ? encryptSecret(server.authToken) : carriedOver;
@@ -240,21 +231,11 @@ export function mergeMcpServerTokens(
       };
     }
 
-    // OAuth state is server-managed: preserve it across saves, but never across a move. The drop
-    // has to happen outside the authType branch, or a save that also flips authType away from
-    // "oauth" carries a live access token to the new URL and a second save flips it back with the
-    // URLs now equal. The client registration goes too: it was issued by the old provider, and
-    // keeping it means the next Connect skips re-registration and sends that client secret to
-    // whatever token endpoint the new server advertises (BP-315 review).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const transient = server as any;
     let oauth = prior?.oauth && sameServer ? { ...prior.oauth } : undefined;
     if (server.authType === "oauth") {
       oauth = oauth ?? { ...EMPTY_OAUTH };
-      // `oauthClientId` is not a secret, so sanitizeMcpServers returns it and the settings page
-      // posts it back on every save — which put the old registration straight back after the reset
-      // above dropped it, leaving the next Connect to skip re-registration and send the old
-      // client_id to the new server. An echo of what was stored is not an admin typing a new one.
       const echoesPriorClientId =
         !sameServer && transient.oauthClientId === prior?.oauth?.clientId;
       if (transient.oauthClientId && !echoesPriorClientId) {

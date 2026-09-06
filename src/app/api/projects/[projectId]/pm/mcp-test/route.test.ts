@@ -53,8 +53,6 @@ beforeEach(() => {
   }));
 });
 
-// Exercises a stored credential through resolveServerToken without ever exposing it, so
-// this guard is the only thing standing between a caller and the project's saved secret
 describe("POST /api/projects/[projectId]/pm/mcp-test", () => {
   it("admits a project owner past the guard", async () => {
     check.mockResolvedValue(true);
@@ -75,9 +73,6 @@ describe("POST /api/projects/[projectId]/pm/mcp-test", () => {
   });
 });
 
-// A malicious owner can point `url` anywhere while naming a saved server so the route
-// resolves a real secret — the outbound client's constructor args are the only place
-// that proves whether the resolved token followed body.url or stayed on server.url.
 describe("stored credentials never leave their saved url", () => {
   it("sends a resolved OAuth token to the server's saved url, not the caller-supplied one", async () => {
     projectWithServer({ name: "notion", url: "https://good.example/mcp", authType: "oauth" });

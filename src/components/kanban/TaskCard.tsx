@@ -9,10 +9,8 @@ import { cardBadges } from "@/lib/custom-fields";
 import { taskPath } from "@/lib/urls";
 import { CopyTaskLink } from "@/components/tasks/CopyTaskLink";
 
-// A card is a summary; past a few badges it stops being one
 const MAX_CARD_BADGES = 3;
 
-// Cards are narrow; the default badge padding makes three of them wrap raggedly
 const COMPACT_BADGE = "text-[11px] px-1.5 whitespace-nowrap";
 
 interface TaskCardProps {
@@ -47,17 +45,8 @@ export function TaskCard({
   const tinted = !selected && !!catColor;
   const dragged = useRef(false);
   const checkboxShown = !readOnly && (selectionActive || selected);
-  // toApiExecution returns nothing unless a runId still holds the task, so the field's
-  // presence is the whole test — a claimed run that has not reported a phase included.
   const run = task.execution;
   const running = !!run;
-  // Ages are server-measured; the board repolls, so no local ticking is needed here. Shares
-  // ExecutionPanel's threshold rather than a second opinion: a card claiming a run is alive
-  // while the task's own panel calls it silent is worse than either verdict on its own.
-  // Falls back to startedAt: phase events are fire-and-forget and may be dropped, so a worker
-  // that claimed a task and died before its first report has no phaseAt at all — silence
-  // measured from the claim still catches it, where an absent phaseAt would read as live for
-  // the whole two-hour lease.
   const quietFor = run ? ageAt(run.phaseAt ?? run.startedAt, run.asOf, 0) : NaN;
   const quiet = Number.isFinite(quietFor) && quietFor > QUIET_MS;
   const look = runLook(quiet ? "quiet" : "live");
@@ -102,7 +91,6 @@ export function TaskCard({
         onContextMenu(task._id, e.clientX, e.clientY);
       }}
       onClick={(e) => {
-        // A browser can still fire a click after a drop; the next press clears the flag
         if (dragged.current) {
           e.preventDefault();
           return;
@@ -114,9 +102,6 @@ export function TaskCard({
       onKeyDown={(e) => {
         if (e.key !== "Enter" && e.key !== " ") return;
         e.preventDefault();
-        // The board's own Enter handler listens on `document` — the very node the
-        // App Router hydrates and React delegates from — so stopPropagation would
-        // not reach it; only stopping the native event immediately does
         e.nativeEvent.stopImmediatePropagation();
         activate(e.shiftKey);
       }}
@@ -142,8 +127,6 @@ export function TaskCard({
             <span className="sr-only">
               {quiet ? "Worker has gone quiet on this task: " : "Being executed by a worker: "}
             </span>
-            {/* `gates:<name>` takes its name from project config, so the length is not ours to
-                assume — the card header is narrow and would wrap for the whole column */}
             <span className="max-w-24 truncate">{runPhase}</span>
           </span>
         )}
@@ -291,14 +274,7 @@ export function TaskCard({
       </div>
     </a>
 
-    {/* Outside the link, like the checkbox: a button inside an anchor is not a link
-        the browser can offer its own actions on. The corner is a wrapper's job —
-        the button carries `relative` for its own touch target, and Tailwind's
-        position utilities are ordered so `relative` would win over an `absolute`
-        passed in here */}
     <span className={`absolute top-2 flex items-center gap-1 ${checkboxShown ? "right-9" : "right-2"}`}>
-      {/* The board's drag is native HTML5, which a touch browser never starts, so a phone
-          had no way to move a card at all. Opens the same menu right-click does. */}
       {onContextMenu && !readOnly && (
         <button
           type="button"

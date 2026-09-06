@@ -9,21 +9,6 @@ import {
   seed,
 } from "./seed";
 
-/**
- * BP-511. Both writers resolved an unknown username to `null` and wrote it. `updateTask` put that
- * null over whoever held the task and answered 200, so `update_task(assignee: "rafa")` unassigned
- * them and said nothing; `createTask` answered 201 with the task unassigned.
- *
- * Over HTTP rather than through the browser, and for the same reason as `assignee-access.spec.ts`:
- * neither form can make this request. Both send `username || null`, and the picker only ever offers
- * accounts that exist — so what reaches this case is MCP, the PM agent, and anything else holding a
- * token, which is exactly who the refusal is for.
- *
- * The unit tests beside this mock Mongoose, so they can prove the writer's *shape* and nothing
- * about what a real document ends up holding. The assignee surviving a refusal is the whole ticket,
- * and only a real write can show it.
- */
-
 test.beforeEach(seed);
 
 const taskUrl = `/api/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_ID}`;
@@ -50,8 +35,6 @@ test("a username nobody holds is refused, and the assignee it would have cleared
     expect(refused.status(), await refused.text()).toBe(400);
     const { error } = await refused.json();
     expect(error).toContain("rafa");
-    // The other refusal's wording sends a reader to a project setting, and there is none to make
-    // for a name nobody holds
     expect(error).not.toMatch(/no access to this board/i);
   });
 
@@ -59,8 +42,6 @@ test("a username nobody holds is refused, and the assignee it would have cleared
     expect((await stored(request)).assignee?.username).toBe(ADMIN_USERNAME);
   });
 
-  // The control. Every assertion above holds just as well for a writer that refused everybody, and
-  // for one that never wrote an assignee in the first place.
   await test.step("a username somebody holds still moves the task", async () => {
     const accepted = await put(request, { assignee: MEMBER_USERNAME });
 
@@ -69,11 +50,6 @@ test("a username nobody holds is refused, and the assignee it would have cleared
   });
 });
 
-/**
- * The lookup normalises, and after this change that is a refusal path: without it `@ADMIN` is a
- * 400 naming an account that plainly exists. A silent no-op became a hard refusal, so the
- * normalisation went from a nicety to load-bearing.
- */
 test("a username is matched normalised, not literally", async ({ request }) => {
   const shouted = await put(request, { assignee: `  ${ADMIN_USERNAME.toUpperCase()} ` });
 
@@ -81,11 +57,6 @@ test("a username is matched normalised, not literally", async ({ request }) => {
   expect((await stored(request)).assignee?.username).toBe(ADMIN_USERNAME);
 });
 
-/**
- * The shape a GET answers with, and what a REST client that PUTs the whole object back sends. The
- * two writers disagreed about it: create coerced it to the string `[object Object]`, update let it
- * past and into the cast, where it left the route a 500.
- */
 test("an assignee that is not a username is refused rather than cast", async ({ request }) => {
   for (const value of [{ _id: "x", username: "admin" }, 7, ["admin"]]) {
     const refused = await put(request, { assignee: value });
@@ -95,17 +66,11 @@ test("an assignee that is not a username is refused rather than cast", async ({ 
     );
   }
 
-  // The message reaches a model as a tool result, so it is not a place to echo the argument back
   const long = await put(request, { assignee: "x".repeat(5000) });
   expect(long.status()).toBe(400);
   expect((await long.json()).error.length).toBeLessThan(500);
 });
 
-/**
- * `""` is what a cleared picker sends. The assignee is an ObjectId ref and cannot hold one, so it
- * reached Mongoose as a cast and left the route a 500 — the one shape "unassign" arrives in that
- * the field refuses. Both forms send `null` instead, which is why this stood.
- */
 test("unassigning works whichever shape it arrives in", async ({ request }) => {
   for (const empty of [null, ""] as const) {
     const handed = await put(request, { assignee: ADMIN_USERNAME });
@@ -136,7 +101,6 @@ test("a create for a username nobody holds is refused, not answered with an unas
   ).json();
   expect(tasks.map((t: { title: string }) => t.title)).not.toContain("Never created");
 
-  // The control, in the same run: the create itself works, and works assigned
   const created = await request.post(`/api/projects/${PROJECT_KEY}/tasks`, {
     headers: ADMIN_AUTH,
     data: { title: "Created assigned", assignee: MEMBER_USERNAME },

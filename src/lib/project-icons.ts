@@ -5,11 +5,6 @@ export interface IconGroup {
   icons: { icon: string; keywords: string }[];
 }
 
-/**
- * The same forty icons the server whitelists, grouped and named so they can be searched.
- * The flat list stays the source of truth — `iconGroupsCoverWhitelist` fails the build's
- * test if the two ever drift.
- */
 export const ICON_GROUPS: IconGroup[] = [
   {
     name: "Planning",
@@ -78,7 +73,6 @@ export const ICON_GROUPS: IconGroup[] = [
   },
 ];
 
-/** Every whitelisted icon appears exactly once across the groups, and nothing else does. */
 export function iconGroupsCoverWhitelist(): boolean {
   const grouped = ICON_GROUPS.flatMap((g) => g.icons.map((i) => i.icon));
   return (

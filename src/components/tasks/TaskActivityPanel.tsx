@@ -9,7 +9,6 @@ interface TaskActivityPanelProps {
   projectId: string;
   scope?: ReferenceScope | null;
   taskId: string;
-  /** Bumped when a comment is posted from the phone's bottom bar */
   commentRefreshKey?: number;
 }
 
@@ -36,7 +35,6 @@ export function TaskActivityPanel({
     { id: "history", label: "History", count: historyCount },
   ];
 
-  // role="tablist" promises arrow-key navigation to assistive tech, so it has to work
   function handleKeyDown(e: KeyboardEvent<HTMLButtonElement>) {
     const order = tabs.map((t) => t.id);
     const i = order.indexOf(tab);
@@ -83,8 +81,6 @@ export function TaskActivityPanel({
         ))}
       </div>
 
-      {/* Both stay mounted: switching tabs must not refetch, lose a half-typed
-          comment, or reset the expanded history */}
       <div
         role="tabpanel"
         id="task-panel-comments"

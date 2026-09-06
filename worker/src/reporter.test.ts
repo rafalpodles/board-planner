@@ -6,7 +6,6 @@ import { claimedTask } from "./__fixtures__/task.js";
 
 const task = claimedTask();
 
-// Deliberately none of the seeded ids, so any surviving literal fails
 const statuses: StatusIds = { approved: "ready", review: "checking", done: "shipped" };
 
 function apiSpy() {
@@ -20,7 +19,6 @@ function apiSpy() {
       .mockResolvedValue(undefined),
     release: vi.fn<(projectId: string, taskId: string) => Promise<void>>().mockResolvedValue(undefined),
     statusIds: vi.fn<() => Promise<StatusIds>>().mockResolvedValue(statuses),
-    // Not used by the reporter, but an ApiClient carries them — and this mock stands in for one
     columnIds: vi.fn<() => Promise<string[]>>().mockResolvedValue([]),
     postEvent: vi.fn().mockResolvedValue({ applied: true }),
     postRun: vi.fn().mockResolvedValue(undefined),
@@ -89,9 +87,6 @@ describe("createReporter", () => {
     expect(api.comment.mock.calls[0][2]).toMatch(/added the thing/);
   });
 
-  // The url is not free text and so does not go through safeText, which made it a path around the
-  // one place everything else is scrubbed. delivery.ts builds it from gh output with a regex that
-  // admits userinfo, so a credential-bearing remote publishes its token permanently.
   it("redacts a credential the PR url carries in its userinfo", async () => {
     const api = apiSpy();
     await createReporter(api, statuses).merged(
@@ -216,10 +211,6 @@ describe("createReporter", () => {
     expect(api.release).toHaveBeenCalledTimes(2);
   });
 
-  // The reporter is built per run (pipeline.ts), so a dedupe that lives inside one can never fire
-  // across runs — which is the only place it matters. A base that cannot be resolved recurs on
-  // every poll: at the default 30 s that is ~120 identical comments an hour on one card, each
-  // dispatching a webhook and a notification.
   it("does not repeat the release comment across runs, given the memory that outlives them", async () => {
     const api = apiSpy();
     const memory: ReleaseMemory = new Map();
@@ -429,9 +420,6 @@ describe("secrets in free text bound for the board", () => {
   });
 });
 
-// BP-380 follow-up. Two tasks in an afternoon were refused by protected-paths, and both times the
-// work the gate wanted a human to read existed only in a worktree on one machine. A patch in a
-// comment executes nothing, so the reading can happen where the task is.
 describe("a refusal that withholds the branch carries the change itself", () => {
   const body = (api: ReturnType<typeof apiSpy>) => api.comment.mock.calls[0][2];
 
@@ -450,8 +438,6 @@ describe("a refusal that withholds the branch carries the change itself", () => 
     expect(body(api)).toContain("+FROM node:22-slim");
   });
 
-  // A pushed branch is the better copy — it has history and can be checked out. Repeating it as a
-  // patch would double every rejection comment for no reader's benefit.
   it("says nothing extra when the branch was pushed", async () => {
     const api = apiSpy();
 
@@ -467,8 +453,6 @@ describe("a refusal that withholds the branch carries the change itself", () => 
     expect(body(api)).toContain("bp-1/x");
   });
 
-  // The same redaction every other agent-authored string gets. A patch is the likeliest place for a
-  // credential to appear, because it is the one thing quoted verbatim.
   it("redacts a secret the patch happens to carry", async () => {
     const api = apiSpy();
 

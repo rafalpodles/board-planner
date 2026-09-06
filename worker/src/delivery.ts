@@ -64,9 +64,6 @@ function prTitle(task: ClaimedTask): string {
     : `${title.slice(0, MAX_TITLE_CHARS - 3)}...`;
 }
 
-// Scrubbed here as well as on the board path. The PR body is the more public sink of the two —
-// on a public repository a secret the agent quoted is published verbatim, while the board copy
-// already showed [redacted] (BP-306).
 function prBody(summary: string): string {
   const body = scrub(summary).trim();
   if (body.length <= MAX_BODY_CHARS) return body;
@@ -88,50 +85,20 @@ function repoArgs(prUrl: string): string[] {
 
 type MergeState = "merged" | "unmerged" | "unknown";
 
-// Order matters for credential.helper: the empty value clears whatever the repository or a global
-// file configured, and the entry after it names the one helper we trust. Clearing alone would be a
-// regression — GIT_CONFIG_GLOBAL below also hides the helper `gh auth setup-git` installs, so an
-// https remote would stop authenticating.
 const HARDENED_CONFIG: ReadonlyArray<readonly [string, string]> = [
   ["core.hooksPath", "/dev/null"],
   ["core.fsmonitor", "false"],
   ["core.pager", "cat"],
   ["core.sshCommand", "ssh"],
-  // Named by git when it wants a password and no helper answered. Empty disables it.
   ["core.askPass", ""],
   ["credential.helper", ""],
   ["credential.helper", "!gh auth git-credential"],
-  // The transport, not the configuration, was the way through: `ext::` hands the URL to a program.
-  // The agent cannot set our environment, but it can rewrite where the push goes —
-  // `remote.origin.pushurl`, `remote.origin.url`, or `url.<ext::…>.insteadOf` — and the transport
-  // is the one chokepoint that catches all three at once.
-  //
-  // `file` is refused for the same reason. It looks harmless — no program in the URL — but a local
-  // push runs git-receive-pack against the destination, and that repository's own post-receive
-  // hook then runs holding this environment. It does NOT inherit the hooksPath above; that was
-  // assumed here once and the test written to confirm it failed instead.
   ["protocol.ext.allow", "never"],
   ["protocol.file.allow", "never"],
 ];
 
-// `remote.<name>.receivepack` is deliberately not in the list above: git keeps the **first** value
-// it is given for it rather than the last, so a repository setting wins over any override — with
-// "more than one receivepack given, using the first" on stderr and exit 0, which nothing reads.
-// The command line is the only place it can be won, so push passes it as a flag.
 const RECEIVE_PACK = "--receive-pack=git-receive-pack";
 
-// `core.gitProxy` is the receivepack quirk a second time: git keeps the **first** proxy entry it
-// finds, so the repository's outranks anything the list above could say. Measured on git 2.50.1 —
-// `none`, `none for *` and the empty string were each tried as an override and each lost, while a
-// `git://` pushurl plus a planted proxy ran the agent's program holding GH_TOKEN, GITHUB_TOKEN and
-// SSH_AUTH_SOCK. The environment is the one layer that wins, and an empty value there means "no
-// proxy" rather than "fall through to the config", which is what makes it the fix. Refusing
-// protocol.git would also work and costs the transport: with no proxy of the agent's choosing left
-// to run, git:// is no more dangerous than https, and it is what the integration suite pushes over.
-//
-// NOSYSTEM drops /etc/gitconfig; GLOBAL=/dev/null drops ~/.gitconfig, which is as reachable to the
-// agent as the repository's own — it holds HOME. The repository config cannot be pointed elsewhere,
-// so the keys above override it instead, at the highest precedence git has.
 export function hardenedGitConfig(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...GIT_SAFE_ENV,
@@ -146,39 +113,18 @@ export function hardenedGitConfig(): NodeJS.ProcessEnv {
   return env;
 }
 
-// githubToken is the operator's pinned account, resolved by name at startup. Absent means what it
-// has always meant: gh resolves its own identity from the keyring, and pushes act as whichever
-// account is active. Present means the identity travels with the call, so a `gh auth switch` in
-// another terminal — global machine state, shared with every process on the box — cannot decide
-// mid-run who this worker pushes as (BP-373).
 export function createDelivery(
   runner: Runner,
   baseBranch?: string,
   githubToken?: string,
 ): Delivery {
-  // The second sink baseBranch reaches, after `git diff`. applyPolicy already refuses anything
-  // that is not a ref name; dropping the flag here rather than passing it on means the worst a
-  // value that got past it can do is open the pull request against the repository's own default.
   const trimmedBase = baseBranch?.trim() ?? "";
   const baseArgs =
     trimmedBase && isGitRefName(trimmedBase) ? ["--base", trimmedBase] : [];
-  // Both names, not just the one gh prefers: an inherited GITHUB_TOKEN would otherwise decide the
-  // identity behind the pin's back, and the failure it produces is a push that succeeds as the
-  // wrong account rather than one that fails.
   const pinnedIdentity: NodeJS.ProcessEnv = githubToken?.trim()
     ? { GH_TOKEN: githubToken.trim(), GITHUB_TOKEN: githubToken.trim() }
     : {};
 
-  // Delivery is the one place that may carry the credentials git and gh need for the remote — and
-  // it runs inside the worktree the agent just wrote. The command is ours; what git *executes* on
-  // our behalf is not. Every key below is a "run this program" hook, and the agent holds
-  // `Bash(git *)` plus Write, so it can set any of them in the repository config — which a linked
-  // worktree shares with the main clone, so what it plants outlives the run.
-  //
-  // Through GIT_CONFIG_* rather than `-c`, because the environment reaches the git that `gh`
-  // shells out to; `-c` covers only the process we spawn ourselves. That is also why delivery does
-  // not use git-safety's gitArgs like every other call site: HARDENED_CONFIG carries the same keys
-  // and more, at the same precedence, and reaches gh's inner invocations as well.
   function run(
     command: string,
     args: string[],
@@ -201,10 +147,6 @@ export function createDelivery(
     });
   }
 
-  // A second line, not the first: HARDENED_CONFIG overrides the keys it names, and this refuses
-  // the push outright if the agent wrote an executable key at all — including one the list does
-  // not name. Push is where it is worth paying for, being the call that hands the checkout's own
-  // config a credential; gh carries its token in the environment, so openPr and merge do not.
   async function refuseIfPlanted(
     worktreePath: string,
     configBaseline?: readonly string[] | null,
@@ -239,37 +181,12 @@ export function createDelivery(
 
   return {
     async push(worktreePath, branch, commit, configBaseline) {
-      // Refused rather than falling back to the branch name: the worktree's ref store is exactly
-      // what an agent running inside it can rewrite, so a push that trusts the branch name sends
-      // whatever that store now says HEAD is, not what a reviewer approved (BP-382).
       if (!commit) throw new Error("refusing to push: no commit was named");
-      // BP-327's refusal, preserved across BP-382's refspec form: refuseOptionShapedPositionals
-      // only ever sees the composed refspec, whose first character is the commit's, so an
-      // option-shaped branch would slip past a guard that used to catch it. Refused on the name
-      // itself rather than trusting where it happens to land inside the string.
-      //
-      // The whole ref-name shape rather than the leading dash alone, because the refspec form gave
-      // the string a second way to be read: git splits a push refspec at its **last** colon, so a
-      // branch carrying one re-splits `<commit>:refs/heads/<branch>` and sends a different source
-      // to a different destination. Measured on git 2.50.1 — with a colon in the branch the src
-      // refspec git reported was neither the commit nor the branch. isGitRefName is the same check
-      // applyPolicy spends on baseBranch, and a branch here is always `<taskKey>/worker`.
       if (!isGitRefName(branch)) {
         throw new Error(
           `refusing to push: ${JSON.stringify(branch)} is not a git ref name, and the push refspec is built from it`,
         );
       }
-      // a retried attempt rebuilds the branch off the base, so what the previous attempt pushed is
-      // a diverged history a plain push rejects; the lease still refuses to overwrite commits this
-      // clone has never seen
-      // -- keeps the refspec in git's positional slot: without it a name beginning with a dash is
-      // read as an option, and --receive-pack=<cmd> would run that command on the remote
-      // --no-verify says the same thing as core.hooksPath above, in the one place it matters most:
-      // two independent ways for a planted pre-push to be skipped, rather than one
-      // No -u: git declines to set an upstream when the refspec's source is a raw object id, and
-      // does so silently, exit 0 and no message. Keeping the flag would only claim a tracking
-      // branch the operator does not get — and the worktree this run keeps on failure is exactly
-      // where somebody would type `git push` and find out.
       await refuseIfPlanted(worktreePath);
       const result = await run(
         "git",
@@ -312,8 +229,6 @@ export function createDelivery(
         return url;
       }
 
-      // the branch already carries an open pull request from an earlier attempt, and the push
-      // above pointed it at the commits of this one
       const output = `${result.stdout}\n${result.stderr}`;
       const existing = lastPrUrl(output);
       if (existing && /already exists/i.test(output)) return existing;
@@ -322,8 +237,6 @@ export function createDelivery(
     },
 
     async merge(worktreePath, prUrl) {
-      // --repo keeps gh out of the local checkout: --delete-branch otherwise switches the worktree
-      // to the base branch first, which git refuses while the main clone has it checked out
       const result = await run(
         "gh",
         [

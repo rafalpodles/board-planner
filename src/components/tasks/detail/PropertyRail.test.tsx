@@ -22,8 +22,6 @@ const draft: TaskDraft = {
   customFieldValues: {},
 };
 
-// Not the seeded seven: with those the approved column is literally called "todo" and the active
-// one "in_progress", so an implementation comparing ids rather than roles would pass every case
 const BOARD: AnyColumn[] = [
   { id: "someday", label: "Someday", color: "#888", role: "backlog", order: 0 },
   { id: "ready", label: "Ready", color: "#888", role: "approved", order: 1 },
@@ -57,7 +55,6 @@ function field(over: Partial<ApiCustomField>): ApiCustomField {
   } as ApiCustomField;
 }
 
-/** This board. A project agent belonging to any other must not be offered here. */
 const PROJECT_ID = "p-this-board";
 
 function renderRail(over: Partial<React.ComponentProps<typeof PropertyRail>> = {}) {
@@ -86,8 +83,6 @@ function renderRail(over: Partial<React.ComponentProps<typeof PropertyRail>> = {
   return set;
 }
 
-// Picker rows are comboboxes; the two that open something other than a list of options
-// — Due date, Repeats — stay plain buttons
 async function openRow(label: string | RegExp) {
   const row = [...screen.getAllByRole("combobox"), ...screen.getAllByRole("button")].find((b) =>
     typeof label === "string" ? b.textContent?.startsWith(label) : label.test(b.textContent || "")
@@ -109,14 +104,6 @@ describe("PropertyRail", () => {
     expect(set).toHaveBeenCalledWith("assignee", "rpo");
   });
 
-  /**
-   * BP-400. A member's roster is not the instance's: the picker offers only people who reach this
-   * board, so the person already on the task can legitimately be absent from it. Combobox resolves
-   * its closed-state label out of `options` and hands `undefined` when nothing matches, so an
-   * absent assignee rendered as "Unassigned" — the rail saying the task belongs to nobody while the
-   * server has it assigned. ListView carries a comment about exactly this and compensates; this row
-   * did not.
-   */
   it("names an assignee the roster does not contain, rather than reading as unassigned", () => {
     renderRail({
       users: [],
@@ -159,7 +146,6 @@ describe("PropertyRail", () => {
     ]);
   });
 
-  // Recurrence is not a custom field; it belongs with the rest of the details
   it("puts Repeats in the details and reads it back in words", () => {
     renderRail({
       draft: { ...draft, recurrence: { frequency: "weekly", interval: 2, endDate: null } },
@@ -167,7 +153,6 @@ describe("PropertyRail", () => {
     expect(screen.getByText("Every 2 weeks")).toBeTruthy();
   });
 
-  // BP-463: a series had no way to end, so it repeated until somebody remembered to turn it off
   it("reads back the day a series stops", () => {
     renderRail({
       draft: { ...draft, recurrence: { frequency: "weekly", interval: 1, endDate: "2026-12-31" } },
@@ -175,10 +160,6 @@ describe("PropertyRail", () => {
     expect(screen.getByText(/Every week until/)).toBeTruthy();
   });
 
-  // Two renders rather than two events on one: the input is controlled by the draft, which does not
-  // move when `set` is a spy, so a second `fireEvent.change` back to "" is a no-op — the DOM value
-  // React re-rendered is already "". Written as one test it passed on the first assertion and
-  // never reached the second.
   it("gives a repeating task an end", async () => {
     const recurrence = { frequency: "weekly" as const, interval: 1, endDate: null };
     const set = renderRail({ draft: { ...draft, recurrence } });
@@ -197,7 +178,6 @@ describe("PropertyRail", () => {
     expect(set).toHaveBeenCalledWith("recurrence", { ...recurrence, endDate: null });
   });
 
-  // `max` on the input stops neither typing nor pasting, and the server refuses anything above it
   it("clamps a pasted interval to the maximum it advertises", async () => {
     const recurrence = { frequency: "weekly" as const, interval: 1, endDate: null };
     const set = renderRail({ draft: { ...draft, recurrence } });
@@ -236,14 +216,11 @@ describe("PropertyRail", () => {
     expect(screen.queryByText("Custom fields")).toBeNull();
   });
 
-  // Losing the marker along with the form would make a required field look optional
   it("marks a required custom field", () => {
     renderRail({ customFields: [field({ required: true })] });
     expect(screen.getByText("Team *")).toBeTruthy();
   });
 
-  // CP-214 turned Difficulty into an ordinary project field, so it arrives through
-  // the custom-fields group like any other
   it("renders a migrated field as a plain custom field", async () => {
     const set = renderRail({
       customFields: [
@@ -260,8 +237,6 @@ describe("PropertyRail", () => {
     expect(set).toHaveBeenCalledWith("customFieldValues", { f2: "XL" });
   });
 
-  // The rail names the field on the left, so the control shows no label of its own —
-  // which is exactly how a switch ends up with no accessible name at all
   it("gives a yes/no field a switch that still carries the field's name", async () => {
     const set = renderRail({
       customFields: [field({ _id: "f4", name: "Spike?", fieldType: "checkbox", options: [] })],
@@ -280,8 +255,6 @@ describe("PropertyRail", () => {
     expect((screen.getByLabelText("Estimate") as HTMLInputElement).value).toBe("0.6");
   });
 
-  // The rail used to be a display, so rounding there cost nothing. It is an editor now:
-  // committing the rounded value would quietly drop the precision the task actually holds
   it("shows a number field's real value once it is being edited", async () => {
     renderRail({
       customFields: [field({ _id: "f3", name: "Estimate", fieldType: "number", options: [] })],
@@ -294,8 +267,6 @@ describe("PropertyRail", () => {
     expect(input.value).toBe("0.6");
   });
 
-  // A field with nothing to choose from is typed in the row; a popup would put a second
-  // box on top of the one already showing the value
   it("edits a free-text field in the row rather than behind a picker", async () => {
     const set = renderRail({
       customFields: [field({ _id: "f5", name: "Notes", fieldType: "text", options: [] })],
@@ -334,8 +305,6 @@ describe("PropertyRail", () => {
     expect(row.getAttribute("aria-expanded")).toBe("true");
   });
 
-  // The tick is drawn, not typed: a "✓" in every row's text would be read out with
-  // the label and would land in any assertion on an option's name
   it("keeps the selection tick out of the option's text", async () => {
     renderRail();
     await openRow("Priority");
@@ -361,31 +330,18 @@ describe("PropertyRail", () => {
   });
 });
 
-/**
- * The agent decides what runs on the operator's machine. BP-345 made this row read-only for anyone
- * below instance admin, because choosing an agent could then arm somebody else's machine; BP-358
- * moved that boundary into the claim — assignee === assignedBy === the machine's owner — and the
- * row went back to being an ordinary editable field for whoever may edit the task.
- */
 describe("the Agent row", () => {
   const AGENTS = [
     { _id: "a1", name: "Default", scope: "global", description: "" },
     { _id: "a2", name: "With security review", scope: "global", description: "" },
   ] as never;
 
-  // queryAllByRole, not getAllByRole: the latter throws on zero matches, which made this helper
-  // depend on unrelated rows being present
   function agentRow() {
     return [...screen.queryAllByRole("combobox"), ...screen.queryAllByRole("button")].find((el) =>
       (el.textContent || "").startsWith("Agent")
     );
   }
 
-  /**
-   * A control, not a label. The version of this that asserted only the words "No agent" passed with
-   * the read-only row on screen, because that row rendered the same words — what distinguishes the
-   * two is whether there is anything to open.
-   */
   it("is a picker, and shows the chosen agent in it", () => {
     renderRail({ agents: AGENTS, draft: { ...draft, agent: "a2" } });
 
@@ -393,9 +349,6 @@ describe("the Agent row", () => {
     expect(agentRow()?.textContent).toContain("With security review");
   });
 
-  // The read-only branch had its own empty state, telling the reader that handing work to a machine
-  // was not theirs to do. There is no such reader left, and leaving that sentence in the product
-  // would be refusing somebody a thing they can now simply do.
   it("offers the picker with nothing chosen either, and no note about who may", () => {
     renderRail({ agents: AGENTS });
 
@@ -404,9 +357,6 @@ describe("the Agent row", () => {
     expect(screen.getByText("Agent").closest("div")?.textContent).not.toMatch(/instance admin/i);
   });
 
-  // "Project default" was honest while an empty field fell back to the project's agent. Since BP-358
-  // it means nobody takes the task, and the label has to say so — this is the only signal that a task
-  // is one a person is doing.
   it("names the empty option for what it now means", async () => {
     renderRail({ agents: AGENTS });
 
@@ -420,8 +370,6 @@ describe("the Agent row", () => {
     expect(screen.getAllByRole("option")[0].textContent).toContain("No agent");
   });
 
-  // The project's default stops being what runs and becomes what is offered first. Without this the
-  // setting has no job at all once the fallback is gone.
   it("offers the project's default ahead of the other agents", async () => {
     renderRail({ agents: AGENTS, projectDefaultAgent: "a2" });
     await openRow("Agent");
@@ -431,10 +379,6 @@ describe("the Agent row", () => {
     expect(options[1]).toContain("With security review");
   });
 
-  // Nothing checked what picking the empty option actually sends. It is inert today only because
-  // updateTask normalises "" to null before the write, which is pinned in task-service.test.ts —
-  // this is the other half. If the picker ever sent "" straight through to a caller that does not
-  // normalise, it would reach an ObjectId ref as an empty string.
   it("sends null when the empty option is picked, never an empty string", async () => {
     const set = renderRail({ agents: AGENTS, draft: { ...draft, agent: "a2" } });
     await openRow("Agent");
@@ -451,20 +395,6 @@ describe("the Agent row", () => {
     expect(set).toHaveBeenCalledWith("agent", "a2");
   });
 
-  /**
-   * `agentUsableOnProject` runs a personal agent only on a task its owner assigned to themselves —
-   * anyone may compose one, so its steps are a composition nobody vetted, and a `merge` step merges
-   * whatever the prompt around it says. Offering one anywhere else would be a control that 400s on
-   * click: the reader is told what the server refused, and retrying fails the same way.
-   *
-   * `/api/agents` only ever answers with the reader's OWN user-scoped agents, so `scope: "user"`
-   * in this list always means mine.
-   */
-  /**
-   * BP-456. `/api/agents` answers with the project agents of every project the reader can reach —
-   * every one of them, for an instance admin — and the server refuses any whose project is not
-   * this task's. Offered here they were a control that 400s on click.
-   */
   describe("and a project agent, which belongs to one board", () => {
     const OURS = { _id: "a4", name: "Our board's agent", scope: "project", projectId: PROJECT_ID };
     const THEIRS = { _id: "a5", name: "Other board's agent", scope: "project", projectId: "p-elsewhere" };
@@ -483,7 +413,6 @@ describe("the Agent row", () => {
       renderRail({ agents: BOTH });
 
       const options = (await agentOptions()).join("|");
-      // The control: withholding everything would satisfy the line below just as well
       expect(options).toContain("Our board's agent");
       expect(options).not.toContain("Other board's agent");
     });
@@ -491,8 +420,6 @@ describe("the Agent row", () => {
     it("still names the other board's agent when the task is already carrying it", async () => {
       renderRail({ agents: BOTH, draft: { ...draft, agent: "a5" } });
 
-      // Hiding the current value would render "No agent" over a task that is carrying one —
-      // the same lie the personal-agent rule above is careful to avoid
       expect((await agentOptions()).join("|")).toContain("Other board's agent");
     });
 
@@ -500,15 +427,10 @@ describe("the Agent row", () => {
       renderRail({ agents: BOTH });
       await openRow("Agent");
 
-      // The notice says "your own agents are not offered here". A list shortened by another
-      // board's agent is a different fact, and there are no personal agents in this list at all.
       expect(screen.queryByTestId("personal-agents-withheld")).toBeNull();
     });
 
     it("still says it when a personal agent is withheld beside the other board's", async () => {
-      // The positive control for the test above: absent-because-nothing-rendered and
-      // absent-because-the-rule-says-so look identical, so the sentence has to be shown to
-      // appear in the case it is actually about — with both kinds withheld at once.
       const ALSO_SOMEBODY_ELSES = [
         ...(BOTH as unknown as Record<string, unknown>[]),
         { _id: "a6", name: "Their own agent", scope: "user", description: "" },
@@ -542,15 +464,12 @@ describe("the Agent row", () => {
       expect(screen.queryByTestId("personal-agents-withheld")).toBeNull();
     });
 
-    // The shape the server refuses. Asserted on the option list rather than on the note, so a
-    // version that printed the sentence and still offered the control would fail.
     it("withholds it on a task assigned to somebody else", async () => {
       renderRail({ agents: MINE, draft: { ...draft, assignee: "claude" }, currentUsername: "rpo" });
 
       expect((await agentOptions()).join("|")).not.toContain("My own agent");
     });
 
-    // …and the other half: withholding it without saying so is the silent refusal, just moved
     it("says why it is not there, rather than shortening the list in silence", async () => {
       renderRail({ agents: MINE, draft: { ...draft, assignee: "claude" }, currentUsername: "rpo" });
 
@@ -559,7 +478,6 @@ describe("the Agent row", () => {
       );
     });
 
-    // Nobody's task is not my task, and it is also what a released task looks like
     it("withholds it on an unassigned task", async () => {
       renderRail({ agents: MINE, currentUsername: "rpo" });
 
@@ -567,11 +485,6 @@ describe("the Agent row", () => {
       expect(screen.queryByTestId("personal-agents-withheld")).not.toBeNull();
     });
 
-    /**
-     * The draft, not the stored task: auto-save sends every edited field in one PUT, and the server
-     * judges the assignee that write LEAVES. Keyed on the stored value, taking a task on and
-     * picking your own agent in the same visit would offer nothing until the page reloaded.
-     */
     it("offers it as soon as the draft assigns the task to me, before anything is saved", async () => {
       renderRail({
         agents: MINE,
@@ -583,11 +496,6 @@ describe("the Agent row", () => {
       expect((await agentOptions()).join("|")).toContain("My own agent");
     });
 
-    /**
-     * Filtering the list must not filter what the task is carrying. A personal agent can outlive
-     * the pairing — reassigning a task does not re-check its agent — and a row rendering "No agent"
-     * over a task that has one is the diagnostic this branch spent two rounds removing.
-     */
     it("still names the agent already on the task, even when it would not be offered", async () => {
       renderRail({
         agents: MINE,
@@ -602,28 +510,18 @@ describe("the Agent row", () => {
       ).toContain("My own agent");
     });
 
-    // Nothing to withhold, nothing to explain: the note must not appear on a board whose agents are
-    // all the project's or the instance's
     it("says nothing when there is no personal agent to withhold", () => {
       renderRail({ agents: AGENTS, draft: { ...draft, assignee: "claude" }, currentUsername: "rpo" });
 
       expect(screen.queryByTestId("personal-agents-withheld")).toBeNull();
     });
 
-    /**
-     * On an UNASSIGNED task specifically, which is where the two nulls meet: `draft.assignee` is
-     * null for "nobody has it" and `currentUsername` is null for "the app has not resolved a
-     * reader yet", and comparing them alone makes those the same answer. A version keyed on
-     * "assigned to me" without asking whether there is a me offers the whole personal shelf on
-     * every unassigned task to a reader it cannot name.
-     */
     it("withholds it on an unassigned task when there is no reader either", async () => {
       renderRail({ agents: MINE, currentUsername: null });
 
       expect((await agentOptions()).join("|")).not.toContain("My own agent");
     });
 
-    // The same guard from the other side: a reader who is not the assignee is not the assignee
     it("withholds it from a reader the app cannot name, on somebody's task", async () => {
       renderRail({ agents: MINE, draft: { ...draft, assignee: "rpo" }, currentUsername: null });
 
@@ -631,19 +529,7 @@ describe("the Agent row", () => {
     });
   });
 
-  /**
-   * The agent SOMEBODY ELSE composed, on a task that carries it. `/api/agents` answers only with
-   * agents the reader may choose, so this one is not in the list at all — and the picker, unable
-   * to resolve the id, rendered its empty state. "No agent" printed over the one field that
-   * decides what runs on a machine, which is the exact thing the consent model rests on.
-   *
-   * The name therefore travels on the task itself. The row stops being a picker: re-offering the
-   * value would be a control that 400s on click, which this view can only report and offer to
-   * retry into the same refusal.
-   */
   describe("and an agent the reader may not choose, which the task carries anyway", () => {
-    // Populated, which is the shape the task routes answer with. A fixture holding the bare id
-    // could not tell a row that names the agent from one that cannot.
     const CARRIED = {
       agent: { _id: "a9", name: "Kasia's own agent" },
       assignee: { _id: "u2", username: "claude", fullName: "Claude Code" },
@@ -651,8 +537,6 @@ describe("the Agent row", () => {
       status: "ready",
     } as unknown as ApiTask;
 
-    // The reader has a personal agent of their own as well, so without the suppression below both
-    // notes print at once — and the second one explains a list that is not on screen
     const MINE_AND_THEIRS = [
       ...(AGENTS as unknown as { _id: string; name: string; scope: string }[]),
       { _id: "a3", name: "My own agent", scope: "user", description: "" },
@@ -675,8 +559,6 @@ describe("the Agent row", () => {
       expect(screen.getByTestId("agent-not-offered").textContent).toBe("Kasia's own agent");
     });
 
-    // Asserted on the CONTROL, not on the words: the picker's own empty state says "No agent" too,
-    // so a version that named the agent and still offered a combobox would satisfy any text match
     it("offers no picker for it, because re-choosing it is what the server refuses", () => {
       renderCarried();
 
@@ -695,14 +577,12 @@ describe("the Agent row", () => {
       );
     });
 
-    // Two muted lines under one row, and the second is about a list that is not on screen
     it("does not also explain a shortened list where there is no list", () => {
       renderCarried({ agents: MINE_AND_THEIRS });
 
       expect(screen.queryByTestId("personal-agents-withheld")).toBeNull();
     });
 
-    // The ordinary case has to keep its picker, or this branch has simply replaced the field
     it("leaves the row a picker when the agent is one the reader can see", () => {
       renderRail({
         agents: AGENTS,
@@ -718,12 +598,6 @@ describe("the Agent row", () => {
       ).toContain("With security review");
     });
 
-    /**
-     * The hand-over notice is suppressed while the draft and the stored task disagree, and the
-     * comparison reads the stored agent. Against a POPULATED task an id-to-object comparison never
-     * matches, so every task would look mid-edit and the notice would never appear again — the
-     * lying diagnostic put back by the fix for a different one.
-     */
     it("still judges the hand-over, though the stored agent arrives populated", () => {
       renderRail({
         agents: AGENTS,
@@ -744,22 +618,12 @@ describe("the Agent row", () => {
   });
 });
 
-/**
- * BP-358: the claim takes a task or it does not, and logs nothing either way. An agent chosen on a
- * task no machine will touch looks entirely normal on the card, which is why "why did nothing
- * happen" had no answer anywhere in the product.
- *
- * Every case is located by data-reason rather than by its wording: all four render the same
- * opening sentence, so a text matcher would pass with the wrong branch on screen.
- */
 describe("the agent picker says when nothing will run the task", () => {
   const RAFAL = { _id: "u1", username: "rpo", fullName: "Rafal Podles" } as ApiUser;
   const AGENT = [{ _id: "a1", name: "Default" }] as React.ComponentProps<
     typeof PropertyRail
   >["agents"];
 
-  // `status` widened to a plain string: TaskStatus is the union of the SEEDED column ids, and this
-  // board deliberately uses none of them
   function withStored(
     stored: Partial<Omit<ApiTask, "status">> & { status?: string },
     over: Partial<TaskDraft> = {}
@@ -790,24 +654,14 @@ describe("the agent picker says when nothing will run the task", () => {
     expect(screen.queryByTestId("handover-notice")).toBeNull();
   });
 
-  // A task with an agent, self-assigned, and simply not in the column a claim looks at
   it("says a task before the approved column is not there yet", () => {
     withStored({ status: "someday" });
 
     const notice = screen.getByTestId("handover-notice");
     expect(notice.dataset.reason).toBe("not-approved-yet");
-    // The wording too, not only the attribute: every branch renders the same opening sentence, so
-    // the attribute says WHICH branch and the text says whether it tells the truth. Without this
-    // the message could be replaced with the opposite of what it means and stay green.
     expect(notice.textContent).toMatch(/column work is approved in/i);
   });
 
-  /**
-   * The reproduction: a task with an agent, self-assigned, sitting in the active column with a run
-   * on it, rendered "Nothing will run this yet — move it to the column work is approved in" beside
-   * the live run indicator. `done` said the same. The requirement belongs before the approved
-   * column, and the notice was reading a list of approved ids rather than the board's roles.
-   */
   it.each(["doing", "shipped"])(
     "says nothing about a task in %s, which a machine is past being asked about",
     (status) => {
@@ -826,15 +680,11 @@ describe("the agent picker says when nothing will run the task", () => {
     expect(notice.textContent).toMatch(/assign it to yourself/i);
   });
 
-  // The legacy case, and the visible half of refusing to backfill assignedBy
   it("says a task assigned before the board recorded who assigns will not run", () => {
     withStored({ assignedBy: undefined });
 
     const notice = screen.getByTestId("handover-notice");
     expect(notice.dataset.reason).toBe("assigner-unrecorded");
-    // Who can perform it, not only that a repair exists: the server records the assigner only for
-    // the person being assigned, so a sentence addressed to whoever is reading would be wrong for
-    // everybody else on the board
     expect(notice.textContent).toMatch(/its assignee can record that by assigning it to themselves/i);
   });
 
@@ -848,8 +698,6 @@ describe("the agent picker says when nothing will run the task", () => {
     );
   });
 
-  // The fallback nothing asserted: an assignedBy the server answered as a bare id has no name to
-  // render, and the sentence still has to read as one
   it("falls back to Somebody else when the assigner came back unpopulated", () => {
     withStored({ assignedBy: "u2" });
 
@@ -858,17 +706,12 @@ describe("the agent picker says when nothing will run the task", () => {
     expect(notice.textContent).toMatch(/Somebody else assigned it/i);
   });
 
-  // The verdict depends on assignedBy, which only the server writes. Judging an unsaved draft
-  // would tell somebody who just picked an assignee that their own task will not run.
   it("says nothing while the draft has an edit the server has not seen", () => {
     withStored({ assignee: null }, { assignee: "rpo" });
 
     expect(screen.queryByTestId("handover-notice")).toBeNull();
   });
 
-  // Clearing the agent is the fix for every one of these notices, so the notice has to go the
-  // moment it is cleared rather than sitting there until the save lands. The stored task would
-  // otherwise render "assigned before the board recorded who assigns".
   it("says nothing while the agent itself is the unsaved edit", () => {
     withStored({ assignedBy: undefined }, { agent: null });
 
@@ -877,15 +720,6 @@ describe("the agent picker says when nothing will run the task", () => {
 
 });
 
-/**
- * The Agent row tells the reader to "assign it again to record that", and the detail view saves by
- * diff — so re-picking the person already on the task produced no request at all, and the recovery
- * the product printed was a no-op in the view printing it. The e2e that proves the repair calls
- * updateTask directly, stepping straight over this seam.
- *
- * What the forced write reaches is asserted in TaskDetail.test.tsx: this half only says when the
- * rail asks for one.
- */
 describe("re-assigning to record an assigner the board never had", () => {
   const RAFAL = { _id: "u1", username: "rpo", fullName: "Rafal Podles" } as ApiUser;
 
@@ -909,9 +743,6 @@ describe("re-assigning to record an assigner the board never had", () => {
     expect(repair).toHaveBeenCalledWith("rpo");
   });
 
-  // Nothing to record, so nothing to force: the ordinary diff already declines to write this, and
-  // forcing it would put a save on the wire every time somebody opened the picker and changed
-  // their mind
   it("leaves a task whose assigner is recorded alone", async () => {
     const repair = railFor({});
     await openRow("Assignee");
@@ -920,8 +751,6 @@ describe("re-assigning to record an assigner the board never had", () => {
     expect(repair).not.toHaveBeenCalled();
   });
 
-  // Picking somebody else is an ordinary edit: it differs from the stored value, so auto-save
-  // sends it, and stamping the assigner is then the server's ordinary behaviour
   it("leaves a genuine change to the ordinary save", async () => {
     const repair = railFor({ assignedBy: undefined });
     await openRow("Assignee");
@@ -930,8 +759,6 @@ describe("re-assigning to record an assigner the board never had", () => {
     expect(repair).not.toHaveBeenCalled();
   });
 
-  // Unassigning is a change too, and it is the one case where the picked value is null on both
-  // sides if the guard compared the wrong things
   it("does not mistake unassigning for re-picking the same person", async () => {
     const repair = railFor({ assignedBy: undefined });
     await openRow("Assignee");

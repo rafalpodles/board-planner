@@ -49,7 +49,6 @@ export function groupSprints(sprints: ApiSprint[]): GroupedSprints {
   };
 }
 
-// "Most recent planned" reads as the sprint about to run, not the one furthest out
 export function defaultSprintId(sprints: ApiSprint[]): string | null {
   const { active, planned, completed } = groupSprints(sprints);
   return active[0]?._id ?? planned[0]?._id ?? completed[0]?._id ?? null;

@@ -12,22 +12,6 @@ import {
 } from "./seed";
 import { signIn } from "./session";
 
-/**
- * BP-419. `claimNextTask` required assignee, `assignedBy` and the machine's owner to be one
- * person, and `assign_task` stamps `assignedBy` as the PM — so every task the PM assigned failed
- * that filter for ever. Silently: the claim is one `findOneAndUpdate`, a non-match and an empty
- * queue are the same 204, and the PM's own reply said `BP-x → @rafal` as though it had worked.
- *
- * rpo decided the PM's assignment is a real hand-over. This drives that end to end — the real chat,
- * the real agent loop, the real tool, the real claim route, the real board — because the defect
- * lived precisely in the seam between the tool that writes `assignedBy` and the filter that reads
- * it, and neither half is wrong on its own.
- *
- * Only the model is replaced (`e2e/openrouter-stub.mjs`), and what it "decides" travels inside the
- * message the test types. So nothing here asserts on the reply's text: the directive is on screen
- * too, and an assertion over rendered words would be matching this file's own.
- */
-
 test.beforeEach(seed);
 
 const APPROVED = "todo";
@@ -45,7 +29,6 @@ async function db() {
 
 let nextNumber = 700;
 
-/** A task in the approved column naming an agent — everything the claim wants except the hand-over */
 async function addTask(over: Record<string, unknown> = {}): Promise<{ id: mongoose.Types.ObjectId; number: number }> {
   const handle = await db();
   const _id = new mongoose.Types.ObjectId();
@@ -81,12 +64,8 @@ async function addTask(over: Record<string, unknown> = {}): Promise<{ id: mongoo
 const read = async (id: mongoose.Types.ObjectId) =>
   (await (await db()).collection("tasks").findOne({ _id: id }))!;
 
-/** Everything `verdictFor` wants before this machine may claim, plus a project workers may run */
 test.beforeEach(async () => {
   const handle = await db();
-  // The block catalog is written at server BOOT, and seed() empties the database — so by the second
-  // test of a run it is gone, and a missing block refuses the claim for a reason that has nothing
-  // to do with who assigned what.
   await handle.collection("agentblocks").updateOne(
     { key: "implement" },
     { $set: { key: "implement", kind: "step", name: "Implement", description: "", prompt: "make the change", capability: "edit", model: "opus", fallbackModel: "sonnet", deterministic: false, builtIn: true } },
@@ -118,7 +97,6 @@ function claim(request: APIRequestContext, runId: string) {
   });
 }
 
-/** Drives the real PM turn. The tool call it should make travels in the message, between << and >>. */
 async function pmAssigns(page: Page, taskKey: string, username: string) {
   await page.goto(`/projects/${PROJECT_KEY}/pm`);
   const box = page.getByRole("textbox", { name: /message/i });
@@ -126,8 +104,6 @@ async function pmAssigns(page: Page, taskKey: string, username: string) {
   const directive = { name: "assign_task", arguments: { taskKey, username } };
   await box.fill(`please hand this over <<${JSON.stringify(directive)}>>`);
   await page.getByRole("button", { name: "Send", exact: true }).click();
-  // The turn is done when the tool's action has been recorded on the stored message — the reply's
-  // text is this file's own words coming back, so it is no evidence of anything.
   await expect
     .poll(async () => {
       const messages = await (await db()).collection("pmmessages").find({}).toArray();
@@ -153,8 +129,6 @@ test("a task the PM assigned is claimed by the machine, and the board shows the 
   await test.step("the record stays honest about who assigned it", async () => {
     const stored = await read(task.id);
     expect(String(stored.assignee)).toBe(String(ADMIN_ID));
-    // Not rewritten to the assignee: the activity log and the Agent row both read this field, and
-    // the PM stamping itself as the assignee's own act would be a lie in the record
     expect(String(stored.assignedBy)).toBe(String((await pmUser())!._id));
   });
 
@@ -168,8 +142,6 @@ test("a task the PM assigned is claimed by the machine, and the board shows the 
 
   await test.step("and the board shows it in the active column", async () => {
     await page.goto(`/projects/${PROJECT_KEY}`);
-    // Scoped to the active column rather than found anywhere on the board: the card being on
-    // screen says nothing — it was on screen before the claim too, one column to the left.
     const active = page.getByTestId(`column-${ACTIVE}`);
     await expect(active.locator(`a[href*="/tasks/${task.number}"]`)).toBeVisible();
     await expect(
@@ -178,16 +150,9 @@ test("a task the PM assigned is claimed by the machine, and the board shows the 
   });
 });
 
-/**
- * The control, and the reason this change is "the PM is not somebody else" rather than "the consent
- * model was dropped". Without it, everything above reads identically to having deleted the guard.
- */
 test("a task another person assigned is still refused, beside one that is taken", async ({
   request,
 }) => {
-  // Both in the same queue, and the legitimate one claimed first: a bare 204 is also what a
-  // mis-wired rig produces — a missing agentblocks row, a stale lastSeenAt, a verdictFor refusal —
-  // and without a positive control in the same body a broken fixture reads exactly like a guard.
   const proposed = await addTask({ assignee: ADMIN_ID, assignedBy: MEMBER_ID });
   const legitimate = await addTask({ assignee: ADMIN_ID, assignedBy: ADMIN_ID });
 
@@ -200,12 +165,6 @@ test("a task another person assigned is still refused, beside one that is taken"
   expect((await read(proposed.id)).status).toBe(APPROVED);
 });
 
-/**
- * The escalation this change would otherwise have opened, driven the whole way rather than argued.
- * The PM chat is reachable by every project member, and `assign_task` does not require the assignee
- * to be the person asking — so a member can hand a colleague's machine a task they wrote. The claim
- * pairs the PM's hand-over with the person who asked for it, and this is what proves the pairing.
- */
 test("a member cannot use the PM to start a run on somebody else's machine", async ({
   page,
   request,
@@ -216,32 +175,27 @@ test("a member cannot use the PM to start a run on somebody else's machine", asy
   const actions = await pmAssigns(page, `${PROJECT_KEY}-${task.number}`, "admin");
   expect(actions.map((a) => a.tool)).toContain("assign_task");
 
-  // The assignment itself is allowed and really happened — this is not "the PM refused"
   const stored = await read(task.id);
   expect(String(stored.assignee)).toBe(String(ADMIN_ID));
   expect(String(stored.pmAssignedFor)).toBe(String(MEMBER_ID));
 
-  // ...but the admin's machine does not take work the admin never asked for
   const claimed = await claim(request, "run-escalation");
   expect(claimed.status(), await claimed.text()).toBe(204);
   expect((await read(task.id)).status).toBe(APPROVED);
 });
 
 test("the PM says so when the hand-over it just made cannot complete", async ({ page }) => {
-  // Everything else in place; the one thing missing is the choice that hands work to a machine
   const task = await addTask({ agent: null });
   await signIn(page, "admin");
 
   const actions = await pmAssigns(page, `${PROJECT_KEY}-${task.number}`, "admin");
 
-  // "no agent" appears nowhere in what this test types, so this is the product's own sentence
   const summary = actions.find((a) => a.tool === "assign_task")?.summary ?? "";
   expect(summary).toContain(`${PROJECT_KEY}-${task.number} → @admin`);
   expect(summary).toMatch(/no agent is named on it/);
 });
 
 test("and says so when the project is not enabled for workers at all", async ({ page }) => {
-  // The other half of "not every hand-over completes": the task is perfect, the instance is not.
   await (await db()).collection("projects").updateOne(
     { _id: PROJECT_ID },
     { $set: { "worker.enabled": false } }

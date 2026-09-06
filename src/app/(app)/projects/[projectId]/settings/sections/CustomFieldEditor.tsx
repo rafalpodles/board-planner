@@ -11,7 +11,6 @@ interface Props {
   onEdit: () => void;
   onSave: (patch: Record<string, unknown>) => Promise<void>;
   onDelete: () => void;
-  /** Tasks holding a value for this field; undefined until /stats lands */
   usage?: number;
   canDelete?: boolean;
 }
@@ -23,11 +22,6 @@ const FLAG_CHIPS = [
   { key: "filterable", label: "Filterable" },
 ] as const;
 
-/**
- * The collapsed row for one field. Editing lives in CustomFieldForm — the same form
- * that creates one. Keeping those apart is what left three of the four flags
- * unreachable until after a field already existed.
- */
 export function CustomFieldEditor({
   field,
   onEdit,

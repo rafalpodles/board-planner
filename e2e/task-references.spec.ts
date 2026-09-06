@@ -16,15 +16,6 @@ import {
 } from "./seed";
 import { signIn as arriveSignedIn } from "./session";
 
-/**
- * BP-254, the rendering half. A task key written in prose becomes a link to that task, and nothing
- * is stored as a link — the text keeps saying `BP-12`.
- *
- * That choice is why the former key matters here: this board renamed itself from CP to BP, so
- * everything written before that still says CP and would otherwise be a dead reference. A stored
- * URL would have needed migrating through every description and comment instead.
- */
-
 const TASK_URL = `/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`;
 
 async function db() {
@@ -48,10 +39,6 @@ async function addComment(body: string) {
 
 const signIn = arriveSignedIn;
 
-// toBeVisible() retries; boundingBox() does not. If React replaces the node in the gap between
-// the two calls, boundingBox() returns null, and a bare `!` turns that into a width/height
-// TypeError two lines away from anything naming the race. Retry the read itself instead of
-// waiting harder before it.
 async function measured(locator: Locator) {
   let box: Awaited<ReturnType<Locator["boundingBox"]>> = null;
   await expect(async () => {
@@ -89,20 +76,13 @@ test("a key written in a description links to that task, and reaches it", async 
   const link = page.getByRole("link", { name: `${PROJECT_KEY}-${SIBLING_TASK_NUMBER}` });
   await expect(link).toBeVisible();
 
-  // The link has to actually arrive, not merely look like one. Asserting the URL alone was not
-  // enough: the address changed while a modal drew the linked task on top of the page still
-  // showing the old one, and the test passed.
   await link.click();
   await expect(page).toHaveURL(new RegExp(`${TASK_URL}$`));
 
   await expect(page.getByText(SIBLING_TASK_TITLE).first()).toBeVisible();
-  // One task on screen, not the destination stacked over where the reader came from
   await expect(page.getByText(HELD_TASK_TITLE)).toHaveCount(0);
 });
 
-// The path the report came from: the task opened as a modal over the board, which is what the
-// board's own cards do. Clicking a reference there soft-navigates, and the interceptor draws the
-// destination as another modal over the one already open — two tasks stacked.
 test("a reference clicked inside the task modal does not stack another one", async ({ page }) => {
   const handle = await db();
   await handle
@@ -115,15 +95,10 @@ test("a reference clicked inside the task modal does not stack another one", asy
   await signIn(page);
   await page.goto(`/projects/${PROJECT_KEY}`);
 
-  // Open it the way a person does, so the modal route is the one rendering
   await page.getByText(HELD_TASK_TITLE).first().click();
   await expect(page).toHaveURL(/\/tasks\/1$/);
   await expect(page.getByText(HELD_TASK_TITLE).first()).toBeVisible();
 
-  // Wait for the description to be on screen before reaching into it: the modal is still settling
-  // right after it opens, and the link is present in the DOM before it is stable enough to click
-  // Scoped to the modal: the board underneath has its own card for that task, so an unscoped
-  // locator finds two — which is itself the shape of the bug being tested
   const modal = page.getByRole("dialog");
   await expect(modal.getByText("Duplicate of")).toBeVisible();
   const reference = modal.getByRole("link", { name: `${PROJECT_KEY}-${SIBLING_TASK_NUMBER}` });
@@ -132,7 +107,6 @@ test("a reference clicked inside the task modal does not stack another one", asy
 
   await expect(page).toHaveURL(new RegExp(`${TASK_URL}$`));
   await expect(page.getByText(SIBLING_TASK_TITLE).first()).toBeVisible();
-  // The task the reader came from must not still be underneath
   await expect(page.getByText(HELD_TASK_TITLE)).toHaveCount(0);
 });
 
@@ -172,13 +146,11 @@ test.describe("picking a task from the list", () => {
     const list = page.getByRole("listbox");
     await expect(list).toBeVisible();
     await expect(list.getByRole("option").first()).toBeVisible();
-    // The ticket asks for at most ten, and the seeded board has fewer
     expect(await list.getByRole("option").count()).toBeLessThanOrEqual(10);
 
     const first = (await list.getByRole("option").first().innerText()).split("\n")[0].trim();
     await box.press("Enter");
 
-    // Plain text, not a markdown link — that is the whole of approach (A)
     await expect(box).toHaveValue(`blocked by ${first} `);
   });
 
@@ -196,7 +168,6 @@ test.describe("picking a task from the list", () => {
 
     await box.press("Escape");
     await expect(list).toBeHidden();
-    // Escape dismisses the list, it does not edit what was written
     await expect(box).toHaveValue(`see ${PROJECT_KEY}-`);
   });
 
@@ -210,7 +181,6 @@ test.describe("picking a task from the list", () => {
   });
 });
 
-// Pasting is the same feature as picking from a list, which is the point of storing plain text
 test("a key typed into a new comment is a link once posted", async ({ page }) => {
   await signIn(page);
   await page.goto(`/projects/${PROJECT_KEY}/tasks/1`);
@@ -226,16 +196,9 @@ test("a key typed into a new comment is a link once posted", async ({ page }) =>
   ).toBeVisible();
 });
 
-
-// A phone comments through a bar pinned to the bottom of the task and never sees the wide
-// composer, so wiring the autocomplete only there left the feature — and the @mention that
-// predates it — missing from mobile entirely. Reported from a phone, not caught by any test here.
-// Reported from the product: on a 400px description the list hung at the top of the screen while
-// the caret was at the bottom. It is measured from the caret now, not pinned to the field's edge.
 test.describe("where the list appears", () => {
   test("follows the caret down a tall description", async ({ page }) => {
     const handle = await db();
-    // Long enough that the caret ends up well below the top of the box
     await handle
       .collection("tasks")
       .updateOne({ _id: HELD_TASK_ID }, { $set: { description: "line\n".repeat(20) } });
@@ -246,10 +209,7 @@ test.describe("where the list appears", () => {
 
     const editor = page.getByPlaceholder(/Markdown supported/);
     await expect(editor).toBeVisible();
-    // fill leaves the caret at the end; Control+End dropped it mid-text, and the key then glued
-    // itself to the previous word — where the trigger correctly refuses to fire
     await editor.fill("line\n".repeat(20));
-    // Key by key, so React sees each change and the trigger fires the way it does for a person
     await editor.pressSequentially(`${PROJECT_KEY}-`);
 
     const list = page.getByRole("listbox");
@@ -257,13 +217,9 @@ test.describe("where the list appears", () => {
 
     const box = await measured(editor);
     const where = await measured(list);
-    // Below where the typing is, not floating above the whole field
     expect(where.y).toBeGreaterThan(box.y + box.height / 2);
   });
 
-  // Wrapping a field to hold the list moved its `flex-1 min-w-0` off the flex row's direct child,
-  // and the criteria collapsed to a column a few characters wide. Every test here passed: they
-  // asked whether the list appears, never how wide anything is.
   test("wrapping the field for the list does not narrow it", async ({ page }) => {
     const handle = await db();
     await handle.collection("tasks").updateOne(
@@ -283,20 +239,13 @@ test.describe("where the list appears", () => {
     const criterion = page.getByLabel("Criterion 1").first();
     await expect(criterion).toBeVisible();
     const field = await measured(criterion);
-    // Against the comment box, which sits in the same column and always fills it. The first version
-    // of this compared against the words "Acceptance criteria" — a 140px label — so the collapsed
-    // 147px field cleared the bar and the mutation passed.
     const composer = page.getByPlaceholder(/@mention someone/);
-    // Measured only once it is on screen. Without the wait this raced the comments load and read a
-    // null box — latent since it was written, and surfaced by /api/* going no-store.
     await expect(composer).toBeVisible();
     const reference = await measured(composer);
 
     expect(field.width).toBeGreaterThan(reference.width * 0.8);
   });
 
-  // A criterion was a textarea, and a textarea can only ever show a key as text — which is what
-  // made this the one place the reference did not work. It renders until somebody asks to edit it.
   test("a key in a criterion is a link, and reaches the task", async ({ page }) => {
     const handle = await db();
     await handle.collection("tasks").updateOne(
@@ -330,22 +279,13 @@ test.describe("where the list appears", () => {
     await signIn(page);
     await page.goto(`/projects/${PROJECT_KEY}/tasks/1`);
 
-    // The words, not the link: this is the reader asking to change the text
     await page.getByText("landing first").click();
     await expect(page.getByRole("textbox", { name: "Criterion 1" })).toBeFocused();
 
-    // Blur returns it to the rendered view, links and all
     await page.keyboard.press("Tab");
     await expect(page.getByRole("link", { name: `${PROJECT_KEY}-3` })).toBeVisible();
   });
 
-  // The source guards the click so a link does not also open the editor. There is deliberately no
-  // test for it: the click navigates away either way, so whether the editor opened first is not
-  // observable, and an assertion here passed with the guard deleted. The guard stays because
-  // mutating the page on the way out is wrong, not because a test can see it.
-
-  // Editing an existing criterion is a different field from adding one, and the rendered view now
-  // stands between them — so it needs its own check that the trigger survived the round trip
   test("editing an existing criterion still offers tasks", async ({ page }) => {
     const handle = await db();
     await handle.collection("tasks").updateOne(
@@ -405,7 +345,6 @@ test.describe("on a phone", () => {
     await expect(page.getByRole("listbox")).toBeVisible();
   });
 
-  // Enter picks a suggestion while the list is open; it must not also send the comment
   test("picking a suggestion does not post the comment", async ({ page }) => {
     await signIn(page);
     await page.goto(`/projects/${PROJECT_KEY}/tasks/1`);
@@ -419,23 +358,7 @@ test.describe("on a phone", () => {
   });
 });
 
-/**
- * BP-329. The board's own key is interpolated into a RegExp so that typing it offers the board's
- * tasks. BP-401 constrained what a key may be, but only on the way in and with no migration, so a
- * key made of regex punctuation stored before it is still there. Unescaped it threw inside a
- * useMemo, which is a render, which is the whole task page.
- *
- * By id, deliberately: `resolveProjectId` refuses a key that fails PROJECT_KEY_PATTERN, so such a
- * board answers 404 to its own key and is reachable only by its ObjectId — which every route
- * accepts first, and which is the URL this page renders under.
- */
 test.describe("a board whose key is regex punctuation", () => {
-  // A key that fails to COMPILE, not merely one that over-matches: `A.C` unescaped is a valid
-  // regex and the page survives it, so it could not tell the fix from its absence.
-  //
-  // Written straight into the collection, which is the point rather than a shortcut: BP-401 refuses
-  // this key at every route that writes one, and explicitly migrated nothing — so a board keyed
-  // this way is one that predates that check, and the driver is what such a row looks like.
   const AWKWARD = "C(";
 
   test.beforeEach(async () => {
@@ -447,15 +370,12 @@ test.describe("a board whose key is regex punctuation", () => {
     await signIn(page);
     await page.goto(`/projects/${PROJECT_ID}/tasks/${HELD_TASK_NUMBER}`);
 
-    // The page rendering at all is the fix: unescaped, this threw before anything was drawn
     await expect(page.getByText(HELD_TASK_TITLE).first()).toBeVisible();
 
-    // And the trigger still does its job — escaped, not stripped
     const box = page.getByPlaceholder("Write a comment, @mention someone…");
     await box.click();
     await box.pressSequentially(`Blocked by ${AWKWARD}-`);
 
-    // This board's own tasks, not merely a listbox: escaped, not stripped
     await expect(
       page.getByRole("option", { name: SIBLING_TASK_TITLE, exact: false })
     ).toBeVisible();

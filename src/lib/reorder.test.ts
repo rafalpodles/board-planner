@@ -26,7 +26,6 @@ describe("moveItem", () => {
     expect(moveItem(list, 2, 2)).toBe(list);
   });
 
-  // A drop that lands outside the list must not silently drop an item
   it("ignores out-of-range indices", () => {
     expect(moveItem(list, -1, 2)).toBe(list);
     expect(moveItem(list, 1, 9)).toBe(list);
@@ -74,7 +73,6 @@ describe("manualOrder", () => {
 describe("placeInto", () => {
   const all = ["a", "b", "c", "d", "e"];
 
-  // The client can only order the rows it can see; the rest must not move
   it("permutes the moved ids within the slots they already held", () => {
     expect(placeInto(all, ["e", "c", "a"])).toEqual(["e", "b", "c", "d", "a"]);
   });

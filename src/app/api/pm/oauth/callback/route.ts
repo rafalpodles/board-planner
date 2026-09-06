@@ -7,20 +7,12 @@ import { exchangeCode, getPmOauthRedirectUri } from "@/lib/pm/mcp-oauth";
 
 export const maxDuration = 60;
 
-/**
- * A relative Location, deliberately. This route is unauthenticated, and building an absolute URL
- * meant reading the origin off `x-forwarded-host` — so `GET /api/pm/oauth/callback?state=x` with
- * a forged header answered a 302 to wherever the caller named (BP-316). The browser resolves a
- * relative Location against the origin it actually asked, which no header can move.
- */
 function settingsRedirect(projectId: string | null, result: string): NextResponse {
   const query = `?mcp_oauth=${encodeURIComponent(result)}`;
   const target = projectId ? `/projects/${projectId}/settings${query}` : `/projects${query}`;
   return new NextResponse(null, { status: 302, headers: { Location: target } });
 }
 
-// Unauthenticated by necessity (browser redirect carries no Authorization header);
-// authenticated by the single-use, TTL-bound state instead.
 export async function GET(request: Request) {
   await connectDB();
   const url = new URL(request.url);

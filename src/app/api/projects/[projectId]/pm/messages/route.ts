@@ -14,7 +14,6 @@ export const GET = withProjectAccess(async (request, { params, user }) => {
   const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 50, 1), 100);
   const before = url.searchParams.get("before");
 
-  // Conversations are private; an instance admin may read another user's for support
   const requestedUserId = url.searchParams.get("userId");
   let threadUserId = String(user._id);
   if (requestedUserId && requestedUserId !== threadUserId) {
@@ -42,7 +41,6 @@ export const GET = withProjectAccess(async (request, { params, user }) => {
     .limit(limit)
     .populate("triggeredBy", "username fullName");
 
-  // Ascending for rendering; cursor for the next page is the first (oldest) _id
   messages.reverse();
 
   return NextResponse.json({

@@ -32,8 +32,6 @@ function field(over: Partial<Omit<ICustomField, "_id">> & { _id: string }): ICus
 }
 
 describe("normalizeOptions", () => {
-  // The whole migration rests on this: values already stored on tasks are the
-  // option strings, so the id has to stay that string or every value detaches
   it("keeps a legacy string as its own id, so stored values still match", () => {
     expect(normalizeOptions(["Apples", "Pears"])).toEqual([
       { id: "Apples", value: "Apples", color: DEFAULT_OPTION_COLOR, order: 0 },
@@ -140,7 +138,6 @@ describe("validateCustomFieldValues", () => {
     expect(validateCustomFieldValues({ r1: [] }, [required]).valid).toBe(false);
   });
 
-  // Otherwise archiving a required field would block every save on every task
   it("lets archiving override required", () => {
     const archivedRequired = field({
       _id: "r1",
@@ -162,8 +159,6 @@ describe("validateCustomFieldValues", () => {
 });
 
 describe("sanitizeCustomFieldValues", () => {
-  // The point of archiving: deleting a definition used to wipe the value from
-  // every task on its next save
   it("keeps the values of an archived field", () => {
     const archived = field({ _id: "a1", archived: true });
     expect(sanitizeCustomFieldValues({ a1: "kept" }, [archived])).toEqual({ a1: "kept" });
@@ -192,7 +187,6 @@ describe("matchesFieldFilter", () => {
     expect(matchesFieldFilter(2, { to: "3" }, number)).toBe(true);
   });
 
-  // A blank has no position on a number line, so a range must exclude it
   it("excludes an empty value from any range", () => {
     expect(matchesFieldFilter(undefined, { from: "3" }, number)).toBe(false);
     expect(matchesFieldFilter("", { to: "9" }, number)).toBe(false);
@@ -237,7 +231,6 @@ describe("matchesAllFieldFilters", () => {
     expect(matchesAllFieldFilters(values, { f1: { from: "9" }, f2: { value: "hell" } }, definitions)).toBe(false);
   });
 
-  // A stale filter should not blank the board while it is being cleaned up
   it("ignores a filter whose field is gone rather than hiding everything", () => {
     expect(matchesAllFieldFilters({ f1: 5 }, { ghost: { value: "x" } }, definitions)).toBe(true);
   });
@@ -265,7 +258,6 @@ describe("resolveFieldsByName", () => {
     { _id: "f5", name: "Gone", fieldType: "text" as const, options: [], archived: true },
   ];
 
-  // An MCP client knows the name a human gave the field, never its id
   it("resolves a field name and an option name to their ids", () => {
     expect(resolveFieldsByName({ Owoce: "Apples" }, definitions)).toEqual({ f1: "opt-a" });
   });
@@ -274,7 +266,6 @@ describe("resolveFieldsByName", () => {
     expect(resolveFieldsByName({ owoce: "apples" }, definitions)).toEqual({ f1: "opt-a" });
   });
 
-  // So a client can send back exactly what it read
   it("accepts an option id as well as its name", () => {
     expect(resolveFieldsByName({ Owoce: "opt-a" }, definitions)).toEqual({ f1: "opt-a" });
   });
@@ -289,7 +280,6 @@ describe("resolveFieldsByName", () => {
     expect(resolveFieldsByName({ Done: "true" }, definitions)).toEqual({ f3: true });
   });
 
-  // Silently dropping would leave the caller thinking the value was stored
   it("throws on an unknown field, and lists what is available", () => {
     expect(() => resolveFieldsByName({ Nope: "x" }, definitions)).toThrow(/Unknown field "Nope"/);
     expect(() => resolveFieldsByName({ Nope: "x" }, definitions)).toThrow(/Owoce/);
@@ -309,7 +299,6 @@ describe("resolveFieldsByName", () => {
 });
 
 describe("parseOptions ids", () => {
-  // The editor adds a row with no id yet; "" used to survive and become the option's id
   it("mints an id for an option that arrives without one", () => {
     const result = parseOptions([{ id: "", value: "Apples", color: "#ef4444", order: 0 }]);
     expect(result.error).toBeUndefined();
@@ -333,8 +322,6 @@ describe("parseOptions ids", () => {
   });
 });
 
-// The model answers with option text, and it can answer with something the project
-// does not offer. A suggestion that misses should leave the field empty, never throw.
 describe("matchOptionValue", () => {
   const field = {
     options: [
@@ -387,7 +374,6 @@ describe("customFieldActivityChanges", () => {
   const points = field({ _id: "f-pts", name: "Points", fieldType: "number" });
   const target = field({ _id: "f-date", name: "Target", fieldType: "date" });
 
-  // The bug this exists for: an option id in history names nothing a reader recognises
   it("reports the option's text, not its id", () => {
     expect(
       customFieldActivityChanges({ "f-diff": "opt-m" }, { "f-diff": "opt-l" }, [difficulty])
@@ -440,9 +426,6 @@ describe("customFieldActivityChanges", () => {
     ).toEqual([{ name: "Platforms", before: "iOS", after: "iOS, Web" }]);
   });
 
-  // An update returns a hydrated document, whose customFieldValues is a Map, while the read it is
-  // compared against is lean and gives a plain object. Treating the Map as an object finds nothing
-  // in it, so every edit would read as "cleared".
   it("reads the Map a hydrated document carries, not only a plain object", () => {
     expect(
       customFieldActivityChanges(
@@ -453,8 +436,6 @@ describe("customFieldActivityChanges", () => {
     ).toEqual([{ name: "Difficulty", before: "M", after: "L" }]);
   });
 
-  // The rail renders a multiselect in the project's own option order, and its toggle appends, so
-  // un-picking and re-picking one option rewrites the stored array while the screen never changes.
   it("says nothing when a multiselect is reordered but still holds the same options", () => {
     expect(
       customFieldActivityChanges(
@@ -473,8 +454,6 @@ describe("customFieldActivityChanges", () => {
     ).toEqual([{ name: "Platforms", before: "Web", after: "iOS, Web" }]);
   });
 
-  // The rail draws an untouched checkbox and an unticked one identically ("No"), so reading the
-  // untouched one as blank would log a change to the state already on screen.
   it("says nothing when a checkbox goes from never-set to explicitly false", () => {
     expect(customFieldActivityChanges({}, { "f-spike": false }, [spike])).toEqual([]);
   });

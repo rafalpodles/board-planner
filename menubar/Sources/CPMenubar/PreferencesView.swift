@@ -23,8 +23,6 @@ struct PreferencesView: View {
 
 private struct ConnectionTab: View {
     let model: AppModel
-    // Owned by the app, not this pane: changing boards stops the worker and drops its credential,
-    // and the panel behind this window has to come back as the first-run screen.
     var onboarding: OnboardingModel
     @State private var confirming = false
 
@@ -32,8 +30,6 @@ private struct ConnectionTab: View {
         Form {
             LabeledContent("Server") {
                 HStack {
-                    // The stored address, not the one the socket reports: after the switch there is
-                    // no worker to report anything, and a dash there would read as a broken machine.
                     Text(model.config?.apiUrl ?? onboarding.state.apiURL).lineLimit(1).truncationMode(.head)
                     Button("Change…") { confirming = true }
                 }
@@ -56,9 +52,6 @@ private struct ConnectionTab: View {
             Button("Change board", role: .destructive) { onboarding.changeBoard() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            // Said before it happens, because it ends whatever the worker is running — and a
-            // credential is minted by one board and refused by every other, so it cannot be carried
-            // across. The checkouts stay: a checkout is still a checkout, whichever board is asking.
             Text(
                 "The worker stops and forgets the credential this board gave it, so anything running now ends. Your checkouts and their allowlist are left alone. You will be asked to approve this machine on the new board."
             )
@@ -66,9 +59,6 @@ private struct ConnectionTab: View {
     }
 }
 
-// The identity every push and pull request acts as. Editable here and not only during onboarding,
-// because `gh auth switch` is global machine state — the day this matters is the day somebody adds
-// a second account to a machine that has been running fine for months.
 private struct GithubAccountRow: View {
     let accounts: [GithubAccountChoice]
     @State private var pinned = (try? GithubAccountFile(path: GithubAccountFile.defaultPath()).read()) ?? ""
@@ -89,8 +79,6 @@ private struct GithubAccountRow: View {
             if !error.isEmpty {
                 Text(error).font(.caption).foregroundStyle(.red)
             } else if !pinned.isEmpty {
-                // Said plainly, because the point of pinning is that this machine stops following
-                // `gh auth switch` — and that is invisible from the account name alone.
                 Text("Pushes act as \(pinned) whatever gh is switched to. It takes effect on the next task; a run already in flight keeps the identity it started with.")
                     .font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -136,13 +124,6 @@ private struct RepositoriesTab: View {
             }
 
             HStack {
-                // Named by project, because that is what the operator is adding. The folder picker
-                // beside it stays for a checkout they already have — and for a repository no
-                // project names yet.
-                // The list of projects lives in the browser, where the person is signed in: ticking
-                // one there may mean switching workers on for it, and that is an instance admin in
-                // an interactive session — which this app, holding only the machine's credential,
-                // is not and must not become.
                 Button("Choose projects…") { openPicker() }
                     .disabled(model.config == nil)
 
@@ -164,8 +145,6 @@ private struct RepositoriesTab: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            // What the machine did about the picking, one line each. A clone takes minutes and a
-            // deletion cannot be undone, so neither gets to happen behind a spinner.
             ForEach(Array(sync.steps.enumerated()), id: \.offset) { _, step in
                 switch step {
                 case .added(let project, let path):
@@ -178,8 +157,6 @@ private struct RepositoriesTab: View {
                 case .refused(let project, let reason):
                     Text("Left \(project) alone: \(reason)").font(.caption2).foregroundStyle(.orange)
                 case .partiallyRemoved(let project, let removed, let reason):
-                    // Named in full: this is the one message that reports destruction the operator
-                    // did not ask about and cannot undo.
                     Text("\(project): stopped after deleting \(removed.joined(separator: ", ")) — \(reason)")
                         .font(.caption2).foregroundStyle(.red)
                 case .failed(let project, let reason):
@@ -192,8 +169,6 @@ private struct RepositoriesTab: View {
 
             Text(
                 offers.isEmpty
-                    // The empty menu is the question "where is my project" waiting to happen, so it
-                    // answers it in the place where the answer would be
                     ? "The worker only ever binds a repository listed here. A project joins this list once workers are enabled on it and it names a repository — and drops off it again once this machine has its checkout."
                     : "The worker only ever binds a repository listed here."
             )
@@ -205,8 +180,6 @@ private struct RepositoriesTab: View {
         .onAppear(perform: load)
     }
 
-    // Opened rather than embedded, and with the worker's own id so the screen is about THIS
-    // machine. The app knows the board's address from the worker it is already reading.
     private func openPicker() {
         guard let config = model.config else { return }
         let board = BoardURL.normalise(config.apiUrl)
@@ -219,8 +192,6 @@ private struct RepositoriesTab: View {
         NSWorkspace.shared.open(url)
     }
 
-    // What the worker says this machine could serve and has no checkout of. The app asks nobody
-    // else: it holds no board credential, and the worker is already answering this question.
     private var offers: [ProjectOffer] { model.config?.offers ?? [] }
 
     private func load() {
@@ -232,8 +203,6 @@ private struct RepositoriesTab: View {
         }
     }
 
-    // The same two steps onboarding takes for the first project — clone it, then grant it — with
-    // the same refusal when the checkout cannot be pushed to.
     private func addFromBoard(_ offer: ProjectOffer) {
         let state = Onboarding.load()
         guard !state.checkoutsFolder.isEmpty else {
@@ -253,8 +222,6 @@ private struct RepositoriesTab: View {
                     toolPath: state.toolPath)),
             repos: file)
 
-        // Off the main actor: a clone of a large repository would otherwise freeze the window, and
-        // the operator would be looking at a hung app rather than a running git.
         Task.detached {
             let result = setup.add(offer, parent: state.checkoutsFolder)
             await MainActor.run {
@@ -271,8 +238,6 @@ private struct RepositoriesTab: View {
         }
     }
 
-    // A folder picker is the only way in, matching repos.ts: a path the operator did not choose
-    // from disk is exactly what the allowlist exists to refuse.
     private func add() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -304,12 +269,8 @@ private struct PolicyTab: View {
 
     var body: some View {
         Form {
-            // One row per bound project: these settings describe a repository, so a machine serving
-            // two projects genuinely has two answers.
             ForEach(model.config?.projects ?? [], id: \.project) { project in
                 Section("Project \(project.project)") {
-                    // The answer to "why is this machine sitting on a project and doing nothing",
-                    // which the worker has served since BP-379 and nothing here showed (BP-512)
                     if let blocked = project.blocked, !blocked.isEmpty {
                         Text("Not claiming: \(blocked)").font(.caption).foregroundStyle(.orange)
                     }
@@ -340,16 +301,6 @@ private struct AdvancedTab: View {
 
     var body: some View {
         Form {
-            // Here rather than in the panel footer, where it cost attention every time somebody
-            // opened the panel to buy nothing after the first day. Preferences works as a home only
-            // because it is reachable at any time — this control began life in the first-run view,
-            // which is shown until setup finishes and never again, so it was offered exactly once,
-            // before anything worked. Any transient location reintroduces that.
-            //
-            // On this pane specifically because the state directory below explains what a login-item
-            // launch does to the environment, which is the same fact from the other side.
-            // Swift 6.3.3 quirk: passing `setLoginItem` here as a method reference crashes IRGen
-            // emitting the actor-hopping thunk. The closure is not style.
             Toggle("Start at login", isOn: Binding(get: { startsAtLogin }, set: { setLoginItem($0) }))
                 .help("Opens this app when you log in, which starts the worker with it.")
             if !loginItemNote.isEmpty {
@@ -375,7 +326,6 @@ private struct AdvancedTab: View {
         }
         .formStyle(.grouped)
         .padding()
-        // Re-read rather than trust the last value: this can also be changed in System Settings
         .onAppear { startsAtLogin = LoginItem.isRegistered }
     }
 
@@ -390,8 +340,6 @@ private struct AdvancedTab: View {
         } catch {
             loginItemNote = error.localizedDescription
         }
-        // From the system, not from what was asked for — registering can land on "requires approval",
-        // and the toggle then has to go back rather than claim something that did not happen
         startsAtLogin = LoginItem.isRegistered
     }
 

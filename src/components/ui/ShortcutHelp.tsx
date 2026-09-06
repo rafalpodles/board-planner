@@ -13,12 +13,9 @@ interface ShortcutHelpProps {
 interface Shortcut {
   key: string;
   description: string;
-  // Which prop makes this row dead, so it is hidden instead of advertising a key that does nothing
   hideWhen?: "readOnly" | "pinViewMode";
 }
 
-// The same dialog is shown in both views, so anything that only works in one of
-// them is listed under that view rather than claimed everywhere
 const SHORTCUT_GROUPS: { title: string; shortcuts: Shortcut[] }[] = [
   {
     title: "Anywhere",
@@ -54,16 +51,12 @@ const SHORTCUT_GROUPS: { title: string; shortcuts: Shortcut[] }[] = [
   },
 ];
 
-// VoiceOver/NVDA misread or drop ⌘/⇧ — each glyph gets a visually-hidden spoken label too.
 const GLYPH_LABELS: Record<string, string> = {
   "⌘": "Cmd",
   "⇧": "Shift",
   "↔": "left-right",
 };
 
-// Alternation in a capturing group, not a [character class]: a class breaks silently if a
-// future glyph is ever a regex metacharacter like ^ ] - or \, and the capture keeps the glyph
-// itself in the split result so one pass finds and places it.
 const GLYPH_PATTERN = new RegExp(
   `(${Object.keys(GLYPH_LABELS)
     .map((glyph) => glyph.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))

@@ -58,8 +58,6 @@ async function consumeFrames(
               );
             }
           } catch {
-            // Malformed frame — dropped, not fatal. The next heartbeat still carries the
-            // current command, so a frame lost here is not a command lost.
           }
         }
 
@@ -71,8 +69,6 @@ async function consumeFrames(
   }
 }
 
-// Single-process accelerator only — see src/lib/worker-events.ts for why the heartbeat is the
-// durable contract this falls back to.
 export function connectControl(deps: ControlDeps): Control {
   const fetchImpl = deps.fetchImpl ?? fetch;
   const log = deps.log ?? ((message: string) => console.error(message));
@@ -113,8 +109,6 @@ export function connectControl(deps: ControlDeps): Control {
         scheduleReconnect();
         return;
       }
-      // A response with a body that never delivers a byte (immediate EOF) must not reset the
-      // backoff — only a stream that actually carried data proves the connection was live.
       await consumeFrames(
         response.body,
         (command, issuedAt) => deps.handlers[command](issuedAt),

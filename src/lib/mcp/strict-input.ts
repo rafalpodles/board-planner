@@ -1,17 +1,5 @@
 import { z } from "zod";
 
-/**
- * BP-497: `z.object(shape)` drops a key the shape does not declare, so a call naming a parameter
- * the tool never had was answered 200 having written nothing — and the one field that did move,
- * `updatedAt`, is the one that reads as proof something was written.
- *
- * The advertised schema already said `additionalProperties: false` before this, because
- * zod-to-json-schema emits it for a stripping object as well. So this does not tighten a contract
- * clients were told was loose; it makes the one they were already given true.
- *
- * `hints` names the replacement where there is one. `writes` is whether this tool writes at all,
- * because "nothing was written" is misleading on a tool that never would.
- */
 export function unknownParameterMessage(
   keys: string[],
   hints: Record<string, string> = {},
@@ -19,8 +7,6 @@ export function unknownParameterMessage(
 ): string {
   return `Not a parameter of this tool: ${keys
     .map((key) =>
-      // Own keys only: "__proto__", "constructor" and "toString" are stray keys a confused
-      // client really sends, and an inherited hit renders Object.prototype into the message
       Object.hasOwn(hints, key) ? `"${key}" — use ${hints[key]}` : `"${key}"`
     )
     .join("; ")}.${writes ? " Nothing was written." : ""}`;
@@ -35,8 +21,6 @@ export function strictInput<Shape extends z.ZodRawShape>(
   const message = (keys: string[]) => unknownParameterMessage(keys, hints, writes);
 
   type Issue = { code: string; keys?: string[] };
-  // zod 3 spells this hook errorMap and zod 4 spells it error; mcp-server is on a different major
-  // from the app, and passing both is what lets this file stay identical on either side.
   const params = {
     errorMap: (issue: Issue, ctx: { defaultError: string }) =>
       issue.code === "unrecognized_keys" && issue.keys
@@ -51,10 +35,6 @@ export function strictInput<Shape extends z.ZodRawShape>(
 
 export const NOTHING_TO_CHANGE = "named nothing to change. Nothing was written.";
 
-/**
- * Fields a task really has and MCP really cannot set. Before BP-497 they were dropped in silence;
- * a refusal that named them and pointed nowhere would be a different kind of unhelpful.
- */
 const UNREACHABLE_TASK_FIELDS: Record<string, string> = {
   dueDate: "the app — MCP does not set it",
   sprint: "the app — MCP does not set it",

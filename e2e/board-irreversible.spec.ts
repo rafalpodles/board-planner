@@ -39,17 +39,6 @@ import {
 import { signIn } from "./session";
 import { expectToast, recordedToasts, recordToasts } from "./toasts";
 
-/**
- * BP-466 — the half of the board that cannot be undone: delete, bulk delete, duplicate, and the
- * sprint moves, driven from the card menu, the selection and the task screen. The reversible
- * half (drag, reorder, filter, bulk move) lives in kanban-board-core.spec.ts.
- *
- * Every irreversible action here is first cancelled and shown to have done nothing, then done and
- * shown over the API to have happened — the board repaints optimistically on most of these paths,
- * so a card vanishing says nothing about the server having agreed.
- */
-
-// seed() lays down four tasks and leaves taskCounter on the same number, so a copy is minted with this
 const SEEDED_TASKS = 4;
 const NEXT_TASK_NUMBER = 5;
 
@@ -69,7 +58,6 @@ function contextMenu(page: Page): Locator {
   return page.getByTestId("task-context-menu");
 }
 
-/** The list row j/k has focused, read back as the task number in its key. */
 async function focusedRowTaskNumber(page: Page): Promise<number> {
   const focusedRow = page.locator("tr.ring-2");
   await expect(focusedRow).toHaveCount(1);
@@ -80,7 +68,6 @@ async function openBoard(page: Page, cards = SEEDED_TASKS) {
   await signIn(page);
   await page.goto(boardUrl);
   await expect(page.getByRole("heading", { name: PROJECT_NAME })).toBeVisible();
-  // The heading comes from the project request and the cards from their own
   await expect(page.locator(CARDS)).toHaveCount(cards);
   await recordToasts(page);
 }
@@ -92,7 +79,6 @@ async function openMenuOn(page: Page, taskNumber: number): Promise<Locator> {
   return menu;
 }
 
-/** Selection mode, with the named cards ticked. */
 async function select(page: Page, taskNumbers: number[]) {
   await page.getByRole("button", { name: "Select", exact: true }).click();
   for (const n of taskNumbers) {
@@ -108,7 +94,6 @@ async function readTask(request: APIRequestContext, taskNumber: number) {
   return { status: res.status(), body: res.status() === 200 ? await res.json() : null };
 }
 
-/** A write on one task, registered before the click that causes it. */
 function taskWrite(page: Page, method: string, taskId: { toString(): string }) {
   return page.waitForResponse(
     (res) => res.request().method() === method && res.url().endsWith(`/tasks/${taskId}`)
@@ -126,8 +111,6 @@ test.beforeEach(async () => {
 });
 
 test.describe("duplicate", () => {
-  // What the copy has to carry, planted on the original first: every field the payload names is
-  // set to something the seed does not default to, so a copy of the defaults could not pass
   async function dressTheOriginal(request: APIRequestContext) {
     const res = await request.put(`/api/projects/${PROJECT_ID}/tasks/${SIBLING_TASK_ID}`, {
       headers: ADMIN_AUTH,
@@ -160,9 +143,6 @@ test.describe("duplicate", () => {
     const menu = await openMenuOn(page, SIBLING_TASK_NUMBER);
     await menu.getByRole("button", { name: "Duplicate", exact: true }).click();
 
-    // The body is the contract (src/lib/task-duplicate.ts): what a copy carries, and what it
-    // deliberately leaves out — a status would 400 on a renamed board, an assignee would hand
-    // somebody work nobody offered them
     const body = (await posted).postDataJSON();
     expect(body).toMatchObject({
       title: `Copy of ${SIBLING_TASK_TITLE}`,
@@ -181,9 +161,6 @@ test.describe("duplicate", () => {
     expect((await created).status()).toBe(201);
     await expectToast(page, "Task duplicated");
 
-    // Minted with the next number and landing in the backlog column, not the original's.
-    // Tight: the board's ten-second poll would show the copy anyway, and the reload the
-    // duplicate makes is what this waits for
     const copy = card(page, NEXT_TASK_NUMBER);
     await expect(copy).toHaveCount(1, { timeout: 2_000 });
     await expect(boardColumn(page, "planned").locator(`a[href="${taskUrl(NEXT_TASK_NUMBER)}"]`)).toContainText(
@@ -200,7 +177,6 @@ test.describe("duplicate", () => {
     });
     expect(stored.body.checklist.map((i: { done: boolean }) => i.done)).toEqual([false, false]);
 
-    // The original is untouched: still ticked, still assigned, still where it was
     const original = await readTask(request, SIBLING_TASK_NUMBER);
     expect(original.body.status).toBe("in_progress");
     expect(original.body.assignee.username).toBe(MEMBER_USERNAME);
@@ -218,7 +194,6 @@ test.describe("duplicate", () => {
     );
     const created = taskCreated(page);
     await page.getByRole("button", { name: "Duplicate", exact: true }).click();
-    // The same contract as the board's menu, from the other place that sends it
     const body = (await posted).postDataJSON();
     expect(body.title).toBe(`Copy of ${SIBLING_TASK_TITLE}`);
     for (const left of ["status", "assignee", "sprint", "agent"]) {
@@ -227,8 +202,6 @@ test.describe("duplicate", () => {
     expect((await created).status()).toBe(201);
 
     await expect(page).toHaveURL(new RegExp(`${taskUrl(NEXT_TASK_NUMBER)}$`));
-    // One editor, and no dialog over it: BP-521 turned the push into a document load, so the
-    // intercepting modal is neither drawn on top of the copy nor left armed behind it.
     await expect(page.getByLabel("Task title")).toHaveCount(1);
     await expect(page.getByLabel("Task title")).toHaveValue(`Copy of ${SIBLING_TASK_TITLE}`);
     await expect(page.getByRole("dialog")).toHaveCount(0);
@@ -238,9 +211,6 @@ test.describe("duplicate", () => {
     expect(stored.body.checklist.map((i: { done: boolean }) => i.done)).toEqual([false, false]);
   });
 
-  // BP-526: "Copy of " prepended with no clamp meant any original 193 characters or longer — a
-  // length the product had already accepted on save — pushed the copy's title past the 200-char
-  // cap, and the server refused the duplicate outright with a generic error.
   test("a title at the old cutoff still duplicates, clamped to the cap", async ({ page, request }) => {
     const longTitle = "A".repeat(193);
     const renamed = await request.put(`/api/projects/${PROJECT_ID}/tasks/${SIBLING_TASK_ID}`, {
@@ -290,20 +260,12 @@ test.describe("delete", () => {
       expect((await deleted).status()).toBe(200);
 
       await expectToast(page, "Task deleted");
-      // Tight, here and below: the ten-second poll would drop the card on its own, and the
-      // board's own removal is what is under test
       await expect(card(page, FINISHED_TASK_NUMBER)).toHaveCount(0, { timeout: 1_000 });
       await expect(page.locator(CARDS)).toHaveCount(SEEDED_TASKS - 1, { timeout: 1_000 });
       expect((await readTask(request, FINISHED_TASK_NUMBER)).status).toBe(404);
     });
   });
 
-  /**
-   * BP-527. The dialog rendered without a `loading` prop, so the confirm button stayed clickable
-   * for the whole round trip: a double click fired two DELETEs, the first succeeding and the
-   * second landing on an already-gone task — answering 404 and toasting a failure right after the
-   * success toast, reporting a failed delete for a task that no longer existed.
-   */
   test("a double click sends one DELETE, not two, and no false failure toast", async ({
     page,
     request,
@@ -314,8 +276,6 @@ test.describe("delete", () => {
     await page.route(`**/api/projects/*/tasks/${FINISHED_TASK_ID}`, async (route) => {
       if (route.request().method() !== "DELETE") return route.continue();
       deleteRequests += 1;
-      // Held open long enough that the dialog is still disabled when the double click's second
-      // half lands — without this margin a fast local response could close the window on its own
       await new Promise((resolve) => setTimeout(resolve, 300));
       await route.continue();
     });
@@ -326,7 +286,6 @@ test.describe("delete", () => {
 
     const deleted = taskWrite(page, "DELETE", FINISHED_TASK_ID);
     await dialog.getByRole("button", { name: "Delete", exact: true }).dblclick();
-    // The guard showing itself while the request is in flight — the same wiring as bulk delete
     await expect(dialog.getByRole("button", { name: "Deleting..." })).toBeDisabled();
     expect((await deleted).status()).toBe(200);
 
@@ -336,12 +295,6 @@ test.describe("delete", () => {
     expect((await readTask(request, FINISHED_TASK_NUMBER)).status).toBe(404);
   });
 
-  /**
-   * BP-556, found by the independent review of BP-527. The confirm button was gated on `loading`
-   * but Cancel and the dialog's own close (backdrop/Escape) were not — a person could dismiss the
-   * dialog while the DELETE was still in flight, and a failure landing afterwards toasted with
-   * nothing on screen to connect it to.
-   */
   test("Cancel and Escape are refused while the delete is in flight, so a later failure still has a dialog to land on", async ({
     page,
     request,
@@ -364,13 +317,11 @@ test.describe("delete", () => {
     await dialog.getByRole("button", { name: "Delete", exact: true }).click();
     await requestSent;
 
-    // In flight: neither the button nor the keyboard escape hatch can dismiss it
     await expect(dialog.getByRole("button", { name: "Cancel" })).toBeDisabled();
     await page.keyboard.press("Escape");
     await expect(dialog).toBeVisible();
 
     expect((await deleted).status()).toBe(500);
-    // Settled on its own — the dialog closes itself once there is something to report
     await expect(dialog).toBeHidden();
     await expectToast(page, "Failed to delete task");
     await expect(card(page, FINISHED_TASK_NUMBER)).toBeVisible();
@@ -397,7 +348,6 @@ test.describe("delete", () => {
     await dialog.getByRole("button", { name: "Delete" }).click();
     expect((await deleted).status()).toBe(200);
 
-    // Gone, and the screen that showed it goes with it: the board loads without it
     await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_KEY}$`));
     await expect(page.locator(CARDS)).toHaveCount(SEEDED_TASKS - 1);
     await expect(card(page, FINISHED_TASK_NUMBER)).toHaveCount(0);
@@ -408,8 +358,6 @@ test.describe("delete", () => {
     page,
     request,
   }) => {
-    // Below lg the property rail — and its Delete — is not on the screen; the top bar's menu
-    // carries the action until there is room
     await page.setViewportSize({ width: 900, height: 800 });
     await signIn(page);
     await page.goto(taskUrl(DECOY_TASK_NUMBER));
@@ -428,11 +376,6 @@ test.describe("delete", () => {
     expect((await readTask(request, DECOY_TASK_NUMBER)).status).toBe(404);
   });
 
-  /**
-   * BP-337. A delete takes strictly more off a worker than a move does — the task, not just the
-   * column — so it asks separately, and "Delete anyway" is the person's force. The first dialog
-   * is the ordinary one; the server's 409 is what turns it into the second.
-   */
   test("a task a worker holds is kept until a person says Delete anyway", async ({
     page,
     request,
@@ -454,7 +397,6 @@ test.describe("delete", () => {
 
       await expect(card(page, HELD_TASK_NUMBER)).toBeVisible();
       expect((await readTask(request, HELD_TASK_NUMBER)).status).toBe(200);
-      // Still held, not merely still there
       expect((await storedExecution(HELD_TASK_ID))?.runId).toBe("e2e-run-0001");
     });
 
@@ -502,7 +444,6 @@ test.describe("bulk delete", () => {
     expect((await readTask(request, SIBLING_TASK_NUMBER)).status).toBe(200);
     expect((await readTask(request, FINISHED_TASK_NUMBER)).status).toBe(200);
 
-    // The control: confirmed, both go, and the selection is spent
     const deletes = [
       taskWrite(page, "DELETE", SIBLING_TASK_ID),
       taskWrite(page, "DELETE", FINISHED_TASK_ID),
@@ -590,16 +531,10 @@ test.describe("sprints from the card menu", () => {
       expect((await written).status()).toBe(200);
       await expectToast(page, "Moved to backlog");
       expect((await readTask(request, PLANNING_BACKLOG_TASK_NUMBER)).body.sprint).toBeNull();
-      // Unscoped, the card stays on the board
       await expect(card(page, PLANNING_BACKLOG_TASK_NUMBER)).toBeVisible();
     });
   });
 
-  /**
-   * BP-528. handleBulkSprint ran the per-task PUTs through Promise.all inside a try/catch: the
-   * first rejection skipped applySprintChange and the toast entirely, even for the task whose PUT
-   * had already landed server-side — and left the selection standing as if nothing had happened.
-   */
   test("one task's PUT failing does not hide the other's success, and the selection clears", async ({
     page,
     request,
@@ -620,18 +555,11 @@ test.describe("sprints from the card menu", () => {
     expect((await failed).status()).toBe(500);
 
     await expectToast(page, `Moved 1 of 2 to ${PLANNING_SPRINT_NAME}`);
-    // The move that already landed is kept, not thrown away with the one that didn't
     expect((await readTask(request, SIBLING_TASK_NUMBER)).body.sprint).toBe(String(PLANNING_SPRINT_ID));
     expect((await readTask(request, FINISHED_TASK_NUMBER)).body.sprint).toBeNull();
-    // Spent either way — a person is not left re-selecting the same two tasks to retry
     await expect(page.getByRole("button", { name: "Select", exact: true })).toBeVisible();
   });
 
-  /**
-   * BP-528, continued. The unscoped test above cannot tell whether applySprintChange received
-   * the fulfilled ids or the rejected ones — an unscoped board renders identically either way.
-   * Scoped to the sprint the two disagree: only a task that actually left it may vanish.
-   */
   test("on a board scoped to the sprint, only the task whose PUT actually landed leaves it", async ({
     page,
     request,
@@ -656,13 +584,7 @@ test.describe("sprints from the card menu", () => {
     expect((await failed).status()).toBe(500);
 
     await expectToast(page, "Moved 1 of 2 to backlog");
-    // Tight on purpose: the board's own ten-second poll would eventually drop the succeeded
-    // card too, which would let a wrong id slip past this assertion unnoticed
     await expect(card(page, PLANNING_SPRINT_TASK_NUMBER)).toHaveCount(0, { timeout: 1_000 });
-    // A one-shot count, not toBeVisible/toHaveCount's retry: the failed task's card is only
-    // ever removed optimistically, by the same code path a wrong id would also take — by the
-    // time the assertion above resolves, that path has already run, so a retrying assertion here
-    // would just wait out the ten-second poll putting a wrongly-removed card back and pass anyway
     expect(await card(page, PLANNING_SPRINT_DONE_TASK_NUMBER).count()).toBe(1);
 
     expect((await readTask(request, PLANNING_SPRINT_TASK_NUMBER)).body.sprint).toBeNull();
@@ -676,7 +598,6 @@ test.describe("sprints from the card menu", () => {
     page,
     request,
   }) => {
-    // A third card in the sprint, so a single removal and a two-card selection can both happen
     const joined = await request.put(`/api/projects/${PROJECT_ID}/tasks/${SIBLING_TASK_ID}`, {
       headers: ADMIN_AUTH,
       data: { sprint: String(PLANNING_SPRINT_ID) },
@@ -686,7 +607,6 @@ test.describe("sprints from the card menu", () => {
     await signIn(page);
     await page.goto(scopedUrl);
     await expect(page.getByRole("heading", { name: PROJECT_NAME })).toBeVisible();
-    // Only the sprint's three tasks: the backlog one and the rest of the seed are elsewhere
     await expect(page.locator(CARDS)).toHaveCount(3);
     await recordToasts(page);
 
@@ -697,8 +617,6 @@ test.describe("sprints from the card menu", () => {
       expect((await written).status()).toBe(200);
       await expectToast(page, "Moved to backlog");
 
-      // Tight on purpose: the board also polls every ten seconds and would drop the card on its
-      // own, so a patient wait here would pass with the board's own removal deleted
       await expect(card(page, SIBLING_TASK_NUMBER)).toHaveCount(0, { timeout: 1_000 });
       await expect(page.locator(CARDS)).toHaveCount(2, { timeout: 1_000 });
       expect((await readTask(request, SIBLING_TASK_NUMBER)).body.sprint).toBeNull();
@@ -721,7 +639,6 @@ test.describe("sprints from the card menu", () => {
       expect((await readTask(request, PLANNING_SPRINT_DONE_TASK_NUMBER)).body.sprint).toBeNull();
     });
 
-    // Back on the unscoped board, all three are still tasks
     await page.goto(boardUrl);
     await expect(card(page, SIBLING_TASK_NUMBER)).toBeVisible();
     await expect(card(page, PLANNING_SPRINT_TASK_NUMBER)).toBeVisible();
@@ -729,10 +646,6 @@ test.describe("sprints from the card menu", () => {
   });
 });
 
-// BP-529. The sibling scenario the block above never hits: a task whose sprint already closed,
-// on a board with no open sprint left to pair it with. "Move to sprint" has nothing to offer —
-// that part is right — but that used to take "Remove from sprint" down with it, which is exactly
-// the button this task needs.
 test.describe("a sprint that closed with the task still in it", () => {
   test.beforeEach(async () => {
     await seedTaskInCompletedSprint();
@@ -765,7 +678,6 @@ test.describe("selecting without opening", () => {
     await card(page, SIBLING_TASK_NUMBER).click({ modifiers: ["Shift"] });
     await expect(page.getByRole("button", { name: "Select (1)" })).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_KEY}$`));
-    // Nor did the anchor open anywhere else
     expect(page.context().pages()).toHaveLength(1);
 
     await card(page, FINISHED_TASK_NUMBER).click({ modifiers: ["Shift"] });
@@ -774,7 +686,6 @@ test.describe("selecting without opening", () => {
     await page.keyboard.press("Escape");
     await expect(page.getByRole("button", { name: "Select", exact: true })).toBeVisible();
 
-    // The control: a plain click opens the task
     await card(page, SIBLING_TASK_NUMBER).click();
     await expect(page).toHaveURL(new RegExp(`${taskUrl(SIBLING_TASK_NUMBER)}$`));
   });
@@ -793,7 +704,6 @@ test.describe("selecting without opening", () => {
     await title.click({ modifiers: ["ControlOrMeta"] });
     await expect(page.getByRole("button", { name: "Select", exact: true })).toBeVisible();
 
-    // The control
     await title.click();
     await expect(page).toHaveURL(new RegExp(`${taskUrl(SIBLING_TASK_NUMBER)}$`));
   });
@@ -825,8 +735,6 @@ test.describe("keyboard", () => {
       await expect(page.getByRole("button", { name: "List", exact: true })).toHaveAttribute("aria-current", "true");
       await expect(page.locator("tr", { hasText: SIBLING_TASK_TITLE })).toBeVisible();
 
-      // Two seconds, not the default thirty: the board polls every ten, and a poll's response
-      // is indistinguishable from the one the key is supposed to cause
       const reloaded = page.waitForResponse(
         (res) => res.request().method() === "GET" && /\/api\/projects\/[^/]+\/tasks/.test(res.url()),
         { timeout: 2_000 }
@@ -840,13 +748,6 @@ test.describe("keyboard", () => {
     });
   });
 
-  /**
-   * The help lists "Esc — Close dialogs", and for a while it did not: the board's own Escape
-   * handler re-rendered on every press and the help's listener was re-subscribed in the middle of
-   * the dispatch, so it never saw the key. This test asserted that limit until BP-522 fixed it,
-   * and going red is how the fix was noticed. `e2e/shortcut-help-escape.spec.ts` carries the rest
-   * of that surface — the modal, the confirm, the context menu and `?`.
-   */
   test("Escape closes the help", async ({ page }) => {
     await openBoard(page);
     const help = page.getByRole("heading", { name: "Keyboard Shortcuts" });
@@ -875,28 +776,19 @@ test.describe("keyboard", () => {
     await expect(page.locator("tbody tr").first()).toHaveClass(/ring-2/);
     await page.keyboard.press("v");
 
-    // ⌘/Ctrl-click and a middle click leave the board where it is and open the card elsewhere
     for (const how of [{ modifiers: ["ControlOrMeta" as const] }, { button: "middle" as const }]) {
       const opened = page.context().waitForEvent("page");
       await card(page, SIBLING_TASK_NUMBER).click(how);
       const tab = await opened;
-      // The page event fires before the new tab has navigated anywhere
       await expect(tab).toHaveURL(new RegExp(`${taskUrl(SIBLING_TASK_NUMBER)}$`));
       await tab.close();
       await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_KEY}$`));
     }
   });
 
-  /**
-   * The board's Enter listens on `document` and opens whichever task j/k focused; a card's own
-   * Enter opens that card. Both can be true at once — a card focused with Tab while j has focused
-   * another — and TaskCard stops the native event so only its own wins. Removing that stop makes
-   * this land on the j-focused task instead.
-   */
   test("Enter on a focused card opens that card, not the one j focused", async ({ page }) => {
     await openBoard(page);
 
-    // Which task j focuses first is the list's business; ask it
     await page.keyboard.press("v");
     await page.keyboard.press("j");
     const first = await focusedRowTaskNumber(page);
@@ -906,7 +798,6 @@ test.describe("keyboard", () => {
     await expect(page).toHaveURL(new RegExp(`${taskUrl(first)}$`));
 
     await page.goto(boardUrl);
-    // The view mode is remembered, so this comes back as the list; the seam is a card's
     await page.getByRole("button", { name: "Board", exact: true }).click();
     await expect(page.locator(CARDS)).toHaveCount(SEEDED_TASKS);
     await page.keyboard.press("j");
@@ -916,8 +807,6 @@ test.describe("keyboard", () => {
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(new RegExp(`${taskUrl(other)}$`));
 
-    // Shift+Enter is the keyboard's shift-click: the focused card joins the selection and nothing
-    // opens. Last, because once a selection exists a plain Enter selects too, by design.
     await page.goto(boardUrl);
     await expect(page.locator(CARDS)).toHaveCount(SEEDED_TASKS);
     await card(page, other).focus();
@@ -926,11 +815,6 @@ test.describe("keyboard", () => {
     await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_KEY}$`));
   });
 
-  /**
-   * BP-544. j/k used to move `focusedTaskIndex` in either view, and Enter navigated to wherever
-   * it landed — but only the list draws a ring around the focused row; the board drew nothing, so
-   * j moved an invisible cursor and Enter jumped to whatever task it silently landed on.
-   */
   test("j/k/Enter are inert on the board — the cursor they move is only ever drawn in the list", async ({
     page,
   }) => {
@@ -944,15 +828,11 @@ test.describe("keyboard", () => {
     await page.keyboard.press("j");
     await page.keyboard.press("k");
     await page.keyboard.press("Enter");
-    // A one-shot check after a settle, not a retrying matcher: the URL already matches before
-    // Enter is even pressed, so toHaveURL would pass on its first poll and never see a
-    // navigation that lands a tick later — measured at ~5ms, so 1s is a comfortable margin
     await page.waitForTimeout(1_000);
     await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_KEY}$`));
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(page.locator(CARDS)).toHaveCount(SEEDED_TASKS);
 
-    // The control: the same keys, in the list, move a visible cursor and Enter opens it
     await page.getByRole("button", { name: "List", exact: true }).click();
     await page.keyboard.press("j");
     const focused = await focusedRowTaskNumber(page);
@@ -990,8 +870,6 @@ test.describe("a board with nothing on it, and one that would not load", () => {
   test("when the board cannot load, Retry loads it", async ({ page }) => {
     await signIn(page);
 
-    // The project request fails until Retry is pressed. The board polls every ten seconds, so a
-    // failure that cleared itself would let the poll do Retry's job and leave the button unproven.
     let failing = true;
     await page.route(`**/api/projects/${PROJECT_KEY}`, (route) =>
       failing ? route.fulfill({ status: 500, body: "{}" }) : route.continue()

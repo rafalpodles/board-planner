@@ -13,7 +13,6 @@ describe("isNavItemActive", () => {
     expect(isNavItemActive("/settings/users", "/settings")).toBe(true);
   });
 
-  // A plain startsWith would light up My Tasks on /my-tasksomething
   it("does not match a sibling that merely shares a prefix", () => {
     expect(isNavItemActive("/my-tasksomething", "/my-tasks")).toBe(false);
     expect(isNavItemActive("/projectsettings", "/projects")).toBe(false);

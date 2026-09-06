@@ -108,8 +108,6 @@ describe("GET /api/workers/:workerId/stream", () => {
   it("keeps the stream open and pings on the interval instead of failing", async () => {
     const response = await GET(request(), ctx());
     const controller = registerWorkerStream.mock.calls[0][1] as { enqueue: ReturnType<typeof vi.fn> };
-    // start() calls registerWorkerStream with the real controller; wrap enqueue to observe pings
-    // without breaking it, unlike the failure test above.
     const enqueue = vi.fn(controller.enqueue.bind(controller));
     controller.enqueue = enqueue;
 

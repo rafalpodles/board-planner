@@ -45,7 +45,6 @@ describe("notifyPasswordChanged", () => {
 
     expect(sent().text).toContain("(rafal)");
     expect(sent().text).toContain("not sent by email");
-    // The admin case is not a takeover alarm — somebody they can ask did it on purpose
     expect(sent().text).not.toContain("can sign in as you right now");
   });
 

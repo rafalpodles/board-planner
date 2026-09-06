@@ -34,7 +34,6 @@ function stored(notifications: unknown) {
   findById.mockReturnValue({ lean: async () => ({ _id: "u1", notifications }) });
 }
 
-// withAuth is mocked to a one-argument handler; the real signature takes the context too
 const put = (body: unknown) =>
   (PUT as unknown as (req: Request) => Promise<Response>)(
     new Request("http://x/api/users/me/notifications", { method: "PUT", body: JSON.stringify(body) })
@@ -53,15 +52,12 @@ beforeEach(() => {
 });
 
 describe("what a PUT is allowed to clear", () => {
-  // normaliseMatrix(undefined) is an all-off grid, so writing it unconditionally meant a client
-  // sending only a chat connection silently went dark on every row and every channel
   it("leaves the grid alone when the request carries none", async () => {
     await put({ chat: { kind: "slack", webhookUrl: "https://hooks.example/x" } });
 
     expect(written()).not.toHaveProperty("notifications.defaults");
   });
 
-  // A client that serialises a missing field as null must not be read as "mute everything"
   it("treats a null grid as absent rather than as all-off", async () => {
     await put({ defaults: null, chat: { kind: "slack", webhookUrl: "https://hooks.example/x" } });
 
@@ -73,12 +69,6 @@ describe("what a PUT is allowed to clear", () => {
   });
 });
 
-/**
- * The connection is resolved once from the stored state and the request, and it writes two fields
- * and nothing else. Each of these was a defect: re-stating the connection reported it gone and
- * wiped the chat column everywhere, an address was storable under no service, and a `chat` that
- * said nothing — `{}` or a non-object — deleted an unrecoverable credential on a 200.
- */
 describe("the truth table for the chat connection", () => {
   it("re-stating the connection exactly as it stands leaves the credential alone", async () => {
     await put({ chat: { kind: "slack" } });
@@ -119,8 +109,6 @@ describe("the truth table for the chat connection", () => {
     expect(findByIdAndUpdate).not.toHaveBeenCalled();
   });
 
-  // The trap one shape over from the one above: an object that names nothing is a partial update,
-  // not an instruction to destroy a credential
   it("leaves the connection alone when chat is an object that says nothing", async () => {
     const res = await put({ defaults: grid(false), chat: {} });
 
@@ -138,8 +126,6 @@ describe("the truth table for the chat connection", () => {
     expect(set["notifications.chat.webhookUrl"]).toBe("");
   });
 
-  // Disconnecting used to rewrite the grid and every project override to strip chat, which cost a
-  // race, regenerated subdocument ids, and left the screen disabling the box it demanded you clear
   it("touches no grid at all when the connection goes away", async () => {
     stored({ ...CONNECTED, projects: [{ project: "p1", matrix: grid(true) }] });
 
@@ -151,8 +137,6 @@ describe("the truth table for the chat connection", () => {
     expect(set).not.toHaveProperty("notifications.projects.0.matrix");
   });
 
-  // A tick with no connection is a preference, not an error: it delivers nothing today and starts
-  // working if a webhook appears, which resolveChannels decides at send time
   it("stores a chat tick from an account with no connection", async () => {
     stored({ chat: { kind: "", webhookUrl: "" }, projects: [] });
 
@@ -164,13 +148,6 @@ describe("the truth table for the chat connection", () => {
   });
 });
 
-/**
- * Stated as "may not install an address" this rule kept slipping: a token could switch the column
- * on against an address the owner had already stored, widen it a row at a time, or delete an
- * override that was muting a board — each a standing outbound copy reached by a different verb.
- * Nothing in this repo edits notification preferences with a token, so the surface is withheld
- * whole and there is one thing to audit rather than four conditions to keep in agreement.
- */
 describe("who may change notification preferences", () => {
   it.each([
     ["installing an address", { chat: { kind: "slack", webhookUrl: "https://hooks.example/x" } }],
@@ -186,8 +163,6 @@ describe("who may change notification preferences", () => {
     expect(findByIdAndUpdate).not.toHaveBeenCalled();
   });
 
-  // Refusing before anything is read also means a machine credential cannot use the validation
-  // errors to probe what this instance allows — 400-vs-403 once mapped the webhook allowlist
   it("refuses before validating, so nothing about the instance leaks", async () => {
     caller = { _id: "u1", viaMachineCredential: true };
 

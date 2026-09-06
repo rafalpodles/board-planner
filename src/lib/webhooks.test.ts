@@ -82,8 +82,6 @@ describe("what a failed delivery records", () => {
     });
   });
 
-  // The original code's `.catch(() => {})` only ever saw a REJECTED promise — a receiver that
-  // answers with a plain 500 resolves `safeFetch` normally, so this was recorded as a success.
   it("stamps failed on a non-2xx response, not just a rejected promise", async () => {
     findByIdLean.mockResolvedValue(
       project([{ _id: "w1", url: "https://a.example/hook", events: ["task_created"], enabled: true }])
@@ -96,9 +94,6 @@ describe("what a failed delivery records", () => {
     expect(callsFor("w1")[0][1].$set["webhooks.$.lastError"]).toBe("HTTP 500");
   });
 
-  // safeFetch's BlockedDestinationError names exactly why a destination was refused — "resolves to
-  // the private address X" — which is precisely what the SSRF guard exists to keep from whoever
-  // chose that URL. Recording it verbatim would turn a blind refusal into a reconnaissance oracle.
   it("does not persist the detail from a blocked-destination error", async () => {
     findByIdLean.mockResolvedValue(
       project([{ _id: "w1", url: "https://a.example/hook", events: ["task_created"], enabled: true }])
@@ -113,9 +108,6 @@ describe("what a failed delivery records", () => {
     expect(written).toBe("Blocked destination");
   });
 
-  // Refused before ever reaching the network is still an attempt: without recording it, a URL
-  // that stops passing this check (edited to something disallowed, or DNS moved) reads as "still
-  // delivering" on the settings page forever, because nothing ever writes over the last success.
   it("records an outcome even when the destination check itself refuses the URL", async () => {
     findByIdLean.mockResolvedValue(
       project([{ _id: "w1", url: "https://a.example/hook", events: ["task_created"], enabled: true }])
@@ -156,11 +148,6 @@ describe("multiple webhooks on the same event", () => {
 });
 
 describe("ordering against a concurrent attempt on the same webhook", () => {
-  // Two events firing close together for one webhook can settle out of order — an older, slower
-  // attempt landing its write after a newer, faster one's would otherwise overwrite it. The guard
-  // is in the query filter itself ($elemMatch with an $or on lastAttemptAt), asserted here by
-  // shape since only a real MongoDB evaluates whether it actually excludes a stale write — that was
-  // verified separately against a live instance.
   it("scopes the write to a webhook whose recorded attempt is not already newer", async () => {
     findByIdLean.mockResolvedValue(
       project([{ _id: "w1", url: "https://a.example/hook", events: ["task_created"], enabled: true }])
@@ -194,9 +181,6 @@ describe("recording the outcome is itself fire-and-forget", () => {
     findByIdLean.mockResolvedValue(
       project([{ _id: "w1", url: "https://a.example/hook", events: ["task_created"], enabled: true }])
     );
-    // Held open deliberately: if dispatchWebhooks awaited the delivery chain, this call would
-    // never resolve, and the test itself would time out — the only way this test can fail for the
-    // right reason. A settled mock, unlike the earlier Date.now() check, can't pass by accident.
     let releaseDelivery!: (v: { ok: boolean; status: number }) => void;
     safeFetch.mockReturnValue(new Promise((resolve) => (releaseDelivery = resolve)));
 

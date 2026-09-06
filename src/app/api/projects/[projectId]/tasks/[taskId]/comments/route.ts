@@ -9,7 +9,6 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   const { projectId, taskId } = await params;
   await connectDB();
 
-  // Verify task belongs to project
   const task = await Task.findOne({ _id: taskId, project: projectId });
   if (!task) {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });

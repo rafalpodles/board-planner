@@ -25,8 +25,6 @@ export default function PreferencesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Saved on change rather than behind a button: a single switch has nothing to
-  // review before committing, and the board is expected to follow immediately
   async function handleToggle(next: boolean) {
     const previous = collapseEmptyColumns;
     setCollapseEmptyColumns(next);

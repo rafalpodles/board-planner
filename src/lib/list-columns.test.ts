@@ -12,14 +12,11 @@ import {
 import { SORT_OPTIONS } from "@/types";
 
 describe("column definitions", () => {
-  // A row with no title is not a row, and the key is how you open it
   it("keeps key and title unhideable", () => {
     expect(listColumns().filter((c) => c.fixed).map((c) => c.id)).toEqual(["key", "title"]);
     expect(hideableColumns().map((c) => c.id)).not.toContain("title");
   });
 
-  // Twelve columns at once squeezed the title out; these are the ones that earn
-  // their width least
   it("starts with the noisiest columns off", () => {
     expect(defaultHidden()).toEqual(["category", "dueDate", "updatedAt"]);
     expect(visibleCount(defaultHidden())).toBe(listColumns().length - 3);
@@ -35,7 +32,6 @@ describe("column definitions", () => {
     expect(visibleCount(defaultHidden(fields), fields)).toBe(listColumns().length - 3);
   });
 
-  // Column ids double as sort fields, so a typo would silently break sorting
   it("names every column after a real sort field", () => {
     const fields = new Set(SORT_OPTIONS.map((o) => o.value));
     for (const column of listColumns()) expect(fields).toContain(column.id);
@@ -72,7 +68,6 @@ describe("toggleColumn", () => {
   });
 });
 
-// A stored blob outlives the code that wrote it
 describe("sanitizeHidden", () => {
   it("drops unknown ids", () => {
     expect(sanitizeHidden(["status", "nonsense", 7])).toEqual(["status"]);

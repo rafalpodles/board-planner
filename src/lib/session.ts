@@ -34,29 +34,6 @@ export function appOrigins(): string[] {
     .filter((origin) => origin.length > 0);
 }
 
-/**
- * This instance's own origin, from configuration only.
- *
- * Never from a request header. `x-forwarded-host` is client-supplied on a deployment with no
- * proxy in front, and reading it turned the MCP tool client into a reader of whatever address a
- * token holder named, and the PM OAuth callback into an open redirect (BP-316). Returns null
- * rather than guessing, so every caller has to decide what "not configured" means for it.
- *
- * `APP_ORIGIN` is an allowlist rather than an address — the compose file's own default lists
- * localhost, and a deployment that accepts both a LAN and a public origin has no reason to order
- * them. So it is a source only when it names exactly one origin; anything else needs
- * `PUBLIC_ORIGIN`, which is a single value and settable at runtime.
- *
- * `NEXT_PUBLIC_APP_URL` is deliberately NOT a source. Next.js inlines it at build time, so in the
- * shipped bundle it is a literal from the build machine — the Dockerfile defaults it to
- * `http://localhost:3000`, which made it always truthy and turned the intended fail-closed 500
- * into a discovery document advertising localhost, cached for an hour. A value that cannot be
- * corrected at runtime cannot be this one (BP-316 review).
- *
- * Every candidate is parsed, and the scheme is checked. `new URL()` accepts `board.example.com:8443`
- * as an opaque URL whose `.origin` is the string "null" — truthy, so every "not configured" guard
- * would pass and the endpoints would read `null/oauth/token`.
- */
 export const ORIGIN_REQUIRED =
   "This instance's own origin is not configured. Set PUBLIC_ORIGIN to an http(s) URL (or give APP_ORIGIN exactly one origin): the MCP endpoint publishes it to clients and calls this instance's own API with it, so it must not come from a request header.";
 
@@ -90,10 +67,6 @@ export function assertSessionConfig(): void {
     );
   }
 
-  // The compose stack ships the flag on so a localhost deployment works out of the box, which makes
-  // "still insecure once it moved behind TLS" the likely mistake rather than an exotic one.
-  // Allowlisted, not blocklisted: a schemeless APP_ORIGIN is a plausible typo and would slip past a
-  // startsWith("https://") test, waving the flag through on exactly the deployment it guards.
   const notPlainHttp = origins.filter((origin) => !origin.startsWith("http://"));
   if (notPlainHttp.length > 0) {
     throw new Error(
@@ -122,10 +95,6 @@ function cookieHeader(name: string, value: string, maxAgeSeconds: number): strin
   return attributes.join("; ");
 }
 
-// Max-Age tracks the ABSOLUTE cap, not the idle window. The idle window slides server-side on every
-// use, but nothing re-sends Set-Cookie, so pinning the cookie to it would have the browser discard a
-// live session 30 days after login however often it was used — the very logout this work removes.
-// A cookie outliving its row is harmless: the server is the authority and answers 401.
 export function buildSessionCookie(token: string, absoluteExpiresAt: Date): string {
   const maxAge = Math.max(0, Math.floor((absoluteExpiresAt.getTime() - Date.now()) / 1000));
   return cookieHeader(sessionCookieName(), token, maxAge);
@@ -154,9 +123,6 @@ export function readSessionCookie(header: string | null): string | null {
     values.push(part.slice(separator + 1).trim());
   }
 
-  // Two cookies of one name mean one was set for a parent domain — the shadowing the __Host- prefix
-  // exists to prevent, and which the unprefixed name cannot. Taking either is a coin flip on whose
-  // session wins, so take neither.
   if (values.length !== 1) return null;
   return values[0].length > 0 ? values[0] : null;
 }

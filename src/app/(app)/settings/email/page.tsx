@@ -35,8 +35,6 @@ export default function EmailSettingsPage() {
       setSettings(await api.get("/api/admin/email"));
     } catch {
       toast("Failed to read the mail settings", "error");
-      // Otherwise the page spins for ever: the toast clears after three seconds and leaves an
-      // admin watching an animation with nothing to click
       setSettings({ configured: false, host: "", port: 0, user: "", from: "" });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -58,9 +56,6 @@ export default function EmailSettingsPage() {
       const res: { to: string } = await api.post("/api/admin/email", {});
       setResult({ ok: true, heading: `Accepted for delivery to ${res.to}`, message: "" });
     } catch (err) {
-      // A refusal by the mail server and a refusal by us are different answers to the question the
-      // admin asked, and saying the server refused when it was never contacted sends them to the
-      // wrong place to look. Only 502 is the server's own answer.
       const status = (err as { status?: number })?.status;
       setResult({
         ok: false,
@@ -117,8 +112,6 @@ export default function EmailSettingsPage() {
       >
         {sending ? "Sending…" : "Send a test message"}
       </Button>
-      {/* Naming the address is also how the page stops offering a button that can only fail:
-          without one the server refuses, and a round trip to learn that is a round trip wasted */}
       <p className="mt-2 text-sm text-text-muted">
         {currentUser?.email ? (
           `It goes to ${currentUser.email}, the address on your profile.`

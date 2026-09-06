@@ -79,16 +79,12 @@ describe("loadIdentity", () => {
     expect(loadIdentity({ read: () => text })).toEqual({ workerId: "6a7c686f70ed274cf658b1b3", credential: "cpw_x" });
   });
 
-  // The identity file lives under the state directory, which the agent reaches through its own
-  // HOME. A still-valid credential paired with a rewritten workerId is the reachable half of it.
   it("returns null when the stored workerId is not the ObjectId the server mints", () => {
     const text = JSON.stringify({ workerId: "../../evil", credential: "cpw_x", heartbeatMs: 60_000 });
     expect(loadIdentity({ read: () => text })).toBeNull();
   });
 });
 
-// BP-327: the register response's workerId becomes a filesystem path — repos.ts derives the
-// worktree root from it — so "a non-empty string" was never a strong enough shape for it.
 describe("the workerId a registration hands back", () => {
   it("is refused when it would traverse out of the worktree root", async () => {
     const deps = depsWith({
@@ -110,8 +106,6 @@ describe("the workerId a registration hands back", () => {
     expect(loadIdentity(deps.store)).toBeNull();
   });
 
-  // The enrolment token is spent by the registration that returned the bad id, so forgetting it
-  // here would strand the worker with no way to try again
   it("leaves the enrolment token in place when it refuses", async () => {
     const forgetEnrolmentToken = vi.fn();
     const deps = depsWith({
@@ -151,9 +145,6 @@ describe("startHeartbeat", () => {
     expect(deps.store.write).toHaveBeenCalledWith(expect.any(String), { mode: 0o600 });
   });
 
-  // Registration authenticates with a single-use enrolment token, never the operational token. The
-  // agent runs at this uid with Read, so whatever sits on this disk must not be able to lift the
-  // worker's own kill switch — and an unscoped admin token could.
   it("registers with the enrolment token, not the operational one", async () => {
     const deps = depsWith({ stored: null });
 
@@ -174,7 +165,6 @@ describe("startHeartbeat", () => {
     expect(forget).toHaveBeenCalledTimes(1);
   });
 
-  // Order matters: forgetting first would strand the worker with a spent token and no credential
   it("keeps the token when registration fails", async () => {
     const forget = vi.fn();
     const deps = depsWith({ stored: null, registerStatus: 401, forgetEnrolmentToken: forget });
@@ -184,8 +174,6 @@ describe("startHeartbeat", () => {
     expect(forget).not.toHaveBeenCalled();
   });
 
-  // The failure the ordering exists for: if the credential cannot be persisted and the token has
-  // already been spent server-side, deleting it too leaves this worker unable to ever register.
   it("keeps the token when the credential cannot be written to disk", async () => {
     const forget = vi.fn();
     const deps = depsWith({ stored: null, forgetEnrolmentToken: forget });
@@ -207,8 +195,6 @@ describe("startHeartbeat", () => {
     expect(deps.log).toHaveBeenCalledWith(expect.stringContaining("CP_ENROLMENT_TOKEN"));
   });
 
-  // An enrolled worker must keep booting after the operator deletes the token, which is the whole
-  // point of removing it
   it("still heartbeats on a stored identity with no enrolment token present", async () => {
     const deps = depsWith({ enrolmentToken: "" });
 
@@ -239,7 +225,6 @@ describe("startHeartbeat", () => {
     expect(onAbort).toHaveBeenCalled();
   });
 
-  // A network blip is not a kill switch
   it("does not abort when the heartbeat merely fails to reach the server", async () => {
     const onAbort = vi.fn();
     const heartbeat = startHeartbeat(depsWith({ throws: new Error("ECONNREFUSED") }));
@@ -250,8 +235,6 @@ describe("startHeartbeat", () => {
     expect(onAbort).not.toHaveBeenCalled();
   });
 
-  // The other half of the 401-vs-network distinction: a blip must not make the worker treat its
-  // own credential as invalid, or it would re-register and mint a duplicate identity
   it("does not clear the stored identity when the heartbeat merely fails to reach the server", async () => {
     const deps = depsWith({ throws: new Error("ECONNREFUSED") });
 
@@ -312,8 +295,6 @@ describe("startHeartbeat", () => {
     expect(handlers.stop).not.toHaveBeenCalled();
   });
 
-  // A refusal is already an abort; obeying a stale command from the same response would be a
-  // second, unrelated state change on a worker the server has just cut off
   it("dispatches no command on a refused heartbeat", async () => {
     const handlers = handlerStub();
     const heartbeat = startHeartbeat(
@@ -372,7 +353,6 @@ describe("startHeartbeat", () => {
     );
   });
 
-  // The operator fixes repos.json; the server-side field must clear, not stay stuck forever
   it("clears a previously reported binding error once told there is none", async () => {
     const deps = depsWith();
     const heartbeat = startHeartbeat(deps);

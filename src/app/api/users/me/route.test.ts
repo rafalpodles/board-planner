@@ -128,7 +128,6 @@ describe("PUT /api/users/me — changing the address that can reset the password
 
   it("tells the address that is losing the ability to recover the account", async () => {
     await PUT(put({ email: "new@example.com", currentPassword: "right" }), context);
-    // The notification is deliberately not awaited by the handler
     await new Promise((resolve) => setImmediate(resolve));
 
     expect(sendEmail).toHaveBeenCalledWith(
@@ -145,8 +144,6 @@ describe("PUT /api/users/me — changing the address that can reset the password
     expect(sendEmail).not.toHaveBeenCalled();
   });
 
-  // The profile form submits the address alongside the notification toggle, so an unchanged value
-  // arriving with every save must not put a password prompt in front of a checkbox
   it("does not demand a password when the address submitted is the one already stored", async () => {
     const response = await PUT(
       put({ email: "OLD@example.com", emailNotifications: true }),
@@ -179,10 +176,7 @@ describe("PUT /api/users/me — changing the address that can reset the password
 
     expect(response.status).toBe(200);
     expect(userFindByIdAndUpdate).not.toHaveBeenCalled();
-    // The body is the account, not an empty object: the shipped version of this test could not see
-    // the difference, because the findById mock was not a thenable
     expect(await response.json()).toMatchObject({ _id: "u1", email: "old@example.com" });
-    // And nothing was destroyed on the way to doing nothing
     expect(invalidateResetTokens).not.toHaveBeenCalled();
     expect(compare).not.toHaveBeenCalled();
   });
@@ -194,9 +188,6 @@ describe("PUT /api/users/me — changing the address that can reset the password
     expect(compare).not.toHaveBeenCalled();
   });
 
-  // This gate's source key IS the account, so a success must clear it — otherwise ten wrong guesses
-  // from a borrowed session refuse the owner their own correct password for the rest of the window,
-  // and clearAccountAttempts cannot lift it because the block sits outside the account dimension.
   it("gives its own lockout an exit, so a correct password is never refused twice", async () => {
     const gate = sourceKey("u1", "email-change");
     for (let i = 0; i < EXCLUSIVE_SOURCE_ATTEMPTS - 1; i++) await recordFailedAttempt(gate);
@@ -230,8 +221,6 @@ describe("PUT /api/users/me — changing the address that can reset the password
     expect(response.status).toBe(400);
   });
 
-  // The admin path refuses this on `kind` and says why: an address makes an un-loginable account
-  // resettable. viaMachineCredential alone does not cover a machine row signed in by cookie.
   it("refuses a machine account moving its own address", async () => {
     getAuthUser.mockResolvedValue(signedIn({ kind: "machine" }));
 
@@ -244,8 +233,6 @@ describe("PUT /api/users/me — changing the address that can reset the password
     expect(userFindByIdAndUpdate).not.toHaveBeenCalled();
   });
 
-  // The purge of outstanding reset links runs before the write, so a collision learned from the
-  // index alone would destroy them over an address that was never stored
   it("answers 409 before purging anything when the address is taken", async () => {
     userExists.mockResolvedValue({ _id: "somebody-else" });
 
@@ -292,7 +279,6 @@ describe("PUT /api/users/me — changing your own display name", () => {
     );
   });
 
-  // The whole point of the ticket: this is not the address, so it must not summon a password prompt
   it("asks for no password, and touches nothing that the address change touches", async () => {
     const response = await PUT(put({ fullName: "Rafał Podleś" }), context);
 
@@ -346,7 +332,6 @@ describe("PUT /api/users/me — changing your own display name", () => {
     }
   });
 
-  // A name is what a comment is signed with, and nothing else records that the signature moved
   it("audits the change", async () => {
     await PUT(put({ fullName: "Rafał Podleś" }), context);
 
@@ -368,7 +353,6 @@ describe("PUT /api/users/me — changing your own display name", () => {
     expect(logInstanceAudit).not.toHaveBeenCalled();
   });
 
-  // The form submits the whole profile, so the name arrives alongside the address on every save
   it("changes the name and the address in one request, each on its own terms", async () => {
     userFindByIdAndUpdate.mockResolvedValue({ _id: "u1", email: "new@example.com" });
 
@@ -385,9 +369,6 @@ describe("PUT /api/users/me — changing your own display name", () => {
     );
   });
 
-  // A machine account is refused the address because an address makes it resettable. A name makes
-  // it nothing, so the refusal would be theatre — and the worker registration rewrites this field
-  // on every poll anyway (src/lib/worker-user.ts).
   it("is not gated on a machine credential, unlike the address", async () => {
     getAuthUser.mockResolvedValue(signedIn({ fullName: "Rafal Podles", viaMachineCredential: true }));
 

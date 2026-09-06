@@ -12,9 +12,6 @@ final class ProjectSetupTests: XCTestCase {
                 run: { tool, args, _ in
                     self.calls.append([tool] + args)
                     for (needle, result) in self.results where args.contains(needle) { return result }
-                    // An ordinary checkout answers both of these with the same relative `.git`.
-                    // Without it every stub would look like a directory git cannot describe, which
-                    // CloneStep now refuses to adopt (BP-422)
                     if args.contains("--git-dir") || args.contains("--git-common-dir") {
                         return (0, ".git")
                     }
@@ -51,8 +48,6 @@ final class ProjectSetupTests: XCTestCase {
             ])
     }
 
-    // repos.json is the grant, so writing one for a checkout that was refused would produce a
-    // machine the board believes can work and which cannot.
     func testItGrantsNothingWhenTheCloneIsRefused() throws {
         let git = Git()
         git.results["clone"] = (128, "Repository not found.")
@@ -65,8 +60,6 @@ final class ProjectSetupTests: XCTestCase {
         XCTAssertEqual(try repos.read(), [])
     }
 
-    // The same rule onboarding applies: read-only access is fatal, and it is worth finding out here
-    // rather than after an agent has worked and six gates have passed.
     func testItGrantsNothingWhenTheCheckoutCannotBePushedTo() throws {
         let git = Git()
         git.results["push"] = (128, "remote: Write access to repository not granted.")
@@ -78,7 +71,6 @@ final class ProjectSetupTests: XCTestCase {
         XCTAssertEqual(try repos.read(), [])
     }
 
-    // Re-adding a project whose checkout is already there must not fail on its own earlier success
     func testItReusesACheckoutThatIsAlreadyThere() throws {
         let git = Git()
         git.present = ["/checkouts/SB/.git"]
@@ -92,8 +84,6 @@ final class ProjectSetupTests: XCTestCase {
         XCTAssertFalse(git.calls.contains { $0.contains("clone") })
     }
 
-    // An offer with no key still has to land somewhere nameable. The project id is not pretty, but
-    // it is unique, and a directory named after nothing is worse.
     func testItNamesTheCheckoutAfterTheProjectWhenThereIsNoKey() throws {
         let git = Git()
         let repos = try scratchRepos()
@@ -105,7 +95,6 @@ final class ProjectSetupTests: XCTestCase {
         XCTAssertEqual(try result.get(), "/checkouts/p9")
     }
 
-    // The existing grants belong to other projects and this machine is still serving them
     func testItKeepsTheCheckoutsItAlreadyHad() throws {
         let git = Git()
         let repos = try scratchRepos()

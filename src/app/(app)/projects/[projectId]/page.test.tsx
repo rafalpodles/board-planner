@@ -12,7 +12,6 @@ const { api, toast } = vi.hoisted(() => ({
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/hooks/use-auth", () => ({
   useAuth: () => ({
-    // Off so every column keeps a body: a rail has no drop area to aim a card at
     user: { username: "rpo", collapseEmptyColumns: false },
     isAdmin: false,
   }),
@@ -74,8 +73,6 @@ const conflict = {
   phaseAt: null,
 };
 
-// Exactly what use-api throws: the message every existing caller reports, with the
-// status and parsed body riding along
 function apiError(status: number, body: Record<string, unknown>) {
   return Object.assign(new Error(String(body.error ?? "Request failed")), { status, body });
 }
@@ -94,8 +91,6 @@ async function renderBoard() {
     return Promise.reject(new Error(`unexpected GET ${url}`));
   });
   const view = render(<KanbanPage />);
-  // The cards, not the column: the board renders its columns a beat before the filter
-  // bar hands back the rows to put in them
   for (const key of ["TP-2", "TP-3"]) await screen.findByText(key);
   return view;
 }
@@ -122,7 +117,6 @@ async function rightClick(taskKey: string) {
   });
 }
 
-// The context menu's "Move to" entries; the column headings are plain headings
 async function moveTo(label: string) {
   await click(screen.getByRole("button", { name: label }));
 }
@@ -134,8 +128,6 @@ async function select(...taskKeys: string[]) {
   }
 }
 
-// Native DnD: the column reads the drop index from a dragover, then the id off the
-// drop's dataTransfer
 async function dragCardInto(taskId: string, columnId: string) {
   const column = screen.getByTestId(`column-${columnId}`);
   const body = column.querySelector("[data-column-body]")!;
@@ -164,11 +156,6 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-/**
- * BP-337 review. DELETE could not answer 409 until this change, so `Promise.all` was safe here and
- * `handleBulkMove` two functions above already carried the lesson. The moment delete learned to
- * refuse, one held task rejected the whole batch while the rest were already gone server-side.
- */
 describe("Bulk delete with one task held by a worker", () => {
   async function bulkDeleteBoth() {
     api.del.mockImplementation((url: string) =>
@@ -178,7 +165,6 @@ describe("Bulk delete with one task held by a worker", () => {
     await select("TP-2", "TP-3");
     await rightClick("TP-2");
     await click(screen.getByRole("button", { name: "Delete 2 tasks" }));
-    // The menu entry and the dialog's confirm carry the same label; the dialog's is the later one
     const confirms = screen.getAllByRole("button", { name: "Delete 2 tasks" });
     await click(confirms[confirms.length - 1]);
   }
@@ -202,24 +188,15 @@ describe("Bulk delete with one task held by a worker", () => {
     expect(toast).not.toHaveBeenCalledWith("Failed to delete tasks", "error");
   });
 
-  // The dialog stayed open over cards that were already gone, and clicking it again re-deleted
-  // them into a 404
   it("closes the confirmation even when part of the batch was refused", async () => {
     await bulkDeleteBoth();
 
-    // The dialog's title, which does not move: its button label is text no dialog renders on its
-    // own, and its message counts the selection this same handler has just emptied — so both of
-    // those read absent whether the dialog closed or not
     await waitFor(() =>
       expect(screen.queryByRole("heading", { name: "Delete Selected Tasks" })).toBeNull()
     );
   });
 });
 
-/**
- * BP-337 review. The board parks a refused *move* and asks; a refused delete reached the same
- * endpoint shape and got a flat error, which is this ticket's own asymmetry one layer out.
- */
 describe("Deleting one held task from the context menu", () => {
   async function deleteHeldFromMenu() {
     api.del.mockImplementation((url: string) =>
@@ -265,8 +242,6 @@ describe("Bulk move with one task held by a worker", () => {
     await moveTo("In Progress");
   }
 
-  // The whole batch used to be rejected over the one held task, so the board said nothing
-  // had moved while the server had already moved the rest
   it("applies the tasks that did move", async () => {
     await bulkMoveBothToInProgress();
 
@@ -345,8 +320,6 @@ describe("Dragging a task a worker is running", () => {
   });
 });
 
-// The status endpoint is a second way to the same refusal, and used to answer it with
-// nothing but "Failed to update status"
 describe("Moving a held task through the status endpoint", () => {
   async function moveTP3ViaContextMenu() {
     await renderBoard();
@@ -388,7 +361,6 @@ describe("Moving a held task through the status endpoint", () => {
     expect(heldDialog()).toBeNull();
   });
 
-  // A 409 is also how a stale write is refused; only the runConflict body means a worker
   it("still reports a 409 that carries no run conflict as an ordinary failure", async () => {
     api.patch.mockRejectedValue(apiError(409, { error: "Conflict" }));
     await moveTP3ViaContextMenu();

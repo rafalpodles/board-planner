@@ -42,7 +42,6 @@ describe("useCanonicalUrl", () => {
     render(<Probe projectKey="RP" taskNumber={1} />);
 
     expect(window.location.pathname).toBe("/projects/RP/tasks/1");
-    // A soft navigation would re-trigger the intercepting modal on top of the page
     expect(replace).not.toHaveBeenCalled();
   });
 

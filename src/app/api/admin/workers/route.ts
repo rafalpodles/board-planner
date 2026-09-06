@@ -6,9 +6,6 @@ import { Task } from "@/models/task";
 import { toApiWorker } from "@/lib/worker-service";
 import { ApiWorkerTask } from "@/types";
 
-// Phase lives on the task, not the worker, so the fleet view has to join the two. A task is only
-// reported while its run still holds it: every exit from the active column clears the run identity,
-// so a stale workerId cannot resurface here as a task the worker is no longer running.
 async function currentTasks(workerIds: string[]): Promise<Map<string, ApiWorkerTask>> {
   if (workerIds.length === 0) return new Map();
 
@@ -16,10 +13,6 @@ async function currentTasks(workerIds: string[]): Promise<Map<string, ApiWorkerT
     "execution.workerId": { $in: workerIds },
     "execution.runId": { $nin: [null, ""] },
   })
-    // A worker killed mid-run leaves its task claimed until the lease is swept, and the sweep only
-    // happens when someone claims from that project again — so the same worker can match an
-    // abandoned task and the one it is really running. Newest claim first, so the live run wins,
-    // and deterministically rather than by whatever order the server happens to return.
     .sort({ "execution.startedAt": -1 })
     .select("_id taskNumber title project execution")
     .populate("project", "key")
@@ -45,8 +38,6 @@ async function currentTasks(workerIds: string[]): Promise<Map<string, ApiWorkerT
 export const GET = withAdmin(async () => {
   await connectDB();
 
-  // Populated, not left as an id: the fleet console's Owner column exists to answer "whose machine
-  // is this", and toApiWorker reads a name off the ref rather than inventing one from the id.
   const workers = await Worker.find()
     .populate("owner", "username fullName")
     .sort({ name: 1, host: 1 });

@@ -6,7 +6,6 @@ import { useApi } from "@/hooks/use-api";
 import { projectPath, taskPath } from "@/lib/urls";
 import { useOpenTask } from "@/hooks/use-open-task";
 
-// Matches the API, which refuses anything shorter
 export const MIN_QUERY = 2;
 
 export type HitGroup = "current" | "other";
@@ -69,7 +68,6 @@ export function toHits(projects: ApiProject[], tasks: ApiTask[]): SearchHit[] {
   ];
 }
 
-/** Columns are project-defined since CP-128, so a hit's status only reads correctly through its own project */
 export function columnOf(
   hit: SearchHit,
   projects: ApiProject[]
@@ -89,7 +87,6 @@ export function groupOf(hit: SearchHit, currentProjectRef?: string): HitGroup {
     : "other";
 }
 
-/** Current project's hits first, so the two groups render as two contiguous runs */
 export function sortByGroup(hits: SearchHit[], currentProjectRef?: string): SearchHit[] {
   if (!currentProjectRef) return hits;
   return [
@@ -145,7 +142,6 @@ export function useSearch(
     [active, projects, trimmed, tasks, currentProjectRef]
   );
 
-  // A shrinking result set would otherwise leave the cursor past the end
   useEffect(() => setSelectedIndex(0), [trimmed]);
 
   const reset = useCallback(() => {

@@ -8,9 +8,7 @@ interface DangerActionProps {
   label: string;
   title: string;
   message: string;
-  /** What is about to be lost, counted. "Used by 34 tasks." beats "this is permanent". */
   usage?: string;
-  /** The reversible thing to do instead, offered beside the destructive one */
   alternative?: { label: string; onSelect: () => void | Promise<void> };
   onConfirm: () => void | Promise<void>;
   confirmLabel?: string;

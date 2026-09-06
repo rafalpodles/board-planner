@@ -7,11 +7,8 @@ import { AgentBlock } from "@/models/agentBlock";
 import { toApiBlock } from "@/lib/agent-service";
 import { AGENT_BUCKETS } from "@/types";
 
-// The key is the contract with the worker and with every agent that already names it, so a rename
-// changes the label and never the key.
 export const PUT = withAuth(async (request, { params, user }) => {
   const { blockId } = await params;
-  // An id that is not one reaches Mongoose as a CastError and answers 500; this is a 404.
   if (!isValidObjectId(blockId)) return NextResponse.json({ error: "No such record" }, { status: 404 });
   await connectDB();
 
@@ -23,10 +20,6 @@ export const PUT = withAuth(async (request, { params, user }) => {
       { status: 403 }
     );
   }
-  // Authoring a block became instance-admin in BP-345, and editing one is authoring its prompt
-  // again — the field the worker executes. Ownership is no longer enough on its own: blocks created
-  // by ordinary members before that change still name them as `createdBy`, and a `createdBy` that
-  // is empty for any reason used to leave the block editable by anyone at all.
   if (user.role !== "admin") {
     return NextResponse.json(
       { error: "Only an instance admin can change a block" },
@@ -53,7 +46,6 @@ export const PUT = withAuth(async (request, { params, user }) => {
 
 export const DELETE = withAuth(async (_request, { params, user }) => {
   const { blockId } = await params;
-  // An id that is not one reaches Mongoose as a CastError and answers 500; this is a 404.
   if (!isValidObjectId(blockId)) return NextResponse.json({ error: "No such record" }, { status: 404 });
   await connectDB();
 
@@ -65,8 +57,6 @@ export const DELETE = withAuth(async (_request, { params, user }) => {
       { status: 400 }
     );
   }
-  // Same bar as authoring and editing, and for the same reason as PUT above: ownership alone left
-  // pre-BP-345 member-authored blocks, and any block with an empty createdBy, open to anyone.
   if (user.role !== "admin") {
     return NextResponse.json(
       { error: "Only an instance admin can delete a block" },
@@ -74,13 +64,9 @@ export const DELETE = withAuth(async (_request, { params, user }) => {
     );
   }
 
-  // Deleting a block an agent still names would leave that agent referring to nothing, and the
-  // worker refuses an unknown key mid-run rather than at the moment somebody caused it.
   const users = await Agent.find(
     {
       $or: AGENT_BUCKETS.flatMap((bucket) => [
-        // Both shapes are stored. $elemMatch, not a bare string: the path is a subdocument array,
-        // and a bare string there is a CastError that took the whole request down (BP-460).
         { [`composition.${bucket}.key`]: block.key },
         { [`composition.${bucket}`]: { $elemMatch: { $eq: block.key } } },
       ]),

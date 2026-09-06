@@ -16,7 +16,6 @@ import { Button } from "@/components/ui/Button";
 function useBoardDocumentTitle(project: ApiProject | null, tasks: ApiTask[]) {
   useEffect(() => {
     if (!project) return;
-    // By role: a board that renamed these columns counted nothing and showed a bare project name
     const approved = new Set(columnIdsWithRole(project, "approved"));
     const active = new Set(columnIdsWithRole(project, "active"));
     const todoCount = tasks.filter((t) => approved.has(t.status)).length;
@@ -35,17 +34,11 @@ export default function KanbanPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // Scope lives in the URL so it survives a reload and can be shared;
-  // filters stay in localStorage
   const rawScope = searchParams.get("sprint");
   const scope = sprintScopeFromParam(rawScope);
   const board = useProjectBoard(projectId, scope);
 
   useEffect(() => {
-    // A stale bookmark or a link to a deleted sprint falls back to the unscoped board;
-    // leaving the bad value in the URL would just re-trigger the fallback every reload.
-    // Native, not router.replace: this page sits under an @modal parallel route, and a
-    // soft navigation risks waking it the way useCanonicalUrl already found out.
     const trimmed = rawScope?.trim();
     if (trimmed && !isSprintScopeShape(trimmed)) {
       window.history.replaceState(null, "", projectPath(projectId) + window.location.hash);
@@ -63,9 +56,6 @@ export default function KanbanPage() {
     );
   }
 
-  // Nothing loaded and nothing to retry automatically: the poll already tried and
-  // toasted once, so re-showing a spinner here would spin forever without ever
-  // telling the person there is a problem to act on
   if (!board.project) {
     return (
       <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">

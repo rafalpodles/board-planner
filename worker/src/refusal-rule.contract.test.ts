@@ -3,23 +3,11 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-/**
- * The integration test stubs the board, so its refusal rule is a *copy* of the server's — the
- * worker is a separate package and cannot import from the app. A copy drifts silently: change
- * `recordTaskPhase`'s filter and the stub keeps answering by the old rule, leaving that test
- * green while it proves nothing about the server anyone actually runs.
- *
- * Reading the app's source is the one link available across the package boundary. This is a
- * tripwire, not a test of behaviour: when it fails, the fix is to update the stub in
- * `wiring.integration.test.ts` to match, then update the expectations here.
- */
-
 const APP_TASK_SERVICE = join(
   dirname(fileURLToPath(import.meta.url)),
   "../../src/lib/task-service.ts"
 );
 
-/** The clauses the stub reproduces. Each one, if dropped server-side, changes what `applied` means. */
 const FILTER_CLAUSES = [
   '_id: event.taskId',
   '"execution.workerId": event.workerId',
@@ -41,8 +29,6 @@ describe("the stub's refusal rule still matches the server's", () => {
     expect(recordTaskPhaseSource()).toContain(clause);
   });
 
-  // The worker treats a false ack as "the task was taken from me". If the server ever returned
-  // false for a third reason, that reading would be wrong and the abort would kill healthy runs.
   it("still reports whether the update matched, and nothing else", () => {
     expect(recordTaskPhaseSource()).toContain("return result.matchedCount > 0");
   });

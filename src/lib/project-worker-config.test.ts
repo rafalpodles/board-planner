@@ -9,7 +9,6 @@ describe("parseProjectWorkerConfig", () => {
     });
   });
 
-  // A partial patch that replaced `worker` wholesale would reset every field it did not mention
   it("writes dotted paths so an untouched field survives", () => {
     const result = parseProjectWorkerConfig({ policy: { baseBranch: "develop" } });
 
@@ -29,7 +28,6 @@ describe("parseProjectWorkerConfig", () => {
     ]);
   });
 
-  // Turning merging off explicitly is a decision, and must not read as inherited afterwards
   it("records a value equal to the default as deliberately set", () => {
     const result = parseProjectWorkerConfig({ policy: { model: "opus" } });
 
@@ -48,8 +46,6 @@ describe("parseProjectWorkerConfig", () => {
 
   describe("refusals", () => {
 
-    // BP-358: claimScope no longer names a policy field. It is refused exactly like any other
-    // name nobody defined, not validated as a scope.
     it("refuses claimScope, which is no longer a recognised field", () => {
       expect(parseProjectWorkerConfig({ policy: { claimScope: "any" } })).toEqual({
         ok: false,
@@ -57,8 +53,6 @@ describe("parseProjectWorkerConfig", () => {
       });
     });
 
-    // BP-358: the project-wide nominee is gone. Nothing reads claimAssignee any more, so it is
-    // silently dropped rather than validated — and alone, that leaves nothing to update.
     it("ignores a claimAssignee, which no longer routes anything", () => {
       expect(parseProjectWorkerConfig({ claimAssignee: "6a70afff45d39cd9bc8bb600" })).toEqual({
         ok: false,
@@ -75,9 +69,6 @@ describe("parseProjectWorkerConfig", () => {
       expect(parseProjectWorkerConfig({ policy: { baseBranch: 7 } })).toMatchObject({ ok: false });
     });
 
-    // BP-327. baseBranch travels in the assignment policy and lands as a positional argument to
-    // `git diff` on somebody's laptop. git reads an option-shaped positional as an option:
-    // `--output=<path>` writes a file there, under the operator's own uid.
     it.each([
       "--output=/tmp/pwned",
       "-o/tmp/pwned",
@@ -103,8 +94,6 @@ describe("parseProjectWorkerConfig", () => {
       }
     );
 
-    // Same sink, one step further along: the model names are `--model`'s value on the CLI the
-    // worker spawns, so an option-shaped one is worth refusing where it is set.
     it.each(["model", "fallbackModel", "reviewModel"])(
       "refuses an option-shaped %s",
       (field) => {
@@ -129,8 +118,6 @@ describe("parseProjectWorkerConfig", () => {
       }
     });
 
-    // Machine-level settings must not be reachable through the project, or one project's admin
-    // would be changing how someone else's laptop behaves.
     it("refuses a field that belongs to the worker, not the project", () => {
       expect(parseProjectWorkerConfig({ policy: { pollIntervalMs: 5000 } })).toEqual({
         ok: false,
@@ -154,8 +141,6 @@ describe("parseProjectWorkerConfig", () => {
   });
 });
 
-// Without this a field touched once could never follow the default again: policyOverrides only
-// ever grew, and the UI showed "set" with no route back.
 describe("resetting a field to the default", () => {
   it("removes the field from the override list", () => {
     const result = parseProjectWorkerConfig({ reset: ["model"] }, ["model", "baseBranch"]);
@@ -165,7 +150,6 @@ describe("resetting a field to the default", () => {
     ]);
   });
 
-  // The stored copy goes back too, so the document never holds a value nothing resolves against
   it("puts the stored value back to the default", () => {
     const result = parseProjectWorkerConfig({ reset: ["maxDiffLines"] }, ["maxDiffLines"]);
 
@@ -203,7 +187,6 @@ describe("resetting a field to the default", () => {
     expect(update["worker.policy.model"]).toBe("sonnet");
   });
 
-  // Otherwise the outcome would depend on which branch ran last
   it("refuses to set and reset the same field in one request", () => {
     expect(
       parseProjectWorkerConfig({ reset: ["model"], policy: { model: "sonnet" } })
@@ -217,11 +200,3 @@ describe("resetting a field to the default", () => {
   });
 });
 
-// The rule no per-field validator could hold: every field is checked in isolation, so nothing
-// stopped a project from merging without review — the one safety property worker/README.md
-// asserts outright. It has to be judged on the resulting state, because a partial patch cannot be
-// read on its own: setting autoMerge alone is fine or fatal depending on a field it never mentions.
-// The rule that lived here — autoMerge may not outlive the review gate — is retired with both
-// fields. Merging is now a Merge step in a composition, and whether the change was reviewed is read
-// off the same sequence: see "refuses a review that ran before the last thing that wrote" in
-// agent-rules.test.ts.

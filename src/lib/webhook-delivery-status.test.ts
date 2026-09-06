@@ -29,8 +29,6 @@ describe("webhookDeliveryStatus", () => {
     expect(status.text).toContain("connect ECONNREFUSED");
   });
 
-  // The error suffix is conditional on rpo's own reading of the row: an empty lastError must not
-  // print a bare trailing "—" with nothing after it
   it("omits the dash when there is no error text", () => {
     const status = webhookDeliveryStatus({
       lastAttemptAt: new Date().toISOString(),

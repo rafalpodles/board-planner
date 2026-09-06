@@ -9,8 +9,6 @@ const workerSchema = new Schema<IWorker>(
     version: { type: String, default: "" },
     protocolVersion: { type: Number, required: true },
     credentialHash: { type: String, required: true, select: false },
-    // Reported by the worker, never set from the server: this is what that machine says it has
-    // on disk. The path is here only so an operator can see which checkout was used.
     repos: {
       type: [{
         remote: { type: String, required: true, trim: true },
@@ -18,30 +16,17 @@ const workerSchema = new Schema<IWorker>(
       }],
       default: [],
     },
-    // The person this machine belongs to, set from the account that enrolled it. Distinct from
-    // `identity` below: identity is which machine acted, owner is whose machine it is. It is also
-    // the whole of what this machine may reach — the projects that person can reach, resolved on
-    // every call rather than stored, so a revoked grant reaches the machine at once.
     owner: { type: Schema.Types.ObjectId, ref: "User", default: null },
     policy: {
       pollIntervalMs: { type: Number, default: 30_000 },
     },
-    // Which policy fields an operator actually set. The schema materialises a default into every
-    // other field at creation, so this list is the only record of intent.
     policyOverrides: { type: [String], default: [] },
     enabled: { type: Boolean, default: true },
     lockedByInstance: { type: Boolean, default: false },
     lastSeenAt: { type: Date, default: null },
-    // Set only from the browser screen, by the person who owns the machine. Deliberately not
-    // `default: []` versus absent — see IWorker: "never chosen" and "chose nothing" are different
-    // answers, and the second one is a request to remove every checkout.
     desiredProjects: { type: [{ type: Schema.Types.ObjectId, ref: "Project" }], default: undefined },
-    // The user record this machine acts as: comment author, assignee, and the name in history.
-    // Null only for a worker registered before CP-241 and not seen since.
     identity: { type: Schema.Types.ObjectId, ref: "User", default: null },
     bindingError: { type: String, default: "" },
-    // Null, not an empty pass: a worker too old to report this has not told us it is fine, and a
-    // console that showed it green would be the exact "healthy, fails every task" this closes.
     preflight: {
       type: new Schema(
         {

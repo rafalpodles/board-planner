@@ -19,14 +19,12 @@ export interface GeneratedTask {
   description: string;
   category: string;
   acceptanceCriteria: string;
-  /** Chosen option(s) per project field, keyed by the field's own name */
   fields: Record<string, string | string[]>;
   duplicateOf: number | null;
   duplicateReason: string;
   suggestedBlockedBy: number[];
   suggestedBlocking: number[];
   dependencyReason: string;
-  /** `fields` resolved to option ids by the route that holds the definitions */
   customFieldValues?: Record<string, unknown>;
 }
 
@@ -40,7 +38,6 @@ export interface ExistingTaskSummary {
 interface ProjectContext {
   name: string;
   description: string;
-  /** The project's own choice fields; nothing is asked about a field it does not define */
   choiceFields: PromptField[];
   categories?: string[];
   readme?: string;
@@ -130,23 +127,19 @@ When analyzing duplicates and dependencies, consider the semantic meaning, not j
 
   const parsed = JSON.parse(content) as GeneratedTask;
 
-  // Validate and sanitize
   const validCategories = categoryList;
 
   if (!validCategories.includes(parsed.category)) {
     parsed.category = validCategories.includes("user-story") ? "user-story" : validCategories[0];
   }
-  // `fields` is validated where the definitions live, by the route that resolves it
   if (!parsed.fields || typeof parsed.fields !== "object") {
     parsed.fields = {};
   }
 
-  // Coerce acceptanceCriteria array to string (LLM sometimes returns arrays)
   if (Array.isArray(parsed.acceptanceCriteria)) {
     parsed.acceptanceCriteria = (parsed.acceptanceCriteria as unknown as string[]).join("\n");
   }
 
-  // Sanitize new fields
   if (typeof parsed.duplicateOf !== "number") {
     parsed.duplicateOf = null;
   }

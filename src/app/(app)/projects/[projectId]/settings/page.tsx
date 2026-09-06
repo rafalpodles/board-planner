@@ -55,7 +55,6 @@ function Icon({ d }: { d: string }) {
   );
 }
 
-// The sections that print a task or usage count
 const COUNTS_NEEDED = new Set(["general", "board", "fields"]);
 
 const SECTIONS: SectionMeta[] = [
@@ -100,7 +99,6 @@ const SECTIONS: SectionMeta[] = [
     blurb:
       "What this project sends to you. Personal — each member has their own, and it overrides the global grid for this board only.",
     keywords: "notifications email in-app slack discord mute per project personal grid matrix",
-    // Deliberately not projectAdmin: this is the reader's own preference, so every member has one
     access: "member",
     icon: (
       <Icon d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 00-4-5.7V5a2 2 0 10-4 0v.3C7.7 6.2 6 8.4 6 11v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
@@ -245,8 +243,6 @@ export default function ProjectSettingsPage() {
     if (scroll) scrollSettingsToTop();
   }, []);
 
-  // /stats runs several aggregations, so it is only paid for once a section that
-  // prints a count is opened — and then shared, rather than fetched three times
   useEffect(() => {
     if (stats || !COUNTS_NEEDED.has(active)) return;
     api
@@ -256,9 +252,6 @@ export default function ProjectSettingsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, stats, projectId]);
 
-  // The redesign moved channels, webhooks, categories and templates out of instant-save,
-  // so an accidental reload now costs real work. main guarded one button; this guards the
-  // exits a browser actually offers.
   useEffect(() => {
     if (total === 0) return;
     const warn = (e: BeforeUnloadEvent) => e.preventDefault();

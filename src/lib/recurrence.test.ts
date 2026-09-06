@@ -25,7 +25,6 @@ describe("what a client may say about a repeating task", () => {
       frequency: "monthly",
       interval: 3,
       endDate: null,
-      // Always null out of the normaliser: no client says which day a series is anchored to
       anchorDay: null,
     });
   });
@@ -40,9 +39,6 @@ describe("what a client may say about a repeating task", () => {
     expect(normaliseRecurrence({ frequency: "daily", interval: 100000 }).ok).toBe(false);
   });
 
-  // `Number(true)` is 1 and `Number([5])` is 5, so a boolean was accepted as "every 1 day" and a
-  // one-element array as its contents — the second looser than the Mongoose cast this stands in
-  // for, which refuses an array outright.
   it.each([true, false, [5], [], {}, () => 5])("refuses an interval of %o", (interval) => {
     expect(normaliseRecurrence({ frequency: "daily", interval }).ok).toBe(false);
   });
@@ -54,7 +50,6 @@ describe("what a client may say about a repeating task", () => {
     expect(normaliseRecurrence({ frequency: "daily", interval: "many" }).ok).toBe(false);
   });
 
-  // A form field arrives as a string, and refusing it would refuse the form
   it("takes an interval written as a number in a string", () => {
     expect(ok({ frequency: "daily", interval: "2" })?.interval).toBe(2);
   });
@@ -65,7 +60,6 @@ describe("what a client may say about a repeating task", () => {
     );
   });
 
-  // It used to be neither stored nor rejected: 200, and a series that ran forever
   it("refuses an end date it cannot read rather than discarding it", () => {
     expect(normaliseRecurrence({ frequency: "weekly", interval: 1, endDate: "soon" }).ok).toBe(false);
     expect(normaliseRecurrence({ frequency: "weekly", interval: 1, endDate: {} }).ok).toBe(false);
@@ -89,10 +83,6 @@ describe("clamping what an editor's number input hands over", () => {
 describe("when the next occurrence falls", () => {
   const weekly = { frequency: "weekly", interval: 1 } as const;
 
-  // The boundary itself, which nothing pinned: `>` versus `>=` passed the whole suite either way,
-  // because no fixture put an occurrence exactly ON the end date. It is the case a person is most
-  // likely to reach — pick 8 June on a weekly series that lands there — and `endDate` is documented
-  // as the day the series stops *after*, so the occurrence is produced.
   it("produces the occurrence that lands exactly on the end date", () => {
     const at = nextOccurrence(
       { ...weekly, endDate: "2026-06-08" },
@@ -102,14 +92,9 @@ describe("when the next occurrence falls", () => {
     expect(at.ended).toBe(false);
     expect(at.dueDate?.toISOString()).toBe("2026-06-08T00:00:00.000Z");
 
-    // The control, one week further on: the same series with the same end is over by then
     expect(nextOccurrence({ ...weekly, endDate: "2026-06-08" }, at.dueDate).ended).toBe(true);
   });
 
-  // The operator itself. Once the comparison moved to the end of the day, `>` and `>=` disagree
-  // only on the day's very last millisecond — but they do disagree, and the end day is inclusive,
-  // so an occurrence due at 23:59:59.999 on it belongs to the series. Without this the mutation
-  // `>` -> `>=` passes the whole file.
   it("keeps an occurrence due on the end day's final millisecond", () => {
     const at = nextOccurrence(
       { frequency: "daily", interval: 1, endDate: "2026-06-08" },
@@ -120,9 +105,6 @@ describe("when the next occurrence falls", () => {
     expect(at.dueDate?.toISOString()).toBe("2026-06-08T23:59:59.999Z");
   });
 
-  // The end is a day, and every value it is compared against is an instant. Judged against its
-  // midnight the field meant two different things: a due date carrying a time of day — which the
-  // REST API accepts even though the date input cannot make one — lost its final occurrence.
   it("keeps an occurrence due later in the day the series ends", () => {
     const at = nextOccurrence(
       { frequency: "daily", interval: 1, endDate: "2026-06-08" },
@@ -133,20 +115,14 @@ describe("when the next occurrence falls", () => {
     expect(at.dueDate?.toISOString()).toBe("2026-06-08T09:00:00.000Z");
   });
 
-  // The undated arm of the same disagreement: `now` is a full timestamp, so any close after
-  // midnight UTC on the end day was already past it and "until 31 December" handed out its last
-  // occurrence on the 30th.
   it("does not end an undated series partway through the day it ends", () => {
     const config = { ...weekly, endDate: "2026-12-31" };
 
     expect(nextOccurrence(config, null, new Date("2026-12-31T10:00:00.000Z")).ended).toBe(false);
     expect(nextOccurrence(config, null, new Date("2026-12-31T23:59:59.000Z")).ended).toBe(false);
-    // and the control on the far side of it
     expect(nextOccurrence(config, null, new Date("2027-01-01T00:00:01.000Z")).ended).toBe(true);
   });
 
-  // Through `nextOccurrence`, not through the arithmetic directly — that has its own block below.
-  // What this pins is the wiring: the next occurrence counts from the closed one's own due date.
   it("counts from the occurrence's own due date", () => {
     const from = new Date("2026-06-03T12:00:00.000Z");
     expect(nextOccurrence(weekly, from).dueDate?.toISOString()).toBe("2026-06-10T12:00:00.000Z");
@@ -158,8 +134,6 @@ describe("when the next occurrence falls", () => {
     );
   });
 
-  // The anchor used to be the moment somebody clicked, so a "weekly" series closed on a Tuesday
-  // and then a Friday landed eleven days later, and kept sliding
   it("leaves an undated task undated rather than anchoring it to now", () => {
     expect(nextOccurrence(weekly, null).dueDate).toBeNull();
     expect(nextOccurrence(weekly, null).ended).toBe(false);
@@ -173,7 +147,6 @@ describe("when the next occurrence falls", () => {
     );
   });
 
-  // An undated series has no clock of its own, so an end date on one would otherwise mean nothing
   it("judges an undated series against the day it reaches", () => {
     const ends = { ...weekly, endDate: "2026-06-08" };
     expect(nextOccurrence(ends, null, new Date("2026-06-07")).ended).toBe(false);
@@ -182,13 +155,8 @@ describe("when the next occurrence falls", () => {
 });
 
 describe("advancing a recurring series' due date", () => {
-  // UTC components, because the arithmetic is UTC (BP-485) and a local reading of the answer would
-  // be a different day for half the planet — which is the bug this replaced.
   const ymd = (d: Date) => [d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate()];
 
-  // The shape a real due date has. `<input type="date">` sends "2026-01-31" and Mongoose casts it
-  // to UTC midnight, so this is what is actually in the database — not the local-noon `Date` every
-  // earlier fixture here built, which is precisely why none of them could see BP-485.
   const stored = (isoDay: string) => new Date(isoDay);
 
   const inZone = <T,>(timeZone: string, run: () => T): T => {
@@ -197,16 +165,11 @@ describe("advancing a recurring series' due date", () => {
     try {
       return run();
     } finally {
-      // Not a plain assignment: `process.env.TZ = undefined` stores the string "undefined", which
-      // is not a zone, and silently leaves the rest of the run on UTC.
       if (wasTz === undefined) delete process.env.TZ;
       else process.env.TZ = wasTz;
     }
   };
 
-  // THE test for BP-485, and the one no arrangement of fixtures could replace: the same stored
-  // value must produce the same answer wherever the server happens to run. Under local getters
-  // this returned 28 February in UTC and Warsaw and 1 March in Los Angeles, New York and Honolulu.
   it("gives the same answer whatever timezone the server runs in", () => {
     const zones = [
       "UTC",
@@ -226,14 +189,6 @@ describe("advancing a recurring series' due date", () => {
     expect(answers[0]).toBe("2026-02-28T00:00:00.000Z");
   });
 
-  // Same claim for the two frequencies the clamp does not touch, so a half-UTC module cannot pass:
-  // reverting only the monthly branch leaves this one green, and reverting only these leaves the
-  // one above green.
-  //
-  // Both spans deliberately cross the US transition on 8 March 2026, and that is load-bearing:
-  // adding days locally and adding them in UTC give the same instant *except* across a DST
-  // boundary. A February span proved nothing — measured, reverting the daily branch to local
-  // getters passed every zone.
   it.each([
     { frequency: "daily" as const, interval: 3, from: "2026-03-06", to: "2026-03-09" },
     { frequency: "weekly" as const, interval: 2, from: "2026-03-01", to: "2026-03-15" },
@@ -246,15 +201,6 @@ describe("advancing a recurring series' due date", () => {
     expect(answers[0]).toBe(`${to}T00:00:00.000Z`);
   });
 
-  // BP-461. `setUTCMonth` does not clamp either: 31 January + 1 month is 3 March, so a monthly
-  // series skipped February and then kept drifting, because the occurrence after that was computed
-  // from the 3rd.
-  //
-  // Short months in both directions, a year boundary, an interval above one, and both leap-year
-  // answers for 29 February, plus one whose day the target month can hold. All but the last are
-  // dates where a bare `setUTCMonth` and the clamp disagree; the last guards the other half of
-  // `Math.min`, since every row above lands on the target month's last day and a version that
-  // discarded `day` would satisfy all of them — measured.
   it.each([
     { from: "2026-01-31", interval: 1, to: [2026, 2, 28], why: "31 Jan lands on the last of February" },
     { from: "2026-01-29", interval: 1, to: [2026, 2, 28], why: "so does the 29th" },
@@ -268,10 +214,6 @@ describe("advancing a recurring series' due date", () => {
     expect(ymd(nextRecurrenceDue(stored(from), "monthly", interval))).toEqual(to);
   });
 
-  // BP-486, and the point of the whole anchor. Before it, February's clamp was permanent: every
-  // occurrence was computed from the one before, so 31 January became 28 February and the series
-  // stayed on the 28th for good. The anchor is the day the person chose, carried forward, so the
-  // 31st comes back the moment a month is long enough to hold it.
   it("climbs back to the chosen day once a month is long enough", () => {
     let due: Date | null = new Date("2026-01-31");
     let anchor: number | null = null;
@@ -291,13 +233,9 @@ describe("advancing a recurring series' due date", () => {
       "2026-05-31",
       "2026-06-30",
     ]);
-    // Said as the property too: the anchor is the day chosen, not the day last landed on
     expect(anchor).toBe(31);
   });
 
-  // The control, and the reason the anchor is not simply the series' first due date: a person who
-  // retargets the series by editing a due date must get the day they moved it to. `updateTask`
-  // clears the anchor on that write, which is what this reproduces.
   it("takes the new day when somebody retargets the series", () => {
     const retargeted = nextOccurrence(
       { frequency: "monthly", interval: 1, anchorDay: null },
@@ -308,18 +246,10 @@ describe("advancing a recurring series' due date", () => {
     expect(retargeted.anchorDay).toBe(5);
   });
 
-  // Only monthly can be clamped, so nothing else carries one — a stored anchor on a weekly series
-  // would be a value nothing reads and everything has to keep consistent.
   it.each(["daily", "weekly"] as const)("stores no anchor for a %s series", (frequency) => {
     expect(nextOccurrence({ frequency, interval: 1 }, new Date("2026-01-31")).anchorDay).toBeNull();
   });
 
-  // Measured, and deliberately not what BP-461's description predicted: each occurrence is computed
-  // from the one just closed, so once February has clamped 31 to 28 the series settles on the 28th
-  // rather than climbing back. That is the price of basing the next occurrence on the previous one,
-  // and the previous one is what lets somebody retarget a series by editing its due date. What
-  // matters here is that it is stationary — the bug was a series walking forward forever, 31 Jan,
-  // 3 Mar, 3 Apr, 3 May, through months nobody chose. See BP-486.
   it("settles on a day and stays there, instead of walking forward month after month", () => {
     let due = stored("2026-01-31");
     const series: number[][] = [];
@@ -336,9 +266,6 @@ describe("advancing a recurring series' due date", () => {
     ]);
   });
 
-  // The control for the clamp: `setUTCDate` overflowing into the next month is exactly what "seven
-  // days later" means, so these two must be left alone by it — and the interval has to be carried,
-  // or `7 * interval` mutated to a bare `7` goes unnoticed.
   it.each([
     { frequency: "daily" as const, interval: 3, to: [2026, 3, 3] },
     { frequency: "weekly" as const, interval: 2, to: [2026, 3, 14] },
@@ -351,30 +278,17 @@ describe("advancing a recurring series' due date", () => {
     expect([next.getUTCHours(), next.getUTCMinutes()]).toEqual([9, 30]);
   });
 
-  // The consequence of choosing UTC, asserted rather than left to be discovered. A series carrying
-  // a real time of day keeps its UTC time across a DST transition, so its local wall clock moves by
-  // an hour. Invisible for a date-only value — midnight UTC stays midnight UTC — and it is the
-  // trade that buys the timezone-independence above.
   it("keeps UTC time across a DST transition, and lets the local clock move", () => {
     inZone("Australia/Sydney", () => {
       const base = new Date("2028-09-15T02:30:00Z");
       const next = nextRecurrenceDue(base, "monthly", 1);
 
       expect(next.toISOString()).toBe("2028-10-15T02:30:00.000Z");
-      // Sydney went from UTC+10 to UTC+11 on 1 October 2028, so the same UTC instant reads an hour
-      // later on the wall — by design.
       expect(base.getTimezoneOffset()).toBe(-600);
       expect(next.getTimezoneOffset()).toBe(-660);
     });
   });
 
-  // Also from the review of BP-461: `getUTCMonth() + interval + 1` concatenates rather than adds if
-  // `interval` arrives as a string — `0 + "2" + 1` is "021", which is September 2027, whose last
-  // day is the 30th, so 31 January + 2 months came back as 30 March instead of the 31st.
-  //
-  // Unreachable through the app — `schemaValuesOrRefusal` requires an integer >= 1 and the schema
-  // types the path as a Number — but this function is exported, and its one caller reads the
-  // interval off a task typed `any`, so the parameter's type is documentation rather than a guard.
   it("adds a string interval rather than concatenating it", () => {
     const next = nextRecurrenceDue(stored("2026-01-31"), "monthly", "2" as unknown as number);
     expect(ymd(next)).toEqual([2026, 3, 31]);

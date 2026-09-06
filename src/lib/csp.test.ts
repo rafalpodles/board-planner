@@ -1,11 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 
-/**
- * The security-relevant half of allowing `unsafe-eval` in development: proving production never
- * gets it. A CSP is a header nobody looks at once it works, so the only thing standing between
- * "React can reconstruct a call stack in dev" and "the production bundle may call eval" is a test
- * that reads the header for both builds.
- */
 async function scriptSrc(nodeEnv: string): Promise<string> {
   vi.stubEnv("NODE_ENV", nodeEnv);
   vi.resetModules();
@@ -26,8 +20,6 @@ describe("the Content-Security-Policy this app serves", () => {
     expect(await scriptSrc("production")).toBe("script-src 'self' 'unsafe-inline'");
   });
 
-  // The control: without it a directive that dropped `unsafe-eval` from *both* builds would pass
-  // the assertion above while leaving the dev console error it exists to remove
   it("allows it in development, where React's own debugging needs it", async () => {
     expect(await scriptSrc("development")).toBe("script-src 'self' 'unsafe-inline' 'unsafe-eval'");
   });

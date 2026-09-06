@@ -12,7 +12,6 @@ import {
 interface BoardHeaderProps {
   projectName: string;
   projectIcon?: string;
-  /** The only place the project's description is shown anywhere in the app */
   projectDescription?: string;
   sprints: ApiSprint[];
   scope: string;
@@ -59,15 +58,12 @@ export function BoardHeader({
   }
 
   return (
-    // z-30 keeps the scope menu over the board: @container makes the header a stacking context
     <header className="@container relative z-30 flex h-14 shrink-0 items-center gap-2 @md:gap-3 border-b border-border bg-bg px-3 @md:px-6">
       <div className="min-w-0">
-        {/* Own row: centred on the title+scope block the icon hangs below the title */}
         <div className="flex items-center gap-2">
           <span aria-hidden className="hidden shrink-0 text-2xl leading-none @md:inline">
             {projectIcon || DEFAULT_PROJECT_ICON}
           </span>
-          {/* 24px fits five characters in the ~90px a narrow header leaves the title */}
           <h1 className="truncate text-[15px] font-bold leading-tight @md:text-2xl">
             {projectName}
           </h1>
@@ -76,8 +72,6 @@ export function BoardHeader({
           ref={scopeRef}
           className="relative flex items-center gap-1.5 text-[11px] leading-tight text-text-muted"
         >
-          {/* The description truncates and the scope does not: one is prose, the
-              other is the control that decides which tasks the board is showing */}
           {projectDescription && (
             <span className="truncate" title={projectDescription}>
               {projectDescription}
@@ -142,8 +136,6 @@ export function BoardHeader({
             type="button"
             onClick={() => onViewModeChange(mode)}
             aria-current={viewMode === mode ? "true" : undefined}
-            // Small on a narrow header on purpose: this toggle and the project's name compete for
-            // the same row, and the name is the one a reader needs. It grows back at @md.
             className={`focus-ring rounded-md px-1.5 py-1 text-[11px] transition-colors @md:px-3 @md:py-1.5 @md:text-[13px] ${
               viewMode === mode
                 ? "bg-bg-input font-medium text-text"
@@ -177,7 +169,6 @@ export function BoardHeader({
         onClick={onNewTask}
         title="New task (N)"
         aria-label="New task"
-        // Button's own sm size is responsive (min-h-11 sm:min-h-[36px]); this row must not resize
         className="h-11 shrink-0 whitespace-nowrap"
       >
         <svg

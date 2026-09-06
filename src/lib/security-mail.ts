@@ -3,22 +3,12 @@ import { isEmailConfigured, sendEmail } from "@/lib/email";
 import { EmailContent, renderEmail } from "@/lib/email-template";
 import { selfOrigin } from "@/lib/session";
 
-/**
- * The mails that say somebody may be taking the account over.
- *
- * None of them consults `emailNotifications`: that switch is about work happening on a board, and
- * a person who turned it off has not agreed to be the last to know their password changed. They
- * are also all fire-and-forget — nobody is waiting on one, and a mail server having a bad
- * afternoon must not take the request down with it.
- */
 async function deliver(
   to: string,
   subject: string,
   build: () => EmailContent
 ): Promise<void> {
   if (!to || !isEmailConfigured()) return;
-  // The content is built in here rather than by the caller: every caller starts this with `void`,
-  // so anything thrown while assembling it would be an unhandled rejection rather than a log line.
   try {
     const { html, text } = renderEmail(build());
     await sendEmail({ to, subject, text, html });
@@ -35,11 +25,8 @@ function signInButton(): { label: string; url: string } | undefined {
 export interface PasswordChangedNotice {
   email: string;
   username: string;
-  /** A reset link the account holder followed, or an administrator setting one for them. */
   how: "reset_link" | "admin";
-  /** The administrator's username, for the admin case. */
   actor?: string;
-  /** Where the reset came from, as the audit row records it. */
   from?: string;
 }
 
@@ -82,15 +69,12 @@ export async function notifyPasswordChanged(n: PasswordChangedNotice): Promise<v
 }
 
 export interface AddressChangedNotice {
-  /** The address losing the account, which is the one that hears about it. */
   previousEmail: string;
   username: string;
   newEmail: string;
-  /** The administrator's username, when the account did not do this itself. */
   actor?: string;
 }
 
-/** Enough of the new address to recognise it, not enough to hand it to whoever reads the old inbox. */
 export function maskAddress(address: string): string {
   const [local, domain] = address.split("@");
   if (!local || !domain) return "•••";
@@ -125,9 +109,7 @@ export interface CredentialCreatedNotice {
   email: string;
   username: string;
   kind: "token" | "oauth";
-  /** The token's name, or the OAuth client's. */
   name: string;
-  /** What it can reach: the boards it is scoped to, or the whole account. */
   scope: string;
 }
 

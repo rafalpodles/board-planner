@@ -34,12 +34,6 @@ async function openTab(label: string) {
   await act(async () => tab!.click());
 }
 
-/**
- * A step block's prompt is what a worker executes on somebody's machine, so authoring one became
- * instance-admin in BP-345 — and the button did not move with the endpoint. A non-admin filled the
- * dialog in, clicked Create, and got an unhandled rejection: the modal stayed open with the typed
- * prompt still in it and nothing said why.
- */
 describe("who is offered the catalog's actions", () => {
   it("offers New agent to everyone, because composing from existing blocks is open", async () => {
     isAdmin.value = false;
@@ -56,7 +50,6 @@ describe("who is offered the catalog's actions", () => {
     expect(screen.getByText(/instance admin authors/i)).not.toBeNull();
   });
 
-  // Without this the two refusals above would pass on a page that offers nothing to anybody
   it.each(["Gates", "Steps"])("offers the %s action to an instance admin", async (tab) => {
     await openTab(tab);
 

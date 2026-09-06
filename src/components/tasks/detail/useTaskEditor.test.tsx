@@ -89,8 +89,6 @@ describe("useTaskEditor", () => {
     });
   });
 
-  // The debounce cleanup also runs on unmount, so closing inside the window used
-  // to drop the edit silently
   it("flushes a pending edit when the view goes away inside the debounce window", async () => {
     const { unmount } = render(<Harness task={baseTask} />);
 
@@ -127,12 +125,6 @@ describe("useTaskEditor", () => {
     expect(api.put).toHaveBeenCalledTimes(2);
   });
 
-  /**
-   * BP-439. Clearing the title is how a rename starts, and the 400 that answers it carries the
-   * reason on the Error `use-api` throws. Discarded, the reader was told "Save failed" and left to
-   * guess — so the reason is kept and stays kept while the refused value is still in the draft,
-   * which is the state a person is actually in when they go and edit something else.
-   */
   it("keeps the server's reason for a refusal, and keeps it across the next edit", async () => {
     api.put.mockRejectedValue(Object.assign(new Error("Title is required"), { status: 400 }));
     render(<Harness task={baseTask} />);
@@ -161,7 +153,6 @@ describe("useTaskEditor", () => {
     );
   });
 
-  // The control: without it a reason that is never cleared reads exactly like one that is reported
   it("drops the reason once a save goes through", async () => {
     api.put.mockRejectedValueOnce(new Error("Title is required"));
     render(<Harness task={baseTask} />);
@@ -181,8 +172,6 @@ describe("useTaskEditor", () => {
     expect(screen.getByTestId("error").textContent).toBe("");
   });
 
-  // A PM move or a second tab must not be clobbered, but it must not win over
-  // what the user is in the middle of typing either
   it("adopts a server change only for fields the user has not edited", async () => {
     const { rerender } = render(<Harness task={baseTask} />);
 
@@ -198,12 +187,6 @@ describe("useTaskEditor", () => {
     expect(screen.getByTestId("priority").textContent).toBe("low");
   });
 
-  /**
-   * The task routes populate `agent` so the reader can be told the name of an agent
-   * `/api/agents` withholds. The draft holds the picker's VALUE, which is the id — seeded with the
-   * document instead, the picker matches no option and the field reads as permanently edited
-   * against the stored task.
-   */
   it("seeds the agent from a populated reference by its id", () => {
     function AgentHarness({ task }: { task: ApiTask }) {
       const { draft } = useTaskEditor("p1", task);
@@ -219,7 +202,6 @@ describe("useTaskEditor", () => {
     expect(screen.getByTestId("agent").textContent).toBe("a9");
   });
 
-  // The other shape the same field arrives in: a writer echoing back what it was sent
   it("takes a bare agent id as it comes", () => {
     function AgentHarness({ task }: { task: ApiTask }) {
       const { draft } = useTaskEditor("p1", task);

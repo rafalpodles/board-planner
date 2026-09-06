@@ -18,7 +18,6 @@ const { POST } = await import("./route");
 
 const WORKER_ID = "69a52e3b399b27d3cbb2c5a5";
 const ADMIN = { _id: "admin-1", role: "admin", tokenScoped: false };
-// The strongest principal that is not an instance admin: someone who owns a project outright
 const PROJECT_OWNER = { _id: "owner-1", role: "member", tokenScoped: false };
 
 function request(body: unknown, workerId = WORKER_ID) {
@@ -110,8 +109,6 @@ describe("POST /api/workers/:workerId/command", () => {
     expect(json).toEqual({ command: "pause", issuedAt: "2026-08-01T12:00:00.000Z" });
   });
 
-  // The issuance travels with the command so the worker can tell this delivery from the copy its
-  // next heartbeat carries — without it, the same stop would be applied twice
   it("publishes the issued command and its issuance over the worker's SSE stream, keyed by its own id", async () => {
     const { req, ctx } = request({ command: "pause" });
 

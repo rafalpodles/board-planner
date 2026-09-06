@@ -7,16 +7,9 @@ const createNotifications = vi.fn().mockResolvedValue(undefined);
 const userFind = vi.fn();
 const grantFind = vi.fn();
 
-/** Everybody in the collection, per test, as stored. The mock applies the real filter to them. */
 let stored: Record<string, unknown>[] = [];
-/** Who holds a grant on PROJECT. */
 let granted: string[] = [];
 
-/**
- * Enough of a query engine to answer the filter this module actually sends, and no more. It
- * honours $and/$or/$elemMatch and dotted paths, so a query that forgot the access half, or looked
- * up the wrong project's override, returns the wrong people here rather than passing anyway.
- */
 function valueAt(doc: unknown, path: string): unknown {
   return path.split(".").reduce<unknown>((node, key) => {
     if (node === null || typeof node !== "object") return undefined;
@@ -67,7 +60,6 @@ vi.mock("@/models/user", () => ({
       userFind(...a);
       const filter = a[0] as Record<string, unknown>;
       const hits = stored.filter((doc) => matches(doc, filter));
-      // Sorted by _id the way the query asks, so the cap below takes a defined set
       hits.sort((x, y) => String(x._id).localeCompare(String(y._id)));
       let limit = hits.length;
       const chain = {
@@ -99,7 +91,6 @@ const row = (over: Partial<Record<"inApp" | "email" | "chat", boolean>> = {}) =>
   ...over,
 });
 
-/** Somebody who saved the settings screen — a stored grid, so no legacy fallback applies. */
 function member(
   n: number,
   over: {
@@ -136,8 +127,6 @@ describe("who hears that a task was created", () => {
     expect(await boardFeedSubscribers(PROJECT)).toEqual([id(1)]);
   });
 
-  // The control the checklist asks for, and the whole point of the row: everybody else on the
-  // board is in the audience query and must fall out of it on the tick alone.
   it("leaves out a member of the same board who ticked nothing", async () => {
     stored = [
       member(1, { defaults: { task_created: row({ inApp: true }) } }),
@@ -148,9 +137,6 @@ describe("who hears that a task was created", () => {
     expect(await boardFeedSubscribers(PROJECT)).toEqual([id(1)]);
   });
 
-  // An account that has never opened the settings screen has no stored grid at all, and the
-  // legacy fallback rings the bell for every other row. Adding this one to it would subscribe
-  // every existing account on the instance to the firehose.
   it("leaves out an account that predates the grid", async () => {
     stored = [{ _id: id(3), role: "member", emailNotifications: true }];
     granted = [id(3)];
@@ -180,9 +166,6 @@ describe("who hears that a task was created", () => {
     expect(await boardFeedSubscribers(PROJECT)).toEqual([]);
   });
 
-  // The case no query over paths can express: the candidate matches on the global grid, and the
-  // project's own grid — which is the one in force — switches the row off. Only resolveChannels
-  // knows that, which is why it and not the query makes the decision.
   it("obeys an override that switches the row off for this board", async () => {
     stored = [
       member(1, {
@@ -195,8 +178,6 @@ describe("who hears that a task was created", () => {
     expect(await boardFeedSubscribers(PROJECT)).toEqual([]);
   });
 
-  // Chat is not stored as deliverable, it is derived from the connection. A tick with no webhook
-  // resolves to nothing, so it is not a subscription either.
   it("does not count a chat tick with nothing connected as opting in", async () => {
     stored = [member(1, { defaults: { task_created: row({ chat: true }) } })];
     granted = [id(1)];
@@ -214,9 +195,6 @@ describe("who hears that a task was created", () => {
 });
 
 describe("who is in the audience at all", () => {
-  // Access has to be part of the *selection*, not only of the delivery filter downstream: with
-  // the cap applied to a list that includes people who cannot reach the board, an instance full
-  // of subscribers to other projects can push this board's own members past the limit.
   it("does not select a subscriber with no standing on the board", async () => {
     stored = [member(1, { defaults: { task_created: row({ inApp: true }) } })];
     granted = [];
@@ -270,7 +248,6 @@ describe("a board with more subscribers than the cap", () => {
     expect(told[0]).toBe(id(1));
   });
 
-  // A cap nobody is told about reads as "everyone was notified" in every log this leaves behind
   it("says out loud that it left people out", async () => {
     const reported = vi.spyOn(console, "error").mockImplementation(() => {});
     stored = crowd(BOARD_FEED_FANOUT_LIMIT + 1);
@@ -282,9 +259,6 @@ describe("a board with more subscribers than the cap", () => {
     reported.mockRestore();
   });
 
-  // The cap has to be spent on people who subscribed. Selecting the whole audience and sifting it
-  // afterwards passes every other test here — and quietly drops the one subscriber on a board
-  // whose membership is larger than the limit, which is the board the cap exists for.
   it("still reaches the one subscriber behind a board full of people who are not", async () => {
     const bystanders = Array.from({ length: BOARD_FEED_FANOUT_LIMIT }, (_, i) => member(i + 1));
     const subscriber = member(BOARD_FEED_FANOUT_LIMIT + 1, {
@@ -337,9 +311,6 @@ describe("dispatching it", () => {
     expect(createNotifications).not.toHaveBeenCalled();
   });
 
-  // Assembling the mail costs a query for the actor's name. Every task created anywhere on the
-  // instance would pay it if it were built by the caller — including the great majority nobody
-  // has subscribed to.
   it("does not assemble the mail for a board nobody subscribed to", async () => {
     const email = vi.fn().mockResolvedValue({ kicker: "New on the board", taskKey: "BP-7", taskTitle: "x" });
     stored = [member(1)];
@@ -373,8 +344,6 @@ describe("dispatching it", () => {
     expect(createNotifications).toHaveBeenCalledWith(expect.objectContaining({ email: built }));
   });
 
-  // Nothing awaits this: task creation has already answered the request. A rejection escaping
-  // here is an unhandled rejection, which ends the process rather than losing one notification.
   it("does not reject when the subscriber lookup fails", async () => {
     const reported = vi.spyOn(console, "error").mockImplementation(() => {});
     userFind.mockImplementationOnce(() => {

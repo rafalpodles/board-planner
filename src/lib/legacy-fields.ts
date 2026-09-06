@@ -1,18 +1,8 @@
 import { ApiCustomField, ApiLabel, DEFAULT_OPTION_COLOR, Difficulty, ICustomField } from "@/types";
 
-/** The sizes the seeded Difficulty field offers; nothing else keys on them now */
 const DIFFICULTIES: Difficulty[] = ["S", "M", "L", "XL"];
 import { normalizeOptions } from "./custom-fields";
 
-/**
- * CP-213 turns `component`, `difficulty` and `labels` from columns on the task into
- * ordinary project fields. Seeding reproduces today's behaviour exactly, so the
- * morning after the migration nothing looks different — the three are simply
- * editable now.
- *
- * CP-214 removed the columns themselves; what is left here is the seeding a new
- * project still needs and the helpers the migration script uses.
- */
 export const LEGACY_FIELD_NAMES = {
   component: "Component",
   difficulty: "Difficulty",
@@ -21,7 +11,6 @@ export const LEGACY_FIELD_NAMES = {
 
 export type LegacyFieldKey = keyof typeof LEGACY_FIELD_NAMES;
 
-// Matches --color-difficulty-* in globals.css, so a migrated badge keeps its colour
 const DIFFICULTY_COLORS: Record<string, string> = {
   S: "#4ade80",
   M: "#60a5fa",
@@ -34,7 +23,6 @@ type SeedInput = {
   labels?: ApiLabel[];
 };
 
-/** The three definitions a project should have, in the order they belong in the form */
 export function legacyFieldSeeds(project: SeedInput): Omit<ICustomField, "_id">[] {
   return [
     {
@@ -55,8 +43,6 @@ export function legacyFieldSeeds(project: SeedInput): Omit<ICustomField, "_id">[
     },
     {
       name: LEGACY_FIELD_NAMES.difficulty,
-      // S → XL, not alphabetical: sorting by difficulty has to keep its meaning,
-      // which is the reason options carry an order at all
       fieldType: "dropdown",
       options: DIFFICULTIES.map((value, index) => ({
         id: value,
@@ -74,8 +60,6 @@ export function legacyFieldSeeds(project: SeedInput): Omit<ICustomField, "_id">[
     {
       name: LEGACY_FIELD_NAMES.labels,
       fieldType: "multiselect",
-      // The option id IS the label's id, so `task.labels` is already a valid value
-      // and no task data has to be rewritten
       options: (project.labels || []).map((label, index) => ({
         id: label._id,
         value: label.name,
@@ -102,7 +86,6 @@ export function findLegacyField<T extends FieldLike>(
   return (fields || []).find((f) => f.name.toLowerCase() === name);
 }
 
-/** The values the migration writes for one task, keyed by the seeded field ids */
 export function migratedValuesFor(
   task: { component?: string; difficulty?: string; labels?: string[] },
   fields: ApiCustomField[]
@@ -118,11 +101,6 @@ export function migratedValuesFor(
   return values;
 }
 
-/**
- * An option list that covers every value already in use. A task can carry a
- * component that was deleted from `project.components`; dropping it during the
- * migration would silently clear that task's value.
- */
 export function withValuesInUse(
   field: Omit<ICustomField, "_id">,
   valuesInUse: string[]

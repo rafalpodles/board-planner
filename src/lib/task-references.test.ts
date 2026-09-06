@@ -21,8 +21,6 @@ describe("linking task references written in prose", () => {
     expect(render("see BP-12 for the rest")).toContain("[BP-12](/projects/BP/tasks/12)");
   });
 
-  // The whole reason keys are not stored as URLs: this project renamed CP to BP, and every
-  // comment written before that still says CP
   it("links a key the board used to answer to, at its current address", () => {
     expect(render("originally CP-5")).toContain("[CP-5](/projects/BP/tasks/5)");
   });
@@ -38,8 +36,6 @@ describe("linking task references written in prose", () => {
   });
 });
 
-// A regex over the raw markdown cannot tell these apart, which is why this is a remark plugin.
-// The @mention rendering beside it is that regex, and it bolds the @ of an email address.
 describe("what must not be turned into a link", () => {
   it("leaves a key inside a code span alone", () => {
     expect(render("`BP-12` is the branch prefix")).not.toContain("](/projects");
@@ -73,14 +69,11 @@ describe("where the match starts and stops", () => {
     expect(render("done in BP-3.")).toContain("[BP-3](/projects/BP/tasks/3)");
   });
 
-  // BP-1 must not swallow the 2 of BP-12 and link the wrong task
   it("takes the whole number, not a prefix of it", () => {
     expect(render("see BP-12")).toContain("/projects/BP/tasks/12");
     expect(render("see BP-12")).not.toContain("/projects/BP/tasks/1)");
   });
 
-  // What the right-hand boundary is actually for. Greediness already takes the whole number, so
-  // the first version of this suite passed with the boundary deleted.
   it("does not link a key whose number runs into something else", () => {
     expect(render("release BP-12beta shipped")).not.toContain("](/projects");
     expect(render("range BP-12-14")).not.toContain("](/projects");
