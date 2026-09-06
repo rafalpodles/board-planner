@@ -12,6 +12,7 @@ import { Modal } from "@/components/ui/Modal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
 import { generatePassword } from "@/lib/password-generator";
+import { LIST_REFRESH_FAILED } from "@/lib/messages";
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -79,7 +80,7 @@ export default function UsersPage() {
       // No verb: this runs after a create, a save and a delete, and telling somebody "Saved" when
       // they deleted a user — who is still on screen, because this is the fetch that failed — is
       // the one message they cannot act on.
-      toast("The list could not be refreshed — reload the page to see it", "error");
+      toast(LIST_REFRESH_FAILED, "error");
     }
   }
 

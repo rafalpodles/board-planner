@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { LIST_REFRESH_FAILED } from "@/lib/messages";
 import { render, screen, cleanup, act, waitFor } from "@testing-library/react";
 import UsersPage from "./page";
 
@@ -192,7 +193,7 @@ describe("the users page, after a save that is followed by a refetch", () => {
     // The failure is the list's, not the save's, and it says so without claiming a verb — this
     // same helper runs after a delete
     expect(toast).toHaveBeenCalledWith(
-      "The list could not be refreshed — reload the page to see it",
+      LIST_REFRESH_FAILED,
       "error"
     );
   });
@@ -217,9 +218,35 @@ describe("the users page, after a save that is followed by a refetch", () => {
     expect(toast).toHaveBeenCalledWith("User deleted", "success");
     // Both halves: that the refresh failure was reported at all, and that it did not claim a save
     expect(toast).toHaveBeenCalledWith(
-      "The list could not be refreshed — reload the page to see it",
+      LIST_REFRESH_FAILED,
       "error"
     );
     expect(toast.mock.calls.map(([message]) => message).join(" ")).not.toContain("Saved");
+  });
+
+  it("says a user was created, and says separately when only the list is stale", async () => {
+    api.post.mockResolvedValue({ _id: "u3" });
+
+    render(<UsersPage />);
+    await screen.findByText("Ada");
+    act(() => screen.getByRole("button", { name: /new user/i }).click());
+    type(screen.getByLabelText("Username") as HTMLInputElement, "grace");
+    type(screen.getByLabelText("Password") as HTMLInputElement, "hopper-1906");
+    type(screen.getByLabelText("Full Name") as HTMLInputElement, "Grace Hopper");
+
+    api.get.mockImplementation((path: string) =>
+      path === "/api/users"
+        ? Promise.reject(new Error("network down"))
+        : Promise.resolve({ configured: false })
+    );
+    await act(async () => {
+      screen.getByRole("button", { name: "Create User" }).click();
+    });
+
+    // The account exists. Without its own line, the only thing a create ever said was that the
+    // list is stale — which reads as the create having failed.
+    expect(toast).toHaveBeenCalledWith("User created", "success");
+    expect(toast).toHaveBeenCalledWith(LIST_REFRESH_FAILED, "error");
+    expect(screen.queryByRole("dialog", { name: "New User" })).toBeNull();
   });
 });

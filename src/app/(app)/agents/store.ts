@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { useToast } from "@/components/ui/Toast";
 import { AgentComposition, ApiAgent, ApiAgentBlock } from "@/types";
+import { LIST_REFRESH_FAILED } from "@/lib/messages";
 
 export interface NewAgent {
   name: string;
@@ -63,14 +64,14 @@ export function useStore() {
   }, [load]);
 
   // The refresh that follows a write, whose failure is not the write's failure. Under the same
-  // `await` as the POST, a blipped GET came back to the dialog as "Could not create" — over a
-  // record the server had already made, with the fields still filled in and Create inviting a
+  // `await` as the POST, a blipped GET arrived at the dialog as the write's own error — the fetch's
+  // message under the fields, over a record the server had already made, with Create inviting a
   // second one (BP-565).
   const refreshAfterWrite = useCallback(async () => {
     try {
       await load();
     } catch {
-      toast("The list could not be refreshed — reload the page to see it", "error");
+      toast(LIST_REFRESH_FAILED, "error");
     }
   }, [load, toast]);
 

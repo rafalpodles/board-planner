@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { StrictMode } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { LIST_REFRESH_FAILED } from "@/lib/messages";
 import { render, screen, cleanup, act } from "@testing-library/react";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { NewTaskModal } from "@/components/tasks/NewTaskModal";
@@ -34,7 +35,9 @@ vi.mock("@/components/ui/MarkdownEditor", () => ({
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast }) }));
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  // Reset, not clear: a test that leaves `api.get` rejecting would otherwise mount the next test's
+  // store into a failed load
+  vi.resetAllMocks();
 });
 afterEach(cleanup);
 
@@ -464,11 +467,37 @@ describe("a dialog with a request in flight refuses Escape", () => {
       screen.getByRole("button", { name: "Create" }).click();
     });
 
+    expect(screen.queryByText("network down")).toBeNull();
     expect(screen.queryByText("Could not create")).toBeNull();
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(toast).toHaveBeenCalledWith(
-      "The list could not be refreshed — reload the page to see it",
+      LIST_REFRESH_FAILED,
       "error"
     );
+  });
+
+  /**
+   * The composition editor is the other side of the same store: it renders "Not saved." over a
+   * refusal, so a refetch reported as the write's failure put a red banner over a composition the
+   * server had already stored.
+   */
+  it("saveComposition survives a refetch that fails", async () => {
+    api.get.mockResolvedValue([]);
+    api.put.mockResolvedValue({});
+    let save: (() => Promise<void>) | null = null;
+
+    function Host() {
+      const store = useStore();
+      save = () => store.saveComposition("a1", { blocks: [] } as never);
+      return null;
+    }
+    render(<Host />);
+    await act(async () => {});
+
+    api.get.mockRejectedValue(new Error("network down"));
+    await act(async () => {
+      await expect(save!()).resolves.toBeUndefined();
+    });
+    expect(toast).toHaveBeenCalledWith(LIST_REFRESH_FAILED, "error");
   });
 });
