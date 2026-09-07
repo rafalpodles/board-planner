@@ -182,12 +182,21 @@ test("the PM panel opens fully on screen above a pinned bar", async ({ page }) =
   await page.getByPlaceholder(/Message the PM/).fill("A message worth not losing");
   const send = page.getByRole("button", { name: "Send", exact: true });
   await expect(send).toBeVisible();
-  const sendOwnsItsCentre = await send.evaluate((el) => {
+  const sendKeepsItself = await send.evaluate((el) => {
     const r = el.getBoundingClientRect();
-    const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-    return at === el || el.contains(at);
+    const owns = (x: number, y: number) => {
+      const at = document.elementFromPoint(x, y);
+      return at === el || el.contains(at);
+    };
+    // The launcher comes up from below, so its bite is the bottom edge — a raise that is merely
+    // too small leaves the centre alone and takes that
+    return {
+      centre: owns(r.left + r.width / 2, r.top + r.height / 2),
+      bottomEdge: owns(r.left + r.width / 2, r.bottom - 3),
+      bottomRight: owns(r.right - 3, r.bottom - 3),
+    };
   });
-  expect(sendOwnsItsCentre).toBe(true);
+  expect(sendKeepsItself).toEqual({ centre: true, bottomEdge: true, bottomRight: true });
 
   const fits = await page.evaluate(() => {
     const panel = document.querySelector('[data-testid="pm-chat-panel"]')!;
@@ -197,7 +206,9 @@ test("the PM panel opens fully on screen above a pinned bar", async ({ page }) =
     const at = document.elementFromPoint(c.left + c.width / 2, c.top + c.height / 2);
     const box = document.querySelector('[aria-label="Add a comment"]')!;
     const t = box.getBoundingClientRect();
-    const overTheBox = document.elementFromPoint(t.left + t.width / 2, t.top + t.height / 2);
+    // Its top edge, not its centre: the centre sits below where either anchor reaches, so a
+    // raise that stopped protecting the draft would not move it
+    const overTheBox = document.elementFromPoint(t.left + t.width / 2, t.top + 4);
     return {
       panelTop: Math.round(p.top),
       closeTop: Math.round(c.top),
@@ -205,14 +216,23 @@ test("the PM panel opens fully on screen above a pinned bar", async ({ page }) =
       // What the raise is for: at the lower anchor the panel comes down over the draft somebody
       // is in the middle of typing. It touches the grown bar's top edge either way — that part is
       // cosmetic — but the text they are writing has to stay theirs.
-      draftOwnsItsCentre: overTheBox === box || box.contains(overTheBox),
+      draftKeepsItsTop: overTheBox === box || box.contains(overTheBox),
     };
   });
+
+  // The claim the fixed 96px rests on: the Post button stays pinned to the bar's bottom, so a
+  // grown bar does not bring it up into the launcher
+  const postClearOfTheLauncher = await page.evaluate(() => {
+    const post = document.querySelector('[aria-label="Post comment"]')!.getBoundingClientRect();
+    const fab = document.querySelector('[aria-label="Close PM chat"]')!.getBoundingClientRect();
+    return post.top >= fab.bottom;
+  });
+  expect(postClearOfTheLauncher).toBe(true);
 
   expect(fits.panelTop).toBeGreaterThanOrEqual(0);
   expect(fits.closeTop).toBeGreaterThanOrEqual(0);
   expect(fits.closeOwnsItsCentre).toBe(true);
-  expect(fits.draftOwnsItsCentre).toBe(true);
+  expect(fits.draftKeepsItsTop).toBe(true);
 });
 
 // The control for the scope: at desktop width the bar is `lg:hidden` — in the DOM but not on
