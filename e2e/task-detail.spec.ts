@@ -78,6 +78,48 @@ function taskWrite(page: Page, method: string, urlPart: string) {
   );
 }
 
+/**
+ * BP-595. Adding a criterion is `fill` + Enter, and when no write follows, a bare
+ * `waitForResponse` timeout says only that. Three causes need three different fixes: React never
+ * saw the fill, so `add()` read an empty draft; the key was swallowed by the suggestion list; or
+ * the write was made and lost.
+ *
+ * The criterion's own row is the one signal only React can produce — an empty box is not, because
+ * a controlled `<textarea>` whose state never changed is reset to "" on the next commit, which
+ * looks exactly like a handled Enter. When the row does not arrive, the box separates the first
+ * two: still holding the text means the key never reached `add()`.
+ */
+async function addCriterion(page: Page, taskId: string, text: string) {
+  const addBox = page.getByLabel("Add criterion");
+  const saved = taskWrite(page, "PUT", `/tasks/${taskId}`);
+  // An abandoned waitForResponse rejects when the page closes, on top of the message below
+  void saved.catch(() => {});
+
+  await addBox.fill(text);
+  await addBox.press("Enter");
+
+  // `exact`: a name matches on substring, and this helper is shared — "the build" would pass on
+  // the row "the build passes". 5s is not a network budget: the row and the cleared box come out
+  // of the same React commit as `add()`.
+  const row = page.getByRole("checkbox", { name: text, exact: true });
+  try {
+    await expect(row).toBeVisible({ timeout: 5_000 });
+  } catch (cause) {
+    // Only "the row never arrived" is diagnosable here. Two rows, a closed page or the test's own
+    // deadline must keep their own message rather than be retold as a story about React.
+    if ((await row.count()) !== 0) throw cause;
+    const held = await addBox.inputValue();
+    throw new Error(
+      held === ""
+        ? `no criterion "${text}" was added and the box is empty: React never took the fill, so add() saw an empty draft and no write was attempted`
+        : `no criterion "${text}" was added and the box still holds "${held}": the key never reached add()`,
+      { cause }
+    );
+  }
+
+  expect((await saved).status()).toBe(200);
+}
+
 async function readTask(request: APIRequestContext, taskNumber: number) {
   const res = await request.get(`/api/projects/${PROJECT_KEY}/tasks/${taskNumber}`, {
     headers: ADMIN_AUTH,
@@ -246,16 +288,8 @@ test("acceptance criteria tick, count, persist and reach the card", async ({ pag
   const detail = page.locator("#main-content");
 
   await test.step("adding two criteria starts both unticked", async () => {
-    const addBox = page.getByLabel("Add criterion");
-    const saved = taskWrite(page, "PUT", `/tasks/${FINISHED_TASK_ID}`);
-    await addBox.fill("the build passes");
-    await addBox.press("Enter");
-    await saved;
-
-    const savedSecond = taskWrite(page, "PUT", `/tasks/${FINISHED_TASK_ID}`);
-    await addBox.fill("the docs mention it");
-    await addBox.press("Enter");
-    await savedSecond;
+    await addCriterion(page, String(FINISHED_TASK_ID), "the build passes");
+    await addCriterion(page, String(FINISHED_TASK_ID), "the docs mention it");
 
     await expect(detail.getByText("0/2")).toBeVisible();
   });
@@ -615,10 +649,7 @@ test("emptying an acceptance criterion is refused, and the stored one survives",
   await openTask(page, FINISHED_TASK_NUMBER);
 
   await test.step("a criterion is added the ordinary way", async () => {
-    const saved = taskWrite(page, "PUT", `/tasks/${FINISHED_TASK_ID}`);
-    await page.getByLabel("Add criterion").fill("the build passes");
-    await page.getByLabel("Add criterion").press("Enter");
-    expect((await saved).status()).toBe(200);
+    await addCriterion(page, String(FINISHED_TASK_ID), "the build passes");
   });
 
   await test.step("clearing it answers 400, not 500", async () => {
