@@ -142,6 +142,33 @@ describe("GeneralSection member access", () => {
     expect(select).toHaveProperty("value", "member");
   });
 
+  /**
+   * BP-592, a consequence of BP-583's own fix. The list is grant rows plus instance admins, so
+   * `GET …/members` never answers with a non-admin holding no relation. Nulling the row left a
+   * live access select on somebody the endpoint could not return — a row that cannot exist.
+   */
+  it("removes a revoked member's row when the list cannot be re-read", async () => {
+    renderSection();
+    const select = await screen.findByLabelText("Access for alice");
+    api.get.mockRejectedValueOnce(new Error("network down"));
+
+    fireEvent.change(select, { target: { value: "none" } });
+
+    await waitFor(() => expect(toast).toHaveBeenCalledWith(LIST_REFRESH_FAILED, "error"));
+    expect(screen.queryByLabelText("Access for alice")).toBeNull();
+  });
+
+  // Why dropping the row is always right here: the only rows with a select are the ones the
+  // endpoint builds from grants, and an instance admin — the one kind it returns without one —
+  // has a label instead, so no revocation on this screen can reach that case
+  it("gives an instance admin a label rather than an access select", async () => {
+    renderSection();
+    await screen.findByLabelText("Access for alice");
+
+    expect(screen.queryByLabelText("Access for carol")).toBeNull();
+    expect(screen.getByText("Instance admin")).toBeTruthy();
+  });
+
   // The control: a write that genuinely fails must still be reported as the write's failure, and
   // must not claim the access was updated
   it("still reports a failed write as one, and does not confirm it", async () => {

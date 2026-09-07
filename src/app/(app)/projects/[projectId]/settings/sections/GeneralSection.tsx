@@ -103,10 +103,17 @@ export function GeneralSection({ projectId, project, replaceProject, stats }: Se
     // A row already on screen carries the change the server made, so a refresh that fails leaves
     // it right rather than showing the relation that was replaced — the select reads from this
     // list. Somebody added from the search has no row to patch; the refresh message covers that.
+    //
+    // A revocation removes the row rather than nulling it: this list is grant rows plus instance
+    // admins, so `GET …/members` never answers with a non-admin holding no relation, and a null
+    // there put a live access select on somebody the endpoint could not return (BP-592). Only a
+    // non-admin has that select — an instance admin's row is a label — so a revocation here is
+    // always a row the refresh would drop.
     setMembers((prev) =>
-      prev.map((m) =>
-        m._id === userId ? { ...m, relation: relation === "none" ? null : relation } : m
-      )
+      prev.flatMap((m) => {
+        if (m._id !== userId) return [m];
+        return relation === "none" ? [] : [{ ...m, relation }];
+      })
     );
     toast("Access updated", "success");
 
