@@ -59,8 +59,10 @@ function held<T>(): { promise: Promise<T>; release: (value: T) => void } {
 
 let board: ReturnType<typeof useProjectBoard>;
 
+let probeScope = "all";
+
 function Probe() {
-  board = useProjectBoard("p1", "all");
+  board = useProjectBoard("p1", probeScope);
   return <span data-testid="order">{board.tasks.map((t) => `${t._id}:${t.order}`).join(",")}</span>;
 }
 
@@ -79,7 +81,20 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+/** The board filtered to one sprint, which is where an optimistic move is visible */
+async function mountedScoped(sprint: string) {
+  probeScope = sprint;
+  api.get.mockImplementation((path: string) => {
+    if (path.includes("/tasks")) return Promise.resolve([task("t1", 0), task("t2", 1)]);
+    if (path.endsWith("/sprints")) return Promise.resolve([{ _id: sprint, name: "Sprint one" }]);
+    return Promise.resolve(PROJECT);
+  });
+  render(<Probe />);
+  await waitFor(() => expect(orderOnScreen()).toBe("t1:0,t2:1"));
+}
+
 async function mounted() {
+  probeScope = "all";
   render(<Probe />);
   await waitFor(() => expect(orderOnScreen()).toBe("t1:0,t2:1"));
 }
@@ -285,5 +300,66 @@ describe("a force that is still running", () => {
 
     expect(board.forcing).toBe(false);
     expect(board.heldMove).toBeNull();
+  });
+});
+
+/**
+ * BP-557. `applySprintChange` filters a task out of a scoped board, so applying it before the
+ * server agreed made the card vanish and come back a round trip later when the PUT failed. Free on
+ * an unscoped board, where the row stays and only its badge changes; the whole screen on a scoped
+ * one.
+ */
+describe("moving a task to another sprint", () => {
+  it("waits for the server before taking the card off a scoped board", async () => {
+    await mountedScoped("s1");
+    let release!: (value: unknown) => void;
+    api.put.mockReturnValue(
+      new Promise((resolve) => {
+        release = resolve;
+      })
+    );
+
+    let moving!: Promise<void>;
+    act(() => {
+      moving = board.handleRowSprintChange("t1", "s2");
+    });
+
+    expect(board.tasks.map((t) => t._id), "still on screen while the write is out").toContain("t1");
+
+    await act(async () => {
+      release({});
+      await moving;
+    });
+
+    expect(board.tasks.map((t) => t._id), "and gone once the server agreed").not.toContain("t1");
+  });
+
+  it("leaves the card where it is when the write fails", async () => {
+    await mountedScoped("s1");
+    api.put.mockRejectedValue(new Error("network"));
+
+    await act(async () => {
+      await board.handleRowSprintChange("t1", "s2");
+    });
+
+    expect(board.tasks.map((t) => t._id), "no flicker to undo").toContain("t1");
+  });
+
+  // The control: an unscoped board still paints immediately, because being wrong is invisible there
+  it("applies at once when the card is not going anywhere", async () => {
+    await mounted();
+    let release!: (value: unknown) => void;
+    api.put.mockReturnValue(
+      new Promise((resolve) => {
+        release = resolve;
+      })
+    );
+
+    act(() => {
+      board.handleRowSprintChange("t1", "s2");
+    });
+
+    expect(board.tasks.find((t) => t._id === "t1")!.sprint).toBe("s2");
+    await act(async () => release({}));
   });
 });
