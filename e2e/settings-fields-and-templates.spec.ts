@@ -513,3 +513,34 @@ test.describe("board columns", () => {
     ]);
   });
 });
+
+/**
+ * BP-576. The option colour popover holds a ten-column swatch grid wider than a narrow phone, and
+ * the clamp that keeps a panel on screen has to choose an edge: pushed right until its right edge
+ * is inside, its left end — and the first swatches, where reading starts — go off the other side.
+ */
+test("a swatch panel wider than the screen keeps its left end on it", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 800 });
+  await openFields(page);
+  await page.getByRole("button", { name: "+ Add field" }).click();
+  await page.getByLabel("Name", { exact: true }).fill("Component");
+  await page.getByLabel("Type", { exact: true }).selectOption("dropdown");
+  await page.getByRole("button", { name: "+ Add option" }).click();
+
+  await page.getByRole("button", { name: "Colour for this option" }).click();
+  const grid = page.getByRole("group", { name: "Colour for this option" });
+  await expect(grid).toBeVisible();
+
+  // Wider than the screen, so some swatch has to be off it; the ones a reader starts from are the
+  // ones that must not be
+  const reach = await grid.evaluate((el) => {
+    const first = el.querySelector("button")!.getBoundingClientRect();
+    const at = document.elementFromPoint(first.left + first.width / 2, first.top + first.height / 2);
+    return {
+      panelLeft: Math.round(el.getBoundingClientRect().left),
+      firstSwatchTappable: at === el.querySelector("button") || el.querySelector("button")!.contains(at),
+    };
+  });
+  expect(reach.firstSwatchTappable, `panel left ${reach.panelLeft}`).toBe(true);
+  expect(reach.panelLeft).toBeGreaterThanOrEqual(0);
+});

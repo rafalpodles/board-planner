@@ -6,6 +6,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { ApiComment, ApiReaction } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { LoadFailed } from "@/components/ui/LoadFailed";
+import { Popover } from "@/components/ui/Popover";
 import { Textarea } from "@/components/ui/Textarea";
 import { useToast } from "@/components/ui/Toast";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -327,22 +328,43 @@ export function Comments({
                   </button>
                 )
               )}
-              <div className="relative group/react">
-                <button className="text-text-muted hover:text-text text-xs px-1.5 py-0.5 rounded-full border border-transparent hover:border-border transition-colors cursor-pointer">
-                  +
-                </button>
-                <div className="absolute left-0 bottom-full mb-1 hidden group-hover/react:flex bg-bg-card border border-border rounded-lg shadow-lg p-1 gap-0.5 z-10">
-                  {REACTION_EMOJIS.map((emoji) => (
-                    <button
-                      key={emoji}
-                      onClick={() => toggleReaction(comment._id, emoji)}
-                      className="hover:bg-bg-hover rounded p-1 text-sm cursor-pointer"
-                    >
-                      {emoji}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              {/* A control, not a hover state: the palette used to be a sibling revealed by
+                  `group-hover`, so a touch screen — which never satisfies :hover — and a keyboard
+                  could toggle a reaction somebody had already left but never start one (BP-576) */}
+              <Popover width="w-auto"
+                trigger={({ toggle, open }) => (
+                  <button
+                    type="button"
+                    onClick={toggle}
+                    aria-expanded={open}
+                    aria-label="Add a reaction"
+                    // 44px on a phone, the minimum from BP-365: this is the control the ticket is
+                    // about, and a 22px target is barely one for the audience it was reopened for
+                    className="text-text-muted hover:text-text text-xs px-1.5 py-0.5 rounded-full border border-transparent hover:border-border transition-colors cursor-pointer min-h-11 min-w-11 sm:min-h-0 sm:min-w-0"
+                  >
+                    +
+                  </button>
+                )}
+              >
+                {({ close }) => (
+                  <div className="flex gap-0.5">
+                    {REACTION_EMOJIS.map((emoji) => (
+                      <button
+                        key={emoji}
+                        type="button"
+                        aria-label={`React with ${emoji}`}
+                        onClick={() => {
+                          toggleReaction(comment._id, emoji);
+                          close();
+                        }}
+                        className="hover:bg-bg-hover rounded p-1 text-sm cursor-pointer"
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </Popover>
             </div>
           </div>
         ))}

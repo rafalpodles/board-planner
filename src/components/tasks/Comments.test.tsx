@@ -416,3 +416,70 @@ describe("Comments when the read fails", () => {
     expect(screen.queryByTestId("comments-error")).toBeNull();
   });
 });
+
+/**
+ * BP-576. The palette of emoji was a sibling revealed by `group-hover`, and the `+` had no
+ * `onClick` at all — so a touch screen, which never satisfies `:hover`, and a keyboard could
+ * toggle a reaction somebody had already left but never start one.
+ */
+describe("adding a reaction without a mouse", () => {
+  const openPalette = () => screen.getByRole("button", { name: "Add a reaction" });
+
+  it("opens the palette from a click on the + control", async () => {
+    serve([comment]);
+    render(<Comments projectId="TP" taskId="t1" />);
+    await waitFor(() => expect(openPalette()).toBeTruthy());
+
+    expect(screen.queryByRole("button", { name: "React with 👍" })).toBeNull();
+
+    fireEvent.click(openPalette());
+
+    expect(screen.getByRole("button", { name: "React with 👍" })).toBeTruthy();
+  });
+
+  it("adds the reaction the palette's own button names", async () => {
+    serve([comment]);
+    api.patch.mockResolvedValue({});
+    render(<Comments projectId="TP" taskId="t1" />);
+    await waitFor(() => expect(openPalette()).toBeTruthy());
+
+    fireEvent.click(openPalette());
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "React with 🎉" }));
+    });
+
+    expect(api.patch).toHaveBeenCalledWith(
+      "/api/projects/TP/tasks/t1/comments/c1",
+      { emoji: "🎉" }
+    );
+    // and it closes behind the choice, rather than sitting open over the thread
+    expect(screen.queryByRole("button", { name: "React with 🎉" })).toBeNull();
+  });
+
+  it("says whether it is open, so a screen reader can tell", async () => {
+    serve([comment]);
+    render(<Comments projectId="TP" taskId="t1" />);
+    await waitFor(() => expect(openPalette()).toBeTruthy());
+
+    expect(openPalette().getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(openPalette());
+    expect(openPalette().getAttribute("aria-expanded")).toBe("true");
+  });
+
+  // The control: the chips for reactions somebody already left worked before this and still do
+  it("still toggles a reaction that is already there", async () => {
+    serve([{ ...comment, reactions: [{ emoji: "👍", user: author }] }]);
+    api.patch.mockResolvedValue({});
+    render(<Comments projectId="TP" taskId="t1" />);
+    const chip = await screen.findByRole("button", { name: /👍/ });
+
+    await act(async () => {
+      fireEvent.click(chip);
+    });
+
+    expect(api.patch).toHaveBeenCalledWith(
+      "/api/projects/TP/tasks/t1/comments/c1",
+      { emoji: "👍" }
+    );
+  });
+});
