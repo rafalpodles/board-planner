@@ -107,6 +107,11 @@ describe("where the PM launcher is painted", () => {
       "max-lg:[body:has([data-pinned-bottom-bar])_&]:bottom-24"
     );
     expect(launcher()!.className.split(/\s+/)).toContain("bottom-6");
+    // The save bar's rule carries no width scope: unlike the comment bar it knows when it is
+    // open, and the collision it causes is at every width (BP-593)
+    expect(launcher()!.className.split(/\s+/)).toContain(
+      "[body:has([data-pinned-save-bar])_&]:bottom-24"
+    );
   });
 
   // The control: the launcher is withheld for its own reasons, and those still hold
