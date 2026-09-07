@@ -39,13 +39,21 @@ export const GET = withProjectAccess(async (request, { params }) => {
     const statuses = statusParam.split(",").map((id) => id.trim()).filter(Boolean);
     if (statuses.length > 0) {
       const columnIds = getColumnIds(board);
+      // A status no column has is a typo — unless tasks on this board are actually sitting in it,
+      // which is what a column deleted out from under them leaves behind. Those tasks are reachable
+      // by no screen and by no other query, so refusing the one id that finds them made the state
+      // unseeable rather than merely broken (BP-514). The rule BP-311 set is to refuse the act that
+      // creates the problem, never the board that already has it.
       if (!statuses.some((id) => columnIds.includes(id))) {
-        return NextResponse.json(
-          {
-            error: `Invalid status "${statusParam.slice(0, 64)}" — project columns: ${columnIds.join(", ")}`,
-          },
-          { status: 400 }
-        );
+        const orphaned = await Task.exists({ project: projectId, status: { $in: statuses } });
+        if (!orphaned) {
+          return NextResponse.json(
+            {
+              error: `Invalid status "${statusParam.slice(0, 64)}" — project columns: ${columnIds.join(", ")}`,
+            },
+            { status: 400 }
+          );
+        }
       }
       filter.status = { $in: statuses };
     }

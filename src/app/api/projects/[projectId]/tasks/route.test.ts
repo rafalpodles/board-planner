@@ -3,12 +3,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const getAuthUser = vi.fn();
 const check = vi.fn();
 const taskFind = vi.fn();
+// Whether any task on this board is sitting in the asked-for status — what tells an orphaned
+// column id apart from a typo (BP-514)
+const taskExists = vi.fn();
 const workerFind = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ getAuthUser, RateLimitError: class extends Error {} }));
 vi.mock("@/lib/grants", () => ({ check }));
-vi.mock("@/models/task", () => ({ Task: { find: taskFind } }));
+vi.mock("@/models/task", () => ({ Task: { find: taskFind, exists: taskExists } }));
 vi.mock("@/models/worker", () => ({ Worker: { find: workerFind } }));
 const userFindOne = vi.fn();
 vi.mock("@/models/user", () => ({ User: { findOne: userFindOne } }));
@@ -39,6 +42,7 @@ const populated: unknown[] = [];
 
 beforeEach(() => {
   vi.clearAllMocks();
+  taskExists.mockResolvedValue(null);
   getAuthUser.mockResolvedValue(USER);
   check.mockResolvedValue(true);
   populated.length = 0;
@@ -277,6 +281,43 @@ describe("GET /api/projects/:projectId/tasks — the status filter", () => {
     expect(res.status).toBe(400);
     expect((await res.json()).error).toMatch(/project columns: backlog, doing/);
     expect(taskFind).not.toHaveBeenCalled();
+  });
+
+  /**
+   * BP-514. A column deleted out from under its tasks leaves them holding a status no column has.
+   * They are drawn by no board and reachable by no other query, so refusing the one id that finds
+   * them made the state unseeable — while BP-311's rule is to refuse the act that creates the
+   * problem, never the board that already has it.
+   */
+  it("takes an id no column has when tasks are actually sitting in it", async () => {
+    taskExists.mockResolvedValue({ _id: "t1" });
+
+    const res = await GET(request("?status=in_progress"), ctx());
+
+    expect(res.status).toBe(200);
+    expect(taskFind).toHaveBeenCalledWith(
+      expect.objectContaining({ status: { $in: ["in_progress"] } })
+    );
+    // Scoped to this board. Without the project clause the probe answers "does any task anywhere
+    // hold this status", which is a different question and one this caller may not ask
+    expect(taskExists).toHaveBeenCalledWith({
+      project: PROJECT_ID,
+      status: { $in: ["in_progress"] },
+    });
+  });
+
+  // The filter is comma-separated, so the probe has to ask about all of them: an orphan in the
+  // second id is as real as one in the first
+  it("takes a list where only a later id has orphaned tasks", async () => {
+    taskExists.mockResolvedValue({ _id: "t1" });
+
+    const res = await GET(request("?status=nonesuch,in_progress"), ctx());
+
+    expect(res.status).toBe(200);
+    expect(taskExists).toHaveBeenCalledWith({
+      project: PROJECT_ID,
+      status: { $in: ["nonesuch", "in_progress"] },
+    });
   });
 
   // The control: the same request against an id the board does define still filters

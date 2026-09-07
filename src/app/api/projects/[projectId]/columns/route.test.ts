@@ -211,3 +211,49 @@ describe("PUT columns · the seeded seven", () => {
     expect((res.body as Column[]).map((c) => c.id)).toEqual(seven.map((c) => c.id));
   });
 });
+
+/**
+ * BP-514. A board stored with `columns: []` is shown the seven defaults everywhere — this editor
+ * included — so computing what a save *removes* from the raw array answered "nothing was removed"
+ * about columns its admin can see. A whole new set could be saved with the in-use check never
+ * running once, and every task kept a status naming a column that no longer existed.
+ */
+describe("a board stored with no columns of its own", () => {
+  it("refuses to replace the defaults out from under tasks standing in them", async () => {
+    board([], { in_progress: [7, 9] });
+
+    const { status, body } = await put([
+      col("stage_one", "Stage one", "backlog", 0),
+      col("stage_two", "Stage two", "active", 1),
+      col("stage_three", "Stage three", "done", 2),
+    ]);
+
+    expect(status).toBe(400);
+    expect(body.error).toContain("In Progress");
+    expect(body.error).toContain("TP-7");
+  });
+
+  // The control: the same board with nothing standing in the defaults saves as it always did
+  it("lets the same save through when no task stands in a default", async () => {
+    board([]);
+
+    const { status } = await put([
+      col("stage_one", "Stage one", "backlog", 0),
+      col("stage_two", "Stage two", "active", 1),
+      col("stage_three", "Stage three", "done", 2),
+    ]);
+
+    expect(status).toBe(200);
+  });
+
+  // And a default the payload keeps is not "removed" merely because the board stored nothing
+  it("does not count a default the save keeps", async () => {
+    board([], { in_progress: [7] });
+
+    const { status, body } = await put(
+      DEFAULT_PROJECT_COLUMNS.map((c, i) => col(c.id, c.label, c.role, i))
+    );
+
+    expect(status, JSON.stringify(body)).toBe(200);
+  });
+});
