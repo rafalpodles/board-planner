@@ -97,8 +97,9 @@ describe("where the panel lands", () => {
     const panel = open({ top: 118, bottom: 158 });
 
     expect(panel.style.bottom).toBe(`${260 - 118 + 4}px`);
-    // 118 - 8 above; without the cap the panel's 260px would put its top at -150
-    expect(panel.style.maxHeight).toBe("110px");
+    // 118 above the trigger, less the margins; without the cap the panel's 260px would put its
+    // top at -150
+    expect(panel.style.maxHeight).toBe("106px");
     expect(260 - Number.parseInt(panel.style.bottom) - Number.parseInt(panel.style.maxHeight))
       .toBeGreaterThanOrEqual(0);
   });

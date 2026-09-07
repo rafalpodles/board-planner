@@ -544,3 +544,62 @@ test("a swatch panel wider than the screen keeps its left end on it", async ({ p
   expect(reach.firstSwatchTappable, `panel left ${reach.panelLeft}`).toBe(true);
   expect(reach.panelLeft).toBeGreaterThanOrEqual(0);
 });
+
+/**
+ * BP-555. The save bar is `sticky bottom-0` inside the settings column and owns the bottom strip of
+ * it; the picker's panel is `position: fixed` and portaled to the body, a different stacking
+ * context, so `z-index` never compares them. Measured off rpo's screenshot at 1280×720, the flipped
+ * panel covered the bar's left-hand half — the part that says there are unsaved changes.
+ */
+test("a picker at the bottom of a settings section does not cover the save bar", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await openFields(page);
+
+  await page.getByRole("button", { name: "+ Add template" }).click();
+  const nameInput = page.getByLabel("Template name");
+  await nameInput.fill("Bug report");
+  const row = nameInput.locator(
+    "xpath=ancestor::div[.//button[normalize-space()='Edit' or normalize-space()='Done']][1]"
+  );
+  await row.getByRole("button", { name: "Edit" }).click();
+
+  const unsaved = page.getByText(/unsaved change/);
+  await expect(unsaved).toBeVisible();
+
+  await row.getByRole("combobox", { name: "Template category" }).click();
+  await expect(page.getByRole("listbox", { name: "Template category" })).toBeVisible();
+
+  const verdict = await page.evaluate(() => {
+    const bar = document.querySelector("[data-pinned-bottom-bar]")!.getBoundingClientRect();
+    const panel = document.querySelector('[role="listbox"]')!.parentElement!.getBoundingClientRect();
+    // A bare text node beside a button, so its own rectangle comes from a Range rather than
+    // from an element
+    const walker = document.createTreeWalker(
+      document.querySelector("[data-pinned-bottom-bar]")!,
+      NodeFilter.SHOW_TEXT
+    );
+    let text: Text | null = null;
+    while (walker.nextNode()) {
+      if (/unsaved change/.test(walker.currentNode.textContent || "")) {
+        text = walker.currentNode as Text;
+        break;
+      }
+    }
+    const range = document.createRange();
+    range.selectNodeContents(text!);
+    const r = range.getBoundingClientRect();
+    const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return {
+      overlap: Math.round(Math.min(panel.bottom, bar.bottom) - Math.max(panel.top, bar.top)),
+      labelReadable: at !== null && at.contains(text!),
+      where: `panel ${Math.round(panel.top)}..${Math.round(panel.bottom)} bar ${Math.round(
+        bar.top
+      )}..${Math.round(bar.bottom)}`,
+    };
+  });
+
+  expect(verdict.labelReadable, verdict.where).toBe(true);
+  expect(verdict.overlap, verdict.where).toBeLessThanOrEqual(0);
+});

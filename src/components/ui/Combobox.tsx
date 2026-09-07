@@ -64,6 +64,7 @@ const PANEL_WIDTH = 224;
 const PANEL_MAX_HEIGHT = 260;
 /** Between the panel and the trigger, and between the panel and whatever bounds it */
 const GAP = 4;
+const PINNED_BARS = "[data-pinned-bottom-bar],[data-pinned-phone-bar]";
 /** The search box's own height, taken out of what is left for the list */
 const SEARCH_HEIGHT = 33;
 
@@ -78,7 +79,7 @@ function floorOfFreeSpace() {
   let floor = document.documentElement.clientHeight;
   const phone = window.matchMedia("(max-width: 1023px)").matches;
   const bars = document.querySelectorAll<HTMLElement>(
-    phone ? "[data-pinned-bottom-bar],[data-pinned-phone-bar]" : "[data-pinned-bottom-bar]"
+    phone ? PINNED_BARS : "[data-pinned-bottom-bar]"
   );
   for (const bar of bars) {
     const r = bar.getBoundingClientRect();
@@ -177,8 +178,11 @@ export function Combobox(props: ComboboxProps) {
       ?.getBoundingClientRect();
     const viewport = document.documentElement;
     const floor = floorOfFreeSpace();
+    // The settings column scrolls *under* its save bar, so a trigger can itself be behind one.
+    // Flipping above such a trigger still lands on the bar; the panel hangs off the floor instead
+    const ledge = Math.min(trigger.top, floor);
     const below = floor - trigger.bottom - GAP;
-    const above = trigger.top - GAP - GAP;
+    const above = ledge - GAP * 3;
     // Flipped only when there is genuinely more room above: asking whether the panel fits below
     // and not whether it fits above put its top off the screen on a short window (BP-547)
     const flip = below < PANEL_MAX_HEIGHT && above > below;
@@ -188,7 +192,7 @@ export function Combobox(props: ComboboxProps) {
         Math.min(inner?.left ?? trigger.left, viewport.clientWidth - PANEL_WIDTH - GAP * 2)
       ),
       top: flip ? undefined : trigger.bottom + GAP,
-      bottom: flip ? viewport.clientHeight - trigger.top + GAP : undefined,
+      bottom: flip ? viewport.clientHeight - ledge + GAP : undefined,
       maxHeight: Math.max(0, Math.min(PANEL_MAX_HEIGHT, flip ? above : below)),
     });
   }, []);
@@ -199,13 +203,16 @@ export function Combobox(props: ComboboxProps) {
     setActive(Math.max(0, selectedIndexRef.current));
   }, [open, measure]);
 
-  // The trigger changes size under the panel — a multiselect's chips wrap onto a second line as
-  // options are ticked, and the panel is placed from the trigger's bottom (BP-547)
+  // Two things move under an open panel without the viewport changing: the trigger, whose chips
+  // wrap onto a second line as a multiselect is ticked (BP-547), and a pinned bar, which arrives
+  // over 200ms of `max-height` — so the floor measured on the opening click is not the one the
+  // reader ends up with
   useEffect(() => {
     const trigger = anchor.current;
     if (!open || !trigger || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
     observer.observe(trigger);
+    for (const bar of document.querySelectorAll(PINNED_BARS)) observer.observe(bar);
     return () => observer.disconnect();
   }, [open, measure]);
 
