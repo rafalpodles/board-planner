@@ -40,6 +40,8 @@ export default function MachineProjectsPage() {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState("");
+  /** Kept apart from `error`: one says the save did not happen, the other that the list is old */
+  const [stale, setStale] = useState("");
 
   useEffect(() => {
     api
@@ -56,6 +58,8 @@ export default function MachineProjectsPage() {
 
   function toggle(row: CatalogueRow) {
     setSaved("");
+    setError("");
+    setStale("");
     setPicked((prev) => {
       const next = new Set(prev);
       if (next.has(row.project)) next.delete(row.project);
@@ -67,6 +71,7 @@ export default function MachineProjectsPage() {
   async function save() {
     setSaving(true);
     setError("");
+    setStale("");
     try {
       const result = await api.put(`/api/workers/${workerId}/projects`, {
         projects: [...picked],
@@ -83,12 +88,26 @@ export default function MachineProjectsPage() {
       setSaving(false);
       return;
     }
+    // The rows carry the change the write made, so the pending-delete warning goes with it. Left
+    // to the re-read alone, a failed one keeps promising to remove a checkout it already removed
+    setView((prev) =>
+      prev
+        ? {
+            ...prev,
+            catalogue: prev.catalogue.map((row) => ({
+              ...row,
+              wanted: picked.has(row.project),
+              servedHere: picked.has(row.project),
+            })),
+          }
+        : prev
+    );
     // A second fact, and a different one: the save landed, so saying "Could not save" here would
-    // deny something that happened. All that is wrong is the list on screen (BP-585)
+    // deny something that happened. All that is wrong is what somebody else may have changed
     try {
       setView(await api.get(`/api/workers/${workerId}/projects`));
     } catch {
-      setError(LIST_REFRESH_FAILED);
+      setStale(LIST_REFRESH_FAILED);
     } finally {
       setSaving(false);
     }
@@ -186,8 +205,11 @@ export default function MachineProjectsPage() {
         </p>
       )}
 
-      {error && <p className="mt-4 text-sm text-danger">{error}</p>}
+      {/* The outcome of the click first, then the caveat. And a warning rather than a danger:
+          on this page red is what "your action did not happen" looks like */}
       {saved && <p className="mt-4 text-sm text-text-muted">{saved}</p>}
+      {stale && <p className="mt-4 text-sm text-warning">{stale}</p>}
+      {error && <p className="mt-4 text-sm text-danger">{error}</p>}
 
       <div className="mt-6 flex items-center gap-3">
         <Button onClick={save} disabled={saving}>
