@@ -159,3 +159,38 @@ test("a task read that nothing overtook is still applied", async ({ page }) => {
 
   await expect.poll(async () => rowOrder(page)).toEqual(before);
 });
+
+/**
+ * BP-558 review. The stored `execution` subdocument has defaults on every field, so it serialises
+ * as a truthy object even when nothing is running — and the board reads a truthy `execution` as
+ * "a machine is holding this task", which is the red pulsing indicator. Reconciling a row from a
+ * write that answered with the raw document therefore painted a run that does not exist onto every
+ * card the reader touched, until the next poll cleared it.
+ */
+test("changing a status does not paint a run that is not happening", async ({ page }) => {
+  await listView(page);
+  const before = await page.getByTestId("row-run-live").count();
+
+  // The seed holds one task with a live run, and a status change on that one is refused with a
+  // 409 rather than written — the last row is an ordinary one
+  const order = await rowOrder(page);
+  const key = order[order.length - 1];
+  const status = page.getByRole("combobox", { name: new RegExp(`^Status for ${key}`) });
+  await status.click();
+  const options = page.getByRole("listbox", { name: new RegExp(`^Status for ${key}`) });
+  await expect(options).toBeVisible();
+  const written = page.waitForResponse(
+    (r) =>
+      /\/tasks\//.test(new URL(r.url()).pathname) &&
+      ["PUT", "PATCH"].includes(r.request().method()) &&
+      r.ok()
+  );
+  // Whichever column it is not already in
+  const target = options.locator('[role="option"][aria-selected="false"]').first();
+  await target.click();
+  await written;
+
+  // Read once and straight away: the poll would clear a phantom within ten seconds, so a retrying
+  // matcher would wait out the very evidence this test exists for
+  expect(await page.getByTestId("row-run-live").count(), "no run appeared").toBe(before);
+});
