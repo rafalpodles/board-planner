@@ -98,14 +98,14 @@ describe("MobileCommentBar", () => {
 
 /**
  * BP-591. The PM launcher is painted over this bar and steps up for anything carrying
- * `data-pinned-bottom-bar`, so the attribute is a contract with another file rather than
+ * `data-pinned-phone-bar`, so the attribute is a contract with another file rather than
  * decoration. The launcher's own half is asserted in `PmChatWidget.test.tsx`.
  */
 describe("the strip it occupies", () => {
   it("declares the bottom strip as spoken for", () => {
     renderBar();
 
-    const bar = screen.getByLabelText("Add a comment").closest("[data-pinned-bottom-bar]");
+    const bar = screen.getByLabelText("Add a comment").closest("[data-pinned-phone-bar]");
     expect(bar).not.toBeNull();
   });
 });

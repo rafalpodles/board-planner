@@ -104,9 +104,23 @@ describe("where the PM launcher is painted", () => {
     // The whole token, not a substring of it: asserting only the attribute name survives losing
     // the `max-lg:` scope, which is exactly the defect review caught here
     expect(launcher()!.className.split(/\s+/)).toContain(
-      "max-lg:[body:has([data-pinned-bottom-bar])_&]:bottom-24"
+      "max-lg:[body:has([data-pinned-phone-bar])_&]:bottom-24"
     );
     expect(launcher()!.className.split(/\s+/)).toContain("bottom-6");
+    // The save bar's rule carries no width scope: unlike the comment bar it knows when it is
+    // open, and the collision it causes is at every width (BP-593)
+    expect(launcher()!.className.split(/\s+/)).toContain(
+      "[body:has([data-pinned-bottom-bar])_&]:bottom-24"
+    );
+
+    // The panel's half of the same rule, and unscoped for the same reason: a `max-lg:` on it
+    // alone puts the launcher back on Send above 1024, which no e2e width would see
+    fireEvent.click(launcher()!);
+    const panel = screen.getByTestId("pm-chat-panel").className.split(/\s+/);
+    expect(panel).toContain("[body:has([data-pinned-bottom-bar])_&]:bottom-40");
+    expect(panel).toContain(
+      "[body:has([data-pinned-bottom-bar])_&]:h-[min(44rem,calc(100vh-12rem))]"
+    );
   });
 
   // The control: the launcher is withheld for its own reasons, and those still hold
