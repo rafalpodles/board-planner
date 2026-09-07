@@ -152,6 +152,7 @@ function TaskDetailView({
   // Deliberately its own state rather than reusing heldStatus: the two dialogs say different
   // things about what is lost, and one is undoable while the other is not (BP-337)
   const [heldDelete, setHeldDelete] = useState<RunConflict | null>(null);
+  const [forcingStatus, setForcingStatus] = useState(false);
   const [addingChild, setAddingChild] = useState(false);
   const [addingChildSaving, setAddingChildSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -228,12 +229,17 @@ function TaskDetailView({
   async function forceHeldStatus() {
     if (!heldStatus) return;
     const pending = heldStatus;
-    setHeldStatus(null);
+    // Kept up for its own write, like the forced delete beside it: taking a task off a running
+    // worker is not something to do behind a closed dialog (BP-588)
+    setForcingStatus(true);
     try {
       await pending.retry();
       toast(`${taskKey} taken from the worker`, "success");
     } catch {
       toast("Failed to update status", "error");
+    } finally {
+      setForcingStatus(false);
+      setHeldStatus(null);
     }
     onReload();
   }
@@ -535,6 +541,8 @@ function TaskDetailView({
         open={!!heldStatus}
         onClose={() => setHeldStatus(null)}
         onConfirm={forceHeldStatus}
+        loading={forcingStatus}
+        loadingLabel="Moving..."
         title="This task is being executed"
         message={
           heldStatus

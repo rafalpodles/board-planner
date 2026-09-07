@@ -264,4 +264,28 @@ describe("ProjectBoardView's emptyState prop", () => {
     render(<ProjectBoardView board={makeBoard({ tasks: [] })} />);
     expect(screen.getByText("No tasks yet")).toBeTruthy();
   });
+
+  /**
+   * BP-588 review. `ConfirmDialog` hard-coded "Deleting…" as its busy label, and this was the first
+   * change to give the *move* dialog a busy state — so a forced move announced itself as a delete,
+   * beside a message saying the task's work would be lost.
+   */
+  it("says what a forced move is doing, not what a delete would be", () => {
+    render(
+      <ProjectBoardView
+        board={makeBoard({
+          tasks,
+          heldMove: {
+            taskKey: "TP-1",
+            conflict: { workerName: "mac", phase: "agent" } as never,
+            retry: async () => {},
+          },
+          forcing: true,
+        })}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Moving..." })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Deleting..." })).toBeNull();
+  });
 });

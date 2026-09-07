@@ -444,9 +444,10 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
       toast(`${pending.taskKey} taken from the worker`, "success");
     } catch {
       toast("Failed to move task", "error");
+    } finally {
+      setForcing(false);
+      setHeldMove(null);
     }
-    setForcing(false);
-    setHeldMove(null);
     loadData();
   }
 
@@ -566,9 +567,10 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
       toast("Task deleted", "success");
     } catch {
       toast("Failed to delete task", "error");
+    } finally {
+      setForcing(false);
+      setHeldDelete(null);
     }
-    setForcing(false);
-    setHeldDelete(null);
     loadData();
   }
 

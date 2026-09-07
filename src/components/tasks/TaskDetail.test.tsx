@@ -163,6 +163,45 @@ describe("TaskDetail", () => {
     });
   });
 
+  /**
+   * BP-588 review found this one still live three lines above the delete it fixed: the forced
+   * *status* change closed its dialog on the click too, and was never given `loading` at all.
+   */
+  it("keeps the forced-move confirmation up, and busy, while it runs", async () => {
+    let release!: () => void;
+    api.patch
+      .mockRejectedValueOnce({
+        status: 409,
+        body: { runConflict: { workerName: "mac", phase: "agent" } },
+      })
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          release = () => resolve({});
+        })
+      );
+    renderDetail();
+    await loaded();
+
+    await act(async () => screen.getByRole("combobox", { name: "Status" }).click());
+    await act(async () => screen.getByRole("option", { name: /In Progress/i }).click());
+    expect(screen.getByText("This task is being executed")).toBeTruthy();
+
+    await act(async () => {
+      screen.getByRole("button", { name: "Move anyway" }).click();
+    });
+
+    expect(screen.queryByText("This task is being executed")).not.toBeNull();
+    // And it says what it is doing: this dialog moves a task, it does not delete one
+    const confirm = screen.getByRole("button", { name: "Moving..." });
+    expect((confirm as HTMLButtonElement).disabled).toBe(true);
+
+    await act(async () => {
+      release();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(screen.queryByText("This task is being executed")).toBeNull());
+  });
+
   it("counts the acceptance criteria that are done", async () => {
     renderDetail();
     await loaded();
@@ -268,6 +307,14 @@ describe("TaskDetail", () => {
       screen.queryByText("This task is being executed"),
       "the dialog stays up for the write it started"
     ).not.toBeNull();
+    // Up is not the point; busy is. Without `loading` reaching it the dialog would stay open and
+    // still offer a second click, and Escape would take it away mid-write
+    const confirm = screen.getByRole("button", { name: "Deleting..." });
+    expect((confirm as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    expect(screen.queryByText("This task is being executed")).not.toBeNull();
 
     await act(async () => {
       release();

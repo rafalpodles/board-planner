@@ -10,6 +10,12 @@ interface ConfirmDialogProps {
   title: string;
   message: string;
   confirmLabel?: string;
+  /**
+   * What the confirm button says while the write it started is running. Defaults to "Deleting…"
+   * because deleting is what this dialog was written for, but it is not the only thing it confirms
+   * — a forced *move* asking "Deleting…" describes the wrong act (BP-588 review).
+   */
+  loadingLabel?: string;
   loading?: boolean;
 }
 
@@ -20,6 +26,7 @@ export function ConfirmDialog({
   title,
   message,
   confirmLabel = "Delete",
+  loadingLabel = "Deleting...",
   loading = false,
 }: ConfirmDialogProps) {
   return (
@@ -35,7 +42,7 @@ export function ConfirmDialog({
           onClick={onConfirm}
           disabled={loading}
         >
-          {loading ? "Deleting..." : confirmLabel}
+          {loading ? loadingLabel : confirmLabel}
         </Button>
       </div>
     </Modal>

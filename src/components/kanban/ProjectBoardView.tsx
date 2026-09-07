@@ -430,6 +430,7 @@ export function ProjectBoardView({
         }}
         onConfirm={forceHeldMove}
         loading={forcing}
+        loadingLabel="Moving..."
         title="This task is being executed"
         message={
           heldMove
