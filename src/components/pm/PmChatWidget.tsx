@@ -37,7 +37,7 @@ export function PmChatWidget() {
   return (
     <>
       {open && (
-        <div data-testid="pm-chat-panel" className="fixed bottom-24 right-4 z-40 w-[min(30rem,calc(100vw-2rem))] h-[min(44rem,calc(100vh-8rem))] max-lg:[body:has([data-pinned-bottom-bar])_&]:bottom-40 max-lg:[body:has([data-pinned-bottom-bar])_&]:h-[min(44rem,calc(100vh-12rem))] bg-bg border border-border rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+        <div data-testid="pm-chat-panel" className="fixed bottom-24 right-4 z-40 w-[min(30rem,calc(100vw-2rem))] h-[min(44rem,calc(100vh-8rem))] bg-bg border border-border rounded-2xl shadow-2xl flex flex-col overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-bg-card shrink-0">
             <p className="font-semibold text-sm">🤖 PM — {project.name}</p>
             <div className="flex items-center gap-3">

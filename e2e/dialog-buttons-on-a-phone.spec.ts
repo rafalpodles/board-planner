@@ -164,6 +164,14 @@ test("the PM panel opens fully on screen above a pinned bar", async ({ page }) =
   await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
   await expect(launcher(page)).toBeVisible();
 
+  // With a draft in it the bar grows from 75px to about 160px, which is the state the panel's own
+  // raised position is for: at the lower anchor it clears an empty bar and not a full one
+  const draft = page.getByLabel("Add a comment");
+  await draft.fill("A comment long enough to grow the bar\n".repeat(5));
+  await expect
+    .poll(async () => (await draft.boundingBox())?.height ?? 0)
+    .toBeGreaterThan(60);
+
   await launcher(page).click();
   const close = page.getByRole("button", { name: "Close PM chat" }).first();
   await expect(close).toBeVisible();
@@ -174,20 +182,24 @@ test("the PM panel opens fully on screen above a pinned bar", async ({ page }) =
     const p = panel.getBoundingClientRect();
     const c = closeEl.getBoundingClientRect();
     const at = document.elementFromPoint(c.left + c.width / 2, c.top + c.height / 2);
-    const bar = document.querySelector("[data-pinned-bottom-bar]")!.getBoundingClientRect();
+    const box = document.querySelector('[aria-label="Add a comment"]')!;
+    const t = box.getBoundingClientRect();
+    const overTheBox = document.elementFromPoint(t.left + t.width / 2, t.top + t.height / 2);
     return {
       panelTop: Math.round(p.top),
       closeTop: Math.round(c.top),
       closeOwnsItsCentre: at === closeEl || closeEl.contains(at),
-      // The raise itself, not only the height that follows from it
-      panelClearsTheBar: p.bottom <= bar.top,
+      // What the raise is for: at the lower anchor the panel comes down over the draft somebody
+      // is in the middle of typing. It touches the grown bar's top edge either way — that part is
+      // cosmetic — but the text they are writing has to stay theirs.
+      draftOwnsItsCentre: overTheBox === box || box.contains(overTheBox),
     };
   });
 
   expect(fits.panelTop).toBeGreaterThanOrEqual(0);
   expect(fits.closeTop).toBeGreaterThanOrEqual(0);
   expect(fits.closeOwnsItsCentre).toBe(true);
-  expect(fits.panelClearsTheBar).toBe(true);
+  expect(fits.draftOwnsItsCentre).toBe(true);
 });
 
 // The control for the scope: at desktop width the bar is `lg:hidden` — in the DOM but not on
