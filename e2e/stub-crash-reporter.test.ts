@@ -100,16 +100,13 @@ describe("reading the stubs' own output", () => {
   });
 
   // The two streams interleave, and one buffer would glue an unfinished stdout line onto the next
-  // stderr chunk — inventing a line neither stream ever wrote
+  // stderr chunk — here that splice spells the marker neither stream ever wrote
   it("keeps a half-line on each stream to itself", async () => {
     const reporter = watching();
-    reporter.onStdOut?.("compiled /projects in 400ms — no newline yet");
-    reporter.onStdErr?.(` [openai stub] GET /x\n`);
-    reporter.onStdOut?.(`${CRASH_MARKER} [openai stub] GET /y\n`);
+    reporter.onStdOut?.(`compiled /projects — ${CRASH_MARKER.slice(0, 5)}`);
+    reporter.onStdErr?.(`${CRASH_MARKER.slice(5)} is not what this line says\n`);
 
-    await reporter.onEnd?.(passed);
-
-    expect(summary()).toContain("[openai stub] GET /y");
-    expect(summary(), "one crash, not a spliced second").toContain("1 stub crash");
+    expect(await reporter.onEnd?.(passed), "no crash was reported by either stream").toBeUndefined();
+    expect(summary()).toBe("");
   });
 });
