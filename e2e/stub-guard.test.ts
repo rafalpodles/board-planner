@@ -202,7 +202,8 @@ describe("reporting", () => {
 
     const crashed = await fetch(`${url}/v1/chat/completions`, { method: "POST" });
     expect(crashed.status).toBe(500);
-    expect(errors.length).toBeLessThan(5);
+    // Exactly one: `toBeLessThan` was also satisfied by a report that was never written at all.
+    expect(errors.length).toBe(1);
   });
 
   it("survives stderr refusing the write, rather than dying inside its own report", async () => {
@@ -481,47 +482,79 @@ function split(source: string): { withoutComments: string; code: string } {
   return { withoutComments, code };
 }
 
+/**
+ * Every local name in `source` bound to an HTTP server factory, and whether the file reaches for
+ * one it cannot bind statically.
+ *
+ * The question this test can honestly ask is not "does the file mention the guard" — a file can
+ * import it, call it once, and stand up a second server beside it, which is what `mongo-proxy.mjs`
+ * legitimately does with its TCP half. It is: **is every HTTP server in e2e/ created around
+ * `guard`**.
+ */
+function httpServerFactories(source: string): { names: string[]; dynamic: boolean } {
+  const names: string[] = [];
+  const isHttp = (module: string) => /^(?:node:)?(?:http|https|http2)$/.test(module);
+
+  const named = /import\s*\{([^}]*)\}\s*from\s*["'`]([^"'`]+)["'`]/g;
+  for (const [, bindings, module] of source.matchAll(named)) {
+    if (!isHttp(module)) continue;
+    for (const binding of bindings.split(",")) {
+      const [imported, local] = binding.split(/\s+as\s+/).map((part) => part.trim());
+      if (/^createS(?:erver|ecureServer)$/.test(imported)) names.push(local || imported);
+    }
+  }
+
+  const namespace = /import\s*\*\s*as\s*(\w+)\s*from\s*["'`]([^"'`]+)["'`]/g;
+  for (const [, local, module] of source.matchAll(namespace)) {
+    if (isHttp(module)) names.push(`${local}\\.createServer`);
+  }
+
+  // `await import("node:http")` binds nothing this can follow, so it is reported rather than
+  // silently passed.
+  const dynamic = [...source.matchAll(/\bimport\s*\(\s*["'`]([^"'`]+)["'`]/g)].some(([, module]) =>
+    isHttp(module)
+  );
+
+  return { names, dynamic };
+}
+
 describe("every stub process", () => {
-  it("reaches the guard, so a new one cannot quietly reintroduce the bug", () => {
-    // The ticket asks for the guard on every stub, not only the model one, and four of the five
-    // were the same shape with the same gap. Nothing but this stops the sixth being written the
-    // old way against a green suite.
+  it("creates every HTTP server around the guard, so a new one cannot reintroduce the bug", () => {
+    // Four of the five stubs had the same shape and the same gap, and nothing but this stops the
+    // sixth — or a sixth server inside an existing one — being written the old way against a green
+    // suite.
     //
-    // Importing the module is not enough to pass: the likely new stub imports readBody and then
-    // calls a bare createServer. Nor is calling something named serve, which a file can declare
-    // itself, or merely mention. Both are required, of code with its comments and — for the call —
-    // its strings removed: a trailing `// move this to serve()` used to satisfy this check.
+    // What is checked is each CALL, not the file's imports: a file that imports `serve`, calls it,
+    // and then stands up a bare `createServer` beside it used to pass, and that is precisely the
+    // regression this is here for. Comments and strings are stripped first, so neither prose nor a
+    // URL literal can satisfy or trip it.
+    //
+    // Out of scope, deliberately: a `node:net` server. `mongo-proxy.mjs` runs one, and an HTTP
+    // guard has nothing to wrap it in — its own connection handling is what covers it.
     const here = dirname(fileURLToPath(import.meta.url));
     const files = readdirSync(here, { recursive: true, encoding: "utf8" })
       // .artifacts is a run's own output, gitignored, and nothing in it is a stub.
       .filter((file) => !file.split(sep).some((part) => part.startsWith(".")))
       .filter((file) => file.endsWith(".mjs") && !file.endsWith("stub-guard.mjs"));
 
-    // Not a count, which retiring one stub would break: the file the ticket is named after has to
-    // be in the candidate set, or the assertion below is about nothing.
-    expect(files).toContain("openrouter-stub.mjs");
-
     const scan = (file: string) => {
       const { withoutComments, code } = split(readFileSync(join(here, file), "utf8"));
-      const servesHttp = /(["'`])(?:node:)?http2?s?\1/.test(withoutComments);
-      // Imported BY NAME from the guard, not merely mentioned: a file can declare its own `serve`,
-      // and the call below would then be its own.
-      const imported = /import\s*\{([^}]*)\}\s*from\s*["'`][^"'`]*stub-guard\.mjs["'`]/
-        .exec(withoutComments)?.[1];
-      const called = /\b(?:serve|guard)\s*\(/.test(code);
-      return {
-        servesHttp,
-        guarded: /\b(?:serve|guard)\b/.test(imported ?? "") && called,
-      };
+      const { names, dynamic } = httpServerFactories(withoutComments);
+      const calls = names.flatMap((name) => [...code.matchAll(new RegExp(`\\b${name}\\s*\\(`, "g"))]);
+      const guarded = names.flatMap((name) => [
+        ...code.matchAll(new RegExp(`\\b${name}\\s*\\(\\s*guard\\s*\\(`, "g")),
+      ]);
+      return { servers: calls.length, unwrapped: calls.length - guarded.length, dynamic };
     };
 
-    // Not "some stub is a candidate": the check below is only about files that name node:http, and
-    // if none did, an empty result would mean nothing at all.
-    expect(files.filter((file) => scan(file).servesHttp).length).toBeGreaterThanOrEqual(1);
+    // The four stubs on `serve()` create no server of their own, so they contribute nothing to
+    // scan and the assertion below would be about nothing without this: at least one file in e2e/
+    // really does stand up an HTTP server by hand, and it is examined.
+    expect(files.filter((file) => scan(file).servers > 0)).not.toEqual([]);
 
     const unguarded = files.filter((file) => {
-      const { servesHttp, guarded } = scan(file);
-      return servesHttp && !guarded;
+      const { unwrapped, dynamic } = scan(file);
+      return unwrapped > 0 || dynamic;
     });
 
     expect(unguarded).toEqual([]);
