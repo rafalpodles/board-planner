@@ -32,16 +32,14 @@ export const CRASH_MARKER = "STUB CRASH";
  *   what could not be written synchronously is handed to the stream's own queue, which costs the
  *   synchrony and delivers it only if the process lives long enough to drain — see `fatal`.
  *
- * The re-entrancy guard is not belt and braces. With fd 2 unwritable, the fallback's `write` emits
- * `error` on a stream nobody listens to, Node raises that as an uncaught exception, and the
- * handler calls back into here: measured at 127,832 rounds in five seconds, RSS climbing, the stub
- * alive and serving nothing. A stub spinning at 100% is worse for a run than one that died fast.
+ * The listener on the fallback stream is the load-bearing line, not decoration. With fd 2
+ * unwritable the queued write emits `error` on a stream nobody listens to, Node raises that as an
+ * uncaught exception, and the handler reports again: measured at 25,852 rounds in under a second,
+ * RSS climbing, the stub alive and serving nothing. A guard against re-entering this function was
+ * tried first and blocked exactly zero of them — the storm arrives a tick later, after the guard
+ * has been released — so it went, rather than stay as a line no mutation can redden.
  */
-let emitting = false;
-
 function emit(text) {
-  if (emitting) return;
-  emitting = true;
   try {
     const buffer = Buffer.from(text, "utf8");
     let written = 0;
@@ -65,9 +63,9 @@ function emit(text) {
       written += sent;
     }
   } catch {
-    // Buffer.from itself, on a stack too long to hold. Nothing this function does may throw.
-  } finally {
-    emitting = false;
+    // `Buffer.from` on a stack too long to hold. Defensive, and unreachable by any test that could
+    // be written cheaply: nothing this function does may throw, because its one caller of last
+    // resort is the `uncaughtException` handler, where a throw is fatal.
   }
 }
 

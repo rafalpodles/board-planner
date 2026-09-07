@@ -57,8 +57,13 @@ vi.mock("node:fs", async (importOriginal) => {
 });
 
 let server: Server | undefined;
+let stderrListeners: unknown[] = [];
 
 beforeEach(() => {
+  // The fallback installs a no-op `error` listener on the real stderr of whatever process runs it,
+  // and here that is the vitest worker, where it would outlive the test and swallow the next real
+  // stderr error in it.
+  stderrListeners = process.stderr.listeners("error");
   errors.length = 0;
   stderr.accept = Infinity;
   stderr.throwsOnce = false;
@@ -71,6 +76,11 @@ afterEach(async () => {
   // Also on the way out: `res.on("error")` can report after a body has finished, and a leftover
   // line would satisfy the next test's `toContain`.
   errors.length = 0;
+  for (const listener of process.stderr.listeners("error")) {
+    if (!stderrListeners.includes(listener)) {
+      process.stderr.removeListener("error", listener as () => void);
+    }
+  }
   const running = server;
   server = undefined;
   if (running) await new Promise<void>((resolve) => running.close(() => resolve()));
@@ -182,6 +192,19 @@ describe("reporting", () => {
     expect(errors.join("")).toContain(CRASH_MARKER);
   });
 
+  it("gives up rather than spinning when stderr accepts nothing and reports no error", async () => {
+    // `writeSync` returning 0 is not progress, and a loop that keeps asking wedges the event loop
+    // — this function failing in the one way its whole point is to avoid.
+    stderr.accept = 0;
+    const url = await listen(() => {
+      throw new Error("the directive was not JSON");
+    });
+
+    const crashed = await fetch(`${url}/v1/chat/completions`, { method: "POST" });
+    expect(crashed.status).toBe(500);
+    expect(errors.length).toBeLessThan(5);
+  });
+
   it("survives stderr refusing the write, rather than dying inside its own report", async () => {
     // Once anything has touched process.stderr the fd is non-blocking, and a full pipe makes
     // writeSync throw EAGAIN. Thrown from `report` that is fatal in the worst place: `report` is
@@ -223,8 +246,10 @@ describe("reporting", () => {
 
     expect(errors.join("")).toBe(`\n${CRASH_MARKER} [`.slice(0, 12));
     expect(queued.join("")).toContain("a stack that outlasts the buffer");
-    // Nothing written twice: the queue picks up exactly where the synchronous write stopped.
-    expect(errors.join("") + queued.join("")).toContain(`${CRASH_MARKER} [test stub]`);
+    // Nothing written twice: the queue picks up exactly where the synchronous write stopped. The
+    // marker is inside the twelve bytes fd 2 already took, so re-queueing the whole report — which
+    // a `subarray(0)` slip would do — puts it in here as well.
+    expect(queued.join("")).not.toContain(CRASH_MARKER);
   });
 });
 
@@ -349,7 +374,8 @@ describe("the process-level guard", () => {
       spawned.on("close", () => resolve(Number(/ROUNDS (\d+)/.exec(out)?.[1] ?? -1)));
     });
 
-    expect(rounds).toBeGreaterThanOrEqual(0);
+    // At least one: zero would mean the seeded throw never fired and the scenario never engaged.
+    expect(rounds).toBeGreaterThanOrEqual(1);
     // One report, not a storm. The number is a ceiling with room, not a measurement.
     expect(rounds).toBeLessThan(20);
   }, 20_000);
@@ -389,14 +415,70 @@ describe("the process-level guard", () => {
   }, 20_000);
 });
 
-/** Source with its comments taken out, so prose cannot satisfy or trip a scan of it. */
-function withoutComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/.*$/gm, "");
-}
+/**
+ * Splits source into its code and its string literals, so a scan can ask each question of the
+ * right half. Written as a walk rather than a pair of regexes because both regexes were wrong in
+ * ways that mattered: a template literal spanning lines was never matched, so its body counted as
+ * code, and `//` inside a URL literal ate the rest of a real line (BP-575 round-four review).
+ *
+ * Regex literals are not tracked. One containing an unbalanced quote would confuse this; none of
+ * the stubs has one, and the failure would be a red to investigate rather than a silent pass.
+ */
+function split(source: string): { withoutComments: string; code: string } {
+  let withoutComments = "";
+  let code = "";
+  let quote = "";
+  let comment: "" | "line" | "block" = "";
 
-/** …and without string literals either, for the questions a sentence must not be able to answer. */
-function withoutStrings(source: string): string {
-  return source.replace(/(["'`])(?:\\.|(?!\1)[^\\\n])*\1/g, '""');
+  for (let i = 0; i < source.length; i += 1) {
+    const char = source[i];
+    const pair = source.slice(i, i + 2);
+
+    if (comment === "line") {
+      if (char === "\n") {
+        comment = "";
+        withoutComments += char;
+        code += char;
+      }
+      continue;
+    }
+    if (comment === "block") {
+      if (pair === "*/") {
+        comment = "";
+        i += 1;
+      }
+      continue;
+    }
+    if (quote) {
+      withoutComments += char;
+      if (char === "\\") {
+        withoutComments += source[i + 1] ?? "";
+        i += 1;
+        continue;
+      }
+      if (char === quote) quote = "";
+      continue;
+    }
+    if (pair === "//") {
+      comment = "line";
+      i += 1;
+      continue;
+    }
+    if (pair === "/*") {
+      comment = "block";
+      i += 1;
+      continue;
+    }
+    if (char === '"' || char === "'" || char === "`") {
+      quote = char;
+      withoutComments += char;
+      continue;
+    }
+    withoutComments += char;
+    code += char;
+  }
+
+  return { withoutComments, code };
 }
 
 describe("every stub process", () => {
@@ -419,10 +501,26 @@ describe("every stub process", () => {
     // be in the candidate set, or the assertion below is about nothing.
     expect(files).toContain("openrouter-stub.mjs");
 
+    const scan = (file: string) => {
+      const { withoutComments, code } = split(readFileSync(join(here, file), "utf8"));
+      const servesHttp = /(["'`])(?:node:)?http2?s?\1/.test(withoutComments);
+      // Imported BY NAME from the guard, not merely mentioned: a file can declare its own `serve`,
+      // and the call below would then be its own.
+      const imported = /import\s*\{([^}]*)\}\s*from\s*["'`][^"'`]*stub-guard\.mjs["'`]/
+        .exec(withoutComments)?.[1];
+      const called = /\b(?:serve|guard)\s*\(/.test(code);
+      return {
+        servesHttp,
+        guarded: /\b(?:serve|guard)\b/.test(imported ?? "") && called,
+      };
+    };
+
+    // Not "some stub is a candidate": the check below is only about files that name node:http, and
+    // if none did, an empty result would mean nothing at all.
+    expect(files.filter((file) => scan(file).servesHttp).length).toBeGreaterThanOrEqual(1);
+
     const unguarded = files.filter((file) => {
-      const source = withoutComments(readFileSync(join(here, file), "utf8"));
-      const servesHttp = /["'](?:node:)?http2?s?["']/.test(source);
-      const guarded = /stub-guard/.test(source) && /\b(?:serve|guard)\s*\(/.test(withoutStrings(source));
+      const { servesHttp, guarded } = scan(file);
       return servesHttp && !guarded;
     });
 
