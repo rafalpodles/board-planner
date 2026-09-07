@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, afterEach } from "vitest";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { ToastProvider, useToast } from "@/components/ui/Toast";
 import { registerLayer } from "@/lib/focus-trap";
 
@@ -57,18 +57,20 @@ describe("where a toast lands", () => {
     expect(tray().className).toContain("z-50");
   });
 
-  it("moves a toast that was already up when the dialog opened", () => {
+  // React re-reads the store on its own during a `waitFor` poll, so this cannot prove the
+  // notification fired — `subscribeLayers` is pinned in `focus-trap.test.ts` instead. What it
+  // does pin is that a toast raised before the dialog ends up in the same place as one raised
+  // after it.
+  it("moves a toast that was already up when the dialog opened", async () => {
     mounted();
     act(() => raise("Saved"));
     expect(tray().className).toContain("bottom-4");
 
     const layer = document.createElement("div");
     document.body.appendChild(layer);
-    act(() => {
-      registerLayer(layer);
-    });
+    registerLayer(layer);
 
-    expect(tray().className).toContain("top-4");
+    await waitFor(() => expect(tray().className).toContain("top-4"));
   });
 
   it("takes the corner back once the last layer closes", () => {
