@@ -31,23 +31,29 @@ export const GET = withAuth(async (request, { user }) => {
   }
 
   // A key is whatever the rule allows — letters, digits, hyphens and underscores, up to the cap —
-  // followed by the task's number. The prefix is taken greedily and validated rather than described
-  // again here: a key may itself contain a hyphen, so `BP-2-14` is task 14 of the board keyed
-  // `BP-2`, and a regex restating the shape drifts from the rule the way this one had (BP-573).
+  // followed by the task's number. The prefix is validated rather than described again here: a
+  // regex restating the shape drifts from the rule, the way this one had (BP-573).
+  //
+  // The split is unambiguous whatever the regex's appetite: the tail is anchored and all digits, so
+  // only the last hyphen can divide them. `BP-2-14` is task 14 of the board keyed `BP-2` and can be
+  // read no other way, because a task number never contains a hyphen.
   const keyMatch = q.match(/^(.+)-(\d{1,9})$/);
-  const candidate = keyMatch?.[1] ?? "";
 
-  if (keyMatch && PROJECT_KEY_PATTERN.test(candidate)) {
+  if (keyMatch && PROJECT_KEY_PATTERN.test(keyMatch[1])) {
+    const candidate = keyMatch[1];
     const taskNumber = parseInt(keyMatch[2], 10);
     // Resolved against the board rather than compared to the populated key: that is the only way a
     // key the project used to answer to still finds its task, as in-prose references already do
     const escapedKey = candidate.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const byKey = new RegExp(`^${escapedKey}$`, "i");
-    const project = await Project.findOne({
-      $or: [{ key: byKey }, { formerKeys: byKey }],
-    })
-      .select("_id")
+    // Every match, not the first: `findOne` has no preference between the two clauses, so a board
+    // that answers to this key *today* could lose to one that merely used to — measured, and the
+    // winner was whichever was inserted first. A live key is never ambiguous; a retired one is
+    // only consulted when nothing holds it now (BP-573 review)
+    const boards = await Project.find({ $or: [{ key: byKey }, { formerKeys: byKey }] })
+      .select("_id key")
       .lean();
+    const project = boards.find((board) => byKey.test(board.key as string)) ?? boards[0];
 
     // Named explicitly rather than by overwriting `filter.project`, which is what carries the
     // reader's access: a key that resolves to a board they cannot see must find nothing, not

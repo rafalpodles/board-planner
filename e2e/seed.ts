@@ -415,15 +415,6 @@ export async function seedSprintPlanning() {
   const task = taskFactory(now);
   await db.collection("tasks").insertMany([
     task({
-      _id: new mongoose.Types.ObjectId("e2e0000000000000000ca101"),
-      project: AWKWARD_PROJECT_ID,
-      taskNumber: AWKWARD_HIT_NUMBER,
-      title: AWKWARD_HIT_TITLE,
-      status: SPARE_COLUMN.id,
-      order: 20,
-      updatedAt: new Date(now.getTime() - 4_000),
-    }),
-    task({
       _id: PLANNING_SPRINT_TASK_ID,
       taskNumber: PLANNING_SPRINT_TASK_NUMBER,
       title: PLANNING_SPRINT_TASK_TITLE,
@@ -500,15 +491,6 @@ export async function seedSprintEstimates() {
 
   const task = taskFactory(now);
   await db.collection("tasks").insertMany([
-    task({
-      _id: new mongoose.Types.ObjectId("e2e0000000000000000ca101"),
-      project: AWKWARD_PROJECT_ID,
-      taskNumber: AWKWARD_HIT_NUMBER,
-      title: AWKWARD_HIT_TITLE,
-      status: SPARE_COLUMN.id,
-      order: 20,
-      updatedAt: new Date(now.getTime() - 4_000),
-    }),
     task({
       _id: ESTIMATE_DONE_NUMERIC_TASK_ID,
       taskNumber: 101,
@@ -658,15 +640,6 @@ export async function seedSprintLifecycle() {
   const points = (value: number) => ({ [String(LIFECYCLE_POINTS_FIELD_ID)]: value });
   const task = taskFactory(now);
   await db.collection("tasks").insertMany([
-    task({
-      _id: new mongoose.Types.ObjectId("e2e0000000000000000ca101"),
-      project: AWKWARD_PROJECT_ID,
-      taskNumber: AWKWARD_HIT_NUMBER,
-      title: AWKWARD_HIT_TITLE,
-      status: SPARE_COLUMN.id,
-      order: 20,
-      updatedAt: new Date(now.getTime() - 4_000),
-    }),
     task({
       _id: LIFECYCLE_FINISHED_TASK_ID,
       taskNumber: LIFECYCLE_FINISHED_TASK_NUMBER,

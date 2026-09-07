@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const getAuthUser = vi.fn();
 const accessibleProjectIds = vi.fn();
 const taskFind = vi.fn();
-const projectFindOne = vi.fn();
+const projectFind = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({
@@ -12,7 +12,7 @@ vi.mock("@/lib/auth", () => ({
 }));
 vi.mock("@/lib/grants", () => ({ accessibleProjectIds }));
 vi.mock("@/models/task", () => ({ Task: { find: taskFind } }));
-vi.mock("@/models/project", () => ({ Project: { findOne: projectFindOne } }));
+vi.mock("@/models/project", () => ({ Project: { find: projectFind } }));
 
 const { GET } = await import("./route");
 
@@ -31,7 +31,7 @@ const search = (q: string) =>
 let lastQuery: { filter: unknown; limit?: number; sorted?: unknown };
 /** What the key branch asked the projects collection, and what it was told */
 let lastProjectQuery: unknown;
-let foundProject: { _id: string } | null;
+let foundBoards: { _id: string; key: string }[];
 
 function chain(rows: unknown[]) {
   const self = {
@@ -53,14 +53,12 @@ beforeEach(() => {
   vi.clearAllMocks();
   lastQuery = { filter: undefined };
   lastProjectQuery = undefined;
-  foundProject = { _id: "p1" };
+  foundBoards = [{ _id: "p1", key: "TP" }];
   getAuthUser.mockResolvedValue(MEMBER);
   accessibleProjectIds.mockResolvedValue(ALLOWED);
-  projectFindOne.mockImplementation((filter: unknown) => {
+  projectFind.mockImplementation((filter: unknown) => {
     lastProjectQuery = filter;
-    return {
-      select: () => ({ lean: () => Promise.resolve(foundProject) }),
-    };
+    return { select: () => ({ lean: () => Promise.resolve(foundBoards) }) };
   });
   taskFind.mockImplementation((filter: unknown) => {
     lastQuery.filter = filter;
@@ -143,6 +141,7 @@ describe("GET /api/search", () => {
   });
 
   it("finds a task by a key the board used to answer to", async () => {
+    foundBoards = [{ _id: "p1", key: "BP" }];
     await search("CP-250");
 
     const asked = lastProjectQuery as { $or: { key?: RegExp; formerKeys?: RegExp }[] };
@@ -151,9 +150,35 @@ describe("GET /api/search", () => {
     expect(lastQuery.filter).toMatchObject({ project: "p1", taskNumber: 250 });
   });
 
+  /**
+   * Nothing stops a new board taking a key an old one released — `migrate-project-key` moves the
+   * live key and keeps the old one in `formerKeys`, and the unique index guards only the live one.
+   * Measured before the fix: the answer was whichever document the scan reached first.
+   */
+  it("prefers the board that answers to the key today over one that used to", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    foundBoards = [
+      { _id: "old", key: "PLATFORM_TEAM-2" },
+      { _id: "live", key: "PT" },
+    ];
+
+    await search("PT-77");
+
+    expect(lastQuery.filter).toMatchObject({ project: "live", taskNumber: 77 });
+  });
+
+  it("takes the retired one when no board holds the key now", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    foundBoards = [{ _id: "old", key: "PLATFORM_TEAM-2" }];
+
+    await search("PT-77");
+
+    expect(lastQuery.filter).toMatchObject({ project: "old", taskNumber: 77 });
+  });
+
   // The key branch names the project directly, which would otherwise replace the access filter
   it("finds nothing when the key resolves to a board the reader cannot see", async () => {
-    foundProject = { _id: "p9" };
+    foundBoards = [{ _id: "p9", key: "SB" }];
 
     const body = await (await search("SB-1")).json();
 
@@ -163,7 +188,7 @@ describe("GET /api/search", () => {
 
   it("leaves an admin's key search unscoped by grants", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
-    foundProject = { _id: "p9" };
+    foundBoards = [{ _id: "p9", key: "SB" }];
 
     await search("SB-1");
 
@@ -176,10 +201,19 @@ describe("GET /api/search", () => {
     ["a prefix the rule does not allow", "9BP-1"],
     ["a number with no key", "-14"],
   ])("falls back to the text search for %s", async (_label, query) => {
-    foundProject = null;
+    foundBoards = [];
 
     await search(query);
 
+    expect(lastQuery.filter).toHaveProperty("$or");
+  });
+
+  // The bound on the number is deliberate: past nine digits it is not a task number anybody has,
+  // and the text search is the better answer for a string that long
+  it("does not treat a ten-digit tail as a task number", async () => {
+    await search("BP-1234567890");
+
+    expect(projectFind).not.toHaveBeenCalled();
     expect(lastQuery.filter).toHaveProperty("$or");
   });
 
@@ -192,7 +226,7 @@ describe("GET /api/search", () => {
   ])("does not look up a board whose key %s", async (_label, query) => {
     await search(query);
 
-    expect(projectFindOne).not.toHaveBeenCalled();
+    expect(projectFind).not.toHaveBeenCalled();
     expect(lastQuery.filter).toHaveProperty("$or");
   });
 
