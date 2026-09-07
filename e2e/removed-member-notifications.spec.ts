@@ -126,8 +126,11 @@ test("a member removed from the board stops hearing about the task they watch", 
   // 3. Removal, through the screen an owner actually uses. The row goes with the grant: the
   // members list is built from grant rows, so losing one is how the screen shows it worked.
   await admin.goto(`/projects/${PROJECT_KEY}/settings`);
+  // The list is re-read after the write, so a retrying negative here would pass on the refresh
+  // whatever the screen did with the row it already had. Waited for by its toast, then read once
   await admin.getByLabel(`Access for ${MEMBER_USERNAME}`).selectOption("none");
-  await expect(admin.getByLabel(`Access for ${MEMBER_USERNAME}`)).toHaveCount(0);
+  await expect(admin.getByText("Access updated")).toBeVisible();
+  expect(await admin.getByLabel(`Access for ${MEMBER_USERNAME}`).count()).toBe(0);
 
   // 4. What was already queued goes with the grant, rather than staying readable forever.
   await expectNothingReachesThem(member);
@@ -168,4 +171,33 @@ test("a member who still holds the board keeps hearing about it", async ({ brows
 
   await memberContext.close();
   await adminContext.close();
+});
+
+/**
+ * BP-592, a consequence of BP-583's fix. The row is patched from the write that landed, so a
+ * members read that fails afterwards leaves it showing the change — right for a grant, wrong for a
+ * revocation: this list is grant rows plus instance admins, so `GET …/members` never answers with
+ * a non-admin holding no relation. A null there is a row the endpoint cannot return, with a live
+ * access select on somebody who has no access.
+ */
+test("a revoked row goes even when the list cannot be re-read", async ({ page }) => {
+  await seed();
+  await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
+  await page.goto(`/projects/${PROJECT_KEY}/settings`);
+  const select = page.getByLabel(`Access for ${MEMBER_USERNAME}`);
+  await expect(select).toBeVisible();
+
+  // The read only: the revocation itself has to land, or there is nothing to be stale about
+  await page.route(
+    (url) => url.pathname.endsWith("/members"),
+    async (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      await route.fulfill({ status: 500, contentType: "application/json", body: "{}" });
+    }
+  );
+
+  await select.selectOption("none");
+
+  await expect(page.getByText("The list could not be refreshed")).toBeVisible();
+  expect(await page.getByLabel(`Access for ${MEMBER_USERNAME}`).count()).toBe(0);
 });
