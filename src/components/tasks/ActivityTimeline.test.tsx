@@ -222,4 +222,40 @@ describe("ActivityTimeline across a task switch", () => {
 
     await waitFor(() => expect(onCountChange).toHaveBeenLastCalledWith(null));
   });
+
+  /**
+   * BP-582 review. Comments trades its withdrawn number for a Retry; History traded it for nothing,
+   * so the only ways back were changing task or posting a comment. And with no reading state, an
+   * in-flight read claimed "No history yet" — the very defect BP-577 fixed next door.
+   */
+  it("offers the read again rather than a sentence and nothing", async () => {
+    api.get.mockRejectedValueOnce(new Error("network"));
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+
+    await waitFor(() => expect(screen.getByTestId("history-error")).toBeTruthy());
+    expect(screen.queryByText(/No history yet/)).toBeNull();
+
+    api.get.mockResolvedValue([log]);
+    await act(async () => {
+      screen.getByRole("button", { name: "Retry" }).click();
+    });
+
+    await waitFor(() => expect(screen.getByText(/Owner Name/)).toBeTruthy());
+    expect(screen.queryByTestId("history-error")).toBeNull();
+  });
+
+  it("claims nothing about the history while it is still being read", async () => {
+    api.get.mockImplementation(() => new Promise(() => {}));
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+
+    expect(screen.queryByText(/No history yet/)).toBeNull();
+  });
+
+  // The control: a task nothing has happened to still says so
+  it("still says there is none when the read answers with none", async () => {
+    api.get.mockResolvedValue([]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+
+    await waitFor(() => expect(screen.getByText(/No history yet/)).toBeTruthy());
+  });
 });
