@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { MEMBER_USERNAME, PROJECT_KEY, seed } from "./seed";
 import { signIn } from "./session";
+import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
 
 /**
  * BP-583. The grant and the members read that follows it were one `try`, so a members GET that
@@ -10,24 +11,31 @@ import { signIn } from "./session";
  *
  * The write's failure and the refresh's failure are different facts. This drives them apart at
  * the surface, against the real endpoints.
+ *
+ * A toast lives 3s and the suite's expect timeout is 15s, so a *retrying* `toHaveCount(0)` on one
+ * passes by waiting it out — it cannot fail. Every negative here is `count()`, read once, after a
+ * positive that proves the screen has settled.
  */
 
 test.beforeEach(seed);
 
-/**
- * A toast lives 3s and the suite's expect timeout is 15s, so a *retrying* `toHaveCount(0)` on one
- * passes by waiting it out — it cannot fail. Every negative below is `count()`, read once, after a
- * positive that proves the screen has settled.
- */
-const LIST_REFRESH_FAILED = "The list could not be refreshed — reload the page to see it";
-
 async function openMembers(page: Page) {
   await page.goto(`/projects/${PROJECT_KEY}/settings`);
   await expect(page.getByLabel(`Access for ${MEMBER_USERNAME}`)).toBeVisible();
-  // The mount read runs twice under `next dev`'s StrictMode, and the second one is still in
-  // flight when the select first paints — a `waitForResponse` armed here would catch that one
-  // and call it the refresh
-  await page.waitForLoadState("networkidle");
+}
+
+/**
+ * The refresh, told apart from a mount read by what it carries rather than by when it arrives:
+ * `next dev` runs the mount effect twice, and the second read is still in flight when the select
+ * first paints. Only the read that follows the write reports the new relation.
+ */
+function refreshCarrying(page: Page, relation: string) {
+  return page.waitForResponse(async (r) => {
+    if (new URL(r.url()).pathname.split("/").pop() !== "members") return false;
+    if (r.request().method() !== "GET" || !r.ok()) return false;
+    const rows = (await r.json()) as { username: string; relation: string | null }[];
+    return rows.some((m) => m.username === MEMBER_USERNAME && m.relation === relation);
+  });
 }
 
 /** Fails only the members **read**, and only from the next one on, so the write still lands */
@@ -50,7 +58,10 @@ test("a grant that landed is not reported as a failure when only its refresh fai
   await breakTheMembersRead(page);
 
   const written = page.waitForResponse(
-    (r) => r.url().includes("/members") && r.request().method() === "PUT" && r.ok()
+    (r) =>
+      new URL(r.url()).pathname.split("/").pop() === "members" &&
+      r.request().method() === "PUT" &&
+      r.ok()
   );
   await page.getByLabel(`Access for ${MEMBER_USERNAME}`).selectOption("owner");
   await written;
@@ -98,15 +109,26 @@ test("a grant that lands and refreshes says so once", async ({ page }) => {
   await signIn(page);
   await openMembers(page);
 
-  // The row is painted from the write before the refresh is even issued, so both assertions below
-  // would be satisfied while the read was still in flight. Wait for the read itself.
-  const refreshed = page.waitForResponse(
-    (r) => r.url().includes("/members") && r.request().method() === "GET" && r.ok()
-  );
+  // What the refresh brings back has to reach the screen, not merely arrive: the row is already
+  // painted from the write, so every other assertion here would hold for a refresh whose result
+  // was thrown away. The name only this response carries is the one that cannot.
+  const RENAMED = "Refreshed From The Server";
+  await page.route("**/members", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const response = await route.fetch();
+    const rows = (await response.json()) as { username: string; fullName: string }[];
+    await route.fulfill({
+      response,
+      json: rows.map((m) => (m.username === MEMBER_USERNAME ? { ...m, fullName: RENAMED } : m)),
+    });
+  });
+
+  const refreshed = refreshCarrying(page, "owner");
   await page.getByLabel(`Access for ${MEMBER_USERNAME}`).selectOption("owner");
   await refreshed;
 
   await expect(page.getByText("Access updated")).toBeVisible();
+  await expect(page.getByText(RENAMED)).toBeVisible();
   await expect(page.getByLabel(`Access for ${MEMBER_USERNAME}`)).toHaveValue("owner");
   expect(await page.getByText(LIST_REFRESH_FAILED).count(), LIST_REFRESH_FAILED).toBe(0);
 });

@@ -133,13 +133,13 @@ describe("GeneralSection member access", () => {
   // the row would fall back to the relation that was replaced and the toasts would expire over it
   it("leaves the row showing the change even when the list cannot be re-read", async () => {
     renderSection();
-    const select = await screen.findByLabelText("Access for bob");
+    const select = await screen.findByLabelText("Access for alice");
     api.get.mockRejectedValueOnce(new Error("network down"));
 
-    fireEvent.change(select, { target: { value: "owner" } });
+    fireEvent.change(select, { target: { value: "member" } });
 
     await waitFor(() => expect(toast).toHaveBeenCalledWith(LIST_REFRESH_FAILED, "error"));
-    expect((select as HTMLSelectElement).value).toBe("owner");
+    expect(select).toHaveProperty("value", "member");
   });
 
   // The control: a write that genuinely fails must still be reported as the write's failure, and
