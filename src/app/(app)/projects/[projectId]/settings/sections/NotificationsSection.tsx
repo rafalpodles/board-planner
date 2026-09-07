@@ -39,9 +39,15 @@ export function NotificationsSection({ project }: SectionProps) {
   const id = String(project._id);
 
   useEffect(() => {
+    // `matrix` is the reader's own grid, held unsaved until they press Save, and this seeds it.
+    // The settings shell keeps this section mounted and interactive across a move from one
+    // project to another, so without the flag the previous project's answer can land on the new
+    // project's screen — and `save()` would then PUT that grid under this project's id (BP-553).
+    let ignore = false;
     api
       .get("/api/users/me/notifications")
       .then((prefs: Prefs) => {
+        if (ignore) return;
         const own = prefs.projects.find((p) => p.project === id);
         setGlobalMatrix(prefs.defaults);
         // Shown as stored, chat included. With nothing connected it does not deliver — that is
@@ -51,8 +57,15 @@ export function NotificationsSection({ project }: SectionProps) {
         setOverriding(!!own);
         setChatConfigured(prefs.chat.configured);
       })
-      .catch(() => setLoadFailed(true))
-      .finally(() => setLoaded(true));
+      .catch(() => {
+        if (!ignore) setLoadFailed(true);
+      })
+      .finally(() => {
+        if (!ignore) setLoaded(true);
+      });
+    return () => {
+      ignore = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
