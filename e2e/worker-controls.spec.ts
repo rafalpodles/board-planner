@@ -1072,13 +1072,10 @@ test("a save that lands and a re-read that fails say so separately", async ({ pa
     }
   );
 
-  // Retried rather than clicked once: Playwright's actionability checks pass against a DOM React
-  // is not yet driving, and the click is dispatched a single time — a swallowed one shows up as
-  // "clicking did not change its state", or worse as a save that carries the old set
-  await expect(async () => {
-    await row.getByRole("checkbox").uncheck();
-    await expect(row.getByRole("checkbox")).not.toBeChecked();
-  }).toPass({ timeout: 10_000 });
+  // Clicked once, deliberately: the retry this used to need existed only because an abandoned
+  // mount's read discarded the tick (BP-553). If that comes back, this is where it shows.
+  await row.getByRole("checkbox").uncheck();
+  await expect(row.getByRole("checkbox")).not.toBeChecked();
   const saved = await save(page);
   // What this test unticked, not the whole set: another spec in the group can leave the machine
   // wanting a second board, and asserting an empty array makes that residue look like this bug
