@@ -8,6 +8,10 @@ import {
   BODY_ONLY_WORD,
   HELD_TASK_TITLE,
   HELD_TASK_KEY,
+  AWKWARD_FORMER_KEY,
+  AWKWARD_HIT_KEY,
+  AWKWARD_HIT_NUMBER,
+  AWKWARD_HIT_TITLE,
   LEGACY_HIT_KEY,
   LEGACY_HIT_TITLE,
   LEGACY_HIT_WORD,
@@ -384,6 +388,45 @@ test.describe("the ⌘K layer", () => {
     await query(page, OTHER_HIT_KEY);
     await expect(options(page)).toHaveCount(1);
     await expect(options(page).first()).toContainText(OTHER_HIT_TITLE);
+  });
+
+  /**
+   * BP-573. A key may hold digits, hyphens and underscores and run to twenty characters, and a
+   * board keeps the keys it used to answer to. The endpoint's own regex allowed letters only, and
+   * ten of them — so each of these fell through to the text search, which cannot match a key at
+   * all, because a key is never stored: it is built from the board's key and the task's number
+   * wherever it is shown. The reader saw "No matches" for a task that plainly exists.
+   */
+  test.describe("a key the rule allows but the search did not", () => {
+    test.beforeEach(async ({ page }) => {
+      await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
+      await openBoard(page);
+      await openLayer(page);
+    });
+
+    test("finds a task whose board key holds digits, an underscore and a hyphen", async ({
+      page,
+    }) => {
+      await query(page, AWKWARD_HIT_KEY);
+
+      await expect(options(page)).toHaveCount(1);
+      await expect(options(page).first()).toContainText(AWKWARD_HIT_TITLE);
+    });
+
+    test("finds it by a key the board used to answer to", async ({ page }) => {
+      await query(page, `${AWKWARD_FORMER_KEY}-${AWKWARD_HIT_NUMBER}`);
+
+      await expect(options(page)).toHaveCount(1);
+      await expect(options(page).first()).toContainText(AWKWARD_HIT_TITLE);
+    });
+
+    // The control: a key-shaped query naming no board must still find nothing, so the tests above
+    // cannot be passing because the branch stopped narrowing
+    test("still finds nothing for a key no board answers to", async ({ page }) => {
+      await query(page, `ZZZ-${AWKWARD_HIT_NUMBER}`);
+
+      await expect(layerOf(page).getByText("No matches")).toBeVisible();
+    });
   });
 
   /**
