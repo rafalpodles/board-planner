@@ -112,6 +112,15 @@ describe("where the PM launcher is painted", () => {
     expect(launcher()!.className.split(/\s+/)).toContain(
       "[body:has([data-pinned-bottom-bar])_&]:bottom-24"
     );
+
+    // The panel's half of the same rule, and unscoped for the same reason: a `max-lg:` on it
+    // alone puts the launcher back on Send above 1024, which no e2e width would see
+    fireEvent.click(launcher()!);
+    const panel = screen.getByTestId("pm-chat-panel").className.split(/\s+/);
+    expect(panel).toContain("[body:has([data-pinned-bottom-bar])_&]:bottom-40");
+    expect(panel).toContain(
+      "[body:has([data-pinned-bottom-bar])_&]:h-[min(44rem,calc(100vh-12rem))]"
+    );
   });
 
   // The control: the launcher is withheld for its own reasons, and those still hold

@@ -32,7 +32,7 @@ async function makeDirty(page: Page) {
   await expect
     .poll(async () => {
       const box = await saveButton(page).boundingBox();
-      const viewport = page.viewportSize()!.height;
+      const viewport = await page.evaluate(() => window.innerHeight);
       return !!box && box.y + box.height <= viewport;
     })
     .toBe(true);
@@ -61,8 +61,8 @@ for (const width of [420, 700, 1023, 1280]) {
     expect(await rightEdgeOf(page)).toBe("Save changes");
 
     // The boxes, not only the probed point: a launcher that overlapped Save somewhere other than
-    // its right edge would pass the check above. `:last-of-type` reads the section-jump link here
-    // — the only button among its own siblings — so the assertion is made through the locator.
+    // its right edge would pass the check above. Through the locator, because the bar's own
+    // section-jump link is the last button among its siblings and answers a naive selector.
     const overlap = await saveButton(page).evaluate((el) => {
       const s = el.getBoundingClientRect();
       const f = document.querySelector('[aria-label="Open PM chat"]')!.getBoundingClientRect();
@@ -79,7 +79,7 @@ for (const width of [420, 700, 1023, 1280]) {
  * point a finger actually lands on. This one is here so the save flow itself stays covered at a
  * width where the two controls are close.
  */
-test("the click at that edge still saves", async ({ page }) => {
+test("the click at that edge saves, and does not open the chat", async ({ page }) => {
   await page.setViewportSize({ width: 700, height: 800 });
   await signIn(page);
   await makeDirty(page);
@@ -133,9 +133,4 @@ test("the PM panel clears the launcher while the save bar is open", async ({ pag
     };
   });
   expect(keeps).toEqual({ centre: true, bottomEdge: true, bottomRight: true });
-
-  const panelTop = await page
-    .getByTestId("pm-chat-panel")
-    .evaluate((el) => Math.round(el.getBoundingClientRect().top));
-  expect(panelTop).toBeGreaterThanOrEqual(0);
 });
