@@ -165,12 +165,15 @@ test("every emoji stays tappable when a reaction lands while the palette is open
 
     // Four chips settled, so the fifth is the one that moves the row under an open palette
     for (const emoji of ["👍", "👎", "❤️", "👀"]) {
-      const reacted = page.waitForResponse(
-        (r) => r.url().includes("/comments") && r.request().method() === "GET" && r.ok()
-      );
       await addReaction(page).tap();
-      await page.getByRole("button", { name: `React with ${emoji}` }).tap();
-      await reacted;
+      // Registered before the tap that causes it: a response that arrives first is one
+      // `waitForResponse` never sees
+      await Promise.all([
+        page.waitForResponse(
+          (r) => r.url().includes("/comments") && r.request().method() === "GET" && r.ok()
+        ),
+        page.getByRole("button", { name: `React with ${emoji}` }).tap(),
+      ]);
       await expect(page.getByRole("button", { name: new RegExp(emoji) })).toBeVisible();
     }
 
@@ -181,18 +184,19 @@ test("every emoji stays tappable when a reaction lands while the palette is open
     await page.route(
       (url) => url.pathname.endsWith("/comments"),
       async (route) => {
-        if (route.request().method() !== "GET") return route.fallback();
         await held;
         await route.fallback();
       }
     );
 
     await addReaction(page).tap();
-    await page.getByRole("button", { name: "React with 🎉" }).tap();
     // The PATCH lands; the refetch that will grow the row is held
-    await page.waitForResponse(
-      (r) => r.url().includes("/comments/") && r.request().method() === "PATCH" && r.ok()
-    );
+    await Promise.all([
+      page.waitForResponse(
+        (r) => r.url().includes("/comments/") && r.request().method() === "PATCH" && r.ok()
+      ),
+      page.getByRole("button", { name: "React with 🎉" }).tap(),
+    ]);
 
     await addReaction(page).tap();
     await expect(page.getByRole("button", { name: "React with 😄" })).toBeVisible();
@@ -201,9 +205,11 @@ test("every emoji stays tappable when a reaction lands while the palette is open
     release();
     // The fifth chip arrives and pushes the + rightwards with the palette still open
     await expect(page.getByRole("button", { name: /🎉/ })).toBeVisible();
-    await expect.poll(async () => (await addReaction(page).boundingBox())!.x).toBeGreaterThan(
-      before
-    );
+    // `?? before` rather than `!`: the row re-renders as the chip lands, and a momentarily
+    // detached button should retry rather than throw
+    await expect
+      .poll(async () => (await addReaction(page).boundingBox())?.x ?? before)
+      .toBeGreaterThan(before);
     await expect(page.getByRole("button", { name: "React with 😄" })).toBeVisible();
 
     const reach = await page.evaluate(() => {
