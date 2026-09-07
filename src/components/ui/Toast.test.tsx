@@ -3,6 +3,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { ToastProvider, useToast } from "@/components/ui/Toast";
 import { registerLayer } from "@/lib/focus-trap";
+import { Modal } from "@/components/ui/Modal";
 
 /**
  * BP-590. A phone's dialog is a bottom sheet, and `bottom-4 right-4` at `max-w-sm` is its action
@@ -92,8 +93,41 @@ describe("where a toast lands", () => {
     expect(trayClasses()).not.toContain("top-4");
   });
 
-  // A full-screen dialog is a layer with no action row at the bottom; its controls are the back
-  // and overflow buttons at the *top*, which is where this used to send the toast (BP-590 review)
+  // The two above drive the registry by hand. These two drive the component that decides which
+  // kind it is, because `sheet: !bare` is the whole difference and nothing else pins it.
+  it("moves for a real Modal", () => {
+    render(
+      <ToastProvider>
+        <Raiser />
+        <Modal open onClose={() => {}} title="Delete task">
+          <p>are you sure</p>
+        </Modal>
+      </ToastProvider>
+    );
+
+    act(() => raise("Saved"));
+
+    expect(trayClasses()).toContain("top-4");
+  });
+
+  // A full-screen `bare` dialog has no action row at the bottom; its controls are the back and
+  // overflow buttons at the *top*, which is where this used to send the toast (BP-590 review)
+  it("stays in the corner under a real bare Modal", () => {
+    render(
+      <ToastProvider>
+        <Raiser />
+        <Modal open onClose={() => {}} title="TP-3" bare>
+          <p>the task</p>
+        </Modal>
+      </ToastProvider>
+    );
+
+    act(() => raise("Saved"));
+
+    expect(trayClasses()).toContain("bottom-4");
+    expect(trayClasses()).not.toContain("top-4");
+  });
+
   it("stays in the corner under a full-screen dialog", () => {
     mounted();
     const el = document.createElement("div");
