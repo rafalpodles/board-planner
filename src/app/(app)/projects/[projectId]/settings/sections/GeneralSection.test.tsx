@@ -4,6 +4,7 @@ import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-libra
 import { GeneralSection } from "./GeneralSection";
 import { SettingsProvider } from "@/components/settings/settings-context";
 import { ApiProject, ApiProjectMember } from "@/types";
+import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
 
 const { api, toast } = vi.hoisted(() => ({
   api: { get: vi.fn(), put: vi.fn(), del: vi.fn() },
@@ -109,6 +110,50 @@ describe("GeneralSection member access", () => {
 
     await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2));
     expect(toast).toHaveBeenCalledWith("Access updated", "success");
+  });
+
+  /**
+   * BP-583. The grant and the list read after it were one `try`, so a blipped members GET told an
+   * admin "Failed to update access" over access the server had already changed — and the row still
+   * showed the old relation, so the obvious next move was to grant it again.
+   */
+  it("reports the refresh, not the write, when only the members read fails", async () => {
+    renderSection();
+    const select = await screen.findByLabelText("Access for bob");
+    api.get.mockRejectedValueOnce(new Error("network down"));
+
+    fireEvent.change(select, { target: { value: "owner" } });
+
+    await waitFor(() => expect(toast).toHaveBeenCalledWith(LIST_REFRESH_FAILED, "error"));
+    expect(toast).toHaveBeenCalledWith("Access updated", "success");
+    expect(toast).not.toHaveBeenCalledWith("Failed to update access", "error");
+  });
+
+  // The control: a write that genuinely fails must still be reported as the write's failure, and
+  // must not claim the access was updated
+  it("still reports a failed write as one, and does not confirm it", async () => {
+    renderSection();
+    const select = await screen.findByLabelText("Access for bob");
+    api.put.mockRejectedValueOnce(new Error("nope"));
+
+    fireEvent.change(select, { target: { value: "owner" } });
+
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("nope", "error"));
+    expect(toast).not.toHaveBeenCalledWith("Access updated", "success");
+    expect(toast).not.toHaveBeenCalledWith(LIST_REFRESH_FAILED, "error");
+  });
+
+  // A write that failed must not be followed by the read at all: the list on screen is still true
+  it("does not re-read the list after a write that failed", async () => {
+    renderSection();
+    const select = await screen.findByLabelText("Access for bob");
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(1));
+    api.put.mockRejectedValueOnce(new Error("nope"));
+
+    fireEvent.change(select, { target: { value: "owner" } });
+
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("nope", "error"));
+    expect(api.get).toHaveBeenCalledTimes(1);
   });
 
   it("surfaces the server's last-owner conflict message instead of a generic failure", async () => {

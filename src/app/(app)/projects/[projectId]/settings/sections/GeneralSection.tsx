@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
+import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
 import { useDraft } from "@/hooks/use-draft";
 import { useToast } from "@/components/ui/Toast";
 import { ApiMemberCandidate, ApiProjectMember, GrantRelation } from "@/types";
@@ -94,10 +95,20 @@ export function GeneralSection({ projectId, project, replaceProject, stats }: Se
       } else {
         await api.put(`/api/projects/${projectId}/members`, { userId, relation });
       }
-      setMembers(await api.get(`/api/projects/${projectId}/members`));
-      toast("Access updated", "success");
     } catch (err) {
       toast(err instanceof Error ? err.message : "Failed to update access", "error");
+      return;
+    }
+
+    toast("Access updated", "success");
+
+    // The list refresh that follows a write. Its own failure is not the write's failure — the
+    // access change landed — and saying "Failed to update access" over one that did is the
+    // message an admin acts on by granting it a second time (BP-583, the shape of BP-565).
+    try {
+      setMembers(await api.get(`/api/projects/${projectId}/members`));
+    } catch {
+      toast(LIST_REFRESH_FAILED, "error");
     }
   }
 
