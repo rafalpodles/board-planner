@@ -60,10 +60,15 @@ function held<T>(): { promise: Promise<T>; release: (value: T) => void } {
 let board: ReturnType<typeof useProjectBoard>;
 
 let probeScope = "all";
+let rerenderProbe: () => void = () => {};
 
 function Probe() {
   board = useProjectBoard("p1", probeScope);
   return <span data-testid="order">{board.tasks.map((t) => `${t._id}:${t.order}`).join(",")}</span>;
+}
+
+function taskReads() {
+  return api.get.mock.calls.filter((call: unknown[]) => String(call[0]).includes("/tasks")).length;
 }
 
 function orderOnScreen() {
@@ -72,6 +77,9 @@ function orderOnScreen() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Module-level, so a test that renders <Probe /> without mounted()/mountedScoped() would
+  // otherwise inherit the previous test's scope
+  probeScope = "all";
   api.get.mockImplementation((path: string) => {
     if (path.endsWith("/tasks")) return Promise.resolve([task("t1", 0), task("t2", 1)]);
     if (path.endsWith("/sprints")) return Promise.resolve([]);
@@ -89,7 +97,8 @@ async function mountedScoped(sprint: string) {
     if (path.endsWith("/sprints")) return Promise.resolve([{ _id: sprint, name: "Sprint one" }]);
     return Promise.resolve(PROJECT);
   });
-  render(<Probe />);
+  const { rerender } = render(<Probe />);
+  rerenderProbe = () => rerender(<Probe />);
   await waitFor(() => expect(orderOnScreen()).toBe("t1:0,t2:1"));
 }
 
@@ -337,12 +346,44 @@ describe("moving a task to another sprint", () => {
   it("leaves the card where it is when the write fails", async () => {
     await mountedScoped("s1");
     api.put.mockRejectedValue(new Error("network"));
+    const readsBefore = taskReads();
 
     await act(async () => {
       await board.handleRowSprintChange("t1", "s2");
     });
 
     expect(board.tasks.map((t) => t._id), "no flicker to undo").toContain("t1");
+    // The card being there at the end is also what the old code produced: it removed the row,
+    // then re-read the list, and the re-read put it back within the same act(). What separates
+    // "never left" from "left and came back" is that no second read was needed.
+    expect(taskReads() - readsBefore, "nothing to re-read, because nothing was removed").toBe(0);
+  });
+
+  it("re-reads rather than removing a card when the filter moved under the write", async () => {
+    await mountedScoped("s1");
+    const put = held<unknown>();
+    api.put.mockReturnValue(put.promise);
+
+    let moving!: Promise<void>;
+    act(() => {
+      moving = board.handleRowSprintChange("t1", "s2");
+    });
+
+    // The reader widens the board while the PUT is out. `applySprintChange` still filters
+    // against "s1", so applying it now would drop a task the unscoped board must show.
+    probeScope = "all";
+    await act(async () => {
+      rerenderProbe();
+    });
+    const readsBefore = taskReads();
+
+    await act(async () => {
+      put.release({});
+      await moving;
+    });
+
+    expect(board.tasks.map((t) => t._id), "still on the board it now belongs to").toContain("t1");
+    expect(taskReads() - readsBefore, "the server is asked instead").toBe(1);
   });
 
   // The control: an unscoped board still paints immediately, because being wrong is invisible there

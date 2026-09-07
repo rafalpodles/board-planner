@@ -99,6 +99,9 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
   const [loadError, setLoadError] = useState(false);
   const [showNewTask, setShowNewTask] = useState(false);
   const loadSeq = useRef(0);
+  // Read after an await, where the render-time `scope` is a stale copy
+  const scopeRef = useRef(scope);
+  scopeRef.current = scope;
 
   /**
    * A read already in flight knows nothing about a write that started after it, so delivering its
@@ -497,21 +500,23 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
   }
 
   async function handleRowSprintChange(taskId: string, sprintId: string | null) {
-    // Not patchTask: a task leaving the sprint the board is filtered by has to drop
-    // out of the list, which applySprintChange already knows how to do.
-    //
-    // But only *after* the server agrees, when the move would take the card off this board. An
-    // optimistic apply is free on an unscoped board — the row stays and its sprint badge changes —
-    // and on a scoped one it is the card vanishing, which a failed PUT then undoes a round trip
-    // later. Guessing is worth it when being wrong is invisible; here it is the whole screen
-    // (BP-557, the shape BP-528 fixed for the bulk path).
-    const wanted = scope === "backlog" ? null : scope;
-    const leaves = scope !== "all" && sprintId !== wanted;
+    // `leaves`: the move takes the card off this board, so the removal waits for the server —
+    // being wrong there is the whole screen, not a badge (BP-557).
+    const scopeAtClick = scope;
+    const wanted = scopeAtClick === "backlog" ? null : scopeAtClick;
+    const leaves = scopeAtClick !== "all" && sprintId !== wanted;
 
     if (!leaves) applySprintChange([taskId], sprintId);
     try {
       await writing(() => api.put(`/api/projects/${projectId}/tasks/${taskId}`, { sprint: sprintId }));
-      if (leaves) applySprintChange([taskId], sprintId);
+      // `applySprintChange` filters against the scope of the render it was made in, and the
+      // reader may have changed the filter while the PUT was out — applying it then removes the
+      // task from a board it belongs to. The scope change's own read was discarded by `writing`,
+      // so the server has to be asked again rather than simply left alone.
+      if (leaves) {
+        if (scopeRef.current === scopeAtClick) applySprintChange([taskId], sprintId);
+        else loadData();
+      }
       const target = sprintId ? sprints.find((s) => s._id === sprintId)?.name ?? "sprint" : "backlog";
       toast(`Moved to ${target}`, "success");
     } catch {
