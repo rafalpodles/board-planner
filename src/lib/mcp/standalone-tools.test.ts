@@ -185,10 +185,16 @@ describe("the standalone MCP server, driven rather than read", () => {
     const call = await connected(client);
     const huge = "z".repeat(50_000);
 
-    const assignee = await call("update_task", { taskKey: "BP-1", assignee: huge });
-    expect(assignee.refused).toBe(true);
-    expect(assignee.said).toContain(`"${"z".repeat(64)}…"`);
-    expect(assignee.said.length).toBeLessThan(400);
+    // Both paths: create_task resolves an assignee with its own copy of the same check
+    for (const [tool, args] of [
+      ["update_task", { taskKey: "BP-1", assignee: huge }],
+      ["create_task", { project: "BP", title: "t", assignee: huge }],
+    ] as const) {
+      const assignee = await call(tool, args as Record<string, unknown>);
+      expect(assignee.refused, tool).toBe(true);
+      expect(assignee.said, tool).toContain(`"${"z".repeat(64)}…"`);
+      expect(assignee.said.length, tool).toBeLessThan(400);
+    }
 
     const agent = await call("update_task", { taskKey: "BP-1", agent: huge });
     expect(agent.refused).toBe(true);
