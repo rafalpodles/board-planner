@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { MEMBER_USERNAME, PROJECT_KEY, seed } from "./seed";
-import { signIn as arriveSignedIn } from "./session";
+import { signIn } from "./session";
 
 /**
  * BP-583. The grant and the members read that follows it were one `try`, so a members GET that
@@ -14,7 +14,14 @@ import { signIn as arriveSignedIn } from "./session";
 
 test.beforeEach(seed);
 
-const signIn = arriveSignedIn;
+/**
+ * A toast lives 3s and the suite's expect timeout is 15s, so a *retrying* `toHaveCount(0)` on one
+ * passes by waiting it out — it cannot fail. Every negative here is read once, immediately after
+ * the positive that proves the screen has settled.
+ */
+async function isNotOnScreen(page: Page, text: string) {
+  return (await page.getByText(text).count()) === 0;
+}
 
 const LIST_REFRESH_FAILED = "The list could not be refreshed — reload the page to see it";
 
@@ -49,9 +56,12 @@ test("a grant that landed is not reported as a failure when only its refresh fai
   await written;
 
   await expect(page.getByText(LIST_REFRESH_FAILED)).toBeVisible();
-  await expect(page.getByText("Failed to update access")).toHaveCount(0);
+  expect(await isNotOnScreen(page, "Failed to update access")).toBe(true);
 
-  // The change is real, whatever the list on screen says: a reload reads it back from the server
+  // The row carries the change even though the list could not be re-read
+  await expect(page.getByLabel(`Access for ${MEMBER_USERNAME}`)).toHaveValue("owner");
+
+  // And it is real, not just painted: a reload reads it back from the server
   await page.unroute("**/api/projects/*/members");
   await page.reload();
   await expect(page.getByLabel(`Access for ${MEMBER_USERNAME}`)).toHaveValue("owner");
@@ -68,15 +78,19 @@ test("a refused grant still says the access was not updated", async ({ page }) =
     await route.fulfill({
       status: 500,
       contentType: "application/json",
-      body: JSON.stringify({ error: "Failed to update access" }),
+      body: JSON.stringify({ error: "the write was refused" }),
     });
   });
 
   await page.getByLabel(`Access for ${MEMBER_USERNAME}`).selectOption("owner");
 
-  await expect(page.getByText("Failed to update access")).toBeVisible();
-  await expect(page.getByText(LIST_REFRESH_FAILED)).toHaveCount(0);
-  await expect(page.getByText("Access updated")).toHaveCount(0);
+  // The server's own words, not a generic fallback, and not the refresh's line
+  await expect(page.getByText("the write was refused")).toBeVisible();
+  expect(await isNotOnScreen(page, LIST_REFRESH_FAILED)).toBe(true);
+  expect(await isNotOnScreen(page, "Access updated")).toBe(true);
+
+  // Nothing moved: the row still shows what the server still holds
+  await expect(page.getByLabel(`Access for ${MEMBER_USERNAME}`)).toHaveValue("member");
 });
 
 // The other control: with both halves working, one success and nothing else
@@ -88,5 +102,5 @@ test("a grant that lands and refreshes says so once", async ({ page }) => {
 
   await expect(page.getByText("Access updated")).toBeVisible();
   await expect(page.getByLabel(`Access for ${MEMBER_USERNAME}`)).toHaveValue("owner");
-  await expect(page.getByText(LIST_REFRESH_FAILED)).toHaveCount(0);
+  expect(await isNotOnScreen(page, LIST_REFRESH_FAILED)).toBe(true);
 });

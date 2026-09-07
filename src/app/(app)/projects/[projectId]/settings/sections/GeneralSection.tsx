@@ -100,11 +100,16 @@ export function GeneralSection({ projectId, project, replaceProject, stats }: Se
       return;
     }
 
+    // The row carries the change the server made, so a refresh that fails leaves it right rather
+    // than showing the relation that was replaced — the select reads from this list (BP-583)
+    setMembers((prev) =>
+      prev.map((m) =>
+        m._id === userId ? { ...m, relation: relation === "none" ? null : relation } : m
+      )
+    );
     toast("Access updated", "success");
 
-    // The list refresh that follows a write. Its own failure is not the write's failure — the
-    // access change landed — and saying "Failed to update access" over one that did is the
-    // message an admin acts on by granting it a second time (BP-583, the shape of BP-565).
+    // Its own failure is not the write's: the access change landed
     try {
       setMembers(await api.get(`/api/projects/${projectId}/members`));
     } catch {
