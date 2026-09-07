@@ -1,12 +1,9 @@
 import { execFile, spawn } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
-import { dirname, join, sep } from "node:path";
-import { fileURLToPath } from "node:url";
 import { createServer, Server } from "node:http";
 import { AddressInfo, connect, createServer as createTcpServer } from "node:net";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CRASH_MARKER, guard, readBody } from "./stub-guard.mjs";
+import { CRASH_MARKER, guard, readBody, serve } from "./stub-guard.mjs";
 
 /**
  * The stubs are one process each for a whole Playwright run, so a throw inside a handler used to
@@ -100,6 +97,36 @@ async function freePort(): Promise<number> {
   const { port } = probe.address() as AddressInfo;
   await new Promise<void>((resolve) => probe.close(() => resolve()));
   return port;
+}
+
+/**
+ * Stands up a real `serve()` on a free port, runs `check` against it, and takes back everything it
+ * installed in this process — `keepAlive`'s `uncaughtException` listener would otherwise swallow
+ * the vitest worker's own failures for the rest of the run.
+ */
+async function withServe(check: (url: string) => Promise<void>): Promise<void> {
+  const before = process.listeners("uncaughtException");
+  const port = await freePort();
+  const started = serve({
+    name: "served by serve",
+    port,
+    handler: (req: { url?: string }, res: { writeHead: (n: number) => { end: (b?: string) => void } }) => {
+      if (req.url === "/health") {
+        res.writeHead(200).end("ok");
+        return;
+      }
+      throw new Error("the directive was not JSON");
+    },
+  }) as Server;
+
+  try {
+    await check(`http://127.0.0.1:${port}`);
+  } finally {
+    await new Promise<void>((resolve) => started.close(() => resolve()));
+    for (const listener of process.listeners("uncaughtException")) {
+      if (!before.includes(listener)) process.removeListener("uncaughtException", listener);
+    }
+  }
 }
 
 /** Runs a script against the real module, in its own process, and reports how it ended. */
@@ -416,147 +443,30 @@ describe("the process-level guard", () => {
   }, 20_000);
 });
 
-/**
- * Splits source into its code and its string literals, so a scan can ask each question of the
- * right half. Written as a walk rather than a pair of regexes because both regexes were wrong in
- * ways that mattered: a template literal spanning lines was never matched, so its body counted as
- * code, and `//` inside a URL literal ate the rest of a real line (BP-575 round-four review).
- *
- * Regex literals are not tracked. One containing an unbalanced quote would confuse this; none of
- * the stubs has one, and the failure would be a red to investigate rather than a silent pass.
- */
-function split(source: string): { withoutComments: string; code: string } {
-  let withoutComments = "";
-  let code = "";
-  let quote = "";
-  let comment: "" | "line" | "block" = "";
-
-  for (let i = 0; i < source.length; i += 1) {
-    const char = source[i];
-    const pair = source.slice(i, i + 2);
-
-    if (comment === "line") {
-      if (char === "\n") {
-        comment = "";
-        withoutComments += char;
-        code += char;
-      }
-      continue;
-    }
-    if (comment === "block") {
-      if (pair === "*/") {
-        comment = "";
-        i += 1;
-      }
-      continue;
-    }
-    if (quote) {
-      withoutComments += char;
-      if (char === "\\") {
-        withoutComments += source[i + 1] ?? "";
-        i += 1;
-        continue;
-      }
-      if (char === quote) quote = "";
-      continue;
-    }
-    if (pair === "//") {
-      comment = "line";
-      i += 1;
-      continue;
-    }
-    if (pair === "/*") {
-      comment = "block";
-      i += 1;
-      continue;
-    }
-    if (char === '"' || char === "'" || char === "`") {
-      quote = char;
-      withoutComments += char;
-      continue;
-    }
-    withoutComments += char;
-    code += char;
-  }
-
-  return { withoutComments, code };
-}
-
-/**
- * Every local name in `source` bound to an HTTP server factory, and whether the file reaches for
- * one it cannot bind statically.
- *
- * The question this test can honestly ask is not "does the file mention the guard" — a file can
- * import it, call it once, and stand up a second server beside it, which is what `mongo-proxy.mjs`
- * legitimately does with its TCP half. It is: **is every HTTP server in e2e/ created around
- * `guard`**.
- */
-function httpServerFactories(source: string): { names: string[]; dynamic: boolean } {
-  const names: string[] = [];
-  const isHttp = (module: string) => /^(?:node:)?(?:http|https|http2)$/.test(module);
-
-  const named = /import\s*\{([^}]*)\}\s*from\s*["'`]([^"'`]+)["'`]/g;
-  for (const [, bindings, module] of source.matchAll(named)) {
-    if (!isHttp(module)) continue;
-    for (const binding of bindings.split(",")) {
-      const [imported, local] = binding.split(/\s+as\s+/).map((part) => part.trim());
-      if (/^createS(?:erver|ecureServer)$/.test(imported)) names.push(local || imported);
-    }
-  }
-
-  const namespace = /import\s*\*\s*as\s*(\w+)\s*from\s*["'`]([^"'`]+)["'`]/g;
-  for (const [, local, module] of source.matchAll(namespace)) {
-    if (isHttp(module)) names.push(`${local}\\.createServer`);
-  }
-
-  // `await import("node:http")` binds nothing this can follow, so it is reported rather than
-  // silently passed.
-  const dynamic = [...source.matchAll(/\bimport\s*\(\s*["'`]([^"'`]+)["'`]/g)].some(([, module]) =>
-    isHttp(module)
-  );
-
-  return { names, dynamic };
-}
-
-describe("every stub process", () => {
-  it("creates every HTTP server around the guard, so a new one cannot reintroduce the bug", () => {
-    // Four of the five stubs had the same shape and the same gap, and nothing but this stops the
-    // sixth — or a sixth server inside an existing one — being written the old way against a green
-    // suite.
+describe("serve", () => {
+  it("wraps the handler it is given, so every stub built on it is guarded", () => {
+    // The property the four stubs actually rest on, and the one a static scan of the files could
+    // not see: un-guarding `serve` un-guards all of them at once, and a scan that reads their
+    // source still finds `serve(` where it expects it.
     //
-    // What is checked is each CALL, not the file's imports: a file that imports `serve`, calls it,
-    // and then stands up a bare `createServer` beside it used to pass, and that is precisely the
-    // regression this is here for. Comments and strings are stripped first, so neither prose nor a
-    // URL literal can satisfy or trip it.
-    //
-    // Out of scope, deliberately: a `node:net` server. `mongo-proxy.mjs` runs one, and an HTTP
-    // guard has nothing to wrap it in — its own connection handling is what covers it.
-    const here = dirname(fileURLToPath(import.meta.url));
-    const files = readdirSync(here, { recursive: true, encoding: "utf8" })
-      // .artifacts is a run's own output, gitignored, and nothing in it is a stub.
-      .filter((file) => !file.split(sep).some((part) => part.startsWith(".")))
-      .filter((file) => file.endsWith(".mjs") && !file.endsWith("stub-guard.mjs"));
+    // A scan is what stood here — comments and strings stripped, imports resolved, calls matched.
+    // Six review rounds found five holes in it (a default import, an alias assignment, a handler
+    // guarded into a const first) and it never could see this mutation at all. A test that drives
+    // the thing is worth more than an analyser nobody maintains.
+    return withServe(async (url) => {
+      // Bounded: without the guard nothing answers this at all, and the failure should say the
+      // request went unanswered rather than sit out the test's own timeout.
+      const crashed = await fetch(`${url}/v1/chat/completions`, {
+        method: "POST",
+        signal: AbortSignal.timeout(1_500),
+      });
+      expect(crashed.status).toBe(500);
+      expect(errors.join("")).toContain(CRASH_MARKER);
+      expect(errors.join("")).toContain("served by serve");
 
-    const scan = (file: string) => {
-      const { withoutComments, code } = split(readFileSync(join(here, file), "utf8"));
-      const { names, dynamic } = httpServerFactories(withoutComments);
-      const calls = names.flatMap((name) => [...code.matchAll(new RegExp(`\\b${name}\\s*\\(`, "g"))]);
-      const guarded = names.flatMap((name) => [
-        ...code.matchAll(new RegExp(`\\b${name}\\s*\\(\\s*guard\\s*\\(`, "g")),
-      ]);
-      return { servers: calls.length, unwrapped: calls.length - guarded.length, dynamic };
-    };
-
-    // The four stubs on `serve()` create no server of their own, so they contribute nothing to
-    // scan and the assertion below would be about nothing without this: at least one file in e2e/
-    // really does stand up an HTTP server by hand, and it is examined.
-    expect(files.filter((file) => scan(file).servers > 0)).not.toEqual([]);
-
-    const unguarded = files.filter((file) => {
-      const { unwrapped, dynamic } = scan(file);
-      return unwrapped > 0 || dynamic;
+      // And still serving, which is the whole of BP-575.
+      const next = await fetch(`${url}/health`);
+      expect(next.status).toBe(200);
     });
-
-    expect(unguarded).toEqual([]);
   });
 });
