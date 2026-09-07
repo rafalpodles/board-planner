@@ -51,6 +51,9 @@ export function MobileCommentBar({
 
   return (
     <div
+      // Declares the bottom strip as spoken for. Anything the shell floats down there stands clear
+      // of a bar carrying this, rather than each side guessing at the other's geometry (BP-591).
+      data-pinned-bottom-bar
       className="sticky bottom-0 z-10 flex items-end gap-2 border-t border-border bg-bg-card relative
         px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:hidden"
     >

@@ -92,6 +92,20 @@ describe("where the PM launcher is painted", () => {
     expect(launcher()).not.toBeNull();
   });
 
+  /**
+   * BP-591. A bar pinned to the bottom of the page is not something layering can settle — both
+   * controls are meant to be pressed — so the bar declares the strip and the launcher steps over
+   * it. The two halves of that contract live in different files; this is what keeps them together.
+   */
+  it("steps up for a bar that declares the bottom strip", async () => {
+    render(<PmChatWidget />);
+    await waitFor(() => expect(launcher()).not.toBeNull());
+
+    const className = launcher()!.className;
+    expect(className).toContain("bottom-6");
+    expect(className).toContain("[data-pinned-bottom-bar]");
+  });
+
   // The control: the launcher is withheld for its own reasons, and those still hold
   it("is not there at all when the project has no PM", async () => {
     api.get.mockResolvedValue({ ...PROJECT, pm: { enabled: false, lockedByInstance: false } });

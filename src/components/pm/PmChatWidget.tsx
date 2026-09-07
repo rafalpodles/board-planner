@@ -37,7 +37,7 @@ export function PmChatWidget() {
   return (
     <>
       {open && (
-        <div className="fixed bottom-24 right-4 z-40 w-[min(30rem,calc(100vw-2rem))] h-[min(44rem,calc(100vh-8rem))] bg-bg border border-border rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+        <div className="fixed bottom-24 right-4 [body:has([data-pinned-bottom-bar])_&]:bottom-40 z-40 w-[min(30rem,calc(100vw-2rem))] h-[min(44rem,calc(100vh-8rem))] bg-bg border border-border rounded-2xl shadow-2xl flex flex-col overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-bg-card shrink-0">
             <p className="font-semibold text-sm">🤖 PM — {project.name}</p>
             <div className="flex items-center gap-3">
@@ -66,12 +66,16 @@ export function PmChatWidget() {
       {/* z-40, not z-50: every overlay is z-50, and at equal z the one painted last wins — which
           is this, rendered after the page. On a phone a dialog is a bottom sheet whose action row
           lands right here, and a finger on the primary button's corner opened the chat instead
-          (BP-589). A layer below, it is greyed out behind the scrim with the rest of the page. */}
+          (BP-589). A layer below, it is greyed out behind the scrim with the rest of the page.
+
+          It also steps up over a bar pinned to the bottom of the page, which is not something
+          layering can settle: both controls are meant to be pressed. Measured on a phone, this
+          button covered the comment bar's Post button entirely — its centre included (BP-591). */}
       <button
         onClick={() => setOpen((v) => !v)}
         aria-label={open ? "Close PM chat" : "Open PM chat"}
         title="PM Agent"
-        className="fixed bottom-6 right-4 z-40 flex h-14 w-14 cursor-pointer items-center justify-center rounded-full bg-primary-solid text-white shadow-lg ring-4 ring-primary/20 transition-colors hover:bg-primary-solid-hover"
+        className="fixed bottom-6 right-4 [body:has([data-pinned-bottom-bar])_&]:bottom-24 z-40 flex h-14 w-14 cursor-pointer items-center justify-center rounded-full bg-primary-solid text-white shadow-lg ring-4 ring-primary/20 transition-colors hover:bg-primary-solid-hover"
       >
         {open ? (
           <svg

@@ -105,3 +105,53 @@ test("with no dialog open the launcher owns its own square", async ({ page }) =>
   await expect(launcher(page)).toBeVisible();
   expect(await whatIsOverTheLauncher(page)).toBe("the launcher");
 });
+
+/**
+ * BP-591. The same launcher, a different collision, and one layering cannot settle: on a task at
+ * phone width the comment bar is pinned to the bottom and the launcher sat on top of its Post
+ * button — measured, the button's own centre belonged to the launcher, so it could not be tapped
+ * at all. The bar declares the strip; the launcher steps over it.
+ */
+test("the comment bar's Post button keeps its own centre at phone width", async ({ page }) => {
+  await page.setViewportSize(PHONE);
+  await signIn(page);
+  await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
+
+  const post = page.getByRole("button", { name: "Post comment" });
+  await expect(post).toBeVisible();
+  await expect(launcher(page)).toBeVisible();
+
+  const geometry = await page.evaluate(() => {
+    const postEl = document.querySelector('[aria-label="Post comment"]')!;
+    const fabEl = document.querySelector('[aria-label="Open PM chat"]')!;
+    const p = postEl.getBoundingClientRect();
+    const f = fabEl.getBoundingClientRect();
+    const owns = (el: Element, r: DOMRect) => {
+      const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return at === el || el.contains(at);
+    };
+    return {
+      overlap: Math.max(0, Math.min(p.bottom, f.bottom) - Math.max(p.top, f.top)),
+      postOwnsItsCentre: owns(postEl, p),
+      launcherOwnsItsCentre: owns(fabEl, f),
+    };
+  });
+
+  expect(geometry.overlap).toBe(0);
+  expect(geometry.postOwnsItsCentre).toBe(true);
+  expect(geometry.launcherOwnsItsCentre).toBe(true);
+});
+
+// The control: with no pinned bar the launcher stays where it always was, rather than floating
+// high on every screen
+test("the launcher does not step up where nothing is pinned", async ({ page }) => {
+  await page.setViewportSize(PHONE);
+  await signIn(page);
+  await page.goto(`/projects/${PROJECT_KEY}`);
+  await expect(launcher(page)).toBeVisible();
+
+  const bottom = await page.evaluate(
+    () => getComputedStyle(document.querySelector('[aria-label="Open PM chat"]')!).bottom
+  );
+  expect(bottom).toBe("24px");
+});
