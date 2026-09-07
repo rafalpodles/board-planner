@@ -8,6 +8,7 @@ import { logActivity } from "@/lib/activity";
 import { decryptSecret } from "@/lib/encryption";
 import { getProjectColumns } from "@/lib/columns";
 import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
+import { writeProviderLinks } from "@/lib/pr-links";
 
 export const POST = withProjectAccess(async (_request, { params, user }) => {
   const { projectId } = await params;
@@ -72,9 +73,13 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
       updatedAt: pr.updatedAt,
     }));
 
-    // Replace only this provider's entries; GitLab links stay untouched
-    const others = (task.linkedPRs || []).filter((pr) => (pr.provider ?? "github") !== "github");
-    task.linkedPRs = [...others, ...prDocs] as typeof task.linkedPRs;
+    // Replaced in the database rather than in JS, because two syncs of the same task overlap
+    // easily — a scheduled one against a double-clicked manual one — and read-mutate-save means
+    // the second write silently drops whatever the first one added (BP-559). `$filter` keeps the
+    // other provider's links, which is what the old `others` line did.
+    //
+    // Dates are built here, not left to the schema: a pipeline update is not cast by Mongoose.
+    await writeProviderLinks(task._id, "github", prDocs);
     linked += prs.length;
 
     // Auto-transition: merged PR + task in_review → ready_to_test.
@@ -82,20 +87,25 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
     const hasMerged = prs.some((pr) => pr.state === "merged");
     const columnIds = new Set(getProjectColumns(project).map((c) => c.id));
     if (hasMerged && task.status === "in_review" && columnIds.has("ready_to_test")) {
-      const oldStatus = task.status;
-      task.status = "ready_to_test";
-      autoTransitioned++;
-      await logActivity(
-        String(task._id),
-        user._id,
-        "status_changed",
-        "status",
-        oldStatus,
-        "ready_to_test"
+      // Guarded on the status just read, the way BP-489 guards every other status write: without
+      // it two overlapping syncs both saw `in_review`, both wrote `ready_to_test`, and both logged
+      // the transition — one move, two rows in the task's history.
+      const moved = await Task.updateOne(
+        { _id: task._id, status: "in_review" },
+        { $set: { status: "ready_to_test" } }
       );
+      if (moved.modifiedCount === 1) {
+        autoTransitioned++;
+        await logActivity(
+          String(task._id),
+          user._id,
+          "status_changed",
+          "status",
+          "in_review",
+          "ready_to_test"
+        );
+      }
     }
-
-    await task.save();
   }
 
   return NextResponse.json({

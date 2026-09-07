@@ -8,6 +8,7 @@ import { logActivity } from "@/lib/activity";
 import { decryptSecret } from "@/lib/encryption";
 import { mergedReviewDestination } from "@/lib/columns";
 import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
+import { writeProviderLinks } from "@/lib/pr-links";
 
 export const POST = withProjectAccess(async (_request, { params, user }) => {
   const { projectId } = await params;
@@ -77,21 +78,27 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
       updatedAt: mr.updatedAt,
     }));
 
-    // Replace only this provider's entries; GitHub links stay untouched
-    const others = (task.linkedPRs || []).filter((pr) => (pr.provider ?? "github") !== "gitlab");
-    task.linkedPRs = [...others, ...mrDocs] as typeof task.linkedPRs;
+    // In the database rather than in JS, for the reason its GitHub twin carries: two overlapping
+    // syncs of one task meant the later save dropped whatever the earlier one had added (BP-559).
+    // Dates are built above, because a pipeline update is not cast by Mongoose.
+    await writeProviderLinks(task._id, "gitlab", mrDocs);
     linked += mrs.length;
 
     const hasMerged = mrs.some((mr) => mr.state === "merged");
     const destination = hasMerged ? mergedReviewDestination(project, task.status) : undefined;
     if (destination) {
+      // Guarded on the status just read (BP-489's rule): two overlapping syncs both saw the same
+      // review column and both logged the move, so one transition wrote two history rows.
       const oldStatus = task.status;
-      task.status = destination as typeof task.status;
-      autoTransitioned++;
-      await logActivity(String(task._id), user._id, "status_changed", "status", oldStatus, destination);
+      const moved = await Task.updateOne(
+        { _id: task._id, status: oldStatus },
+        { $set: { status: destination } }
+      );
+      if (moved.modifiedCount === 1) {
+        autoTransitioned++;
+        await logActivity(String(task._id), user._id, "status_changed", "status", oldStatus, destination);
+      }
     }
-
-    await task.save();
   }
 
   return NextResponse.json({
