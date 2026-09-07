@@ -4,13 +4,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Combobox } from "./Combobox";
 
 const observers: (() => void)[] = [];
+const observed: Element[] = [];
 vi.stubGlobal(
   "ResizeObserver",
   class {
     constructor(cb: () => void) {
       observers.push(cb);
     }
-    observe() {}
+    observe(target: Element) {
+      observed.push(target);
+    }
     disconnect() {}
   }
 );
@@ -78,6 +81,8 @@ function open(trigger: { top: number; bottom: number; left?: number }) {
 
 afterEach(() => {
   cleanup();
+  observers.length = 0;
+  observed.length = 0;
   document.querySelectorAll("[data-pinned-phone-bar]").forEach((el) => el.remove());
   vi.restoreAllMocks();
   document.querySelectorAll("[data-pinned-bottom-bar]").forEach((el) => el.remove());
@@ -113,11 +118,11 @@ describe("where the panel lands", () => {
     const panel = open({ top: 118, bottom: 158 });
 
     expect(panel.style.bottom).toBe(`${260 - 118 + 4}px`);
-    // 118 above the trigger, less the margins; without the cap the panel's 260px would put its
-    // top at -150
-    expect(panel.style.maxHeight).toBe("106px");
-    expect(260 - Number.parseInt(panel.style.bottom) - Number.parseInt(panel.style.maxHeight))
-      .toBeGreaterThanOrEqual(0);
+    // Without the cap the panel's 260px would put its top at -150. With it, the top lands on the
+    // margin the constant names — 12, not merely "somewhere on the screen"
+    const top = 260 - Number.parseInt(panel.style.bottom) - Number.parseInt(panel.style.maxHeight);
+    expect(top).toBe(12);
+    expect(panel.style.maxHeight).toBe("102px");
   });
 
   it("a resize re-places the panel instead of closing it", () => {
@@ -154,13 +159,15 @@ describe("where the panel lands", () => {
   // was excluded while on screen, so what counts is that it has a height, not how wide the window is
   it("counts a phone bar the same way", () => {
     stateViewport(844, 390);
+    // 68px, which is what the comment bar measures — a taller one would make the arithmetic work
+    // for a bar this product does not have
+    pinnedBar({ top: 776, bottom: 844 }, "data-pinned-phone-bar");
     // Against the viewport there is room below for the whole panel; against the free space there
     // is not, so counting the bar is the difference between hanging down and flipping
-    pinnedBar({ top: 400, bottom: 844 }, "data-pinned-phone-bar");
-    const panel = open({ top: 200, bottom: 240 });
+    const panel = open({ top: 600, bottom: 640 });
 
     expect(panel.style.top).toBe("");
-    expect(panel.style.bottom).toBe(`${844 - 200 + 4}px`);
+    expect(panel.style.bottom).toBe(`${844 - 600 + 4}px`);
   });
 
   it("re-places when a bar arrives after the panel is open", async () => {
@@ -216,5 +223,77 @@ describe("where the panel lands", () => {
     expect(
       (document.querySelector('[role="listbox"]')!.parentElement as HTMLElement).style.top
     ).toBe("184px");
+  });
+
+  // A bar hidden at this width is `display: none`, so it has no rectangle. That is the whole
+  // reason the breakpoint query could be deleted, and it was the untested half of it
+  it("ignores a bar that is not on screen", () => {
+    stateViewport(720);
+    pinnedBar({ top: 0, bottom: 0 }, "data-pinned-phone-bar");
+    const panel = open({ top: 100, bottom: 140 });
+
+    // A zero-height bar read as a floor would put the panel above the trigger, or nowhere
+    expect(panel.style.top).toBe("144px");
+    expect(panel.style.maxHeight).toBe("260px");
+  });
+
+  it("observes the trigger and every bar, not just its own panel", () => {
+    stateViewport(720);
+    const bar = pinnedBar({ top: 630, bottom: 700 });
+    open({ top: 100, bottom: 140 });
+
+    expect(observed).toContain(screen.getByRole("combobox", { name: "Template category" }));
+    expect(observed).toContain(bar);
+  });
+
+  it("re-places when a phone bar arrives after the panel is open", async () => {
+    stateViewport(844, 390);
+    // Low enough that the 68px bar is what tips it, high enough that it hangs down until then
+    const panel = open({ top: 500, bottom: 540 });
+    expect(panel.style.top).toBe("544px");
+
+    const late = document.createElement("div");
+    stateRect(late, { top: 776, bottom: 844 });
+    document.body.append(late);
+    await act(async () => {
+      late.setAttribute("data-pinned-phone-bar", "");
+      await Promise.resolve();
+    });
+
+    const placed = document.querySelector('[role="listbox"]')!.parentElement as HTMLElement;
+    expect(placed.style.top).toBe("");
+    expect(placed.style.bottom).toBe(`${844 - 500 + 4}px`);
+  });
+
+  // Focus belongs to the reader once the panel is open: a re-measure produces a fresh placement
+  // object every time, and having that in the focus effect's deps took focus off the option they
+  // had just clicked
+  it("leaves focus where the reader put it when the panel is re-placed", () => {
+    stateViewport(720);
+    open({ top: 100, bottom: 140 });
+
+    const option = screen.getByRole("option", { name: "Beta" });
+    act(() => option.focus());
+    expect(document.activeElement).toBe(option);
+
+    act(() => {
+      resized();
+    });
+
+    expect(document.activeElement).toBe(option);
+  });
+
+  // happy-dom lays nothing out, so this asserts the mechanism rather than the result: the panel is
+  // a column and the list is the part that gives. The heights themselves were measured in a real
+  // browser, at three panel caps with a search box present
+  it("lets the list, and only the list, take what is left of the panel", () => {
+    stateViewport(720);
+    const panel = open({ top: 100, bottom: 140 });
+    const listbox = panel.querySelector('[role="listbox"]')!;
+
+    expect(panel.className).toContain("flex-col");
+    expect(listbox.className).toContain("flex-1");
+    expect(listbox.className).toContain("min-h-0");
+    expect(listbox.className).toContain("overflow-y-auto");
   });
 });

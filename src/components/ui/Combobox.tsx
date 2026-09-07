@@ -182,7 +182,9 @@ export function Combobox(props: ComboboxProps) {
     // Flipping above such a trigger still lands on the bar; the panel hangs off the floor instead
     const ledge = Math.min(trigger.top, floor);
     const below = floor - trigger.bottom - GAP;
-    const above = ledge - TOP_MARGIN;
+    // Less a gap as well as the margin: the panel's bottom edge is written at `ledge - GAP`, so
+    // the height it may take starts from there, not from the ledge
+    const above = ledge - TOP_MARGIN - GAP;
     // Flipped only when there is genuinely more room above: asking whether the panel fits below
     // and not whether it fits above put its top off the screen on a short window (BP-547)
     const flip = below < PANEL_MAX_HEIGHT && above > below;
