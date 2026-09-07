@@ -1,5 +1,6 @@
 "use client";
 
+import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
@@ -76,10 +77,18 @@ export default function MachineProjectsPage() {
           ? `Saved. ${left.join(", ")} ${left.length === 1 ? "does not run machines" : "do not run machines"} yet, and only an instance admin can turn that on — the machine will leave ${left.length === 1 ? "it" : "them"} alone until somebody does.`
           : "Saved. The app picks this up and sets up the checkouts."
       );
-      const data: View = await api.get(`/api/workers/${workerId}/projects`);
-      setView(data);
     } catch (e) {
+      setSaved("");
       setError((e as Error).message || "Could not save");
+      setSaving(false);
+      return;
+    }
+    // A second fact, and a different one: the save landed, so saying "Could not save" here would
+    // deny something that happened. All that is wrong is the list on screen (BP-585)
+    try {
+      setView(await api.get(`/api/workers/${workerId}/projects`));
+    } catch {
+      setError(LIST_REFRESH_FAILED);
     } finally {
       setSaving(false);
     }
