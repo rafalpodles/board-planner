@@ -24,6 +24,10 @@ const LIST_REFRESH_FAILED = "The list could not be refreshed — reload the page
 async function openMembers(page: Page) {
   await page.goto(`/projects/${PROJECT_KEY}/settings`);
   await expect(page.getByLabel(`Access for ${MEMBER_USERNAME}`)).toBeVisible();
+  // The mount read runs twice under `next dev`'s StrictMode, and the second one is still in
+  // flight when the select first paints — a `waitForResponse` armed here would catch that one
+  // and call it the refresh
+  await page.waitForLoadState("networkidle");
 }
 
 /** Fails only the members **read**, and only from the next one on, so the write still lands */
