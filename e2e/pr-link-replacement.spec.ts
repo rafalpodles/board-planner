@@ -20,7 +20,11 @@ async function db() {
   return handle;
 }
 
-let nextNumber = 9300;
+// Numbered away from the seed and from each other: nothing here goes through the counter that
+// hands out task numbers, and `project_1_taskNumber_1` is unique, so a fixed base makes the
+// second run of the file fail on the first insert.
+let nextNumber = 900_000 + Math.floor(Math.random() * 90_000);
+const created: mongoose.Types.ObjectId[] = [];
 
 function link(provider: "github" | "gitlab" | null, number: number) {
   const doc: Record<string, unknown> = {
@@ -52,6 +56,7 @@ async function taskWith(linkedPRs: Record<string, unknown>[] | undefined) {
   // provider work is in — `$ifNull` is the only reason the pipeline survives it.
   if (linkedPRs) doc.linkedPRs = linkedPRs;
   await handle.collection("tasks").insertOne(doc);
+  created.push(_id);
   return _id;
 }
 
@@ -67,7 +72,9 @@ async function linksOf(_id: mongoose.Types.ObjectId) {
 }
 
 test.afterAll(async () => {
-  if (mongoose.connection.readyState !== 0) await mongoose.disconnect();
+  if (mongoose.connection.readyState === 0) return;
+  if (created.length) await (await db()).collection("tasks").deleteMany({ _id: { $in: created } });
+  await mongoose.disconnect();
 });
 
 test("a GitLab sync replaces only GitLab's links", async () => {
