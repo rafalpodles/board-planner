@@ -100,8 +100,9 @@ export function GeneralSection({ projectId, project, replaceProject, stats }: Se
       return;
     }
 
-    // The row carries the change the server made, so a refresh that fails leaves it right rather
-    // than showing the relation that was replaced — the select reads from this list (BP-583)
+    // A row already on screen carries the change the server made, so a refresh that fails leaves
+    // it right rather than showing the relation that was replaced — the select reads from this
+    // list. Somebody added from the search has no row to patch; the refresh message covers that.
     setMembers((prev) =>
       prev.map((m) =>
         m._id === userId ? { ...m, relation: relation === "none" ? null : relation } : m

@@ -129,6 +129,19 @@ describe("GeneralSection member access", () => {
     expect(toast).not.toHaveBeenCalledWith("Failed to update access", "error");
   });
 
+  // The harm the ticket names, and the half the message alone does not fix: with the list unread,
+  // the row would fall back to the relation that was replaced and the toasts would expire over it
+  it("leaves the row showing the change even when the list cannot be re-read", async () => {
+    renderSection();
+    const select = await screen.findByLabelText("Access for bob");
+    api.get.mockRejectedValueOnce(new Error("network down"));
+
+    fireEvent.change(select, { target: { value: "owner" } });
+
+    await waitFor(() => expect(toast).toHaveBeenCalledWith(LIST_REFRESH_FAILED, "error"));
+    expect((select as HTMLSelectElement).value).toBe("owner");
+  });
+
   // The control: a write that genuinely fails must still be reported as the write's failure, and
   // must not claim the access was updated
   it("still reports a failed write as one, and does not confirm it", async () => {

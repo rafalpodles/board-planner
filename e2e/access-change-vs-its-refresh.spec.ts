@@ -16,13 +16,9 @@ test.beforeEach(seed);
 
 /**
  * A toast lives 3s and the suite's expect timeout is 15s, so a *retrying* `toHaveCount(0)` on one
- * passes by waiting it out — it cannot fail. Every negative here is read once, immediately after
- * the positive that proves the screen has settled.
+ * passes by waiting it out — it cannot fail. Every negative below is `count()`, read once, after a
+ * positive that proves the screen has settled.
  */
-async function isNotOnScreen(page: Page, text: string) {
-  return (await page.getByText(text).count()) === 0;
-}
-
 const LIST_REFRESH_FAILED = "The list could not be refreshed — reload the page to see it";
 
 async function openMembers(page: Page) {
@@ -56,7 +52,7 @@ test("a grant that landed is not reported as a failure when only its refresh fai
   await written;
 
   await expect(page.getByText(LIST_REFRESH_FAILED)).toBeVisible();
-  expect(await isNotOnScreen(page, "Failed to update access")).toBe(true);
+  expect(await page.getByText("Failed to update access").count(), "the write's error").toBe(0);
 
   // The row carries the change even though the list could not be re-read
   await expect(page.getByLabel(`Access for ${MEMBER_USERNAME}`)).toHaveValue("owner");
@@ -86,8 +82,8 @@ test("a refused grant still says the access was not updated", async ({ page }) =
 
   // The server's own words, not a generic fallback, and not the refresh's line
   await expect(page.getByText("the write was refused")).toBeVisible();
-  expect(await isNotOnScreen(page, LIST_REFRESH_FAILED)).toBe(true);
-  expect(await isNotOnScreen(page, "Access updated")).toBe(true);
+  expect(await page.getByText(LIST_REFRESH_FAILED).count(), LIST_REFRESH_FAILED).toBe(0);
+  expect(await page.getByText("Access updated").count(), "Access updated").toBe(0);
 
   // Nothing moved: the row still shows what the server still holds
   await expect(page.getByLabel(`Access for ${MEMBER_USERNAME}`)).toHaveValue("member");
@@ -98,9 +94,15 @@ test("a grant that lands and refreshes says so once", async ({ page }) => {
   await signIn(page);
   await openMembers(page);
 
+  // The row is painted from the write before the refresh is even issued, so both assertions below
+  // would be satisfied while the read was still in flight. Wait for the read itself.
+  const refreshed = page.waitForResponse(
+    (r) => r.url().includes("/members") && r.request().method() === "GET" && r.ok()
+  );
   await page.getByLabel(`Access for ${MEMBER_USERNAME}`).selectOption("owner");
+  await refreshed;
 
   await expect(page.getByText("Access updated")).toBeVisible();
   await expect(page.getByLabel(`Access for ${MEMBER_USERNAME}`)).toHaveValue("owner");
-  expect(await isNotOnScreen(page, LIST_REFRESH_FAILED)).toBe(true);
+  expect(await page.getByText(LIST_REFRESH_FAILED).count(), LIST_REFRESH_FAILED).toBe(0);
 });
