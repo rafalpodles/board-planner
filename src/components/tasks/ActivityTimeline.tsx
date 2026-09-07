@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { ApiActivityLog, STATUS_LABELS, TaskStatus } from "@/types";
 import { timeAgo } from "@/lib/time";
@@ -9,7 +9,7 @@ interface ActivityTimelineProps {
   projectId: string;
   taskId: string;
   hideHeading?: boolean;
-  onCountChange?: (count: number) => void;
+  onCountChange?: (count: number | null) => void;
   // Bumped by the parent when something outside this component wrote an activity entry
   refreshKey?: number;
 }
@@ -112,18 +112,44 @@ export function ActivityTimeline({
   const [expanded, setExpanded] = useState(false);
   const [failed, setFailed] = useState(false);
   const api = useApi();
+  const loadSeq = useRef(0);
 
-  useEffect(() => {
-    setFailed(false);
+  const load = useCallback(() => {
+    // A task switch reconciles this panel in place, so the previous task's read is still in
+    // flight and would otherwise land as this task's history (BP-586, the shape BP-577 gave
+    // Comments next door)
+    const seq = ++loadSeq.current;
     api
       .get(`/api/projects/${projectId}/tasks/${taskId}/activity`)
       .then((data: ApiActivityLog[]) => {
+        if (seq !== loadSeq.current) return;
         setLogs(data);
+        setFailed(false);
         onCountChange?.(data.length);
       })
-      .catch(() => setFailed(true));
+      .catch(() => {
+        if (seq === loadSeq.current) setFailed(true);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taskId, refreshKey]);
+  }, [projectId, taskId]);
+
+  useEffect(() => {
+    // A different task is a different history: what is on screen belongs to the one just left,
+    // and so does the count this panel last reported
+    setLogs([]);
+    setFailed(false);
+    setExpanded(false);
+    onCountChange?.(null);
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taskId]);
+
+  useEffect(() => {
+    // A refresh keeps what is on screen: the rows are this task's either way
+    if (!refreshKey) return;
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
 
   const displayLogs = expanded ? logs : logs.slice(0, 5);
 

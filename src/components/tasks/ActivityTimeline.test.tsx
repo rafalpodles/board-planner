@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, waitFor, act } from "@testing-library/react";
 import { ActivityTimeline } from "./ActivityTimeline";
 
 const { api } = vi.hoisted(() => ({
@@ -96,5 +96,84 @@ describe("ActivityTimeline", () => {
     api.get.mockResolvedValue([{ ...log, action: "updated", field: "checklist" }]);
     render(<ActivityTimeline projectId="TP" taskId="t1" />);
     await waitFor(() => expect(screen.getByText(/updated checklist/)).toBeTruthy());
+  });
+});
+
+/**
+ * BP-586. `TaskActivityPanel` reconciles this panel in place on a task switch, so without a reset
+ * and a sequence guard the task just left keeps its rows, its count and — if the new read fails —
+ * a failure line over another task's history. The shape is the one BP-577 gave `Comments`.
+ */
+describe("ActivityTimeline across a task switch", () => {
+  it("does not present the previous task's rows as this task's", async () => {
+    api.get.mockResolvedValue([log]);
+    const view = render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() => expect(screen.getByText(/Owner Name/)).toBeTruthy());
+
+    const pending: ((rows: unknown[]) => void)[] = [];
+    api.get.mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
+    view.rerender(<ActivityTimeline projectId="TP" taskId="t2" />);
+
+    expect(screen.queryByText(/Owner Name/)).toBeNull();
+
+    await act(async () => pending.forEach((resolve) => resolve([])));
+    await waitFor(() => expect(screen.getByText(/No history yet/)).toBeTruthy());
+  });
+
+  it("ignores the previous task's read when it lands late", async () => {
+    const pending: ((rows: unknown[]) => void)[] = [];
+    api.get.mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
+    const view = render(<ActivityTimeline projectId="TP" taskId="t1" />);
+
+    view.rerender(<ActivityTimeline projectId="TP" taskId="t2" />);
+    await act(async () => pending[pending.length - 1]([]));
+    await waitFor(() => expect(screen.getByText(/No history yet/)).toBeTruthy());
+
+    await act(async () => pending[0]([log]));
+
+    expect(screen.queryByText(/Owner Name/)).toBeNull();
+  });
+
+  it("does not let the previous task's failure claim this task's history", async () => {
+    const pending: { resolve: (rows: unknown[]) => void; reject: (e: Error) => void }[] = [];
+    api.get.mockImplementation(
+      () => new Promise((resolve, reject) => pending.push({ resolve, reject }))
+    );
+    const view = render(<ActivityTimeline projectId="TP" taskId="t1" />);
+
+    view.rerender(<ActivityTimeline projectId="TP" taskId="t2" />);
+    await act(async () => pending[pending.length - 1].resolve([log]));
+    await waitFor(() => expect(screen.getByText(/Owner Name/)).toBeTruthy());
+
+    await act(async () => pending[0].reject(new Error("network")));
+
+    expect(screen.queryByText(/Could not load/)).toBeNull();
+    expect(screen.getByText(/Owner Name/)).toBeTruthy();
+  });
+
+  it("withdraws the count it reported when the task changes", async () => {
+    const onCountChange = vi.fn();
+    api.get.mockResolvedValue([log]);
+    const view = render(
+      <ActivityTimeline projectId="TP" taskId="t1" onCountChange={onCountChange} />
+    );
+    await waitFor(() => expect(onCountChange).toHaveBeenCalledWith(1));
+
+    api.get.mockImplementation(() => new Promise(() => {}));
+    view.rerender(<ActivityTimeline projectId="TP" taskId="t2" onCountChange={onCountChange} />);
+
+    expect(onCountChange).toHaveBeenLastCalledWith(null);
+  });
+
+  // A refresh of the same task is not a switch: what is on screen belongs to it either way
+  it("keeps the rows on screen while a refresh of the same task runs", async () => {
+    api.get.mockResolvedValue([log]);
+    const view = render(<ActivityTimeline projectId="TP" taskId="t1" refreshKey={0} />);
+    await waitFor(() => expect(screen.getByText(/Owner Name/)).toBeTruthy());
+
+    api.get.mockImplementation(() => new Promise(() => {}));
+    view.rerender(<ActivityTimeline projectId="TP" taskId="t1" refreshKey={1} />);
+
+    expect(screen.getByText(/Owner Name/)).toBeTruthy();
   });
 });
