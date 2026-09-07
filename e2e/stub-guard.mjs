@@ -17,6 +17,17 @@ import { createServer } from "node:http";
 export const CRASH_MARKER = "STUB CRASH";
 
 /**
+ * The other marker, for the one crash a green run makes on purpose: `stub-survives-a-throw`
+ * provokes a throw to prove this guard works. It has to be a different string rather than a
+ * suffix, because what reads these lines (`stub-crash-reporter.ts`) fails the run on
+ * `CRASH_MARKER` and cannot be asked to tell a substring apart from its own container (BP-581).
+ */
+export const EXPECTED_CRASH_MARKER = "STUB THREW ON PURPOSE";
+
+/** A request that says the throw it is about to cause is the point of the test making it. */
+export const EXPECTED_CRASH_HEADER = "x-e2e-expected-crash";
+
+/**
  * Puts a line on stderr, whole, without ever becoming the failure itself.
  *
  * Synchronously rather than through console.error, because a write to a pipe is asynchronous on
@@ -72,7 +83,8 @@ function emit(text) {
 function report(name, error, req) {
   const where = req ? `${req.method ?? "?"} ${req.url ?? "?"}` : "outside any request";
   const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
-  emit(`\n${CRASH_MARKER} [${name}] ${where}\n${detail}\n`);
+  const marker = req?.headers?.[EXPECTED_CRASH_HEADER] ? EXPECTED_CRASH_MARKER : CRASH_MARKER;
+  emit(`\n${marker} [${name}] ${where}\n${detail}\n`);
 }
 
 /**
