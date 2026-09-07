@@ -1,5 +1,6 @@
 "use client";
 
+import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
@@ -39,6 +40,8 @@ export default function MachineProjectsPage() {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState("");
+  /** Kept apart from `error`: one says the save did not happen, the other that the list is old */
+  const [stale, setStale] = useState("");
 
   useEffect(() => {
     api
@@ -55,6 +58,8 @@ export default function MachineProjectsPage() {
 
   function toggle(row: CatalogueRow) {
     setSaved("");
+    setError("");
+    setStale("");
     setPicked((prev) => {
       const next = new Set(prev);
       if (next.has(row.project)) next.delete(row.project);
@@ -66,20 +71,50 @@ export default function MachineProjectsPage() {
   async function save() {
     setSaving(true);
     setError("");
+    setStale("");
+    let left: string[];
     try {
       const result = await api.put(`/api/workers/${workerId}/projects`, {
         projects: [...picked],
       });
-      const left = (result?.leftDisabled ?? []) as string[];
+      left = (result?.leftDisabled ?? []) as string[];
       setSaved(
         left.length
           ? `Saved. ${left.join(", ")} ${left.length === 1 ? "does not run machines" : "do not run machines"} yet, and only an instance admin can turn that on — the machine will leave ${left.length === 1 ? "it" : "them"} alone until somebody does.`
           : "Saved. The app picks this up and sets up the checkouts."
       );
-      const data: View = await api.get(`/api/workers/${workerId}/projects`);
-      setView(data);
     } catch (e) {
+      setSaved("");
       setError((e as Error).message || "Could not save");
+      setSaving(false);
+      return;
+    }
+    // The rows carry what the write did, so a failed re-read does not leave them describing the
+    // board as it was — the pending-delete warning outliving the removal it warned about.
+    //
+    // Downward only. `servedHere` is what the *machine* reported having, and the write records a
+    // wish rather than a clone: setting it upward would paint a checkout that does not exist yet
+    // and swallow the line saying one is coming. `workersEnabled` is different — the write really
+    // does throw that switch, for everything the response did not list as left off.
+    setView((prev) =>
+      prev
+        ? {
+            ...prev,
+            catalogue: prev.catalogue.map((row) => ({
+              ...row,
+              servedHere: row.servedHere && picked.has(row.project),
+              workersEnabled:
+                row.workersEnabled || (picked.has(row.project) && !left.includes(row.key)),
+            })),
+          }
+        : prev
+    );
+    // A second fact, and a different one: the save landed, so saying "Could not save" here would
+    // deny something that happened. All that is wrong is what somebody else may have changed
+    try {
+      setView(await api.get(`/api/workers/${workerId}/projects`));
+    } catch {
+      setStale(LIST_REFRESH_FAILED);
     } finally {
       setSaving(false);
     }
@@ -177,8 +212,11 @@ export default function MachineProjectsPage() {
         </p>
       )}
 
-      {error && <p className="mt-4 text-sm text-danger">{error}</p>}
+      {/* The outcome of the click first, then the caveat. And a warning rather than a danger:
+          on this page red is what "your action did not happen" looks like */}
       {saved && <p className="mt-4 text-sm text-text-muted">{saved}</p>}
+      {stale && <p className="mt-4 text-sm text-warning">{stale}</p>}
+      {error && <p className="mt-4 text-sm text-danger">{error}</p>}
 
       <div className="mt-6 flex items-center gap-3">
         <Button onClick={save} disabled={saving}>

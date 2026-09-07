@@ -1047,3 +1047,53 @@ test("a machine that quarantined a checkout says so on the fleet screen, not `re
   await expect(row).toContainText("restart this worker");
   await expect(row.getByText(/^ready/), "the machine still reads ready").toHaveCount(0);
 });
+
+/**
+ * BP-585. The catalogue was re-read under the same `try` as the PUT that saved it, so a failed
+ * re-read painted "Could not save" beside the "Saved." the same handler had just set. The save
+ * landing and the list going stale are different facts and the screen has to say both.
+ */
+test("a save that lands and a re-read that fails say so separately", async ({ page, request }) => {
+  await nameRepository(PROJECT_ID, REPOSITORY);
+  await setWorker({ owner: ADMIN_ID });
+  await heartbeat(request, { repos: [{ remote: REPOSITORY, path: CHECKOUT }] });
+
+  await signIn(page);
+  await page.goto(`/settings/workers/${WORKER_ID}/projects`);
+  const row = pickerRow(page, PROJECT_NAME);
+  await expect(row.getByRole("checkbox")).toBeChecked();
+
+  // Only the read after the save: the one that painted the page is already done
+  await page.route(
+    (url) => url.pathname === `/api/workers/${WORKER_ID}/projects`,
+    async (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      await route.abort("failed");
+    }
+  );
+
+  // Retried rather than clicked once: Playwright's actionability checks pass against a DOM React
+  // is not yet driving, and the click is dispatched a single time — a swallowed one shows up as
+  // "clicking did not change its state", or worse as a save that carries the old set
+  await expect(async () => {
+    await row.getByRole("checkbox").uncheck();
+    await expect(row.getByRole("checkbox")).not.toBeChecked();
+  }).toPass({ timeout: 10_000 });
+  const saved = await save(page);
+  // What this test unticked, not the whole set: another spec in the group can leave the machine
+  // wanting a second board, and asserting an empty array makes that residue look like this bug
+  expect(saved.projects).not.toContain(String(PROJECT_ID));
+
+  await expect(page.getByText("The list could not be refreshed")).toBeVisible();
+  // The save happened, and the screen does not deny it. Counted by treatment rather than by
+  // wording: an aborted request throws a raw "Failed to fetch", so asserting the handler's own
+  // fallback string would have passed with the bug fully present
+  await expect(page.getByText(/^Saved\./)).toBeVisible();
+  expect(await page.locator("p.text-danger").count()).toBe(0);
+  // Nor does it still promise the removal it has already made
+  expect(await page.getByText(/Saving removes/).count()).toBe(0);
+  // What the server holds is what the save asked for, whatever the stale list shows
+  expect(((await workerRow())?.desiredProjects ?? []).map(String)).not.toContain(
+    String(PROJECT_ID)
+  );
+});
