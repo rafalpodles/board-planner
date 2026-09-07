@@ -54,7 +54,7 @@ export function MobileCommentBar({
       // Declares the bottom strip as spoken for, so anything the shell floats down there steps
       // over it (BP-591). The step is a fixed 96px rather than this bar's height, and the e2e
       // measures the clearance at the textarea's full growth rather than assuming it.
-      data-pinned-bottom-bar
+      data-pinned-phone-bar
       className="sticky bottom-0 z-10 flex items-end gap-2 border-t border-border bg-bg-card relative
         px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:hidden"
     >

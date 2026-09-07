@@ -21,7 +21,7 @@ const group = {
   discard: vi.fn(),
 };
 
-const bar = () => document.querySelector("[data-pinned-save-bar]");
+const bar = () => document.querySelector("[data-pinned-bottom-bar]");
 
 afterEach(cleanup);
 

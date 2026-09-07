@@ -50,7 +50,7 @@ export function SaveBar({ pending, total, onGoToSection }: SaveBarProps) {
       // Only while it is open, unlike the phone comment bar: this one is always mounted and
       // collapses to `max-h-0`, so declaring the strip unconditionally would push the PM launcher
       // up on every settings page for ever (BP-593)
-      data-pinned-save-bar={open ? "" : undefined}
+      data-pinned-bottom-bar={open ? "" : undefined}
       className={`sticky bottom-0 z-40 overflow-hidden transition-[max-height] duration-200
         ${open ? "max-h-56" : "max-h-0 pointer-events-none"}`}
       aria-hidden={!open}

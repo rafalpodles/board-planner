@@ -246,9 +246,9 @@ test("a task page at desktop width does not raise the launcher", async ({ page }
 
   const state = await page.evaluate(() => ({
     bottom: getComputedStyle(document.querySelector('[aria-label="Open PM chat"]')!).bottom,
-    barIsInTheDom: !!document.querySelector("[data-pinned-bottom-bar]"),
+    barIsInTheDom: !!document.querySelector("[data-pinned-phone-bar]"),
     barIsOnScreen:
-      document.querySelector("[data-pinned-bottom-bar]")?.getBoundingClientRect().height !== 0,
+      document.querySelector("[data-pinned-phone-bar]")?.getBoundingClientRect().height !== 0,
   }));
 
   expect(state.barIsInTheDom).toBe(true);
