@@ -415,6 +415,15 @@ export async function seedSprintPlanning() {
   const task = taskFactory(now);
   await db.collection("tasks").insertMany([
     task({
+      _id: new mongoose.Types.ObjectId("e2e0000000000000000ca101"),
+      project: AWKWARD_PROJECT_ID,
+      taskNumber: AWKWARD_HIT_NUMBER,
+      title: AWKWARD_HIT_TITLE,
+      status: SPARE_COLUMN.id,
+      order: 20,
+      updatedAt: new Date(now.getTime() - 4_000),
+    }),
+    task({
       _id: PLANNING_SPRINT_TASK_ID,
       taskNumber: PLANNING_SPRINT_TASK_NUMBER,
       title: PLANNING_SPRINT_TASK_TITLE,
@@ -491,6 +500,15 @@ export async function seedSprintEstimates() {
 
   const task = taskFactory(now);
   await db.collection("tasks").insertMany([
+    task({
+      _id: new mongoose.Types.ObjectId("e2e0000000000000000ca101"),
+      project: AWKWARD_PROJECT_ID,
+      taskNumber: AWKWARD_HIT_NUMBER,
+      title: AWKWARD_HIT_TITLE,
+      status: SPARE_COLUMN.id,
+      order: 20,
+      updatedAt: new Date(now.getTime() - 4_000),
+    }),
     task({
       _id: ESTIMATE_DONE_NUMERIC_TASK_ID,
       taskNumber: 101,
@@ -640,6 +658,15 @@ export async function seedSprintLifecycle() {
   const points = (value: number) => ({ [String(LIFECYCLE_POINTS_FIELD_ID)]: value });
   const task = taskFactory(now);
   await db.collection("tasks").insertMany([
+    task({
+      _id: new mongoose.Types.ObjectId("e2e0000000000000000ca101"),
+      project: AWKWARD_PROJECT_ID,
+      taskNumber: AWKWARD_HIT_NUMBER,
+      title: AWKWARD_HIT_TITLE,
+      status: SPARE_COLUMN.id,
+      order: 20,
+      updatedAt: new Date(now.getTime() - 4_000),
+    }),
     task({
       _id: LIFECYCLE_FINISHED_TASK_ID,
       taskNumber: LIFECYCLE_FINISHED_TASK_NUMBER,
@@ -1187,9 +1214,38 @@ export const META_WILDCARD = ".*";
  *
  * Both are elsewhere in the suite, and neither failure names this function.
  */
+/**
+ * A board whose key exercises every character the rule allows and runs past the ten the search
+ * regex used to permit, plus a key it used to answer to. Both are what BP-573 is about.
+ */
+export const AWKWARD_PROJECT_ID = new mongoose.Types.ObjectId("e2e0000000000000000ca100");
+export const AWKWARD_PROJECT_KEY = "PLATFORM_TEAM-2";
+export const AWKWARD_FORMER_KEY = "PT";
+export const AWKWARD_HIT_NUMBER = 77;
+export const AWKWARD_HIT_KEY = `${AWKWARD_PROJECT_KEY}-${AWKWARD_HIT_NUMBER}`;
+export const AWKWARD_HIT_TITLE = "Reachable only by its key";
+
 export async function seedSearchCorpus() {
   const db = (await connect()).db!;
   const now = new Date();
+
+  await db.collection("projects").insertOne({
+    _id: AWKWARD_PROJECT_ID,
+    name: "Platform Team",
+    key: AWKWARD_PROJECT_KEY,
+    formerKeys: [AWKWARD_FORMER_KEY],
+    description: "",
+    icon: "",
+    categories: CATEGORIES.map((c) => ({ ...c, _id: new mongoose.Types.ObjectId() })),
+    columns: COLUMNS.map((c) => ({ ...c, _id: new mongoose.Types.ObjectId() })),
+    taskTemplates: [],
+    customFields: [],
+    webhooks: [],
+    notificationChannels: [],
+    taskCounter: AWKWARD_HIT_NUMBER,
+    createdAt: now,
+    updatedAt: now,
+  });
 
   await db.collection("projects").insertOne({
     _id: OTHER_PROJECT_ID,
@@ -1244,6 +1300,15 @@ export async function seedSearchCorpus() {
   // lets the sort be deleted with every test still green.
   const task = taskFactory(now);
   await db.collection("tasks").insertMany([
+    task({
+      _id: new mongoose.Types.ObjectId("e2e0000000000000000ca101"),
+      project: AWKWARD_PROJECT_ID,
+      taskNumber: AWKWARD_HIT_NUMBER,
+      title: AWKWARD_HIT_TITLE,
+      status: SPARE_COLUMN.id,
+      order: 20,
+      updatedAt: new Date(now.getTime() - 4_000),
+    }),
     task({
       _id: BODY_HIT_ID,
       taskNumber: BODY_HIT_NUMBER,
