@@ -33,7 +33,9 @@ describe("reading the stubs' own output", () => {
 
   it("fails a run whose stub crashed, even when every test passed", async () => {
     const reporter = watching();
-    reporter.onStdErr?.(`\n${CRASH_MARKER} [webhook receiver] POST /hook\nTypeError: no\n`);
+    // stdout, not stderr: a stub's own `console.log` and the dev server's lines come that way,
+    // and a reader wired to only one of the two is half a reader
+    reporter.onStdOut?.(`\n${CRASH_MARKER} [webhook receiver] POST /hook\nTypeError: no\n`);
 
     expect(await reporter.onEnd?.(passed)).toEqual({ status: "failed" });
     // Naming the stub is the point: a crash on a fire-and-forget path reads as a missing row
@@ -82,5 +84,32 @@ describe("reading the stubs' own output", () => {
     await reporter.onEnd?.(passed);
 
     expect(summary()).toContain("2 stub crashes");
+  });
+
+  // `stub-guard`'s own docblock records a measured storm of 25,852 reports in under a second;
+  // holding every line of that in the runner is no better than dropping them all
+  it("counts a storm without printing all of it", async () => {
+    const reporter = watching();
+    for (let i = 0; i < 50; i++) reporter.onStdErr?.(`${CRASH_MARKER} [a] GET /${i}\n`);
+
+    await reporter.onEnd?.(passed);
+
+    expect(summary(), "the count is the true one").toContain("50 stub crashes");
+    expect(summary().split("\n").filter((line) => line.includes("GET /")).length).toBe(20);
+    expect(summary()).toContain("…and 30 more");
+  });
+
+  // The two streams interleave, and one buffer would glue an unfinished stdout line onto the next
+  // stderr chunk — inventing a line neither stream ever wrote
+  it("keeps a half-line on each stream to itself", async () => {
+    const reporter = watching();
+    reporter.onStdOut?.("compiled /projects in 400ms — no newline yet");
+    reporter.onStdErr?.(` [openai stub] GET /x\n`);
+    reporter.onStdOut?.(`${CRASH_MARKER} [openai stub] GET /y\n`);
+
+    await reporter.onEnd?.(passed);
+
+    expect(summary()).toContain("[openai stub] GET /y");
+    expect(summary(), "one crash, not a spliced second").toContain("1 stub crash");
   });
 });

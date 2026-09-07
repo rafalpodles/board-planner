@@ -80,11 +80,15 @@ function emit(text) {
   }
 }
 
+/** Which of the two markers this crash gets. A crash outside any request is never expected. */
+function markerFor(req) {
+  return req?.headers?.[EXPECTED_CRASH_HEADER] ? EXPECTED_CRASH_MARKER : CRASH_MARKER;
+}
+
 function report(name, error, req) {
   const where = req ? `${req.method ?? "?"} ${req.url ?? "?"}` : "outside any request";
   const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
-  const marker = req?.headers?.[EXPECTED_CRASH_HEADER] ? EXPECTED_CRASH_MARKER : CRASH_MARKER;
-  emit(`\n${marker} [${name}] ${where}\n${detail}\n`);
+  emit(`\n${markerFor(req)} [${name}] ${where}\n${detail}\n`);
 }
 
 /**
@@ -143,7 +147,10 @@ export function guard(name, handler) {
           res.destroy();
           return;
         }
-        res.writeHead(500, { "Content-Type": "text/plain" }).end(`${CRASH_MARKER} ${name}`);
+        // The same marker as the log line, not `CRASH_MARKER` always: the app logs an upstream
+        // 500's body, that log is piped to the reporter too, and a declared-expected crash
+        // reaching it that way would fail a run whose only crash was the deliberate one (BP-581).
+        res.writeHead(500, { "Content-Type": "text/plain" }).end(`${markerFor(req)} ${name}`);
       });
   };
 }

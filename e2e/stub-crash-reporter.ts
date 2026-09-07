@@ -11,43 +11,64 @@ import { CRASH_MARKER } from "./stub-guard.mjs";
  * So the line is read rather than left for whoever scrolls back. The deliberate crash in
  * `stub-survives-a-throw.spec.ts` carries its own marker (`EXPECTED_CRASH_MARKER`) and never
  * reaches here.
+ *
+ * Two limits, both measured rather than assumed. A crash reported more than ~100ms after the last
+ * test's request never arrives at all — the web servers are torn down first — so a fire-and-forget
+ * failure caused by the *last* spec of a group is invisible here exactly as it was in the log.
+ * And `--reporter=line` on the command line replaces this reporter rather than adding to it; CI
+ * passes no `--reporter`, which is what keeps the check on.
  */
+// A crash can repeat: `stub-guard`'s own docblock records a measured storm of 25,852 reports in
+// under a second, and holding every line of that in the runner is no better than dropping them.
+const MOST_TO_SHOW = 20;
+
 export default class StubCrashReporter implements Reporter {
   private readonly crashes: string[] = [];
-  // A crash spans several lines and arrives in chunks that split anywhere, so the marker's own
-  // line is reassembled rather than searched for inside whatever a chunk happened to contain.
-  private pending = "";
-
+  private count = 0;
+  // One buffer per stream: stdout and stderr interleave, and a line without its newline yet would
+  // otherwise be glued to whatever the other stream said next.
+  private pendingOut = "";
+  private pendingErr = "";
   printsToStdio() {
     return true;
   }
 
-  private scan(chunk: string | Buffer) {
-    this.pending += chunk.toString();
-    const lines = this.pending.split("\n");
-    this.pending = lines.pop() ?? "";
-    for (const line of lines) {
-      if (line.includes(CRASH_MARKER)) this.crashes.push(line.trim());
-    }
+  /**
+   * A crash spans several lines and arrives in chunks that split anywhere, so the marker's own
+   * line is reassembled rather than searched for inside whatever a chunk happened to contain.
+   */
+  private scan(pending: string, chunk: string | Buffer): string {
+    const lines = (pending + chunk.toString()).split("\n");
+    const tail = lines.pop() ?? "";
+    for (const line of lines) this.record(line);
+    return tail;
+  }
+
+  private record(line: string) {
+    if (!line.includes(CRASH_MARKER)) return;
+    this.count++;
+    if (this.crashes.length < MOST_TO_SHOW) this.crashes.push(line.trim());
   }
 
   onStdOut(chunk: string | Buffer) {
-    this.scan(chunk);
+    this.pendingOut = this.scan(this.pendingOut, chunk);
   }
 
   onStdErr(chunk: string | Buffer) {
-    this.scan(chunk);
+    this.pendingErr = this.scan(this.pendingErr, chunk);
   }
 
   async onEnd(result: FullResult) {
-    // The tail, in case the last line never got its newline
-    if (this.pending.includes(CRASH_MARKER)) this.crashes.push(this.pending.trim());
-    if (this.crashes.length === 0) return;
+    // The tails, in case a last line never got its newline
+    this.record(this.pendingOut);
+    this.record(this.pendingErr);
+    if (this.count === 0) return;
 
     const lines = [
       "",
-      `${this.crashes.length} stub crash${this.crashes.length === 1 ? "" : "es"} during this run:`,
+      `Failing this run: ${this.count} stub crash${this.count === 1 ? "" : "es"}.`,
       ...this.crashes.map((crash) => `  ${crash}`),
+      ...(this.count > this.crashes.length ? [`  …and ${this.count - this.crashes.length} more`] : []),
       "",
       "A stub that throws answers 500 and keeps serving, so a crash on a fire-and-forget path",
       "(the webhook receiver) would otherwise only show up as something that never arrived.",

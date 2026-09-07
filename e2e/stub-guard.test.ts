@@ -204,14 +204,17 @@ describe("guard", () => {
       body: "{{",
     });
 
-    // Still a 500 with the ordinary body: the spec that asked for the throw asserts on that
+    // Still a 500, and the body carries the declared marker too: the app logs an upstream 500's
+    // body, and that log reaches the same reader as the stub's own stderr
     expect(crashed.status).toBe(500);
-    expect(await crashed.text()).toContain(CRASH_MARKER);
+    const body = await crashed.text();
+    expect(body).toContain(EXPECTED_CRASH_MARKER);
+    expect(body).not.toContain(CRASH_MARKER);
 
     const reported = errors.join("\n");
     expect(reported).toContain(EXPECTED_CRASH_MARKER);
     expect(reported).toContain("provoked on purpose");
-    // The line the reporter reads must not carry the marker that fails a run
+    // Nothing the reporter reads may carry the marker that fails a run
     expect(reported.split("\n").filter((line) => line.includes(CRASH_MARKER))).toHaveLength(0);
   });
 
