@@ -131,14 +131,14 @@ export class PlannerClient {
 
   async resolveTaskKey(taskKey: string): Promise<{ projectId: string; taskId: string }> {
     const match = taskKey.match(/^([A-Z]+)-(\d+)$/i);
-    if (!match) throw new Error(`Invalid task key: "${taskKey}". Expected format: "CP-1"`);
+    if (!match) throw new Error(`Invalid task key: "${echo(taskKey)}". Expected format: "CP-1"`);
 
     const [, projectKey, taskNumberStr] = match;
     const project = await this.getProjectByKey(projectKey);
     const tasks = (await this.listTasks(project._id)) as { _id: string; taskNumber: number }[];
     const task = tasks.find((t) => t.taskNumber === parseInt(taskNumberStr, 10));
 
-    if (!task) throw new Error(`Task ${echo(taskKey).toUpperCase()} not found`);
+    if (!task) throw new Error(`Task ${echo(taskKey.toUpperCase())} not found`);
     return { projectId: project._id, taskId: task._id };
   }
 }

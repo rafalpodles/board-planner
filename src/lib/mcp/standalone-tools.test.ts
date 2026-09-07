@@ -174,4 +174,34 @@ describe("the standalone MCP server, driven rather than read", () => {
     const short = await call("update_task", { taskKey: "BP-1", fields: { Owoce: "Pears" } });
     expect(short.said).toContain('"Pears"');
   });
+
+  /**
+   * The mutation audit found every refusal in the standalone `tools.ts` and `api-client.ts` to be a
+   * survivor: `npm test` never runs that package, and the drift guard reads request *paths*, not
+   * refusal messages. These drive the real module, so reverting a bound there goes red.
+   */
+  it("bounds the names in its own assignee and agent refusals", async () => {
+    const client = stubClient();
+    const call = await connected(client);
+    const huge = "z".repeat(50_000);
+
+    const assignee = await call("update_task", { taskKey: "BP-1", assignee: huge });
+    expect(assignee.refused).toBe(true);
+    expect(assignee.said).toContain(`"${"z".repeat(64)}…"`);
+    expect(assignee.said.length).toBeLessThan(400);
+
+    const agent = await call("update_task", { taskKey: "BP-1", agent: huge });
+    expect(agent.refused).toBe(true);
+    expect(agent.said).toContain(`"${"z".repeat(64)}…"`);
+    expect(agent.said.length).toBeLessThan(400);
+  });
+
+  it("bounds the task key in its own resolver", async () => {
+    const call = await connected(stubClient());
+
+    const bad = await call("get_task", { taskKey: `${"z".repeat(50_000)}-1` });
+    expect(bad.refused).toBe(true);
+    expect(bad.said).toContain(`"${"z".repeat(64)}…"`);
+    expect(bad.said.length).toBeLessThan(400);
+  });
 });

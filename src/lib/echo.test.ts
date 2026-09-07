@@ -11,9 +11,22 @@ import { ECHO_LIMIT, echo } from "./echo";
  */
 
 describe("echo", () => {
+  // Every other assertion here is written in terms of ECHO_LIMIT, so without this the file that
+  // says it is where the bound is stated would be the one file that never states it
+  it("is the 64 the rest of the codebase already settled on", () => {
+    expect(ECHO_LIMIT).toBe(64);
+  });
+
   it("leaves a value that is already short alone", () => {
     expect(echo("Platform")).toBe("Platform");
     expect(echo("x".repeat(ECHO_LIMIT))).toBe("x".repeat(ECHO_LIMIT));
+  });
+
+  // Uppercasing after the slice can exceed the bound — "ß" becomes "SS", "ﬃ" becomes "FFI" — so
+  // whatever is shown has to be bounded last
+  it("bounds what the reader is shown, whatever it was made from", () => {
+    expect(echo("ß".repeat(200).toUpperCase()).length).toBeLessThanOrEqual(ECHO_LIMIT + 1);
+    expect(echo("ﬃ".repeat(200).toUpperCase()).length).toBeLessThanOrEqual(ECHO_LIMIT + 1);
   });
 
   it("bounds a long one, and says it did", () => {
