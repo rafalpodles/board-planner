@@ -80,6 +80,9 @@ export function Modal({
     containerRef: dialogRef,
     onEscape: requestClose,
     returnFocusTo,
+    // Every variant but `bare` is a sheet whose action row is at the bottom. `bare` fills the
+    // screen and puts its controls in a top bar — a toast sent up there would land on those.
+    sheet: !bare,
   });
 
   useLayoutEffect(() => {

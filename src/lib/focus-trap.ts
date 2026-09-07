@@ -14,11 +14,34 @@ const FOCUSABLE_SELECTOR = [
 // opened from inside it would fight it for both.
 const openLayers: HTMLElement[] = [];
 
-export function registerLayer(el: HTMLElement): () => void {
+const layerWatchers = new Set<() => void>();
+// The subset that is a bottom sheet below `sm`, whose action row is what a toast in the corner
+// covers. The drawer, the search layer and a full-screen `bare` dialog are layers too, and none
+// of them has one.
+const openSheets: HTMLElement[] = [];
+
+export function registerLayer(el: HTMLElement, sheet = false): () => void {
   openLayers.push(el);
+  if (sheet) openSheets.push(el);
+  layerWatchers.forEach((notify) => notify());
   return () => {
     const at = openLayers.indexOf(el);
     if (at >= 0) openLayers.splice(at, 1);
+    const sheetAt = openSheets.indexOf(el);
+    if (sheetAt >= 0) openSheets.splice(sheetAt, 1);
+    layerWatchers.forEach((notify) => notify());
+  };
+}
+
+export function openSheetCount(): number {
+  return openSheets.length;
+}
+
+/** For anything painted outside a layer that has to know one is there — the toast's geometry */
+export function subscribeLayers(notify: () => void): () => void {
+  layerWatchers.add(notify);
+  return () => {
+    layerWatchers.delete(notify);
   };
 }
 
