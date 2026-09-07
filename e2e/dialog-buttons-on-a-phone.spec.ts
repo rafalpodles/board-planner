@@ -176,6 +176,19 @@ test("the PM panel opens fully on screen above a pinned bar", async ({ page }) =
   const close = page.getByRole("button", { name: "Close PM chat" }).first();
   await expect(close).toBeVisible();
 
+  // What the panel's own raised position is for: the launcher is painted after it at the same z,
+  // so at the lower anchor it sits on Send — a tap meant for it closed the chat and took the
+  // message with it
+  await page.getByPlaceholder(/Message the PM/).fill("A message worth not losing");
+  const send = page.getByRole("button", { name: "Send", exact: true });
+  await expect(send).toBeVisible();
+  const sendOwnsItsCentre = await send.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return at === el || el.contains(at);
+  });
+  expect(sendOwnsItsCentre).toBe(true);
+
   const fits = await page.evaluate(() => {
     const panel = document.querySelector('[data-testid="pm-chat-panel"]')!;
     const closeEl = document.querySelector('[aria-label="Close PM chat"]')!;
