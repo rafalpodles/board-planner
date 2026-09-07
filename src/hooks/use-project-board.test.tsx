@@ -384,6 +384,36 @@ describe("moving a task to another sprint", () => {
 
     expect(board.tasks.map((t) => t._id), "still on the board it now belongs to").toContain("t1");
     expect(taskReads() - readsBefore, "the server is asked instead").toBe(1);
+    // …and asked for the board the reader is now looking at. `loadData` closes over the scope of
+    // the render that built it, so the one this handler captured still names "s1" and would
+    // answer with the old board — a spinner until the next poll.
+    expect(api.get, "the re-read names the new scope").toHaveBeenCalledWith(
+      "/api/projects/p1/tasks"
+    );
+  });
+
+  it("a slower answer cannot undo a move made after it", async () => {
+    await mountedScoped("s1");
+    const first = held<unknown>();
+    api.put.mockReturnValueOnce(first.promise);
+    api.put.mockResolvedValue({});
+
+    let leaving!: Promise<void>;
+    act(() => {
+      leaving = board.handleRowSprintChange("t1", "s2");
+    });
+    // Moved straight back before the first write is answered: this one stays on the board, so it
+    // applies at once and there is nothing left for the first answer to do.
+    await act(async () => {
+      await board.handleRowSprintChange("t1", "s1");
+    });
+
+    await act(async () => {
+      first.release({});
+      await leaving;
+    });
+
+    expect(board.tasks.map((t) => t._id), "the later move is the one that counts").toContain("t1");
   });
 
   // The control: an unscoped board still paints immediately, because being wrong is invisible there

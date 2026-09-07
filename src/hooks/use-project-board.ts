@@ -99,9 +99,11 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
   const [loadError, setLoadError] = useState(false);
   const [showNewTask, setShowNewTask] = useState(false);
   const loadSeq = useRef(0);
-  // Read after an await, where the render-time `scope` is a stale copy
+  // Read after an await, where the render-time `scope` — and the `loadData` closed over it — are
+  // stale copies. Written in an effect, so a render React threw away cannot leave a value behind.
   const scopeRef = useRef(scope);
-  scopeRef.current = scope;
+  // Which sprint each task was last asked to move to, so a slow answer cannot undo a later move
+  const sprintWrites = useRef(new Map<string, number>());
 
   /**
    * A read already in flight knows nothing about a write that started after it, so delivering its
@@ -211,6 +213,12 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
       .catch(() => setAssignableUsers([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
+
+  const loadDataRef = useRef(loadData);
+  useEffect(() => {
+    loadDataRef.current = loadData;
+    scopeRef.current = scope;
+  }, [loadData, scope]);
 
   usePollWhileVisible(loadData, 10_000);
 
@@ -505,17 +513,21 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
     const scopeAtClick = scope;
     const wanted = scopeAtClick === "backlog" ? null : scopeAtClick;
     const leaves = scopeAtClick !== "all" && sprintId !== wanted;
+    const writeSeq = (sprintWrites.current.get(taskId) ?? 0) + 1;
+    sprintWrites.current.set(taskId, writeSeq);
 
     if (!leaves) applySprintChange([taskId], sprintId);
     try {
       await writing(() => api.put(`/api/projects/${projectId}/tasks/${taskId}`, { sprint: sprintId }));
-      // `applySprintChange` filters against the scope of the render it was made in, and the
-      // reader may have changed the filter while the PUT was out — applying it then removes the
-      // task from a board it belongs to. The scope change's own read was discarded by `writing`,
-      // so the server has to be asked again rather than simply left alone.
-      if (leaves) {
+      // Both guards are about what the deferred removal was decided from. `applySprintChange`
+      // filters against the scope of the render it was built in, and this move is only the
+      // task's current one until somebody moves it again — either can have changed while the
+      // PUT was out, and applying the removal then takes the card off a board it belongs to.
+      // The scope change's own read was discarded by `writing`, so the server is asked again
+      // through the *current* loadData: the one closed over here still names the old scope.
+      if (leaves && sprintWrites.current.get(taskId) === writeSeq) {
         if (scopeRef.current === scopeAtClick) applySprintChange([taskId], sprintId);
-        else loadData();
+        else loadDataRef.current();
       }
       const target = sprintId ? sprints.find((s) => s._id === sprintId)?.name ?? "sprint" : "backlog";
       toast(`Moved to ${target}`, "success");
@@ -523,7 +535,7 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
       toast("Failed to update sprint", "error");
       // A removed row cannot be put back by patching it, and the server is the only
       // thing that still knows what the scope should contain
-      if (!leaves) loadData();
+      if (!leaves) loadDataRef.current();
     }
   }
 
