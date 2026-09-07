@@ -41,6 +41,8 @@ export interface ProjectBoard {
   heldMove: { retry: () => Promise<unknown>; conflict: RunConflict; taskKey: string } | null;
   setHeldMove: (held: ProjectBoard["heldMove"]) => void;
   forceHeldMove: () => Promise<void>;
+  /** True while a "do it anyway" is running, so its confirmation can say so */
+  forcing: boolean;
   // Its own state, not heldMove's: that dialog says moving costs the run, and this one costs the
   // task. One wording cannot be true of both (BP-337).
   heldDelete: { retry: () => Promise<unknown>; conflict: RunConflict; taskKey: string } | null;
@@ -134,6 +136,13 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
   // Carries the retry rather than a request body: the board reaches the same refusal through two
   // different endpoints, and both have to offer the same way out.
   const [heldMove, setHeldMove] = useState<ProjectBoard["heldMove"]>(null);
+  /**
+   * Whether a "do it anyway" is on the wire. The confirmations used to close on the click and let
+   * the write run behind an empty board, so there was no busy state and a failure toast arrived
+   * over nothing — the same shape BP-565 fixed for the first confirmation and BP-588 for the task
+   * screen's forced delete.
+   */
+  const [forcing, setForcing] = useState(false);
   const [heldDelete, setHeldDelete] = useState<ProjectBoard["heldDelete"]>(null);
   const [confirmContextDelete, setConfirmContextDelete] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -429,13 +438,15 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
   async function forceHeldMove() {
     if (!heldMove) return;
     const pending = heldMove;
-    setHeldMove(null);
+    setForcing(true);
     try {
       await pending.retry();
       toast(`${pending.taskKey} taken from the worker`, "success");
     } catch {
       toast("Failed to move task", "error");
     }
+    setForcing(false);
+    setHeldMove(null);
     loadData();
   }
 
@@ -549,13 +560,15 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
   async function forceHeldDelete() {
     if (!heldDelete) return;
     const pending = heldDelete;
-    setHeldDelete(null);
+    setForcing(true);
     try {
       await pending.retry();
       toast("Task deleted", "success");
     } catch {
       toast("Failed to delete task", "error");
     }
+    setForcing(false);
+    setHeldDelete(null);
     loadData();
   }
 
@@ -589,6 +602,7 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
     forceHeldDelete,
     setHeldMove,
     forceHeldMove,
+    forcing,
     handleStatusChange,
     handleTaskDrop,
     handleReorder,
