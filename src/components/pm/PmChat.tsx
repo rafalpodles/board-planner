@@ -568,12 +568,9 @@ export function PmChat({
       {errorState && (
         <div className="mb-2 text-sm text-danger flex items-center gap-3">
           <span>{errorState}</span>
-          {/* Not while the turn is still finishing. The stream's error event writes this banner
-              from inside the read loop, before `working` is cleared, so the button was on screen
-              during a window in which `send` refuses to run — and the click cleared the banner and
-              the button on its way to doing nothing (BP-552). `send` clears both itself, after its
-              own guard, which is the only place that knows the send is really happening. */}
-          {retryable && !working && (lastFailedInput || pending.length > 0) && (
+          {/* The same conditions `send` refuses on: offering a button that cannot run is what
+              made a click clear the banner and send nothing (BP-552) */}
+          {retryable && !working && !uploading && (lastFailedInput || pending.length > 0) && (
             <Button size="sm" variant="secondary" onClick={() => send(lastFailedInput)}>
               Retry
             </Button>

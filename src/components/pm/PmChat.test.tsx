@@ -71,17 +71,31 @@ async function chatWithAFailedTurn() {
     screen.getByRole("button", { name: /send/i }).click();
   });
 
-  // The turn fails, and the stream stays open — which is the window
+  // The route sends `error` and closes in the same breath, so the window is not an open stream —
+  // it is the message reload that follows, which `working` outlives
+  let releaseReload!: () => void;
+  const reload = new Promise<void>((resolve) => {
+    releaseReload = resolve;
+  });
+  api.get.mockImplementation((path: string) =>
+    path.includes("/pm/messages")
+      ? reload.then(() => ({ messages: [], nextCursor: null }))
+      : path.includes("/tasks")
+        ? Promise.resolve([])
+        : Promise.resolve(PROJECT)
+  );
+
   await act(async () => {
     stream.push(`event: error\ndata: ${JSON.stringify({ error: "OpenRouter HTTP 500" })}\n\n`);
+    stream.close();
     await Promise.resolve();
   });
-  return stream;
+  return { ...stream, releaseReload };
 }
 
 describe("Retry after a failed turn", () => {
   it("is not offered while the turn that failed is still finishing", async () => {
-    const stream = await chatWithAFailedTurn();
+    const turn = await chatWithAFailedTurn();
 
     await waitFor(() => expect(screen.getByText("OpenRouter HTTP 500")).toBeTruthy());
     expect(
@@ -90,7 +104,7 @@ describe("Retry after a failed turn", () => {
     ).toBeNull();
 
     await act(async () => {
-      stream.close();
+      turn.releaseReload();
       await Promise.resolve();
     });
 
@@ -98,9 +112,9 @@ describe("Retry after a failed turn", () => {
   });
 
   it("sends when it is pressed", async () => {
-    const stream = await chatWithAFailedTurn();
+    const turn = await chatWithAFailedTurn();
     await act(async () => {
-      stream.close();
+      turn.releaseReload();
       await Promise.resolve();
     });
     await waitFor(() => expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy());
@@ -113,5 +127,60 @@ describe("Retry after a failed turn", () => {
 
     expect(api.stream.mock.calls.length, "the retry reached the server").toBe(before + 1);
     expect(screen.queryByText("OpenRouter HTTP 500"), "and cleared the banner").toBeNull();
+  });
+
+  // `send` refuses while a turn is working, and that refusal is the whole premise of the guard
+  // above. Without this the clause could be deleted and both tests above would stay green while
+  // the button became pointless again
+  it("is refused by send if it is somehow pressed while the turn works", async () => {
+    const turn = await chatWithAFailedTurn();
+    await waitFor(() => expect(screen.getByText("OpenRouter HTTP 500")).toBeTruthy());
+
+    const before = api.stream.mock.calls.length;
+    // Reaching past the guard, because reaching it through the screen is what the guard prevents
+    await act(async () => {
+      document.querySelectorAll("button").forEach((b) => {
+        if (b.textContent === "Retry") b.click();
+      });
+      await Promise.resolve();
+    });
+    expect(api.stream.mock.calls.length).toBe(before);
+
+    await act(async () => {
+      turn.releaseReload();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy());
+  });
+
+  // The same dead button, reached through the other half of `send`'s guard: an image attached
+  // mid-turn is still uploading when the turn errors and lets go
+  it("is not offered while an attachment is still uploading", async () => {
+    const turn = await chatWithAFailedTurn();
+    let releaseUpload!: () => void;
+    api.upload.mockReturnValue(
+      new Promise((resolve) => {
+        releaseUpload = () => resolve({ fileId: "f1", width: 10, height: 10 });
+      })
+    );
+
+    await act(async () => {
+      turn.releaseReload();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy());
+
+    await act(async () => {
+      const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+      const file = new File(["x"], "shot.png", { type: "image/png" });
+      Object.defineProperty(input, "files", { value: [file] });
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Retry" }), "not while it uploads").toBeNull()
+    );
+    releaseUpload();
   });
 });
