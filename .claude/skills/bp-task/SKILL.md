@@ -9,9 +9,9 @@ A task is done when it is merged, documented, cleaned up after, and nobody was a
 
 ## 0. Pick
 
-- A task named in the request wins. Otherwise pick from `todo`, never from `planned`: assigned to `owner` first, then highest priority, then oldest.
+- A task named in the request wins. Otherwise pick from `todo`, never from `planned`: assigned to the board's own account first, then highest priority, then oldest.
 - Before anything else: `git ls-remote --heads origin | grep -i <n>`, `gh pr list --state all --search BP-<n>`, and grep `list_tasks` titles for the same subject. Somebody may be on it, or it may already be fixed. Details in `references/git-github.md`.
-- `change_task_status` to `in_progress`, `update_task` assignee `owner`, `add_comment` with the approach. Every size starts at once; no plan waits for approval.
+- `change_task_status` to `in_progress`, `update_task` assignee the board's own account (`references/board.md` says how to read it), `add_comment` with the approach. Every size starts at once; no plan waits for approval.
 - Own worktree outside the repo, branch `bp-<n>/<slug>`, own Mongo container. Recipe in `references/git-github.md`.
 
 ## 1. Build
