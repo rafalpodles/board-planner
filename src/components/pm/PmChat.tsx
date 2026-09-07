@@ -568,8 +568,10 @@ export function PmChat({
       {errorState && (
         <div className="mb-2 text-sm text-danger flex items-center gap-3">
           <span>{errorState}</span>
-          {retryable && (lastFailedInput || pending.length > 0) && (
-            <Button size="sm" variant="secondary" onClick={() => { setErrorState(""); setRetryable(false); send(lastFailedInput); }}>
+          {/* The same conditions `send` refuses on: offering a button that cannot run is what
+              made a click clear the banner and send nothing (BP-552) */}
+          {retryable && !working && !uploading && (lastFailedInput || pending.length > 0) && (
+            <Button size="sm" variant="secondary" onClick={() => send(lastFailedInput)}>
               Retry
             </Button>
           )}
