@@ -114,7 +114,7 @@ export function registerTools(server: McpServer, client: ApiClient): void {
       const field = byName.get(name.trim().toLowerCase());
       if (!field) {
         const known = [...byName.values()].map((f) => f.name).join(", ") || "none";
-        throw new Error(`Unknown field "${name}". Available: ${known}`);
+        throw new Error(`Unknown field "${echo(name)}". Available: ${known}`);
       }
 
       if (field.fieldType === "dropdown" || field.fieldType === "multiselect") {
@@ -128,7 +128,7 @@ export function registerTools(server: McpServer, client: ApiClient): void {
             options.find((o) => o.value.trim().toLowerCase() === text);
           if (!match) {
             const known = options.map((o) => o.value).join(", ") || "none";
-            throw new Error(`Unknown option "${value}" for "${field.name}". Available: ${known}`);
+            throw new Error(`Unknown option "${echo(value)}" for "${field.name}". Available: ${known}`);
           }
           return match.id;
         };
