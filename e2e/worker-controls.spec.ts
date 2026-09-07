@@ -1077,9 +1077,13 @@ test("a save that lands and a re-read that fails say so separately", async ({ pa
   expect(saved.projects).toEqual([]);
 
   await expect(page.getByText("The list could not be refreshed")).toBeVisible();
-  // The save happened, and the screen does not deny it
+  // The save happened, and the screen does not deny it. Counted by treatment rather than by
+  // wording: an aborted request throws a raw "Failed to fetch", so asserting the handler's own
+  // fallback string would have passed with the bug fully present
   await expect(page.getByText(/^Saved\./)).toBeVisible();
-  expect(await page.getByText("Could not save").count()).toBe(0);
+  expect(await page.locator("p.text-danger").count()).toBe(0);
+  // Nor does it still promise the removal it has already made
+  expect(await page.getByText(/Saving removes/).count()).toBe(0);
   // What the server holds is what the save asked for, whatever the stale list shows
   expect((await workerRow())?.projects ?? []).toEqual([]);
 });
