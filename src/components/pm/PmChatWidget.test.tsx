@@ -1,13 +1,14 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, waitFor, act } from "@testing-library/react";
-import { registerLayer } from "@/lib/focus-trap";
+import { render, screen, cleanup, waitFor } from "@testing-library/react";
+import { Modal } from "@/components/ui/Modal";
 import { PmChatWidget } from "./PmChatWidget";
 
 /**
- * BP-589. At phone width a dialog is a bottom sheet, and this launcher is painted at the same
- * z-50 over its action row: on a right-aligned footer it covered the primary button's own corner,
- * so a finger there opened the PM chat instead of pressing the button under it.
+ * BP-589. At phone width a dialog is a bottom sheet, and this launcher was painted at the same
+ * z-50 over its action row: at equal z the one rendered last wins, and this is rendered after the
+ * page. On a right-aligned footer it covered the primary button's own corner, so a finger there
+ * opened the PM chat instead of pressing the button under it.
  */
 
 const { api } = vi.hoisted(() => ({
@@ -29,6 +30,12 @@ const PROJECT = {
 
 const launcher = () => screen.queryByRole("button", { name: "Open PM chat" });
 
+/** The stacking level an element is actually painted at, read from the class that sets it */
+function zOf(el: Element | null | undefined): number {
+  const match = /(?:^|\s)z-(\d+)(?:\s|$)/.exec(el?.className?.toString() ?? "");
+  return match ? Number(match[1]) : NaN;
+}
+
 beforeEach(() => {
   api.get.mockReset();
   api.get.mockResolvedValue(PROJECT);
@@ -36,57 +43,38 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-describe("the PM launcher and an open dialog", () => {
-  it("is there when nothing is layered over the page", async () => {
-    render(<PmChatWidget />);
-
-    await waitFor(() => expect(launcher()).not.toBeNull());
-  });
-
-  it("stands aside while a dialog is open, and comes back when it closes", async () => {
-    render(<PmChatWidget />);
-    await waitFor(() => expect(launcher()).not.toBeNull());
-
-    const dialog = document.createElement("div");
-    document.body.appendChild(dialog);
-    let close = () => {};
-    act(() => {
-      close = registerLayer(dialog);
-    });
-
-    expect(launcher()).toBeNull();
-
-    act(() => close());
-
-    await waitFor(() => expect(launcher()).not.toBeNull());
-    dialog.remove();
-  });
-
-  // Two layers deep — a dialog opened from inside the drawer — must not uncover it on the first close
-  it("stays away until the last layer has gone", async () => {
+describe("where the PM launcher is painted", () => {
+  // Compared against the overlay rather than restated as a literal, so drift in either one fails
+  it("sits below the layer every dialog is painted on", async () => {
+    render(
+      <Modal open onClose={() => {}} title="Somebody else's dialog">
+        <p>body</p>
+      </Modal>
+    );
     render(<PmChatWidget />);
     await waitFor(() => expect(launcher()).not.toBeNull());
 
-    const first = document.createElement("div");
-    const second = document.createElement("div");
-    document.body.append(first, second);
-    let closeFirst = () => {};
-    let closeSecond = () => {};
-    act(() => {
-      closeFirst = registerLayer(first);
-      closeSecond = registerLayer(second);
-    });
-
-    act(() => closeSecond());
-    expect(launcher()).toBeNull();
-
-    act(() => closeFirst());
-    await waitFor(() => expect(launcher()).not.toBeNull());
-    first.remove();
-    second.remove();
+    const overlay = document.querySelector(".fixed.inset-0");
+    expect(zOf(overlay)).toBeGreaterThan(0);
+    expect(zOf(launcher())).toBeLessThan(zOf(overlay));
   });
 
-  // The control: withholding it has to be about the layer, not about the widget's own gate
+  // Hiding it was the first fix and it was wrong: the chat's own attachment lightbox is a Modal,
+  // so unmounting on any open layer destroyed the panel, its draft and its staged uploads
+  it("stays mounted while a dialog is open", async () => {
+    render(<PmChatWidget />);
+    await waitFor(() => expect(launcher()).not.toBeNull());
+
+    render(
+      <Modal open onClose={() => {}} title="Somebody else's dialog">
+        <p>body</p>
+      </Modal>
+    );
+
+    expect(launcher()).not.toBeNull();
+  });
+
+  // The control: the launcher is withheld for its own reasons, and those still hold
   it("is not there at all when the project has no PM", async () => {
     api.get.mockResolvedValue({ ...PROJECT, pm: { enabled: false, lockedByInstance: false } });
     render(<PmChatWidget />);

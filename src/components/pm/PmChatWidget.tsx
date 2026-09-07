@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
-import { openLayerCount, subscribeLayers } from "@/lib/focus-trap";
 import { isPmRunnable } from "@/lib/pm/gate";
 import { projectRefFromPathname } from "@/lib/urls";
 import { ApiProject } from "@/types";
@@ -19,10 +18,6 @@ export function PmChatWidget() {
 
   const [project, setProject] = useState<ApiProject | null>(null);
   const [open, setOpen] = useState(false);
-  // A dialog is a bottom sheet on a phone, and this button is painted at the same z-50 over its
-  // action row: on a right-aligned footer it covers the primary button's own corner, so a finger
-  // there opens the PM chat instead (BP-589). Server-rendered as 0, which is what no dialog is.
-  const layers = useSyncExternalStore(subscribeLayers, openLayerCount, () => 0);
 
   useEffect(() => {
     setProject(null);
@@ -39,13 +34,10 @@ export function PmChatWidget() {
     return null;
   }
 
-  // Its own panel registers no layer, so this only stands aside for somebody else's dialog
-  if (layers > 0) return null;
-
   return (
     <>
       {open && (
-        <div className="fixed bottom-24 right-4 z-50 w-[min(30rem,calc(100vw-2rem))] h-[min(44rem,calc(100vh-8rem))] bg-bg border border-border rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+        <div className="fixed bottom-24 right-4 z-40 w-[min(30rem,calc(100vw-2rem))] h-[min(44rem,calc(100vh-8rem))] bg-bg border border-border rounded-2xl shadow-2xl flex flex-col overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-bg-card shrink-0">
             <p className="font-semibold text-sm">🤖 PM — {project.name}</p>
             <div className="flex items-center gap-3">
@@ -71,11 +63,15 @@ export function PmChatWidget() {
           </div>
         </div>
       )}
+      {/* z-40, not z-50: every overlay is z-50, and at equal z the one painted last wins — which
+          is this, rendered after the page. On a phone a dialog is a bottom sheet whose action row
+          lands right here, and a finger on the primary button's corner opened the chat instead
+          (BP-589). A layer below, it is greyed out behind the scrim with the rest of the page. */}
       <button
         onClick={() => setOpen((v) => !v)}
         aria-label={open ? "Close PM chat" : "Open PM chat"}
         title="PM Agent"
-        className="fixed bottom-6 right-4 z-50 flex h-14 w-14 cursor-pointer items-center justify-center rounded-full bg-primary-solid text-white shadow-lg ring-4 ring-primary/20 transition-colors hover:bg-primary-solid-hover"
+        className="fixed bottom-6 right-4 z-40 flex h-14 w-14 cursor-pointer items-center justify-center rounded-full bg-primary-solid text-white shadow-lg ring-4 ring-primary/20 transition-colors hover:bg-primary-solid-hover"
       >
         {open ? (
           <svg

@@ -30,6 +30,15 @@ async function openDeleteConfirm(page: Page) {
   await page.getByRole("option", { name: "Delete task" }).click();
 }
 
+/** Whether a tap on the launcher's own square would reach the launcher */
+async function whatIsOverTheLauncher(page: Page) {
+  return page.getByRole("button", { name: /PM chat$/ }).evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return at === el || el.contains(at) ? "the launcher" : "something else";
+  });
+}
+
 /** What the browser would actually deliver a tap at that point to */
 async function coversItsOwnCorner(page: Page, name: RegExp) {
   return page.getByRole("dialog").getByRole("button", { name }).evaluate((el) => {
@@ -51,15 +60,20 @@ test("a dialog's own buttons keep their corners at phone width", async ({ page }
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
 
-  await expect(launcher(page)).toHaveCount(0);
+  // Still mounted — it is painted a layer below, not taken away, so the chat it may be holding
+  // open survives somebody else's dialog
+  await expect(launcher(page)).toHaveCount(1);
   expect(await coversItsOwnCorner(page, /^Delete$/)).toBe(true);
 
-  // The click a finger makes, at the point the launcher used to own
+  // The scrim owns the launcher's own square while the sheet is up
+  expect(await whatIsOverTheLauncher(page)).not.toBe("the launcher");
+
   await dialog.getByRole("button", { name: /^Cancel$/ }).click();
   await expect(dialog).toHaveCount(0);
 
-  // And it comes back once the sheet is gone
+  // …and once the sheet is gone it takes its own clicks again
   await expect(launcher(page)).toBeVisible();
+  expect(await whatIsOverTheLauncher(page)).toBe("the launcher");
 });
 
 test("the primary button takes a real click rather than the launcher", async ({ page }) => {
@@ -78,14 +92,16 @@ test("the primary button takes a real click rather than the launcher", async ({ 
   await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_KEY}$`));
 });
 
-// The control: on a wide screen nothing is layered over anything, and the launcher stays put
-test("a desktop dialog leaves the launcher where it was", async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 800 });
+/**
+ * The control, and it has to be this one: with no dialog open the launcher is the topmost thing at
+ * its own coordinates. Without it, "the launcher is not on top" above would also pass on a page
+ * that never painted a launcher at all, or on a probe that reads the wrong point.
+ */
+test("with no dialog open the launcher owns its own square", async ({ page }) => {
+  await page.setViewportSize(PHONE);
   await signIn(page);
   await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
-  await expect(launcher(page)).toBeVisible();
 
-  await openDeleteConfirm(page);
-  await expect(page.getByRole("dialog")).toBeVisible();
-  expect(await coversItsOwnCorner(page, /^Delete$/)).toBe(true);
+  await expect(launcher(page)).toBeVisible();
+  expect(await whatIsOverTheLauncher(page)).toBe("the launcher");
 });
