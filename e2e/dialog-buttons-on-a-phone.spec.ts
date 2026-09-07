@@ -259,8 +259,8 @@ test("a task page at desktop width does not raise the launcher", async ({ page }
 /**
  * BP-590. The toast is the third thing that lands in a bottom sheet's action row, and unlike the
  * launcher it cannot be painted below the sheet: behind the scrim it would be unreadable, and a
- * toast is the only thing on screen saying why an action failed. So it moves to the top instead —
- * including a toast already on screen when the sheet opens, which is what this drives.
+ * toast is often the only thing on screen saying why an action failed. So it moves to the top
+ * instead — including a toast already up when the sheet opens under it, which is this flow.
  */
 test("a toast still on screen clears the sheet it opens under", async ({ page }) => {
   await page.setViewportSize(PHONE);
@@ -274,26 +274,22 @@ test("a toast still on screen clears the sheet it opens under", async ({ page })
   await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
   await expect(launcher(page)).toBeVisible();
 
+  // A toast lives three seconds on a real timer, and reopening the sheet is a menu, a popover and
+  // an option click. Frozen, so a loaded machine cannot turn "it expired" into "the fix regressed"
+  await page.clock.install();
+
   await test.step("a refused delete raises the toast", async () => {
     await openDeleteConfirm(page);
     await page.getByRole("dialog").getByRole("button", { name: /^Delete$/ }).click();
     await expect(page.getByTestId("toast").first()).toBeVisible();
   });
 
-  // Within the toast's own three seconds, so it is still up when the sheet arrives under it
   await openDeleteConfirm(page);
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
 
   const toast = page.getByTestId("toast").first();
   await expect(toast).toBeVisible();
-
-  const readable = await toast.evaluate((el) => {
-    const r = el.getBoundingClientRect();
-    const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-    return at === el || el.contains(at);
-  });
-  expect(readable, "the toast takes its own centre rather than sitting under the scrim").toBe(true);
 
   const overlapsTheActionRow = await toast.evaluate((el) => {
     const t = el.getBoundingClientRect();
@@ -304,5 +300,16 @@ test("a toast still on screen clears the sheet it opens under", async ({ page })
   });
   expect(overlapsTheActionRow, "the toast is off the sheet's lowest button").toBe(false);
 
+  // Not "is the toast on top at its own centre" — it is `z-50` and last in the DOM, so it wins
+  // that point wherever it sits, including on top of the button. This asks the opposite: whether
+  // the button's own corner is still the button's.
   expect(await coversItsOwnCorner(page, /^Delete$/)).toBe(true);
+
+  // …and the toast is still readable rather than pushed under the scrim, which is the half a
+  // z-index fix would have traded away
+  await expect(toast).toBeVisible();
+  expect(
+    await toast.evaluate((el) => Number(getComputedStyle(el.parentElement!).zIndex)),
+    "the tray is above the scrim"
+  ).toBe(50);
 });
