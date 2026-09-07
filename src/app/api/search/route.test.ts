@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const getAuthUser = vi.fn();
 const accessibleProjectIds = vi.fn();
 const taskFind = vi.fn();
+const projectFindOne = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({
@@ -11,7 +12,7 @@ vi.mock("@/lib/auth", () => ({
 }));
 vi.mock("@/lib/grants", () => ({ accessibleProjectIds }));
 vi.mock("@/models/task", () => ({ Task: { find: taskFind } }));
-vi.mock("@/models/project", () => ({ Project: {} }));
+vi.mock("@/models/project", () => ({ Project: { findOne: projectFindOne } }));
 
 const { GET } = await import("./route");
 
@@ -28,6 +29,9 @@ const search = (q: string) =>
  * answer is where the narrowing happens — not whether the answer looks right for a corpus of five.
  */
 let lastQuery: { filter: unknown; limit?: number; sorted?: unknown };
+/** What the key branch asked the projects collection, and what it was told */
+let lastProjectQuery: unknown;
+let foundProject: { _id: string } | null;
 
 function chain(rows: unknown[]) {
   const self = {
@@ -48,8 +52,16 @@ function chain(rows: unknown[]) {
 beforeEach(() => {
   vi.clearAllMocks();
   lastQuery = { filter: undefined };
+  lastProjectQuery = undefined;
+  foundProject = { _id: "p1" };
   getAuthUser.mockResolvedValue(MEMBER);
   accessibleProjectIds.mockResolvedValue(ALLOWED);
+  projectFindOne.mockImplementation((filter: unknown) => {
+    lastProjectQuery = filter;
+    return {
+      select: () => ({ lean: () => Promise.resolve(foundProject) }),
+    };
+  });
   taskFind.mockImplementation((filter: unknown) => {
     lastQuery.filter = filter;
     return chain([]);
@@ -108,25 +120,67 @@ describe("GET /api/search", () => {
     expect(taskFind).toHaveBeenCalledTimes(1);
   });
 
-  it("carries the same filter into the task-key branch", async () => {
+  it("scopes the key branch to the board the key resolves to", async () => {
     await search("TP-10");
 
-    expect(lastQuery.filter).toMatchObject({ project: { $in: ALLOWED }, taskNumber: 10 });
+    expect(lastQuery.filter).toMatchObject({ project: "p1", taskNumber: 10 });
   });
 
-  it("keeps a task whose number matches but whose project key does not", async () => {
-    taskFind.mockImplementation((filter: unknown) => {
-      lastQuery.filter = filter;
-      return chain([
-        { _id: "t1", taskNumber: 1, priority: "high", project: { key: "TP", name: "Ours" } },
-        { _id: "t2", taskNumber: 1, priority: "high", project: { key: "SB", name: "Theirs" } },
-      ]);
-    });
+  // BP-573. A key may hold digits, hyphens and underscores and run to twenty characters — the
+  // search regex allowed letters only, and ten. Each of these used to fall through to the text
+  // search, which cannot match a key at all: the key is never stored, it is built for display.
+  it.each([
+    ["digits", "BP2-14", "BP2"],
+    ["a hyphen", "BP-2-14", "BP-2"],
+    ["an underscore", "BP_2-14", "BP_2"],
+    ["more than ten characters", "PLATFORM_TEAM-14", "PLATFORM_TEAM"],
+  ])("recognises a key with %s", async (_label, query, key) => {
+    await search(query);
 
-    const body = await (await search("TP-1")).json();
+    expect(lastQuery.filter).toMatchObject({ project: "p1", taskNumber: 14 });
+    const asked = lastProjectQuery as { $or: [{ key: RegExp }, { formerKeys: RegExp }] };
+    expect(asked.$or[0].key.test(key), `the board was looked up by ${key}`).toBe(true);
+  });
 
-    expect(body).toHaveLength(1);
-    expect(body[0]._id).toBe("t1");
+  it("finds a task by a key the board used to answer to", async () => {
+    await search("CP-250");
+
+    const asked = lastProjectQuery as { $or: { key?: RegExp; formerKeys?: RegExp }[] };
+    expect(asked.$or.map((clause) => Object.keys(clause)[0])).toEqual(["key", "formerKeys"]);
+    expect(asked.$or[1].formerKeys!.test("cp")).toBe(true);
+    expect(lastQuery.filter).toMatchObject({ project: "p1", taskNumber: 250 });
+  });
+
+  // The key branch names the project directly, which would otherwise replace the access filter
+  it("finds nothing when the key resolves to a board the reader cannot see", async () => {
+    foundProject = { _id: "p9" };
+
+    const body = await (await search("SB-1")).json();
+
+    expect(body).toEqual([]);
+    expect(taskFind).not.toHaveBeenCalled();
+  });
+
+  it("leaves an admin's key search unscoped by grants", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    foundProject = { _id: "p9" };
+
+    await search("SB-1");
+
+    expect(lastQuery.filter).toMatchObject({ project: "p9", taskNumber: 1 });
+  });
+
+  // The control: what is not a key must still be searched as words
+  it.each([
+    ["a key-shaped string naming no board", "ZZ-1"],
+    ["a prefix the rule does not allow", "9BP-1"],
+    ["a number with no key", "-14"],
+  ])("falls back to the text search for %s", async (_label, query) => {
+    foundProject = null;
+
+    await search(query);
+
+    expect(lastQuery.filter).toHaveProperty("$or");
   });
 
   it("escapes regex metacharacters instead of running them", async () => {
