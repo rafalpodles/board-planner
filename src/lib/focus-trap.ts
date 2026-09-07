@@ -9,9 +9,9 @@ const FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(", ");
 
-// Every overlay shares z-50, so the one last in the DOM is painted in front and
-// owns Escape and Tab. The drawer registers here too, or a dialog opened from
-// inside it would fight it for both.
+// Overlays share z-50 (the search layer alone is above them), so among equals the one last in the
+// DOM is painted in front and owns Escape and Tab. The drawer registers here too, or a dialog
+// opened from inside it would fight it for both.
 const openLayers: HTMLElement[] = [];
 
 export function registerLayer(el: HTMLElement): () => void {

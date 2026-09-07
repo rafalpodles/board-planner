@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, waitFor, fireEvent } from "@testing-library/react";
 import { Modal } from "@/components/ui/Modal";
 import { PmChatWidget } from "./PmChatWidget";
 
@@ -57,6 +57,24 @@ describe("where the PM launcher is painted", () => {
     const overlay = document.querySelector(".fixed.inset-0");
     expect(zOf(overlay)).toBeGreaterThan(0);
     expect(zOf(launcher())).toBeLessThan(zOf(overlay));
+  });
+
+  // The panel is the untested half otherwise: at z-50 it would tie with a dialog and, rendered
+  // after the page, paint over it
+  it("paints its open panel below that layer too", async () => {
+    render(
+      <Modal open onClose={() => {}} title="Somebody else's dialog">
+        <p>body</p>
+      </Modal>
+    );
+    render(<PmChatWidget />);
+    await waitFor(() => expect(launcher()).not.toBeNull());
+
+    fireEvent.click(launcher()!);
+
+    const panel = screen.getByText(/^🤖 PM — /).closest("div")?.parentElement;
+    const overlay = document.querySelector(".fixed.inset-0");
+    expect(zOf(panel)).toBeLessThan(zOf(overlay));
   });
 
   // Hiding it was the first fix and it was wrong: the chat's own attachment lightbox is a Modal,

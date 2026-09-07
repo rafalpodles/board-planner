@@ -119,7 +119,8 @@ export function SearchLayer({ open, onOpen, onClose }: SearchLayerProps) {
     }
   }
 
-  // z-[60], not z-50: the PM FAB is z-50 and would float over the mobile sheet
+  // z-[60], above the z-50 every other overlay uses: opened from inside one, this is the layer
+  // in front (the PM launcher that used to tie with it is z-40 since BP-589)
   return (
     <div
       className="fixed inset-0 z-[60] flex items-start justify-center bg-black/60 sm:pt-[12vh]"
