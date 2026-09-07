@@ -92,21 +92,28 @@ function taskWrite(page: Page, method: string, urlPart: string) {
 async function addCriterion(page: Page, taskId: string, text: string) {
   const addBox = page.getByLabel("Add criterion");
   const saved = taskWrite(page, "PUT", `/tasks/${taskId}`);
-  // Nothing awaits this if the diagnosis below throws, and an abandoned waitForResponse rejects
-  // when the page closes — on top of the message this helper exists to deliver.
+  // An abandoned waitForResponse rejects when the page closes, on top of the message below
   void saved.catch(() => {});
 
   await addBox.fill(text);
   await addBox.press("Enter");
 
+  // `exact`: a name matches on substring, and this helper is shared — "the build" would pass on
+  // the row "the build passes". 5s is not a network budget: the row and the cleared box come out
+  // of the same React commit as `add()`.
+  const row = page.getByRole("checkbox", { name: text, exact: true });
   try {
-    await expect(page.getByRole("checkbox", { name: text })).toBeVisible({ timeout: 5_000 });
-  } catch {
+    await expect(row).toBeVisible({ timeout: 5_000 });
+  } catch (cause) {
+    // Only "the row never arrived" is diagnosable here. Two rows, a closed page or the test's own
+    // deadline must keep their own message rather than be retold as a story about React.
+    if ((await row.count()) !== 0) throw cause;
     const held = await addBox.inputValue();
     throw new Error(
       held === ""
         ? `no criterion "${text}" was added and the box is empty: React never took the fill, so add() saw an empty draft and no write was attempted`
-        : `no criterion "${text}" was added and the box still holds "${held}": the key never reached add()`
+        : `no criterion "${text}" was added and the box still holds "${held}": the key never reached add()`,
+      { cause }
     );
   }
 
