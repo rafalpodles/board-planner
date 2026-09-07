@@ -146,18 +146,28 @@ test("a task read still in flight does not undo a reorder", async ({ page }) => 
   expect(await rowOrder(page)).toEqual(dropped);
 });
 
-// The control: a read nothing overtook is the only way another person's work reaches this board
+// The control: a read nothing overtook is the only way another person's work reaches this board.
+// It has to carry something the board does not already show, or it passes whether or not the read
+// was applied — which is exactly what the first version of this test did
 test("a task read that nothing overtook is still applied", async ({ page }) => {
   await listView(page);
   const before = await rowOrder(page);
 
-  const read = holdNextTaskRead(page);
-  await read.arm;
-  await page.locator("body").press("r");
-  await read.issued();
-  read.release();
+  // Somebody else reordered the board; this read is the only way this page can learn that
+  await page.route(
+    (url) => /\/api\/projects\/[^/]+\/tasks$/.test(url.pathname),
+    async (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      const response = await route.fetch();
+      const tasks = (await response.json()) as { order?: number }[];
+      const reversed = tasks.map((t, i) => ({ ...t, order: tasks.length - i }));
+      await route.fulfill({ response, json: reversed });
+    }
+  );
 
-  await expect.poll(async () => rowOrder(page)).toEqual(before);
+  await page.locator("body").press("r");
+
+  await expect.poll(async () => rowOrder(page)).toEqual([...before].reverse());
 });
 
 /**
