@@ -99,6 +99,25 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
   const [loadError, setLoadError] = useState(false);
   const [showNewTask, setShowNewTask] = useState(false);
   const loadSeq = useRef(0);
+  // Read after an await, where the render-time `scope` — and the `loadData` closed over it — are
+  // stale copies. Both are written in one effect below, not during render.
+  const scopeRef = useRef(scope);
+  const sprintWrites = useRef(new Map<string, number>());
+
+  /**
+   * Both sprint writers apply their removal only once the server has agreed, and by then somebody
+   * may have moved the same card again — through the other writer, since the row picker and the
+   * bulk toolbar are on the same screen. Claim the tasks before writing; the returned reader says
+   * which of them this write is still the newest for.
+   */
+  function claimSprintWrite(taskIds: string[]) {
+    const claimed = taskIds.map((id) => {
+      const seq = (sprintWrites.current.get(id) ?? 0) + 1;
+      sprintWrites.current.set(id, seq);
+      return [id, seq] as const;
+    });
+    return () => claimed.filter(([id, seq]) => sprintWrites.current.get(id) === seq).map(([id]) => id);
+  }
 
   /**
    * A read already in flight knows nothing about a write that started after it, so delivering its
@@ -209,6 +228,12 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
+  const loadDataRef = useRef(loadData);
+  useEffect(() => {
+    loadDataRef.current = loadData;
+    scopeRef.current = scope;
+  }, [loadData, scope]);
+
   usePollWhileVisible(loadData, 10_000);
 
   // Instant refresh when the PM chat reports a write action (poll stays as fallback).
@@ -254,6 +279,8 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
 
   async function handleBulkSprint(sprintId: string | null) {
     const ids = Array.from(selectedTasks);
+    const scopeAtClick = scope;
+    const stillNewest = claimSprintWrite(ids);
     // Settled, not all — the same lesson handleBulkMove and handleBulkDelete already carry: one
     // task's PUT failing used to hide every move that had already landed server-side, and left
     // the selection as if nothing had happened.
@@ -262,7 +289,15 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
     );
 
     const movedIds = ids.filter((_, i) => outcomes[i].status === "fulfilled");
-    applySprintChange(movedIds, sprintId);
+    // The same two guards the row picker carries: `applySprintChange` filters against the scope of
+    // the render it was built in, and a card moved again while these were on the wire is no longer
+    // this write's to remove.
+    if (scopeRef.current === scopeAtClick) {
+      const newest = new Set(stillNewest());
+      applySprintChange(movedIds.filter((id) => newest.has(id)), sprintId);
+    } else {
+      loadDataRef.current();
+    }
     setSelectedTasks(new Set());
 
     const target = sprintId
@@ -497,16 +532,33 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
   }
 
   async function handleRowSprintChange(taskId: string, sprintId: string | null) {
-    // Not patchTask: a task leaving the sprint the board is filtered by has to drop
-    // out of the list, which applySprintChange already knows how to do
-    applySprintChange([taskId], sprintId);
+    // `leaves`: the move takes the card off this board, so the removal waits for the server —
+    // being wrong there is the whole screen, not a badge (BP-557).
+    const scopeAtClick = scope;
+    const wanted = scopeAtClick === "backlog" ? null : scopeAtClick;
+    const leaves = scopeAtClick !== "all" && sprintId !== wanted;
+    const stillNewest = claimSprintWrite([taskId]);
+
+    if (!leaves) applySprintChange([taskId], sprintId);
     try {
       await writing(() => api.put(`/api/projects/${projectId}/tasks/${taskId}`, { sprint: sprintId }));
+      // Both guards are about what the deferred removal was decided from. `applySprintChange`
+      // filters against the scope of the render it was built in, and this move is only the
+      // task's current one until somebody moves it again — either can have changed while the
+      // PUT was out, and applying the removal then takes the card off a board it belongs to.
+      // The scope change's own read was discarded by `writing`, so the server is asked again
+      // through the *current* loadData: the one closed over here still names the old scope.
+      if (leaves && stillNewest().length === 1) {
+        if (scopeRef.current === scopeAtClick) applySprintChange([taskId], sprintId);
+        else loadDataRef.current();
+      }
+      const target = sprintId ? sprints.find((s) => s._id === sprintId)?.name ?? "sprint" : "backlog";
+      toast(`Moved to ${target}`, "success");
     } catch {
       toast("Failed to update sprint", "error");
       // A removed row cannot be put back by patching it, and the server is the only
       // thing that still knows what the scope should contain
-      loadData();
+      if (!leaves) loadDataRef.current();
     }
   }
 

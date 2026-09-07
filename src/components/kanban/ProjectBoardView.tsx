@@ -366,18 +366,10 @@ export function ProjectBoardView({
                 handleBulkSprint(sprintId);
                 return;
               }
-              const taskId = contextMenu.taskId;
-              applySprintChange([taskId], sprintId);
-              try {
-                await api.put(`/api/projects/${projectId}/tasks/${taskId}`, { sprint: sprintId });
-                const target = sprintId
-                  ? sprints.find((s) => s._id === sprintId)?.name ?? "sprint"
-                  : "backlog";
-                toast(`Moved to ${target}`, "success");
-              } catch {
-                toast("Failed to move task to sprint", "error");
-                reload();
-              }
+              // The same writer the list rows use, rather than a second copy of it: this one
+              // applied the change before the server agreed, so on a scoped board the card
+              // vanished and came back a round trip later (BP-557)
+              await handleRowSprintChange(contextMenu.taskId, sprintId);
             }}
             onDuplicate={() => handleContextDuplicate(contextMenu.taskId)}
             onDelete={() => {

@@ -59,9 +59,16 @@ function held<T>(): { promise: Promise<T>; release: (value: T) => void } {
 
 let board: ReturnType<typeof useProjectBoard>;
 
+let probeScope = "all";
+let rerenderProbe: () => void = () => {};
+
 function Probe() {
-  board = useProjectBoard("p1", "all");
+  board = useProjectBoard("p1", probeScope);
   return <span data-testid="order">{board.tasks.map((t) => `${t._id}:${t.order}`).join(",")}</span>;
+}
+
+function taskReads() {
+  return api.get.mock.calls.filter((call: unknown[]) => String(call[0]).includes("/tasks")).length;
 }
 
 function orderOnScreen() {
@@ -70,6 +77,9 @@ function orderOnScreen() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Module-level, so a test that renders <Probe /> without mounted()/mountedScoped() would
+  // otherwise inherit the previous test's scope
+  probeScope = "all";
   api.get.mockImplementation((path: string) => {
     if (path.endsWith("/tasks")) return Promise.resolve([task("t1", 0), task("t2", 1)]);
     if (path.endsWith("/sprints")) return Promise.resolve([]);
@@ -79,7 +89,21 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+/** The board filtered to one sprint, which is where an optimistic move is visible */
+async function mountedScoped(sprint: string) {
+  probeScope = sprint;
+  api.get.mockImplementation((path: string) => {
+    if (path.includes("/tasks")) return Promise.resolve([task("t1", 0), task("t2", 1)]);
+    if (path.endsWith("/sprints")) return Promise.resolve([{ _id: sprint, name: "Sprint one" }]);
+    return Promise.resolve(PROJECT);
+  });
+  const { rerender } = render(<Probe />);
+  rerenderProbe = () => rerender(<Probe />);
+  await waitFor(() => expect(orderOnScreen()).toBe("t1:0,t2:1"));
+}
+
 async function mounted() {
+  probeScope = "all";
   render(<Probe />);
   await waitFor(() => expect(orderOnScreen()).toBe("t1:0,t2:1"));
 }
@@ -285,5 +309,185 @@ describe("a force that is still running", () => {
 
     expect(board.forcing).toBe(false);
     expect(board.heldMove).toBeNull();
+  });
+});
+
+/**
+ * BP-557. `applySprintChange` filters a task out of a scoped board, so applying it before the
+ * server agreed made the card vanish and come back a round trip later when the PUT failed. Free on
+ * an unscoped board, where the row stays and only its badge changes; the whole screen on a scoped
+ * one.
+ */
+describe("moving a task to another sprint", () => {
+  it("waits for the server before taking the card off a scoped board", async () => {
+    await mountedScoped("s1");
+    let release!: (value: unknown) => void;
+    api.put.mockReturnValue(
+      new Promise((resolve) => {
+        release = resolve;
+      })
+    );
+
+    let moving!: Promise<void>;
+    act(() => {
+      moving = board.handleRowSprintChange("t1", "s2");
+    });
+
+    expect(board.tasks.map((t) => t._id), "still on screen while the write is out").toContain("t1");
+
+    await act(async () => {
+      release({});
+      await moving;
+    });
+
+    expect(board.tasks.map((t) => t._id), "and gone once the server agreed").not.toContain("t1");
+  });
+
+  it("leaves the card where it is when the write fails", async () => {
+    await mountedScoped("s1");
+    api.put.mockRejectedValue(new Error("network"));
+    const readsBefore = taskReads();
+
+    await act(async () => {
+      await board.handleRowSprintChange("t1", "s2");
+    });
+
+    expect(board.tasks.map((t) => t._id), "no flicker to undo").toContain("t1");
+    // The card being there at the end is also what the old code produced: it removed the row,
+    // then re-read the list, and the re-read put it back within the same act(). What separates
+    // "never left" from "left and came back" is that no second read was needed.
+    expect(taskReads() - readsBefore, "nothing to re-read, because nothing was removed").toBe(0);
+  });
+
+  it("re-reads rather than removing a card when the filter moved under the write", async () => {
+    await mountedScoped("s1");
+    const put = held<unknown>();
+    api.put.mockReturnValue(put.promise);
+
+    let moving!: Promise<void>;
+    act(() => {
+      moving = board.handleRowSprintChange("t1", "s2");
+    });
+
+    // The reader widens the board while the PUT is out. `applySprintChange` still filters
+    // against "s1", so applying it now would drop a task the unscoped board must show.
+    probeScope = "all";
+    await act(async () => {
+      rerenderProbe();
+    });
+    const readsBefore = taskReads();
+
+    await act(async () => {
+      put.release({});
+      await moving;
+    });
+
+    expect(board.tasks.map((t) => t._id), "still on the board it now belongs to").toContain("t1");
+    expect(taskReads() - readsBefore, "the server is asked instead").toBe(1);
+    // …and asked for the board the reader is now looking at. `loadData` closes over the scope of
+    // the render that built it, so the one this handler captured still names "s1" and would
+    // answer with the old board — a spinner until the next poll.
+    expect(api.get, "the re-read names the new scope").toHaveBeenCalledWith(
+      "/api/projects/p1/tasks"
+    );
+  });
+
+  it("a slower answer cannot undo a move made after it", async () => {
+    await mountedScoped("s1");
+    const first = held<unknown>();
+    api.put.mockReturnValueOnce(first.promise);
+    api.put.mockResolvedValue({});
+
+    let leaving!: Promise<void>;
+    act(() => {
+      leaving = board.handleRowSprintChange("t1", "s2");
+    });
+    // Moved straight back before the first write is answered: this one stays on the board, so it
+    // applies at once and there is nothing left for the first answer to do.
+    await act(async () => {
+      await board.handleRowSprintChange("t1", "s1");
+    });
+
+    await act(async () => {
+      first.release({});
+      await leaving;
+    });
+
+    expect(board.tasks.map((t) => t._id), "the later move is the one that counts").toContain("t1");
+    expect(board.tasks.find((t) => t._id === "t1")!.sprint, "and with the sprint it was moved to").toBe("s1");
+  });
+
+  // The bulk toolbar and the row picker are on the same screen and write the same field, so a
+  // guard only the row path carries is a guard the reader can walk around.
+  it("a slower row answer cannot undo a bulk move made after it", async () => {
+    await mountedScoped("s1");
+    const first = held<unknown>();
+    api.put.mockReturnValueOnce(first.promise);
+    api.put.mockResolvedValue({});
+
+    let leaving!: Promise<void>;
+    act(() => {
+      leaving = board.handleRowSprintChange("t1", "s2");
+    });
+    await act(async () => {
+      board.setSelectedTasks(new Set(["t1"]));
+    });
+    await act(async () => {
+      await board.handleBulkSprint("s1");
+    });
+
+    await act(async () => {
+      first.release({});
+      await leaving;
+    });
+
+    expect(board.tasks.map((t) => t._id), "the bulk move is the newer one").toContain("t1");
+  });
+
+  it("a bulk move re-reads rather than removing when the filter moved under it", async () => {
+    await mountedScoped("s1");
+    const put = held<unknown>();
+    api.put.mockReturnValue(put.promise);
+
+    await act(async () => {
+      board.setSelectedTasks(new Set(["t1"]));
+    });
+    let moving!: Promise<void>;
+    act(() => {
+      moving = board.handleBulkSprint("s2");
+    });
+
+    probeScope = "all";
+    await act(async () => {
+      rerenderProbe();
+    });
+    const readsBefore = taskReads();
+
+    await act(async () => {
+      put.release({});
+      await moving;
+    });
+
+    expect(board.tasks.map((t) => t._id), "still on the board it now belongs to").toContain("t1");
+    expect(taskReads() - readsBefore, "the server is asked instead").toBe(1);
+    expect(api.get, "the re-read names the new scope").toHaveBeenCalledWith("/api/projects/p1/tasks");
+  });
+
+  // The control: an unscoped board still paints immediately, because being wrong is invisible there
+  it("applies at once when the card is not going anywhere", async () => {
+    await mounted();
+    let release!: (value: unknown) => void;
+    api.put.mockReturnValue(
+      new Promise((resolve) => {
+        release = resolve;
+      })
+    );
+
+    act(() => {
+      board.handleRowSprintChange("t1", "s2");
+    });
+
+    expect(board.tasks.find((t) => t._id === "t1")!.sprint).toBe("s2");
+    await act(async () => release({}));
   });
 });
