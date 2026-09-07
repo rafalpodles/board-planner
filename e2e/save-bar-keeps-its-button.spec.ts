@@ -68,8 +68,14 @@ for (const width of [420, 700, 1023, 1280]) {
   });
 }
 
-// A real click, at the point the launcher used to own: it has to save rather than open the chat
-test("a click on that edge saves rather than opening the chat", async ({ page }) => {
+/**
+ * A control rather than the proof: measured, this click reaches Save with the fix reverted too —
+ * Playwright re-checks actionability and the overlap band does not cover the button's vertical
+ * centre at every width. What discriminates is the four geometry tests above, which read the
+ * point a finger actually lands on. This one is here so the save flow itself stays covered at a
+ * width where the two controls are close.
+ */
+test("the click still saves, and does not open the chat", async ({ page }) => {
   await page.setViewportSize({ width: 700, height: 800 });
   await signIn(page);
   await makeDirty(page);
