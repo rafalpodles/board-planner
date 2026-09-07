@@ -42,8 +42,19 @@ describe("the intercepting task modal", () => {
     expect(screen.queryByText("asked for TP/1")).toBeNull();
   });
 
-  it("falls back to the params when the address is not a task's", () => {
+  /**
+   * BP-541. This used to fall back to the params and draw the board's own task — which is the bug:
+   * an unmatched parallel slot keeps its active subpage across a soft navigation, so leaving the
+   * task for a project page left the modal parked over the board that arrived.
+   */
+  it("draws nothing once the address stops naming a task", () => {
     pathname = "/projects/TP";
+    render(<TaskDetailModal />);
+    expect(screen.queryByText(/asked for/)).toBeNull();
+  });
+
+  it("still draws while the address names one", () => {
+    pathname = "/projects/TP/tasks/9";
     render(<TaskDetailModal />);
     expect(screen.queryByText("asked for TP/9")).not.toBeNull();
   });
