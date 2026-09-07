@@ -165,11 +165,20 @@ describe("ActivityTimeline across a task switch", () => {
     expect(onCountChange).toHaveBeenLastCalledWith(null);
   });
 
+  // The other half of that guard: mounting must not fire the read twice
+  it("reads once on mount, not once per effect", async () => {
+    api.get.mockResolvedValue([log]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+
+    await waitFor(() => expect(screen.getByText(/Owner Name/)).toBeTruthy());
+    expect(api.get).toHaveBeenCalledTimes(1);
+  });
+
   // The one reachable line the rest of these miss: a refresh that succeeds has to take the
   // failure sentence down with it, or it sits above rows that did load
   it("clears a failure when a refresh of the same task answers", async () => {
     api.get.mockRejectedValueOnce(new Error("network"));
-    const view = render(<ActivityTimeline projectId="TP" taskId="t1" refreshKey={0} />);
+    const view = render(<ActivityTimeline projectId="TP" taskId="t1" />);
     await waitFor(() => expect(screen.getByText(/Could not load/)).toBeTruthy());
 
     api.get.mockResolvedValue([log]);
@@ -182,7 +191,7 @@ describe("ActivityTimeline across a task switch", () => {
   // A refresh of the same task is not a switch: what is on screen belongs to it either way
   it("keeps the rows on screen while a refresh of the same task runs", async () => {
     api.get.mockResolvedValue([log]);
-    const view = render(<ActivityTimeline projectId="TP" taskId="t1" refreshKey={0} />);
+    const view = render(<ActivityTimeline projectId="TP" taskId="t1" />);
     await waitFor(() => expect(screen.getByText(/Owner Name/)).toBeTruthy());
 
     api.get.mockImplementation(() => new Promise(() => {}));

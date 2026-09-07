@@ -106,7 +106,7 @@ export function ActivityTimeline({
   taskId,
   hideHeading,
   onCountChange,
-  refreshKey,
+  refreshKey = 0,
 }: ActivityTimelineProps) {
   const [logs, setLogs] = useState<ApiActivityLog[]>([]);
   const [expanded, setExpanded] = useState(false);
@@ -145,7 +145,7 @@ export function ActivityTimeline({
 
   useEffect(() => {
     // A refresh keeps what is on screen: the rows are this task's either way
-    if (refreshKey === 0 || refreshKey === undefined) return;
+    if (refreshKey === 0) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);
