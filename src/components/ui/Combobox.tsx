@@ -1,6 +1,15 @@
 "use client";
 
-import { ReactNode, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  ReactNode,
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 
 export interface ComboboxOption {
@@ -43,8 +52,41 @@ interface MultiProps extends SharedProps {
 
 type ComboboxProps = SingleProps | MultiProps;
 
+interface Placement {
+  left: number;
+  top?: number;
+  bottom?: number;
+  /** What is actually free on the chosen side, so the panel never runs off either end */
+  maxHeight: number;
+}
+
 const PANEL_WIDTH = 224;
 const PANEL_MAX_HEIGHT = 260;
+/** Between the panel and the trigger, and between the panel and whatever bounds it */
+const GAP = 4;
+/** Kept clear of the top of the screen, so a flipped panel does not read as cut off */
+const TOP_MARGIN = 12;
+const PINNED_BARS = "[data-pinned-bottom-bar],[data-pinned-phone-bar]";
+
+/**
+ * The bottom of the space a panel may occupy. A bar pinned to the bottom of the screen says so
+ * with `data-pinned-bottom-bar` or `data-pinned-phone-bar` — the same attributes the PM launcher
+ * steps around. Measuring against the viewport instead put a flipped panel on top of the settings
+ * save bar, over the half that says there are unsaved changes (BP-555).
+ *
+ * A bar hidden at this width is not asked about: it has no height, and reading the breakpoint
+ * instead disagreed with it — Tailwind's `lg` is `64rem`, which a browser resolves against its own
+ * default font size, so at 1100px with 20px text the phone bar was on screen while a
+ * `max-width: 1023px` query said it was not.
+ */
+function floorOfFreeSpace() {
+  let floor = document.documentElement.clientHeight;
+  for (const bar of document.querySelectorAll<HTMLElement>(PINNED_BARS)) {
+    const r = bar.getBoundingClientRect();
+    if (r.height > 0) floor = Math.min(floor, r.top);
+  }
+  return floor;
+}
 
 export function Combobox(props: ComboboxProps) {
   const {
@@ -60,7 +102,7 @@ export function Combobox(props: ComboboxProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
-  const [rect, setRect] = useState<DOMRect | null>(null);
+  const [place, setPlace] = useState<Placement | null>(null);
   const listboxId = useId();
   const anchor = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
@@ -125,26 +167,76 @@ export function Combobox(props: ComboboxProps) {
   // whole row the button, label included, so aligning to the button put the list under
   // the field's name instead of under the value it is about to replace. Vertically it
   // still hangs off the trigger, so the panel clears the row rather than the text.
-  useLayoutEffect(() => {
-    if (!open) return;
+  const measure = useCallback(() => {
     const trigger = anchor.current?.getBoundingClientRect();
     if (!trigger) {
-      setRect(null);
+      setPlace(null);
       return;
     }
     const inner = anchor.current
       ?.querySelector("[data-combobox-anchor]")
       ?.getBoundingClientRect();
-    setRect(
-      new DOMRect(
-        inner?.left ?? trigger.left,
-        trigger.top,
-        inner?.width ?? trigger.width,
-        trigger.height,
+    const viewport = document.documentElement;
+    const floor = floorOfFreeSpace();
+    // The settings column scrolls *under* its save bar, so a trigger can itself be behind one.
+    // Flipping above such a trigger still lands on the bar; the panel hangs off the floor instead
+    const ledge = Math.min(trigger.top, floor);
+    const below = floor - trigger.bottom - GAP;
+    // Less a gap as well as the margin: the panel's bottom edge is written at `ledge - GAP`, so
+    // the height it may take starts from there, not from the ledge
+    const above = ledge - TOP_MARGIN - GAP;
+    // Flipped only when there is genuinely more room above: asking whether the panel fits below
+    // and not whether it fits above put its top off the screen on a short window (BP-547)
+    const flip = below < PANEL_MAX_HEIGHT && above > below;
+    setPlace({
+      left: Math.max(
+        GAP * 2,
+        Math.min(inner?.left ?? trigger.left, viewport.clientWidth - PANEL_WIDTH - GAP * 2)
       ),
-    );
+      top: flip ? undefined : trigger.bottom + GAP,
+      bottom: flip ? viewport.clientHeight - ledge + GAP : undefined,
+      maxHeight: Math.max(0, Math.min(PANEL_MAX_HEIGHT, flip ? above : below)),
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    measure();
     setActive(Math.max(0, selectedIndexRef.current));
-  }, [open]);
+  }, [open, measure]);
+
+  // Two things move under an open panel without the viewport changing: the trigger, whose chips
+  // wrap onto a second line as a multiselect is ticked (BP-547), and a pinned bar, which arrives
+  // over 200ms of `max-height` — so the floor measured on the opening click is not the one the
+  // reader ends up with
+  useEffect(() => {
+    const trigger = anchor.current;
+    if (!open || !trigger || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(trigger);
+    function watchBars() {
+      for (const bar of document.querySelectorAll(PINNED_BARS)) observer.observe(bar);
+    }
+    watchBars();
+    // A bar announces itself by gaining the attribute, so the set is not fixed at open: a save bar
+    // arrives when the form it belongs to is first dirtied, which can be from inside this panel
+    const arrivals =
+      typeof MutationObserver === "undefined"
+        ? null
+        : new MutationObserver(() => {
+            watchBars();
+            measure();
+          });
+    arrivals?.observe(document.body, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["data-pinned-bottom-bar", "data-pinned-phone-bar"],
+    });
+    return () => {
+      observer.disconnect();
+      arrivals?.disconnect();
+    };
+  }, [open, measure]);
 
   // `rect` rather than `open`: the panel is rendered only once it has been measured, which
   // is a commit later than the one that set `open`, so keying on `open` alone focused
@@ -153,9 +245,19 @@ export function Combobox(props: ComboboxProps) {
   // The listbox rather than the panel around it: the wrapper carries the position and the
   // pointer-event stoppers but no role and no name, so focusing it announced nothing where
   // the trigger it took focus from had announced "…, combo box, expanded".
+  const focused = useRef(false);
   useEffect(() => {
-    if (open && rect) (showSearch ? search : list).current?.focus();
-  }, [open, rect, showSearch]);
+    if (!open) {
+      focused.current = false;
+      return;
+    }
+    // Once: `place` is a fresh object on every re-measure, and a resize under an open panel was
+    // taking focus off the option the reader had just clicked
+    if (place && !focused.current) {
+      focused.current = true;
+      (showSearch ? search : list).current?.focus();
+    }
+  }, [open, place, showSearch]);
 
   useEffect(() => {
     if (!open) return;
@@ -175,8 +277,11 @@ export function Combobox(props: ComboboxProps) {
       if (anchor.current?.contains(target) || panel.current?.contains(target)) return;
       dismiss();
     }
+    // Re-placed rather than dismissed: on Android the on-screen keyboard is a viewport resize, and
+    // a picker with a search box raises it by focusing that box — so closing here shut the picker
+    // on the tap that opened it (BP-547)
     function onResize() {
-      dismiss();
+      measure();
     }
     // The panel is fixed to the viewport, so anything that moves the trigger has to close
     // it rather than leave it floating somewhere wrong. Its own option list is not that: a
@@ -205,7 +310,7 @@ export function Combobox(props: ComboboxProps) {
       window.removeEventListener("resize", onResize);
       window.removeEventListener("scroll", onScroll, true);
     };
-  }, [open]);
+  }, [open, measure]);
 
   function onKeyDown(e: React.KeyboardEvent) {
     // Everything typed into an open dropdown belongs to it. The board listens for
@@ -236,10 +341,6 @@ export function Combobox(props: ComboboxProps) {
     }
     if (e.key === "Tab") close();
   }
-
-  // Flipped above the trigger when the viewport has no room below it
-  const below = rect ? window.innerHeight - rect.bottom : 0;
-  const flip = rect ? below < PANEL_MAX_HEIGHT && rect.top > below : false;
 
   const trigger = props.multiple
     ? props.children(options.filter((o) => pickedSet.has(o.value)))
@@ -272,7 +373,7 @@ export function Combobox(props: ComboboxProps) {
       </button>
 
       {open &&
-        rect &&
+        place &&
         createPortal(
           <div
             ref={panel}
@@ -289,12 +390,16 @@ export function Combobox(props: ComboboxProps) {
             onContextMenu={(e) => e.stopPropagation()}
             style={{
               position: "fixed",
-              left: Math.max(8, Math.min(rect.left, window.innerWidth - PANEL_WIDTH - 8)),
-              top: flip ? undefined : rect.bottom + 4,
-              bottom: flip ? window.innerHeight - rect.top + 4 : undefined,
+              left: place.left,
+              top: place.top,
+              bottom: place.bottom,
               width: PANEL_WIDTH,
+              maxHeight: place.maxHeight,
             }}
-            className={`z-50 overflow-hidden rounded-lg border border-border bg-bg-card shadow-lg ${panelClassName}`}
+            // A column, so the list takes whatever the search box leaves rather than a height
+            // stated here — a number that drifts clips the last option inside a scroller that
+            // believes it has shown it
+            className={`z-50 flex flex-col overflow-hidden rounded-lg border border-border bg-bg-card shadow-lg ${panelClassName}`}
           >
             {showSearch && (
               <input
@@ -306,7 +411,7 @@ export function Combobox(props: ComboboxProps) {
                 }}
                 placeholder="Search…"
                 aria-label={`Search ${label}`}
-                className="w-full border-b border-border bg-transparent px-2.5 py-2 text-xs text-text outline-none placeholder:text-text-muted"
+                className="w-full shrink-0 border-b border-border bg-transparent px-2.5 py-2 text-xs text-text outline-none placeholder:text-text-muted"
               />
             )}
             <div
@@ -323,7 +428,7 @@ export function Combobox(props: ComboboxProps) {
               aria-activedescendant={filtered[active] ? `${listboxId}-${active}` : undefined}
               // The ring is drawn inside its own box: the panel around it is `overflow-hidden`,
               // which crops an offset outline exactly as it crops anything else
-              className="focus-ring-inset max-h-52 overflow-y-auto py-1"
+              className="focus-ring-inset min-h-0 flex-1 overflow-y-auto py-1"
             >
               {filtered.length === 0 && (
                 <p className="px-2.5 py-2 text-xs text-text-muted">No matches</p>
