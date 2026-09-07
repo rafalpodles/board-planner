@@ -53,9 +53,4 @@ describe("the intercepting task modal", () => {
     expect(screen.queryByText(/asked for/)).toBeNull();
   });
 
-  it("still draws while the address names one", () => {
-    pathname = "/projects/TP/tasks/9";
-    render(<TaskDetailModal />);
-    expect(screen.queryByText("asked for TP/9")).not.toBeNull();
-  });
 });

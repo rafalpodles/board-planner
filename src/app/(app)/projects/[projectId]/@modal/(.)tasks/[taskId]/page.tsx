@@ -12,11 +12,6 @@ export default function TaskDetailModal() {
   const router = useRouter();
   const [title, setTitle] = useState("");
 
-  // Both halves of the task's identity from one source. `useParams` gives the project of the
-  // layout this modal was intercepted into — the project being *left* when the URL names another
-  // one — so the modal asked for that board's task under this board's address, and drew a task
-  // nobody had asked for (BP-540). Nothing reaches here cross-project any more; this is so the
-  // answer is still right if something ever does.
   const taskId = taskRefFromPathname(pathname);
 
   // A soft navigation keeps an unmatched parallel slot's active subpage — Next says so under
@@ -29,6 +24,11 @@ export default function TaskDetailModal() {
   // a fix. The URL cannot go stale — when it no longer names a task, this slot has nothing to draw.
   if (!taskId) return null;
 
+  // Both halves of the task's identity from one source. `useParams` gives the project of the
+  // layout this modal was intercepted into — the project being *left* when the URL names another
+  // one — so the modal asked for that board's task under this board's address, and drew a task
+  // nobody had asked for (BP-540). Nothing reaches here cross-project any more; this is so the
+  // answer is still right if something ever does.
   const projectId = projectRefFromPathname(pathname) ?? params.projectId;
 
   // `bare`: the detail view draws its own top bar, and the modal chrome would double it
