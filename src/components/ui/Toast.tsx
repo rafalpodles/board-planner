@@ -9,7 +9,7 @@ import {
   useRef,
   useSyncExternalStore,
 } from "react";
-import { openLayerCount, subscribeLayers } from "@/lib/focus-trap";
+import { openSheetCount, subscribeLayers } from "@/lib/focus-trap";
 
 type ToastType = "success" | "error" | "info";
 
@@ -52,10 +52,10 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     [removeToast]
   );
 
-  // Read at render, not at raise: a dialog opened while a toast is still up moves it too
-  const layered = useSyncExternalStore(
+  // Read at render, not at raise: a sheet opened while a toast is still up moves it too
+  const overASheet = useSyncExternalStore(
     subscribeLayers,
-    () => openLayerCount() > 0,
+    () => openSheetCount() > 0,
     () => false
   );
 
@@ -77,7 +77,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
           // It moves rather than dropping a layer: behind the scrim it would be unreadable, and a
           // toast raised from inside the dialog is feedback the reader needs (BP-590).
           className={`fixed z-50 flex max-w-sm flex-col gap-2 sm:bottom-4 sm:right-4 sm:left-auto sm:top-auto sm:w-auto sm:translate-x-0 ${
-            layered
+            overASheet
               ? "left-1/2 top-4 w-[calc(100%-2rem)] -translate-x-1/2"
               : "bottom-4 right-4"
           }`}

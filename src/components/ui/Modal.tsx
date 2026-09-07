@@ -80,6 +80,8 @@ export function Modal({
     containerRef: dialogRef,
     onEscape: requestClose,
     returnFocusTo,
+    // `bare` fills the screen and has no action row; every other variant is a sheet at the bottom
+    sheet: !bare,
   });
 
   useLayoutEffect(() => {

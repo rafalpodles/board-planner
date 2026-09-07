@@ -16,6 +16,8 @@ interface FocusTrapOptions {
   returnFocusTo?: RefObject<HTMLElement | null>;
   /** Off for layers that leave the page scrollable behind them */
   lockScroll?: boolean;
+  /** A bottom sheet below `sm`, so anything painted in that corner has to move (BP-590) */
+  sheet?: boolean;
 }
 
 export function useFocusTrap({
@@ -24,6 +26,7 @@ export function useFocusTrap({
   onEscape,
   returnFocusTo,
   lockScroll = true,
+  sheet = false,
 }: FocusTrapOptions) {
   // BP-530: every caller passes an inline arrow, so a dep on it re-subscribes the keydown listener
   // whenever another handler writes state during the same dispatch — and a listener added during a
@@ -34,13 +37,13 @@ export function useFocusTrap({
   useEffect(() => {
     if (!active) return;
     const container = containerRef.current!;
-    const unregister = registerLayer(container);
+    const unregister = registerLayer(container, sheet);
     if (lockScroll) document.body.style.overflow = "hidden";
     return () => {
       unregister();
       if (lockScroll && openLayerCount() === 0) document.body.style.overflow = "";
     };
-  }, [active, containerRef, lockScroll]);
+  }, [active, containerRef, lockScroll, sheet]);
 
   useEffect(() => {
     if (!active) return;
