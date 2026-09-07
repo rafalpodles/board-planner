@@ -12,13 +12,24 @@ export default function TaskDetailModal() {
   const router = useRouter();
   const [title, setTitle] = useState("");
 
+  const taskId = taskRefFromPathname(pathname);
+
+  // A soft navigation keeps an unmatched parallel slot's active subpage — Next says so under
+  // "Behavior" in parallel-routes — and `default.tsx` only answers a hard load. So leaving the task
+  // for anything that is not a task (a project from ⌘K, a sidebar link, the breadcrumb) left this
+  // modal parked over whatever arrived (BP-541).
+  //
+  // Read from the address on every render rather than closed once: a flag would be cleared by the
+  // navigation and re-armed by the slot's remembered state, which is why BP-521 says hiding is not
+  // a fix. The URL cannot go stale — when it no longer names a task, this slot has nothing to draw.
+  if (!taskId) return null;
+
   // Both halves of the task's identity from one source. `useParams` gives the project of the
   // layout this modal was intercepted into — the project being *left* when the URL names another
   // one — so the modal asked for that board's task under this board's address, and drew a task
   // nobody had asked for (BP-540). Nothing reaches here cross-project any more; this is so the
   // answer is still right if something ever does.
   const projectId = projectRefFromPathname(pathname) ?? params.projectId;
-  const taskId = taskRefFromPathname(pathname) ?? params.taskId;
 
   // `bare`: the detail view draws its own top bar, and the modal chrome would double it
   return (
