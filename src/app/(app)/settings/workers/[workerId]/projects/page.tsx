@@ -72,11 +72,12 @@ export default function MachineProjectsPage() {
     setSaving(true);
     setError("");
     setStale("");
+    let left: string[];
     try {
       const result = await api.put(`/api/workers/${workerId}/projects`, {
         projects: [...picked],
       });
-      const left = (result?.leftDisabled ?? []) as string[];
+      left = (result?.leftDisabled ?? []) as string[];
       setSaved(
         left.length
           ? `Saved. ${left.join(", ")} ${left.length === 1 ? "does not run machines" : "do not run machines"} yet, and only an instance admin can turn that on — the machine will leave ${left.length === 1 ? "it" : "them"} alone until somebody does.`
@@ -88,16 +89,22 @@ export default function MachineProjectsPage() {
       setSaving(false);
       return;
     }
-    // The rows carry the change the write made, so the pending-delete warning goes with it. Left
-    // to the re-read alone, a failed one keeps promising to remove a checkout it already removed
+    // The rows carry what the write did, so a failed re-read does not leave them describing the
+    // board as it was — the pending-delete warning outliving the removal it warned about.
+    //
+    // Downward only. `servedHere` is what the *machine* reported having, and the write records a
+    // wish rather than a clone: setting it upward would paint a checkout that does not exist yet
+    // and swallow the line saying one is coming. `workersEnabled` is different — the write really
+    // does throw that switch, for everything the response did not list as left off.
     setView((prev) =>
       prev
         ? {
             ...prev,
             catalogue: prev.catalogue.map((row) => ({
               ...row,
-              wanted: picked.has(row.project),
-              servedHere: picked.has(row.project),
+              servedHere: row.servedHere && picked.has(row.project),
+              workersEnabled:
+                row.workersEnabled || (picked.has(row.project) && !left.includes(row.key)),
             })),
           }
         : prev

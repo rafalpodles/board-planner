@@ -143,4 +143,98 @@ describe("saving the machine's projects", () => {
     expect(screen.queryByText(/Saving removes/)).toBeNull();
     expect(screen.queryByText("connected")).toBeNull();
   });
+
+  // `servedHere` is what the machine reported having. The write records a wish; the clone happens
+  // later, so patching it upward paints a checkout that does not exist and swallows the line
+  // saying one is on its way
+  it("never claims a checkout the machine has not reported", async () => {
+    const absent = {
+      ...VIEW,
+      catalogue: [{ ...VIEW.catalogue[0], wanted: false, servedHere: false }],
+    };
+    api.get.mockResolvedValueOnce(absent).mockRejectedValueOnce(new Error("read timed out"));
+    render(<MachineProjectsPage />);
+    await screen.findByRole("button", { name: "Save" });
+
+    await act(async () => {
+      (screen.getByRole("checkbox") as HTMLInputElement).click();
+    });
+    await act(async () => {
+      screen.getByRole("button", { name: "Save" }).click();
+    });
+
+    await waitFor(() => expect(screen.getByText(LIST_REFRESH_FAILED)).toBeTruthy());
+    expect(screen.queryByText("connected")).toBeNull();
+    expect(screen.getByText(/will be cloned by the app/)).toBeTruthy();
+  });
+
+  // The write really does throw the workers switch, for everything the response did not name as
+  // left off — so the row must stop offering to do what the save just did
+  it("stops offering to switch on what the save switched on", async () => {
+    const off = {
+      ...VIEW,
+      canEnableWorkers: true,
+      catalogue: [{ ...VIEW.catalogue[0], wanted: false, servedHere: false, workersEnabled: false }],
+    };
+    api.get.mockResolvedValueOnce(off).mockRejectedValueOnce(new Error("read timed out"));
+    render(<MachineProjectsPage />);
+    await screen.findByRole("button", { name: "Save" });
+
+    await act(async () => {
+      (screen.getByRole("checkbox") as HTMLInputElement).click();
+    });
+    await act(async () => {
+      screen.getByRole("button", { name: "Save" }).click();
+    });
+
+    await waitFor(() => expect(screen.getByText(LIST_REFRESH_FAILED)).toBeTruthy());
+    expect(screen.queryByText(/ticking it turns that on/)).toBeNull();
+  });
+
+  // ...and keeps offering it for the one the server said it left off
+  it("keeps the warning for a project the server left switched off", async () => {
+    const off = {
+      ...VIEW,
+      canEnableWorkers: true,
+      catalogue: [{ ...VIEW.catalogue[0], wanted: false, servedHere: false, workersEnabled: false }],
+    };
+    api.get.mockResolvedValueOnce(off).mockRejectedValueOnce(new Error("read timed out"));
+    api.put.mockResolvedValueOnce({ leftDisabled: ["BP"] });
+    render(<MachineProjectsPage />);
+    await screen.findByRole("button", { name: "Save" });
+
+    await act(async () => {
+      (screen.getByRole("checkbox") as HTMLInputElement).click();
+    });
+    await act(async () => {
+      screen.getByRole("button", { name: "Save" }).click();
+    });
+
+    await waitFor(() => expect(screen.getByText(LIST_REFRESH_FAILED)).toBeTruthy());
+    expect(screen.getByText(/ticking it turns that on/)).toBeTruthy();
+  });
+
+  it("clears what it said as soon as the reader changes the picks again", async () => {
+    api.get.mockResolvedValueOnce(VIEW).mockRejectedValueOnce(new Error("read timed out"));
+    await saveOnce();
+    await waitFor(() => expect(screen.getByText(LIST_REFRESH_FAILED)).toBeTruthy());
+
+    await act(async () => {
+      (screen.getByRole("checkbox") as HTMLInputElement).click();
+    });
+
+    expect(screen.queryByText(LIST_REFRESH_FAILED)).toBeNull();
+    expect(screen.queryByText(/^Saved\./)).toBeNull();
+  });
+
+  // The outcome of the click first, the caveat second — the reading order is the fix, not just
+  // the colour
+  it("says what happened before it says what is stale", async () => {
+    api.get.mockResolvedValueOnce(VIEW).mockRejectedValueOnce(new Error("read timed out"));
+    await saveOnce();
+
+    const stale = await screen.findByText(LIST_REFRESH_FAILED);
+    const saved = screen.getByText(/^Saved\./);
+    expect(saved.compareDocumentPosition(stale) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
 });
