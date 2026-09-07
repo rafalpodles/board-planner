@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
+import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
 import { useDraft } from "@/hooks/use-draft";
 import { useToast } from "@/components/ui/Toast";
 import { ApiMemberCandidate, ApiProjectMember, GrantRelation } from "@/types";
@@ -94,10 +95,26 @@ export function GeneralSection({ projectId, project, replaceProject, stats }: Se
       } else {
         await api.put(`/api/projects/${projectId}/members`, { userId, relation });
       }
-      setMembers(await api.get(`/api/projects/${projectId}/members`));
-      toast("Access updated", "success");
     } catch (err) {
       toast(err instanceof Error ? err.message : "Failed to update access", "error");
+      return;
+    }
+
+    // A row already on screen carries the change the server made, so a refresh that fails leaves
+    // it right rather than showing the relation that was replaced — the select reads from this
+    // list. Somebody added from the search has no row to patch; the refresh message covers that.
+    setMembers((prev) =>
+      prev.map((m) =>
+        m._id === userId ? { ...m, relation: relation === "none" ? null : relation } : m
+      )
+    );
+    toast("Access updated", "success");
+
+    // Its own failure is not the write's: the access change landed
+    try {
+      setMembers(await api.get(`/api/projects/${projectId}/members`));
+    } catch {
+      toast(LIST_REFRESH_FAILED, "error");
     }
   }
 
