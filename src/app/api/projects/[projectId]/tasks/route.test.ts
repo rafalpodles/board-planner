@@ -298,6 +298,26 @@ describe("GET /api/projects/:projectId/tasks — the status filter", () => {
     expect(taskFind).toHaveBeenCalledWith(
       expect.objectContaining({ status: { $in: ["in_progress"] } })
     );
+    // Scoped to this board. Without the project clause the probe answers "does any task anywhere
+    // hold this status", which is a different question and one this caller may not ask
+    expect(taskExists).toHaveBeenCalledWith({
+      project: PROJECT_ID,
+      status: { $in: ["in_progress"] },
+    });
+  });
+
+  // The filter is comma-separated, so the probe has to ask about all of them: an orphan in the
+  // second id is as real as one in the first
+  it("takes a list where only a later id has orphaned tasks", async () => {
+    taskExists.mockResolvedValue({ _id: "t1" });
+
+    const res = await GET(request("?status=nonesuch,in_progress"), ctx());
+
+    expect(res.status).toBe(200);
+    expect(taskExists).toHaveBeenCalledWith({
+      project: PROJECT_ID,
+      status: { $in: ["nonesuch", "in_progress"] },
+    });
   });
 
   // The control: the same request against an id the board does define still filters
