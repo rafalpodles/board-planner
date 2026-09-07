@@ -16,6 +16,7 @@ import { unknownParameterMessage, NOTHING_TO_CHANGE } from "@/lib/mcp/strict-inp
 import { buildBoardDigest } from "./board-review";
 import { handoverOf } from "@/lib/handover";
 import { getProjectColumns } from "@/lib/columns";
+import { echo } from "@/lib/echo";
 
 export interface PmToolContext {
   projectId: string;
@@ -67,11 +68,11 @@ async function resolveTask(ctx: PmToolContext, taskKey: unknown): Promise<{ task
   }
   const match = taskKey.trim().toUpperCase().match(/-?(\d+)$/);
   if (!match) {
-    return { error: `Invalid taskKey format: ${taskKey}` };
+    return { error: `Invalid taskKey format: ${echo(taskKey)}` };
   }
   const task = await Task.findOne({ project: ctx.projectId, taskNumber: Number(match[1]) });
   if (!task) {
-    return { error: `Task ${taskKey} not found in this project` };
+    return { error: `Task ${echo(taskKey)} not found in this project` };
   }
   return { task };
 }

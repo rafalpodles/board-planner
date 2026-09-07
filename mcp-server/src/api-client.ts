@@ -1,3 +1,4 @@
+import { echo } from "./echo.js";
 // A tool argument becomes a path segment, so it has to be encoded: the WHATWG parser normalises
 // `..` before the request goes out, so an id of `p1/../../admin/users` would otherwise fetch a
 // route the tool never named. Kept identical to src/lib/mcp/planner-client.ts, which this file is
@@ -12,7 +13,7 @@ const SAFE_SEGMENT = /^[A-Za-z0-9_-]+$/;
 
 const seg = (value: string) => {
   if (typeof value !== "string" || !SAFE_SEGMENT.test(value)) {
-    throw new Error(`Invalid path segment: "${value}"`);
+    throw new Error(`Invalid path segment: "${echo(value)}"`);
   }
   return encodeURIComponent(value);
 };
@@ -61,7 +62,7 @@ export class ApiClient {
     const project = projects.find(
       (p) => (p as { key: string }).key === key.toUpperCase()
     );
-    if (!project) throw new Error(`Project with key "${key}" not found`);
+    if (!project) throw new Error(`Project with key "${echo(key)}" not found`);
     return project;
   }
 

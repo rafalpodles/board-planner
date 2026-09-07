@@ -4,6 +4,7 @@ import { z } from "zod";
 import { PlannerClient } from "./planner-client";
 import { resolveFieldsByName } from "@/lib/custom-fields";
 import { APP_NAME } from "@/lib/brand";
+import { echo } from "@/lib/echo";
 import {
   strictInput,
   NOTHING_TO_CHANGE,
@@ -167,7 +168,7 @@ export function registerPlannerTools(server: McpServer): void {
         const user = users.find((u) => u.username === assignee.toLowerCase());
         if (!user) {
           throw new Error(
-            `"${assignee}" is not someone this board can be assigned to — only people with access to it are.`
+            `"${echo(assignee)}" is not someone this board can be assigned to — only people with access to it are.`
           );
         }
         data.assignee = user.username;
@@ -256,7 +257,7 @@ export function registerPlannerTools(server: McpServer): void {
           const user = users.find((u) => u.username === assignee.toLowerCase());
           if (!user) {
             throw new Error(
-              `"${assignee}" is not someone this board can be assigned to — only people with access to it are.`
+              `"${echo(assignee)}" is not someone this board can be assigned to — only people with access to it are.`
             );
           }
           data.assignee = user.username;
@@ -282,7 +283,7 @@ export function registerPlannerTools(server: McpServer): void {
             throw new Error(
               named.length > 0
                 ? `Agent "${agent}" exists on another project — only this project's own agents can be assigned here.`
-                : `Agent "${agent}" not found`
+                : `Agent "${echo(agent)}" not found`
             );
           }
           data.agent = match._id;

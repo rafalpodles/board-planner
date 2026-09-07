@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { echo } from "@/lib/echo";
 
 /**
  * BP-497: `z.object(shape)` drops a key the shape does not declare, so a call naming a parameter
@@ -21,7 +22,7 @@ export function unknownParameterMessage(
     .map((key) =>
       // Own keys only: "__proto__", "constructor" and "toString" are stray keys a confused
       // client really sends, and an inherited hit renders Object.prototype into the message
-      Object.hasOwn(hints, key) ? `"${key}" — use ${hints[key]}` : `"${key}"`
+      Object.hasOwn(hints, key) ? `"${echo(key)}" — use ${hints[key]}` : `"${echo(key)}"`
     )
     .join("; ")}.${writes ? " Nothing was written." : ""}`;
 }

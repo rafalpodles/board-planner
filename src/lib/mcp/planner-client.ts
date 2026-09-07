@@ -1,4 +1,5 @@
 import type { ApiCustomField } from "@/types";
+import { echo } from "@/lib/echo";
 /** Only what the tools read: the id, and the field definitions the `fields` parameter resolves against */
 export interface McpProject {
   _id: string;
@@ -28,7 +29,7 @@ const SAFE_SEGMENT = /^[A-Za-z0-9_-]+$/;
 
 const seg = (value: string) => {
   if (typeof value !== "string" || !SAFE_SEGMENT.test(value)) {
-    throw new Error(`Invalid path segment: "${value}"`);
+    throw new Error(`Invalid path segment: "${echo(value)}"`);
   }
   return encodeURIComponent(value);
 };
@@ -71,7 +72,7 @@ export class PlannerClient {
   async getProjectByKey(key: string): Promise<McpProject> {
     const projects = await this.listProjects();
     const project = projects.find((p) => (p as { key: string }).key === key.toUpperCase());
-    if (!project) throw new Error(`Project with key "${key}" not found`);
+    if (!project) throw new Error(`Project with key "${echo(key)}" not found`);
     return project as McpProject;
   }
 
@@ -137,7 +138,7 @@ export class PlannerClient {
     const tasks = (await this.listTasks(project._id)) as { _id: string; taskNumber: number }[];
     const task = tasks.find((t) => t.taskNumber === parseInt(taskNumberStr, 10));
 
-    if (!task) throw new Error(`Task ${taskKey.toUpperCase()} not found`);
+    if (!task) throw new Error(`Task ${echo(taskKey).toUpperCase()} not found`);
     return { projectId: project._id, taskId: task._id };
   }
 }
