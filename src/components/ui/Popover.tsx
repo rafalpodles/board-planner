@@ -12,6 +12,9 @@ interface PopoverProps {
   label?: string;
 }
 
+/** Kept clear of the edge, so a panel flush against it does not read as cut off */
+const MARGIN = 8;
+
 export function Popover({
   trigger,
   children,
@@ -50,6 +53,46 @@ export function Popover({
 
   useEffect(() => {
     if (open) panelRef.current?.focus();
+  }, [open]);
+
+  /**
+   * Anchored to the trigger, the panel runs off whichever edge the trigger is near — measured on a
+   * comment whose reactions had pushed the `+` rightwards, the last two emoji were past the card's
+   * clip and unreachable by touch (BP-576). This slides it back inside, which is what the reader
+   * needs; placing it against the free rectangle rather than the viewport is BP-555's larger job.
+   */
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!open || !panel) return;
+
+    function clamp() {
+      if (!panel) return;
+      panel.style.transform = "";
+      const rect = panel.getBoundingClientRect();
+      const past = rect.right - (window.innerWidth - MARGIN);
+      const before = MARGIN - rect.left;
+      const shift = past > 0 ? -past : before > 0 ? before : 0;
+      if (shift) panel.style.transform = `translateX(${shift}px)`;
+    }
+
+    clamp();
+    // Measured once on mount it slid by 6px where 43 were needed: the panel's content settles its
+    // width after that first layout — emoji did here — so the clamp is redone once the frame is
+    // painted, and again whenever the panel resizes under it
+    const frame = requestAnimationFrame(clamp);
+    const observer =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(clamp);
+    observer?.observe(panel);
+    window.addEventListener("resize", clamp);
+    // The anchor travels with its row, and a scroll or a re-flow underneath moves the panel with
+    // it — the clamp has to follow rather than being decided once
+    window.addEventListener("scroll", clamp, true);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+      window.removeEventListener("resize", clamp);
+      window.removeEventListener("scroll", clamp, true);
+    };
   }, [open]);
 
   return (

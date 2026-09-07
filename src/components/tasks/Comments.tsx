@@ -331,14 +331,11 @@ export function Comments({
               {/* A control, not a hover state: the palette used to be a sibling revealed by
                   `group-hover`, so a touch screen — which never satisfies :hover — and a keyboard
                   could toggle a reaction somebody had already left but never start one (BP-576) */}
-              <Popover
-                label="Add a reaction"
-                width="w-auto"
+              <Popover width="w-auto"
                 trigger={({ toggle, open }) => (
                   <button
                     type="button"
                     onClick={toggle}
-                    aria-haspopup="menu"
                     aria-expanded={open}
                     aria-label="Add a reaction"
                     // 44px on a phone, the minimum from BP-365: this is the control the ticket is

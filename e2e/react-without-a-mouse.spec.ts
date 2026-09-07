@@ -139,3 +139,77 @@ test("an existing reaction still toggles from the keyboard", async ({ page }) =>
 
   await expect(page.getByRole("button", { name: /👍/ })).toHaveCount(0);
 });
+
+/**
+ * The palette is anchored to the `+`, and reaction chips push the `+` rightwards as they
+ * accumulate. Measured on a phone with five chips, the last two emoji sat past the comment card's
+ * clip — present in the DOM, reachable by keyboard, and untappable. Every emoji has to be
+ * tappable at the width the ticket was written for.
+ */
+test("every emoji is tappable on a phone, however far right the + has been pushed", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    hasTouch: true,
+    isMobile: true,
+  });
+  const page = await context.newPage();
+  try {
+    await signIn(page);
+    await comment(page, "A remark with a row of reactions");
+
+    // Fill the row, so the + is pushed as far right as it goes
+    for (const emoji of ["👍", "👎", "❤️", "👀", "🎉"]) {
+      const reacted = page.waitForResponse(
+        (r) => r.url().includes("/comments/") && r.request().method() === "PATCH" && r.ok()
+      );
+      await addReaction(page).tap();
+      await page.getByRole("button", { name: `React with ${emoji}` }).tap();
+      await reacted;
+    }
+
+    // The row re-flows as the last reaction lands, which moves the + and the palette with it.
+    // Opening mid-reflow measures a position neither the reader nor the code ever settles on.
+    await expect(page.getByRole("button", { name: /🎉/ })).toBeVisible();
+    await expect
+      .poll(async () => (await addReaction(page).boundingBox())?.x ?? 0)
+      .toBeGreaterThan(0);
+    const settled = (await addReaction(page).boundingBox())!.x;
+    await expect.poll(async () => (await addReaction(page).boundingBox())?.x).toBe(settled);
+
+    await addReaction(page).tap();
+    await expect(page.getByRole("button", { name: "React with 😄" })).toBeVisible();
+
+    const reach = await page.evaluate(() => {
+      const out: Record<string, boolean> = {};
+      const where: string[] = [];
+      for (const el of document.querySelectorAll('[aria-label^="React with"]')) {
+        const r = el.getBoundingClientRect();
+        const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        out[el.getAttribute("aria-label")!] = at === el || el.contains(at);
+        where.push(
+          `${el.getAttribute("aria-label")} ${Math.round(r.left)}..${Math.round(r.right)} → ${
+            at ? at.tagName : "null"
+          }`
+        );
+      }
+      const panel = document
+        .querySelector('[aria-label="Add a reaction"]')!
+        .parentElement!.querySelector<HTMLElement>('[tabindex="-1"]')!;
+      const p = panel.getBoundingClientRect();
+      where.push(
+        `panel ${Math.round(p.left)}..${Math.round(p.right)} shift=${panel.style.transform || "none"} vw=${window.innerWidth}`
+      );
+      return { out, where };
+    });
+
+    expect(Object.values(reach.out)).toHaveLength(6);
+    expect(
+      Object.entries(reach.out).filter(([, ok]) => !ok),
+      reach.where.join("\n")
+    ).toEqual([]);
+  } finally {
+    await context.close();
+  }
+});
