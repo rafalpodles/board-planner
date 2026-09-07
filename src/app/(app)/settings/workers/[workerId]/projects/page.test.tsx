@@ -280,4 +280,28 @@ describe("saving the machine's projects", () => {
       "the reader's tick survives"
     ).toBe(false);
   });
+
+  // The other half of the guard: an abandoned mount's *failure* is not this screen's failure
+  it("does not report an abandoned mount's failed read as an error", async () => {
+    let reject!: (error: Error) => void;
+    const abandoned = new Promise<typeof VIEW>((_, r) => {
+      reject = r;
+    });
+    api.get.mockReturnValueOnce(abandoned).mockReturnValue(Promise.resolve(VIEW));
+
+    render(
+      <StrictMode>
+        <MachineProjectsPage />
+      </StrictMode>
+    );
+    await screen.findByRole("button", { name: "Save" });
+
+    await act(async () => {
+      reject(new Error("the read that nobody is waiting for"));
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText("the read that nobody is waiting for")).toBeNull();
+    expect(document.querySelectorAll("p.text-danger")).toHaveLength(0);
+  });
 });
