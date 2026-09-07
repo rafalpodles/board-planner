@@ -78,6 +78,31 @@ async function dragCardToPane(page: Page, card: Locator, pane: Locator) {
   await dataTransfer.dispose();
 }
 
+/**
+ * BP-594. The reported failure was a card count — five backlog rows where four were expected —
+ * and that is the same picture whether the drop found no handler, resolved no task, or the server
+ * refused the move and the page put the card back. The move is a single PUT, so watching for it
+ * tells "nothing was written" apart from "the write was refused", and leaves the counts below
+ * with only the case where the write itself was fine.
+ */
+async function dragAndWatchTheWrite(page: Page, card: Locator, pane: Locator, taskId: string) {
+  const write = page
+    .waitForResponse(
+      (res) => res.request().method() === "PUT" && res.url().endsWith(`/tasks/${taskId}`),
+      { timeout: 30_000 }
+    )
+    .catch(() => null);
+
+  await dragCardToPane(page, card, pane);
+
+  const response = await write;
+  expect(
+    response,
+    "no write reached the server in 30s: the drop found no handler, or no task for the dragged id, or the move was merely slow"
+  ).not.toBeNull();
+  expect(response!.status(), "the server refused the move").toBe(200);
+}
+
 test("dragging a task from the backlog into the sprint pane adds it to the sprint", async ({
   page,
   request,
@@ -109,7 +134,7 @@ test("dragging a task from the backlog into the sprint pane adds it to the sprin
 
   const backlogCountBefore = await cardsIn(backlog).count();
 
-  await dragCardToPane(page, backlogCard, sprint);
+  await dragAndWatchTheWrite(page, backlogCard, sprint, String(PLANNING_BACKLOG_TASK_ID));
 
   await test.step("the sprint pane gains it and the backlog pane loses it", async () => {
     await expect(cardsIn(sprint)).toHaveCount(3);
@@ -152,7 +177,7 @@ test("dragging a task from the sprint pane back to the backlog removes it from t
 
   const backlogCountBefore = await cardsIn(backlog).count();
 
-  await dragCardToPane(page, sprintCard, backlog);
+  await dragAndWatchTheWrite(page, sprintCard, backlog, String(PLANNING_SPRINT_TASK_ID));
 
   await test.step("the backlog pane gains it and the sprint pane loses it, keeping the done one", async () => {
     await expect(cardsIn(sprint)).toHaveCount(1);
