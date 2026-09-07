@@ -1,7 +1,19 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Combobox } from "./Combobox";
+
+const observers: (() => void)[] = [];
+vi.stubGlobal(
+  "ResizeObserver",
+  class {
+    constructor(cb: () => void) {
+      observers.push(cb);
+    }
+    observe() {}
+    disconnect() {}
+  }
+);
 
 /**
  * BP-555 and the placement half of BP-547. happy-dom lays nothing out, so every rectangle here is
@@ -41,15 +53,18 @@ function stateRect(el: Element, box: { top: number; bottom: number; left?: numbe
   } as DOMRect);
 }
 
-function pinnedBar(box: { top: number; bottom: number }) {
+function pinnedBar(box: { top: number; bottom: number }, attribute = "data-pinned-bottom-bar") {
   const bar = document.createElement("div");
-  bar.setAttribute("data-pinned-bottom-bar", "");
+  bar.setAttribute(attribute, "");
   document.body.append(bar);
   stateRect(bar, box);
   return bar;
 }
 
-function open(trigger: { top: number; bottom: number }) {
+/** Fires every ResizeObserver this render created; happy-dom has none of its own */
+const resized = () => observers.forEach((cb) => cb());
+
+function open(trigger: { top: number; bottom: number; left?: number }) {
   render(
     <Combobox options={OPTIONS} label="Template category" onChange={() => {}} value="a">
       {(picked) => <span>{picked?.label ?? "None"}</span>}
@@ -63,6 +78,7 @@ function open(trigger: { top: number; bottom: number }) {
 
 afterEach(() => {
   cleanup();
+  document.querySelectorAll("[data-pinned-phone-bar]").forEach((el) => el.remove());
   vi.restoreAllMocks();
   document.querySelectorAll("[data-pinned-bottom-bar]").forEach((el) => el.remove());
 });
@@ -120,5 +136,82 @@ describe("where the panel lands", () => {
     expect(document.querySelector('[role="listbox"]')!.parentElement!.style.bottom).toBe(
       `${400 - 300 + 4}px`
     );
+  });
+
+  // The arrangement the real screen has, and the one the two tests above cannot reach: the
+  // settings column scrolls *under* its save bar, so the trigger is behind the bar rather than
+  // above it. Flipping above such a trigger still lands on the bar
+  it("hangs off the bar when the trigger itself is behind one", () => {
+    stateViewport(720);
+    pinnedBar({ top: 614, bottom: 696 });
+    const panel = open({ top: 682, bottom: 720 });
+
+    expect(panel.style.bottom).toBe(`${720 - 614 + 4}px`);
+    expect(720 - Number.parseInt(panel.style.bottom)).toBeLessThanOrEqual(614);
+  });
+
+  // The phone bar is the same fact under a different attribute. Read at the wrong breakpoint it
+  // was excluded while on screen, so what counts is that it has a height, not how wide the window is
+  it("counts a phone bar the same way", () => {
+    stateViewport(844, 390);
+    pinnedBar({ top: 750, bottom: 844 }, "data-pinned-phone-bar");
+    const panel = open({ top: 600, bottom: 640 });
+
+    expect(panel.style.bottom).toBe(`${844 - 600 + 4}px`);
+  });
+
+  it("re-places when a bar arrives after the panel is open", async () => {
+    stateViewport(720);
+    const panel = open({ top: 400, bottom: 440 });
+    expect(panel.style.top).toBe("444px");
+
+    const late = document.createElement("div");
+    stateRect(late, { top: 500, bottom: 700 });
+    document.body.append(late);
+    await act(async () => {
+      late.setAttribute("data-pinned-bottom-bar", "");
+      await Promise.resolve();
+    });
+
+    // Only 56px are left below it now, so the panel that was hanging down goes above instead
+    const placed = document.querySelector('[role="listbox"]')!.parentElement as HTMLElement;
+    expect(placed.style.top).toBe("");
+    expect(placed.style.bottom).toBe(`${720 - 400 + 4}px`);
+  });
+
+  // The old rule asked only whether the trigger had more room above it than the panel wanted
+  // below; it flipped into a space smaller than the one it left
+  it("stays below when there is less room above than below", () => {
+    stateViewport(720);
+    pinnedBar({ top: 660, bottom: 720 });
+    // below = 660 - 450 - 4 = 206, above = 210 - 12 = 198
+    const panel = open({ top: 210, bottom: 450 });
+
+    expect(panel.style.top).toBe("454px");
+    expect(panel.style.maxHeight).toBe("206px");
+  });
+
+  it("keeps the panel inside the right-hand edge", () => {
+    stateViewport(720, 400);
+    const panel = open({ top: 100, bottom: 140, left: 320 });
+
+    // 400 - 224 - 8
+    expect(panel.style.left).toBe("168px");
+  });
+
+  it("re-places when the trigger grows under it", () => {
+    stateViewport(720);
+    const panel = open({ top: 100, bottom: 140 });
+    expect(panel.style.top).toBe("144px");
+
+    const trigger = screen.getByRole("combobox", { name: "Template category" });
+    stateRect(trigger, { top: 100, bottom: 180 });
+    act(() => {
+      resized();
+    });
+
+    expect(
+      (document.querySelector('[role="listbox"]')!.parentElement as HTMLElement).style.top
+    ).toBe("184px");
   });
 });

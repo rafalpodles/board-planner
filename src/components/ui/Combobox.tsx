@@ -64,24 +64,24 @@ const PANEL_WIDTH = 224;
 const PANEL_MAX_HEIGHT = 260;
 /** Between the panel and the trigger, and between the panel and whatever bounds it */
 const GAP = 4;
+/** Kept clear of the top of the screen, so a flipped panel does not read as cut off */
+const TOP_MARGIN = 12;
 const PINNED_BARS = "[data-pinned-bottom-bar],[data-pinned-phone-bar]";
-/** The search box's own height, taken out of what is left for the list */
-const SEARCH_HEIGHT = 33;
 
 /**
  * The bottom of the space a panel may occupy. A bar pinned to the bottom of the screen says so
- * with `data-pinned-bottom-bar` (or `data-pinned-phone-bar`, which only applies below `lg`) — the
- * same attributes the PM launcher steps around. Measuring against the viewport instead put a
- * flipped panel on top of the settings save bar, over the half that says there are unsaved
- * changes (BP-555).
+ * with `data-pinned-bottom-bar` or `data-pinned-phone-bar` — the same attributes the PM launcher
+ * steps around. Measuring against the viewport instead put a flipped panel on top of the settings
+ * save bar, over the half that says there are unsaved changes (BP-555).
+ *
+ * A bar hidden at this width is not asked about: it has no height, and reading the breakpoint
+ * instead disagreed with it — Tailwind's `lg` is `64rem`, which a browser resolves against its own
+ * default font size, so at 1100px with 20px text the phone bar was on screen while a
+ * `max-width: 1023px` query said it was not.
  */
 function floorOfFreeSpace() {
   let floor = document.documentElement.clientHeight;
-  const phone = window.matchMedia("(max-width: 1023px)").matches;
-  const bars = document.querySelectorAll<HTMLElement>(
-    phone ? PINNED_BARS : "[data-pinned-bottom-bar]"
-  );
-  for (const bar of bars) {
+  for (const bar of document.querySelectorAll<HTMLElement>(PINNED_BARS)) {
     const r = bar.getBoundingClientRect();
     if (r.height > 0) floor = Math.min(floor, r.top);
   }
@@ -182,7 +182,7 @@ export function Combobox(props: ComboboxProps) {
     // Flipping above such a trigger still lands on the bar; the panel hangs off the floor instead
     const ledge = Math.min(trigger.top, floor);
     const below = floor - trigger.bottom - GAP;
-    const above = ledge - GAP * 3;
+    const above = ledge - TOP_MARGIN;
     // Flipped only when there is genuinely more room above: asking whether the panel fits below
     // and not whether it fits above put its top off the screen on a short window (BP-547)
     const flip = below < PANEL_MAX_HEIGHT && above > below;
@@ -212,8 +212,28 @@ export function Combobox(props: ComboboxProps) {
     if (!open || !trigger || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
     observer.observe(trigger);
-    for (const bar of document.querySelectorAll(PINNED_BARS)) observer.observe(bar);
-    return () => observer.disconnect();
+    function watchBars() {
+      for (const bar of document.querySelectorAll(PINNED_BARS)) observer.observe(bar);
+    }
+    watchBars();
+    // A bar announces itself by gaining the attribute, so the set is not fixed at open: a save bar
+    // arrives when the form it belongs to is first dirtied, which can be from inside this panel
+    const arrivals =
+      typeof MutationObserver === "undefined"
+        ? null
+        : new MutationObserver(() => {
+            watchBars();
+            measure();
+          });
+    arrivals?.observe(document.body, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["data-pinned-bottom-bar", "data-pinned-phone-bar"],
+    });
+    return () => {
+      observer.disconnect();
+      arrivals?.disconnect();
+    };
   }, [open, measure]);
 
   // `rect` rather than `open`: the panel is rendered only once it has been measured, which
@@ -223,8 +243,18 @@ export function Combobox(props: ComboboxProps) {
   // The listbox rather than the panel around it: the wrapper carries the position and the
   // pointer-event stoppers but no role and no name, so focusing it announced nothing where
   // the trigger it took focus from had announced "…, combo box, expanded".
+  const focused = useRef(false);
   useEffect(() => {
-    if (open && place) (showSearch ? search : list).current?.focus();
+    if (!open) {
+      focused.current = false;
+      return;
+    }
+    // Once: `place` is a fresh object on every re-measure, and a resize under an open panel was
+    // taking focus off the option the reader had just clicked
+    if (place && !focused.current) {
+      focused.current = true;
+      (showSearch ? search : list).current?.focus();
+    }
   }, [open, place, showSearch]);
 
   useEffect(() => {
@@ -364,7 +394,10 @@ export function Combobox(props: ComboboxProps) {
               width: PANEL_WIDTH,
               maxHeight: place.maxHeight,
             }}
-            className={`z-50 overflow-hidden rounded-lg border border-border bg-bg-card shadow-lg ${panelClassName}`}
+            // A column, so the list takes whatever the search box leaves rather than a height
+            // stated here — a number that drifts clips the last option inside a scroller that
+            // believes it has shown it
+            className={`z-50 flex flex-col overflow-hidden rounded-lg border border-border bg-bg-card shadow-lg ${panelClassName}`}
           >
             {showSearch && (
               <input
@@ -376,7 +409,7 @@ export function Combobox(props: ComboboxProps) {
                 }}
                 placeholder="Search…"
                 aria-label={`Search ${label}`}
-                className="w-full border-b border-border bg-transparent px-2.5 py-2 text-xs text-text outline-none placeholder:text-text-muted"
+                className="w-full shrink-0 border-b border-border bg-transparent px-2.5 py-2 text-xs text-text outline-none placeholder:text-text-muted"
               />
             )}
             <div
@@ -393,9 +426,7 @@ export function Combobox(props: ComboboxProps) {
               aria-activedescendant={filtered[active] ? `${listboxId}-${active}` : undefined}
               // The ring is drawn inside its own box: the panel around it is `overflow-hidden`,
               // which crops an offset outline exactly as it crops anything else
-              // The panel's own cap is what is free where it landed, and the search box shares it
-              style={{ maxHeight: place.maxHeight - (showSearch ? SEARCH_HEIGHT : 0) }}
-              className="focus-ring-inset overflow-y-auto py-1"
+              className="focus-ring-inset min-h-0 flex-1 overflow-y-auto py-1"
             >
               {filtered.length === 0 && (
                 <p className="px-2.5 py-2 text-xs text-text-muted">No matches</p>
