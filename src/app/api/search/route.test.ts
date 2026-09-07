@@ -183,6 +183,19 @@ describe("GET /api/search", () => {
     expect(lastQuery.filter).toHaveProperty("$or");
   });
 
+  // A prefix the rule cannot allow is not a key, so the projects collection is never asked about
+  // it — the pattern check is what keeps a text query out of the key branch
+  it.each([
+    ["does not start with a letter", "9BP-1"],
+    ["is longer than the cap", `${"A".repeat(21)}-1`],
+    ["holds a character the rule forbids", "B P-1"],
+  ])("does not look up a board whose key %s", async (_label, query) => {
+    await search(query);
+
+    expect(projectFindOne).not.toHaveBeenCalled();
+    expect(lastQuery.filter).toHaveProperty("$or");
+  });
+
   it("escapes regex metacharacters instead of running them", async () => {
     await search(".*");
 
