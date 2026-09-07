@@ -15,8 +15,9 @@ const FOCUSABLE_SELECTOR = [
 const openLayers: HTMLElement[] = [];
 
 const layerWatchers = new Set<() => void>();
-// The subset that is a bottom sheet below `sm`. The drawer, the search layer and a full-screen
-// `bare` dialog are layers too, and none of them puts anything in the bottom-right corner.
+// The subset that is a bottom sheet below `sm`, whose action row is what a toast in the corner
+// covers. The drawer, the search layer and a full-screen `bare` dialog are layers too, and none
+// of them has one.
 const openSheets: HTMLElement[] = [];
 
 export function registerLayer(el: HTMLElement, sheet = false): () => void {

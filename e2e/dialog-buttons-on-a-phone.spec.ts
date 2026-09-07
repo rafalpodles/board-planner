@@ -275,8 +275,10 @@ test("a toast still on screen clears the sheet it opens under", async ({ page })
   await expect(launcher(page)).toBeVisible();
 
   // A toast lives three seconds on a real timer, and reopening the sheet is a menu, a popover and
-  // an option click. Frozen, so a loaded machine cannot turn "it expired" into "the fix regressed"
+  // an option click. `install` alone leaves the clock running; the pair is what stops it, so a
+  // loaded machine cannot turn "it expired" into "the fix regressed".
   await page.clock.install();
+  await page.clock.pauseAt(Date.now());
 
   await test.step("a refused delete raises the toast", async () => {
     await openDeleteConfirm(page);
@@ -305,11 +307,12 @@ test("a toast still on screen clears the sheet it opens under", async ({ page })
   // the button's own corner is still the button's.
   expect(await coversItsOwnCorner(page, /^Delete$/)).toBe(true);
 
-  // …and the toast is still readable rather than pushed under the scrim, which is the half a
-  // z-index fix would have traded away
-  await expect(toast).toBeVisible();
-  expect(
-    await toast.evaluate((el) => Number(getComputedStyle(el.parentElement!).zIndex)),
-    "the tray is above the scrim"
-  ).toBe(50);
+  // …and the toast is still readable rather than greyed out under the scrim, which is the half a
+  // z-index fix would have traded away. The scrim is `z-50` too, so the number proves nothing —
+  // what decides between equals is that the tray is painted after the page, and this reads that.
+  const scrimIsBehind = await toast.evaluate((el) => {
+    const scrim = document.querySelector('[role="dialog"]')!.parentElement!;
+    return !!(scrim.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+  expect(scrimIsBehind, "the tray is painted after the scrim, so it is the readable one").toBe(true);
 });
