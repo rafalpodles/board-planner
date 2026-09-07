@@ -7,7 +7,9 @@ import {
   useCallback,
   useEffect,
   useRef,
+  useSyncExternalStore,
 } from "react";
+import { openLayerCount, subscribeLayers } from "@/lib/focus-trap";
 
 type ToastType = "success" | "error" | "info";
 
@@ -50,6 +52,13 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     [removeToast]
   );
 
+  // Read at render, not at raise: a dialog opened while a toast is still up moves it too
+  const layered = useSyncExternalStore(
+    subscribeLayers,
+    () => openLayerCount() > 0,
+    () => false
+  );
+
   // Cleanup on unmount
   useEffect(() => {
     const timers = timersRef.current;
@@ -62,7 +71,17 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     <ToastContext.Provider value={{ toast }}>
       {children}
       {toasts.length > 0 && (
-        <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm">
+        <div
+          data-testid="toast-tray"
+          // A phone's dialog is a bottom sheet whose action row is exactly where a toast lands.
+          // It moves rather than dropping a layer: behind the scrim it would be unreadable, and a
+          // toast raised from inside the dialog is feedback the reader needs (BP-590).
+          className={`fixed z-50 flex max-w-sm flex-col gap-2 sm:bottom-4 sm:right-4 sm:left-auto sm:top-auto sm:w-auto sm:translate-x-0 ${
+            layered
+              ? "left-1/2 top-4 w-[calc(100%-2rem)] -translate-x-1/2"
+              : "bottom-4 right-4"
+          }`}
+        >
           {toasts.map((t) => (
             <div
               key={t.id}

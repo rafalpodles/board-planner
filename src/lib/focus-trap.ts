@@ -14,11 +14,23 @@ const FOCUSABLE_SELECTOR = [
 // opened from inside it would fight it for both.
 const openLayers: HTMLElement[] = [];
 
+const layerWatchers = new Set<() => void>();
+
 export function registerLayer(el: HTMLElement): () => void {
   openLayers.push(el);
+  layerWatchers.forEach((notify) => notify());
   return () => {
     const at = openLayers.indexOf(el);
     if (at >= 0) openLayers.splice(at, 1);
+    layerWatchers.forEach((notify) => notify());
+  };
+}
+
+/** For anything painted outside a layer that has to know one is there — the toast's geometry */
+export function subscribeLayers(notify: () => void): () => void {
+  layerWatchers.add(notify);
+  return () => {
+    layerWatchers.delete(notify);
   };
 }
 
