@@ -140,3 +140,43 @@ test.describe("a PM chip", () => {
     await expect(page.getByRole("heading", { name: PROJECT_NAME })).toBeVisible();
   });
 });
+
+/**
+ * BP-541. A soft navigation keeps an unmatched parallel slot's active subpage, and `@modal`'s
+ * `default.tsx` only answers a hard load — so leaving an open task for anything that is not a task
+ * left the editor parked over whatever arrived.
+ *
+ * The route the ticket describes — ⌘K while the modal is open — is **closed**, and this says so
+ * rather than asserting the fix through a door nobody can open: `SearchLayer` refuses the shortcut
+ * while any layer is registered (BP-522/BP-543), and the sidebar sits under the modal's overlay.
+ * The residue is still a real property of the slot, which is why the modal now reads the address
+ * on every render; that half is pinned by the component's own tests.
+ */
+test.describe("leaving an open task", () => {
+  async function openTheModal(page: Page) {
+    await page.goto(`/projects/${PROJECT_KEY}`);
+    await page.getByText(SIBLING_TASK_TITLE).first().click();
+    await expect(taskDialog(page).getByLabel("Task title")).toHaveValue(SIBLING_TASK_TITLE);
+  }
+
+  test("cannot be left by ⌘K, which the open layer refuses", async ({ page }) => {
+    await openTheModal(page);
+
+    await page.keyboard.press("ControlOrMeta+k");
+
+    expect(await page.getByRole("dialog", { name: "Search" }).count()).toBe(0);
+    await expect(taskDialog(page)).toHaveCount(1);
+  });
+
+  // The control: the same key opens it the moment the task is closed, so the assertion above is
+  // about the layer and not about a shortcut that stopped working
+  test("and by the same key the moment the task is closed", async ({ page }) => {
+    await openTheModal(page);
+    await page.keyboard.press("Escape");
+    await expect(taskDialog(page)).toHaveCount(0);
+
+    await page.keyboard.press("ControlOrMeta+k");
+
+    await expect(page.getByRole("dialog", { name: "Search" })).toBeVisible();
+  });
+});
