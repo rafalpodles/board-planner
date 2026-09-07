@@ -140,6 +140,8 @@ describe("GeneralSection member access", () => {
 
     await waitFor(() => expect(toast).toHaveBeenCalledWith(LIST_REFRESH_FAILED, "error"));
     expect(select).toHaveProperty("value", "member");
+    // And nobody else's relation moved with it
+    expect(screen.getByLabelText("Access for bob")).toHaveProperty("value", "none");
   });
 
   /**
@@ -156,17 +158,27 @@ describe("GeneralSection member access", () => {
 
     await waitFor(() => expect(toast).toHaveBeenCalledWith(LIST_REFRESH_FAILED, "error"));
     expect(screen.queryByLabelText("Access for alice")).toBeNull();
+    // Only that row: without the id guard a revocation takes the whole list with it
+    expect(screen.getByLabelText("Access for bob")).toBeTruthy();
   });
 
-  // Why dropping the row is always right here: the only rows with a select are the ones the
-  // endpoint builds from grants, and an instance admin — the one kind it returns without one —
-  // has a label instead, so no revocation on this screen can reach that case
-  it("gives an instance admin a label rather than an access select", async () => {
+  /**
+   * Why dropping the row is always right here: a `<select>` exists only on a row the endpoint built
+   * from a grant. The label is keyed on `instanceAdmin` alone — *not* on holding no relation — so
+   * an admin who also holds a grant is a label too, and no revocation on this screen can reach the
+   * one kind of row the endpoint returns without a grant.
+   */
+  it("gives an instance admin a label whether or not they hold a grant", async () => {
+    api.get.mockResolvedValue([
+      ...members,
+      { _id: "u4", username: "dan", fullName: "Dan D", relation: "owner", instanceAdmin: true },
+    ]);
     renderSection();
     await screen.findByLabelText("Access for alice");
 
     expect(screen.queryByLabelText("Access for carol")).toBeNull();
-    expect(screen.getByText("Instance admin")).toBeTruthy();
+    expect(screen.queryByLabelText("Access for dan")).toBeNull();
+    expect(screen.getAllByText("Instance admin")).toHaveLength(2);
   });
 
   // The control: a write that genuinely fails must still be reported as the write's failure, and
