@@ -154,10 +154,13 @@ describe("where the panel lands", () => {
   // was excluded while on screen, so what counts is that it has a height, not how wide the window is
   it("counts a phone bar the same way", () => {
     stateViewport(844, 390);
-    pinnedBar({ top: 750, bottom: 844 }, "data-pinned-phone-bar");
-    const panel = open({ top: 600, bottom: 640 });
+    // Against the viewport there is room below for the whole panel; against the free space there
+    // is not, so counting the bar is the difference between hanging down and flipping
+    pinnedBar({ top: 400, bottom: 844 }, "data-pinned-phone-bar");
+    const panel = open({ top: 200, bottom: 240 });
 
-    expect(panel.style.bottom).toBe(`${844 - 600 + 4}px`);
+    expect(panel.style.top).toBe("");
+    expect(panel.style.bottom).toBe(`${844 - 200 + 4}px`);
   });
 
   it("re-places when a bar arrives after the panel is open", async () => {
