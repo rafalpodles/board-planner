@@ -341,7 +341,9 @@ export function Comments({
                     aria-haspopup="menu"
                     aria-expanded={open}
                     aria-label="Add a reaction"
-                    className="text-text-muted hover:text-text text-xs px-1.5 py-0.5 rounded-full border border-transparent hover:border-border transition-colors cursor-pointer"
+                    // 44px on a phone, the minimum from BP-365: this is the control the ticket is
+                    // about, and a 22px target is barely one for the audience it was reopened for
+                    className="text-text-muted hover:text-text text-xs px-1.5 py-0.5 rounded-full border border-transparent hover:border-border transition-colors cursor-pointer min-h-11 min-w-11 sm:min-h-0 sm:min-w-0"
                   >
                     +
                   </button>
