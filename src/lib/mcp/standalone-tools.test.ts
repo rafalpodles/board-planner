@@ -125,4 +125,21 @@ describe("the standalone MCP server, driven rather than read", () => {
 
     expect(permissive.map(([name]) => name)).toEqual([]);
   });
+
+  /**
+   * The second copy of the bound (BP-564). `npm test` does not run anything under `mcp-server/`,
+   * and the package builds separately, so a bound applied to one copy and not the other compiles
+   * clean on both sides and nothing says a word — the reason api-client-drift.test.ts exists.
+   * `echo.test.ts` asserts the two helper files are identical; this asserts the standalone
+   * *call site* actually uses it.
+   */
+  it("bounds a caller's parameter name in the standalone copy too", async () => {
+    const { unknownParameterMessage } = await import("../../../mcp-server/src/strict-input");
+
+    const said = unknownParameterMessage(["z".repeat(50_000)], {}, true);
+
+    expect(said).toContain(`"${"z".repeat(64)}…"`);
+    expect(said.length).toBeLessThan(200);
+    expect(unknownParameterMessage(["checklist"], {}, true)).toContain('"checklist"');
+  });
 });

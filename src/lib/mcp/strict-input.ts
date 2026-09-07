@@ -1,5 +1,17 @@
 import { z } from "zod";
-import { echo } from "@/lib/echo";
+
+/**
+ * The bound on a caller's own words, kept here rather than imported: this file is duplicated byte
+ * for byte into `mcp-server/`, which is its own package on its own module resolution, and a
+ * specifier that differs between the copies is a difference the drift guard refuses. Same 64 as
+ * `@/lib/echo`, which the sites that can import it use (BP-564).
+ */
+const ECHO_LIMIT = 64;
+
+function echo(value: unknown): string {
+  const text = String(value);
+  return text.length > ECHO_LIMIT ? `${text.slice(0, ECHO_LIMIT)}…` : text;
+}
 
 /**
  * BP-497: `z.object(shape)` drops a key the shape does not declare, so a call naming a parameter
