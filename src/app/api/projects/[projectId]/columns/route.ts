@@ -5,7 +5,7 @@ import { Project } from "@/models/project";
 import { Task } from "@/models/task";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { COLUMN_ROLES, ColumnRole, ROLE_LABELS } from "@/types";
-import { columnIdsWithRole } from "@/lib/columns";
+import { columnIdsWithRole, effectiveColumns } from "@/lib/columns";
 
 const MAX_COLUMNS = 12;
 const MAX_LABEL = 40;
@@ -53,7 +53,13 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  const existingIds = new Set((project.columns || []).map((c) => c.id));
+  // The columns this board actually has, which for one stored with `columns: []` is the seven
+  // defaults everybody is shown — this editor included. Reading the raw array here made every
+  // incoming id a stranger on such a board: the defaults could not be claimed, so keeping one was
+  // indistinguishable from deleting it, and the in-use check below never saw what was leaving
+  // (BP-514).
+  const existing = effectiveColumns(project.columns);
+  const existingIds = new Set(existing.map((c) => c.id));
   // Every id the incoming board claims by identity, resolved before a slug is handed out
   const claims: string[] = columns
     .filter((raw) => typeof raw?.id === "string" && existingIds.has(raw.id))
@@ -118,7 +124,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
   // the one whose fix — move the tasks — the person has to make first whatever else is wrong
   // Removed means nobody claimed it, not that its id went unused: a newcomer taking a
   // departing column's id used to hide the departure from the check below
-  const removed = (project.columns || []).filter((c) => !claimed.has(c.id));
+  const removed = existing.filter((c) => !claimed.has(c.id));
   for (const col of removed) {
     const inUse = await Task.find({ project: projectId, status: col.id })
       .select("taskNumber")
