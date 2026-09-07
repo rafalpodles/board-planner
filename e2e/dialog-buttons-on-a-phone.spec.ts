@@ -155,3 +155,54 @@ test("the launcher does not step up where nothing is pinned", async ({ page }) =
   );
   expect(bottom).toBe("24px");
 });
+
+// The panel is sized from the position it is anchored at, so raising the launcher without
+// resizing it pushed its header — and its only close control — off the top of the screen
+test("the PM panel opens fully on screen above a pinned bar", async ({ page }) => {
+  await page.setViewportSize(PHONE);
+  await signIn(page);
+  await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
+  await expect(launcher(page)).toBeVisible();
+
+  await launcher(page).click();
+  const close = page.getByRole("button", { name: "Close PM chat" }).first();
+  await expect(close).toBeVisible();
+
+  const fits = await page.evaluate(() => {
+    const panel = document.querySelector('[class*="rounded-2xl"][class*="shadow-2xl"]')!;
+    const closeEl = document.querySelector('[aria-label="Close PM chat"]')!;
+    const p = panel.getBoundingClientRect();
+    const c = closeEl.getBoundingClientRect();
+    const at = document.elementFromPoint(c.left + c.width / 2, c.top + c.height / 2);
+    return {
+      panelTop: Math.round(p.top),
+      closeTop: Math.round(c.top),
+      closeOwnsItsCentre: at === closeEl || closeEl.contains(at),
+    };
+  });
+
+  expect(fits.panelTop).toBeGreaterThanOrEqual(0);
+  expect(fits.closeTop).toBeGreaterThanOrEqual(0);
+  expect(fits.closeOwnsItsCentre).toBe(true);
+});
+
+// The control for the scope: at desktop width the bar is `lg:hidden` — in the DOM but not on
+// screen — so nothing is actually pinned and the launcher must stay where it always is
+test("a task page at desktop width does not raise the launcher", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await signIn(page);
+  await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
+  await expect(page.getByRole("button", { name: /^Delete task$/ }).or(page.getByRole("button", { name: "More actions" })).first()).toBeVisible();
+  await expect(launcher(page)).toBeVisible();
+
+  const state = await page.evaluate(() => ({
+    bottom: getComputedStyle(document.querySelector('[aria-label="Open PM chat"]')!).bottom,
+    barIsInTheDom: !!document.querySelector("[data-pinned-bottom-bar]"),
+    barIsOnScreen:
+      document.querySelector("[data-pinned-bottom-bar]")?.getBoundingClientRect().height !== 0,
+  }));
+
+  expect(state.barIsInTheDom).toBe(true);
+  expect(state.barIsOnScreen).toBe(false);
+  expect(state.bottom).toBe("24px");
+});
