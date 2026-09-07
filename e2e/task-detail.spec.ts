@@ -80,17 +80,36 @@ function taskWrite(page: Page, method: string, urlPart: string) {
 
 /**
  * BP-595. Adding a criterion is `fill` + Enter, and when no write follows, a bare
- * `waitForResponse` timeout says only that. It has three causes and they need different fixes:
- * React never saw the fill, so `add()` read an empty draft; the key was consumed by the
- * suggestion list; or the save was made and lost. The box clearing is React's own answer — `add()`
- * empties the draft, and the field is controlled — so reading it back names the first two.
+ * `waitForResponse` timeout says only that. Three causes need three different fixes: React never
+ * saw the fill, so `add()` read an empty draft; the key was swallowed by the suggestion list; or
+ * the write was made and lost.
+ *
+ * The criterion's own row is the one signal only React can produce — an empty box is not, because
+ * a controlled `<textarea>` whose state never changed is reset to "" on the next commit, which
+ * looks exactly like a handled Enter. When the row does not arrive, the box separates the first
+ * two: still holding the text means the key never reached `add()`.
  */
 async function addCriterion(page: Page, taskId: string, text: string) {
   const addBox = page.getByLabel("Add criterion");
   const saved = taskWrite(page, "PUT", `/tasks/${taskId}`);
+  // Nothing awaits this if the diagnosis below throws, and an abandoned waitForResponse rejects
+  // when the page closes — on top of the message this helper exists to deliver.
+  void saved.catch(() => {});
+
   await addBox.fill(text);
   await addBox.press("Enter");
-  await expect(addBox, `Enter did not reach React: the box still holds what was typed, so no write was ever attempted for "${text}"`).toHaveValue("");
+
+  try {
+    await expect(page.getByRole("checkbox", { name: text })).toBeVisible({ timeout: 5_000 });
+  } catch {
+    const held = await addBox.inputValue();
+    throw new Error(
+      held === ""
+        ? `no criterion "${text}" was added and the box is empty: React never took the fill, so add() saw an empty draft and no write was attempted`
+        : `no criterion "${text}" was added and the box still holds "${held}": the key never reached add()`
+    );
+  }
+
   expect((await saved).status()).toBe(200);
 }
 
