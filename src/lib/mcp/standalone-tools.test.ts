@@ -142,4 +142,36 @@ describe("the standalone MCP server, driven rather than read", () => {
     expect(said.length).toBeLessThan(200);
     expect(unknownParameterMessage(["checklist"], {}, true)).toContain('"checklist"');
   });
+
+  /**
+   * The standalone package keeps its **own** `resolveFieldsByName`, distinct from the app's in
+   * `src/lib/custom-fields.ts` — which is how the first pass at BP-564 bounded the app's copy and
+   * left this one echoing whatever a caller sent. Exactly the failure mode the ticket is about,
+   * repeated inside the fix for it.
+   */
+  it("bounds a field name and an option value in its own resolver", async () => {
+    const client = stubClient();
+    client.getProject = vi.fn(async () => ({
+      _id: "p1",
+      customFields: [
+        { _id: "f1", name: "Owoce", fieldType: "dropdown", options: [{ id: "a", value: "Apples" }] },
+      ],
+    })) as never;
+    const call = await connected(client);
+    const huge = "z".repeat(50_000);
+
+    const unknownField = await call("update_task", { taskKey: "BP-1", fields: { [huge]: "x" } });
+    expect(unknownField.refused).toBe(true);
+    expect(unknownField.said).toContain(`"${"z".repeat(64)}…"`);
+    expect(unknownField.said.length).toBeLessThan(400);
+
+    const unknownOption = await call("update_task", { taskKey: "BP-1", fields: { Owoce: huge } });
+    expect(unknownOption.refused).toBe(true);
+    expect(unknownOption.said).toContain(`"${"z".repeat(64)}…"`);
+    expect(unknownOption.said.length).toBeLessThan(400);
+
+    // Still quoted whole when it is something anybody would really send
+    const short = await call("update_task", { taskKey: "BP-1", fields: { Owoce: "Pears" } });
+    expect(short.said).toContain('"Pears"');
+  });
 });
