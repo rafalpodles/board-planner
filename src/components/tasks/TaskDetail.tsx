@@ -279,6 +279,7 @@ function TaskDetailView({
       // this line (BP-565).
       setDeleting(false);
       setConfirmDelete(false);
+      setHeldDelete(null);
       onClose();
     } catch (err) {
       // The same shape the status change already handles, and it has to be handled here for a
@@ -294,6 +295,7 @@ function TaskDetailView({
       toast("Failed to delete task", "error");
       setDeleting(false);
       setConfirmDelete(false);
+      setHeldDelete(null);
     }
   }
 
@@ -513,10 +515,12 @@ function TaskDetailView({
       <ConfirmDialog
         open={!!heldDelete}
         onClose={() => setHeldDelete(null)}
-        onConfirm={() => {
-          setHeldDelete(null);
-          return handleDelete(true);
-        }}
+        // Not closed here: closing before the write means `deleting` never flips while this dialog
+        // is mounted, so `loading` and the `closeDisabled` gate BP-565 added could never apply to
+        // it — the forced delete ran with nothing on screen, and its failure toast had nothing to
+        // land on. `handleDelete` clears this the same way it clears the first confirmation, on
+        // every exit (BP-588).
+        onConfirm={() => handleDelete(true)}
         title="This task is being executed"
         message={
           heldDelete

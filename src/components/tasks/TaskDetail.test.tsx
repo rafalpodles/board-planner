@@ -234,6 +234,74 @@ describe("TaskDetail", () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 
+  /**
+   * BP-588. The confirmation closed itself before calling the delete, so `deleting` never flipped
+   * while it was mounted — `loading` and the `closeDisabled` gate BP-565 added could not apply to
+   * it, and the forced delete ran with nothing on screen for its failure to land on.
+   */
+  it("keeps the forced-delete confirmation up while the delete runs", async () => {
+    let release!: () => void;
+    api.del
+      .mockRejectedValueOnce({
+        status: 409,
+        body: { runConflict: { workerName: "mac", phase: "agent" } },
+      })
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          release = () => resolve({});
+        })
+      );
+    renderDetail({});
+    await loaded();
+
+    await act(async () => screen.getByRole("button", { name: "More actions" }).click());
+    const menu = within(screen.getByRole("listbox", { name: "More actions" }));
+    await act(async () => menu.getByRole("option", { name: "Delete task" }).click());
+    await act(async () => screen.getByRole("button", { name: "Delete" }).click());
+    expect(screen.getByText("This task is being executed")).toBeTruthy();
+
+    await act(async () => {
+      screen.getByRole("button", { name: "Delete anyway" }).click();
+    });
+
+    expect(
+      screen.queryByText("This task is being executed"),
+      "the dialog stays up for the write it started"
+    ).not.toBeNull();
+
+    await act(async () => {
+      release();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(screen.queryByText("This task is being executed")).toBeNull());
+  });
+
+  // And it closes once the answer is in, rather than hanging over the task it did not delete.
+  // The toast itself is not asserted: this file's `useToast` mock returns a fresh spy per call,
+  // so an assertion on it could never fail
+  it("closes once a failed forced delete has answered", async () => {
+    api.del
+      .mockRejectedValueOnce({
+        status: 409,
+        body: { runConflict: { workerName: "mac", phase: "agent" } },
+      })
+      .mockRejectedValueOnce(new Error("the worker would not let go"));
+    renderDetail({});
+    await loaded();
+
+    await act(async () => screen.getByRole("button", { name: "More actions" }).click());
+    const menu = within(screen.getByRole("listbox", { name: "More actions" }));
+    await act(async () => menu.getByRole("option", { name: "Delete task" }).click());
+    await act(async () => screen.getByRole("button", { name: "Delete" }).click());
+
+    await act(async () => {
+      screen.getByRole("button", { name: "Delete anyway" }).click();
+    });
+
+    expect(api.del).toHaveBeenLastCalledWith("/api/projects/TP/tasks/t1", { force: true });
+    expect(screen.queryByText("This task is being executed")).toBeNull();
+  });
+
   it("offers delete from the overflow menu, behind the same confirmation", async () => {
     api.del.mockResolvedValue({});
     const onClose = vi.fn();
