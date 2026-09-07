@@ -37,7 +37,7 @@ export function PmChatWidget() {
   return (
     <>
       {open && (
-        <div className="fixed bottom-24 right-4 z-40 w-[min(30rem,calc(100vw-2rem))] h-[min(44rem,calc(100vh-8rem))] max-lg:[body:has([data-pinned-bottom-bar])_&]:bottom-40 max-lg:[body:has([data-pinned-bottom-bar])_&]:h-[min(44rem,calc(100vh-12rem))] bg-bg border border-border rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+        <div data-testid="pm-chat-panel" className="fixed bottom-24 right-4 z-40 w-[min(30rem,calc(100vw-2rem))] h-[min(44rem,calc(100vh-8rem))] max-lg:[body:has([data-pinned-bottom-bar])_&]:bottom-40 max-lg:[body:has([data-pinned-bottom-bar])_&]:h-[min(44rem,calc(100vh-12rem))] bg-bg border border-border rounded-2xl shadow-2xl flex flex-col overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-bg-card shrink-0">
             <p className="font-semibold text-sm">🤖 PM — {project.name}</p>
             <div className="flex items-center gap-3">
@@ -64,9 +64,9 @@ export function PmChatWidget() {
         </div>
       )}
       {/* z-40, not z-50: at equal z the one painted last wins, and that is this, rendered after
-          the page — so a dialog's own buttons were losing to it (BP-589). The raised position is
-          for a bar pinned to the bottom, which layering cannot settle: both are meant to be
-          pressed (BP-591). */}
+          the page — so a dialog's own buttons were losing to it, and below the scrim it greys out
+          with the rest of the page (BP-589). The raised position is for a bar pinned to the
+          bottom, which layering cannot settle: both are meant to be pressed (BP-591). */}
       <button
         onClick={() => setOpen((v) => !v)}
         aria-label={open ? "Close PM chat" : "Open PM chat"}

@@ -169,21 +169,25 @@ test("the PM panel opens fully on screen above a pinned bar", async ({ page }) =
   await expect(close).toBeVisible();
 
   const fits = await page.evaluate(() => {
-    const panel = document.querySelector('[class*="rounded-2xl"][class*="shadow-2xl"]')!;
+    const panel = document.querySelector('[data-testid="pm-chat-panel"]')!;
     const closeEl = document.querySelector('[aria-label="Close PM chat"]')!;
     const p = panel.getBoundingClientRect();
     const c = closeEl.getBoundingClientRect();
     const at = document.elementFromPoint(c.left + c.width / 2, c.top + c.height / 2);
+    const bar = document.querySelector("[data-pinned-bottom-bar]")!.getBoundingClientRect();
     return {
       panelTop: Math.round(p.top),
       closeTop: Math.round(c.top),
       closeOwnsItsCentre: at === closeEl || closeEl.contains(at),
+      // The raise itself, not only the height that follows from it
+      panelClearsTheBar: p.bottom <= bar.top,
     };
   });
 
   expect(fits.panelTop).toBeGreaterThanOrEqual(0);
   expect(fits.closeTop).toBeGreaterThanOrEqual(0);
   expect(fits.closeOwnsItsCentre).toBe(true);
+  expect(fits.panelClearsTheBar).toBe(true);
 });
 
 // The control for the scope: at desktop width the bar is `lg:hidden` — in the DOM but not on

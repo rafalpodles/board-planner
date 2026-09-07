@@ -101,9 +101,12 @@ describe("where the PM launcher is painted", () => {
     render(<PmChatWidget />);
     await waitFor(() => expect(launcher()).not.toBeNull());
 
-    const className = launcher()!.className;
-    expect(className).toContain("bottom-6");
-    expect(className).toContain("[data-pinned-bottom-bar]");
+    // The whole token, not a substring of it: asserting only the attribute name survives losing
+    // the `max-lg:` scope, which is exactly the defect review caught here
+    expect(launcher()!.className.split(/\s+/)).toContain(
+      "max-lg:[body:has([data-pinned-bottom-bar])_&]:bottom-24"
+    );
+    expect(launcher()!.className.split(/\s+/)).toContain("bottom-6");
   });
 
   // The control: the launcher is withheld for its own reasons, and those still hold
