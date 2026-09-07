@@ -407,6 +407,25 @@ describe("Comments when the read fails", () => {
     expect(onCountChange).toHaveBeenLastCalledWith(null);
   });
 
+  // BP-582. A reload that fails leaves the tab's number standing beside a panel saying the count
+  // is unknown — "Comments 0" next to "Failed to load the comments."
+  it("withdraws the count when a later read fails", async () => {
+    const onCountChange = vi.fn();
+    serve([comment]);
+    const view = render(
+      <Comments projectId="TP" taskId="t1" refreshKey={0} onCountChange={onCountChange} />
+    );
+    await waitFor(() => expect(onCountChange).toHaveBeenCalledWith(1));
+
+    // A comment posted from the phone's bottom bar re-reads the list; this one does not answer
+    api.get.mockRejectedValue(new Error("the read that never answered"));
+    view.rerender(
+      <Comments projectId="TP" taskId="t1" refreshKey={1} onCountChange={onCountChange} />
+    );
+
+    await waitFor(() => expect(onCountChange).toHaveBeenLastCalledWith(null));
+  });
+
   // Without this control the failure branch could be rendering whenever the list is empty
   it("still says there are none when the read answers with none", async () => {
     serve([]);

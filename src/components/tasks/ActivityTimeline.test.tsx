@@ -199,4 +199,22 @@ describe("ActivityTimeline across a task switch", () => {
 
     expect(screen.getByText(/Owner Name/)).toBeTruthy();
   });
+
+  // BP-582, the same shape as Comments next door: the tab draws this number, and a read that
+  // failed is no evidence for the one before it
+  it("withdraws the count when a later read fails", async () => {
+    const onCountChange = vi.fn();
+    api.get.mockResolvedValue([log]);
+    const view = render(
+      <ActivityTimeline projectId="TP" taskId="t1" refreshKey={0} onCountChange={onCountChange} />
+    );
+    await waitFor(() => expect(onCountChange).toHaveBeenCalledWith(1));
+
+    api.get.mockRejectedValue(new Error("the read that never answered"));
+    view.rerender(
+      <ActivityTimeline projectId="TP" taskId="t1" refreshKey={1} onCountChange={onCountChange} />
+    );
+
+    await waitFor(() => expect(onCountChange).toHaveBeenLastCalledWith(null));
+  });
 });

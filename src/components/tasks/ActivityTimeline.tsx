@@ -128,7 +128,10 @@ export function ActivityTimeline({
         onCountChange?.(data.length);
       })
       .catch(() => {
-        if (seq === loadSeq.current) setFailed(true);
+        if (seq !== loadSeq.current) return;
+        setFailed(true);
+        // Same as Comments next door: the tab's number is a claim about the read that just failed
+        onCountChange?.(null);
       });
   }
 

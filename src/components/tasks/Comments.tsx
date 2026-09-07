@@ -74,6 +74,9 @@ export function Comments({
       // answered supports none. The toast clears after three seconds; the sentence would not.
       if (seq !== loadSeq.current) return;
       setLoadFailed(true);
+      // The tab above draws this number, and the last read to answer is not evidence about this
+      // one. Leaving it there put "Comments 0" beside a panel saying the count is unknown (BP-582)
+      onCountChange?.(null);
       toast("Failed to load comments", "error");
     } finally {
       if (seq === loadSeq.current) setReading(false);
