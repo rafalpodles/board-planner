@@ -78,6 +78,35 @@ async function dragCardToPane(page: Page, card: Locator, pane: Locator) {
   await dataTransfer.dispose();
 }
 
+/**
+ * BP-594. Twice this spec failed in a full group run with nothing but a card count — five rows
+ * where four were expected — which is the same picture for three different causes: the pane had
+ * no drop handler, the dragstart carried no task id, or the server refused the move and the page
+ * put the card back. Five runs in group context reproduced none of them, so the next occurrence
+ * has to arrive already diagnosed rather than costing another investigation.
+ *
+ * The move is one PUT. Watching for it separates "no write was ever attempted" from "the write
+ * was refused", and the count assertions that follow then only have to explain themselves when
+ * the write itself was fine.
+ */
+async function dragAndWatchTheWrite(page: Page, card: Locator, pane: Locator, taskId: string) {
+  const write = page
+    .waitForResponse(
+      (res) => res.request().method() === "PUT" && res.url().includes(`/tasks/${taskId}`),
+      { timeout: 15_000 }
+    )
+    .catch(() => null);
+
+  await dragCardToPane(page, card, pane);
+
+  const response = await write;
+  expect(
+    response,
+    "the drop dispatched no write at all: the pane had no onDropTask, or the dragstart carried no task id"
+  ).not.toBeNull();
+  expect(response!.status(), "the server refused the move").toBe(200);
+}
+
 test("dragging a task from the backlog into the sprint pane adds it to the sprint", async ({
   page,
   request,
@@ -109,7 +138,7 @@ test("dragging a task from the backlog into the sprint pane adds it to the sprin
 
   const backlogCountBefore = await cardsIn(backlog).count();
 
-  await dragCardToPane(page, backlogCard, sprint);
+  await dragAndWatchTheWrite(page, backlogCard, sprint, String(PLANNING_BACKLOG_TASK_ID));
 
   await test.step("the sprint pane gains it and the backlog pane loses it", async () => {
     await expect(cardsIn(sprint)).toHaveCount(3);
@@ -152,7 +181,7 @@ test("dragging a task from the sprint pane back to the backlog removes it from t
 
   const backlogCountBefore = await cardsIn(backlog).count();
 
-  await dragCardToPane(page, sprintCard, backlog);
+  await dragAndWatchTheWrite(page, sprintCard, backlog, String(PLANNING_SPRINT_TASK_ID));
 
   await test.step("the backlog pane gains it and the sprint pane loses it, keeping the done one", async () => {
     await expect(cardsIn(sprint)).toHaveCount(1);
