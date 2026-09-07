@@ -363,9 +363,10 @@ describe("Comments when the read fails", () => {
         ? new Promise((resolve, reject) => pending.push({ resolve, reject }))
         : Promise.resolve([])
     );
-    const view = render(<Comments projectId="TP" taskId="t1" />);
+    const onCountChange = vi.fn();
+    const view = render(<Comments projectId="TP" taskId="t1" onCountChange={onCountChange} />);
 
-    view.rerender(<Comments projectId="TP" taskId="t2" />);
+    view.rerender(<Comments projectId="TP" taskId="t2" onCountChange={onCountChange} />);
     await act(async () => pending[pending.length - 1].resolve([comment]));
     await waitFor(() => expect(screen.getByText("Kasia Nowak")).toBeTruthy());
 
@@ -373,6 +374,9 @@ describe("Comments when the read fails", () => {
 
     expect(screen.queryByTestId("comments-error")).toBeNull();
     expect(screen.getByText("Kasia Nowak")).toBeTruthy();
+    // The tab too: withdrawing the count before the sequence check would take away a number the
+    // read that actually answered had just earned
+    expect(onCountChange).toHaveBeenLastCalledWith(1);
   });
 
   // The third exit: a superseded read must not tear the spinner down and let "No comments yet"

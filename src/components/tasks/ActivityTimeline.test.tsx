@@ -139,9 +139,12 @@ describe("ActivityTimeline across a task switch", () => {
     api.get.mockImplementation(
       () => new Promise((resolve, reject) => pending.push({ resolve, reject }))
     );
-    const view = render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    const onCountChange = vi.fn();
+    const view = render(
+      <ActivityTimeline projectId="TP" taskId="t1" onCountChange={onCountChange} />
+    );
 
-    view.rerender(<ActivityTimeline projectId="TP" taskId="t2" />);
+    view.rerender(<ActivityTimeline projectId="TP" taskId="t2" onCountChange={onCountChange} />);
     await act(async () => pending[pending.length - 1].resolve([log]));
     await waitFor(() => expect(screen.getByText(/Owner Name/)).toBeTruthy());
 
@@ -149,6 +152,8 @@ describe("ActivityTimeline across a task switch", () => {
 
     expect(screen.queryByText(/Could not load/)).toBeNull();
     expect(screen.getByText(/Owner Name/)).toBeTruthy();
+    // And the tab keeps the number the read that answered earned
+    expect(onCountChange).toHaveBeenLastCalledWith(1);
   });
 
   it("withdraws the count it reported when the task changes", async () => {

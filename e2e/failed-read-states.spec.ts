@@ -213,7 +213,9 @@ test("the tab drops its count when a reload of the comments fails", async ({ pag
   await page.getByRole("button", { name: "Comment", exact: true }).click();
 
   await expect(page.getByTestId("comments-error")).toBeVisible();
-  await expect(tab, "no number beside a panel that cannot count").not.toContainText("0");
+  // The whole label, not "does not contain 0": forbidding the digit lets any *other* invented
+  // number through, and the count this task really has is the one digit the assertion named
+  await expect(tab, "no number beside a panel that cannot count").toHaveText("Comments");
 });
 
 // The control: a task nobody has commented on still says so
