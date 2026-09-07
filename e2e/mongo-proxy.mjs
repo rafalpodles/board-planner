@@ -1,5 +1,6 @@
 import { createServer as createControl } from "node:http";
 import { connect, createServer } from "node:net";
+import { fatal, fatalOnListenFailure, guard, keepAlive } from "./stub-guard.mjs";
 
 /**
  * Sits between the dev server and MongoDB so a test can take the database away and give it back.
@@ -24,6 +25,10 @@ import { connect, createServer } from "node:net";
 // every interface would let anybody on the network take this run's database away
 const LOOPBACK = "127.0.0.1";
 
+// Named for the crash log, which is the only place this process speaks when something throws.
+const NAME = "mongo proxy";
+keepAlive(NAME);
+
 const PORT = Number(process.env.MONGO_PROXY_PORT ?? 3991);
 const CONTROL_PORT = Number(process.env.MONGO_PROXY_CONTROL_PORT ?? 3992);
 
@@ -32,10 +37,10 @@ const rawUri = process.env.E2E_MONGODB_URI ?? "mongodb://localhost:27017/boardpl
 // the failure would otherwise be 503s from the first test rather than this line. The config makes
 // the same check when it rewrites the dev server's URI; this one guards a proxy started by hand.
 if (!/^mongodb:\/\/[^,/]+\/[^?]+/.test(rawUri)) {
-  console.error(
+  fatal(
+    NAME,
     "E2E_MONGODB_URI must be a single-host mongodb:// URI naming a database; mongodb+srv and host lists cannot be proxied"
   );
-  process.exit(1);
 }
 const upstream = new URL(rawUri.replace(/^mongodb:\/\//, "http://"));
 const UPSTREAM = {
@@ -74,7 +79,7 @@ function json(res, status, body) {
   res.end(payload);
 }
 
-const control = createControl((req, res) => {
+const control = createControl(guard(NAME, async (req, res) => {
   if (req.url === "/health") {
     res.writeHead(200, { "Content-Type": "text/plain" }).end("ok");
     return;
@@ -103,10 +108,15 @@ const control = createControl((req, res) => {
     return;
   }
   json(res, 404, { error: "unknown control" });
-});
+}));
 
 // The health check answers only once both are listening: a dev server started against a control
 // port that was up before the proxy port would fail its first query and read as an outage
+// Named apart: one line saying which of the two ports it was beats reading the port out of
+// Node's own EADDRINUSE text.
+fatalOnListenFailure(`${NAME} (pipe)`, proxy);
+fatalOnListenFailure(`${NAME} (control)`, control);
+
 proxy.listen(PORT, LOOPBACK, () => {
   control.listen(CONTROL_PORT, LOOPBACK, () => {
     console.log(

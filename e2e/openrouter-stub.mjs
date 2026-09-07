@@ -1,4 +1,4 @@
-import { createServer } from "node:http";
+import { readBody, serve } from "./stub-guard.mjs";
 
 /**
  * A stand-in for OpenRouter, so a PM turn can be driven end to end without a model, a network
@@ -55,43 +55,45 @@ function reply(res, body) {
 // The shape of the last completion request, for /last
 let received = null;
 
-const server = createServer((req, res) => {
-  // `failTimes` counts attempts per directive, and this process outlives every test in the run —
-  // including a Playwright retry, which would otherwise start at attempt 2 and never fail.
-  if (req.url === "/reset") {
-    seen.clear();
-    received = null;
-    res.writeHead(200, { "Content-Type": "text/plain" }).end("ok");
-    return;
-  }
+serve({
+  name: "openrouter stub",
+  port: PORT,
+  host: LOOPBACK,
+  handler: async (req, res) => {
+    // `failTimes` counts attempts per directive, and this process outlives every test in the run —
+    // including a Playwright retry, which would otherwise start at attempt 2 and never fail.
+    if (req.url === "/reset") {
+      seen.clear();
+      received = null;
+      res.writeHead(200, { "Content-Type": "text/plain" }).end("ok");
+      return;
+    }
 
-  // What the model was actually handed on the last turn. A turn carrying only an image has no text
-  // to put a directive in, so this is the only way a test can assert the image was in the request
-  // rather than merely that a turn ran (BP-451 review).
-  if (req.url === "/last") {
-    res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(received));
-    return;
-  }
+    // What the model was actually handed on the last turn. A turn carrying only an image has no text
+    // to put a directive in, so this is the only way a test can assert the image was in the request
+    // rather than merely that a turn ran (BP-451 review).
+    if (req.url === "/last") {
+      res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(received));
+      return;
+    }
 
-  // Playwright waits on this before it starts the dev server
-  if (req.url === "/health") {
-    res.writeHead(200, { "Content-Type": "text/plain" }).end("ok");
-    return;
-  }
+    // Playwright waits on this before it starts the dev server
+    if (req.url === "/health") {
+      res.writeHead(200, { "Content-Type": "text/plain" }).end("ok");
+      return;
+    }
 
-  if (req.url?.endsWith("/models")) {
-    reply(res, MODELS);
-    return;
-  }
+    if (req.url?.endsWith("/models")) {
+      reply(res, MODELS);
+      return;
+    }
 
-  if (!req.url?.endsWith("/chat/completions")) {
-    res.writeHead(404).end();
-    return;
-  }
+    if (!req.url?.endsWith("/chat/completions")) {
+      res.writeHead(404).end();
+      return;
+    }
 
-  let raw = "";
-  req.on("data", (chunk) => (raw += chunk));
-  req.on("end", () => {
+    const raw = await readBody(req);
     let messages = [];
     let offeredTools = [];
     try {
@@ -239,9 +241,7 @@ const server = createServer((req, res) => {
       });
     };
 
-    if (call.delayMs) setTimeout(answer, call.delayMs);
-    else answer();
-  });
+    if (call.delayMs) await new Promise((resolve) => setTimeout(resolve, call.delayMs));
+    answer();
+  },
 });
-
-server.listen(PORT, LOOPBACK, () => console.log(`openrouter stub listening on ${PORT}`));
