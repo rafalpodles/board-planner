@@ -1047,3 +1047,39 @@ test("a machine that quarantined a checkout says so on the fleet screen, not `re
   await expect(row).toContainText("restart this worker");
   await expect(row.getByText(/^ready/), "the machine still reads ready").toHaveCount(0);
 });
+
+/**
+ * BP-585. The catalogue was re-read under the same `try` as the PUT that saved it, so a failed
+ * re-read painted "Could not save" beside the "Saved." the same handler had just set. The save
+ * landing and the list going stale are different facts and the screen has to say both.
+ */
+test("a save that lands and a re-read that fails say so separately", async ({ page, request }) => {
+  await nameRepository(PROJECT_ID, REPOSITORY);
+  await setWorker({ owner: ADMIN_ID });
+  await heartbeat(request, { repos: [{ remote: REPOSITORY, path: CHECKOUT }] });
+
+  await signIn(page);
+  await page.goto(`/settings/workers/${WORKER_ID}/projects`);
+  const row = pickerRow(page, PROJECT_NAME);
+  await expect(row.getByRole("checkbox")).toBeChecked();
+
+  // Only the read after the save: the one that painted the page is already done
+  await page.route(
+    (url) => url.pathname === `/api/workers/${WORKER_ID}/projects`,
+    async (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      await route.abort("failed");
+    }
+  );
+
+  await row.getByRole("checkbox").uncheck();
+  const saved = await save(page);
+  expect(saved.projects).toEqual([]);
+
+  await expect(page.getByText("The list could not be refreshed")).toBeVisible();
+  // The save happened, and the screen does not deny it
+  await expect(page.getByText(/^Saved\./)).toBeVisible();
+  expect(await page.getByText("Could not save").count()).toBe(0);
+  // What the server holds is what the save asked for, whatever the stale list shows
+  expect((await workerRow())?.projects ?? []).toEqual([]);
+});
