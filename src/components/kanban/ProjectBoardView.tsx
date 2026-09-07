@@ -70,6 +70,7 @@ export function ProjectBoardView({
     forceHeldDelete,
     setHeldMove,
     forceHeldMove,
+    forcing,
     reload,
     applySprintChange,
     patchTask,
@@ -409,6 +410,7 @@ export function ProjectBoardView({
           reload();
         }}
         onConfirm={forceHeldDelete}
+        loading={forcing}
         title="This task is being executed"
         message={
           heldDelete
@@ -427,6 +429,8 @@ export function ProjectBoardView({
           reload();
         }}
         onConfirm={forceHeldMove}
+        loading={forcing}
+        loadingLabel="Moving..."
         title="This task is being executed"
         message={
           heldMove

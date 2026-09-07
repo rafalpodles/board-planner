@@ -137,6 +137,7 @@ function makeBoard(overrides: Partial<ProjectBoard> = {}): ProjectBoard {
     forceHeldDelete: async () => {},
     setHeldMove: vi.fn(),
     forceHeldMove: vi.fn(),
+    forcing: false,
     handleStatusChange: vi.fn(),
     handleTaskDrop: vi.fn(),
     handleReorder: vi.fn(),

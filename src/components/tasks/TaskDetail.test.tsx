@@ -163,6 +163,45 @@ describe("TaskDetail", () => {
     });
   });
 
+  /**
+   * BP-588 review found this one still live three lines above the delete it fixed: the forced
+   * *status* change closed its dialog on the click too, and was never given `loading` at all.
+   */
+  it("keeps the forced-move confirmation up, and busy, while it runs", async () => {
+    let release!: () => void;
+    api.patch
+      .mockRejectedValueOnce({
+        status: 409,
+        body: { runConflict: { workerName: "mac", phase: "agent" } },
+      })
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          release = () => resolve({});
+        })
+      );
+    renderDetail();
+    await loaded();
+
+    await act(async () => screen.getByRole("combobox", { name: "Status" }).click());
+    await act(async () => screen.getByRole("option", { name: /In Progress/i }).click());
+    expect(screen.getByText("This task is being executed")).toBeTruthy();
+
+    await act(async () => {
+      screen.getByRole("button", { name: "Move anyway" }).click();
+    });
+
+    expect(screen.queryByText("This task is being executed")).not.toBeNull();
+    // And it says what it is doing: this dialog moves a task, it does not delete one
+    const confirm = screen.getByRole("button", { name: "Moving..." });
+    expect((confirm as HTMLButtonElement).disabled).toBe(true);
+
+    await act(async () => {
+      release();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(screen.queryByText("This task is being executed")).toBeNull());
+  });
+
   it("counts the acceptance criteria that are done", async () => {
     renderDetail();
     await loaded();
@@ -232,6 +271,82 @@ describe("TaskDetail", () => {
 
     expect(api.del).toHaveBeenLastCalledWith("/api/projects/TP/tasks/t1", { force: true });
     await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
+  /**
+   * BP-588. The confirmation closed itself before calling the delete, so `deleting` never flipped
+   * while it was mounted — `loading` and the `closeDisabled` gate BP-565 added could not apply to
+   * it, and the forced delete ran with nothing on screen for its failure to land on.
+   */
+  it("keeps the forced-delete confirmation up while the delete runs", async () => {
+    let release!: () => void;
+    api.del
+      .mockRejectedValueOnce({
+        status: 409,
+        body: { runConflict: { workerName: "mac", phase: "agent" } },
+      })
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          release = () => resolve({});
+        })
+      );
+    renderDetail({});
+    await loaded();
+
+    await act(async () => screen.getByRole("button", { name: "More actions" }).click());
+    const menu = within(screen.getByRole("listbox", { name: "More actions" }));
+    await act(async () => menu.getByRole("option", { name: "Delete task" }).click());
+    await act(async () => screen.getByRole("button", { name: "Delete" }).click());
+    expect(screen.getByText("This task is being executed")).toBeTruthy();
+
+    await act(async () => {
+      screen.getByRole("button", { name: "Delete anyway" }).click();
+    });
+
+    expect(
+      screen.queryByText("This task is being executed"),
+      "the dialog stays up for the write it started"
+    ).not.toBeNull();
+    // Up is not the point; busy is. Without `loading` reaching it the dialog would stay open and
+    // still offer a second click, and Escape would take it away mid-write
+    const confirm = screen.getByRole("button", { name: "Deleting..." });
+    expect((confirm as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    expect(screen.queryByText("This task is being executed")).not.toBeNull();
+
+    await act(async () => {
+      release();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(screen.queryByText("This task is being executed")).toBeNull());
+  });
+
+  // And it closes once the answer is in, rather than hanging over the task it did not delete.
+  // The toast itself is not asserted: this file's `useToast` mock returns a fresh spy per call,
+  // so an assertion on it could never fail
+  it("closes once a failed forced delete has answered", async () => {
+    api.del
+      .mockRejectedValueOnce({
+        status: 409,
+        body: { runConflict: { workerName: "mac", phase: "agent" } },
+      })
+      .mockRejectedValueOnce(new Error("the worker would not let go"));
+    renderDetail({});
+    await loaded();
+
+    await act(async () => screen.getByRole("button", { name: "More actions" }).click());
+    const menu = within(screen.getByRole("listbox", { name: "More actions" }));
+    await act(async () => menu.getByRole("option", { name: "Delete task" }).click());
+    await act(async () => screen.getByRole("button", { name: "Delete" }).click());
+
+    await act(async () => {
+      screen.getByRole("button", { name: "Delete anyway" }).click();
+    });
+
+    expect(api.del).toHaveBeenLastCalledWith("/api/projects/TP/tasks/t1", { force: true });
+    expect(screen.queryByText("This task is being executed")).toBeNull();
   });
 
   it("offers delete from the overflow menu, behind the same confirmation", async () => {

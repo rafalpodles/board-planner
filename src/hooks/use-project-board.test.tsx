@@ -226,3 +226,64 @@ describe("what a status write paints", () => {
     expect(row.title, "the row keeps the fields the answer did not mention").toBe("t1");
   });
 });
+
+/**
+ * BP-588. The board's "do it anyway" confirmations closed themselves on the click and let the write
+ * run behind an empty board — no busy state, and a failure toast arriving over nothing. They were
+ * also never given `loading`, so there was no busy state to lose in the first place.
+ */
+describe("a force that is still running", () => {
+  it("keeps the move's dialog open and says it is working", async () => {
+    await mounted();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    let forcing!: Promise<void>;
+    // Parked the way a 409 does it, rather than by writing to the returned object
+    api.patch.mockRejectedValueOnce({
+      status: 409,
+      body: { runConflict: { workerName: "mac", phase: "agent" } },
+    });
+    await act(async () => {
+      await board.handleStatusChange("t1", "blocked");
+    });
+    expect(board.heldMove, "the refusal parked it").not.toBeNull();
+
+    api.patch.mockReturnValueOnce(held);
+    act(() => {
+      forcing = board.forceHeldMove();
+    });
+
+    expect(board.forcing, "the dialog can say it is working").toBe(true);
+    expect(board.heldMove, "and it is still on screen").not.toBeNull();
+
+    await act(async () => {
+      release();
+      await forcing;
+    });
+
+    expect(board.forcing).toBe(false);
+    expect(board.heldMove, "and goes when there is an answer").toBeNull();
+  });
+
+  it("lets go of the flag even when the write fails", async () => {
+    await mounted();
+    api.patch.mockRejectedValueOnce({
+      status: 409,
+      body: { runConflict: { workerName: "mac", phase: "agent" } },
+    });
+    await act(async () => {
+      await board.handleStatusChange("t1", "blocked");
+    });
+
+    api.patch.mockRejectedValueOnce(new Error("the worker would not let go"));
+    await act(async () => {
+      await board.forceHeldMove();
+    });
+
+    expect(board.forcing).toBe(false);
+    expect(board.heldMove).toBeNull();
+  });
+});
