@@ -182,6 +182,42 @@ test("a task whose comments cannot be read does not claim it has none", async ({
   await expect(page.getByTestId("comments-error")).toHaveCount(0);
 });
 
+/**
+ * BP-582. The panel below tells a failed read from an empty discussion; the **tab above it** draws
+ * a number the panel last reported, and a read that failed is no evidence for the one before it.
+ * On a task with comments, a failed reload left "Comments 3" beside a panel saying the count is
+ * unknown.
+ */
+test("the tab drops its count when a reload of the comments fails", async ({ page }) => {
+  await signIn(page);
+  await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
+
+  const tab = page.getByRole("tab", { name: /^Comments/ });
+  await expect(tab).toContainText("0");
+
+  // The read only, not the write: posting is what makes the panel re-read, and the ticket's own
+  // repro is a comment that lands while the list cannot be fetched
+  let failing = false;
+  await page.route(
+    (url) => url.pathname.endsWith("/comments"),
+    async (route) => {
+      if (!failing || route.request().method() !== "GET") return route.fallback();
+      await route.fulfill({ status: 500, contentType: "application/json", body: "{}" });
+    }
+  );
+
+  const box = page.getByRole("textbox", { name: "Write a comment, @mention someone…" });
+  await expect(box).toBeVisible();
+  await box.fill("A remark nobody will be able to count");
+  failing = true;
+  await page.getByRole("button", { name: "Comment", exact: true }).click();
+
+  await expect(page.getByTestId("comments-error")).toBeVisible();
+  // The whole label, not "does not contain 0": forbidding the digit lets any *other* invented
+  // number through, and the count this task really has is the one digit the assertion named
+  await expect(tab, "no number beside a panel that cannot count").toHaveText("Comments");
+});
+
 // The control: a task nobody has commented on still says so
 test("a task with no comments still says it has none", async ({ page }) => {
   await signIn(page);

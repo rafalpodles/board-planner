@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
+import { LoadFailed } from "@/components/ui/LoadFailed";
 import { ApiActivityLog, STATUS_LABELS, TaskStatus } from "@/types";
 import { timeAgo } from "@/lib/time";
 
@@ -111,6 +112,9 @@ export function ActivityTimeline({
   const [logs, setLogs] = useState<ApiActivityLog[]>([]);
   const [expanded, setExpanded] = useState(false);
   const [failed, setFailed] = useState(false);
+  // "No history yet" is a claim about this task, and a read still in flight supports none — the
+  // same reason Comments next door has one (BP-577)
+  const [reading, setReading] = useState(true);
   const api = useApi();
   const loadSeq = useRef(0);
 
@@ -128,7 +132,13 @@ export function ActivityTimeline({
         onCountChange?.(data.length);
       })
       .catch(() => {
-        if (seq === loadSeq.current) setFailed(true);
+        if (seq !== loadSeq.current) return;
+        setFailed(true);
+        // Same as Comments next door: the tab's number is a claim about the read that just failed
+        onCountChange?.(null);
+      })
+      .finally(() => {
+        if (seq === loadSeq.current) setReading(false);
       });
   }
 
@@ -137,6 +147,7 @@ export function ActivityTimeline({
     // and so does the count this panel last reported
     setLogs([]);
     setFailed(false);
+    setReading(true);
     setExpanded(false);
     onCountChange?.(null);
     load();
@@ -159,12 +170,21 @@ export function ActivityTimeline({
       )}
 
       {failed && (
-        <p className="text-sm text-danger">
-          Could not load this task&apos;s history.
-        </p>
+        // The same control the comments panel offers: a withdrawn count and a bare sentence left
+        // the reader nothing to do but change task or post something (BP-582 review)
+        <LoadFailed
+          testId="history-error"
+          variant={logs.length ? "row" : "block"}
+          className={logs.length ? "mb-2" : "py-4"}
+          message="Could not load this task's history."
+          onRetry={() => {
+            setReading(true);
+            load();
+          }}
+        />
       )}
 
-      {!failed && logs.length === 0 && (
+      {!failed && !reading && logs.length === 0 && (
         <p className="text-sm text-text-muted">
           No history yet — changes to this task will be recorded here.
         </p>
