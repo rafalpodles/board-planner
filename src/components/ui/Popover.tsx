@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode, useEffect, useRef, useState } from "react";
+import { ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 interface PopoverProps {
   /** Rendered inside the anchor; `toggle` opens and closes the panel */
@@ -61,34 +61,34 @@ export function Popover({
    * clip and unreachable by touch (BP-576). This slides it back inside, which is what the reader
    * needs; placing it against the free rectangle rather than the viewport is BP-555's larger job.
    */
+  function clamp() {
+    const panel = panelRef.current;
+    if (!panel) return;
+    panel.style.transform = "";
+    const rect = panel.getBoundingClientRect();
+    // clientWidth, not innerWidth: a classic scrollbar is inside the latter and outside the former
+    const past = rect.right - (document.documentElement.clientWidth - MARGIN);
+    const before = MARGIN - rect.left;
+    // A panel wider than the viewport cannot satisfy both edges, and nothing scrolls it sideways —
+    // Math.max keeps the left one in, where reading starts
+    const shift = past > 0 ? Math.max(-past, before) : before > 0 ? before : 0;
+    if (shift) panel.style.transform = `translateX(${shift}px)`;
+  }
+
+  // No deps, deliberately: the anchor travels with its row, and a re-flow that moves it — a
+  // reaction landing beside the `+`, say — changes nothing the panel could observe about itself.
+  // Re-clamping on every render is what follows it there
+  useLayoutEffect(clamp);
+
   useEffect(() => {
     const panel = panelRef.current;
     if (!open || !panel) return;
-
-    function clamp() {
-      if (!panel) return;
-      panel.style.transform = "";
-      const rect = panel.getBoundingClientRect();
-      const past = rect.right - (window.innerWidth - MARGIN);
-      const before = MARGIN - rect.left;
-      const shift = past > 0 ? -past : before > 0 ? before : 0;
-      if (shift) panel.style.transform = `translateX(${shift}px)`;
-    }
-
-    clamp();
-    // Measured once on mount it slid by 6px where 43 were needed: the panel's content settles its
-    // width after that first layout — emoji did here — so the clamp is redone once the frame is
-    // painted, and again whenever the panel resizes under it
-    const frame = requestAnimationFrame(clamp);
-    const observer =
-      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(clamp);
+    // Movement the render cycle does not see: the panel's own content settling, and the viewport
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(clamp);
     observer?.observe(panel);
     window.addEventListener("resize", clamp);
-    // The anchor travels with its row, and a scroll or a re-flow underneath moves the panel with
-    // it — the clamp has to follow rather than being decided once
     window.addEventListener("scroll", clamp, true);
     return () => {
-      cancelAnimationFrame(frame);
       observer?.disconnect();
       window.removeEventListener("resize", clamp);
       window.removeEventListener("scroll", clamp, true);

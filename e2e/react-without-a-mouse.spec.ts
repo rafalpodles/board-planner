@@ -143,10 +143,14 @@ test("an existing reaction still toggles from the keyboard", async ({ page }) =>
 /**
  * The palette is anchored to the `+`, and reaction chips push the `+` rightwards as they
  * accumulate. Measured on a phone with five chips, the last two emoji sat past the comment card's
- * clip — present in the DOM, reachable by keyboard, and untappable. Every emoji has to be
- * tappable at the width the ticket was written for.
+ * clip — present in the DOM, reachable by keyboard, and untappable.
+ *
+ * The hard case is a chip landing *while the palette is open*: `toggleReaction` PATCHes and then
+ * refetches, so the chip arrives two round-trips after the tap, and the row re-flows underneath a
+ * panel whose own size never changed. Held here by delaying that refetch, so the palette is
+ * certainly open when the row moves.
  */
-test("every emoji is tappable on a phone, however far right the + has been pushed", async ({
+test("every emoji stays tappable when a reaction lands while the palette is open", async ({
   browser,
 }) => {
   const context = await browser.newContext({
@@ -159,26 +163,47 @@ test("every emoji is tappable on a phone, however far right the + has been pushe
     await signIn(page);
     await comment(page, "A remark with a row of reactions");
 
-    // Fill the row, so the + is pushed as far right as it goes
-    for (const emoji of ["👍", "👎", "❤️", "👀", "🎉"]) {
+    // Four chips settled, so the fifth is the one that moves the row under an open palette
+    for (const emoji of ["👍", "👎", "❤️", "👀"]) {
       const reacted = page.waitForResponse(
-        (r) => r.url().includes("/comments/") && r.request().method() === "PATCH" && r.ok()
+        (r) => r.url().includes("/comments") && r.request().method() === "GET" && r.ok()
       );
       await addReaction(page).tap();
       await page.getByRole("button", { name: `React with ${emoji}` }).tap();
       await reacted;
+      await expect(page.getByRole("button", { name: new RegExp(emoji) })).toBeVisible();
     }
 
-    // The row re-flows as the last reaction lands, which moves the + and the palette with it.
-    // Opening mid-reflow measures a position neither the reader nor the code ever settles on.
-    await expect(page.getByRole("button", { name: /🎉/ })).toBeVisible();
-    await expect
-      .poll(async () => (await addReaction(page).boundingBox())?.x ?? 0)
-      .toBeGreaterThan(0);
-    const settled = (await addReaction(page).boundingBox())!.x;
-    await expect.poll(async () => (await addReaction(page).boundingBox())?.x).toBe(settled);
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route(
+      (url) => url.pathname.endsWith("/comments"),
+      async (route) => {
+        if (route.request().method() !== "GET") return route.fallback();
+        await held;
+        await route.fallback();
+      }
+    );
 
     await addReaction(page).tap();
+    await page.getByRole("button", { name: "React with 🎉" }).tap();
+    // The PATCH lands; the refetch that will grow the row is held
+    await page.waitForResponse(
+      (r) => r.url().includes("/comments/") && r.request().method() === "PATCH" && r.ok()
+    );
+
+    await addReaction(page).tap();
+    await expect(page.getByRole("button", { name: "React with 😄" })).toBeVisible();
+    const before = (await addReaction(page).boundingBox())!.x;
+
+    release();
+    // The fifth chip arrives and pushes the + rightwards with the palette still open
+    await expect(page.getByRole("button", { name: /🎉/ })).toBeVisible();
+    await expect.poll(async () => (await addReaction(page).boundingBox())!.x).toBeGreaterThan(
+      before
+    );
     await expect(page.getByRole("button", { name: "React with 😄" })).toBeVisible();
 
     const reach = await page.evaluate(() => {
@@ -199,7 +224,7 @@ test("every emoji is tappable on a phone, however far right the + has been pushe
         .parentElement!.querySelector<HTMLElement>('[tabindex="-1"]')!;
       const p = panel.getBoundingClientRect();
       where.push(
-        `panel ${Math.round(p.left)}..${Math.round(p.right)} shift=${panel.style.transform || "none"} vw=${window.innerWidth}`
+        `panel ${Math.round(p.left)}..${Math.round(p.right)} shift=${panel.style.transform || "none"} vw=${document.documentElement.clientWidth}`
       );
       return { out, where };
     });
