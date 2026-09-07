@@ -195,6 +195,10 @@ export default defineConfig({
         OPENAI_API_KEY: "e2e-stub-key",
         OPENAI_BASE_URL: `${AI_STUB_URL}/v1`,
         WEBHOOK_SIGNING_SECRET: WEBHOOK_SECRET,
+        // Turns off Next's dev indicator, which paints over the bottom-left of every page and
+        // takes a real click meant for a bottom sheet's action row (BP-589). Only here: a
+        // developer running `next dev` by hand keeps it.
+        E2E: "1",
       },
     },
   ],
