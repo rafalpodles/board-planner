@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { ApiActivityLog, STATUS_LABELS, TaskStatus } from "@/types";
 import { timeAgo } from "@/lib/time";
@@ -114,7 +114,7 @@ export function ActivityTimeline({
   const api = useApi();
   const loadSeq = useRef(0);
 
-  const load = useCallback(() => {
+  function load() {
     // A task switch reconciles this panel in place, so the previous task's read is still in
     // flight and would otherwise land as this task's history (BP-586, the shape BP-577 gave
     // Comments next door)
@@ -130,8 +130,7 @@ export function ActivityTimeline({
       .catch(() => {
         if (seq === loadSeq.current) setFailed(true);
       });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, taskId]);
+  }
 
   useEffect(() => {
     // A different task is a different history: what is on screen belongs to the one just left,
@@ -146,7 +145,7 @@ export function ActivityTimeline({
 
   useEffect(() => {
     // A refresh keeps what is on screen: the rows are this task's either way
-    if (!refreshKey) return;
+    if (refreshKey === 0 || refreshKey === undefined) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);

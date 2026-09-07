@@ -165,6 +165,20 @@ describe("ActivityTimeline across a task switch", () => {
     expect(onCountChange).toHaveBeenLastCalledWith(null);
   });
 
+  // The one reachable line the rest of these miss: a refresh that succeeds has to take the
+  // failure sentence down with it, or it sits above rows that did load
+  it("clears a failure when a refresh of the same task answers", async () => {
+    api.get.mockRejectedValueOnce(new Error("network"));
+    const view = render(<ActivityTimeline projectId="TP" taskId="t1" refreshKey={0} />);
+    await waitFor(() => expect(screen.getByText(/Could not load/)).toBeTruthy());
+
+    api.get.mockResolvedValue([log]);
+    view.rerender(<ActivityTimeline projectId="TP" taskId="t1" refreshKey={1} />);
+
+    await waitFor(() => expect(screen.getByText(/Owner Name/)).toBeTruthy());
+    expect(screen.queryByText(/Could not load/)).toBeNull();
+  });
+
   // A refresh of the same task is not a switch: what is on screen belongs to it either way
   it("keeps the rows on screen while a refresh of the same task runs", async () => {
     api.get.mockResolvedValue([log]);
