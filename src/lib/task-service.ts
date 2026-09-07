@@ -790,15 +790,6 @@ export async function changeStatus(
     }
   }
 
-  const CHANGE_STATUS_POPULATE = [
-    { path: "assignee", select: "username fullName" },
-    { path: "createdBy", select: "username fullName" },
-    // `assignedBy` too, though nothing feeds this response to the Agent row today: handoverOf tells
-    // the PM apart by the username populate puts here, so a caller that ever did would get
-    // "somebody else assigned it" printed over a task the machine is about to take. One line, and
-    // it removes the whole class rather than documenting it.
-    { path: "assignedBy", select: "username fullName" },
-  ];
 
   const task = await Task.findOneAndUpdate(
     // Guarded on the status just read, whenever the write means to leave it: two overlapping
@@ -811,14 +802,17 @@ export async function changeStatus(
       ? [{ $set: { status, ...CLEAR_WORKER_ASSIGNEE } }, { $unset: RUN_FIELDS }]
       : [{ $set: { status } }],
     { returnDocument: "after", updatePipeline: true }
-  ).populate(CHANGE_STATUS_POPULATE);
+  // The board reconciles the row it moved from this answer (BP-558), so anything this leaves as a
+  // bare id overwrites the populated value the list had put there — `agent` and `relations[].task`
+  // among them. The same set as everywhere else is the only shape a caller can merge safely.
+  ).populate(taskPopulateFields);
 
   if (!task) {
     if (leavesColumn) {
       // Lost the race rather than deleted: report the state another request already put this
       // task into, instead of a 404 for a task that plainly still exists.
       const current = await Task.findOne({ _id: taskId, project: projectId }).populate(
-        CHANGE_STATUS_POPULATE
+        taskPopulateFields
       );
       if (current) return { ok: true, data: current as ITask };
     }

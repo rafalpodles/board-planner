@@ -3,7 +3,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const changeStatus = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
-vi.mock("@/lib/task-service", () => ({ changeStatus }));
+// `toApiExecution` too: the route now shapes what it answers with, so that the board cannot read
+// the stored subdocument's defaults as a run in progress (BP-558)
+vi.mock("@/lib/task-service", () => ({
+  changeStatus,
+  toApiExecution: (execution: { runId?: string } | undefined) =>
+    execution?.runId ? execution : undefined,
+}));
 // Models the real middleware rather than deriving one fact from another: the worker branch needs a
 // Bearer AND x-worker-id and yields a verified workerId; a cp_/cpat_ token is a machine credential
 // with NO verified worker id; a cookie session is a person. The old mock defined

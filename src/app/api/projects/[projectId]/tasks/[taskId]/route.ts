@@ -11,6 +11,7 @@ import { toApiExecution, updateTask, taskPopulateFields, heldRunRefusal } from "
 import { Project } from "@/models/project";
 import { Worker } from "@/models/worker";
 import { ITaskExecution } from "@/types";
+import { withApiExecution } from "@/lib/task-execution-view";
 
 
 export const GET = withProjectAccess(async (_request, { params }) => {
@@ -88,7 +89,7 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
     );
   }
 
-  return NextResponse.json(result.data);
+  return NextResponse.json(await withApiExecution(result.data));
 });
 
 export const DELETE = withProjectAccess(async (request, { params, user }) => {

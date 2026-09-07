@@ -97,6 +97,35 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
   const [loadError, setLoadError] = useState(false);
   const [showNewTask, setShowNewTask] = useState(false);
   const loadSeq = useRef(0);
+
+  /**
+   * A read already in flight knows nothing about a write that started after it, so delivering its
+   * answer puts the board back the way it was while the server holds the change — and the reader
+   * sees their own drag, move or edit undo itself. The sequence guard already orders reads against
+   * each other; bumping it here makes every read currently in flight apply nothing.
+   *
+   * The board polls every ten seconds, so this window is open a tenth of the time on the surface
+   * where dragging is the main gesture. Nothing is lost by discarding that read: the next poll
+   * brings the server's truth, including whatever anybody else changed (BP-561; BP-551 did the
+   * same for the sidebar).
+   */
+  function dropReadsInFlight() {
+    ++loadSeq.current;
+  }
+
+  /**
+   * Around a write, not before it. A read issued *while* the write is on the wire is as blind to
+   * it as one issued before: it is answered with the pre-commit state and arrives after the
+   * optimistic paint. Bumping on both sides covers the whole window (BP-561 review).
+   */
+  async function writing<T>(write: () => Promise<T>): Promise<T> {
+    dropReadsInFlight();
+    try {
+      return await write();
+    } finally {
+      dropReadsInFlight();
+    }
+  }
   const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
@@ -196,6 +225,7 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
       .map(({ id }) => tasks.find((t) => t._id === id)?.taskNumber)
       .filter(Boolean);
 
+    dropReadsInFlight();
     setTasks((prev) =>
       prev.map((t) => (movedIds.has(t._id) ? { ...t, status: status as ApiTask["status"] } : t))
     );
@@ -242,6 +272,7 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
 
   // Tasks leaving the sprint the board is filtered by must disappear from it
   function applySprintChange(taskIds: string[], sprintId: string | null) {
+    dropReadsInFlight();
     const affected = new Set(taskIds);
     setTasks((prev) => {
       const updated = prev.map((t) =>
@@ -274,6 +305,7 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
       .map(({ id }) => tasks.find((t) => t._id === id)?.taskNumber)
       .filter(Boolean);
 
+    dropReadsInFlight();
     setTasks((prev) => prev.filter((t) => !deleted.has(t._id)));
     setSelectedTasks(new Set());
     setConfirmBulkDelete(false);
@@ -294,9 +326,9 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
       // copies only the fields present in the body, so this stays a partial update.
       // null, not "": task-service only resolves a non-empty string, so "" would
       // reach Mongoose as a cast error instead of clearing the field
-      const updated = await api.put(`/api/projects/${projectId}/tasks/${taskId}`, {
-        assignee: username || null,
-      });
+      const updated = await writing(() =>
+        api.put(`/api/projects/${projectId}/tasks/${taskId}`, { assignee: username || null })
+      );
       setTasks((prev) =>
         prev.map((t) => (t._id === taskId ? { ...t, assignee: updated.assignee } : t))
       );
@@ -326,12 +358,12 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
         ...(force ? { force: true } : {}),
       });
     try {
-      await patch();
-      setTasks((prev) =>
-        prev.map((t) =>
-          t._id === taskId ? { ...t, status: status as ApiTask["status"] } : t
-        )
-      );
+      // What the server holds, not what was asked for. Since BP-489 a write guards on the status
+      // it read, so the loser of two overlapping moves is answered with the task as it now really
+      // is — a different status than the one it sent. Painting the request instead showed a value
+      // nobody had written, until the next poll corrected it (BP-558)
+      const updated = (await writing(patch)) as Partial<ApiTask>;
+      setTasks((prev) => prev.map((t) => (t._id === taskId ? { ...t, ...updated } : t)));
     } catch (err) {
       if (parkIfHeld(err, taskId, () => patch(true))) return;
       toast("Failed to update status", "error");
@@ -358,6 +390,7 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
     }
 
     // Optimistic update
+    dropReadsInFlight();
     setTasks((prev) =>
       prev.map((t) =>
         t._id === taskId
@@ -376,7 +409,12 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
     };
 
     try {
-      await api.put(`/api/projects/${projectId}/tasks/${taskId}`, body);
+      // The response, for the same reason as handleStatusChange: a drop that loses the race is
+      // told what actually happened, and the bundled order and any other field with it (BP-558)
+      const updated = (await writing(() =>
+        api.put(`/api/projects/${projectId}/tasks/${taskId}`, body)
+      )) as Partial<ApiTask>;
+      setTasks((prev) => prev.map((t) => (t._id === taskId ? { ...t, ...updated } : t)));
     } catch (err) {
       // A worker is running this task. Ask rather than silently taking it off the machine —
       // the optimistic move is rolled back either way, by confirming or by loadData below.
@@ -404,13 +442,14 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
   // The list hands back only the rows it shows, so a filtered list reindexes just
   // those; tasks hidden by a filter keep the order they already had
   async function handleReorder(orderedIds: string[]) {
+    dropReadsInFlight();
     const rank = new Map(orderedIds.map((id, index) => [id, index]));
     setTasks((prev) =>
       prev.map((t) => (rank.has(t._id) ? { ...t, order: rank.get(t._id)! } : t))
     );
 
     try {
-      await api.put(`/api/projects/${projectId}/tasks/reorder`, { order: orderedIds });
+      await writing(() => api.put(`/api/projects/${projectId}/tasks/reorder`, { order: orderedIds }));
     } catch {
       toast("Failed to reorder tasks", "error");
       // The server renumbers across the whole project, so only it knows the result
@@ -423,10 +462,11 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
   // snapshot: the 10s poll and any concurrent edit land in between, and putting the
   // old array back would throw their results away too
   async function patchTask(taskId: string, patch: Record<string, unknown>, label: string) {
+    dropReadsInFlight();
     const before = tasks.find((t) => t._id === taskId);
     setTasks((prev) => prev.map((t) => (t._id === taskId ? { ...t, ...patch } : t)));
     try {
-      await api.put(`/api/projects/${projectId}/tasks/${taskId}`, patch);
+      await writing(() => api.put(`/api/projects/${projectId}/tasks/${taskId}`, patch));
     } catch {
       toast(`Failed to update ${label}`, "error");
       if (!before) return;
@@ -449,7 +489,7 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
     // out of the list, which applySprintChange already knows how to do
     applySprintChange([taskId], sprintId);
     try {
-      await api.put(`/api/projects/${projectId}/tasks/${taskId}`, { sprint: sprintId });
+      await writing(() => api.put(`/api/projects/${projectId}/tasks/${taskId}`, { sprint: sprintId }));
     } catch {
       toast("Failed to update sprint", "error");
       // A removed row cannot be put back by patching it, and the server is the only
@@ -481,6 +521,7 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
     setDeleting(true);
     try {
       await remove(force);
+      dropReadsInFlight();
       setTasks((prev) => prev.filter((t) => t._id !== taskId));
       toast("Task deleted", "success");
     } catch (err) {
