@@ -5,6 +5,7 @@ import {
   OPTION_FIELD_TYPES,
 } from "@/types";
 import { hasControlCharacters } from "@/lib/identifiers";
+import { echo } from "@/lib/echo";
 
 /** An option value reaches the PM's system prompt, and had no limit at all before BP-321 */
 export const MAX_OPTION_VALUE_LENGTH = 100;
@@ -459,7 +460,7 @@ export function resolveFieldsByName(
     const field = byName.get(name.trim().toLowerCase());
     if (!field) {
       throw new Error(
-        `Unknown field "${name}". Available: ${[...byName.values()].map((f) => f.name).join(", ") || "none"}`
+        `Unknown field "${echo(name)}". Available: ${[...byName.values()].map((f) => f.name).join(", ") || "none"}`
       );
     }
 
@@ -473,7 +474,7 @@ export function resolveFieldsByName(
           options.find((o) => o.value.trim().toLowerCase() === text);
         if (!match) {
           throw new Error(
-            `"${value}" is not an option of ${field.name}. Available: ${options.map((o) => o.value).join(", ")}`
+            `"${echo(value)}" is not an option of ${field.name}. Available: ${options.map((o) => o.value).join(", ")}`
           );
         }
         return match.id;

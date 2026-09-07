@@ -4,6 +4,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { z } from "zod";
 import { registerPlannerTools } from "./tools";
+import { unknownParameterMessage } from "./strict-input";
 import { PlannerClient } from "./planner-client";
 
 /**
@@ -168,6 +169,26 @@ describe("a parameter the tool does not declare is refused, not dropped", () => 
     expect(said).not.toContain("native code");
     expect(said).not.toContain("[object Object]");
     expect(said).not.toMatch(/use function|use \[object/);
+  });
+
+  /**
+   * The refusal quotes the key back, and it reaches a model as the tool result. Unbounded, a caller
+   * chooses how much of the reader's context the answer to its own bad request takes up (BP-564).
+   *
+   * Called directly rather than through the SDK, and deliberately: a 50KB key is rejected by the
+   * SDK's own params schema before any tool schema sees it, exactly as `constructor` is above — so
+   * a test driving the transport would assert on the SDK's message and never reach this one.
+   */
+  it("bounds a parameter name a caller made enormous", () => {
+    const said = unknownParameterMessage(["z".repeat(50_000)], {}, true);
+
+    expect(said).toContain(`"${"z".repeat(64)}…"`);
+    expect(said.length).toBeLessThan(200);
+    expect(said).toContain("Nothing was written.");
+  });
+
+  it("quotes a name anybody would really send in full", () => {
+    expect(unknownParameterMessage(["checklist"], {}, true)).toContain('"checklist"');
   });
 
   // "Nothing was written" on a tool that never writes invites the reader to think one was tried

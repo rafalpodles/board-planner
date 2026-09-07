@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { ApiClient } from "./api-client.js";
+import { echo } from "./echo.js";
 import {
   strictInput,
   NOTHING_TO_CHANGE,
@@ -113,7 +114,7 @@ export function registerTools(server: McpServer, client: ApiClient): void {
       const field = byName.get(name.trim().toLowerCase());
       if (!field) {
         const known = [...byName.values()].map((f) => f.name).join(", ") || "none";
-        throw new Error(`Unknown field "${name}". Available: ${known}`);
+        throw new Error(`Unknown field "${echo(name)}". Available: ${known}`);
       }
 
       if (field.fieldType === "dropdown" || field.fieldType === "multiselect") {
@@ -127,7 +128,7 @@ export function registerTools(server: McpServer, client: ApiClient): void {
             options.find((o) => o.value.trim().toLowerCase() === text);
           if (!match) {
             const known = options.map((o) => o.value).join(", ") || "none";
-            throw new Error(`Unknown option "${value}" for "${field.name}". Available: ${known}`);
+            throw new Error(`Unknown option "${echo(value)}" for "${field.name}". Available: ${known}`);
           }
           return match.id;
         };
@@ -180,7 +181,7 @@ export function registerTools(server: McpServer, client: ApiClient): void {
         // answering "does this account exist elsewhere", which is the instance-wide roster BP-400 removed.
         const users = await client.listAssignableUsers(proj._id) as { _id: string; username: string }[];
         const user = users.find(u => u.username === assignee.toLowerCase());
-        if (!user) throw new Error(`"${assignee}" is not someone this board can be assigned to — only people with access to it are.`);
+        if (!user) throw new Error(`"${echo(assignee)}" is not someone this board can be assigned to — only people with access to it are.`);
         data.assignee = user.username;
       }
 
@@ -256,7 +257,7 @@ export function registerTools(server: McpServer, client: ApiClient): void {
           // See create_task: the roster is the board's, and a miss is not split into typo vs no-access.
           const users = await client.listAssignableUsers(projectId) as { _id: string; username: string }[];
           const user = users.find(u => u.username === assignee.toLowerCase());
-          if (!user) throw new Error(`"${assignee}" is not someone this board can be assigned to — only people with access to it are.`);
+          if (!user) throw new Error(`"${echo(assignee)}" is not someone this board can be assigned to — only people with access to it are.`);
           data.assignee = user.username;
         } else {
           data.assignee = null;
@@ -279,7 +280,7 @@ export function registerTools(server: McpServer, client: ApiClient): void {
             throw new Error(
               named.length > 0
                 ? `Agent "${agent}" exists on another project — only this project's own agents can be assigned here.`
-                : `Agent "${agent}" not found`
+                : `Agent "${echo(agent)}" not found`
             );
           }
           data.agent = match._id;
@@ -415,14 +416,14 @@ export function registerTools(server: McpServer, client: ApiClient): void {
 
   async function resolveTaskKey(taskKey: string): Promise<{ projectId: string; task: unknown }> {
     const match = taskKey.match(/^([A-Z]+)-(\d+)$/);
-    if (!match) throw new Error(`Invalid task key: "${taskKey}". Expected format: "CP-1"`);
+    if (!match) throw new Error(`Invalid task key: "${echo(taskKey)}". Expected format: "CP-1"`);
 
     const [, projectKey, taskNumberStr] = match;
     const project = await client.getProjectByKey(projectKey) as { _id: string };
     const tasks = await client.listTasks(project._id) as { _id: string; taskNumber: number }[];
     const task = tasks.find(t => t.taskNumber === parseInt(taskNumberStr, 10));
 
-    if (!task) throw new Error(`Task ${taskKey} not found`);
+    if (!task) throw new Error(`Task ${echo(taskKey)} not found`);
     return { projectId: project._id, task };
   }
 

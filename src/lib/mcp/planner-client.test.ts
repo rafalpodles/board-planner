@@ -115,3 +115,23 @@ describe("a segment that could choose the path is refused, not encoded", () => {
     expect(String(error)).not.toContain("board.example.com");
   });
 });
+
+/**
+ * BP-564. `resolveTaskKey` refuses a badly-shaped key by quoting it, and that refusal is handed to
+ * a model as a tool result — so the caller cannot choose its length.
+ */
+describe("what resolveTaskKey quotes back", () => {
+  it("bounds a key a caller made enormous", async () => {
+    const client = new PlannerClient("http://localhost", "cp_x");
+
+    await expect(client.resolveTaskKey(`${"z".repeat(50_000)}!`)).rejects.toThrow(
+      /Invalid task key: "z{64}…"/
+    );
+  });
+
+  it("quotes a key anybody would really mistype in full", async () => {
+    const client = new PlannerClient("http://localhost", "cp_x");
+
+    await expect(client.resolveTaskKey("BP1")).rejects.toThrow('Invalid task key: "BP1"');
+  });
+});

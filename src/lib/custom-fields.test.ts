@@ -265,6 +265,32 @@ describe("resolveFieldsByName", () => {
     { _id: "f5", name: "Gone", fieldType: "text" as const, options: [], archived: true },
   ];
 
+  /**
+   * Both refusals reach a model as an MCP tool result — this one function feeds the PM agent's
+   * write tool and the production HTTP+OAuth endpoint — so what a caller sends cannot become the
+   * length of what the reader is handed (BP-564).
+   */
+  it("bounds the caller's own words in both refusals", () => {
+    const huge = "x".repeat(50_000);
+
+    expect(() => resolveFieldsByName({ [huge]: "x" }, definitions)).toThrow(
+      /Unknown field "x{64}…"/
+    );
+    expect(() => resolveFieldsByName({ Owoce: huge }, definitions)).toThrow(
+      /"x{64}…" is not an option of Owoce/
+    );
+  });
+
+  // The bound must not touch a name or a value anybody would really send
+  it("quotes a short one in full", () => {
+    expect(() => resolveFieldsByName({ Nieznane: "x" }, definitions)).toThrow(
+      'Unknown field "Nieznane"'
+    );
+    expect(() => resolveFieldsByName({ Owoce: "Pears" }, definitions)).toThrow(
+      '"Pears" is not an option of Owoce'
+    );
+  });
+
   // An MCP client knows the name a human gave the field, never its id
   it("resolves a field name and an option name to their ids", () => {
     expect(resolveFieldsByName({ Owoce: "Apples" }, definitions)).toEqual({ f1: "opt-a" });

@@ -125,4 +125,89 @@ describe("the standalone MCP server, driven rather than read", () => {
 
     expect(permissive.map(([name]) => name)).toEqual([]);
   });
+
+  /**
+   * The second copy of the bound (BP-564). `npm test` does not run anything under `mcp-server/`,
+   * and the package builds separately, so a bound applied to one copy and not the other compiles
+   * clean on both sides and nothing says a word — the reason api-client-drift.test.ts exists.
+   * `echo.test.ts` asserts the two helper files are identical; this asserts the standalone
+   * *call site* actually uses it.
+   */
+  it("bounds a caller's parameter name in the standalone copy too", async () => {
+    const { unknownParameterMessage } = await import("../../../mcp-server/src/strict-input");
+
+    const said = unknownParameterMessage(["z".repeat(50_000)], {}, true);
+
+    expect(said).toContain(`"${"z".repeat(64)}…"`);
+    expect(said.length).toBeLessThan(200);
+    expect(unknownParameterMessage(["checklist"], {}, true)).toContain('"checklist"');
+  });
+
+  /**
+   * The standalone package keeps its **own** `resolveFieldsByName`, distinct from the app's in
+   * `src/lib/custom-fields.ts` — which is how the first pass at BP-564 bounded the app's copy and
+   * left this one echoing whatever a caller sent. Exactly the failure mode the ticket is about,
+   * repeated inside the fix for it.
+   */
+  it("bounds a field name and an option value in its own resolver", async () => {
+    const client = stubClient();
+    client.getProject = vi.fn(async () => ({
+      _id: "p1",
+      customFields: [
+        { _id: "f1", name: "Owoce", fieldType: "dropdown", options: [{ id: "a", value: "Apples" }] },
+      ],
+    })) as never;
+    const call = await connected(client);
+    const huge = "z".repeat(50_000);
+
+    const unknownField = await call("update_task", { taskKey: "BP-1", fields: { [huge]: "x" } });
+    expect(unknownField.refused).toBe(true);
+    expect(unknownField.said).toContain(`"${"z".repeat(64)}…"`);
+    expect(unknownField.said.length).toBeLessThan(400);
+
+    const unknownOption = await call("update_task", { taskKey: "BP-1", fields: { Owoce: huge } });
+    expect(unknownOption.refused).toBe(true);
+    expect(unknownOption.said).toContain(`"${"z".repeat(64)}…"`);
+    expect(unknownOption.said.length).toBeLessThan(400);
+
+    // Still quoted whole when it is something anybody would really send
+    const short = await call("update_task", { taskKey: "BP-1", fields: { Owoce: "Pears" } });
+    expect(short.said).toContain('"Pears"');
+  });
+
+  /**
+   * The mutation audit found every refusal in the standalone `tools.ts` and `api-client.ts` to be a
+   * survivor: `npm test` never runs that package, and the drift guard reads request *paths*, not
+   * refusal messages. These drive the real module, so reverting a bound there goes red.
+   */
+  it("bounds the names in its own assignee and agent refusals", async () => {
+    const client = stubClient();
+    const call = await connected(client);
+    const huge = "z".repeat(50_000);
+
+    // Both paths: create_task resolves an assignee with its own copy of the same check
+    for (const [tool, args] of [
+      ["update_task", { taskKey: "BP-1", assignee: huge }],
+      ["create_task", { project: "BP", title: "t", assignee: huge }],
+    ] as const) {
+      const assignee = await call(tool, args as Record<string, unknown>);
+      expect(assignee.refused, tool).toBe(true);
+      expect(assignee.said, tool).toContain(`"${"z".repeat(64)}…"`);
+      expect(assignee.said.length, tool).toBeLessThan(400);
+    }
+
+    const agent = await call("update_task", { taskKey: "BP-1", agent: huge });
+    expect(agent.refused).toBe(true);
+    expect(agent.said).toContain(`"${"z".repeat(64)}…"`);
+    expect(agent.said.length).toBeLessThan(400);
+  });
+
+  it("bounds the task key in its own resolver", async () => {
+    const call = await connected(stubClient());
+
+    const bad = await call("get_task", { taskKey: `${"z".repeat(50_000)}-1` });
+    expect(bad.refused).toBe(true);
+    expect(bad.said).toContain(`"${"z".repeat(64)}…"`);
+    expect(bad.said.length).toBeLessThan(400);
+  });
 });
