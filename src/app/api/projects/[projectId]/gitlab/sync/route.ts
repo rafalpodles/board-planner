@@ -8,7 +8,7 @@ import { logActivity } from "@/lib/activity";
 import { decryptSecret } from "@/lib/encryption";
 import { mergedReviewDestination } from "@/lib/columns";
 import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
-import { replaceProviderLinks } from "@/lib/pr-links";
+import { writeProviderLinks } from "@/lib/pr-links";
 
 export const POST = withProjectAccess(async (_request, { params, user }) => {
   const { projectId } = await params;
@@ -81,7 +81,7 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
     // In the database rather than in JS, for the reason its GitHub twin carries: two overlapping
     // syncs of one task meant the later save dropped whatever the earlier one had added (BP-559).
     // Dates are built above, because a pipeline update is not cast by Mongoose.
-    await Task.updateOne({ _id: task._id }, replaceProviderLinks("gitlab", mrDocs));
+    await writeProviderLinks(task._id, "gitlab", mrDocs);
     linked += mrs.length;
 
     const hasMerged = mrs.some((mr) => mr.state === "merged");

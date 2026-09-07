@@ -1,4 +1,5 @@
-import type { PipelineStage } from "mongoose";
+import mongoose, { type PipelineStage } from "mongoose";
+import { Task } from "@/models/task";
 
 /**
  * The update that replaces one provider's links on a task and leaves the other provider's alone.
@@ -33,4 +34,21 @@ export function replaceProviderLinks(
       },
     },
   ];
+}
+
+/**
+ * Issuing that update is part of it, not the caller's business: Mongoose refuses a pipeline
+ * without `updatePipeline`, and the subdocument ids `save()` used to mint have to be minted here
+ * instead. Both are invisible to any test that mocks the model, so both live in one place the
+ * end-to-end test can drive (`e2e/pr-link-replacement.spec.ts`).
+ */
+export async function writeProviderLinks(
+  taskId: mongoose.Types.ObjectId,
+  provider: "github" | "gitlab",
+  docs: Record<string, unknown>[]
+): Promise<void> {
+  const withIds = docs.map((doc) => ({ _id: new mongoose.Types.ObjectId(), ...doc }));
+  await Task.updateOne({ _id: taskId }, replaceProviderLinks(provider, withIds), {
+    updatePipeline: true,
+  });
 }

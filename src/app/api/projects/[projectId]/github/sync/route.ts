@@ -8,7 +8,7 @@ import { logActivity } from "@/lib/activity";
 import { decryptSecret } from "@/lib/encryption";
 import { getProjectColumns } from "@/lib/columns";
 import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
-import { replaceProviderLinks } from "@/lib/pr-links";
+import { writeProviderLinks } from "@/lib/pr-links";
 
 export const POST = withProjectAccess(async (_request, { params, user }) => {
   const { projectId } = await params;
@@ -79,7 +79,7 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
     // other provider's links, which is what the old `others` line did.
     //
     // Dates are built here, not left to the schema: a pipeline update is not cast by Mongoose.
-    await Task.updateOne({ _id: task._id }, replaceProviderLinks("github", prDocs));
+    await writeProviderLinks(task._id, "github", prDocs);
     linked += prs.length;
 
     // Auto-transition: merged PR + task in_review → ready_to_test.

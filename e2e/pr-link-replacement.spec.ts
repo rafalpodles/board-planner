@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import mongoose from "mongoose";
-import { replaceProviderLinks } from "@/lib/pr-links";
+import { writeProviderLinks } from "@/lib/pr-links";
 import { E2E_MONGODB_URI, PROJECT_ID } from "./seed";
 
 /**
@@ -60,9 +60,15 @@ async function taskWith(linkedPRs: Record<string, unknown>[] | undefined) {
   return _id;
 }
 
-async function apply(_id: mongoose.Types.ObjectId, provider: "github" | "gitlab", docs: unknown[]) {
-  const handle = await db();
-  await handle.collection("tasks").updateOne({ _id }, replaceProviderLinks(provider, docs));
+async function apply(
+  _id: mongoose.Types.ObjectId,
+  provider: "github" | "gitlab",
+  docs: Record<string, unknown>[]
+) {
+  await db();
+  // Through the model, exactly as the routes issue it: Mongoose refuses a pipeline update
+  // without `updatePipeline`, and every unit test in this repo mocks the model away.
+  await writeProviderLinks(_id, provider, docs);
 }
 
 async function linksOf(_id: mongoose.Types.ObjectId) {
@@ -130,4 +136,14 @@ test("dates reach the database as dates, not as strings", async () => {
   // Mongoose casts a `$set` object against the schema and a pipeline not at all, so the routes
   // build these by hand; a string here sorts and compares as text everywhere downstream.
   expect((await linksOf(_id))[0].updatedAt).toBeInstanceOf(Date);
+});
+
+test("each link keeps the subdocument id the API type promises", async () => {
+  const _id = await taskWith([]);
+
+  await apply(_id, "github", [link("github", 11)]);
+
+  // `save()` used to mint these; a pipeline stores exactly what it is handed, and
+  // `ApiLinkedPR._id` is declared required.
+  expect((await linksOf(_id))[0]._id).toBeInstanceOf(mongoose.Types.ObjectId);
 });
