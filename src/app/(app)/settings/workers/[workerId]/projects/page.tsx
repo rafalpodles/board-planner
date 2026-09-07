@@ -44,15 +44,26 @@ export default function MachineProjectsPage() {
   const [stale, setStale] = useState("");
 
   useEffect(() => {
+    // `picked` is the reader's, and this seeds it. Without the flag a second run of the effect —
+    // which Strict Mode does on every mount in development — answers after the reader has ticked
+    // a row and puts the server's set back, discarding the tick. The save that follows then sends
+    // the old set, and the screen shows no sign of it (BP-553).
+    let ignore = false;
     api
       .get(`/api/workers/${workerId}/projects`)
       .then((data: View) => {
+        if (ignore) return;
         setView(data);
         setPicked(new Set(data.catalogue.filter((row) => row.wanted).map((row) => row.project)));
       })
       // A failed load has to say so. Left to a `finally` alone this renders as a spinner nobody
       // can get out of, which is the same screen as a server that is simply slow.
-      .catch((e: Error) => setError(e.message || "Could not load this machine's projects"));
+      .catch((e: Error) => {
+        if (!ignore) setError(e.message || "Could not load this machine's projects");
+      });
+    return () => {
+      ignore = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workerId]);
 

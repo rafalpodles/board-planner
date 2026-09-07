@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { StrictMode } from "react";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
 import MachineProjectsPage from "./page";
@@ -236,5 +237,47 @@ describe("saving the machine's projects", () => {
     const stale = await screen.findByText(LIST_REFRESH_FAILED);
     const saved = screen.getByText(/^Saved\./);
     expect(saved.compareDocumentPosition(stale) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  /**
+   * BP-553. `next dev` runs Strict Mode, so this page's load effect fires twice on mount. Without
+   * a guard the second answer re-seeds `picked` from the server — discarding a tick the reader
+   * made in between, and the save that follows then sends the old set with nothing on screen
+   * saying so. It made `worker-controls.spec.ts` fail in roughly half of all group runs, on
+   * whichever test happened to click inside the window.
+   */
+  it("does not discard a tick made while a second load is on the wire", async () => {
+    // The *first* mount's read is the slow one. Strict Mode has already thrown that mount away,
+    // so its answer must not reach the screen the second mount painted
+    let release!: (view: typeof VIEW) => void;
+    const abandoned = new Promise<typeof VIEW>((resolve) => {
+      release = resolve;
+    });
+    api.get.mockReturnValueOnce(abandoned).mockReturnValue(Promise.resolve(VIEW));
+
+    render(
+      <StrictMode>
+        <MachineProjectsPage />
+      </StrictMode>
+    );
+    await screen.findByRole("button", { name: "Save" });
+
+    const box = screen.getByRole("checkbox") as HTMLInputElement;
+    expect(box.checked, "the seeded row is ticked").toBe(true);
+    await act(async () => {
+      box.click();
+    });
+    expect(box.checked, "the reader unticked it").toBe(false);
+
+    // The abandoned mount's read lands now, carrying the server's set — which still wants the row
+    await act(async () => {
+      release(VIEW);
+      await Promise.resolve();
+    });
+
+    expect(
+      (screen.getByRole("checkbox") as HTMLInputElement).checked,
+      "the reader's tick survives"
+    ).toBe(false);
   });
 });
