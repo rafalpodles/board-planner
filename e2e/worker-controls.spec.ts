@@ -1072,9 +1072,17 @@ test("a save that lands and a re-read that fails say so separately", async ({ pa
     }
   );
 
-  await row.getByRole("checkbox").uncheck();
+  // Retried rather than clicked once: Playwright's actionability checks pass against a DOM React
+  // is not yet driving, and the click is dispatched a single time — a swallowed one shows up as
+  // "clicking did not change its state", or worse as a save that carries the old set
+  await expect(async () => {
+    await row.getByRole("checkbox").uncheck();
+    await expect(row.getByRole("checkbox")).not.toBeChecked();
+  }).toPass({ timeout: 10_000 });
   const saved = await save(page);
-  expect(saved.projects).toEqual([]);
+  // What this test unticked, not the whole set: another spec in the group can leave the machine
+  // wanting a second board, and asserting an empty array makes that residue look like this bug
+  expect(saved.projects).not.toContain(String(PROJECT_ID));
 
   await expect(page.getByText("The list could not be refreshed")).toBeVisible();
   // The save happened, and the screen does not deny it. Counted by treatment rather than by
@@ -1085,5 +1093,7 @@ test("a save that lands and a re-read that fails say so separately", async ({ pa
   // Nor does it still promise the removal it has already made
   expect(await page.getByText(/Saving removes/).count()).toBe(0);
   // What the server holds is what the save asked for, whatever the stale list shows
-  expect((await workerRow())?.projects ?? []).toEqual([]);
+  expect(((await workerRow())?.desiredProjects ?? []).map(String)).not.toContain(
+    String(PROJECT_ID)
+  );
 });
