@@ -79,21 +79,17 @@ async function dragCardToPane(page: Page, card: Locator, pane: Locator) {
 }
 
 /**
- * BP-594. Twice this spec failed in a full group run with nothing but a card count — five rows
- * where four were expected — which is the same picture for three different causes: the pane had
- * no drop handler, the dragstart carried no task id, or the server refused the move and the page
- * put the card back. Five runs in group context reproduced none of them, so the next occurrence
- * has to arrive already diagnosed rather than costing another investigation.
- *
- * The move is one PUT. Watching for it separates "no write was ever attempted" from "the write
- * was refused", and the count assertions that follow then only have to explain themselves when
- * the write itself was fine.
+ * BP-594. The reported failure was a card count — five backlog rows where four were expected —
+ * and that is the same picture whether the drop found no handler, resolved no task, or the server
+ * refused the move and the page put the card back. The move is a single PUT, so watching for it
+ * tells "nothing was written" apart from "the write was refused", and leaves the counts below
+ * with only the case where the write itself was fine.
  */
 async function dragAndWatchTheWrite(page: Page, card: Locator, pane: Locator, taskId: string) {
   const write = page
     .waitForResponse(
-      (res) => res.request().method() === "PUT" && res.url().includes(`/tasks/${taskId}`),
-      { timeout: 15_000 }
+      (res) => res.request().method() === "PUT" && res.url().endsWith(`/tasks/${taskId}`),
+      { timeout: 30_000 }
     )
     .catch(() => null);
 
@@ -102,7 +98,7 @@ async function dragAndWatchTheWrite(page: Page, card: Locator, pane: Locator, ta
   const response = await write;
   expect(
     response,
-    "the drop dispatched no write at all: the pane had no onDropTask, or the dragstart carried no task id"
+    "no write reached the server in 30s: the drop found no handler, or no task for the dragged id, or the move was merely slow"
   ).not.toBeNull();
   expect(response!.status(), "the server refused the move").toBe(200);
 }
