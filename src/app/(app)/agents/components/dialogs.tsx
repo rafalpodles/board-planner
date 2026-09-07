@@ -19,36 +19,42 @@ function Footer({
   onCancel,
   onCreate,
   disabled,
+  busy,
+  onBusy,
 }: {
   onCancel: () => void;
   onCreate: () => Promise<void> | void;
   disabled: boolean;
+  busy: boolean;
+  onBusy: (busy: boolean) => void;
 }) {
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
 
+  // `busy` is the dialog's rather than this footer's: the write is in flight for the whole dialog,
+  // and the dialog is what has to stay on screen until it lands — a footer that owned it could
+  // disable its own Cancel while the backdrop still dismissed everything (BP-565).
   return (
     <>
       {error && <p className="mt-2 text-[13px] text-danger">{error}</p>}
       <div className="mt-2 flex justify-end gap-2">
-        <Button variant="secondary" onClick={onCancel}>
+        <Button variant="secondary" onClick={onCancel} disabled={busy}>
           Cancel
         </Button>
         <Button
           disabled={disabled || busy}
           onClick={async () => {
             setError("");
-            setBusy(true);
+            onBusy(true);
             try {
               await onCreate();
             } catch (err) {
               setError(err instanceof Error ? err.message : "Could not create");
             } finally {
-              setBusy(false);
+              onBusy(false);
             }
           }}
         >
-          Create
+          {busy ? "Creating…" : "Create"}
         </Button>
       </div>
     </>
@@ -69,16 +75,18 @@ export function NewAgentDialog({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [scope, setScope] = useState(MINE);
+  const [busy, setBusy] = useState(false);
 
   const close = () => {
     setName("");
     setDescription("");
     setScope(MINE);
+    setBusy(false);
     onClose();
   };
 
   return (
-    <Modal open={open} onClose={close} title="New agent">
+    <Modal open={open} onClose={close} closeDisabled={busy} title="New agent">
       <div className="flex flex-col gap-4">
         <Input
           label="Name"
@@ -106,6 +114,8 @@ export function NewAgentDialog({
         />
         <Footer
           onCancel={close}
+          busy={busy}
+          onBusy={setBusy}
           disabled={!name.trim()}
           onCreate={async () => {
             await onCreate({
@@ -133,17 +143,19 @@ export function NewGateDialog({
   const [name, setName] = useState("");
   const [gateKind, setGateKind] = useState(GATE_KINDS[0].key);
   const [params, setParams] = useState<Record<string, string>>(GATE_KINDS[0].defaults);
+  const [busy, setBusy] = useState(false);
   const kind = gateKindByKey(gateKind);
 
   const close = () => {
     setName("");
     setGateKind(GATE_KINDS[0].key);
     setParams(GATE_KINDS[0].defaults);
+    setBusy(false);
     onClose();
   };
 
   return (
-    <Modal open={open} onClose={close} title="New gate">
+    <Modal open={open} onClose={close} closeDisabled={busy} title="New gate">
       <div className="flex flex-col gap-4">
         <Select
           label="What it checks"
@@ -193,6 +205,8 @@ export function NewGateDialog({
 
         <Footer
           onCancel={close}
+          busy={busy}
+          onBusy={setBusy}
           disabled={!name.trim()}
           onCreate={async () => {
             await onCreate({
@@ -224,6 +238,7 @@ export function NewStepDialog({
   const [prompt, setPrompt] = useState("");
   const [capability, setCapability] = useState<string>(CAPABILITIES[0].value);
   const [model, setModel] = useState<string>(MODELS[0].value);
+  const [busy, setBusy] = useState(false);
 
   const close = () => {
     setName("");
@@ -231,11 +246,12 @@ export function NewStepDialog({
     setPrompt("");
     setCapability(CAPABILITIES[0].value);
     setModel(MODELS[0].value);
+    setBusy(false);
     onClose();
   };
 
   return (
-    <Modal open={open} onClose={close} title="New step">
+    <Modal open={open} onClose={close} closeDisabled={busy} title="New step">
       <div className="flex flex-col gap-4">
         <Input
           label="Name"
@@ -279,6 +295,8 @@ export function NewStepDialog({
 
         <Footer
           onCancel={close}
+          busy={busy}
+          onBusy={setBusy}
           disabled={!name.trim()}
           onCreate={async () => {
             await onCreate({
@@ -315,6 +333,7 @@ export function EditBlockDialog({
   const [prompt, setPrompt] = useState("");
   const [params, setParams] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
   // A dialog keyed on the row it edits: the fields reset when a different block opens it
   useEffect(() => {
@@ -324,13 +343,19 @@ export function EditBlockDialog({
     setPrompt(block.prompt);
     setParams(block.params ?? {});
     setError("");
+    setBusy(false);
   }, [block]);
 
   if (!block) return null;
   const kind = block.gateKind ? gateKindByKey(block.gateKind) : undefined;
 
   return (
-    <Modal open onClose={onClose} title={block.builtIn ? `${block.name} (default)` : block.name}>
+    <Modal
+      open
+      onClose={onClose}
+      closeDisabled={busy}
+      title={block.builtIn ? `${block.name} (default)` : block.name}
+    >
       <div className="flex flex-col gap-4">
         <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} required />
         <Textarea
@@ -382,13 +407,14 @@ export function EditBlockDialog({
         {error && <p className="text-[13px] text-danger">{error}</p>}
 
         <div className="mt-2 flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
           <Button
-            disabled={!name.trim()}
+            disabled={!name.trim() || busy}
             onClick={async () => {
               setError("");
+              setBusy(true);
               try {
                 await onSave(block._id, {
                   name: name.trim(),
@@ -398,10 +424,12 @@ export function EditBlockDialog({
                 onClose();
               } catch (err) {
                 setError(err instanceof Error ? err.message : "Could not save");
+              } finally {
+                setBusy(false);
               }
             }}
           >
-            Save
+            {busy ? "Saving…" : "Save"}
           </Button>
         </div>
       </div>

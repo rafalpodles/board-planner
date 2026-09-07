@@ -12,6 +12,7 @@ import { Modal } from "@/components/ui/Modal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
 import { generatePassword } from "@/lib/password-generator";
+import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -70,21 +71,42 @@ export default function UsersPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin, authLoading]);
 
+  // The list refresh that follows a write. Its own failure is not the write's failure — the write
+  // landed — so it is reported as what it is, and never as an unhandled rejection.
+  async function refreshUsers() {
+    try {
+      setUsers(await api.get("/api/users"));
+    } catch {
+      // No verb: this runs after a create, a save and a delete, and telling somebody "Saved" when
+      // they deleted a user — who is still on screen, because this is the fetch that failed — is
+      // the one message they cannot act on.
+      toast(LIST_REFRESH_FAILED, "error");
+    }
+  }
+
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
+    if (saving) return;
     setError("");
     setSaving(true);
 
+    // The flag ends with the write, and the list refetch below is deliberately outside its life.
+    // It gates the dialog's own ways out, so a flag still set across that fetch belonged to a
+    // dialog that had already closed — and the next one opened into it (BP-565).
     try {
       await api.post("/api/users", { username, password, fullName, email: newUserEmail });
-      closeNew();
-      const data = await api.get("/api/users");
-      setUsers(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create user");
-    } finally {
       setSaving(false);
+      return;
     }
+    setSaving(false);
+    closeNew();
+    // Before the refresh, so it does not wait on a slow list — and said at all, which it was not:
+    // a create used to produce no line of its own, leaving a failed refresh as the only thing a new
+    // account ever said.
+    toast("User created", "success");
+    await refreshUsers();
   }
 
   function openEdit(user: ApiUser) {
@@ -119,7 +141,7 @@ export default function UsersPage() {
   }
 
   async function handleEditSave() {
-    if (!editUser) return;
+    if (!editUser || editSaving) return;
     setPasswordError("");
     setEmailError("");
 
@@ -140,15 +162,6 @@ export default function UsersPage() {
         ...(editEmail !== (editUser.email ?? "") ? { email: editEmail } : {}),
         ...(passwordWasSet ? { password: newPassword } : {}),
       });
-      closeEdit();
-      const data = await api.get("/api/users");
-      setUsers(data);
-      toast(
-        passwordWasSet
-          ? `Password set for ${username}. They were signed out everywhere.`
-          : "Saved",
-        "success"
-      );
     } catch (err) {
       const status = (err as { status?: number })?.status;
       const message = err instanceof Error ? err.message : "Failed to update user";
@@ -159,25 +172,38 @@ export default function UsersPage() {
       } else {
         toast(message, "error");
       }
-    } finally {
       setEditSaving(false);
+      return;
     }
+
+    // Cleared with the PUT, before the refetch — see handleCreate.
+    setEditSaving(false);
+    closeEdit();
+    // Before the refresh, not after it: the save is what the toast is about, and the line saying a
+    // password was changed should not wait on a slow list to be re-read.
+    toast(
+      passwordWasSet
+        ? `Password set for ${username}. They were signed out everywhere.`
+        : "Saved",
+      "success"
+    );
+    await refreshUsers();
   }
 
   async function handleDelete() {
-    if (!confirmDeleteUser) return;
+    if (!confirmDeleteUser || deleting) return;
     setDeleting(true);
     try {
       await api.del(`/api/users/${confirmDeleteUser._id}`);
-      setConfirmDeleteUser(null);
-      const data = await api.get("/api/users");
-      setUsers(data);
-      toast("User deleted", "success");
     } catch (err) {
       toast(err instanceof Error ? err.message : "Failed to delete user", "error");
-    } finally {
       setDeleting(false);
+      return;
     }
+    setDeleting(false);
+    setConfirmDeleteUser(null);
+    toast("User deleted", "success");
+    await refreshUsers();
   }
 
   if (!isAdmin) return null;
@@ -236,6 +262,7 @@ export default function UsersPage() {
       <Modal
         open={showNew}
         onClose={closeNew}
+        closeDisabled={saving}
         title="New User"
       >
         <form onSubmit={handleCreate} className="space-y-4">
@@ -282,6 +309,7 @@ export default function UsersPage() {
               type="button"
               variant="secondary"
               onClick={closeNew}
+              disabled={saving}
             >
               Cancel
             </Button>
@@ -293,6 +321,7 @@ export default function UsersPage() {
       <Modal
         open={!!editUser}
         onClose={closeEdit}
+        closeDisabled={editSaving}
         title={editUser ? `Edit ${editUser.fullName}` : ""}
       >
         {editUser && (
@@ -418,11 +447,13 @@ export default function UsersPage() {
               <Button
                 variant="secondary"
                 onClick={closeEdit}
+                disabled={editSaving}
               >
                 Cancel
               </Button>
               <Button
                 variant="danger"
+                disabled={editSaving}
                 onClick={() => {
                   closeEdit();
                   setConfirmDeleteUser(editUser);

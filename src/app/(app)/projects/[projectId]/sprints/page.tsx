@@ -52,6 +52,7 @@ export default function SprintsPage() {
   const [editing, setEditing] = useState<ApiSprint | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [completingSprint, setCompletingSprint] = useState(false);
   const [completing, setCompleting] = useState<ApiSprint | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<ApiSprint | null>(null);
   const [deletingSprint, setDeletingSprint] = useState(false);
@@ -123,6 +124,7 @@ export default function SprintsPage() {
   }
 
   async function handleComplete(sprintId: string, moveToBacklog: boolean) {
+    setCompletingSprint(true);
     try {
       await api.put(`/api/projects/${projectId}/sprints/${sprintId}`, {
         status: "completed",
@@ -133,6 +135,8 @@ export default function SprintsPage() {
       board.reload();
     } catch {
       toast("Failed to complete sprint", "error");
+    } finally {
+      setCompletingSprint(false);
     }
   }
 
@@ -347,6 +351,7 @@ export default function SprintsPage() {
       {completing && (
         <CompleteSprintDialog
           sprint={completing}
+          completing={completingSprint}
           onComplete={(moveToBacklog) => handleComplete(completing._id, moveToBacklog)}
           onClose={() => setCompleting(null)}
         />

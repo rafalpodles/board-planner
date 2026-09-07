@@ -153,6 +153,7 @@ function TaskDetailView({
   // things about what is lost, and one is undoable while the other is not (BP-337)
   const [heldDelete, setHeldDelete] = useState<RunConflict | null>(null);
   const [addingChild, setAddingChild] = useState(false);
+  const [addingChildSaving, setAddingChildSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [commentRefreshKey, setCommentRefreshKey] = useState(0);
@@ -273,6 +274,11 @@ function TaskDetailView({
         force ? { force: true } : undefined
       );
       toast("Task deleted", "success");
+      // Cleared rather than left to the screen going away: the flag now refuses the confirmation's
+      // own ways out, and "the component will unmount" is a promise about a navigation, not about
+      // this line (BP-565).
+      setDeleting(false);
+      setConfirmDelete(false);
       onClose();
     } catch (err) {
       // The same shape the status change already handles, and it has to be handled here for a
@@ -474,6 +480,7 @@ function TaskDetailView({
       <Modal
         open={addingChild}
         onClose={() => setAddingChild(false)}
+        closeDisabled={addingChildSaving}
         title={`New child of ${taskKey}`}
         size="lg"
       >
@@ -490,6 +497,7 @@ function TaskDetailView({
             onReload();
           }}
           onCancel={() => setAddingChild(false)}
+          onBusyChange={setAddingChildSaving}
         />
       </Modal>
 

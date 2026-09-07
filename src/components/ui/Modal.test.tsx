@@ -3,6 +3,7 @@ import { useRef } from "react";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, act, within } from "@testing-library/react";
 import { Modal } from "./Modal";
+import { tabbablesWithin } from "@/lib/focus-trap";
 
 afterEach(cleanup);
 
@@ -310,6 +311,13 @@ describe("Modal dismissal, still intact", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("closes from the header button", () => {
+    const onClose = vi.fn();
+    renderModal({ onClose });
+    act(() => screen.getByRole("button", { name: "Close dialog" }).click());
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it("locks body scroll while open and releases it on close", () => {
     const { rerender } = render(<Trigger open />);
     expect(document.body.style.overflow).toBe("hidden");
@@ -490,5 +498,127 @@ describe("Modal, bare on a narrow screen", () => {
     expect(cls).toContain("max-h-[90vh]");
     expect(cls).toContain("rounded-t-2xl");
     expect(cls).not.toContain("h-dvh");
+  });
+});
+
+/**
+ * BP-565. A dialog's own three ways out — the scrim, Escape, the header × — belong to Modal, so no
+ * caller could gate them on its in-flight write: it disabled its buttons and the request could
+ * still be abandoned by clicking beside the dialog, leaving a later failure toast with nothing on
+ * screen to explain it.
+ */
+describe("Modal, while its caller's request is in flight", () => {
+  it("refuses Escape", () => {
+    const onClose = vi.fn();
+    renderModal({ onClose, closeDisabled: true });
+    press("Escape");
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("refuses a scrim click", () => {
+    const onClose = vi.fn();
+    const { container } = renderModal({ onClose, closeDisabled: true });
+    act(() => (container.firstElementChild as HTMLElement).click());
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  // Dimmed and announced rather than inert: a × that swallows clicks in silence reads as a broken
+  // dialog, which is what the Cancel button beside it already avoids by dimming. `aria-disabled`
+  // rather than `disabled` so it keeps its place in the tab order — in a confirm dialog mid-delete
+  // it is the only control left that has one.
+  it("announces the header button as unavailable, dims it, and keeps it focusable", () => {
+    const onClose = vi.fn();
+    renderModal({ onClose, closeDisabled: true });
+    const close = screen.getByRole("button", { name: "Close dialog" }) as HTMLButtonElement;
+    expect(close.getAttribute("aria-disabled")).toBe("true");
+    expect(close.disabled).toBe(false);
+    expect(close.className).toContain("aria-disabled:opacity-50");
+    act(() => close.click());
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  // The only feedback a phone gets: no Escape key, and the dimmed × is off to the side of a sheet
+  // whose scrim is the gesture people reach for.
+  it("moves the dialog when a refused close is the one thing that happened", () => {
+    const animate = vi.fn();
+    const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "animate");
+    Object.defineProperty(HTMLElement.prototype, "animate", { value: animate, configurable: true });
+    const { container } = renderModal({ closeDisabled: true });
+
+    press("Escape");
+    act(() => (container.firstElementChild as HTMLElement).click());
+    expect(animate).toHaveBeenCalledTimes(2);
+    expect(animate.mock.calls[0][0]).toEqual([
+      { transform: "scale(1)" },
+      { transform: "scale(1.015)" },
+      { transform: "scale(1)" },
+    ]);
+
+    if (original) Object.defineProperty(HTMLElement.prototype, "animate", original);
+    else delete (HTMLElement.prototype as unknown as Record<string, unknown>).animate;
+  });
+
+  it("stays still for a reader who asked for less motion", () => {
+    const animate = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "animate", { value: animate, configurable: true });
+    const matchMedia = vi.fn(() => ({ matches: true }));
+    Object.defineProperty(window, "matchMedia", { value: matchMedia, configurable: true });
+
+    renderModal({ closeDisabled: true });
+    press("Escape");
+
+    expect(animate).not.toHaveBeenCalled();
+    expect(matchMedia).toHaveBeenCalledWith("(prefers-reduced-motion: reduce)");
+    delete (HTMLElement.prototype as unknown as Record<string, unknown>).animate;
+    delete (window as unknown as Record<string, unknown>).matchMedia;
+  });
+
+  it("marks the dialog busy while it refuses", () => {
+    renderModal({ closeDisabled: true });
+    expect(screen.getByRole("dialog").getAttribute("aria-busy")).toBe("true");
+  });
+
+  // The gap the disabled × would have opened: with Cancel and Confirm disabled too, a dialog whose
+  // × had left the tab order would have no tab stop at all, and focus would sit on the container,
+  // which draws no ring.
+  it("still offers a tab stop while every button the caller owns is disabled", () => {
+    render(
+      <Modal open onClose={() => {}} title="Delete Task" closeDisabled>
+        <button disabled>Cancel</button>
+        <button disabled>Delete</button>
+      </Modal>
+    );
+    const stops = tabbablesWithin(screen.getByRole("dialog"));
+    expect(stops.map((el) => el.getAttribute("aria-label"))).toEqual(["Close dialog"]);
+  });
+
+  // The refusal lasts exactly as long as the request: a dialog that could not be dismissed
+  // afterwards would be a worse bug than the one this fixes.
+  it("takes all three back the moment the request lands", () => {
+    const onClose = vi.fn();
+    const { container, rerender } = render(
+      <Modal open onClose={onClose} title="Edit Sprint" closeDisabled>
+        <button>Save</button>
+      </Modal>
+    );
+    rerender(
+      <Modal open onClose={onClose} title="Edit Sprint" closeDisabled={false}>
+        <button>Save</button>
+      </Modal>
+    );
+
+    press("Escape");
+    act(() => (container.firstElementChild as HTMLElement).click());
+    act(() => screen.getByRole("button", { name: "Close dialog" }).click());
+    expect(onClose).toHaveBeenCalledTimes(3);
+  });
+
+  it("leaves a dialog that passes nothing exactly as it was", () => {
+    const onClose = vi.fn();
+    const { container } = renderModal({ onClose });
+    press("Escape");
+    act(() => (container.firstElementChild as HTMLElement).click());
+    act(() => screen.getByRole("button", { name: "Close dialog" }).click());
+    expect(onClose).toHaveBeenCalledTimes(3);
   });
 });

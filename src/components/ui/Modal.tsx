@@ -24,6 +24,13 @@ interface ModalProps {
   returnFocusTo?: React.RefObject<HTMLElement | null>;
   /** Drops the header and padding for a child that draws its own frame */
   bare?: boolean;
+  /**
+   * Refuses the dialog's own three ways out — backdrop, Escape, the × — while a request it started
+   * is still in flight. Its own buttons stay the caller's business; this is the half no caller can
+   * reach, and the half that used to let a failure toast land with nothing on screen to explain it
+   * (BP-556, BP-565).
+   */
+  closeDisabled?: boolean;
 }
 
 export function Modal({
@@ -34,6 +41,7 @@ export function Modal({
   size = "md",
   returnFocusTo,
   bare = false,
+  closeDisabled = false,
 }: ModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -46,10 +54,31 @@ export function Modal({
   // after open (an error message appearing, a field expanding) still gets picked up.
   const [scrollable, setScrollable] = useState(false);
 
+  // A refusal nobody can see reads as a dead dialog, and the scrim is the gesture a phone has —
+  // there is no Escape key there, and the dimmed × is off to the side. So a refused attempt says so
+  // by moving, briefly, and not at all for a reader who asked for less motion.
+  const refuse = () => {
+    const el = dialogRef.current;
+    if (!el || typeof el.animate !== "function") return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    el.animate(
+      [{ transform: "scale(1)" }, { transform: "scale(1.015)" }, { transform: "scale(1)" }],
+      { duration: 180, easing: "ease-out" }
+    );
+  };
+
+  const requestClose = () => {
+    if (closeDisabled) {
+      refuse();
+      return;
+    }
+    onClose();
+  };
+
   useFocusTrap({
     active: open,
     containerRef: dialogRef,
-    onEscape: onClose,
+    onEscape: requestClose,
     returnFocusTo,
   });
 
@@ -68,13 +97,17 @@ export function Modal({
       onClick={(e) => {
         if (e.target !== overlayRef.current) return;
         if (topmostLayer() !== dialogRef.current) return;
-        onClose();
+        requestClose();
       }}
     >
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
+        // Not an announcement — ARIA's own definition is "may wait before exposing changes" — but
+        // it is the standard way to say a dialog is mid-write, and what a reader hears instead is
+        // the caller's own "Saving…" label.
+        aria-busy={closeDisabled || undefined}
         aria-labelledby={named && !bare ? titleId : undefined}
         aria-label={named && !bare ? undefined : named ? title : UNNAMED_DIALOG_LABEL}
         tabIndex={-1}
@@ -92,10 +125,16 @@ export function Modal({
         {!bare && (
           <div className="flex shrink-0 items-center justify-between mb-4">
             <h2 id={titleId} className="text-lg font-semibold">{title}</h2>
+            {/* aria-disabled rather than `disabled`: a disabled button leaves the tab order, and in a
+                confirm dialog mid-delete every other control is disabled too — the dialog would have
+                no tab stop left, and a keyboard user's focus would drop to the body mid-request. This
+                stays focusable, announces itself as unavailable, and swallows the click. */}
             <button
-              onClick={onClose}
+              type="button"
+              onClick={requestClose}
+              aria-disabled={closeDisabled || undefined}
               aria-label="Close dialog"
-              className="p-2 rounded-lg hover:bg-bg-hover text-text-muted min-h-[44px] min-w-[44px] flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              className="p-2 rounded-lg hover:bg-bg-hover text-text-muted min-h-[44px] min-w-[44px] flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary aria-disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent"
             >
               &#x2715;
             </button>

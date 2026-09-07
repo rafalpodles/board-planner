@@ -25,6 +25,7 @@ import {
   storedTaskSprint,
 } from "./seed";
 import { signIn as arriveSignedIn } from "./session";
+import { expectToast, recordToasts } from "./toasts";
 
 /**
  * BP-389. Sprints away from the planning drag, which is e2e/sprint-planning.spec.ts: creating,
@@ -174,6 +175,87 @@ test.describe("creating and editing a sprint from the form", () => {
     await test.step("and a reload finds it there, not only in this tab's state", async () => {
       await page.reload();
       await expect(sprintRow(page, "Sprint Zeppelin")).toBeVisible();
+    });
+  });
+
+  /**
+   * BP-565, the shape BP-556 fixed one dialog at a time. `saving` reached the submit button and
+   * nothing else, so the scrim, Escape and the header × could dismiss the form mid-POST — and the
+   * failure toast then landed with no dialog on screen, and the typed sprint gone with it.
+   *
+   * Driven here rather than in the unit test because the gap was never in Modal alone: it was that
+   * no caller could reach the three ways out Modal owns.
+   */
+  test("the form cannot be dismissed while its save is in flight, and comes back when it fails", async ({
+    page,
+  }) => {
+    await signIn(page);
+    await openSprints(page);
+    await recordToasts(page);
+
+    // Held long enough to click at, then refused: a save that succeeds closes the form on its own,
+    // which would hide whether the refusal ever lifted.
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route(`**/api/projects/${PROJECT_KEY}/sprints`, async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      await held;
+      await route.fulfill({ status: 500, body: "{}" });
+    });
+
+    await page.getByRole("button", { name: "New Sprint" }).click();
+    const form = page.getByRole("dialog", { name: "New Sprint" });
+    await form.getByLabel("Name").fill("Sprint Hindenburg");
+
+    const sent = page.waitForRequest(
+      (request) =>
+        request.method() === "POST" &&
+        new URL(request.url()).pathname === `/api/projects/${PROJECT_KEY}/sprints`
+    );
+    await form.getByRole("button", { name: "Create" }).click();
+    await sent;
+
+    // A dismissal is a React state update from a native listener, so asserting "still there" in the
+    // same tick would pass on its first poll even if the gate were gone. Two frames is where that
+    // update has landed if it is going to.
+    const painted = () =>
+      page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+          )
+      );
+
+    await test.step("all three of the dialog's own ways out refuse", async () => {
+      // Playwright reads aria-disabled on a button as disabled, which is also why the click below
+      // has to be dispatched rather than performed: a plain click() waits for it to become enabled.
+      await expect(form.getByRole("button", { name: "Close dialog" })).toBeDisabled();
+      await expect(form).toHaveAttribute("aria-busy", "true");
+      await expect(form.getByRole("button", { name: "Cancel" })).toBeDisabled();
+
+      await page.keyboard.press("Escape");
+      await painted();
+      await expect(form).toBeVisible();
+
+      // Beside the dialog, which is the one nothing but Modal could ever have gated
+      await page.mouse.click(5, 5);
+      await painted();
+      await expect(form).toBeVisible();
+
+      await form.getByRole("button", { name: "Close dialog" }).dispatchEvent("click");
+      await painted();
+      await expect(form).toBeVisible();
+      await expect(form.getByLabel("Name")).toHaveValue("Sprint Hindenburg");
+    });
+
+    release();
+    await expectToast(page, "Failed to save sprint");
+
+    await test.step("and the failure leaves a dialog to land on, still dismissable", async () => {
+      await expect(form).toBeVisible();
+      await expect(form.getByRole("button", { name: "Close dialog" })).toBeEnabled();
+      await page.keyboard.press("Escape");
+      await expect(form).toBeHidden();
     });
   });
 

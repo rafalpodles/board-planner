@@ -46,7 +46,7 @@ export function DangerAction({
         {label}
       </Button>
 
-      <Modal open={open} onClose={() => setOpen(false)} title={title}>
+      <Modal open={open} onClose={() => setOpen(false)} closeDisabled={busy} title={title}>
         <p className="mb-2 text-sm text-text-muted">{message}</p>
         {usage && (
           <p className="mb-6 rounded-lg border-l-2 border-danger bg-danger/10 px-3 py-2 text-sm">

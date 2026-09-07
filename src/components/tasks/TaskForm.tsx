@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, FormEvent, useEffect, type CSSProperties } from "react";
+import { useState, useCallback, useRef, FormEvent, useEffect, type CSSProperties } from "react";
 import { useApi } from "@/hooks/use-api";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
@@ -48,6 +48,9 @@ interface TaskFormProps {
   // When set, the created task is linked as this task's child
   parentTaskId?: string;
   onCancel: () => void;
+  /** Told when the create is in flight, so a dialog wrapping this form can refuse to be dismissed
+      out from under it — the form is where the typed task lives (BP-565) */
+  onBusyChange?: (busy: boolean) => void;
 }
 
 export function TaskForm({
@@ -62,6 +65,7 @@ export function TaskForm({
   onSaved,
   parentTaskId,
   onCancel,
+  onBusyChange,
 }: TaskFormProps) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -87,9 +91,19 @@ export function TaskForm({
   const [loading, setLoading] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
+  const [uploads, setUploads] = useState(0);
   const [aiEnabled, setAiEnabled] = useState(false);
   const [aiInsights, setAiInsights] = useState<GeneratedTask | null>(null);
   const api = useApi();
+  // What a dialog around this form must not be dismissed during: the create, and an upload whose
+  // markdown lands in the description. Both are short and both take the whole typed task with them
+  // (BP-565).
+  //
+  // Deliberately NOT the AI fill. It is an enrichment the reader asked for, it can run for tens of
+  // seconds, and nothing can abort it — a dialog locked for that long with no way out is a worse
+  // bargain than a fill that lands on a form somebody closed. Its own button already says
+  // "Generating…" and refuses a second press.
+  const busy = loading || uploads > 0;
   const { toast } = useToast();
 
   useEffect(() => {
@@ -104,13 +118,37 @@ export function TaskForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Through a ref, so a caller passing an inline arrow does not make every one of its renders
+  // report false and then true again
+  const onBusyChangeRef = useRef(onBusyChange);
+  onBusyChangeRef.current = onBusyChange;
+
+  useEffect(() => {
+    onBusyChangeRef.current?.(busy);
+  }, [busy]);
+
+  // A form torn down mid-request would otherwise leave the flag set on whoever owns it
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      onBusyChangeRef.current?.(false);
+    };
+  }, []);
+
   const handleFileUpload = useCallback(
     async (file: File): Promise<string> => {
       const formData = new FormData();
       formData.append("file", file);
       formData.append("projectId", projectId);
-      const result = await api.upload("/api/uploads", formData);
-      return result.markdown;
+      setUploads((n) => n + 1);
+      try {
+        const result = await api.upload("/api/uploads", formData);
+        return result.markdown;
+      } finally {
+        setUploads((n) => n - 1);
+      }
     },
     [api, projectId]
   );
@@ -131,7 +169,11 @@ export function TaskForm({
         setCustomFieldValues((prev) => ({ ...prev, ...result.customFieldValues }));
       }
       setAiInsights(result);
-      toast("Fields filled by AI — review and save", "success");
+      // The fill is deliberately not gated (see `busy` above), so the form can be gone by now —
+      // and a line telling somebody to review fields they cannot see is worse than silence. The
+      // failure below is deliberately not held back the same way: a request that failed is worth
+      // hearing about wherever the reader ended up.
+      if (mounted.current) toast("Fields filled by AI — review and save", "success");
     } catch {
       toast("AI generation failed", "error");
     } finally {
@@ -560,10 +602,10 @@ export function TaskForm({
       {error && <p className="text-sm text-danger">{error}</p>}
 
       <div className="flex gap-3 items-center">
-        <Button type="submit" disabled={loading}>
+        <Button type="submit" disabled={busy}>
           {loading ? "Saving..." : "Create Task"}
         </Button>
-        <Button type="button" variant="secondary" onClick={onCancel}>
+        <Button type="button" variant="secondary" onClick={onCancel} disabled={busy}>
           Cancel
         </Button>
       </div>

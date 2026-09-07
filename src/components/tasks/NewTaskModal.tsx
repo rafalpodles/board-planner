@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { ApiProject, ApiSprint } from "@/types";
 import { TaskForm } from "@/components/tasks/TaskForm";
 import { Modal } from "@/components/ui/Modal";
@@ -24,8 +25,10 @@ export function NewTaskModal({
   onClose,
   onSaved,
 }: NewTaskModalProps) {
+  const [saving, setSaving] = useState(false);
+
   return (
-    <Modal open={open} onClose={onClose} title="New Task" size="lg">
+    <Modal open={open} onClose={onClose} closeDisabled={saving} title="New Task" size="lg">
       <TaskForm
         projectId={projectId}
         projectKey={project.key}
@@ -37,6 +40,7 @@ export function NewTaskModal({
         customFields={project.customFields || []}
         onSaved={onSaved}
         onCancel={onClose}
+        onBusyChange={setSaving}
       />
     </Modal>
   );
