@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { replaceProviderLinks } from "@/lib/pr-links";
 
 /**
  * BP-429. This route is unchanged by that ticket; the tests are what it was missing. Its
@@ -11,13 +12,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const fetchPullRequests = vi.fn();
 const projectFindById = vi.fn();
 const taskFindOne = vi.fn();
+// What the route tells the database, now that the write is not a read-mutate-save (BP-559)
+const taskUpdateOne = vi.fn();
 const logActivity = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/encryption", () => ({ decryptSecret: (v: string) => `plain:${v}` }));
 vi.mock("@/lib/activity", () => ({ logActivity }));
 vi.mock("@/models/project", () => ({ Project: { findById: projectFindById } }));
-vi.mock("@/models/task", () => ({ Task: { findOne: taskFindOne } }));
+vi.mock("@/models/task", () => ({ Task: { findOne: taskFindOne, updateOne: taskUpdateOne } }));
 vi.mock("@/lib/github", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/github")>()),
   fetchPullRequests,
@@ -71,6 +74,7 @@ const request = () =>
 const ctx = () => ({ params: Promise.resolve({ projectId: "p1" }) });
 
 beforeEach(() => {
+  taskUpdateOne.mockResolvedValue({ modifiedCount: 1 });
   vi.clearAllMocks();
   projectFindById.mockReturnValue({ lean: () => project() });
   taskFindOne.mockResolvedValue(task());
@@ -89,47 +93,32 @@ describe("POST .../github/sync", () => {
     expect(body.prsLinked).toBe(1);
   });
 
-  it("writes the links to the task and saves it", async () => {
+  it("writes the links through the database, not by saving a mutated object", async () => {
     const doc = task();
     taskFindOne.mockResolvedValue(doc);
     fetchPullRequests.mockResolvedValue([pr({ number: 1 })]);
 
     await POST(request(), ctx());
 
-    expect(doc.linkedPRs).toHaveLength(1);
-    // Without this, every assertion here is about an object mutated in memory and nothing
-    // proves the route ever wrote it back.
-    expect(doc.save).toHaveBeenCalled();
+    // The pipeline's *meaning* — which link survives — is asserted against a real database in
+    // `e2e/pr-link-replacement.spec.ts`; what this file pins is that the route asks the database
+    // to do it, rather than saving a copy it read a moment ago (BP-559)
+    const [filter, update] = taskUpdateOne.mock.calls[0];
+    expect(filter).toEqual({ _id: doc._id });
+    expect(update).toEqual(replaceProviderLinks("github", [expect.objectContaining({ number: 1 })]));
+    expect(doc.save).not.toHaveBeenCalled();
   });
 
-  it("replaces this provider's entries and leaves GitLab's alone", async () => {
-    const doc = task({
-      linkedPRs: [
-        { provider: "gitlab", number: 99, url: "https://gitlab.com/g/p/-/merge_requests/99" },
-        { provider: "github", number: 7, url: "https://github.com/o/r/pull/7" },
-      ],
-    });
+  it("names its own provider, which is what decides whose links are replaced", async () => {
+    const doc = task();
     taskFindOne.mockResolvedValue(doc);
     fetchPullRequests.mockResolvedValue([pr({ number: 1 })]);
 
     await POST(request(), ctx());
 
-    expect(doc.linkedPRs.map((p: { provider: string; number: number }) => [p.provider, p.number])).toEqual([
-      ["gitlab", 99],
-      ["github", 1],
-    ]);
-  });
-
-  it("replaces a link with no provider recorded, because a link predating the field is this one's", async () => {
-    // This is the route where the `?? "github"` default is observable: read the other way, the
-    // legacy row would survive as a duplicate of the pull request that just replaced it.
-    const doc = task({ linkedPRs: [{ number: 7, url: "https://github.com/o/r/pull/7" }] });
-    taskFindOne.mockResolvedValue(doc);
-    fetchPullRequests.mockResolvedValue([pr({ number: 1 })]);
-
-    await POST(request(), ctx());
-
-    expect(doc.linkedPRs.map((p: { number: number }) => p.number)).toEqual([1]);
+    expect(taskUpdateOne.mock.calls[0][1]).toEqual(replaceProviderLinks("github", [
+      expect.objectContaining({ provider: "github", number: 1 }),
+    ]));
   });
 
   it("moves a merged task out of review, and records where it went", async () => {
@@ -139,7 +128,11 @@ describe("POST .../github/sync", () => {
 
     const body = await (await POST(request(), ctx())).json();
 
-    expect(doc.status).toBe("ready_to_test");
+    // The move is a guarded write now, so what proves it is what the database was asked for
+    expect(taskUpdateOne).toHaveBeenCalledWith(
+      { _id: doc._id, status: "in_review" },
+      { $set: { status: "ready_to_test" } }
+    );
     expect(body.autoTransitioned).toBe(1);
     expect(logActivity).toHaveBeenCalledWith(
       "t1",
@@ -191,5 +184,32 @@ describe("POST .../github/sync", () => {
     expect(doc.status).toBe("checking");
     expect(body.autoTransitioned).toBe(0);
     expect(body.prsLinked).toBe(1);
+  });
+
+  /**
+   * The whole point of guarding the write: two overlapping syncs both read `in_review`, and
+   * without the precondition both wrote the move and both logged it — one transition, two rows in
+   * the task's history (BP-559).
+   */
+  it("logs nothing when another sync moved the task first", async () => {
+    const doc = task({ status: "in_review" });
+    taskFindOne.mockResolvedValue(doc);
+    fetchPullRequests.mockResolvedValue([pr({ merged_at: "2026-08-02T00:00:00Z" })]);
+    // The links land; the status write finds the task already moved
+    taskUpdateOne
+      .mockResolvedValueOnce({ modifiedCount: 1 })
+      .mockResolvedValueOnce({ modifiedCount: 0 });
+
+    const body = await (await POST(request(), ctx())).json();
+
+    expect(body.autoTransitioned).toBe(0);
+    expect(logActivity).not.toHaveBeenCalledWith(
+      "t1",
+      "u1",
+      "status_changed",
+      "status",
+      "in_review",
+      "ready_to_test"
+    );
   });
 });

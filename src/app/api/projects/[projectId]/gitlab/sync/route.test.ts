@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { replaceProviderLinks } from "@/lib/pr-links";
 
 /**
  * BP-429. The post-fetch half of sync had no test at any level, which is how three separate things
@@ -11,13 +12,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const fetchMergeRequests = vi.fn();
 const projectFindById = vi.fn();
 const taskFindOne = vi.fn();
+// What the route tells the database, now that the write is not a read-mutate-save (BP-559)
+const taskUpdateOne = vi.fn();
 const logActivity = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/encryption", () => ({ decryptSecret: (v: string) => `plain:${v}` }));
 vi.mock("@/lib/activity", () => ({ logActivity }));
 vi.mock("@/models/project", () => ({ Project: { findById: projectFindById } }));
-vi.mock("@/models/task", () => ({ Task: { findOne: taskFindOne } }));
+vi.mock("@/models/task", () => ({ Task: { findOne: taskFindOne, updateOne: taskUpdateOne } }));
 // Partial: matchMRsToTasks is the REAL matcher, so the former-keys assertion is about the shipped
 // rule rather than about a stub that agrees with itself.
 vi.mock("@/lib/gitlab", async (importOriginal) => ({
@@ -74,6 +77,7 @@ const request = () =>
 const ctx = () => ({ params: Promise.resolve({ projectId: "p1" }) });
 
 beforeEach(() => {
+  taskUpdateOne.mockResolvedValue({ modifiedCount: 1 });
   vi.clearAllMocks();
   projectFindById.mockReturnValue({ lean: () => project() });
   taskFindOne.mockResolvedValue(task());
@@ -101,38 +105,23 @@ describe("POST .../gitlab/sync — matching", () => {
 });
 
 describe("POST .../gitlab/sync — linking", () => {
-  it("replaces this provider's entries and leaves the other provider's alone", async () => {
-    const existing = [
-      { provider: "github", number: 7, url: "https://github.com/o/r/pull/7" },
-      { provider: "gitlab", number: 99, url: "https://gitlab.com/g/p/-/merge_requests/99" },
-    ];
-    const doc = task({ linkedPRs: existing });
+  it("names its own provider, which is what decides whose links are replaced", async () => {
+    const doc = task();
     taskFindOne.mockResolvedValue(doc);
-    fetchMergeRequests.mockResolvedValue([mr({ iid: 1 })]);
+    fetchMergeRequests.mockResolvedValue([mr({ number: 1 })]);
 
     await POST(request(), ctx());
 
-    expect(doc.linkedPRs.map((p: { provider: string; number: number }) => [p.provider, p.number])).toEqual([
-      ["github", 7],
-      ["gitlab", 1],
-    ]);
+    // Which link survives is asserted against a real database in `e2e/pr-link-replacement.spec.ts`;
+    // what this pins is that the route hands the job over rather than saving a copy (BP-559)
+    const [filter, update] = taskUpdateOne.mock.calls[0];
+    expect(filter).toEqual({ _id: doc._id });
+    expect(update).toEqual(replaceProviderLinks("gitlab", [
+      expect.objectContaining({ provider: "gitlab", number: 1 }),
+    ]));
+    expect(doc.save).not.toHaveBeenCalled();
   });
 
-  it("treats a link with no provider recorded as GitHub's, so an old row is not swept away", async () => {
-    const doc = task({ linkedPRs: [{ number: 7, url: "https://github.com/o/r/pull/7" }] });
-    taskFindOne.mockResolvedValue(doc);
-    fetchMergeRequests.mockResolvedValue([mr({ iid: 1 })]);
-
-    await POST(request(), ctx());
-
-    expect(doc.linkedPRs).toHaveLength(2);
-    // Without this, every assertion in this file is about an object mutated in memory and
-    // nothing proves the route ever wrote it back.
-    expect(doc.save).toHaveBeenCalled();
-  });
-});
-
-describe("POST .../gitlab/sync — the merged-MR transition", () => {
   it("sends a merged task to the last review column, not the next one", async () => {
     // The default board has THREE review columns — in_review, needs_human_review, ready_to_test.
     // "The next review column" put merged work in the queue that exists for a human to look at.
@@ -142,7 +131,10 @@ describe("POST .../gitlab/sync — the merged-MR transition", () => {
 
     const body = await (await POST(request(), ctx())).json();
 
-    expect(doc.status).toBe("ready_to_test");
+    expect(taskUpdateOne).toHaveBeenCalledWith(
+      { _id: doc._id, status: doc.status },
+      { $set: { status: "ready_to_test" } }
+    );
     expect(body.autoTransitioned).toBe(1);
   });
 
@@ -170,7 +162,10 @@ describe("POST .../gitlab/sync — the merged-MR transition", () => {
 
     const body = await (await POST(request(), ctx())).json();
 
-    expect(doc.status).toBe("needs_human_review");
+    // No status write reached the database at all — the only call is the link replacement
+    expect(
+      taskUpdateOne.mock.calls.filter(([, update]) => !Array.isArray(update))
+    ).toHaveLength(0);
     expect(body.autoTransitioned).toBe(0);
     expect(logActivity).not.toHaveBeenCalled();
     // The control: the route reached this task and linked its merge request, so the status
@@ -185,7 +180,10 @@ describe("POST .../gitlab/sync — the merged-MR transition", () => {
 
     const body = await (await POST(request(), ctx())).json();
 
-    expect(doc.status).toBe("in_review");
+    // No status write reached the database at all — the only call is the link replacement
+    expect(
+      taskUpdateOne.mock.calls.filter(([, update]) => !Array.isArray(update))
+    ).toHaveLength(0);
     expect(body.autoTransitioned).toBe(0);
     expect(body.prsLinked).toBe(1);
   });
@@ -197,7 +195,10 @@ describe("POST .../gitlab/sync — the merged-MR transition", () => {
 
     const body = await (await POST(request(), ctx())).json();
 
-    expect(doc.status).toBe("ready_to_test");
+    // No status write reached the database at all — the only call is the link replacement
+    expect(
+      taskUpdateOne.mock.calls.filter(([, update]) => !Array.isArray(update))
+    ).toHaveLength(0);
     expect(body.autoTransitioned).toBe(0);
     expect(body.prsLinked).toBe(1);
   });
@@ -219,7 +220,10 @@ describe("POST .../gitlab/sync — the merged-MR transition", () => {
 
     const body = await (await POST(request(), ctx())).json();
 
-    expect(doc.status).toBe("needs_human_review");
+    // No status write reached the database at all — the only call is the link replacement
+    expect(
+      taskUpdateOne.mock.calls.filter(([, update]) => !Array.isArray(update))
+    ).toHaveLength(0);
     expect(body.prsLinked).toBe(1);
   });
 
@@ -233,7 +237,9 @@ describe("POST .../gitlab/sync — the merged-MR transition", () => {
     const body = await (await POST(request(), ctx())).json();
     expect(body.autoTransitioned).toBe(0);
     expect(body.prsLinked).toBe(1);
-    expect(doc.status).toBe("checking");
+    expect(
+      taskUpdateOne.mock.calls.filter(([, update]) => !Array.isArray(update))
+    ).toHaveLength(0);
   });
 
   it("advances along a renamed board that has two review columns", async () => {
@@ -249,7 +255,10 @@ describe("POST .../gitlab/sync — the merged-MR transition", () => {
 
     await POST(request(), ctx());
 
-    expect(doc.status).toBe("verifying");
+    expect(taskUpdateOne).toHaveBeenCalledWith(
+      { _id: doc._id, status: doc.status },
+      { $set: { status: "verifying" } }
+    );
     // On the default board the destination happens to BE "ready_to_test", so the hardcoded string
     // this route used to log was indistinguishable from the real one. Here it is not.
     expect(logActivity).toHaveBeenCalledWith(
