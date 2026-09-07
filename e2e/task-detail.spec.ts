@@ -78,6 +78,22 @@ function taskWrite(page: Page, method: string, urlPart: string) {
   );
 }
 
+/**
+ * BP-595. Adding a criterion is `fill` + Enter, and when no write follows, a bare
+ * `waitForResponse` timeout says only that. It has three causes and they need different fixes:
+ * React never saw the fill, so `add()` read an empty draft; the key was consumed by the
+ * suggestion list; or the save was made and lost. The box clearing is React's own answer — `add()`
+ * empties the draft, and the field is controlled — so reading it back names the first two.
+ */
+async function addCriterion(page: Page, taskId: string, text: string) {
+  const addBox = page.getByLabel("Add criterion");
+  const saved = taskWrite(page, "PUT", `/tasks/${taskId}`);
+  await addBox.fill(text);
+  await addBox.press("Enter");
+  await expect(addBox, `Enter did not reach React: the box still holds what was typed, so no write was ever attempted for "${text}"`).toHaveValue("");
+  expect((await saved).status()).toBe(200);
+}
+
 async function readTask(request: APIRequestContext, taskNumber: number) {
   const res = await request.get(`/api/projects/${PROJECT_KEY}/tasks/${taskNumber}`, {
     headers: ADMIN_AUTH,
@@ -246,16 +262,8 @@ test("acceptance criteria tick, count, persist and reach the card", async ({ pag
   const detail = page.locator("#main-content");
 
   await test.step("adding two criteria starts both unticked", async () => {
-    const addBox = page.getByLabel("Add criterion");
-    const saved = taskWrite(page, "PUT", `/tasks/${FINISHED_TASK_ID}`);
-    await addBox.fill("the build passes");
-    await addBox.press("Enter");
-    await saved;
-
-    const savedSecond = taskWrite(page, "PUT", `/tasks/${FINISHED_TASK_ID}`);
-    await addBox.fill("the docs mention it");
-    await addBox.press("Enter");
-    await savedSecond;
+    await addCriterion(page, String(FINISHED_TASK_ID), "the build passes");
+    await addCriterion(page, String(FINISHED_TASK_ID), "the docs mention it");
 
     await expect(detail.getByText("0/2")).toBeVisible();
   });
@@ -615,10 +623,7 @@ test("emptying an acceptance criterion is refused, and the stored one survives",
   await openTask(page, FINISHED_TASK_NUMBER);
 
   await test.step("a criterion is added the ordinary way", async () => {
-    const saved = taskWrite(page, "PUT", `/tasks/${FINISHED_TASK_ID}`);
-    await page.getByLabel("Add criterion").fill("the build passes");
-    await page.getByLabel("Add criterion").press("Enter");
-    expect((await saved).status()).toBe(200);
+    await addCriterion(page, String(FINISHED_TASK_ID), "the build passes");
   });
 
   await test.step("clearing it answers 400, not 500", async () => {
