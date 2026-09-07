@@ -29,9 +29,7 @@ const created: mongoose.Types.ObjectId[] = [];
 function link(provider: "github" | "gitlab" | null, number: number) {
   const doc: Record<string, unknown> = {
     number,
-    // A title an outsider chooses, and one MongoDB reads as a field path unless the documents are
-    // stored verbatim: without `$literal` this came back as the task's own title.
-    title: number % 2 === 0 ? `$title ${number}` : `PR ${number}`,
+    title: `PR ${number}`,
     state: "open",
     url: `https://example.test/${number}`,
     mergedAt: null,

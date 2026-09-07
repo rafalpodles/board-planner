@@ -9,11 +9,8 @@ import { replaceProviderLinks } from "@/lib/pr-links";
  * per-provider replacement rule and the transition itself all run for real.
  */
 
-// Hoisted, not plain `const`: `@/lib/pr-links` is imported at the top of this file and reaches
-// `@/models/task`, so the mock factory below runs before a `const` in this scope is initialised —
-// which fails as "Cannot access 'taskFindOne' before initialization", and only in the file order
-// CI happens to pick. `taskUpdateOne` is what the route tells the database now that the write is
-// not a read-mutate-save (BP-559).
+// Hoisted: `@/lib/pr-links` above reaches `@/models/task`, so the factory below runs before a
+// plain `const` in this scope is initialised (BP-559).
 const { fetchMergeRequests, projectFindById, taskFindOne, taskUpdateOne, logActivity } = vi.hoisted(
   () => ({
     fetchMergeRequests: vi.fn(),
@@ -122,7 +119,8 @@ describe("POST .../gitlab/sync — linking", () => {
 
     // Which link survives is asserted against a real database in `e2e/pr-link-replacement.spec.ts`;
     // what this pins is that the route hands the job over rather than saving a copy (BP-559)
-    const [filter, update] = taskUpdateOne.mock.calls[0];
+    const [filter, update, options] = taskUpdateOne.mock.calls[0];
+    expect(options).toEqual({ updatePipeline: true });
     expect(filter).toEqual({ _id: doc._id });
     expect(update).toEqual(replaceProviderLinks("gitlab", [
       expect.objectContaining({ provider: "gitlab", number: 7 }),

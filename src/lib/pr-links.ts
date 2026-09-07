@@ -28,10 +28,8 @@ export function replaceProviderLinks(
                 cond: { $ne: [{ $ifNull: ["$$this.provider", "github"] }, provider] },
               },
             },
-            // `$literal`: inside a pipeline every string in a document is an expression, and
-            // `title` is the one field an outsider names. A PR called "$title" was stored as the
-            // task's own title, and one called "$ref cleanup" dropped the field the schema
-            // requires — both from anyone who can name a branch on the linked repository.
+            // `$literal`: in a pipeline a string is an expression, and `title` is a name an
+            // outsider chooses — "$title" was stored as the task's own title.
             { $literal: docs },
           ],
         },
@@ -49,7 +47,7 @@ export function replaceProviderLinks(
 export async function writeProviderLinks(
   taskId: mongoose.Types.ObjectId,
   provider: "github" | "gitlab",
-  docs: Omit<Record<string, unknown>, "_id">[]
+  docs: (Record<string, unknown> & { _id?: never })[]
 ): Promise<void> {
   const withIds = docs.map((doc) => ({ _id: new mongoose.Types.ObjectId(), ...doc }));
   await Task.updateOne({ _id: taskId }, replaceProviderLinks(provider, withIds), {

@@ -9,11 +9,8 @@ import { replaceProviderLinks } from "@/lib/pr-links";
  * The network is stubbed; the matcher, the linking rule and the transition all run for real.
  */
 
-// Hoisted, not plain `const`: `@/lib/pr-links` is imported at the top of this file and reaches
-// `@/models/task`, so the mock factory below runs before a `const` in this scope is initialised —
-// which fails as "Cannot access 'taskFindOne' before initialization", and only in the file order
-// CI happens to pick. `taskUpdateOne` is what the route tells the database now that the write is
-// not a read-mutate-save (BP-559).
+// Hoisted: `@/lib/pr-links` above reaches `@/models/task`, so the factory below runs before a
+// plain `const` in this scope is initialised (BP-559).
 const { fetchPullRequests, projectFindById, taskFindOne, taskUpdateOne, logActivity } = vi.hoisted(
   () => ({
     fetchPullRequests: vi.fn(),
