@@ -657,3 +657,44 @@ test("an outage answers 503 and says the credential was not the problem", async 
   const tasks = await session.callTool("list_tasks", { project: PROJECT_KEY });
   expect(tasks.text).toContain(HELD_TASK_TITLE);
 });
+
+/**
+ * BP-564. Every refusal here is handed to a model as a tool result, so an unbounded echo of the
+ * caller's own argument lets the caller decide how much of the reader's context the answer to its
+ * own bad request takes. Driven over the real HTTP+OAuth endpoint, because that is the surface the
+ * PM agent and every token holder actually use.
+ */
+test("a refusal quotes the caller back, but only so much of it", async ({ request }) => {
+  await seedAgents();
+  const session = await connected(request);
+  const huge = "z".repeat(50_000);
+
+  const assignee = await session.callTool("update_task", {
+    taskKey: SIBLING_TASK_KEY,
+    assignee: huge,
+  });
+  refused(assignee);
+  expect(assignee.text).toContain(`"${"z".repeat(64)}…" is not someone this board`);
+  expect(assignee.text.length).toBeLessThan(400);
+
+  const agent = await session.callTool("update_task", { taskKey: SIBLING_TASK_KEY, agent: huge });
+  refused(agent);
+  expect(agent.text).toContain(`Agent "${"z".repeat(64)}…" not found`);
+  expect(agent.text.length).toBeLessThan(400);
+
+  const field = await session.callTool("update_task", {
+    taskKey: SIBLING_TASK_KEY,
+    fields: { [huge]: "x" },
+  });
+  refused(field);
+  expect(field.text).toContain(`Unknown field "${"z".repeat(64)}…"`);
+  expect(field.text.length).toBeLessThan(600);
+
+  // A name anybody would really send is still quoted whole
+  const short = await session.callTool("update_task", {
+    taskKey: SIBLING_TASK_KEY,
+    assignee: "nobody",
+  });
+  refused(short);
+  expect(short.text).toContain('"nobody" is not someone this board');
+});
