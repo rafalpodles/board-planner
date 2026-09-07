@@ -114,6 +114,72 @@ describe("a read already in flight when a write starts", () => {
     expect(orderOnScreen(), "the drop stands").toBe("t1:1,t2:0");
   });
 
+  // A read issued *while* the write is on the wire is as blind to it as one issued before, and
+  // it was the half the first fix left open
+  it("does not put a reorder back when the read started during the write", async () => {
+    await mounted();
+
+    const write = held<unknown>();
+    api.put.mockImplementation(() => write.promise);
+    let writing!: Promise<void>;
+    act(() => {
+      writing = board.handleReorder(["t2", "t1"]);
+    });
+
+    // The poll goes out now, with the write still on the wire, and is answered with what the
+    // server held before it committed
+    const poll = held<unknown>();
+    api.get.mockImplementation((path: string) => {
+      if (path.endsWith("/tasks")) return poll.promise;
+      if (path.endsWith("/sprints")) return Promise.resolve([]);
+      return Promise.resolve(PROJECT);
+    });
+    let reading!: Promise<void>;
+    act(() => {
+      reading = board.reload();
+    });
+
+    await act(async () => {
+      write.release({});
+      await writing;
+    });
+    await act(async () => {
+      poll.release([task("t1", 0), task("t2", 1)]);
+      await reading;
+    });
+
+    expect(orderOnScreen(), "the drop stands").toBe("t1:1,t2:0");
+  });
+
+  it("does not undo an assignee set while a read was in flight", async () => {
+    await mounted();
+
+    const poll = held<unknown>();
+    api.get.mockImplementation((path: string) => {
+      if (path.endsWith("/tasks")) return poll.promise;
+      if (path.endsWith("/sprints")) return Promise.resolve([]);
+      return Promise.resolve(PROJECT);
+    });
+    let reading!: Promise<void>;
+    act(() => {
+      reading = board.reload();
+    });
+
+    api.put.mockResolvedValue({ _id: "t1", assignee: { _id: "u1", username: "rafal" } });
+    await act(async () => {
+      await board.handleAssigneeChange("t1", "rafal");
+    });
+
+    await act(async () => {
+      poll.release([task("t1", 0), task("t2", 1)]);
+      await reading;
+    });
+
+    expect(
+      (board.tasks.find((t) => t._id === "t1")!.assignee as { username: string } | null)?.username
+    ).toBe("rafal");
+  });
+
   // The control: a read that overtook nothing is the board's only source of other people's work
   it("still applies a read that no write overtook", async () => {
     await mounted();
@@ -145,14 +211,18 @@ describe("what a status write paints", () => {
     expect(board.tasks.find((t) => t._id === "t1")!.status).toBe("shipped");
   });
 
-  it("falls back to the requested status when the write answers with nothing", async () => {
+  it("keeps what only the board knows about the row", async () => {
     await mounted();
-    api.patch.mockResolvedValue(undefined);
+    // What a write answers with is not what the list answers with: `changeStatus` populates fewer
+    // paths, and `relatedFrom` is computed on the client and never sent at all
+    api.patch.mockResolvedValue({ _id: "t1", status: "shipped" });
 
     await act(async () => {
       await board.handleStatusChange("t1", "blocked");
     });
 
-    expect(board.tasks.find((t) => t._id === "t1")!.status).toBe("blocked");
+    const row = board.tasks.find((t) => t._id === "t1")!;
+    expect(row.status).toBe("shipped");
+    expect(row.title, "the row keeps the fields the answer did not mention").toBe("t1");
   });
 });

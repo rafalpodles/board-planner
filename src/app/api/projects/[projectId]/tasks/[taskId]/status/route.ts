@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectAccessOrWorker } from "@/lib/middleware";
 import { changeStatus } from "@/lib/task-service";
+import { withApiExecution } from "@/lib/task-execution-view";
 import { machineMayNotForce, MACHINE_FORCE_REFUSAL } from "@/lib/force-guard";
 
 export const PATCH = withProjectAccessOrWorker(async (request, { params, user, workerId }) => {
@@ -31,5 +32,8 @@ export const PATCH = withProjectAccessOrWorker(async (request, { params, user, w
     );
   }
 
-  return NextResponse.json(result.data);
+  // The stored execution has defaults on every field, so answering with the raw document tells the
+  // board a machine is holding this task and paints the red run indicator on the card the reader
+  // just moved (BP-558 review)
+  return NextResponse.json(await withApiExecution(result.data));
 });
