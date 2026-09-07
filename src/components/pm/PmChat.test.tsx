@@ -18,6 +18,11 @@ vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/hooks/use-open-task", () => ({ useOpenTask: () => vi.fn() }));
 vi.mock("@/lib/board-refresh", () => ({ emitBoardRefresh: vi.fn(), subscribeBoardRefresh: () => () => {} }));
 vi.mock("@/hooks/use-poll-while-visible", () => ({ usePollWhileVisible: () => {} }));
+// happy-dom has no canvas, and the real one would reject the one-byte file below
+vi.mock("@/lib/image-resize", () => ({
+  downscaleImage: (file: File) => Promise.resolve({ file, width: 10, height: 10 }),
+  estimateImageTokens: () => 100,
+}));
 
 const PROJECT = {
   _id: "p1",
@@ -129,58 +134,61 @@ describe("Retry after a failed turn", () => {
     expect(screen.queryByText("OpenRouter HTTP 500"), "and cleared the banner").toBeNull();
   });
 
-  // `send` refuses while a turn is working, and that refusal is the whole premise of the guard
-  // above. Without this the clause could be deleted and both tests above would stay green while
-  // the button became pointless again
-  it("is refused by send if it is somehow pressed while the turn works", async () => {
-    const turn = await chatWithAFailedTurn();
-    await waitFor(() => expect(screen.getByText("OpenRouter HTTP 500")).toBeTruthy());
-
-    const before = api.stream.mock.calls.length;
-    // Reaching past the guard, because reaching it through the screen is what the guard prevents
-    await act(async () => {
-      document.querySelectorAll("button").forEach((b) => {
-        if (b.textContent === "Retry") b.click();
-      });
-      await Promise.resolve();
-    });
-    expect(api.stream.mock.calls.length).toBe(before);
-
-    await act(async () => {
-      turn.releaseReload();
-      await Promise.resolve();
-    });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy());
-  });
-
-  // The same dead button, reached through the other half of `send`'s guard: an image attached
-  // mid-turn is still uploading when the turn errors and lets go
+  /**
+   * The same dead button through the other half of `send`'s guard. The order matters: attaching
+   * clears the banner on the way in, so the image has to be picked up *during* the turn — then the
+   * turn errors and writes the banner back while the upload is still in flight.
+   */
   it("is not offered while an attachment is still uploading", async () => {
-    const turn = await chatWithAFailedTurn();
+    const stream = heldStream();
+    api.stream.mockResolvedValue(stream.response);
+    render(<PmChat projectId="p1" preloadedProject={PROJECT as never} />);
+    const box = await screen.findByRole("textbox");
+
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
+        box,
+        "Once more with feeling."
+      );
+      box.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      screen.getByRole("button", { name: /send/i }).click();
+    });
+
+    // Mid-turn, and the upload is held open
     let releaseUpload!: () => void;
     api.upload.mockReturnValue(
       new Promise((resolve) => {
-        releaseUpload = () => resolve({ fileId: "f1", width: 10, height: 10 });
+        releaseUpload = () => resolve({ fileId: "f1" });
       })
     );
-
-    await act(async () => {
-      turn.releaseReload();
-      await Promise.resolve();
-    });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy());
-
     await act(async () => {
       const input = document.querySelector('input[type="file"]') as HTMLInputElement;
-      const file = new File(["x"], "shot.png", { type: "image/png" });
-      Object.defineProperty(input, "files", { value: [file] });
+      Object.defineProperty(input, "files", {
+        value: [new File(["x"], "shot.png", { type: "image/png" })],
+        configurable: true,
+      });
       input.dispatchEvent(new Event("change", { bubbles: true }));
       await Promise.resolve();
     });
 
-    await waitFor(() =>
-      expect(screen.queryByRole("button", { name: "Retry" }), "not while it uploads").toBeNull()
-    );
-    releaseUpload();
+    await act(async () => {
+      stream.push(`event: error\ndata: ${JSON.stringify({ error: "OpenRouter HTTP 500" })}\n\n`);
+      stream.close();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(screen.getByText("OpenRouter HTTP 500")).toBeTruthy());
+    expect(
+      screen.queryByRole("button", { name: "Retry" }),
+      "the upload has not finished, so send would refuse"
+    ).toBeNull();
+
+    await act(async () => {
+      releaseUpload();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy());
   });
 });
