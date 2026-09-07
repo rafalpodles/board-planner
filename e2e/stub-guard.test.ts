@@ -100,9 +100,14 @@ async function freePort(): Promise<number> {
 }
 
 /**
- * Stands up a real `serve()` on a free port, runs `check` against it, and takes back everything it
- * installed in this process — `keepAlive`'s `uncaughtException` listener would otherwise swallow
- * the vitest worker's own failures for the rest of the run.
+ * Stands up a real `serve()` on a free port, runs `check` against it, and takes back the
+ * `uncaughtException` listener it installed — left behind, that swallows the vitest worker's own
+ * failures for the rest of the run.
+ *
+ * What it cannot take back is `keepAlive`'s module-level `guarding` flag, which has no reset. A
+ * SECOND `serve()` in this worker would therefore install no listener at all, and a throw escaping
+ * a handler there would take the rest of the file with it — this ticket's own bug, inside the
+ * harness. One caller today; the next one needs `vi.resetModules()`.
  */
 async function withServe(check: (url: string) => Promise<void>): Promise<void> {
   const before = process.listeners("uncaughtException");
@@ -461,11 +466,13 @@ describe("serve", () => {
         signal: AbortSignal.timeout(1_500),
       });
       expect(crashed.status).toBe(500);
-      expect(errors.join("")).toContain(CRASH_MARKER);
+      // The BODY, which only the guard writes. `keepAlive` reports the same marker to stderr from
+      // the same name, so a stderr assertion alone cannot say which path answered.
+      expect(await crashed.text()).toContain(CRASH_MARKER);
       expect(errors.join("")).toContain("served by serve");
 
       // And still serving, which is the whole of BP-575.
-      const next = await fetch(`${url}/health`);
+      const next = await fetch(`${url}/health`, { signal: AbortSignal.timeout(1_500) });
       expect(next.status).toBe(200);
     });
   });
