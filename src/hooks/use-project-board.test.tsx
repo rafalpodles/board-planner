@@ -414,6 +414,63 @@ describe("moving a task to another sprint", () => {
     });
 
     expect(board.tasks.map((t) => t._id), "the later move is the one that counts").toContain("t1");
+    expect(board.tasks.find((t) => t._id === "t1")!.sprint, "and with the sprint it was moved to").toBe("s1");
+  });
+
+  // The bulk toolbar and the row picker are on the same screen and write the same field, so a
+  // guard only the row path carries is a guard the reader can walk around.
+  it("a slower row answer cannot undo a bulk move made after it", async () => {
+    await mountedScoped("s1");
+    const first = held<unknown>();
+    api.put.mockReturnValueOnce(first.promise);
+    api.put.mockResolvedValue({});
+
+    let leaving!: Promise<void>;
+    act(() => {
+      leaving = board.handleRowSprintChange("t1", "s2");
+    });
+    await act(async () => {
+      board.setSelectedTasks(new Set(["t1"]));
+    });
+    await act(async () => {
+      await board.handleBulkSprint("s1");
+    });
+
+    await act(async () => {
+      first.release({});
+      await leaving;
+    });
+
+    expect(board.tasks.map((t) => t._id), "the bulk move is the newer one").toContain("t1");
+  });
+
+  it("a bulk move re-reads rather than removing when the filter moved under it", async () => {
+    await mountedScoped("s1");
+    const put = held<unknown>();
+    api.put.mockReturnValue(put.promise);
+
+    await act(async () => {
+      board.setSelectedTasks(new Set(["t1"]));
+    });
+    let moving!: Promise<void>;
+    act(() => {
+      moving = board.handleBulkSprint("s2");
+    });
+
+    probeScope = "all";
+    await act(async () => {
+      rerenderProbe();
+    });
+    const readsBefore = taskReads();
+
+    await act(async () => {
+      put.release({});
+      await moving;
+    });
+
+    expect(board.tasks.map((t) => t._id), "still on the board it now belongs to").toContain("t1");
+    expect(taskReads() - readsBefore, "the server is asked instead").toBe(1);
+    expect(api.get, "the re-read names the new scope").toHaveBeenCalledWith("/api/projects/p1/tasks");
   });
 
   // The control: an unscoped board still paints immediately, because being wrong is invisible there

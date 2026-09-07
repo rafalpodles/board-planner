@@ -100,10 +100,24 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
   const [showNewTask, setShowNewTask] = useState(false);
   const loadSeq = useRef(0);
   // Read after an await, where the render-time `scope` — and the `loadData` closed over it — are
-  // stale copies. Written in an effect, so a render React threw away cannot leave a value behind.
+  // stale copies. Both are written in one effect below, not during render.
   const scopeRef = useRef(scope);
-  // Which sprint each task was last asked to move to, so a slow answer cannot undo a later move
   const sprintWrites = useRef(new Map<string, number>());
+
+  /**
+   * Both sprint writers apply their removal only once the server has agreed, and by then somebody
+   * may have moved the same card again — through the other writer, since the row picker and the
+   * bulk toolbar are on the same screen. Claim the tasks before writing; the returned reader says
+   * which of them this write is still the newest for.
+   */
+  function claimSprintWrite(taskIds: string[]) {
+    const claimed = taskIds.map((id) => {
+      const seq = (sprintWrites.current.get(id) ?? 0) + 1;
+      sprintWrites.current.set(id, seq);
+      return [id, seq] as const;
+    });
+    return () => claimed.filter(([id, seq]) => sprintWrites.current.get(id) === seq).map(([id]) => id);
+  }
 
   /**
    * A read already in flight knows nothing about a write that started after it, so delivering its
@@ -265,6 +279,8 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
 
   async function handleBulkSprint(sprintId: string | null) {
     const ids = Array.from(selectedTasks);
+    const scopeAtClick = scope;
+    const stillNewest = claimSprintWrite(ids);
     // Settled, not all — the same lesson handleBulkMove and handleBulkDelete already carry: one
     // task's PUT failing used to hide every move that had already landed server-side, and left
     // the selection as if nothing had happened.
@@ -273,7 +289,15 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
     );
 
     const movedIds = ids.filter((_, i) => outcomes[i].status === "fulfilled");
-    applySprintChange(movedIds, sprintId);
+    // The same two guards the row picker carries: `applySprintChange` filters against the scope of
+    // the render it was built in, and a card moved again while these were on the wire is no longer
+    // this write's to remove.
+    if (scopeRef.current === scopeAtClick) {
+      const newest = new Set(stillNewest());
+      applySprintChange(movedIds.filter((id) => newest.has(id)), sprintId);
+    } else {
+      loadDataRef.current();
+    }
     setSelectedTasks(new Set());
 
     const target = sprintId
@@ -513,8 +537,7 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
     const scopeAtClick = scope;
     const wanted = scopeAtClick === "backlog" ? null : scopeAtClick;
     const leaves = scopeAtClick !== "all" && sprintId !== wanted;
-    const writeSeq = (sprintWrites.current.get(taskId) ?? 0) + 1;
-    sprintWrites.current.set(taskId, writeSeq);
+    const stillNewest = claimSprintWrite([taskId]);
 
     if (!leaves) applySprintChange([taskId], sprintId);
     try {
@@ -525,7 +548,7 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
       // PUT was out, and applying the removal then takes the card off a board it belongs to.
       // The scope change's own read was discarded by `writing`, so the server is asked again
       // through the *current* loadData: the one closed over here still names the old scope.
-      if (leaves && sprintWrites.current.get(taskId) === writeSeq) {
+      if (leaves && stillNewest().length === 1) {
         if (scopeRef.current === scopeAtClick) applySprintChange([taskId], sprintId);
         else loadDataRef.current();
       }
