@@ -92,6 +92,23 @@ describe("where the PM launcher is painted", () => {
     expect(launcher()).not.toBeNull();
   });
 
+  /**
+   * BP-591. A bar pinned to the bottom of the page is not something layering can settle — both
+   * controls are meant to be pressed — so the bar declares the strip and the launcher steps over
+   * it. The two halves of that contract live in different files; this is what keeps them together.
+   */
+  it("steps up for a bar that declares the bottom strip", async () => {
+    render(<PmChatWidget />);
+    await waitFor(() => expect(launcher()).not.toBeNull());
+
+    // The whole token, not a substring of it: asserting only the attribute name survives losing
+    // the `max-lg:` scope, which is exactly the defect review caught here
+    expect(launcher()!.className.split(/\s+/)).toContain(
+      "max-lg:[body:has([data-pinned-bottom-bar])_&]:bottom-24"
+    );
+    expect(launcher()!.className.split(/\s+/)).toContain("bottom-6");
+  });
+
   // The control: the launcher is withheld for its own reasons, and those still hold
   it("is not there at all when the project has no PM", async () => {
     api.get.mockResolvedValue({ ...PROJECT, pm: { enabled: false, lockedByInstance: false } });
