@@ -9,12 +9,20 @@ import { replaceProviderLinks } from "@/lib/pr-links";
  * per-provider replacement rule and the transition itself all run for real.
  */
 
-const fetchMergeRequests = vi.fn();
-const projectFindById = vi.fn();
-const taskFindOne = vi.fn();
-// What the route tells the database, now that the write is not a read-mutate-save (BP-559)
-const taskUpdateOne = vi.fn();
-const logActivity = vi.fn();
+// Hoisted, not plain `const`: `@/lib/pr-links` is imported at the top of this file and reaches
+// `@/models/task`, so the mock factory below runs before a `const` in this scope is initialised —
+// which fails as "Cannot access 'taskFindOne' before initialization", and only in the file order
+// CI happens to pick. `taskUpdateOne` is what the route tells the database now that the write is
+// not a read-mutate-save (BP-559).
+const { fetchMergeRequests, projectFindById, taskFindOne, taskUpdateOne, logActivity } = vi.hoisted(
+  () => ({
+    fetchMergeRequests: vi.fn(),
+    projectFindById: vi.fn(),
+    taskFindOne: vi.fn(),
+    taskUpdateOne: vi.fn(),
+    logActivity: vi.fn(),
+  })
+);
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/encryption", () => ({ decryptSecret: (v: string) => `plain:${v}` }));

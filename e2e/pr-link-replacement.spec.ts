@@ -29,7 +29,9 @@ const created: mongoose.Types.ObjectId[] = [];
 function link(provider: "github" | "gitlab" | null, number: number) {
   const doc: Record<string, unknown> = {
     number,
-    title: `PR ${number}`,
+    // A title an outsider chooses, and one MongoDB reads as a field path unless the documents are
+    // stored verbatim: without `$literal` this came back as the task's own title.
+    title: number % 2 === 0 ? `$title ${number}` : `PR ${number}`,
     state: "open",
     url: `https://example.test/${number}`,
     mergedAt: null,
@@ -136,6 +138,18 @@ test("dates reach the database as dates, not as strings", async () => {
   // Mongoose casts a `$set` object against the schema and a pipeline not at all, so the routes
   // build these by hand; a string here sorts and compares as text everywhere downstream.
   expect((await linksOf(_id))[0].updatedAt).toBeInstanceOf(Date);
+});
+
+test("a title that looks like a field path is stored as the text it is", async () => {
+  const _id = await taskWith([]);
+
+  await apply(_id, "github", [
+    { ...link("github", 12), title: "$title" },
+    { ...link("github", 13), title: "$ref cleanup" },
+  ]);
+
+  const links = await linksOf(_id);
+  expect(links.map((l) => l.title)).toEqual(["$title", "$ref cleanup"]);
 });
 
 test("each link keeps the subdocument id the API type promises", async () => {

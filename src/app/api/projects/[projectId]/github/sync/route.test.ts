@@ -9,12 +9,20 @@ import { replaceProviderLinks } from "@/lib/pr-links";
  * The network is stubbed; the matcher, the linking rule and the transition all run for real.
  */
 
-const fetchPullRequests = vi.fn();
-const projectFindById = vi.fn();
-const taskFindOne = vi.fn();
-// What the route tells the database, now that the write is not a read-mutate-save (BP-559)
-const taskUpdateOne = vi.fn();
-const logActivity = vi.fn();
+// Hoisted, not plain `const`: `@/lib/pr-links` is imported at the top of this file and reaches
+// `@/models/task`, so the mock factory below runs before a `const` in this scope is initialised —
+// which fails as "Cannot access 'taskFindOne' before initialization", and only in the file order
+// CI happens to pick. `taskUpdateOne` is what the route tells the database now that the write is
+// not a read-mutate-save (BP-559).
+const { fetchPullRequests, projectFindById, taskFindOne, taskUpdateOne, logActivity } = vi.hoisted(
+  () => ({
+    fetchPullRequests: vi.fn(),
+    projectFindById: vi.fn(),
+    taskFindOne: vi.fn(),
+    taskUpdateOne: vi.fn(),
+    logActivity: vi.fn(),
+  })
+);
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/encryption", () => ({ decryptSecret: (v: string) => `plain:${v}` }));
@@ -103,7 +111,10 @@ describe("POST .../github/sync", () => {
     // The pipeline's *meaning* — which link survives — is asserted against a real database in
     // `e2e/pr-link-replacement.spec.ts`; what this file pins is that the route asks the database
     // to do it, rather than saving a copy it read a moment ago (BP-559)
-    const [filter, update] = taskUpdateOne.mock.calls[0];
+    const [filter, update, options] = taskUpdateOne.mock.calls[0];
+    // Mongoose refuses a pipeline update without it — the option is the whole reason the write
+    // lives in `writeProviderLinks` rather than in this route
+    expect(options).toEqual({ updatePipeline: true });
     expect(filter).toEqual({ _id: doc._id });
     expect(update).toEqual(replaceProviderLinks("github", [expect.objectContaining({ number: 1 })]));
     expect(doc.save).not.toHaveBeenCalled();
