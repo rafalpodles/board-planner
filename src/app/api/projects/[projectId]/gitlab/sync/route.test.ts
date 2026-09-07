@@ -108,7 +108,7 @@ describe("POST .../gitlab/sync — linking", () => {
   it("names its own provider, which is what decides whose links are replaced", async () => {
     const doc = task();
     taskFindOne.mockResolvedValue(doc);
-    fetchMergeRequests.mockResolvedValue([mr({ number: 1 })]);
+    fetchMergeRequests.mockResolvedValue([mr({ iid: 7 })]);
 
     await POST(request(), ctx());
 
@@ -117,7 +117,7 @@ describe("POST .../gitlab/sync — linking", () => {
     const [filter, update] = taskUpdateOne.mock.calls[0];
     expect(filter).toEqual({ _id: doc._id });
     expect(update).toEqual(replaceProviderLinks("gitlab", [
-      expect.objectContaining({ provider: "gitlab", number: 1 }),
+      expect.objectContaining({ provider: "gitlab", number: 7 }),
     ]));
     expect(doc.save).not.toHaveBeenCalled();
   });
