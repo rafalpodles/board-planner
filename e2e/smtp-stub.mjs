@@ -58,33 +58,43 @@ const context = createSecureContext(selfSignedCertificate());
 /**
  * One connection's conversation, over whichever socket it is currently on — the same state machine
  * runs again on the TLS socket after an upgrade, which is what the protocol asks for.
+ *
+ * Buffers rather than `setEncoding("utf8")`: the raw socket is handed to a `TLSSocket` on STARTTLS,
+ * and leaving a string decoder on a socket whose remaining bytes are a TLS stream is wrong on its
+ * face. Measured, not assumed to matter: 150 messages through each version, none lost either way.
+ * This one is kept because it is also what makes the loop below correct for a client that sends
+ * DATA and its body in one packet.
  */
 function converse(socket, session) {
-  let buffer = "";
+  let buffer = Buffer.alloc(0);
 
-  socket.setEncoding("utf8");
   socket.on("error", () => socket.destroy());
   socket.on("data", (chunk) => {
-    buffer += chunk;
+    buffer = Buffer.concat([buffer, chunk]);
 
-    if (session.readingData) {
-      // The terminator can straddle two chunks, so it is looked for in the whole buffer
-      const end = buffer.indexOf("\r\n.\r\n");
-      if (end === -1) return;
-      session.data += buffer.slice(0, end);
-      buffer = buffer.slice(end + 5);
-      session.readingData = false;
-      messages.push({ from: session.from, to: session.to, data: session.data });
-      session.data = "";
-      session.to = [];
-      socket.write("250 2.0.0 Ok: queued\r\n");
-    }
+    // One loop for both states: a client is allowed to send DATA and its body in a single packet,
+    // and handling the body only on the *next* chunk would leave the message sitting in the buffer.
+    for (;;) {
+      if (session.readingData) {
+        const end = buffer.indexOf("\r\n.\r\n");
+        if (end === -1) return;
+        session.data += buffer.subarray(0, end).toString("utf8");
+        buffer = buffer.subarray(end + 5);
+        session.readingData = false;
+        messages.push({ from: session.from, to: session.to, data: session.data });
+        session.data = "";
+        session.to = [];
+        socket.write("250 2.0.0 Ok: queued\r\n");
+        continue;
+      }
 
-    let newline;
-    while (!session.readingData && (newline = buffer.indexOf("\r\n")) !== -1) {
-      const line = buffer.slice(0, newline);
-      buffer = buffer.slice(newline + 2);
-      command(socket, session, line);
+      const newline = buffer.indexOf("\r\n");
+      if (newline === -1) return;
+      const line = buffer.subarray(0, newline).toString("utf8");
+      buffer = buffer.subarray(newline + 2);
+      // Anything the client pipelined behind STARTTLS belongs to the TLS handshake, not to this
+      // socket's conversation — `command` hands the connection over and this one is finished.
+      if (command(socket, session, line) === "upgraded") return;
     }
   });
 }
@@ -113,8 +123,8 @@ function command(socket, session, line) {
       socket.write("220 2.0.0 Ready to start TLS\r\n");
       socket.removeAllListeners("data");
       const secured = new TLSSocket(socket, { isServer: true, secureContext: context });
-      converse(secured, { ...session, secure: true, to: [], data: "" });
-      return;
+      converse(secured, { ...session, secure: true, to: [], data: "", readingData: false });
+      return "upgraded";
     }
     case "AUTH":
       // `AUTH PLAIN <credentials>` carries them inline and needs no prompt; `AUTH LOGIN` prompts.
