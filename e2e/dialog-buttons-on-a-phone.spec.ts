@@ -375,3 +375,59 @@ test("a failed post's toast keeps off the Post button and the launcher", async (
   expect(geometry.launcherCentre, "and the launcher it stepped over keeps its own").toBe("itself");
   expect(geometry.toastOnScreen).toBe(true);
 });
+
+/**
+ * BP-596, the neighbour the first fix created. Stepping the toast over a pinned bar put it on
+ * `bottom-40 right-4` — which is exactly where the *open* PM panel is anchored under the same
+ * attributes, and the toast is painted a layer above it. So the message came to rest on the
+ * panel's own Send button: the same transient-over-a-control failure, one surface along.
+ */
+test("a toast keeps off the open PM panel's Send button", async ({ page }) => {
+  await page.setViewportSize(PHONE);
+  await signIn(page);
+
+  await page.route(/\/api\/projects\/[^/]+\/tasks\/[^/]+\/comments$/, async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    await route.fulfill({ status: 500, contentType: "application/json", body: '{"error":"nope"}' });
+  });
+
+  await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
+  await launcher(page).click();
+  const panel = page.getByTestId("pm-chat-panel");
+  await expect(panel).toBeVisible();
+
+  await page.clock.install();
+  await page.clock.pauseAt(Date.now());
+
+  await page.getByLabel("Add a comment").fill("this will not go through");
+  await page.getByRole("button", { name: "Post comment" }).click();
+  await expect(page.getByTestId("toast").first()).toBeVisible();
+
+  const geometry = await page.evaluate(() => {
+    const tray = document.querySelector('[data-testid="toast-tray"]')!;
+    const box = tray.getBoundingClientRect();
+    // Below `sm` the panel is nearly the whole screen, so "off the panel" is not achievable and
+    // not the point. What has to hold is that none of its controls is under the toast.
+    const covered = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        '[data-testid="pm-chat-panel"] button, [data-testid="pm-chat-panel"] a, [data-testid="pm-chat-panel"] textarea'
+      )
+    )
+      .filter((el) => el.getBoundingClientRect().height > 0)
+      .filter((el) => {
+        const r = el.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return hit !== null && tray.contains(hit);
+      })
+      .map((el) => el.getAttribute("aria-label") ?? el.textContent?.trim().slice(0, 20) ?? "?");
+    return {
+      covered,
+      controlsSeen: document.querySelectorAll('[data-testid="pm-chat-panel"] button').length,
+      toastOnScreen: box.top >= 0 && box.bottom <= window.innerHeight,
+    };
+  });
+
+  expect(geometry.controlsSeen, "the panel really has controls to cover").toBeGreaterThan(0);
+  expect(geometry.covered, "no control of the panel is under the toast").toEqual([]);
+  expect(geometry.toastOnScreen).toBe(true);
+});
