@@ -81,6 +81,7 @@ export const GROUPS = {
     "mcp-tools.spec.ts",
     "db-reconnect-leaks.spec.ts",
     "settings-fields-and-templates.spec.ts",
+    "picker-search-announces.spec.ts",
   ],
   people: [
     "day-zero.spec.ts",
