@@ -16,7 +16,9 @@ function sourceFiles(dir: string): string[] {
 const files = sourceFiles(SRC);
 
 describe("focus-ring utility", () => {
-  it("is defined against :focus-visible, so a mouse click leaves no ring behind", () => {
+  // Not "so a mouse click leaves no ring behind": that holds for a button, and not for anything
+  // that takes keyboard input — a text field matches `:focus-visible` however the focus arrived
+  it("is defined against :focus-visible rather than :focus", () => {
     expect(css).toMatch(/\.focus-ring:focus-visible\s*\{/);
     expect(css).toMatch(/\.focus-ring-inset:focus-visible\s*\{/);
   });
@@ -48,18 +50,19 @@ describe("no control strips its outline without a replacement", () => {
   // rather than a class quietly slipping past the regex.
   // `placeholder:` pins each exemption to the text field it was granted for, so an
   // outline stripped from a button in the same file still fails.
+  // The Combobox search box was here on the same reasoning and no longer is. Not because
+  // `:focus-visible` spares the mouse user — it does not: a browser matches it for anything that
+  // takes keyboard input, including after a click and after a programmatic `.focus()`, measured in
+  // Chromium. So the ring really is on for the panel's whole life, which is what the exemption
+  // objected to. It is kept anyway: the box is focused, it is where the keys go, and a picker with
+  // no indicator at all is the defect BP-547 was raised for. The entry above stands on its own
+  // argument, not on this one.
   const CARET_MARKS_FOCUS = [
     {
       file: "components/search/SearchLayer.tsx",
       onlyOn: "placeholder:",
       // focused from the moment the layer opens; a box around it for the whole
       // search reads as a validation error rather than as focus
-    },
-    {
-      file: "components/ui/Combobox.tsx",
-      onlyOn: "placeholder:",
-      // same as above: the panel focuses it on open, so the ring would be on for the
-      // whole life of the dropdown, framing a field nobody has typed in yet
     },
   ];
 

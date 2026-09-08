@@ -411,7 +411,23 @@ export function Combobox(props: ComboboxProps) {
                 }}
                 placeholder="Search…"
                 aria-label={`Search ${label}`}
-                className="w-full shrink-0 border-b border-border bg-transparent px-2.5 py-2 text-xs text-text outline-none placeholder:text-text-muted"
+                // This branch focuses the input, so the input is what has to carry the pattern:
+                // the arrows move a highlight in the list below, and a screen reader announces
+                // nothing unless the focused element says which option is current. BP-532 put
+                // that on the listbox, which is right only for the branch that focuses it.
+                role="combobox"
+                aria-expanded
+                aria-autocomplete="list"
+                aria-controls={`${listboxId}-list`}
+                aria-activedescendant={
+                  filtered[active] ? `${listboxId}-${active}` : undefined
+                }
+                // `focus-ring-inset`, not `focus-ring`: the panel is `overflow-hidden` and crops
+                // an offset outline, which is why the listbox uses the inset variant too. It shows
+                // for the panel's whole life, mouse-opened included — `:focus-visible` matches a
+                // text field however the focus arrived — and that is the trade this takes over a
+                // field a keyboard reaches with no indicator at all.
+                className="focus-ring-inset w-full shrink-0 border-b border-border bg-transparent px-2.5 py-2 text-xs text-text placeholder:text-text-muted"
               />
             )}
             <div
@@ -423,9 +439,13 @@ export function Combobox(props: ComboboxProps) {
               // Focused when there is no search box, so the keys land on the element whose role
               // and name describe what they do. The highlight lives on `active` rather than on
               // focus — without the activedescendant a screen reader announces nothing as it
-              // moves. The search branch focuses the input instead and is not wired up: BP-547.
+              // moves. The search branch carries the same pair on its input instead.
               tabIndex={-1}
-              aria-activedescendant={filtered[active] ? `${listboxId}-${active}` : undefined}
+              // Only on this branch: with a search box the input has the focus and carries it, and
+              // an activedescendant on an unfocused element is read by nobody
+              aria-activedescendant={
+                !showSearch && filtered[active] ? `${listboxId}-${active}` : undefined
+              }
               // The ring is drawn inside its own box: the panel around it is `overflow-hidden`,
               // which crops an offset outline exactly as it crops anything else
               className="focus-ring-inset min-h-0 flex-1 overflow-y-auto py-1"
