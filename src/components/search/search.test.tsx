@@ -245,6 +245,46 @@ describe("SearchLayer", () => {
 
   // A layer that registered no close of its own — nothing does today, but the registry allows it —
   // is treated as gone rather than as a refusal, which would make ⌘K silently dead
+  // The palette has a second opener — the sidebar's Search item — which does not run the shortcut,
+  // so a value left over from an earlier ⌘K would be handed to it as its own return target
+  it("does not hand a later opening the focus target of an earlier one", async () => {
+    const card = document.createElement("button");
+    card.textContent = "a card from before";
+    document.body.append(card);
+    const { rerender, onOpen } = renderLayer(false);
+    const unregister = registerLayer(document.createElement("div"), {
+      close: () => {},
+      trigger: () => card,
+    });
+    act(() => {
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true })
+      );
+    });
+    unregister();
+    expect(onOpen).toHaveBeenCalled();
+
+    // That ⌘K's palette opens and closes, the way the prop would drive it
+    await act(async () => {
+      rerender(<SearchLayer open onOpen={onOpen} onClose={() => {}} />);
+    });
+    await act(async () => {
+      rerender(<SearchLayer open={false} onOpen={onOpen} onClose={() => {}} />);
+    });
+
+    // Now opened by a click on the sidebar instead, with nothing focused
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    await act(async () => {
+      rerender(<SearchLayer open onOpen={onOpen} onClose={() => {}} />);
+    });
+    await act(async () => {
+      rerender(<SearchLayer open={false} onOpen={onOpen} onClose={() => {}} />);
+    });
+
+    expect(document.activeElement, "the card from the earlier replacement is not the target").not.toBe(card);
+    card.remove();
+  });
+
   it("opens over a layer that cannot say how it closes", () => {
     const { onOpen } = renderLayer(false);
     const unregister = registerLayer(document.createElement("div"), { close: () => {} });

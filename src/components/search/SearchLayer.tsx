@@ -107,8 +107,16 @@ export function SearchLayer({ open, onOpen, onClose }: SearchLayerProps) {
 
   const { reset } = search;
   useEffect(() => {
-    if (open) inputRef.current?.focus();
-    else reset();
+    if (open) {
+      inputRef.current?.focus();
+      return;
+    }
+    // Cleared on the way out, because only the ⌘K path writes it: the sidebar's Search item opens
+    // the palette too, and a value left from an earlier replacement would send the focus to a card
+    // the reader has not touched since (BP-567 review). The focus trap's own teardown has already
+    // read it by the time this runs.
+    inherited.current = null;
+    reset();
   }, [open, reset]);
 
   useEffect(() => {
