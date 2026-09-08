@@ -16,7 +16,9 @@ function sourceFiles(dir: string): string[] {
 const files = sourceFiles(SRC);
 
 describe("focus-ring utility", () => {
-  it("is defined against :focus-visible, so a mouse click leaves no ring behind", () => {
+  // Not "so a mouse click leaves no ring behind": that holds for a button, and not for anything
+  // that takes keyboard input — a text field matches `:focus-visible` however the focus arrived
+  it("is defined against :focus-visible rather than :focus", () => {
     expect(css).toMatch(/\.focus-ring:focus-visible\s*\{/);
     expect(css).toMatch(/\.focus-ring-inset:focus-visible\s*\{/);
   });

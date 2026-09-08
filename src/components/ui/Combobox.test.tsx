@@ -331,6 +331,18 @@ describe("the search box the panel grows", () => {
     ).toBeNull();
   });
 
+  // The positive twin, because `!showSearch` is a guard with two sides: without this, inverting it
+  // would take the attribute off the branch BP-532 put it on and only the e2e would notice
+  it("keeps it on the listbox when there is no search box, which is what BP-532 fixed", () => {
+    stateViewport(900);
+    open({ top: 100, bottom: 140 });
+
+    const listbox = document.querySelector('[role="listbox"]')!;
+    const named = listbox.getAttribute("aria-activedescendant");
+    expect(named).not.toBeNull();
+    expect(document.getElementById(named!)?.textContent).toContain("Alpha");
+  });
+
   it("is the combobox itself, pointing at the list the arrows move through", () => {
     stateViewport(900);
     const box = openWithSearch();
