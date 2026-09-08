@@ -3,7 +3,7 @@ import { useRef } from "react";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, act, within } from "@testing-library/react";
 import { Modal } from "./Modal";
-import { tabbablesWithin } from "@/lib/focus-trap";
+import { closeOpenLayers, tabbablesWithin } from "@/lib/focus-trap";
 
 afterEach(cleanup);
 
@@ -620,5 +620,29 @@ describe("Modal, while its caller's request is in flight", () => {
     act(() => (container.firstElementChild as HTMLElement).click());
     act(() => screen.getByRole("button", { name: "Close dialog" }).click());
     expect(onClose).toHaveBeenCalledTimes(3);
+  });
+});
+
+/**
+ * BP-567. `⌘K` replaces the top layer by asking it to close, and reads the answer to decide
+ * whether to open at all — so what this dialog *reports* is the seam, not only what it does on
+ * screen. A refusal that closes nothing but says "yes" gets the dialog replaced out from under
+ * its own request.
+ */
+describe("what the dialog tells the layer registry", () => {
+  it("agrees to close, and does", () => {
+    const onClose = vi.fn();
+    renderModal({ onClose });
+
+    expect(closeOpenLayers(), "agreement, whatever it hands back").not.toBe(false);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses while a write of its own is in flight, and stays", () => {
+    const onClose = vi.fn();
+    renderModal({ onClose, closeDisabled: true });
+
+    expect(closeOpenLayers()).toBe(false);
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

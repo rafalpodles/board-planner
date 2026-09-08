@@ -146,11 +146,10 @@ test.describe("a PM chip", () => {
  * `default.tsx` only answers a hard load — so leaving an open task for anything that is not a task
  * left the editor parked over whatever arrived.
  *
- * The route the ticket describes — ⌘K while the modal is open — is **closed**, and this says so
- * rather than asserting the fix through a door nobody can open: `SearchLayer` refuses the shortcut
- * while any layer is registered (BP-522/BP-543), and the sidebar sits under the modal's overlay.
- * The residue is still a real property of the slot, which is why the modal now reads the address
- * on every render; that half is pinned by the component's own tests.
+ * The route the ticket describes — ⌘K while the modal is open — was closed by BP-560 and is open
+ * again since BP-567: the palette replaces the modal rather than stacking on it, so this is the
+ * door the residue actually comes through. The modal reads the address on every render, which is
+ * what keeps the slot from drawing a task the URL no longer names.
  */
 test.describe("leaving an open task", () => {
   async function openTheModal(page: Page) {
@@ -159,18 +158,18 @@ test.describe("leaving an open task", () => {
     await expect(taskDialog(page).getByLabel("Task title")).toHaveValue(SIBLING_TASK_TITLE);
   }
 
-  test("cannot be left by ⌘K, which the open layer refuses", async ({ page }) => {
+  test("is left by ⌘K, which takes the modal's place", async ({ page }) => {
     await openTheModal(page);
 
     await page.keyboard.press("ControlOrMeta+k");
 
-    expect(await page.getByRole("dialog", { name: "Search" }).count()).toBe(0);
-    await expect(taskDialog(page)).toHaveCount(1);
+    await expect(page.getByRole("dialog", { name: "Search" })).toBeVisible();
+    await expect(taskDialog(page), "replaced, not stacked on").toHaveCount(0);
   });
 
-  // The control: the same key opens it the moment the task is closed, so the assertion above is
-  // about the layer and not about a shortcut that stopped working
-  test("and by the same key the moment the task is closed", async ({ page }) => {
+  // The control: the same key with nothing open, so the assertion above is about the layer being
+  // replaced rather than about a shortcut that works everywhere regardless
+  test("and by the same key with no task open at all", async ({ page }) => {
     await openTheModal(page);
     await page.keyboard.press("Escape");
     await expect(taskDialog(page)).toHaveCount(0);

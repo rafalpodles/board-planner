@@ -189,29 +189,117 @@ describe("SearchLayer", () => {
     expect(onOpen).not.toHaveBeenCalled();
   });
 
-  // BP-560: a dialog moves focus onto its own container DIV, which no typing-target check sees.
-  // The guard is the layer registry, and it applies on the way in only — see the next test
-  it("does not open over another open layer, and does again once that layer is gone", () => {
+  // BP-560 stopped the palette stacking on an open dialog — `aria-modal` promises nothing outside
+  // it exists. BP-567 keeps that promise the other way round: the dialog goes first, through its
+  // own close handler, and the palette takes its place.
+  it("replaces the layer under it rather than opening over it", () => {
     const { onOpen } = renderLayer(false);
-    const unregister = registerLayer(document.createElement("div"));
+    const close = vi.fn();
+    const unregister = registerLayer(document.createElement("div"), { close });
     try {
       act(() => {
         document.dispatchEvent(
           new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true })
         );
-        document.dispatchEvent(new KeyboardEvent("keydown", { key: "/", bubbles: true }));
       });
+      expect(close, "the layer is asked to close, once").toHaveBeenCalledTimes(1);
+      expect(onOpen).toHaveBeenCalledTimes(1);
     } finally {
       unregister();
     }
-    expect(onOpen).not.toHaveBeenCalled();
+  });
 
+  it("does the same for /", () => {
+    const { onOpen } = renderLayer(false);
+    const close = vi.fn();
+    const unregister = registerLayer(document.createElement("div"), { close });
+    try {
+      act(() => {
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "/", bubbles: true }));
+      });
+      expect(close).toHaveBeenCalledTimes(1);
+      expect(onOpen).toHaveBeenCalledTimes(1);
+    } finally {
+      unregister();
+    }
+  });
+
+  // A dialog mid-write refuses its own Escape and shakes instead; it must not be replaced out from
+  // under the request it is waiting on
+  it("stays shut when the layer refuses to close", () => {
+    const { onOpen } = renderLayer(false);
+    const close = vi.fn(() => false);
+    const unregister = registerLayer(document.createElement("div"), { close });
+    try {
+      act(() => {
+        document.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true })
+        );
+      });
+      expect(close).toHaveBeenCalledTimes(1);
+      expect(onOpen, "the refusal is the layer's, and it stands").not.toHaveBeenCalled();
+    } finally {
+      unregister();
+    }
+  });
+
+  // A layer that registered no close of its own — nothing does today, but the registry allows it —
+  // is treated as gone rather than as a refusal, which would make ⌘K silently dead
+  // The palette has a second opener — the sidebar's Search item — which does not run the shortcut,
+  // so a value left over from an earlier ⌘K would be handed to it as its own return target
+  it("does not hand a later opening the focus target of an earlier one", async () => {
+    const card = document.createElement("button");
+    card.textContent = "a card from before";
+    document.body.append(card);
+    const { rerender, onOpen } = renderLayer(false);
+    const unregister = registerLayer(document.createElement("div"), {
+      close: () => {},
+      trigger: () => card,
+    });
     act(() => {
       document.dispatchEvent(
         new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true })
       );
     });
-    expect(onOpen).toHaveBeenCalledTimes(1);
+    unregister();
+    expect(onOpen).toHaveBeenCalled();
+
+    // That ⌘K's palette opens and closes, the way the prop would drive it
+    await act(async () => {
+      rerender(<SearchLayer open onOpen={onOpen} onClose={() => {}} />);
+    });
+    await act(async () => {
+      rerender(<SearchLayer open={false} onOpen={onOpen} onClose={() => {}} />);
+    });
+    // The positive half, so the negative one below distinguishes "cleared" from "focus never ran"
+    expect(document.activeElement, "the hand-over itself works").toBe(card);
+
+    // Now opened by a click on the sidebar instead, with nothing focused
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    await act(async () => {
+      rerender(<SearchLayer open onOpen={onOpen} onClose={() => {}} />);
+    });
+    await act(async () => {
+      rerender(<SearchLayer open={false} onOpen={onOpen} onClose={() => {}} />);
+    });
+
+    expect(document.activeElement, "the card from the earlier replacement is not the target").not.toBe(card);
+    card.remove();
+  });
+
+  it("opens over a layer that cannot say how it closes", () => {
+    const { onOpen } = renderLayer(false);
+    const unregister = registerLayer(document.createElement("div"), { close: () => {} });
+    try {
+      act(() => {
+        document.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true })
+        );
+      });
+      expect(onOpen).toHaveBeenCalledTimes(1);
+    } finally {
+      unregister();
+    }
   });
 
   // The open palette is a layer of its own, so a guard on the count alone would leave ⌘K
@@ -232,7 +320,7 @@ describe("SearchLayer", () => {
   // own chrome — which the headless e2e cannot see, so this is the one place that pins it
   it("eats the key under another open layer rather than passing it to the browser", () => {
     renderLayer(false);
-    const unregister = registerLayer(document.createElement("div"));
+    const unregister = registerLayer(document.createElement("div"), { close: () => {} });
     const presses = [
       new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true, cancelable: true }),
       new KeyboardEvent("keydown", { key: "/", bubbles: true, cancelable: true }),

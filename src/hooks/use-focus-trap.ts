@@ -11,7 +11,8 @@ import {
 interface FocusTrapOptions {
   active: boolean;
   containerRef: RefObject<HTMLElement | null>;
-  onEscape: () => void;
+  /** Returning `false` refuses the close — a dialog with a write in flight (BP-567) */
+  onEscape: () => void | boolean;
   /** Where focus lands on close when nothing was focused at open time — keyboard shortcuts, Safari clicks */
   returnFocusTo?: RefObject<HTMLElement | null>;
   /** Off for layers that leave the page scrollable behind them */
@@ -33,11 +34,19 @@ export function useFocusTrap({
   // dispatch never sees that event. BP-522 is that bug one layer up
   const onEscapeRef = useRef(onEscape);
   onEscapeRef.current = onEscape;
+  /** What had the focus before this layer took it — read by whatever replaces the layer */
+  const triggerRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (!active) return;
     const container = containerRef.current!;
-    const unregister = registerLayer(container, sheet);
+    const unregister = registerLayer(container, {
+      sheet,
+      // Read through the refs, so the layer closes the way it does now rather than the way it did
+      // when it registered, and hands back whatever it took the focus from
+      close: () => onEscapeRef.current(),
+      trigger: () => triggerRef.current,
+    });
     if (lockScroll) document.body.style.overflow = "hidden";
     return () => {
       unregister();
@@ -47,14 +56,23 @@ export function useFocusTrap({
 
   useEffect(() => {
     if (!active) return;
+    const nothing = (el: Element | null) =>
+      !el || el === document.body || el === document.documentElement;
     const focused = document.activeElement as HTMLElement | null;
-    const trigger =
-      focused && focused !== document.body && focused !== document.documentElement
-        ? focused
-        : null;
-    containerRef.current!.focus();
+    const trigger = nothing(focused) ? null : focused;
+    triggerRef.current = trigger;
+    const container = containerRef.current!;
+    container.focus();
     return () => {
-      const target = trigger ?? returnFocusTo?.current ?? null;
+      // Only when nothing else has taken it. A layer that closes asynchronously — the task modal's
+      // `router.back()` waits for `popstate` — unmounts after whatever replaced it has mounted and
+      // focused itself, and an unconditional restore then pulls the caret out of it (BP-567).
+      const now = document.activeElement as HTMLElement | null;
+      if (!nothing(now) && !container.contains(now)) return;
+      // A trigger that has gone with the layer it belonged to is no target: the palette that
+      // replaced a task modal was focused from inside it, and the fallback is what its replacement
+      // handed over
+      const target = trigger?.isConnected ? trigger : (returnFocusTo?.current ?? null);
       if (target?.isConnected) target.focus();
     };
   }, [active, containerRef, returnFocusTo]);
