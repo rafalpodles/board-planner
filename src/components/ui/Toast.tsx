@@ -159,7 +159,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
           }
           // The horizontal half stays in CSS, because it does not depend on anything measured: a
           // phone gets the full width less a margin, a wider screen the right-hand corner.
-          className={`fixed right-4 z-50 flex max-w-sm flex-col gap-2 max-sm:left-4 max-sm:right-4 max-sm:max-w-none`}
+          className="fixed right-4 z-50 flex max-w-sm flex-col gap-2 max-sm:left-4 max-sm:max-w-none"
         >
           {toasts.map((t) => (
             <div

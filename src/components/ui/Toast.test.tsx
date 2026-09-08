@@ -108,6 +108,18 @@ describe("where a toast lands", () => {
     expect(tray().style.bottom).toBe("96px");
   });
 
+  // The phone comment bar is `lg:hidden`: on a wide screen it is in the DOM with a zero-height
+  // rect at the top of the page, and measuring it would send the tray to the other end
+  it("ignores something that is in the page but not on screen", () => {
+    stateViewport(800);
+    obstacle({ top: 0, bottom: 0 });
+    mounted();
+
+    act(() => raise("Saved"));
+
+    expect(tray().style.bottom).toBe("16px");
+  });
+
   it("re-measures when the thing in the corner moves", () => {
     stateViewport(800);
     const bar = obstacle({ top: 720, bottom: 776 });

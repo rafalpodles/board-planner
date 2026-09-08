@@ -36,7 +36,7 @@ export interface Surroundings {
   overASheet: boolean;
 }
 
-/** What the tray is told to do: anchor to the bottom, to the top, or centre itself at the top */
+/** What the tray is told to do: anchor to the bottom of the screen, or to the top */
 export type Placement =
   | { anchor: "bottom"; offset: number }
   | { anchor: "top"; offset: number };

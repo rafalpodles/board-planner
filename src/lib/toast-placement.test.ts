@@ -17,9 +17,8 @@ describe("where a toast may stand", () => {
   it("stands above the launcher rather than on it", () => {
     const placed = placeToast({ ...nothing, obstacles: [{ top: 720, bottom: 776 }] });
 
+    // 96 = 800 - 720 + 16: the tray's bottom edge sits a gap above the launcher's top
     expect(placed).toEqual({ anchor: "bottom", offset: 96 });
-    // The tray's own top edge, checked against the thing it had to clear
-    expect(800 - 96 - 44).toBeLessThan(720);
   });
 
   it("clears the highest of several, not the last one it looked at", () => {
