@@ -48,18 +48,16 @@ describe("no control strips its outline without a replacement", () => {
   // rather than a class quietly slipping past the regex.
   // `placeholder:` pins each exemption to the text field it was granted for, so an
   // outline stripped from a button in the same file still fails.
+  // The Combobox search box was here on the same reasoning and no longer is: `:focus-visible`
+  // already withholds the ring from the mouse user the exemption was written for, and the reader
+  // who opened the panel from the keyboard is the one who needs to be told where the keys go
+  // (BP-547).
   const CARET_MARKS_FOCUS = [
     {
       file: "components/search/SearchLayer.tsx",
       onlyOn: "placeholder:",
       // focused from the moment the layer opens; a box around it for the whole
       // search reads as a validation error rather than as focus
-    },
-    {
-      file: "components/ui/Combobox.tsx",
-      onlyOn: "placeholder:",
-      // same as above: the panel focuses it on open, so the ring would be on for the
-      // whole life of the dropdown, framing a field nobody has typed in yet
     },
   ];
 
