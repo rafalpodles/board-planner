@@ -123,6 +123,20 @@ describe("where the PM launcher is painted", () => {
     );
   });
 
+  // The three attributes `Toast` queries for. They are a contract between two files, and the
+  // toast suite builds its own fixtures, so renaming one here would leave that suite green while
+  // the tray goes back onto Send (BP-597)
+  it("declares itself to whatever else wants the corner", async () => {
+    render(<PmChatWidget />);
+    await waitFor(() => expect(launcher()).not.toBeNull());
+    expect(launcher()!.hasAttribute("data-corner-obstacle")).toBe(true);
+
+    fireEvent.click(launcher()!);
+    const panel = screen.getByTestId("pm-chat-panel");
+    expect(panel.hasAttribute("data-corner-panel")).toBe(true);
+    expect(panel.querySelector("[data-corner-panel-header]")).not.toBeNull();
+  });
+
   // The control: the launcher is withheld for its own reasons, and those still hold
   it("is not there at all when the project has no PM", async () => {
     api.get.mockResolvedValue({ ...PROJECT, pm: { enabled: false, lockedByInstance: false } });

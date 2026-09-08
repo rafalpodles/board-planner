@@ -33,14 +33,41 @@ function openSheet() {
 function stateViewport(height: number, width = 1280) {
   vi.spyOn(document.documentElement, "clientHeight", "get").mockReturnValue(height);
   // The component asks a media query rather than `clientWidth`, so that is what has to answer
-  window.matchMedia = ((query: string) => ({
+  vi.spyOn(window, "matchMedia").mockImplementation(((query: string) => ({
     matches: /min-width:\s*(\d+)px/.test(query)
       ? width >= Number(/min-width:\s*(\d+)px/.exec(query)![1])
       : false,
     media: query,
     addEventListener() {},
     removeEventListener() {},
-  })) as unknown as typeof window.matchMedia;
+  })) as unknown as typeof window.matchMedia);
+}
+
+/**
+ * happy-dom lays nothing out, so a real `ResizeObserver` would never fire. This one fires for the
+ * elements it was actually told to observe, which is the point: a bar that arrives with no height
+ * is only caught if the tray starts observing it *then*.
+ */
+class FakeResizeObserver {
+  static live: FakeResizeObserver[] = [];
+  seen = new Set<Element>();
+  constructor(public cb: () => void) {
+    FakeResizeObserver.live.push(this);
+  }
+  observe(el: Element) {
+    this.seen.add(el);
+  }
+  unobserve(el: Element) {
+    this.seen.delete(el);
+  }
+  disconnect() {
+    this.seen.clear();
+  }
+}
+window.ResizeObserver = FakeResizeObserver as unknown as typeof ResizeObserver;
+
+function resized(el: Element) {
+  FakeResizeObserver.live.forEach((observer) => observer.seen.has(el) && observer.cb());
 }
 
 function stateRect(el: Element, box: { top: number; bottom: number }) {
@@ -105,6 +132,7 @@ function trayClasses() {
 
 afterEach(() => {
   cleanup();
+  FakeResizeObserver.live.length = 0;
   opened.splice(0).forEach((close) => close());
   document
     .querySelectorAll("[data-corner-obstacle],[data-corner-panel]")
@@ -193,6 +221,25 @@ describe("where a toast lands", () => {
     });
 
     expect(tray().style.top).toBe("85px");
+  });
+
+  // `SaveBar` is always mounted and turns its attribute on in the same commit that starts a 200ms
+  // `max-height`: at the moment it announces itself it is still zero tall and `measure` discards
+  // it. Catching the growth means observing it on arrival, not once at setup.
+  it("watches a bar that announces itself before it has any height", async () => {
+    stateViewport(800);
+    mounted();
+    act(() => raise("Saved"));
+    expect(tray().style.bottom).toBe("16px");
+
+    const bar = obstacle({ top: 800, bottom: 800 });
+    await act(async () => {});
+    expect(tray().style.bottom).toBe("16px");
+
+    stateRect(bar, { top: 600, bottom: 800 });
+    act(() => resized(bar));
+
+    expect(tray().style.bottom).toBe("216px");
   });
 
   it("goes to the top over a sheet, whatever else is in the corner", () => {
