@@ -7,9 +7,16 @@ import {
   useCallback,
   useEffect,
   useRef,
+  useLayoutEffect,
   useSyncExternalStore,
 } from "react";
 import { openSheetCount, subscribeLayers } from "@/lib/focus-trap";
+import {
+  placeToast,
+  SHEET_BREAKPOINT,
+  type Placement,
+  type Surroundings,
+} from "@/lib/toast-placement";
 
 type ToastType = "success" | "error" | "info";
 
@@ -28,22 +35,37 @@ const ToastContext = createContext<ToastContextValue | null>(null);
 let nextId = 0;
 
 /**
- * Three surfaces stand where a toast lands, and each wants a different answer: a bottom sheet's
- * action row, a pinned bar, and the open PM panel — which is anchored to the same place the step
- * over a bar goes. The reasoning is in BP-590, BP-591/593 and BP-596; what is here is the shape.
+ * Where the tray stands is measured, not written: the corner is shared with a pinned bar, the PM
+ * launcher and the PM panel, and where each of those is depends on the viewport. Four constants
+ * were tried first and each failed a different one (BP-590, BP-596, BP-597). The arithmetic is in
+ * `toast-placement.ts`; this reads the rectangles and applies the answer.
  */
-const OVER_A_SHEET = "left-1/2 top-4 w-[calc(100%-2rem)] -translate-x-1/2";
+const OBSTACLES = "[data-corner-obstacle],[data-pinned-bottom-bar],[data-pinned-phone-bar]";
 
-const IN_THE_CORNER = [
-  "bottom-4 right-4",
-  // The bar step is written as "a bar, and no panel": two rules of equal weight both anchoring the
-  // tray leave it stretched between them rather than one winning, so the condition carries the
-  // exclusion instead of an override.
-  "[body:has([data-pinned-bottom-bar]):not(:has([data-corner-panel]))_&]:bottom-40",
-  "max-lg:[body:has([data-pinned-phone-bar]):not(:has([data-corner-panel]))_&]:bottom-40",
-  // With a panel open the step is off and the toast keeps `main`'s corner: nothing there is
-  // free, and the placement has to be measured rather than written. BP-597.
-].join(" ");
+function measure(overASheet: boolean): Surroundings {
+  const panel = document.querySelector<HTMLElement>("[data-corner-panel]");
+  const header = panel?.querySelector<HTMLElement>("[data-corner-panel-header]");
+  return {
+    viewportHeight: document.documentElement.clientHeight,
+    // `matchMedia`, not `clientWidth`: the breakpoint mirrors a Tailwind one, and a media query
+    // counts the scrollbar while `clientWidth` does not — a 15px band on Windows and Linux where
+    // the dialog renders centred while the tray thought it was a sheet
+    viewportWidth: window.matchMedia(`(min-width: ${SHEET_BREAKPOINT}px)`).matches
+      ? SHEET_BREAKPOINT
+      : SHEET_BREAKPOINT - 1,
+    panel:
+      panel && header
+        ? {
+            box: panel.getBoundingClientRect(),
+            headerBottom: header.getBoundingClientRect().bottom,
+          }
+        : undefined,
+    obstacles: Array.from(document.querySelectorAll<HTMLElement>(OBSTACLES))
+      .map((el) => el.getBoundingClientRect())
+      .filter((box) => box.height > 0),
+    overASheet,
+  };
+}
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -77,6 +99,62 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     () => false
   );
 
+  const [placement, setPlacement] = useState<Placement>({ anchor: "bottom", offset: 16 });
+  const trayRef = useRef<HTMLDivElement>(null);
+  /**
+   * Measured after the paint that put the tray on screen, and again whenever what shares the
+   * corner moves — which a `resize` listener alone does not cover, as `Combobox` already records
+   * for the same attributes: the PM panel opens without one, and a pinned bar arrives over 200ms
+   * of `max-height`, so the floor measured on the raise is not the one the reader ends up with.
+   */
+  useLayoutEffect(() => {
+    if (toasts.length === 0) return;
+    const remeasure = () =>
+      setPlacement((was) => {
+        const now = placeToast(measure(overASheet));
+        // Same numbers, same object: a new one every time would re-render the tray, whose own
+        // style change is a mutation this observer would see again
+        return was.anchor === now.anchor && was.offset === now.offset ? was : now;
+      });
+    remeasure();
+
+    const sizes = new ResizeObserver(remeasure);
+    // Re-run on every arrival, not once: `SaveBar` is always mounted and turns its attribute on in
+    // the same commit that starts a 200ms `max-height`, so at the moment it announces itself it is
+    // still zero tall and `measure` discards it. Observing it then is what catches the growth —
+    // `Combobox` re-runs its own watch for exactly this reason. `observe` on an element already
+    // observed is a no-op, and its initial callback is absorbed by the bail-out above.
+    const watch = () => {
+      document.querySelectorAll<HTMLElement>(OBSTACLES).forEach((el) => sizes.observe(el));
+      const panel = document.querySelector<HTMLElement>("[data-corner-panel]");
+      if (panel) sizes.observe(panel);
+    };
+    watch();
+
+    // The panel and the bars come and go, so their arrival is a mutation rather than a resize
+    const arrivals = new MutationObserver((records) => {
+      const outsideTheTray = records.some(
+        (record) => !trayRef.current?.contains(record.target as Node)
+      );
+      if (!outsideTheTray) return;
+      watch();
+      remeasure();
+    });
+    arrivals.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["data-corner-panel", "data-pinned-bottom-bar", "data-pinned-phone-bar"],
+    });
+
+    window.addEventListener("resize", remeasure);
+    return () => {
+      sizes.disconnect();
+      arrivals.disconnect();
+      window.removeEventListener("resize", remeasure);
+    };
+  }, [toasts.length, overASheet]);
+
   // Cleanup on unmount
   useEffect(() => {
     const timers = timersRef.current;
@@ -90,10 +168,16 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       {children}
       {toasts.length > 0 && (
         <div
+          ref={trayRef}
           data-testid="toast-tray"
-          className={`fixed z-50 flex max-w-sm flex-col gap-2 sm:bottom-4 sm:right-4 sm:left-auto sm:top-auto sm:w-auto sm:translate-x-0 ${
-            overASheet ? OVER_A_SHEET : IN_THE_CORNER
-          }`}
+          style={
+            placement.anchor === "top"
+              ? { top: placement.offset, bottom: "auto" }
+              : { bottom: placement.offset }
+          }
+          // The horizontal half stays in CSS, because it does not depend on anything measured: a
+          // phone gets the full width less a margin, a wider screen the right-hand corner.
+          className="fixed right-4 z-50 flex max-w-sm flex-col gap-2 max-sm:left-4 max-sm:max-w-none"
         >
           {toasts.map((t) => (
             <div
