@@ -33,28 +33,38 @@ async function raiseAToast(page: Page) {
   await expect(page.getByTestId("toast").first()).toBeVisible();
 }
 
-/** Which of the page's own controls, if any, the toast is standing on */
+/**
+ * Which of the page's own controls the toast is standing on.
+ *
+ * The panel's own list, separately from the rest: its composer mounts only once the conversation
+ * has loaded, and an earlier version of this spec measured before that and counted the launcher
+ * as proof that "there were controls to cover" — so four of its eight states were measuring the
+ * two header buttons and nothing else, while the tray sat on Send.
+ */
 function covered(page: Page) {
   return page.evaluate(() => {
     const tray = document.querySelector('[data-testid="toast-tray"]')!;
-    const controls = Array.from(
-      document.querySelectorAll<HTMLElement>(
-        '[aria-label="Open PM chat"], [aria-label="Close PM chat"], [data-corner-panel] button, [data-corner-panel] a, [data-corner-panel] textarea, [aria-label="Post comment"]'
-      )
-    ).filter((el) => el.getBoundingClientRect().height > 0);
+    const under = (el: HTMLElement) => {
+      const r = el.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return hit !== null && tray.contains(hit);
+    };
+    const named = (el: HTMLElement) =>
+      el.getAttribute("aria-label") ?? el.getAttribute("placeholder") ?? el.textContent?.trim().slice(0, 16) ?? "?";
+    const visible = (selector: string) =>
+      Array.from(document.querySelectorAll<HTMLElement>(selector)).filter(
+        (el) => el.getBoundingClientRect().height > 0
+      );
+
+    const panelControls = visible(
+      '[data-corner-panel] button, [data-corner-panel] a, [data-corner-panel] textarea'
+    );
+    const others = visible('[data-corner-obstacle], [aria-label="Post comment"]');
+    const t = tray.getBoundingClientRect();
     return {
-      seen: controls.length,
-      under: controls
-        .filter((el) => {
-          const r = el.getBoundingClientRect();
-          const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-          return hit !== null && tray.contains(hit);
-        })
-        .map((el) => el.getAttribute("aria-label") ?? el.textContent?.trim().slice(0, 16) ?? "?"),
-      onScreen: (() => {
-        const t = tray.getBoundingClientRect();
-        return t.top >= 0 && t.bottom <= window.innerHeight;
-      })(),
+      panelSeen: panelControls.map(named),
+      under: [...panelControls, ...others].filter(under).map(named),
+      onScreen: t.top >= 0 && t.bottom <= document.documentElement.clientHeight,
     };
   });
 }
@@ -94,10 +104,15 @@ for (const [width, height] of [
       if (withPanel) {
         await launcher(page).click();
         await expect(page.getByTestId("pm-chat-panel")).toBeVisible();
+        // The composer, not just the panel: it mounts when the conversation lands, and it is the
+        // half that reaches down into the corner
+        await expect(page.getByRole("button", { name: "Send", exact: true })).toBeVisible();
       }
 
       const geometry = await covered(page);
-      expect(geometry.seen, "there were controls to cover").toBeGreaterThan(0);
+      if (withPanel) {
+        expect(geometry.panelSeen, "the composer is part of what was measured").toContain("Send");
+      }
       expect(geometry.under, "no control is under the toast").toEqual([]);
       expect(geometry.onScreen, "and the toast is still readable").toBe(true);
     });
