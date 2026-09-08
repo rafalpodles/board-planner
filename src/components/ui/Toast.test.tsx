@@ -110,6 +110,18 @@ describe("where a toast lands", () => {
     expect(trayClasses()).toContain("top-4");
   });
 
+  // A pinned bar is the other thing standing in that corner, and it is not a layer: the toast
+  // steps over it the way the PM launcher does, through the attributes the bars already set.
+  it("steps over a pinned bottom bar rather than sitting on it", () => {
+    mounted();
+
+    act(() => raise("Failed to post comment"));
+
+    const classes = trayClasses();
+    expect(classes).toContain("[body:has([data-pinned-bottom-bar])_&]:bottom-40");
+    expect(classes).toContain("max-lg:[body:has([data-pinned-phone-bar])_&]:bottom-40");
+  });
+
   // A full-screen `bare` dialog has no action row at the bottom; its controls are the back and
   // overflow buttons at the *top*, which is where this used to send the toast (BP-590 review)
   it("stays in the corner under a real bare Modal", () => {
