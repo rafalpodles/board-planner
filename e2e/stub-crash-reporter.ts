@@ -27,6 +27,10 @@ const MOST_TO_SHOW = 20;
  * line of every chunk**, including the one that resumes a line split across two `data` events. So
  * a marker straddling a chunk boundary is reassembled with the prefix sitting inside it, and a
  * search for the marker finds nothing. Removed before matching, and kept out of what is printed.
+ *
+ * `WebServer` is `prefixOutputLines`'s default and no entry in `playwright.config.ts` sets a
+ * `name`; giving one a name changes this prefix and puts the boundary back. The ANSI pass is
+ * display hygiene — the escapes wrap the prefix whole, so matching does not depend on it.
  */
 const PIPED_PREFIX = /\[WebServer\] /g;
 const ANSI = /\u001b\[[0-9;]*m/g;

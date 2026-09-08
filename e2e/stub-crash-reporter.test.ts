@@ -11,8 +11,8 @@ import { CRASH_MARKER, EXPECTED_CRASH_MARKER } from "./stub-guard.mjs";
 
 const passed = { status: "passed" } as FullResult;
 
-/** Playwright's own, minus the dimming it wraps this in */
-const PREFIX = "[WebServer] ";
+/** Playwright's own, dimmed exactly as `prefixOutputLines` emits it */
+const PREFIX = "\u001b[2m[WebServer] \u001b[22m";
 
 function summary() {
   return vi.mocked(process.stdout.write).mock.calls.map(([text]) => String(text)).join("");
