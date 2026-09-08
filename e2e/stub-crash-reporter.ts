@@ -22,6 +22,15 @@ import { CRASH_MARKER } from "./stub-guard.mjs";
 // under a second, and holding every line of that in the runner is no better than dropping them.
 const MOST_TO_SHOW = 20;
 
+/**
+ * What Playwright puts in front of a web server's output — `prefixOutputLines`, dimmed, on **every
+ * line of every chunk**, including the one that resumes a line split across two `data` events. So
+ * a marker straddling a chunk boundary is reassembled with the prefix sitting inside it, and a
+ * search for the marker finds nothing. Removed before matching, and kept out of what is printed.
+ */
+const PIPED_PREFIX = /\[WebServer\] /g;
+const ANSI = /\u001b\[[0-9;]*m/g;
+
 export default class StubCrashReporter implements Reporter {
   private readonly crashes: string[] = [];
   private count = 0;
@@ -44,7 +53,8 @@ export default class StubCrashReporter implements Reporter {
     return tail;
   }
 
-  private record(line: string) {
+  private record(rawLine: string) {
+    const line = rawLine.replace(ANSI, "").replace(PIPED_PREFIX, "");
     if (!line.includes(CRASH_MARKER)) return;
     this.count++;
     if (this.crashes.length < MOST_TO_SHOW) this.crashes.push(line.trim());

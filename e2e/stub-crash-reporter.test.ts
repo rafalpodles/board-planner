@@ -11,6 +11,9 @@ import { CRASH_MARKER, EXPECTED_CRASH_MARKER } from "./stub-guard.mjs";
 
 const passed = { status: "passed" } as FullResult;
 
+/** Playwright's own, minus the dimming it wraps this in */
+const PREFIX = "[WebServer] ";
+
 function summary() {
   return vi.mocked(process.stdout.write).mock.calls.map(([text]) => String(text)).join("");
 }
@@ -40,7 +43,7 @@ describe("reading the stubs' own output", () => {
     expect(await reporter.onEnd?.(passed)).toEqual({ status: "failed" });
     // Naming the stub is the point: a crash on a fire-and-forget path reads as a missing row
     expect(summary()).toContain("[webhook receiver] POST /hook");
-    expect(summary()).toContain("1 stub crash");
+    expect(summary()).toContain("1 stub crash.");
   });
 
   it("keeps a run green when the only crash was the one a spec asked for", async () => {
@@ -51,13 +54,17 @@ describe("reading the stubs' own output", () => {
     expect(summary()).toBe("");
   });
 
-  it("finds a marker split across two chunks", async () => {
+  // The chunks are shaped the way Playwright delivers them: `prefixOutputLines` puts `[WebServer] `
+  // on every line of every chunk, the resumption of a split line included — so the marker comes
+  // back with the prefix inside it unless that is taken out first.
+  it("finds a marker split across two chunks, prefixed the way Playwright prefixes them", async () => {
     const reporter = watching();
-    reporter.onStdErr?.(`\n${CRASH_MARKER.slice(0, 4)}`);
-    reporter.onStdErr?.(`${CRASH_MARKER.slice(4)} [openai stub] GET /x\n`);
+    reporter.onStdErr?.(`${PREFIX}\n${PREFIX}${CRASH_MARKER.slice(0, 4)}`);
+    reporter.onStdErr?.(`${PREFIX}${CRASH_MARKER.slice(4)} [openai stub] GET /x\n`);
 
     expect(await reporter.onEnd?.(passed)).toEqual({ status: "failed" });
     expect(summary()).toContain("[openai stub] GET /x");
+    expect(summary(), "the pipe's own prefix is not part of the report").not.toContain("[WebServer]");
   });
 
   it("finds a crash on a last line that never got its newline", async () => {
@@ -103,8 +110,8 @@ describe("reading the stubs' own output", () => {
   // stderr chunk — here that splice spells the marker neither stream ever wrote
   it("keeps a half-line on each stream to itself", async () => {
     const reporter = watching();
-    reporter.onStdOut?.(`compiled /projects — ${CRASH_MARKER.slice(0, 5)}`);
-    reporter.onStdErr?.(`${CRASH_MARKER.slice(5)} is not what this line says\n`);
+    reporter.onStdOut?.(`${PREFIX}compiled /projects — ${CRASH_MARKER.slice(0, 5)}`);
+    reporter.onStdErr?.(`${PREFIX}${CRASH_MARKER.slice(5)} is not what this line says\n`);
 
     expect(await reporter.onEnd?.(passed), "no crash was reported by either stream").toBeUndefined();
     expect(summary()).toBe("");
