@@ -3,7 +3,7 @@ import { useRef } from "react";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, act, within } from "@testing-library/react";
 import { Modal } from "./Modal";
-import { closeTopLayer, tabbablesWithin } from "@/lib/focus-trap";
+import { closeOpenLayers, tabbablesWithin } from "@/lib/focus-trap";
 
 afterEach(cleanup);
 
@@ -634,7 +634,7 @@ describe("what the dialog tells the layer registry", () => {
     const onClose = vi.fn();
     renderModal({ onClose });
 
-    expect(closeTopLayer()).toBe(true);
+    expect(closeOpenLayers()).toBe(true);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
@@ -642,7 +642,7 @@ describe("what the dialog tells the layer registry", () => {
     const onClose = vi.fn();
     renderModal({ onClose, closeDisabled: true });
 
-    expect(closeTopLayer()).toBe(false);
+    expect(closeOpenLayers()).toBe(false);
     expect(onClose).not.toHaveBeenCalled();
   });
 });

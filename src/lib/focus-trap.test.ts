@@ -1,11 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi } from "vitest";
-import {
-  closeTopLayer,
-  openLayerCount,
-  registerLayer,
-  subscribeLayers,
-} from "@/lib/focus-trap";
+import { closeOpenLayers, openLayerCount, registerLayer, subscribeLayers } from "@/lib/focus-trap";
 
 /**
  * BP-590. The toast reads this registry to decide which corner it takes, and it is painted
@@ -48,41 +43,69 @@ describe("watching the open layers", () => {
  * layer to close the one way it already knows — so "Escape closes the topmost" and "⌘K replaces
  * it" cannot drift apart.
  */
-describe("asking the top layer to close", () => {
+describe("asking the open layers to close", () => {
   function layer(close?: () => void | boolean) {
     const el = document.createElement("div");
     document.body.append(el);
     return { el, stop: registerLayer(el, close ? { close } : {}) };
   }
 
-  it("asks the topmost, not the first registered", () => {
+  // All of them, top down: layers nest — a confirm opened from the task modal is two — and closing
+  // only the topmost would leave the palette stacked on the parent, which is the state BP-560
+  // exists to prevent
+  it("walks the whole stack, top down", () => {
+    const order: string[] = [];
+    const a = layer(() => void order.push("under"));
+    const b = layer(() => void order.push("over"));
+
+    expect(closeOpenLayers()).toBe(true);
+
+    expect(order).toEqual(["over", "under"]);
+    a.stop();
+    b.stop();
+  });
+
+  it("stops at a refusal, leaving the layers below it alone", () => {
     const under = vi.fn();
-    const over = vi.fn();
     const a = layer(under);
-    const b = layer(over);
+    const b = layer(() => false);
 
-    expect(closeTopLayer()).toBe(true);
+    expect(closeOpenLayers()).toBe(false);
 
-    expect(over).toHaveBeenCalledTimes(1);
-    expect(under, "the layer below is not touched").not.toHaveBeenCalled();
+    expect(under, "the parent is not closed on the way past a refusal").not.toHaveBeenCalled();
+    a.stop();
+    b.stop();
+  });
+
+  // Escaping a native keydown listener, a throw kills the shortcut for the rest of the session
+  it("treats a layer that throws on the way out as a refusal", () => {
+    const under = vi.fn();
+    const a = layer(under);
+    const b = layer(() => {
+      throw new Error("mid-teardown");
+    });
+
+    expect(closeOpenLayers()).toBe(false);
+
+    expect(under).not.toHaveBeenCalled();
     a.stop();
     b.stop();
   });
 
   it("reports a refusal, so the caller can leave the layer alone", () => {
     const { stop } = layer(() => false);
-    expect(closeTopLayer()).toBe(false);
+    expect(closeOpenLayers()).toBe(false);
     stop();
   });
 
   it("treats a layer with no close of its own as gone", () => {
     const { stop } = layer();
-    expect(closeTopLayer()).toBe(true);
+    expect(closeOpenLayers()).toBe(true);
     stop();
   });
 
   it("says yes when there is no layer at all", () => {
-    expect(closeTopLayer()).toBe(true);
+    expect(closeOpenLayers()).toBe(true);
   });
 
   it("forgets a layer's close when it unregisters", () => {
@@ -90,7 +113,7 @@ describe("asking the top layer to close", () => {
     const { stop } = layer(close);
     stop();
 
-    expect(closeTopLayer()).toBe(true);
+    expect(closeOpenLayers()).toBe(true);
     expect(close).not.toHaveBeenCalled();
   });
 });

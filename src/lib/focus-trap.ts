@@ -54,13 +54,30 @@ export function openSheetCount(): number {
 }
 
 /**
- * Asks the topmost layer to close, and says whether it agreed. `false` means it refused and is
- * still there; `true` covers both "it closed" and "there was nothing to close".
+ * Asks every open layer to close, top down, and says whether they all agreed.
+ *
+ * All of them, not only the topmost: layers nest — a confirm opened from the task modal is two —
+ * and closing one would leave the palette stacked on the parent, which is the state BP-560 exists
+ * to prevent. A refusal stops the walk and answers `false`; the layers below it stay, and so does
+ * whatever asked.
+ *
+ * The list is snapshotted first because closing is a state update: nothing leaves `openLayers`
+ * until React commits, so a loop that watched the array for progress would never see any.
  */
-export function closeTopLayer(): boolean {
-  const top = topmostLayer();
-  if (!top) return true;
-  return layerClose.get(top)?.() !== false;
+export function closeOpenLayers(): boolean {
+  for (const el of [...openLayers].reverse()) {
+    let answer: void | boolean;
+    try {
+      answer = layerClose.get(el)?.();
+    } catch {
+      // A layer that threw on the way out is not a layer that closed. Reported as a refusal
+      // rather than left to escape a native keydown listener, where it kills the shortcut for
+      // the rest of the session.
+      return false;
+    }
+    if (answer === false) return false;
+  }
+  return true;
 }
 
 /** For anything painted outside a layer that has to know one is there — the toast's geometry */

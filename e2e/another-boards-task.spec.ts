@@ -109,3 +109,30 @@ test("⌘K from the task modal still swaps to a task on the same board", async (
   await expect(taskDialog(page)).toBeVisible();
   await expect(page.getByLabel("Task title")).toHaveValue(HELD_TASK_TITLE);
 });
+
+/**
+ * The task modal closes with `router.back()`, so it unmounts on `popstate` — after the palette has
+ * mounted and focused itself. An unconditional focus restore in the layer's teardown then pulled
+ * the caret back to the card that opened it, out of an open palette (BP-567 review).
+ *
+ * Typed with `keyboard.type`, deliberately: `fill()` focuses the field itself and would hide
+ * exactly this. And read after the modal has gone, because that is when the teardown runs.
+ */
+test("⌘K from the task modal keeps the caret, even though the modal closes late", async ({
+  page,
+}) => {
+  await page.goto(`/projects/${PROJECT_KEY}`);
+  await page.getByText(SIBLING_TASK_TITLE).first().click();
+  await expect(taskDialog(page)).toBeVisible();
+
+  await page.keyboard.press("ControlOrMeta+k");
+  const field = page.getByRole("dialog", { name: "Search" }).getByLabel("Search tasks and projects");
+  await expect(field).toBeVisible();
+
+  // The modal's own teardown has to have run by now, which is what makes this the moment to look
+  await expect(taskDialog(page)).toHaveCount(0);
+  await expect(field, "the caret is still in the palette").toBeFocused();
+
+  await page.keyboard.type(HELD_TASK_TITLE);
+  await expect(field, "and what was typed reached it").toHaveValue(HELD_TASK_TITLE);
+});

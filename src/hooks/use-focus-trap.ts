@@ -58,8 +58,15 @@ export function useFocusTrap({
       focused && focused !== document.body && focused !== document.documentElement
         ? focused
         : null;
-    containerRef.current!.focus();
+    const container = containerRef.current!;
+    container.focus();
     return () => {
+      // Only when nothing else has taken it. A layer that closes asynchronously — the task modal's
+      // `router.back()` waits for `popstate` — unmounts after whatever replaced it has mounted and
+      // focused itself, and an unconditional restore then pulls the caret out of it (BP-567).
+      const now = document.activeElement as HTMLElement | null;
+      const abandoned = !now || now === document.body || container.contains(now);
+      if (!abandoned) return;
       const target = trigger ?? returnFocusTo?.current ?? null;
       if (target?.isConnected) target.focus();
     };
