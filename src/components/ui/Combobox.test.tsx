@@ -297,3 +297,83 @@ describe("where the panel lands", () => {
     expect(listbox.className).toContain("overflow-y-auto");
   });
 });
+
+/**
+ * BP-547 item 2. With eight or more options the panel grows a search box and focuses it, and from
+ * that point the arrows move a highlight in a list the focused element said nothing about. Nothing
+ * in the suite typed into that box before, which is why it and the missing focus indicator were
+ * both invisible.
+ */
+describe("the search box the panel grows", () => {
+  const MANY = Array.from({ length: 9 }, (_, i) => ({
+    value: `v${i}`,
+    label: `Option ${i}`,
+  }));
+
+  function openWithSearch() {
+    render(
+      <Combobox options={MANY} label="Assignee" onChange={() => {}} value="v0">
+        {(picked) => <span>{picked?.label ?? "None"}</span>}
+      </Combobox>
+    );
+    const button = screen.getByRole("combobox", { name: "Assignee" });
+    stateRect(button, { top: 100, bottom: 140 });
+    fireEvent.click(button);
+    return screen.getByRole("combobox", { name: "Search Assignee" });
+  }
+
+  it("is the combobox itself, pointing at the list the arrows move through", () => {
+    stateViewport(900);
+    const box = openWithSearch();
+    const listbox = document.querySelector('[role="listbox"]')!;
+
+    expect(document.activeElement).toBe(box);
+    expect(box.getAttribute("aria-controls")).toBe(listbox.id);
+    expect(box.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("names the option the highlight is on, and follows it", () => {
+    stateViewport(900);
+    const box = openWithSearch();
+
+    const first = box.getAttribute("aria-activedescendant");
+    expect(document.getElementById(first!)?.textContent).toContain("Option 0");
+
+    fireEvent.keyDown(box, { key: "ArrowDown" });
+
+    const second = box.getAttribute("aria-activedescendant");
+    expect(second).not.toBe(first);
+    expect(document.getElementById(second!)?.textContent).toContain("Option 1");
+  });
+
+  it("points at the first match after typing, not at a stale row", () => {
+    stateViewport(900);
+    const box = openWithSearch();
+
+    fireEvent.change(box, { target: { value: "Option 7" } });
+
+    const current = box.getAttribute("aria-activedescendant");
+    expect(document.getElementById(current!)?.textContent).toContain("Option 7");
+  });
+
+  it("names nothing when nothing matches", () => {
+    stateViewport(900);
+    const box = openWithSearch();
+
+    fireEvent.change(box, { target: { value: "no such option" } });
+
+    expect(box.getAttribute("aria-activedescendant")).toBeNull();
+    expect(screen.getByText("No matches")).toBeTruthy();
+  });
+
+  // The panel is `overflow-hidden`, so an offset outline is cropped: the inset variant is the one
+  // that shows. A bare `outline-none` — what this was — escapes `focus-treatment.test.ts`, which
+  // matches `focus:outline-none`
+  it("has a focus indicator that the panel cannot crop", () => {
+    stateViewport(900);
+    const classes = openWithSearch().getAttribute("class")!.split(/\s+/);
+
+    expect(classes).toContain("focus-ring-inset");
+    expect(classes).not.toContain("outline-none");
+  });
+});
