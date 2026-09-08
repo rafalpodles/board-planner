@@ -11,7 +11,8 @@ import {
 interface FocusTrapOptions {
   active: boolean;
   containerRef: RefObject<HTMLElement | null>;
-  onEscape: () => void;
+  /** Returning `false` refuses the close — a dialog with a write in flight (BP-567) */
+  onEscape: () => void | boolean;
   /** Where focus lands on close when nothing was focused at open time — keyboard shortcuts, Safari clicks */
   returnFocusTo?: RefObject<HTMLElement | null>;
   /** Off for layers that leave the page scrollable behind them */
@@ -37,7 +38,12 @@ export function useFocusTrap({
   useEffect(() => {
     if (!active) return;
     const container = containerRef.current!;
-    const unregister = registerLayer(container, sheet);
+    const unregister = registerLayer(container, {
+      sheet,
+      // Read through the ref, so the layer closes the way it does now rather than the way it did
+      // when it registered
+      close: () => onEscapeRef.current(),
+    });
     if (lockScroll) document.body.style.overflow = "hidden";
     return () => {
       unregister();

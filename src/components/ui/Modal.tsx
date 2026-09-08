@@ -67,12 +67,14 @@ export function Modal({
     );
   };
 
+  /** `false` when it refused, which is how `⌘K` knows not to replace it (BP-567) */
   const requestClose = () => {
     if (closeDisabled) {
       refuse();
-      return;
+      return false;
     }
     onClose();
+    return true;
   };
 
   useFocusTrap({

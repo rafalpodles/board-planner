@@ -20,21 +20,47 @@ const layerWatchers = new Set<() => void>();
 // of them has one.
 const openSheets: HTMLElement[] = [];
 
-export function registerLayer(el: HTMLElement, sheet = false): () => void {
+interface LayerOptions {
+  /** A bottom sheet below `sm`, so anything painted in that corner has to move (BP-590) */
+  sheet?: boolean;
+  /**
+   * How this layer closes itself — the same handler Escape runs. `⌘K` replaces the top layer
+   * rather than stacking on it (BP-567), and it does that by asking the layer to close the one
+   * way it already knows, so the two cannot drift apart. Returning `false` refuses: a dialog with
+   * a write in flight is not replaced out from under its own request.
+   */
+  close?: () => void | boolean;
+}
+
+const layerClose = new Map<HTMLElement, () => void | boolean>();
+
+export function registerLayer(el: HTMLElement, { sheet, close }: LayerOptions = {}): () => void {
   openLayers.push(el);
   if (sheet) openSheets.push(el);
+  if (close) layerClose.set(el, close);
   layerWatchers.forEach((notify) => notify());
   return () => {
     const at = openLayers.indexOf(el);
     if (at >= 0) openLayers.splice(at, 1);
     const sheetAt = openSheets.indexOf(el);
     if (sheetAt >= 0) openSheets.splice(sheetAt, 1);
+    layerClose.delete(el);
     layerWatchers.forEach((notify) => notify());
   };
 }
 
 export function openSheetCount(): number {
   return openSheets.length;
+}
+
+/**
+ * Asks the topmost layer to close, and says whether it agreed. `false` means it refused and is
+ * still there; `true` covers both "it closed" and "there was nothing to close".
+ */
+export function closeTopLayer(): boolean {
+  const top = topmostLayer();
+  if (!top) return true;
+  return layerClose.get(top)?.() !== false;
 }
 
 /** For anything painted outside a layer that has to know one is there — the toast's geometry */

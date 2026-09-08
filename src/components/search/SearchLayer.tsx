@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { Badge } from "@/components/ui/Badge";
 import { useFocusTrap } from "@/hooks/use-focus-trap";
 import { useProjects } from "@/hooks/use-projects";
-import { openLayerCount } from "@/lib/focus-trap";
+import { closeTopLayer, openLayerCount } from "@/lib/focus-trap";
 import { projectRefFromPathname } from "@/lib/urls";
 import { STATUS_LABELS } from "@/types";
 import { MIN_QUERY, SearchHit, columnOf, groupOf, useSearch } from "./use-search";
@@ -51,10 +51,16 @@ function useSearchShortcut(onOpen: () => void, onClose: () => void, open: boolea
         e.key === "/" && !e.metaKey && !e.ctrlKey && !e.altKey && !isTypingTarget(e.target);
       if (!cmdK && !slash) return;
       e.preventDefault();
-      // On the way in only: the open palette is a layer itself, and ⌘K has to keep closing it
-      if (!open && openLayerCount() > 0) return;
-      if (open && cmdK) onClose();
-      else if (!open) onOpen();
+      if (open) {
+        // The open palette is a layer itself, and ⌘K has to keep closing it
+        if (cmdK) onClose();
+        return;
+      }
+      // Replacing, not stacking: `aria-modal` promises nothing outside the dialog exists, so the
+      // dialog goes first. Through its own close handler — the one Escape runs — rather than a
+      // second path, and a layer that refuses (a write in flight) keeps the palette shut (BP-567).
+      if (openLayerCount() > 0 && !closeTopLayer()) return;
+      onOpen();
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);

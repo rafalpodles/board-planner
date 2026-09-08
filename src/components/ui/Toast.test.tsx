@@ -23,7 +23,7 @@ function openSheet() {
   const el = document.createElement("div");
   document.body.appendChild(el);
   act(() => {
-    opened.push(registerLayer(el, true));
+    opened.push(registerLayer(el, { sheet: true }));
   });
 }
 
