@@ -136,3 +136,29 @@ test("⌘K from the task modal keeps the caret, even though the modal closes lat
   await page.keyboard.type(HELD_TASK_TITLE);
   await expect(field, "and what was typed reached it").toHaveValue(HELD_TASK_TITLE);
 });
+
+/**
+ * Layers nest: a confirm opened from the task modal is two of them. Closing only the topmost left
+ * the palette stacked on the parent — the state BP-560 exists to prevent — so the walk takes the
+ * whole stack (BP-567 review).
+ */
+test("⌘K from a confirm inside the task modal clears both layers", async ({ page }) => {
+  await page.goto(`/projects/${PROJECT_KEY}`);
+  await page.getByText(SIBLING_TASK_TITLE).first().click();
+  await expect(taskDialog(page)).toBeVisible();
+
+  const rail = page.getByRole("button", { name: /^Delete task$/ });
+  if (await rail.count()) await rail.click();
+  else {
+    await page.getByRole("button", { name: "More actions" }).click();
+    await page.getByRole("option", { name: "Delete task" }).click();
+  }
+  await expect(page.getByRole("dialog", { name: /Delete/i })).toBeVisible();
+
+  await page.keyboard.press("ControlOrMeta+k");
+
+  await expect(page.getByRole("dialog", { name: "Search" })).toBeVisible();
+  // One dialog on the page, and it is the palette: neither the confirm nor the task under it
+  await expect(page.getByRole("dialog")).toHaveCount(1);
+  await expect(taskDialog(page)).toHaveCount(0);
+});
