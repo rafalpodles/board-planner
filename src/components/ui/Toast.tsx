@@ -30,7 +30,7 @@ let nextId = 0;
 /**
  * Three surfaces stand where a toast lands, and each wants a different answer: a bottom sheet's
  * action row, a pinned bar, and the open PM panel — which is anchored to the same place the step
- * over a bar goes. The reasoning is in BP-590 and BP-596; what is here is the shape.
+ * over a bar goes. The reasoning is in BP-590, BP-591/593 and BP-596; what is here is the shape.
  */
 const OVER_A_SHEET = "left-1/2 top-4 w-[calc(100%-2rem)] -translate-x-1/2";
 
