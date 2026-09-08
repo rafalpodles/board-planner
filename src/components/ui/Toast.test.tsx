@@ -118,8 +118,15 @@ describe("where a toast lands", () => {
     act(() => raise("Failed to post comment"));
 
     const classes = trayClasses();
-    expect(classes).toContain("[body:has([data-pinned-bottom-bar])_&]:bottom-40");
-    expect(classes).toContain("max-lg:[body:has([data-pinned-phone-bar])_&]:bottom-40");
+    // "a bar, and no panel": the open PM chat panel is anchored to the same `bottom-40`, and two
+    // rules of equal weight would leave the tray stretched between them (BP-596)
+    expect(classes).toContain(
+      "[body:has([data-pinned-bottom-bar]):not(:has([data-corner-panel]))_&]:bottom-40"
+    );
+    expect(classes).toContain(
+      "max-lg:[body:has([data-pinned-phone-bar]):not(:has([data-corner-panel]))_&]:bottom-40"
+    );
+    expect(classes).toContain("max-sm:[body:has([data-corner-panel])_&]:top-20");
   });
 
   // A full-screen `bare` dialog has no action row at the bottom; its controls are the back and
