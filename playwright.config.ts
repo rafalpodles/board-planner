@@ -12,7 +12,7 @@ export const PM_STUB_URL = `http://localhost:${PM_STUB_PORT}`;
 
 // The model behind AI task generation, replaced the same way.
 //
-// A run owns E2E_PORT through E2E_PORT+5, and every stub derives from that one number so setting
+// A run owns E2E_PORT through E2E_PORT+8, and every stub derives from that one number so setting
 // it reserves the whole block. Giving each stub a default of its own is what makes two operators
 // following the same "pick two adjacent numbers" habit collide on a port neither of them typed.
 const AI_STUB_PORT = Number(process.env.AI_STUB_PORT ?? PORT + 2);
@@ -30,6 +30,14 @@ export const WEBHOOK_SECRET = "e2e-webhook-signing-secret";
 const WEBHOOK_RECEIVER_PORT = Number(process.env.WEBHOOK_RECEIVER_PORT ?? PORT + 3);
 export const WEBHOOK_RECEIVER_URL = `http://127.0.0.1:${WEBHOOK_RECEIVER_PORT}`;
 
+// A mail server on this machine, in its own process for the same reason as the webhook receiver:
+// the notification mail is handed over after the request that caused it has already answered. Two
+// ports — SMTP for nodemailer, HTTP for the spec that reads what arrived. They end a run's block
+// at E2E_PORT+8; the "keep concurrent runs ten apart" rule still covers it, but only just.
+const SMTP_STUB_PORT = Number(process.env.SMTP_STUB_PORT ?? PORT + 7);
+const SMTP_STUB_CONTROL_PORT = Number(process.env.SMTP_STUB_CONTROL_PORT ?? PORT + 8);
+export const SMTP_STUB_CONTROL_URL = `http://127.0.0.1:${SMTP_STUB_CONTROL_PORT}`;
+
 // MongoDB, through a proxy the suite can cut (e2e/mongo-proxy.mjs). The dev server is pointed at
 // the proxy rather than at the database, so a test can take the database away and give it back
 // without stopping a mongod other sessions share; seed() keeps talking to the database directly.
@@ -38,8 +46,7 @@ const MONGO_PROXY_CONTROL_PORT = Number(process.env.MONGO_PROXY_CONTROL_PORT ?? 
 export const MONGO_PROXY_CONTROL_URL = `http://127.0.0.1:${MONGO_PROXY_CONTROL_PORT}`;
 
 // An external MCP server the PM connects out to, so a spec can drive a real catalogue of tools
-// rather than a fixture of one (BP-569). This widens a run's block to E2E_PORT+6; the "keep
-// concurrent runs ten apart" rule already covers it.
+// rather than a fixture of one (BP-569).
 const MCP_SERVER_STUB_PORT = Number(process.env.MCP_SERVER_STUB_PORT ?? PORT + 6);
 export const MCP_SERVER_STUB_URL = `http://127.0.0.1:${MCP_SERVER_STUB_PORT}`;
 
@@ -162,6 +169,18 @@ export default defineConfig({
       env: { WEBHOOK_RECEIVER_PORT: String(WEBHOOK_RECEIVER_PORT) },
     },
     {
+      command: `node e2e/smtp-stub.mjs`,
+      url: `${SMTP_STUB_CONTROL_URL}/health`,
+      reuseExistingServer: false,
+      timeout: 30_000,
+      stdout: "pipe",
+      stderr: "pipe",
+      env: {
+        SMTP_STUB_PORT: String(SMTP_STUB_PORT),
+        SMTP_STUB_CONTROL_PORT: String(SMTP_STUB_CONTROL_PORT),
+      },
+    },
+    {
       command: `npm run dev -- --port ${PORT}`,
       url: BASE_URL,
       reuseExistingServer: false,
@@ -197,6 +216,17 @@ export default defineConfig({
         OPENAI_API_KEY: "e2e-stub-key",
         OPENAI_BASE_URL: `${AI_STUB_URL}/v1`,
         WEBHOOK_SIGNING_SECRET: WEBHOOK_SECRET,
+        // The mail server above. `isEmailConfigured()` wants all three, and without them the whole
+        // e-mail column of the notification grid is unreachable from a browser (BP-465).
+        SMTP_HOST: "127.0.0.1",
+        SMTP_PORT: String(SMTP_STUB_PORT),
+        SMTP_USER: "e2e",
+        SMTP_PASS: "e2e",
+        SMTP_FROM: "Board Planner <noreply@board-planner.test>",
+        // For the stub's throwaway certificate, and for nothing else: `email.ts` sets `requireTLS`
+        // on every port but 465, so the stub has to offer STARTTLS and this run has to accept a
+        // certificate no authority signed.
+        NODE_TLS_REJECT_UNAUTHORIZED: "0",
         // Storing a project's chat webhook URL needs it (BP-372), and so does the personal one the
         // notification grid offers. Without it those routes answer 503 and the specs that drive
         // them assert a refusal instead of the encryption they exist to prove.

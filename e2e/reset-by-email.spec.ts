@@ -150,12 +150,23 @@ test("the sign-in screen offers the way in when a password is forgotten", async 
   await expect(page.getByRole("heading", { name: "Forgot your password?" })).toBeVisible();
 });
 
-// CI has no mail server, which is the state a self-hosted instance starts in. Somebody left
-// waiting for a message that was never coming is the failure this wording exists to prevent.
+// No mail server is the state a self-hosted instance starts in. Somebody left waiting for a message
+// that was never coming is the failure this wording exists to prevent.
+//
+// The refusal is the one `/api/auth/forgot` sends when `isEmailConfigured()` is false, word for
+// word and status for status, replayed here: since BP-465 this run has a mail server, so the state
+// cannot be arranged from outside any more. What is under test is the screen either way — that it
+// shows the refusal rather than the promise.
 test("an instance with no mail server says so instead of promising a link", async ({ page }) => {
-  // Stated rather than assumed: a developer with SMTP_HOST in their shell would otherwise see this
-  // fail for a reason that has nothing to do with the code
-  test.skip(!!process.env.SMTP_HOST, "this asserts the unconfigured state");
+  await page.route("**/api/auth/forgot", (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: "This instance cannot send email. Ask an administrator to set a password for you.",
+      }),
+    })
+  );
 
   await page.goto("/forgot");
   await page.getByLabel("Username or email").fill(MEMBER_USERNAME);

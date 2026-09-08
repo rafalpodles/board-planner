@@ -100,6 +100,21 @@ for (const { name, url, api, testId, claim } of screens) {
   });
 }
 
+/**
+ * The unconfigured answer, whatever this run's mail server is. Since BP-465 the suite boots one, so
+ * the state these two tests are about is no longer the state the app is in — and it is the *answer*
+ * they were ever about, not the environment behind it.
+ */
+async function answerUnconfigured(page: Page) {
+  await page.route("**/api/admin/email", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ configured: false, host: "", port: 587, user: "", from: "" }),
+    })
+  );
+}
+
 test("the email settings screen never tells an admin to set SMTP_HOST after a failed read", async ({
   page,
 }) => {
@@ -113,6 +128,7 @@ test("the email settings screen never tells an admin to set SMTP_HOST after a fa
   await expect(page.getByText("SMTP_HOST")).toHaveCount(0);
 
   stopFailing();
+  await answerUnconfigured(page);
   await page.getByRole("button", { name: "Retry" }).click();
   await expect(page.getByText("No mail server is configured.")).toBeVisible();
   await expect(page.getByTestId("email-settings-error")).toHaveCount(0);
@@ -123,6 +139,7 @@ test("the email settings screen still says so when the read answers unconfigured
   page,
 }) => {
   await signIn(page);
+  await answerUnconfigured(page);
   await page.goto("/settings/email");
 
   await expect(page.getByTestId("email-settings-error")).toHaveCount(0);

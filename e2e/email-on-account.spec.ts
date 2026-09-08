@@ -180,13 +180,19 @@ test("an admin API token cannot change an address", async ({ request }) => {
   expect(member?.email).not.toBe("attacker@example.com");
 });
 
-// CI has no mail server, which is the state most self-hosted instances start in. The screen has to
-// say so rather than offer a button that silently does nothing.
+// No mail server is the state most self-hosted instances start in. The screen has to say so rather
+// than offer a button that silently does nothing.
+//
+// The answer is stubbed rather than arranged: since BP-465 the suite boots a mail server, and a
+// test that skipped itself whenever one existed would now never run at all.
 test("the email screen says plainly when no mail server is configured", async ({ page }) => {
-  // Stated rather than assumed, in the same shape as reset-by-email.spec.ts: this asserts the
-  // unconfigured state, so anybody who gives the run an SMTP_HOST would otherwise get a red here
-  // in a file they never touched.
-  test.skip(!!process.env.SMTP_HOST, "this asserts the unconfigured state");
+  await page.route("**/api/admin/email", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ configured: false, host: "", port: 587, user: "", from: "" }),
+    })
+  );
 
   await signInAsAdmin(page);
   await page.goto("/settings/email");
