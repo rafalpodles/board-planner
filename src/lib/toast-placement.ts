@@ -24,6 +24,7 @@ export const SHEET_BREAKPOINT = 640;
 
 export interface Surroundings {
   viewportHeight: number;
+  /** Only compared against `SHEET_BREAKPOINT`; the caller resolves it from a media query */
   viewportWidth: number;
   /** Anything sharing the tray's corner: the launcher, a pinned bar */
   obstacles: Box[];
@@ -64,8 +65,9 @@ export function placeToast(around: Surroundings): Placement {
     (top, box) => Math.min(top, box.top),
     around.viewportHeight
   );
-  // Clamped, so an obstacle reported at the top of the screen — a bar that is on the page but
-  // hidden, and therefore measured at 0 — cannot push the tray off it entirely
+  // Clamped as a last resort. The caller already drops a zero-height obstacle, so this is not the
+  // defence against a hidden bar; it is what keeps an obstacle that genuinely reaches the top of
+  // the screen from pushing the tray off it.
   const above = around.viewportHeight - highest + GAP;
   return {
     anchor: "bottom",

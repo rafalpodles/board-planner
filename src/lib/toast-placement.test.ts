@@ -33,6 +33,28 @@ describe("where a toast may stand", () => {
     expect(placed).toEqual({ anchor: "bottom", offset: 192 });
   });
 
+  // Measured 1280×800 with the panel open: the panel is 32–704, its header 45–69 and its composer
+  // 633–691, while the launcher alone would put the tray at 96 — that is 660–704, on Send
+  it("stands in the panel's transcript, below its own header", () => {
+    expect(
+      placeToast({
+        ...nothing,
+        panel: { box: { top: 32, bottom: 704 }, headerBottom: 69 },
+        obstacles: [{ top: 720, bottom: 776 }],
+      })
+    ).toEqual({ anchor: "top", offset: 85 });
+  });
+
+  it("falls back to the corner when the panel cannot hold the tray below its header", () => {
+    expect(
+      placeToast({
+        ...nothing,
+        panel: { box: { top: 32, bottom: 100 }, headerBottom: 69 },
+        obstacles: [{ top: 720, bottom: 776 }],
+      })
+    ).toEqual({ anchor: "bottom", offset: 96 });
+  });
+
   // BP-590: a phone's dialog is a bottom sheet and the top of the screen is what it leaves free
   it("goes to the top over a sheet, whatever else is in the corner", () => {
     expect(

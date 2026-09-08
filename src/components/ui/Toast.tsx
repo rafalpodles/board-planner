@@ -11,7 +11,12 @@ import {
   useSyncExternalStore,
 } from "react";
 import { openSheetCount, subscribeLayers } from "@/lib/focus-trap";
-import { placeToast, type Placement, type Surroundings } from "@/lib/toast-placement";
+import {
+  placeToast,
+  SHEET_BREAKPOINT,
+  type Placement,
+  type Surroundings,
+} from "@/lib/toast-placement";
 
 type ToastType = "success" | "error" | "info";
 
@@ -42,7 +47,12 @@ function measure(overASheet: boolean): Surroundings {
   const header = panel?.querySelector<HTMLElement>("[data-corner-panel-header]");
   return {
     viewportHeight: document.documentElement.clientHeight,
-    viewportWidth: document.documentElement.clientWidth,
+    // `matchMedia`, not `clientWidth`: the breakpoint mirrors a Tailwind one, and a media query
+    // counts the scrollbar while `clientWidth` does not — a 15px band on Windows and Linux where
+    // the dialog renders centred while the tray thought it was a sheet
+    viewportWidth: window.matchMedia(`(min-width: ${SHEET_BREAKPOINT}px)`).matches
+      ? SHEET_BREAKPOINT
+      : SHEET_BREAKPOINT - 1,
     panel:
       panel && header
         ? {
@@ -108,19 +118,27 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       });
     remeasure();
 
-    const watching = [
-      ...document.querySelectorAll<HTMLElement>(OBSTACLES),
-      document.querySelector<HTMLElement>("[data-corner-panel]"),
-    ].filter((el): el is HTMLElement => el !== null);
     const sizes = new ResizeObserver(remeasure);
-    watching.forEach((el) => sizes.observe(el));
+    // Re-run on every arrival, not once: `SaveBar` is always mounted and turns its attribute on in
+    // the same commit that starts a 200ms `max-height`, so at the moment it announces itself it is
+    // still zero tall and `measure` discards it. Observing it then is what catches the growth —
+    // `Combobox` re-runs its own watch for exactly this reason. `observe` on an element already
+    // observed is a no-op, and its initial callback is absorbed by the bail-out above.
+    const watch = () => {
+      document.querySelectorAll<HTMLElement>(OBSTACLES).forEach((el) => sizes.observe(el));
+      const panel = document.querySelector<HTMLElement>("[data-corner-panel]");
+      if (panel) sizes.observe(panel);
+    };
+    watch();
 
     // The panel and the bars come and go, so their arrival is a mutation rather than a resize
     const arrivals = new MutationObserver((records) => {
       const outsideTheTray = records.some(
         (record) => !trayRef.current?.contains(record.target as Node)
       );
-      if (outsideTheTray) remeasure();
+      if (!outsideTheTray) return;
+      watch();
+      remeasure();
     });
     arrivals.observe(document.body, {
       childList: true,
