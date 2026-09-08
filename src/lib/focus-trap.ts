@@ -69,6 +69,10 @@ export function openSheetCount(): number {
  *
  * The list is snapshotted in paint order first, because closing is a state update: nothing leaves
  * `openLayers` until React commits, so a loop watching the array for progress would see none.
+ *
+ * A refusal from a layer that is not the topmost leaves the stack half-collapsed — the ones above
+ * it are already closed. No pair in this app refuses from below (`closeDisabled` only ever sits on
+ * the topmost of a nested pair), so it is latent rather than reachable.
  */
 export function closeOpenLayers(): HTMLElement | null | false {
   const stack = [...openLayers].sort((a, b) =>

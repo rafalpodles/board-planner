@@ -147,12 +147,12 @@ test("⌘K from a confirm inside the task modal clears both layers", async ({ pa
   await page.getByText(SIBLING_TASK_TITLE).first().click();
   await expect(taskDialog(page)).toBeVisible();
 
+  // Deterministic rather than "whichever is there when I look": below lg the rail is gone and
+  // Delete lives in the overflow (BP-298), and a non-retrying count taken a tick early would
+  // silently take the other branch
   const rail = page.getByRole("button", { name: /^Delete task$/ });
-  if (await rail.count()) await rail.click();
-  else {
-    await page.getByRole("button", { name: "More actions" }).click();
-    await page.getByRole("option", { name: "Delete task" }).click();
-  }
+  await expect(rail).toBeVisible();
+  await rail.click();
   await expect(page.getByRole("dialog", { name: /Delete/i })).toBeVisible();
 
   await page.keyboard.press("ControlOrMeta+k");
