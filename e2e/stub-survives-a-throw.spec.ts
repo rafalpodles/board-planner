@@ -2,7 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import { PROJECT_KEY, seed } from "./seed";
 import { signIn } from "./session";
 import { PM_STUB_URL } from "../playwright.config";
-import { CRASH_MARKER } from "./stub-guard.mjs";
+import { EXPECTED_CRASH_HEADER, EXPECTED_CRASH_MARKER } from "./stub-guard.mjs";
 
 /**
  * BP-575. The stubs are one process each for a whole run, so a throw inside a request handler used
@@ -40,11 +40,16 @@ test.describe("a stub that is handed a request it cannot serve", () => {
     // `JSON.parse(script)` on a directive that is not JSON. Before the guard this exited the
     // process, and the failure surfaced in whichever spec ran next.
     const crashed = await request.post(`${PM_STUB_URL}/v1/chat/completions`, {
+      // Says the throw is the point of this request, so `stub-crash-reporter` does not fail every
+      // green run over the one crash the suite makes deliberately (BP-581)
+      headers: { [EXPECTED_CRASH_HEADER]: "1" },
       data: completion("Do something <<this is not JSON>>"),
     });
     expect(crashed.status()).toBe(500);
     // Loud on purpose: a guard that answered 200 would hide the throw from the spec that caused it.
-    expect(await crashed.text()).toContain(CRASH_MARKER);
+    // The declared marker, in the body as well as the log — the body is quoted back by whatever
+    // read the 500, and the reporter reads those lines too.
+    expect(await crashed.text()).toContain(EXPECTED_CRASH_MARKER);
 
     // Alive. A dead stub refuses the connection rather than answering it.
     const health = await request.get(`${PM_STUB_URL}/health`);

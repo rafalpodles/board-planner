@@ -72,7 +72,9 @@ export default defineConfig({
   // nothing to say about the code. Assertions stay strict, so a real failure still fails twice.
   retries: process.env.CI ? 1 : 0,
   forbidOnly: !!process.env.CI,
-  reporter: [["list"]],
+  // `stub-crash-reporter` fails a run whose stubs reported a crash; on its own, `list` would
+  // leave the line in the log for whoever scrolls back (BP-581)
+  reporter: [["list"], ["./e2e/stub-crash-reporter.ts"]],
   // Kept next to the tests, where e2e/.gitignore covers it — the repo root does not ignore
   // Playwright's default test-results/
   outputDir: "./e2e/.artifacts",

@@ -3,7 +3,14 @@ import { createServer, Server } from "node:http";
 import { AddressInfo, connect, createServer as createTcpServer } from "node:net";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CRASH_MARKER, guard, readBody, serve } from "./stub-guard.mjs";
+import {
+  CRASH_MARKER,
+  EXPECTED_CRASH_HEADER,
+  EXPECTED_CRASH_MARKER,
+  guard,
+  readBody,
+  serve,
+} from "./stub-guard.mjs";
 
 /**
  * The stubs are one process each for a whole Playwright run, so a throw inside a handler used to
@@ -181,6 +188,34 @@ describe("guard", () => {
     expect(reported).toContain("the directive was not JSON");
     // The stack, not only the message — the ticket's whole complaint is not knowing what threw.
     expect(reported).toMatch(/stub-guard\.test\.ts/);
+  });
+
+  // BP-581: the run fails on `CRASH_MARKER`, and `stub-survives-a-throw` provokes a crash on every
+  // green run to prove this guard works. A request that says so gets the other marker — a separate
+  // string, not a suffix, because the reader cannot tell a substring from its own container.
+  it("marks a crash the request asked for, so it does not fail the run", async () => {
+    const url = await listen(() => {
+      throw new Error("provoked on purpose");
+    });
+
+    const crashed = await fetch(`${url}/v1/chat/completions`, {
+      method: "POST",
+      headers: { [EXPECTED_CRASH_HEADER]: "1" },
+      body: "{{",
+    });
+
+    // Still a 500, and the body carries the declared marker too: the app logs an upstream 500's
+    // body, and that log reaches the same reader as the stub's own stderr
+    expect(crashed.status).toBe(500);
+    const body = await crashed.text();
+    expect(body).toContain(EXPECTED_CRASH_MARKER);
+    expect(body).not.toContain(CRASH_MARKER);
+
+    const reported = errors.join("\n");
+    expect(reported).toContain(EXPECTED_CRASH_MARKER);
+    expect(reported).toContain("provoked on purpose");
+    // Nothing the reporter reads may carry the marker that fails a run
+    expect(reported.split("\n").filter((line) => line.includes(CRASH_MARKER))).toHaveLength(0);
   });
 
   it("catches a rejection from an async handler, which is where the body is parsed", async () => {
