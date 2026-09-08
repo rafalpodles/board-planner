@@ -127,6 +127,12 @@ describe("where a toast lands", () => {
       "max-lg:[body:has([data-pinned-phone-bar]):not(:has([data-corner-panel]))_&]:bottom-40"
     );
     expect(classes).toContain("[body:has([data-corner-panel])_&]:top-20");
+    // Centred at every width: the corner would put it back on the panel's own header controls on
+    // a viewport tall enough for the panel to stop clamping (BP-596 review 3)
+    expect(classes).toContain("[body:has([data-corner-panel])_&]:-translate-x-1/2");
+    expect(classes, "no return to the corner above sm").not.toContain(
+      "sm:[body:has([data-corner-panel])_&]:right-4"
+    );
   });
 
   // A full-screen `bare` dialog has no action row at the bottom; its controls are the back and

@@ -148,8 +148,12 @@ test("the PM panel clears the launcher while the save bar is open", async ({ pag
  * the tray leave it stretched between them rather than one winning, so the exclusion is in the
  * condition rather than in an override.
  */
-test("a toast keeps off the open PM panel's own controls", async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 800 });
+// Two heights, because the panel's top is not a constant: `h-[min(44rem,100vh-8rem)]` clamps on a
+// short viewport and stops clamping on a tall one, and at 960 the panel slides down far enough for
+// its own ⤢ and ✕ to arrive in the band a fixed `top-20` puts the toast in (BP-596 review 3).
+for (const height of [800, 960]) {
+test(`a toast keeps off the open PM panel's own controls at ${height}px tall`, async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height });
   await signIn(page);
 
   await page.route(/\/api\/projects\/[^/]+$/, async (route) => {
@@ -203,6 +207,7 @@ test("a toast keeps off the open PM panel's own controls", async ({ page }) => {
   expect(covered.all, "the composer is part of what was measured").toContain("Send");
   expect(covered.under, "no control of the panel is under the toast").toEqual([]);
 });
+}
 
 /**
  * The other half of BP-596, and the one a scoped fix gets wrong: switching the bar's step off
