@@ -316,3 +316,62 @@ test("a toast still on screen clears the sheet it opens under", async ({ page })
   });
   expect(scrimIsBehind, "the tray is painted after the scrim, so it is the readable one").toBe(true);
 });
+
+/**
+ * BP-596. The third thing that lands on that same Post button, and the one layering cannot settle
+ * either: a toast is raised *by* a failed post, so it appears exactly when the reader is about to
+ * press the button again. Dropping it below the bar would hide the only explanation on screen, so
+ * it steps over the bar the way the launcher does — and over the launcher, which has stepped up by
+ * then as well.
+ */
+test("a failed post's toast keeps off the Post button and the launcher", async ({ page }) => {
+  await page.setViewportSize(PHONE);
+  await signIn(page);
+
+  await page.route(/\/api\/projects\/[^/]+\/tasks\/[^/]+\/comments$/, async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    await route.fulfill({ status: 500, contentType: "application/json", body: '{"error":"nope"}' });
+  });
+
+  await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
+  const post = page.getByRole("button", { name: "Post comment" });
+  await expect(post).toBeVisible();
+  await expect(launcher(page)).toBeVisible();
+
+  // The toast's own three seconds must not run out while the geometry is read
+  await page.clock.install();
+  await page.clock.pauseAt(Date.now());
+
+  await page.getByLabel("Add a comment").fill("this will not go through");
+  await post.click();
+  await expect(page.getByTestId("toast").first()).toBeVisible();
+  // The bar is `sticky bottom-0` inside the page's own scroller and hangs past the fold on this
+  // task, so without this the button's centre is outside the viewport and `elementFromPoint`
+  // answers `null` — which is not the same as "something is covering it"
+  await post.scrollIntoViewIfNeeded();
+
+  const geometry = await page.evaluate(() => {
+    const toast = document.querySelector('[data-testid="toast-tray"]')!;
+    const at = (selector: string) => {
+      const el = document.querySelector(selector)!;
+      const r = el.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      if (hit === null) return "outside the viewport";
+      if (hit === el || el.contains(hit)) return "itself";
+      return toast.contains(hit) ? "the toast" : "something else";
+    };
+    const box = toast.getBoundingClientRect();
+    return {
+      postCentre: at('[aria-label="Post comment"]'),
+      launcherCentre: at('[aria-label="Open PM chat"]'),
+      // The point of stepping rather than dropping a layer: it is still there to be read
+      toastOnScreen: box.top >= 0 && box.bottom <= window.innerHeight,
+    };
+  });
+
+  // Measured before the fix: this said "the toast", which is the bug — the next tap dismissed the
+  // toast instead of retrying the post
+  expect(geometry.postCentre, "a second tap reaches Post, not the toast").toBe("itself");
+  expect(geometry.launcherCentre, "and the launcher it stepped over keeps its own").toBe("itself");
+  expect(geometry.toastOnScreen).toBe(true);
+});

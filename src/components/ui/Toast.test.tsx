@@ -110,6 +110,28 @@ describe("where a toast lands", () => {
     expect(trayClasses()).toContain("top-4");
   });
 
+  // A pinned bar is the other thing standing in that corner, and it is not a layer: the toast
+  // steps over it the way the PM launcher does, through the attributes the bars already set.
+  it("steps over a pinned bottom bar rather than sitting on it", () => {
+    mounted();
+
+    act(() => raise("Failed to post comment"));
+
+    const classes = trayClasses();
+    // "a bar, and no panel": the open PM chat panel is anchored to the same `bottom-40`, and two
+    // rules of equal weight would leave the tray stretched between them (BP-596)
+    expect(classes).toContain(
+      "[body:has([data-pinned-bottom-bar]):not(:has([data-corner-panel]))_&]:bottom-40"
+    );
+    expect(classes).toContain(
+      "max-lg:[body:has([data-pinned-phone-bar]):not(:has([data-corner-panel]))_&]:bottom-40"
+    );
+    // The attribute is read only to switch the step off — no placement of its own (BP-597)
+    expect(
+      classes.filter((c) => c.includes("data-corner-panel") && !c.includes("data-pinned"))
+    ).toHaveLength(0);
+  });
+
   // A full-screen `bare` dialog has no action row at the bottom; its controls are the back and
   // overflow buttons at the *top*, which is where this used to send the toast (BP-590 review)
   it("stays in the corner under a real bare Modal", () => {

@@ -27,6 +27,24 @@ const ToastContext = createContext<ToastContextValue | null>(null);
 
 let nextId = 0;
 
+/**
+ * Three surfaces stand where a toast lands, and each wants a different answer: a bottom sheet's
+ * action row, a pinned bar, and the open PM panel — which is anchored to the same place the step
+ * over a bar goes. The reasoning is in BP-590, BP-591/593 and BP-596; what is here is the shape.
+ */
+const OVER_A_SHEET = "left-1/2 top-4 w-[calc(100%-2rem)] -translate-x-1/2";
+
+const IN_THE_CORNER = [
+  "bottom-4 right-4",
+  // The bar step is written as "a bar, and no panel": two rules of equal weight both anchoring the
+  // tray leave it stretched between them rather than one winning, so the condition carries the
+  // exclusion instead of an override.
+  "[body:has([data-pinned-bottom-bar]):not(:has([data-corner-panel]))_&]:bottom-40",
+  "max-lg:[body:has([data-pinned-phone-bar]):not(:has([data-corner-panel]))_&]:bottom-40",
+  // With a panel open the step is off and the toast keeps `main`'s corner: nothing there is
+  // free, and the placement has to be measured rather than written. BP-597.
+].join(" ");
+
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const timersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(
@@ -73,13 +91,8 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       {toasts.length > 0 && (
         <div
           data-testid="toast-tray"
-          // A phone's dialog is a bottom sheet whose action row is exactly where a toast lands.
-          // It moves rather than dropping a layer: behind the scrim it would be unreadable, and a
-          // toast raised from inside the dialog is feedback the reader needs (BP-590).
           className={`fixed z-50 flex max-w-sm flex-col gap-2 sm:bottom-4 sm:right-4 sm:left-auto sm:top-auto sm:w-auto sm:translate-x-0 ${
-            overASheet
-              ? "left-1/2 top-4 w-[calc(100%-2rem)] -translate-x-1/2"
-              : "bottom-4 right-4"
+            overASheet ? OVER_A_SHEET : IN_THE_CORNER
           }`}
         >
           {toasts.map((t) => (
