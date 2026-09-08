@@ -316,3 +316,61 @@ test("a toast still on screen clears the sheet it opens under", async ({ page })
   });
   expect(scrimIsBehind, "the tray is painted after the scrim, so it is the readable one").toBe(true);
 });
+
+/**
+ * BP-596. The third thing that lands on that same Post button, and the one layering cannot settle
+ * either: a toast is raised *by* a failed post, so it appears exactly when the reader is about to
+ * press the button again. Dropping it below the bar would hide the only explanation on screen, so
+ * it steps over the bar the way the launcher does — and over the launcher, which has stepped up by
+ * then as well.
+ */
+test("a failed post's toast keeps off the Post button and the launcher", async ({ page }) => {
+  await page.setViewportSize(PHONE);
+  await signIn(page);
+
+  await page.route(/\/api\/projects\/[^/]+\/tasks\/[^/]+\/comments$/, async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    await route.fulfill({ status: 500, contentType: "application/json", body: '{"error":"nope"}' });
+  });
+
+  await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
+  const post = page.getByRole("button", { name: "Post comment" });
+  await expect(post).toBeVisible();
+  await expect(launcher(page)).toBeVisible();
+
+  // The toast's own three seconds must not run out while the geometry is read
+  await page.clock.install();
+  await page.clock.pauseAt(Date.now());
+
+  await page.getByLabel("Add a comment").fill("this will not go through");
+  await post.click();
+  await expect(page.getByTestId("toast").first()).toBeVisible();
+
+  const geometry = await page.evaluate(() => {
+    const toast = document.querySelector('[data-testid="toast-tray"]')!.getBoundingClientRect();
+    const owns = (selector: string) => {
+      const el = document.querySelector(selector)!;
+      const r = el.getBoundingClientRect();
+      const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return at === el || el.contains(at);
+    };
+    const overlaps = (selector: string) => {
+      const r = document.querySelector(selector)!.getBoundingClientRect();
+      return toast.bottom > r.top && toast.top < r.bottom;
+    };
+    return {
+      postOwnsItsCentre: owns('[aria-label="Post comment"]'),
+      launcherOwnsItsCentre: owns('[aria-label="Open PM chat"]'),
+      overlapsTheBar: overlaps("[data-pinned-phone-bar]"),
+      overlapsTheLauncher: overlaps('[aria-label="Open PM chat"]'),
+      // The point of stepping rather than dropping a layer: it is still on screen to be read
+      toastOnScreen: toast.top >= 0 && toast.bottom <= window.innerHeight,
+    };
+  });
+
+  expect(geometry.overlapsTheBar, "the toast is clear of the pinned bar").toBe(false);
+  expect(geometry.overlapsTheLauncher, "and of the launcher, which stepped up too").toBe(false);
+  expect(geometry.postOwnsItsCentre, "so a second tap reaches Post, not the toast").toBe(true);
+  expect(geometry.launcherOwnsItsCentre).toBe(true);
+  expect(geometry.toastOnScreen).toBe(true);
+});

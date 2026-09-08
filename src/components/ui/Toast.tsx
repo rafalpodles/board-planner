@@ -73,13 +73,18 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       {toasts.length > 0 && (
         <div
           data-testid="toast-tray"
-          // A phone's dialog is a bottom sheet whose action row is exactly where a toast lands.
-          // It moves rather than dropping a layer: behind the scrim it would be unreadable, and a
-          // toast raised from inside the dialog is feedback the reader needs (BP-590).
+          // Two things stand where a toast lands. A phone's dialog is a bottom sheet whose action
+          // row is exactly there, and the toast moves to the top rather than dropping a layer:
+          // behind the scrim it would be unreadable, and a toast raised from inside the dialog is
+          // feedback the reader needs (BP-590). A pinned bar — the comment bar, a settings save
+          // bar — is the other, and the answer there is the step the PM launcher already takes
+          // over the same two attributes (BP-591, BP-593). 10rem, not the launcher's 6: the
+          // launcher itself has stepped up to 6rem by then, and the toast has to clear both.
           className={`fixed z-50 flex max-w-sm flex-col gap-2 sm:bottom-4 sm:right-4 sm:left-auto sm:top-auto sm:w-auto sm:translate-x-0 ${
             overASheet
               ? "left-1/2 top-4 w-[calc(100%-2rem)] -translate-x-1/2"
-              : "bottom-4 right-4"
+              : `bottom-4 right-4 [body:has([data-pinned-bottom-bar])_&]:bottom-40
+                 max-lg:[body:has([data-pinned-phone-bar])_&]:bottom-40`
           }`}
         >
           {toasts.map((t) => (
