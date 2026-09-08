@@ -458,31 +458,25 @@ for (const [label, key] of [
   ["/", "/"],
   ["⌘K", "ControlOrMeta+k"],
 ] as const) {
-  test(`${label} does not open Search over the help`, async ({ page }) => {
+  test(`${label} replaces the help rather than stacking on it`, async ({ page }) => {
     await openBoard(page);
 
     await page.keyboard.press("?");
     await expect(help(page)).toBeVisible();
-    // The premise: focus sits on the help's own container, a DIV, which is why a text-field
-    // check on the event target cannot be the guard
+    // The premise BP-560 was written for: focus sits on the help's own container, a DIV, which is
+    // why a text-field check on the event target could never be the guard
     await expect.poll(() => activeElementIsInsideTheHelp(page)).toBe(true);
 
     await page.keyboard.press(key);
-    // No settle wait, for the same reason as the `v` test above: opening the palette is one
-    // synchronous state write with no network hop, so a leak is already in the DOM when this
-    // round-trips back from the browser. Then where focus *is*, not only what is absent — the
-    // palette takes focus the moment it opens, so a leak fails both
-    await expect(searchLayer(page)).toHaveCount(0);
-    await expect.poll(() => activeElementIsInsideTheHelp(page)).toBe(true);
-    await expect(help(page)).toBeVisible();
 
-    // The control: the same key opens Search once the help is gone — gone from the registry,
-    // not only from the DOM, or the press can land while the count still says 1
-    await page.keyboard.press("Escape");
-    await expect(help(page)).toBeHidden();
-    await expect.poll(() => scrollLock(page)).toBe("");
-    await page.keyboard.press(key);
+    // Replaced, not stacked: one dialog, and it is the palette
     await expect(searchLayer(page)).toBeVisible();
+    await expect(help(page)).toBeHidden();
+    await expect(page.getByRole("dialog")).toHaveCount(1);
+    await expect(searchLayer(page).getByLabel("Search tasks and projects")).toBeFocused();
+    // Still locked, because the palette is a layer of its own — a release here would mean the
+    // help's cleanup ran after the palette registered
+    await expect.poll(() => scrollLock(page)).toBe("hidden");
   });
 }
 
@@ -491,26 +485,29 @@ for (const [label, key] of [
  * cursor in the title. The typing-target check that keeps `/` out of a text field never applied
  * to ⌘K, so a press there put Search over a half-written form.
  */
-test("⌘K does not open Search over the New Task form, cursor in the title", async ({ page }) => {
+test("⌘K replaces the New Task form, cursor in the title", async ({ page }) => {
   await openBoard(page);
 
   await page.keyboard.press("n");
   await expect(newTask(page)).toBeVisible();
   const title = newTask(page).getByLabel("Title", { exact: true });
   await title.click();
+  await title.fill("half a thought");
   await expect(title).toBeFocused();
 
   await page.keyboard.press("ControlOrMeta+k");
-  await expect(searchLayer(page)).toHaveCount(0);
-  await expect(title).toBeFocused();
-  await expect(newTask(page)).toBeVisible();
 
-  // The control: the same press opens Search once the form is gone
-  await page.keyboard.press("Escape");
-  await expect(newTask(page)).toBeHidden();
-  await expect.poll(() => scrollLock(page)).toBe("");
-  await page.keyboard.press("ControlOrMeta+k");
   await expect(searchLayer(page)).toBeVisible();
+  await expect(newTask(page)).toBeHidden();
+  await expect(page.getByRole("dialog")).toHaveCount(1);
+
+  // What the form does with the half-written title is what Escape does with it: discards. There is
+  // no unsaved-changes confirm anywhere in this app to reuse, so ⌘K inventing one would be the
+  // surprise (BP-567).
+  await page.keyboard.press("Escape");
+  await expect(searchLayer(page)).toBeHidden();
+  await page.keyboard.press("n");
+  await expect(newTask(page).getByLabel("Title", { exact: true })).toHaveValue("");
 });
 
 /**
