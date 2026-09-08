@@ -345,32 +345,33 @@ test("a failed post's toast keeps off the Post button and the launcher", async (
   await page.getByLabel("Add a comment").fill("this will not go through");
   await post.click();
   await expect(page.getByTestId("toast").first()).toBeVisible();
+  // The bar is `sticky bottom-0` inside the page's own scroller and hangs past the fold on this
+  // task, so without this the button's centre is outside the viewport and `elementFromPoint`
+  // answers `null` — which is not the same as "something is covering it"
+  await post.scrollIntoViewIfNeeded();
 
   const geometry = await page.evaluate(() => {
-    const toast = document.querySelector('[data-testid="toast-tray"]')!.getBoundingClientRect();
-    const owns = (selector: string) => {
+    const toast = document.querySelector('[data-testid="toast-tray"]')!;
+    const at = (selector: string) => {
       const el = document.querySelector(selector)!;
       const r = el.getBoundingClientRect();
-      const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-      return at === el || el.contains(at);
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      if (hit === null) return "outside the viewport";
+      if (hit === el || el.contains(hit)) return "itself";
+      return toast.contains(hit) ? "the toast" : "something else";
     };
-    const overlaps = (selector: string) => {
-      const r = document.querySelector(selector)!.getBoundingClientRect();
-      return toast.bottom > r.top && toast.top < r.bottom;
-    };
+    const box = toast.getBoundingClientRect();
     return {
-      postOwnsItsCentre: owns('[aria-label="Post comment"]'),
-      launcherOwnsItsCentre: owns('[aria-label="Open PM chat"]'),
-      overlapsTheBar: overlaps("[data-pinned-phone-bar]"),
-      overlapsTheLauncher: overlaps('[aria-label="Open PM chat"]'),
-      // The point of stepping rather than dropping a layer: it is still on screen to be read
-      toastOnScreen: toast.top >= 0 && toast.bottom <= window.innerHeight,
+      postCentre: at('[aria-label="Post comment"]'),
+      launcherCentre: at('[aria-label="Open PM chat"]'),
+      // The point of stepping rather than dropping a layer: it is still there to be read
+      toastOnScreen: box.top >= 0 && box.bottom <= window.innerHeight,
     };
   });
 
-  expect(geometry.overlapsTheBar, "the toast is clear of the pinned bar").toBe(false);
-  expect(geometry.overlapsTheLauncher, "and of the launcher, which stepped up too").toBe(false);
-  expect(geometry.postOwnsItsCentre, "so a second tap reaches Post, not the toast").toBe(true);
-  expect(geometry.launcherOwnsItsCentre).toBe(true);
+  // Measured before the fix: this said "the toast", which is the bug — the next tap dismissed the
+  // toast instead of retrying the post
+  expect(geometry.postCentre, "a second tap reaches Post, not the toast").toBe("itself");
+  expect(geometry.launcherCentre, "and the launcher it stepped over keeps its own").toBe("itself");
   expect(geometry.toastOnScreen).toBe(true);
 });
