@@ -158,6 +158,11 @@ test("a toast keeps off the open PM panel's own controls", async ({ page }) => {
   await launcher(page).click();
   const panel = page.getByTestId("pm-chat-panel");
   await expect(panel).toBeVisible();
+  // The composer mounts only once the conversation has loaded, and it is the half of the panel
+  // that reaches down into the corner. Measured without this wait, the two header controls alone
+  // satisfied a count — and the test passed under its own mutation on the first two cold runs.
+  await expect(panel.getByPlaceholder(/Message the PM/)).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Send", exact: true })).toBeVisible();
 
   // The toast's own three seconds must not run out while the geometry is read
   await page.clock.install();
@@ -173,18 +178,56 @@ test("a toast keeps off the open PM panel's own controls", async ({ page }) => {
         '[data-testid="pm-chat-panel"] button, [data-testid="pm-chat-panel"] a, [data-testid="pm-chat-panel"] textarea, [data-testid="pm-chat-panel"] input'
       )
     ).filter((el) => el.getBoundingClientRect().height > 0);
+    const name = (el: HTMLElement) =>
+      el.getAttribute("aria-label") ??
+      el.getAttribute("placeholder") ??
+      el.textContent?.trim().slice(0, 20) ??
+      el.tagName;
     return {
-      seen: controls.length,
+      all: controls.map(name),
       under: controls
         .filter((el) => {
           const r = el.getBoundingClientRect();
           const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
           return hit !== null && tray.contains(hit);
         })
-        .map((el) => el.getAttribute("aria-label") ?? el.getAttribute("placeholder") ?? el.tagName),
+        .map(name),
     };
   });
 
-  expect(covered.seen, "the panel really has controls to cover").toBeGreaterThan(0);
-  expect(covered.under, "none of them is under the toast").toEqual([]);
+  // Named, not counted: a count is satisfied by the header's own two buttons, which no
+  // bottom-anchored tray could reach anyway
+  expect(covered.all, "the composer is part of what was measured").toContain("Send");
+  expect(covered.under, "no control of the panel is under the toast").toEqual([]);
 });
+
+/**
+ * The other half of BP-596, and the one a scoped fix gets wrong: switching the bar's step off
+ * because the panel is open is not by itself a place for the toast to stand. What the corner holds
+ * is this bar's own button, so falling back to it is the collision again — measured at 1280 and at
+ * 1023 before the escape was widened past `sm`.
+ */
+for (const width of [1280, 1023]) {
+  test(`Save changes keeps its right edge with the panel open at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await signIn(page);
+
+    await page.route(/\/api\/projects\/[^/]+$/, async (route) => {
+      if (route.request().method() !== "PUT") return route.continue();
+      await route.fulfill({ status: 500, contentType: "application/json", body: '{"error":"nope"}' });
+    });
+
+    await makeDirty(page);
+    await launcher(page).click();
+    const panel = page.getByTestId("pm-chat-panel");
+    await expect(panel.getByPlaceholder(/Message the PM/)).toBeVisible();
+
+    await page.clock.install();
+    await page.clock.pauseAt(Date.now());
+
+    await saveButton(page).click();
+    await expect(page.getByTestId("toast").first()).toBeVisible();
+
+    expect(await rightEdgeOf(page)).toBe("Save changes");
+  });
+}

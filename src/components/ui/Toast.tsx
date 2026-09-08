@@ -52,15 +52,19 @@ const IN_THE_CORNER = [
   // exclusion instead of an override.
   "[body:has([data-pinned-bottom-bar]):not(:has([data-corner-panel]))_&]:bottom-40",
   "max-lg:[body:has([data-pinned-phone-bar]):not(:has([data-corner-panel]))_&]:bottom-40",
-  // Below `sm` the open panel is nearly the whole screen, so there is no free corner to fall back
-  // to: the toast goes under the panel's own header, over its transcript, which is the one band
-  // with no control in it. Above `sm` the panel is short and bottom-anchored, so suppressing the
-  // step above is enough — the corner is below it and clear.
-  "max-sm:[body:has([data-corner-panel])_&]:bottom-auto",
-  "max-sm:[body:has([data-corner-panel])_&]:top-20",
-  "max-sm:[body:has([data-corner-panel])_&]:left-1/2",
-  "max-sm:[body:has([data-corner-panel])_&]:w-[calc(100%-2rem)]",
-  "max-sm:[body:has([data-corner-panel])_&]:-translate-x-1/2",
+  // Switching the step off is not by itself a place to stand: what the corner holds is the *bar's*
+  // own button, so falling back to it is the collision this exists to remove. At every width, then
+  // — the panel is nearly the full height on a wide screen too — the toast goes under the panel's
+  // header and over its transcript, the one band with no control in it.
+  "[body:has([data-corner-panel])_&]:bottom-auto",
+  "[body:has([data-corner-panel])_&]:top-20",
+  "[body:has([data-corner-panel])_&]:left-1/2",
+  "[body:has([data-corner-panel])_&]:w-[calc(100%-2rem)]",
+  "[body:has([data-corner-panel])_&]:-translate-x-1/2",
+  "sm:[body:has([data-corner-panel])_&]:left-auto",
+  "sm:[body:has([data-corner-panel])_&]:right-4",
+  "sm:[body:has([data-corner-panel])_&]:w-auto",
+  "sm:[body:has([data-corner-panel])_&]:translate-x-0",
 ].join(" ");
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {

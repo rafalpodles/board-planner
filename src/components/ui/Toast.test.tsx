@@ -126,7 +126,7 @@ describe("where a toast lands", () => {
     expect(classes).toContain(
       "max-lg:[body:has([data-pinned-phone-bar]):not(:has([data-corner-panel]))_&]:bottom-40"
     );
-    expect(classes).toContain("max-sm:[body:has([data-corner-panel])_&]:top-20");
+    expect(classes).toContain("[body:has([data-corner-panel])_&]:top-20");
   });
 
   // A full-screen `bare` dialog has no action row at the bottom; its controls are the back and
