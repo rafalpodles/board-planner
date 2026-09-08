@@ -113,8 +113,9 @@ export function SearchLayer({ open, onOpen, onClose }: SearchLayerProps) {
     }
     // Cleared on the way out, because only the ⌘K path writes it: the sidebar's Search item opens
     // the palette too, and a value left from an earlier replacement would send the focus to a card
-    // the reader has not touched since (BP-567 review). The focus trap's own teardown has already
-    // read it by the time this runs.
+    // the reader has not touched since (BP-567 review). Safe here because React runs a commit's
+    // effect cleanups before its effect bodies, so the focus trap has already read it — the e2e
+    // "Escape out of a palette that replaced a task" is what guards that, not this sentence.
     inherited.current = null;
     reset();
   }, [open, reset]);

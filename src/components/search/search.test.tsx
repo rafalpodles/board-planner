@@ -271,6 +271,8 @@ describe("SearchLayer", () => {
     await act(async () => {
       rerender(<SearchLayer open={false} onOpen={onOpen} onClose={() => {}} />);
     });
+    // The positive half, so the negative one below distinguishes "cleared" from "focus never ran"
+    expect(document.activeElement, "the hand-over itself works").toBe(card);
 
     // Now opened by a click on the sidebar instead, with nothing focused
     (document.activeElement as HTMLElement | null)?.blur?.();
