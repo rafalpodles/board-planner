@@ -27,8 +27,12 @@ function openSheet() {
   });
 }
 
-function stateViewport(height: number) {
+// Width as well as height: below `sm` a dialog is a bottom sheet and the tray leaves the corner,
+// above it the dialog is centred and the corner is free. happy-dom reports 0 for both, so a test
+// that states only the height passes the sheet cases by accident.
+function stateViewport(height: number, width = 1280) {
   vi.spyOn(document.documentElement, "clientHeight", "get").mockReturnValue(height);
+  vi.spyOn(document.documentElement, "clientWidth", "get").mockReturnValue(width);
 }
 
 function stateRect(el: Element, box: { top: number; bottom: number }) {
@@ -122,7 +126,7 @@ describe("where a toast lands", () => {
   });
 
   it("goes to the top over a sheet, whatever else is in the corner", () => {
-    stateViewport(800);
+    stateViewport(800, 390);
     obstacle({ top: 720, bottom: 776 });
     mounted();
     openSheet();
@@ -133,7 +137,7 @@ describe("where a toast lands", () => {
   });
 
   it("moves a toast that was already up when the sheet opened", () => {
-    stateViewport(800);
+    stateViewport(800, 390);
     mounted();
     act(() => raise("Saved"));
     expect(tray().style.bottom).toBe("16px");
@@ -144,7 +148,7 @@ describe("where a toast lands", () => {
   });
 
   it("takes the corner back once the last sheet closes", () => {
-    stateViewport(800);
+    stateViewport(800, 390);
     mounted();
     openSheet();
     act(() => raise("Saved"));
@@ -174,7 +178,7 @@ describe("where a toast lands", () => {
   });
 
   it("moves for a real Modal, which is a sheet", () => {
-    stateViewport(800);
+    stateViewport(800, 390);
     render(
       <ToastProvider>
         <Raiser />
@@ -187,6 +191,23 @@ describe("where a toast lands", () => {
     act(() => raise("Saved"));
 
     expect(tray().style.top).toBe("16px");
+  });
+
+  // The same dialog on a wide screen is centred, not a sheet, so the corner stays the corner
+  it("keeps the corner over a dialog on a wide screen", () => {
+    stateViewport(800, 1280);
+    render(
+      <ToastProvider>
+        <Raiser />
+        <Modal open onClose={() => {}} title="Delete task">
+          <p>are you sure</p>
+        </Modal>
+      </ToastProvider>
+    );
+
+    act(() => raise("Saved"));
+
+    expect(tray().style.bottom).toBe("16px");
   });
 
   it("is painted above the scrim either way", () => {

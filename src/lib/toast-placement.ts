@@ -19,8 +19,12 @@ export interface Box {
   bottom: number;
 }
 
+/** Tailwind's `sm`, the width at which a dialog stops being a bottom sheet */
+export const SHEET_BREAKPOINT = 640;
+
 export interface Surroundings {
   viewportHeight: number;
+  viewportWidth: number;
   /** Anything sharing the tray's corner: the launcher, a pinned bar */
   obstacles: Box[];
   /**
@@ -41,7 +45,13 @@ const GAP = 16;
 /** The tray's own height, near enough: one line of text with its padding */
 const TRAY = 44;
 export function placeToast(around: Surroundings): Placement {
-  if (around.overASheet) return { anchor: "top", offset: GAP };
+  // Only below `sm`, because that is where a dialog *is* a bottom sheet and its action row is the
+  // corner. Wider, it is centred and the corner is free — which is what the `sm:` overrides on the
+  // old class list did, and dropping them silently would have moved every desktop confirm's toast
+  // to the top of the screen.
+  if (around.overASheet && around.viewportWidth < SHEET_BREAKPOINT) {
+    return { anchor: "top", offset: GAP };
+  }
 
   if (around.panel) {
     const under = around.panel.headerBottom + GAP;
@@ -54,5 +64,11 @@ export function placeToast(around: Surroundings): Placement {
     (top, box) => Math.min(top, box.top),
     around.viewportHeight
   );
-  return { anchor: "bottom", offset: Math.max(GAP, around.viewportHeight - highest + GAP) };
+  // Clamped, so an obstacle reported at the top of the screen — a bar that is on the page but
+  // hidden, and therefore measured at 0 — cannot push the tray off it entirely
+  const above = around.viewportHeight - highest + GAP;
+  return {
+    anchor: "bottom",
+    offset: Math.min(Math.max(GAP, above), around.viewportHeight - GAP - TRAY),
+  };
 }

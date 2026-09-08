@@ -6,7 +6,7 @@ import { placeToast } from "@/lib/toast-placement";
  * constant, so a regression is a regression against what was actually on screen.
  */
 describe("where a toast may stand", () => {
-  const nothing = { viewportHeight: 800, obstacles: [], overASheet: false };
+  const nothing = { viewportHeight: 800, viewportWidth: 1280, obstacles: [], overASheet: false };
 
   it("keeps the corner when the corner is empty", () => {
     expect(placeToast(nothing)).toEqual({ anchor: "bottom", offset: 16 });
@@ -37,7 +37,27 @@ describe("where a toast may stand", () => {
   // BP-590: a phone's dialog is a bottom sheet and the top of the screen is what it leaves free
   it("goes to the top over a sheet, whatever else is in the corner", () => {
     expect(
-      placeToast({ ...nothing, overASheet: true, obstacles: [{ top: 720, bottom: 776 }] })
+      placeToast({
+        ...nothing,
+        viewportWidth: 390,
+        overASheet: true,
+        obstacles: [{ top: 720, bottom: 776 }],
+      })
     ).toEqual({ anchor: "top", offset: 16 });
+  });
+
+  // Above `sm` the same dialog is centred, not a sheet, and the corner is free — what the old
+  // class list's `sm:` overrides did, and what dropping them silently would have changed
+  it("keeps the corner over a dialog on a wide screen", () => {
+    expect(placeToast({ ...nothing, overASheet: true })).toEqual({ anchor: "bottom", offset: 16 });
+  });
+
+  // A bar that is on the page but hidden measures at the top of the screen; without a clamp the
+  // tray is pushed clean off it and the message is never seen
+  it("stays on screen when something reports itself at the very top", () => {
+    const placed = placeToast({ ...nothing, obstacles: [{ top: 0, bottom: 0 }] });
+
+    expect(placed).toEqual({ anchor: "bottom", offset: 740 });
+    expect(placed.offset + 44, "the tray's own top edge is still on screen").toBeLessThanOrEqual(800);
   });
 });

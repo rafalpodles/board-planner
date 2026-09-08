@@ -42,6 +42,7 @@ function measure(overASheet: boolean): Surroundings {
   const header = panel?.querySelector<HTMLElement>("[data-corner-panel-header]");
   return {
     viewportHeight: document.documentElement.clientHeight,
+    viewportWidth: document.documentElement.clientWidth,
     panel:
       panel && header
         ? {
