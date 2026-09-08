@@ -634,7 +634,7 @@ describe("what the dialog tells the layer registry", () => {
     const onClose = vi.fn();
     renderModal({ onClose });
 
-    expect(closeOpenLayers()).toBe(true);
+    expect(closeOpenLayers(), "agreement, whatever it hands back").not.toBe(false);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 

@@ -162,3 +162,32 @@ test("⌘K from a confirm inside the task modal clears both layers", async ({ pa
   await expect(page.getByRole("dialog")).toHaveCount(1);
   await expect(taskDialog(page)).toHaveCount(0);
 });
+
+/**
+ * Closing the palette that replaced a modal. Its own trigger was the modal's node, which has gone
+ * with it, so without the hand-over the focus lands on `<body>` and Tab restarts at the top of the
+ * document — a path that did not exist before ⌘K could replace a layer (BP-567 review).
+ */
+test("Escape out of a palette that replaced a task returns the focus to the card", async ({
+  page,
+}) => {
+  await page.goto(`/projects/${PROJECT_KEY}`);
+  const card = page.getByText(SIBLING_TASK_TITLE).first();
+  await card.click();
+  await expect(taskDialog(page)).toBeVisible();
+
+  await page.keyboard.press("ControlOrMeta+k");
+  await expect(page.getByRole("dialog", { name: "Search" })).toBeVisible();
+  await expect(taskDialog(page)).toHaveCount(0);
+
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "Search" })).toHaveCount(0);
+
+  const landed = await page.evaluate(() => {
+    const el = document.activeElement;
+    if (!el || el === document.body || el === document.documentElement) return "nothing";
+    return el.textContent?.trim().slice(0, 40) ?? el.tagName;
+  });
+  expect(landed, "the focus is somewhere a keyboard can carry on from").not.toBe("nothing");
+  expect(landed).toContain(SIBLING_TASK_TITLE);
+});

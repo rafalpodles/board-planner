@@ -23,7 +23,7 @@ function openSheet() {
   const el = document.createElement("div");
   document.body.appendChild(el);
   act(() => {
-    opened.push(registerLayer(el, { sheet: true }));
+    opened.push(registerLayer(el, { sheet: true, close: () => {} }));
   });
 }
 
@@ -155,7 +155,7 @@ describe("where a toast lands", () => {
     const el = document.createElement("div");
     document.body.appendChild(el);
     act(() => {
-      opened.push(registerLayer(el));
+      opened.push(registerLayer(el, { close: () => {} }));
     });
 
     act(() => raise("Saved"));

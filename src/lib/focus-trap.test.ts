@@ -12,14 +12,14 @@ describe("watching the open layers", () => {
     const seen: number[] = [];
     const stop = subscribeLayers(() => seen.push(openLayerCount()));
 
-    const close = registerLayer(document.createElement("div"));
+    const close = registerLayer(document.createElement("div"), { close: () => {} });
     expect(seen, "opening a layer is announced").toEqual([1]);
 
     close();
     expect(seen, "and so is closing it").toEqual([1, 0]);
 
     stop();
-    registerLayer(document.createElement("div"))();
+    registerLayer(document.createElement("div"), { close: () => {} })();
     expect(seen, "a watcher that unsubscribed hears nothing more").toEqual([1, 0]);
   });
 
@@ -30,7 +30,7 @@ describe("watching the open layers", () => {
     const stopSecond = subscribeLayers(second);
 
     stopFirst();
-    registerLayer(document.createElement("div"))();
+    registerLayer(document.createElement("div"), { close: () => {} })();
 
     expect(first).not.toHaveBeenCalled();
     expect(second).toHaveBeenCalledTimes(2);
@@ -44,10 +44,10 @@ describe("watching the open layers", () => {
  * it" cannot drift apart.
  */
 describe("asking the open layers to close", () => {
-  function layer(close?: () => void | boolean) {
+  function layer(close?: () => void | boolean, trigger?: () => HTMLElement | null) {
     const el = document.createElement("div");
     document.body.append(el);
-    return { el, stop: registerLayer(el, close ? { close } : {}) };
+    return { el, stop: registerLayer(el, { close: close ?? (() => {}), trigger }) };
   }
 
   // All of them, top down: layers nest — a confirm opened from the task modal is two — and closing
@@ -58,7 +58,7 @@ describe("asking the open layers to close", () => {
     const a = layer(() => void order.push("under"));
     const b = layer(() => void order.push("over"));
 
-    expect(closeOpenLayers()).toBe(true);
+    expect(closeOpenLayers()).not.toBe(false);
 
     expect(order).toEqual(["over", "under"]);
     a.stop();
@@ -98,14 +98,23 @@ describe("asking the open layers to close", () => {
     stop();
   });
 
-  it("treats a layer with no close of its own as gone", () => {
-    const { stop } = layer();
-    expect(closeOpenLayers()).toBe(true);
-    stop();
+  it("says yes, and hands nothing back, when there is no layer at all", () => {
+    expect(closeOpenLayers()).toBeNull();
   });
 
-  it("says yes when there is no layer at all", () => {
-    expect(closeOpenLayers()).toBe(true);
+  // What the replacement returns the focus to when it closes in turn: the deepest layer's own
+  // trigger, since the layers above it were focused from inside the one below (BP-567 review)
+  it("hands back the deepest layer's trigger", () => {
+    const card = document.createElement("button");
+    document.body.append(card);
+    const a = layer(undefined, () => card);
+    const b = layer(undefined, () => null);
+
+    expect(closeOpenLayers()).toBe(card);
+
+    a.stop();
+    b.stop();
+    card.remove();
   });
 
   it("forgets a layer's close when it unregisters", () => {
@@ -113,7 +122,7 @@ describe("asking the open layers to close", () => {
     const { stop } = layer(close);
     stop();
 
-    expect(closeOpenLayers()).toBe(true);
+    expect(closeOpenLayers()).not.toBe(false);
     expect(close).not.toHaveBeenCalled();
   });
 });

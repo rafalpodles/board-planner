@@ -247,7 +247,7 @@ describe("SearchLayer", () => {
   // is treated as gone rather than as a refusal, which would make ⌘K silently dead
   it("opens over a layer that cannot say how it closes", () => {
     const { onOpen } = renderLayer(false);
-    const unregister = registerLayer(document.createElement("div"));
+    const unregister = registerLayer(document.createElement("div"), { close: () => {} });
     try {
       act(() => {
         document.dispatchEvent(
@@ -278,7 +278,7 @@ describe("SearchLayer", () => {
   // own chrome — which the headless e2e cannot see, so this is the one place that pins it
   it("eats the key under another open layer rather than passing it to the browser", () => {
     renderLayer(false);
-    const unregister = registerLayer(document.createElement("div"));
+    const unregister = registerLayer(document.createElement("div"), { close: () => {} });
     const presses = [
       new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true, cancelable: true }),
       new KeyboardEvent("keydown", { key: "/", bubbles: true, cancelable: true }),

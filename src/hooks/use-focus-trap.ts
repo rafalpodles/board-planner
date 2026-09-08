@@ -34,15 +34,18 @@ export function useFocusTrap({
   // dispatch never sees that event. BP-522 is that bug one layer up
   const onEscapeRef = useRef(onEscape);
   onEscapeRef.current = onEscape;
+  /** What had the focus before this layer took it — read by whatever replaces the layer */
+  const triggerRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (!active) return;
     const container = containerRef.current!;
     const unregister = registerLayer(container, {
       sheet,
-      // Read through the ref, so the layer closes the way it does now rather than the way it did
-      // when it registered
+      // Read through the refs, so the layer closes the way it does now rather than the way it did
+      // when it registered, and hands back whatever it took the focus from
       close: () => onEscapeRef.current(),
+      trigger: () => triggerRef.current,
     });
     if (lockScroll) document.body.style.overflow = "hidden";
     return () => {
@@ -53,11 +56,11 @@ export function useFocusTrap({
 
   useEffect(() => {
     if (!active) return;
+    const nothing = (el: Element | null) =>
+      !el || el === document.body || el === document.documentElement;
     const focused = document.activeElement as HTMLElement | null;
-    const trigger =
-      focused && focused !== document.body && focused !== document.documentElement
-        ? focused
-        : null;
+    const trigger = nothing(focused) ? null : focused;
+    triggerRef.current = trigger;
     const container = containerRef.current!;
     container.focus();
     return () => {
@@ -65,9 +68,11 @@ export function useFocusTrap({
       // `router.back()` waits for `popstate` — unmounts after whatever replaced it has mounted and
       // focused itself, and an unconditional restore then pulls the caret out of it (BP-567).
       const now = document.activeElement as HTMLElement | null;
-      const abandoned = !now || now === document.body || container.contains(now);
-      if (!abandoned) return;
-      const target = trigger ?? returnFocusTo?.current ?? null;
+      if (!nothing(now) && !container.contains(now)) return;
+      // A trigger that has gone with the layer it belonged to is no target: the palette that
+      // replaced a task modal was focused from inside it, and the fallback is what its replacement
+      // handed over
+      const target = trigger?.isConnected ? trigger : (returnFocusTo?.current ?? null);
       if (target?.isConnected) target.focus();
     };
   }, [active, containerRef, returnFocusTo]);
