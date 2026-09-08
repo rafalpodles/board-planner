@@ -134,3 +134,57 @@ test("the PM panel clears the launcher while the save bar is open", async ({ pag
   });
   expect(keeps).toEqual({ centre: true, bottomEdge: true, bottomRight: true });
 });
+
+/**
+ * BP-596, the neighbour that fix created. Stepping the toast over this bar put it at
+ * `bottom-40 right-4` — which is exactly where the **open PM panel** is anchored under the same
+ * attribute, and the toast is painted a layer above it. So a failed save's message came to rest on
+ * the panel's own composer: the same transient-over-a-control failure, one surface along.
+ *
+ * The step is therefore written as "a bar, and no panel". Two rules of equal weight both anchoring
+ * the tray leave it stretched between them rather than one winning, so the exclusion is in the
+ * condition rather than in an override.
+ */
+test("a toast keeps off the open PM panel's own controls", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await signIn(page);
+
+  await page.route(/\/api\/projects\/[^/]+$/, async (route) => {
+    if (route.request().method() !== "PUT") return route.continue();
+    await route.fulfill({ status: 500, contentType: "application/json", body: '{"error":"nope"}' });
+  });
+
+  await makeDirty(page);
+  await launcher(page).click();
+  const panel = page.getByTestId("pm-chat-panel");
+  await expect(panel).toBeVisible();
+
+  // The toast's own three seconds must not run out while the geometry is read
+  await page.clock.install();
+  await page.clock.pauseAt(Date.now());
+
+  await saveButton(page).click();
+  await expect(page.getByTestId("toast").first()).toBeVisible();
+
+  const covered = await page.evaluate(() => {
+    const tray = document.querySelector('[data-testid="toast-tray"]')!;
+    const controls = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        '[data-testid="pm-chat-panel"] button, [data-testid="pm-chat-panel"] a, [data-testid="pm-chat-panel"] textarea, [data-testid="pm-chat-panel"] input'
+      )
+    ).filter((el) => el.getBoundingClientRect().height > 0);
+    return {
+      seen: controls.length,
+      under: controls
+        .filter((el) => {
+          const r = el.getBoundingClientRect();
+          const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+          return hit !== null && tray.contains(hit);
+        })
+        .map((el) => el.getAttribute("aria-label") ?? el.getAttribute("placeholder") ?? el.tagName),
+    };
+  });
+
+  expect(covered.seen, "the panel really has controls to cover").toBeGreaterThan(0);
+  expect(covered.under, "none of them is under the toast").toEqual([]);
+});
