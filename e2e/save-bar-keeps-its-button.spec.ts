@@ -11,8 +11,8 @@ import { signIn } from "./session";
  * The launcher steps over the bar while it is open. Unlike the phone comment bar there is no
  * width scope: this bar knows when it is open, and the collision was at every width.
  *
- * BP-596 added the third surface that lands there — the toast — and the tests for it are at the
- * foot of this file, because they measure the same button.
+ * BP-596 added the third surface that lands there — the toast — but its own measurement lives in
+ * `dialog-buttons-on-a-phone.spec.ts`, beside the button it actually covers.
  */
 
 const SETTINGS = `/projects/${PROJECT_KEY}/settings`;
@@ -137,14 +137,3 @@ test("the PM panel clears the launcher while the save bar is open", async ({ pag
   });
   expect(keeps).toEqual({ centre: true, bottomEdge: true, bottomRight: true });
 });
-
-/**
- * BP-596, the neighbour that fix created. Stepping the toast over this bar put it at
- * `bottom-40 right-4` — which is exactly where the **open PM panel** is anchored under the same
- * attribute, and the toast is painted a layer above it. So a failed save's message came to rest on
- * the panel's own composer: the same transient-over-a-control failure, one surface along.
- *
- * The step is therefore written as "a bar, and no panel". Two rules of equal weight both anchoring
- * the tray leave it stretched between them rather than one winning, so the exclusion is in the
- * condition rather than in an override.
- */

@@ -126,10 +126,10 @@ describe("where a toast lands", () => {
     expect(classes).toContain(
       "max-lg:[body:has([data-pinned-phone-bar]):not(:has([data-corner-panel]))_&]:bottom-40"
     );
-    // No second placement for the panel: with a bar, the raised launcher and a full-height panel
-    // there is no free position, and every constant tried covered one of the panel's own controls
-    // at some viewport. Left to BP-597, which wants a measured one.
-    expect(classes.filter((c) => c.includes("data-corner-panel"))).toHaveLength(2);
+    // The attribute is read only to switch the step off — no placement of its own (BP-597)
+    expect(
+      classes.filter((c) => c.includes("data-corner-panel") && !c.includes("data-pinned"))
+    ).toHaveLength(0);
   });
 
   // A full-screen `bare` dialog has no action row at the bottom; its controls are the back and

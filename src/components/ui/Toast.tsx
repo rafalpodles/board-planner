@@ -41,14 +41,8 @@ const IN_THE_CORNER = [
   // exclusion instead of an override.
   "[body:has([data-pinned-bottom-bar]):not(:has([data-corner-panel]))_&]:bottom-40",
   "max-lg:[body:has([data-pinned-phone-bar]):not(:has([data-corner-panel]))_&]:bottom-40",
-  // With the panel open the step is off and the toast stays in the corner — which is where the
-  // bar's own button is. That is not an improvement, it is `main`'s behaviour left alone: with a
-  // pinned bar, the raised launcher and a full-height panel, the corner column is occupied from
-  // the bottom edge to 152px and the panel takes everything above it, so no fixed position is
-  // free. Four attempts at one each covered something else — the panel's Send, then its ⤢ and ✕
-  // at viewport heights past the `h-[min(44rem,100vh-8rem)]` clamp, then the same two again on a
-  // narrow-and-tall phone where centring separates nothing. It needs a measured position rather
-  // than a constant, which is BP-597.
+  // With a panel open the step is off and the toast keeps `main`'s corner: nothing there is
+  // free, and the placement has to be measured rather than written. BP-597.
 ].join(" ");
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
