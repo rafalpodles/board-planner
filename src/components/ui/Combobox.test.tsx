@@ -322,6 +322,15 @@ describe("the search box the panel grows", () => {
     return screen.getByRole("combobox", { name: "Search Assignee" });
   }
 
+  it("leaves the listbox's own activedescendant off, since nothing is focused there", () => {
+    stateViewport(900);
+    openWithSearch();
+
+    expect(
+      document.querySelector('[role="listbox"]')!.getAttribute("aria-activedescendant")
+    ).toBeNull();
+  });
+
   it("is the combobox itself, pointing at the list the arrows move through", () => {
     stateViewport(900);
     const box = openWithSearch();
@@ -350,6 +359,10 @@ describe("the search box the panel grows", () => {
     stateViewport(900);
     const box = openWithSearch();
 
+    // Moved first, deliberately: typing without it leaves `active` at 0, where "reset to the top"
+    // and "leave it where it was" agree — the assertion would hold either way
+    fireEvent.keyDown(box, { key: "ArrowDown" });
+    fireEvent.keyDown(box, { key: "ArrowDown" });
     fireEvent.change(box, { target: { value: "Option 7" } });
 
     const current = box.getAttribute("aria-activedescendant");
