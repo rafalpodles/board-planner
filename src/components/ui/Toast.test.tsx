@@ -53,19 +53,6 @@ function obstacle(box: { top: number; bottom: number }) {
   return el;
 }
 
-/** The open PM panel, with the header its own controls sit in */
-function panel(box: { top: number; bottom: number }, headerBottom: number) {
-  const el = document.createElement("div");
-  el.setAttribute("data-corner-panel", "");
-  const header = document.createElement("div");
-  header.setAttribute("data-corner-panel-header", "");
-  el.append(header);
-  document.body.append(el);
-  stateRect(el, box);
-  stateRect(header, { top: box.top, bottom: headerBottom });
-  return el;
-}
-
 function Raiser() {
   raise = useToast().toast;
   return null;
@@ -90,7 +77,7 @@ function trayClasses() {
 afterEach(() => {
   cleanup();
   opened.splice(0).forEach((close) => close());
-  document.querySelectorAll("[data-corner-obstacle],[data-corner-panel]").forEach((el) => el.remove());
+  document.querySelectorAll("[data-corner-obstacle]").forEach((el) => el.remove());
   vi.restoreAllMocks();
 });
 
@@ -132,17 +119,6 @@ describe("where a toast lands", () => {
     });
 
     expect(tray().style.bottom).toBe("216px");
-  });
-
-  it("stands in the panel's transcript, under the header its controls are in", () => {
-    stateViewport(960);
-    panel({ top: 96, bottom: 864 }, 133);
-    mounted();
-
-    act(() => raise("Saved"));
-
-    expect(tray().style.top).toBe("149px");
-    expect(tray().style.bottom).toBe("auto");
   });
 
   it("goes to the top over a sheet, whatever else is in the corner", () => {

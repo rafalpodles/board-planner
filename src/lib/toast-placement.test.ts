@@ -34,36 +34,6 @@ describe("where a toast may stand", () => {
     expect(placed).toEqual({ anchor: "bottom", offset: 192 });
   });
 
-  // Measured 1280×960: past `h-[min(44rem,100vh-8rem)]`'s clamp the panel slides down and its own
-  // ⤢ and ✕ land at 109–133, which is why a fixed `top-20` covered them
-  it("stands in the panel's transcript, below its header wherever that is", () => {
-    expect(
-      placeToast({
-        ...nothing,
-        viewportHeight: 960,
-        panel: { box: { top: 96, bottom: 864 }, headerBottom: 133 },
-      })
-    ).toEqual({ anchor: "top", offset: 149 });
-
-    // The same panel on a shorter screen, where the clamp holds it at the top
-    expect(
-      placeToast({
-        ...nothing,
-        panel: { box: { top: 32, bottom: 640 }, headerBottom: 69 },
-      })
-    ).toEqual({ anchor: "top", offset: 85 });
-  });
-
-  it("ignores a panel too short to hold the tray, and stands above it instead", () => {
-    const placed = placeToast({
-      ...nothing,
-      obstacles: [{ top: 700, bottom: 780 }],
-      panel: { box: { top: 700, bottom: 760 }, headerBottom: 740 },
-    });
-
-    expect(placed).toEqual({ anchor: "bottom", offset: 116 });
-  });
-
   // BP-590: a phone's dialog is a bottom sheet and the top of the screen is what it leaves free
   it("goes to the top over a sheet, whatever else is in the corner", () => {
     expect(

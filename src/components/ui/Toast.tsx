@@ -38,17 +38,11 @@ let nextId = 0;
 const OBSTACLES = "[data-corner-obstacle],[data-pinned-bottom-bar],[data-pinned-phone-bar]";
 
 function measure(overASheet: boolean): Surroundings {
-  const panel = document.querySelector<HTMLElement>("[data-corner-panel]");
-  const header = panel?.querySelector<HTMLElement>("[data-corner-panel-header]");
   return {
     viewportHeight: document.documentElement.clientHeight,
     obstacles: Array.from(document.querySelectorAll<HTMLElement>(OBSTACLES))
       .map((el) => el.getBoundingClientRect())
       .filter((box) => box.height > 0),
-    panel:
-      panel && header
-        ? { box: panel.getBoundingClientRect(), headerBottom: header.getBoundingClientRect().bottom }
-        : undefined,
     overASheet,
   };
 }
