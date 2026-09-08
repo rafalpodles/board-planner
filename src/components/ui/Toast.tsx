@@ -28,20 +28,9 @@ const ToastContext = createContext<ToastContextValue | null>(null);
 let nextId = 0;
 
 /**
- * Three things stand where a toast lands, and the answer differs for each.
- *
- * A phone's dialog is a bottom sheet whose action row is exactly there. The toast moves to the top
- * rather than dropping a layer: behind the scrim it would be unreadable, and a toast raised from
- * inside the dialog is the feedback the reader needs (BP-590).
- *
- * A pinned bar — the comment bar, a settings save bar — is the second, and the answer is the step
- * the PM launcher already takes over the same two attributes (BP-591, BP-593). 10rem rather than
- * the launcher's 6, because the launcher itself has stepped to 6rem by then.
- *
- * The open PM panel is the third, and it is why the step alone is not enough: it is anchored to
- * that same `bottom-40` and painted a layer below, so the toast came to rest on its Send button.
- * A corner with the panel in it has no room left, so the toast goes up, exactly as it does for a
- * sheet (BP-596).
+ * Three surfaces stand where a toast lands, and each wants a different answer: a bottom sheet's
+ * action row, a pinned bar, and the open PM panel — which is anchored to the same place the step
+ * over a bar goes. The reasoning is in BP-590 and BP-596; what is here is the shape.
  */
 const OVER_A_SHEET = "left-1/2 top-4 w-[calc(100%-2rem)] -translate-x-1/2";
 

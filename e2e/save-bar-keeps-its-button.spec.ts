@@ -10,6 +10,9 @@ import { signIn } from "./session";
  *
  * The launcher steps over the bar while it is open. Unlike the phone comment bar there is no
  * width scope: this bar knows when it is open, and the collision was at every width.
+ *
+ * BP-596 added the third surface that lands there — the toast — and the tests for it are at the
+ * foot of this file, because they measure the same button.
  */
 
 const SETTINGS = `/projects/${PROJECT_KEY}/settings`;
