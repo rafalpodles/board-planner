@@ -1,4 +1,5 @@
 import { APP_NAME, APP_DOMAIN } from "@/lib/brand";
+import { withCacheBreakpoints } from "./prompt-cache";
 
 const BASE_URL = () => process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1";
 
@@ -31,6 +32,15 @@ export interface OrUsage {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+  /**
+   * Prompt tokens the provider served from its cache. A **subset** of `promptTokens`, never an
+   * addition to it — the day's total does not change when caching starts working, only what that
+   * total costs. Absent means the provider reported no cache activity, which is a real answer
+   * (nothing was cached) rather than the unknown a missing `usage` block is (BP-568).
+   */
+  cachedPromptTokens: number;
+  /** Prompt tokens written into the cache. Only providers that price cache writes report it. */
+  cacheWriteTokens: number;
 }
 
 export type OrCompletionResult =
@@ -62,6 +72,25 @@ function usageOf(data: any): OrUsage | undefined {
     completionTokens,
     // Some providers omit the total; adding the two is what it means
     totalTokens: Number.isFinite(total) ? total : promptTokens + completionTokens,
+    ...cacheTokensOf(usage.prompt_tokens_details),
+  };
+}
+
+/**
+ * OpenRouter reports cache activity on every response with no request parameter to ask for it, in
+ * `usage.prompt_tokens_details`. A provider that caches nothing omits the block entirely, and a
+ * provider that caches but does not price writes omits `cache_write_tokens` alone — both read as
+ * zero, because "no tokens were served from cache" is what they mean (BP-568).
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function cacheTokensOf(details: any): { cachedPromptTokens: number; cacheWriteTokens: number } {
+  const positive = (value: unknown) => {
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  };
+  return {
+    cachedPromptTokens: positive(details?.cached_tokens),
+    cacheWriteTokens: positive(details?.cache_write_tokens),
   };
 }
 
@@ -69,6 +98,14 @@ export async function chatCompletion(opts: {
   model: string;
   messages: OrChatMessage[];
   tools: OrToolDefinition[];
+  /**
+   * How many leading messages are byte-identical on every call of this turn — the stable prefix a
+   * cache breakpoint is worth spending on. Defaults to all of them, which is what a single-call
+   * caller has (BP-568).
+   */
+  cachePrefixLength?: number;
+  /** Sticky-routing key, so the turn's later calls reach the endpoint its first call warmed */
+  sessionId?: string;
   signal?: AbortSignal;
 }): Promise<OrCompletionResult> {
   const apiKey = process.env.OPENROUTER_API_KEY;
@@ -88,7 +125,12 @@ export async function chatCompletion(opts: {
       },
       body: JSON.stringify({
         model: opts.model,
-        messages: opts.messages,
+        messages: withCacheBreakpoints(
+          opts.model,
+          opts.messages,
+          opts.cachePrefixLength ?? opts.messages.length
+        ),
+        ...(opts.sessionId ? { session_id: opts.sessionId } : {}),
         max_tokens: MAX_TOKENS(),
         tools: opts.tools.map((t) => ({
           type: "function",

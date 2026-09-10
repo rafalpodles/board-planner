@@ -25,6 +25,13 @@ const pmMessageSchema = new Schema<IPmMessage>(
       promptTokens: { type: Number, default: 0 },
       completionTokens: { type: Number, default: 0 },
       totalTokens: { type: Number, default: 0 },
+      /**
+       * How much of the prompt the provider served from its own cache, and how much it wrote into
+       * it. Part of promptTokens rather than extra to it, so a turn's total is unchanged by
+       * caching — what changes is what that total was billed at (BP-568).
+       */
+      cachedPromptTokens: { type: Number, default: 0 },
+      cacheWriteTokens: { type: Number, default: 0 },
       /** Round-trips to the model. The number the turn cap was mistaken for. */
       calls: { type: Number, default: 0 },
       /** True when the turn stopped because it ran out of steps, not because it was finished */

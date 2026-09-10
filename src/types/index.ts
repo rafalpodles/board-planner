@@ -740,6 +740,10 @@ export interface IPmUsage {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+  /** Of `promptTokens`, how many were served from the provider's cache — a subset, not an addition */
+  cachedPromptTokens: number;
+  /** Prompt tokens written into the cache, where the provider prices writes separately */
+  cacheWriteTokens: number;
   /** Round-trips to the model — the number `dailyTurnCap` was mistaken for */
   calls: number;
   /** The turn stopped because it ran out of steps, not because it was finished */

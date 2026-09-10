@@ -45,7 +45,15 @@ export async function isOverDailyTurnCap(
 export async function dailyPmSpend(
   projectId: string,
   pm: { dailyTokenCap?: number; autonomy?: { timezone?: string } }
-): Promise<{ over: boolean; cap: number; tokens: number; calls: number; stepLimitHits: number }> {
+): Promise<{
+  over: boolean;
+  cap: number;
+  tokens: number;
+  cachedTokens: number;
+  cacheWriteTokens: number;
+  calls: number;
+  stepLimitHits: number;
+}> {
   const cap = await resolveDailyTokenCap(pm.dailyTokenCap);
   const zone = pm.autonomy?.timezone;
   const startOfDay = startOfDayInTimezone(
@@ -54,6 +62,8 @@ export async function dailyPmSpend(
   );
   const [totals] = await PmMessage.aggregate<{
     tokens: number;
+    cachedTokens: number;
+    cacheWriteTokens: number;
     calls: number;
     stepLimitHits: number;
   }>([
@@ -62,6 +72,12 @@ export async function dailyPmSpend(
       $group: {
         _id: null,
         tokens: { $sum: { $ifNull: ["$usage.totalTokens", 0] } },
+        // Already inside `tokens`, reported apart from it so the operator can see what share of
+        // the day was billed at cache-read price rather than as a cold prompt (BP-568). Turns
+        // stored before this shipped carry neither field, and $ifNull reads those as 0 — which
+        // is what "we did not measure it" and "nothing was cached" both look like on that day.
+        cachedTokens: { $sum: { $ifNull: ["$usage.cachedPromptTokens", 0] } },
+        cacheWriteTokens: { $sum: { $ifNull: ["$usage.cacheWriteTokens", 0] } },
         calls: { $sum: { $ifNull: ["$usage.calls", 0] } },
         // Turns that ran out of steps rather than finishing — the most expensive shape a turn has
         stepLimitHits: { $sum: { $cond: [{ $eq: ["$usage.hitStepLimit", true] }, 1, 0] } },
@@ -75,6 +91,8 @@ export async function dailyPmSpend(
     over: cap > 0 && tokens >= cap,
     cap,
     tokens,
+    cachedTokens: totals?.cachedTokens ?? 0,
+    cacheWriteTokens: totals?.cacheWriteTokens ?? 0,
     calls: totals?.calls ?? 0,
     stepLimitHits: totals?.stepLimitHits ?? 0,
   };

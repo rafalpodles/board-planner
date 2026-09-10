@@ -93,6 +93,8 @@ interface PmUsageToday {
   turns: { used: number; cap: number };
   calls: number;
   tokens: number;
+  cachedTokens: number;
+  cacheWriteTokens: number;
   tokenCap: number;
   stepLimitHits: number;
   maxCallsPerTurn: number;
@@ -542,6 +544,20 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                   </>
                 )}
               </p>
+              {/* Part of the tokens above, not extra to them. Shown even at zero: "none of it was
+                  cached" is the answer the number is asked for, and hiding it would leave a
+                  provider that stopped caching looking exactly like one that never could. */}
+              {usage.tokens > 0 && (
+                <p className="m-0 mt-1 text-text-muted" data-testid="pm-usage-cache">
+                  <strong className="text-text">{usage.cachedTokens.toLocaleString()}</strong> of
+                  those ({Math.round((usage.cachedTokens / usage.tokens) * 100)}%) were read from
+                  the provider's cache, billed at a fraction of a cold prompt
+                  {usage.cacheWriteTokens > 0 && (
+                    <>; {usage.cacheWriteTokens.toLocaleString()} were written to it</>
+                  )}
+                  .
+                </p>
+              )}
             </div>
           )}
         </SettingsCard>

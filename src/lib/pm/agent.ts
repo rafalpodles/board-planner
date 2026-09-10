@@ -6,6 +6,7 @@ import { IPmMessage, PmAttachment, PmMessageTrigger } from "@/types";
 import { buildUserContent } from "./attachments";
 import { getPmUser, PM_USERNAME } from "./pm-user";
 import { chatCompletion, OrChatMessage } from "./openrouter";
+import { pmSessionId } from "./prompt-cache";
 import { isPmRunnable, pmDisabledReason, resolvePmModel } from "./availability";
 import { PM_TOOLS, pmToolDefinitions, PmToolContext, refuseUndeclaredArgs } from "./tools";
 import { discoverMcpTools, callMcpTool, McpRuntime, MAX_MCP_CALLS_PER_TURN } from "./mcp-tools";
@@ -260,7 +261,18 @@ export async function runPmTurn(opts: {
    * exit, including the ones that fail: a turn that burned nine calls and then hit a provider error
    * cost nine calls, and a record that forgave them would understate exactly the runs that hurt.
    */
-  const spend = { promptTokens: 0, completionTokens: 0, totalTokens: 0, calls: 0, hitStepLimit: false };
+  const spend = {
+    promptTokens: 0,
+    completionTokens: 0,
+    totalTokens: 0,
+    // A subset of promptTokens, recorded beside it rather than added to it: the operator sets a
+    // budget from the total, and needs to know how much of that total was billed at cache-read
+    // price (BP-568)
+    cachedPromptTokens: 0,
+    cacheWriteTokens: 0,
+    calls: 0,
+    hitStepLimit: false,
+  };
   const record = () => {
     assistantMessage.usage = { ...spend };
   };
@@ -294,6 +306,9 @@ export async function runPmTurn(opts: {
     { role: "user", content: userContent },
   ];
 
+  const stablePrefixLength = messages.length;
+  const sessionId = pmSessionId(opts.projectId, opts.triggeredByUserId);
+
 
   const interrupted = async (): Promise<PmTurnResult> => {
     const done = assistantMessage.actions.map((a) => a.summary);
@@ -312,7 +327,16 @@ export async function runPmTurn(opts: {
   for (let step = 0; step < MAX_STEPS; step++) {
     if (opts.signal?.aborted) return interrupted();
 
-    const completion = await chatCompletion({ model, messages, tools: toolDefinitions, signal: opts.signal });
+    const completion = await chatCompletion({
+      model,
+      messages,
+      tools: toolDefinitions,
+      // Everything the loop appends from here — assistant tool calls and their results — grows
+      // past this mark, so the prefix it names is the same bytes on every one of the 15 calls
+      cachePrefixLength: stablePrefixLength,
+      sessionId,
+      signal: opts.signal,
+    });
 
     // Counted before the result is judged: the call was made and billed whatever it answered
     spend.calls++;
@@ -320,6 +344,8 @@ export async function runPmTurn(opts: {
       spend.promptTokens += completion.usage.promptTokens;
       spend.completionTokens += completion.usage.completionTokens;
       spend.totalTokens += completion.usage.totalTokens;
+      spend.cachedPromptTokens += completion.usage.cachedPromptTokens;
+      spend.cacheWriteTokens += completion.usage.cacheWriteTokens;
     }
 
     if (completion.type === "aborted") {
