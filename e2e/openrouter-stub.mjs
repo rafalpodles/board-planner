@@ -64,19 +64,34 @@ let received = null;
 let requests = [];
 
 /**
- * The stable prefix, as the stub can see it: everything before the first assistant message
- * carrying tool calls, which is where a turn starts appending to itself.
+ * The stable prefix as the STUB works it out — everything before the first assistant message
+ * carrying tool calls. Structural, so two calls of one turn agree here whatever the app did; use
+ * `markedPrefix` when the question is what the app claimed, and this only as a coarse shape.
  */
 function prefixOf(messages) {
   const growth = messages.findIndex((m) => Array.isArray(m?.tool_calls) && m.tool_calls.length > 0);
   return JSON.stringify(growth === -1 ? messages : messages.slice(0, growth));
 }
 
-const cacheControlsIn = (messages) =>
-  messages.reduce(
-    (n, m) => n + (Array.isArray(m?.content) ? m.content.filter((part) => part?.cache_control).length : 0),
-    0
-  );
+const isMarked = (m) =>
+  Array.isArray(m?.content) && m.content.some((part) => part?.cache_control);
+
+// The roles carrying a breakpoint, in order — a count alone cannot say WHERE the second one
+// landed, which is the whole question about the prefix boundary
+const markedRolesIn = (messages) => messages.filter(isMarked).map((m) => m?.role);
+
+/**
+ * Everything up to and including the last marked message — the run of bytes the app has told the
+ * provider to cache. Unlike `prefixOf` below, which the stub works out for itself from the shape
+ * of the conversation, this is the app's own claim: two calls of one turn must make the same one.
+ */
+function markedPrefixOf(messages) {
+  let last = -1;
+  messages.forEach((m, i) => {
+    if (isMarked(m)) last = i;
+  });
+  return last === -1 ? null : JSON.stringify(messages.slice(0, last + 1));
+}
 
 /**
  * What a provider that caches reports. The first call of a turn writes the prefix into the cache
@@ -143,11 +158,15 @@ serve({
     try {
       const body = JSON.parse(raw);
       messages = body.messages ?? [];
+      const markedRoles = markedRolesIn(messages);
       requests.push({
         sessionId: body.session_id ?? null,
         prefix: prefixOf(messages),
         messageCount: messages.length,
-        cacheControls: cacheControlsIn(messages),
+        cacheControls: markedRoles.length,
+        markedRoles,
+        markedPrefix: markedPrefixOf(messages),
+        lastRole: messages[messages.length - 1]?.role ?? null,
       });
       // The names the model was OFFERED, which is the whole subject of BP-569 and is carried
       // beside the conversation rather than inside it — no assertion on messages can see it.

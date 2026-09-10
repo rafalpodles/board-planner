@@ -100,6 +100,15 @@ interface PmUsageToday {
   maxCallsPerTurn: number;
 }
 
+/**
+ * Clamped, because the two numbers come from a provider rather than from us: nothing stops one
+ * reporting cached tokens it never counted as prompt tokens, and "450% were read from the cache"
+ * on a settings screen reads as a broken product rather than as a broken provider.
+ */
+function cachedShare(usage: PmUsageToday): number {
+  return Math.min(100, Math.max(0, Math.round((usage.cachedTokens / usage.tokens) * 100)));
+}
+
 export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: SectionProps) {
   const api = useApi();
   const { toast } = useToast();
@@ -531,7 +540,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
               data-testid="pm-usage-today"
               className="mt-4 rounded-lg border border-border bg-bg-input/40 px-3 py-2 text-sm"
             >
-              <p className="m-0 text-text-muted">
+              <p className="m-0 text-text-muted" data-testid="pm-usage-totals">
                 Today: <strong className="text-text">{usage.turns.used}</strong> turns,{" "}
                 <strong className="text-text">{usage.calls}</strong> model calls,{" "}
                 <strong className="text-text">{usage.tokens.toLocaleString()}</strong> tokens
@@ -544,14 +553,16 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                   </>
                 )}
               </p>
-              {/* Part of the tokens above, not extra to them. Shown even at zero: "none of it was
-                  cached" is the answer the number is asked for, and hiding it would leave a
-                  provider that stopped caching looking exactly like one that never could. */}
+              {/* Part of the tokens above, not extra to them. Shown whenever anything was spent,
+                  including at zero cached: "none of it came from the cache" is the answer this
+                  number is asked for, and hiding that case would leave an instance whose caching
+                  stopped working looking exactly like one that never could. A day with no spend
+                  has nothing to take a share of, which is the only case that hides the line. */}
               {usage.tokens > 0 && (
                 <p className="m-0 mt-1 text-text-muted" data-testid="pm-usage-cache">
                   <strong className="text-text">{usage.cachedTokens.toLocaleString()}</strong> of
-                  those ({Math.round((usage.cachedTokens / usage.tokens) * 100)}%) were read from
-                  the provider's cache, billed at a fraction of a cold prompt
+                  those ({cachedShare(usage)}%) were read from the provider's cache, billed at a
+                  fraction of a cold prompt
                   {usage.cacheWriteTokens > 0 && (
                     <>; {usage.cacheWriteTokens.toLocaleString()} were written to it</>
                   )}

@@ -9,15 +9,20 @@ import { needsCacheBreakpoints, withCacheBreakpoints, pmSessionId } from "./prom
  * request whose `content` was rewritten from a string into an array of parts for nothing.
  */
 
+/**
+ * What outlives the turn: the system prompt and the history replayed in front of it. The caller's
+ * `prefixLength` names exactly this much — see the note in `agent.ts` for why this turn's own user
+ * message is not part of it.
+ */
 const PREFIX = [
   { role: "system", content: "the standing rules" },
   { role: "user", content: "older turn" },
   { role: "assistant", content: "older answer" },
-  { role: "user", content: "what this turn asks" },
 ];
 
-// What the loop appends as the turn runs. Never part of the stable prefix.
+// What this turn adds: its own question, and then whatever the loop appends as it runs.
 const GROWTH = [
+  { role: "user", content: "what this turn asks" },
   { role: "assistant", content: "", tool_calls: [{ id: "c1" }] },
   { role: "tool", content: "the tool's answer" },
 ];
@@ -30,7 +35,7 @@ const cacheControlsIn = (messages: Record<string, unknown>[]) =>
   );
 
 describe("which providers get breakpoints", () => {
-  it.each(["anthropic/claude-sonnet-4.6", "qwen/qwen3-max", "google/gemini-2.5-pro"])(
+  it.each(["anthropic/claude-sonnet-4.6", "qwen/qwen3-max"])(
     "%s caches only what is marked, so it is marked",
     (model) => {
       expect(needsCacheBreakpoints(model)).toBe(true);
@@ -51,6 +56,19 @@ describe("which providers get breakpoints", () => {
   ])("%s caches automatically, so nothing is added to its request", (model) => {
     expect(needsCacheBreakpoints(model)).toBe(false);
   });
+
+  /**
+   * Gemini accepts breakpoints, which is why it was on the marked list at first — and marking it
+   * is the one case where sending them costs real money rather than nothing. 2.5 and newer cache
+   * implicitly with no write and no storage charge; a breakpoint moves that same prefix onto the
+   * explicit path, priced at the input rate plus five minutes of storage (BP-568 review).
+   */
+  it.each(["google/gemini-2.5-flash", "google/gemini-2.5-pro"])(
+    "%s caches implicitly and free, so marking it would be paying for what it already does",
+    (model) => {
+      expect(needsCacheBreakpoints(model)).toBe(false);
+    }
+  );
 });
 
 describe("where the breakpoints land", () => {
@@ -64,10 +82,10 @@ describe("where the breakpoints land", () => {
     expect(typeof sent[0].content).toBe("string");
   });
 
-  it("marks the system prompt and the end of the stable prefix, and nothing the turn grew", () => {
+  it("marks the system prompt and the end of the stable prefix, and nothing the turn added", () => {
     const sent = withCacheBreakpoints("anthropic/claude-sonnet-4.6", [...PREFIX, ...GROWTH], PREFIX.length);
 
-    expect(cacheControlsIn(sent)).toEqual([1, 0, 0, 1, 0, 0]);
+    expect(cacheControlsIn(sent)).toEqual([1, 0, 1, 0, 0, 0]);
   });
 
   /**
@@ -81,7 +99,7 @@ describe("where the breakpoints land", () => {
 
     const sent = withCacheBreakpoints("anthropic/claude-sonnet-4.6", grown, PREFIX.length);
 
-    expect(cacheControlsIn(sent)).toEqual([1, 0, 0, 1, 0, 0, 0]);
+    expect(cacheControlsIn(sent)).toEqual([1, 0, 1, 0, 0, 0, 0]);
   });
 
   it("marks the last part of a multi-part message, not the picture in front of it", () => {
@@ -111,17 +129,33 @@ describe("where the breakpoints land", () => {
     expect(sent[0].content).toBe("   ");
   });
 
-  it("does not mark the system prompt twice when it is the whole prefix", () => {
-    const sent = withCacheBreakpoints("anthropic/claude-sonnet-4.6", [{ role: "system", content: "rules" }], 1);
+  // A thread with nothing replayed yet: the system prompt is the whole of what outlives the turn,
+  // and it is marked once. (The earlier version of this said "not marked twice", which the Set of
+  // indices makes true by construction — no edit to this file could redden it.)
+  it("marks the system prompt alone when there is no history behind it", () => {
+    const sent = withCacheBreakpoints("anthropic/claude-sonnet-4.6", [...PREFIX, ...GROWTH], 1);
 
-    expect(cacheControlsIn(sent)).toEqual([1]);
+    expect(cacheControlsIn(sent)).toEqual([1, 0, 0, 0, 0, 0]);
+  });
+
+  /**
+   * A caller naming no stable prefix means "there is nothing here worth a cache write", and must
+   * be obeyed. Marking the first message anyway would make the option unable to say it, and pay
+   * for a write on exactly the turns judged not to deserve one.
+   */
+  it("marks nothing at all when the caller names no stable prefix", () => {
+    const sent = withCacheBreakpoints("anthropic/claude-sonnet-4.6", [...PREFIX, ...GROWTH], 0);
+
+    expect(cacheControlsIn(sent)).toEqual([0, 0, 0, 0, 0, 0]);
+    // Not merely unmarked: the request shape is untouched, string content and all
+    expect(typeof sent[0].content).toBe("string");
   });
 
   // The caller's own bookkeeping must not be able to point past the end of the array
   it("survives a prefix longer than the conversation", () => {
     const sent = withCacheBreakpoints("anthropic/claude-sonnet-4.6", PREFIX, 99);
 
-    expect(cacheControlsIn(sent)).toEqual([1, 0, 0, 1]);
+    expect(cacheControlsIn(sent)).toEqual([1, 0, 1]);
   });
 
   it("does not mutate the messages it was given", () => {

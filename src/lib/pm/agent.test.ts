@@ -67,8 +67,11 @@ vi.mock("./mcp-tools", () => ({
   callMcpTool: vi.fn(),
   MAX_MCP_CALLS_PER_TURN: 5,
 }));
+// A function, not a constant: what the cache breakpoint marks is the END of the replayed history,
+// so a mock that can only answer "no history" cannot tell the right boundary from the wrong one
+const replayHistoryMock = vi.fn(async () => [] as { role: string; content: string }[]);
 vi.mock("./history", () => ({
-  replayHistory: async () => [],
+  replayHistory: () => replayHistoryMock(),
   stripSpoofedLabels: (s: string) => s,
   HISTORY_AUTHOR_PREFIX: "",
 }));
@@ -95,6 +98,9 @@ vi.mock("./tools", () => ({
 }));
 
 const { runPmTurn } = await import("./agent");
+// Not mocked: what the sticky key is computed FROM is the claim under test, and the function that
+// computes it is pinned separately in prompt-cache.test.ts
+const { pmSessionId } = await import("./prompt-cache");
 const { NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS, BOARD_REVIEW_DISALLOWED_TOOLS } = await import("./autonomy");
 
 function toolCall(name: string, args: Record<string, unknown>) {
@@ -414,7 +420,11 @@ describe("the prefix a turn asks to be cached", () => {
    * `mock.calls[1]` are the same object — comparing them proved only that an array equals itself,
    * and the comparison passed with the prefix bookkeeping deleted.
    */
-  const sent: { messages: { role: string }[]; cachePrefixLength: number; sessionId: string }[] = [];
+  const sent: {
+    messages: { role: string; content?: unknown }[];
+    cachePrefixLength: number;
+    sessionId: string;
+  }[] = [];
 
   function answering(...results: object[]) {
     let i = 0;
@@ -432,14 +442,22 @@ describe("the prefix a turn asks to be cached", () => {
     });
   }
 
+  const HISTORY = [
+    { role: "user", content: "an older question" },
+    { role: "assistant", content: "an older answer" },
+  ];
+
   beforeEach(() => {
     sent.length = 0;
+    replayHistoryMock.mockResolvedValue(HISTORY);
   });
 
-  // The implementation installed above outlives `vi.clearAllMocks`, which clears calls and not
-  // behaviour — a later test in this file would otherwise inherit a stub answering "done" forever
+  // Both implementations outlive `vi.clearAllMocks`, which clears calls and not behaviour — a
+  // later test in this file would otherwise inherit a stub answering "done" forever, and a history
+  // it never asked for
   afterEach(() => {
     chatCompletion.mockReset();
+    replayHistoryMock.mockImplementation(async () => []);
   });
 
   const twoCalls = () =>
@@ -461,24 +479,42 @@ describe("the prefix a turn asks to be cached", () => {
     expect(sent[1].messages.length).toBeGreaterThan(sent[0].messages.length);
   });
 
-  it("stops before anything the turn itself appended", async () => {
+  /**
+   * The boundary, and the reason it is where it is. A cache write costs more than the cold prompt
+   * it replaces, so a mark is only worth making where something later reads it back. The system
+   * prompt and the replayed history are read by every later call of this turn AND by every turn
+   * after it; this turn's own user message is read by neither once the turn answers in one call,
+   * which is what an ordinary conversational turn does (BP-568 review).
+   */
+  it("ends at the replayed history, not at this turn's own question", async () => {
     twoCalls();
 
     await turn([]);
 
     const marked = sent[1].messages.slice(0, sent[1].cachePrefixLength);
+
+    expect(marked.map((m) => m.role)).toEqual(["system", "user", "assistant"]);
+    expect(marked[marked.length - 1].content).toBe("an older answer");
+    // This turn's question, and everything the loop appended after it, sit past the mark
+    expect(marked.some((m) => m.content === "trigger")).toBe(false);
     expect(marked.some((m) => m.role === "tool")).toBe(false);
-    expect(marked[marked.length - 1].role).toBe("user");
-    // The control: the tool's answer was in that request, just past the mark
+    // The controls: both really were in that request, just not inside the marked prefix
+    expect(sent[1].messages.some((m) => m.content === "trigger")).toBe(true);
     expect(sent[1].messages.some((m) => m.role === "tool")).toBe(true);
   });
 
-  it("names one conversation for every call of the turn", async () => {
+  /**
+   * The key must be this board and this reader, in that order. A shape assertion alone leaves both
+   * mistakes green: a constant would be one conversation for the whole instance, sending every
+   * reader to an endpoint holding somebody else's prefix, and swapping the pair would be a
+   * different key for the same thread every time a different board is read (BP-568 review).
+   */
+  it("names one conversation for every call of the turn, keyed by board and reader", async () => {
     twoCalls();
 
     await turn([]);
 
-    expect(sent[0].sessionId).toEqual(expect.stringMatching(/^[0-9a-f]{32}$/));
+    expect(sent[0].sessionId).toBe(pmSessionId(PROJECT._id, "pm-user-id"));
     expect(sent[1].sessionId).toBe(sent[0].sessionId);
   });
 });

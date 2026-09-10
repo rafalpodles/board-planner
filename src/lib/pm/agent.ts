@@ -291,9 +291,10 @@ export async function runPmTurn(opts: {
     return finalize("⚠️ That image could not be read, so there was nothing to send.");
   }
 
+  const replayed = await replayHistory(history, opts.projectId);
   const messages: OrChatMessage[] = [
     { role: "system", content: buildSystemPrompt(project, mcp, disallowedTools, actor) },
-    ...(await replayHistory(history, opts.projectId)),
+    ...replayed,
     ...(imageOnly
       ? [
           {
@@ -306,7 +307,14 @@ export async function runPmTurn(opts: {
     { role: "user", content: userContent },
   ];
 
-  const stablePrefixLength = messages.length;
+  /**
+   * The system prompt and the replayed history — and deliberately not this turn's own user
+   * message, nor the image nudge in front of it. Both of those are read back by this turn's later
+   * calls and by nothing else: a turn that answers in one call reads them never, and the next
+   * turn's history has already grown past them. Since a cache write costs more than the cold
+   * prompt it replaces, a mark nothing reads is a loss (BP-568 review).
+   */
+  const stablePrefixLength = 1 + replayed.length;
   const sessionId = pmSessionId(opts.projectId, opts.triggeredByUserId);
 
 

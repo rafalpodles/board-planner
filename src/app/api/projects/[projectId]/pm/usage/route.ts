@@ -31,10 +31,12 @@ export const GET = withProjectOwner(async (_request, { params }) => {
     turns: { used: turns.used, cap: turns.cap },
     calls: spend.calls,
     tokens: spend.tokens,
-    // Part of `tokens`, not extra to it: what share of the day the provider served from its own
-    // cache. Without this every token reads as a cold prompt and the budget above is set from a
-    // number that cannot tell a cache hit from a miss (BP-568).
+    // A share of `tokens`, not an addition to it: what the provider served from its own cache.
+    // Without this every token reads as a cold prompt and the budget above is set from a number
+    // that cannot tell a cache hit from a miss (BP-568).
     cachedTokens: spend.cachedTokens,
+    // Reported beside the two, never inside either — what a cache write cost is the provider's
+    // own accounting and is not documented as part of the prompt count
     cacheWriteTokens: spend.cacheWriteTokens,
     tokenCap: spend.cap,
     // Turns that ran out of steps rather than finishing — the most expensive shape a turn takes,
