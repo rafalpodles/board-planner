@@ -76,11 +76,18 @@ function prefixOf(messages) {
 const isMarked = (m) =>
   Array.isArray(m?.content) && m.content.some((part) => part?.cache_control);
 
-// A message's text whether its content is a plain string or an array of parts
+/**
+ * A message's text whether its content is a plain string or an array of parts.
+ *
+ * The array branch is the guarded one, not the default: this runs OUTSIDE the body-parse try/catch,
+ * and a throw here is answered 500 with a crash marker rather than a completion. `String()` never
+ * threw on a number or a bare object, and this must not either — BP-575 is about exactly that kind
+ * of throw in this handler.
+ */
 const textOf = (m) =>
-  typeof m?.content === "string"
-    ? m.content
-    : (m?.content ?? []).map((part) => (typeof part?.text === "string" ? part.text : "")).join(" ");
+  Array.isArray(m?.content)
+    ? m.content.map((part) => (typeof part?.text === "string" ? part.text : "")).join(" ")
+    : String(m?.content ?? "");
 
 // The roles carrying a breakpoint, in order — a count alone cannot say WHERE the second one
 // landed, which is the whole question about the prefix boundary

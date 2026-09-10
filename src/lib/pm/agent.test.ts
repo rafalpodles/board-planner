@@ -33,6 +33,9 @@ vi.mock("@/models/user", () => ({
     }),
   },
 }));
+// How many rows the replay window returned. At HISTORY_LIMIT the window has stopped growing, which
+// is what decides whether the first call of a turn is worth a history cache write at all.
+const historyDocsMock = vi.fn(async (): Promise<unknown[]> => []);
 const createdMessages: ReturnType<typeof pmMessage>[] = [];
 vi.mock("@/models/pmMessage", () => ({
   PmMessage: {
@@ -42,7 +45,7 @@ vi.mock("@/models/pmMessage", () => ({
       return doc;
     }),
     find: () => ({
-      sort: () => ({ limit: () => ({ populate: () => ({ lean: () => Promise.resolve([]) }) }) }),
+      sort: () => ({ limit: () => ({ populate: () => ({ lean: () => historyDocsMock() }) }) }),
     }),
   },
 }));
@@ -462,6 +465,7 @@ describe("the prefix a turn asks to be cached", () => {
     chatCompletion.mockReset();
     replayHistoryMock.mockImplementation(async () => []);
     buildUserContentMock.mockImplementation(async (text: string) => text);
+    historyDocsMock.mockImplementation(async () => []);
   });
 
   const twoCalls = () =>
@@ -546,6 +550,36 @@ describe("the prefix a turn asks to be cached", () => {
     // The control: the picture really was in the request, just past the boundary
     expect(JSON.stringify(request.messages)).toContain("image_url");
     expect(JSON.stringify(marked)).not.toContain("image_url");
+  });
+
+  /**
+   * A cache write costs more than the cold prompt it replaces, so it has to be read back by
+   * something. While the replay window is still growing the history mark is read by the next turn
+   * whatever this one does — but once the window has filled it slides, the next turn opens with
+   * different bytes, and a turn that then answers in a single call has paid for an entry no
+   * request will ever read. The second call is the first proof that more calls are coming
+   * (BP-568 review).
+   */
+  it("withholds the history mark until a filled thread has proved the turn is not a one-call turn", async () => {
+    historyDocsMock.mockResolvedValue(Array.from({ length: 30 }, (_, i) => ({ content: `old ${i}` })));
+    twoCalls();
+
+    await turn([]);
+
+    expect(sent[0].cachePrefixLength).toBe(1);
+    expect(sent[1].cachePrefixLength).toBe(1 + HISTORY.length);
+  });
+
+  // The control: a thread still filling up marks the history from the first call, because there
+  // the next turn reads it back even if this one stops here
+  it("marks the history from the first call while the window is still growing", async () => {
+    historyDocsMock.mockResolvedValue([{ content: "the only older turn" }]);
+    twoCalls();
+
+    await turn([]);
+
+    expect(sent[0].cachePrefixLength).toBe(1 + HISTORY.length);
+    expect(sent[1].cachePrefixLength).toBe(1 + HISTORY.length);
   });
 
   it("names one conversation for every call of the turn, keyed by board and reader", async () => {

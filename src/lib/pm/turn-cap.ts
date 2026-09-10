@@ -86,12 +86,25 @@ export async function dailyPmSpend(
   ]);
 
   const tokens = totals?.tokens ?? 0;
+  const cachedTokens = totals?.cachedTokens ?? 0;
+  /**
+   * The premise this reporting rests on is the provider's, not ours: a cache read is documented as
+   * part of `prompt_tokens`. A provider counting it outside would make `tokens` understate what was
+   * billed while the settings screen still rendered a plausible share. Nothing on screen could show
+   * that, so it goes to the log — the operator is not the one who can act on it (BP-568 review).
+   */
+  if (cachedTokens > tokens) {
+    console.warn(
+      `[pm] project ${projectId}: ${cachedTokens} cached tokens reported against ${tokens} total — ` +
+        `the provider is counting cache reads outside its prompt total, so the day's spend is understated`
+    );
+  }
   return {
     // A cap of 0 is no cap: `over` must not become true for every project the moment this ships
     over: cap > 0 && tokens >= cap,
     cap,
     tokens,
-    cachedTokens: totals?.cachedTokens ?? 0,
+    cachedTokens,
     cacheWriteTokens: totals?.cacheWriteTokens ?? 0,
     calls: totals?.calls ?? 0,
     stepLimitHits: totals?.stepLimitHits ?? 0,

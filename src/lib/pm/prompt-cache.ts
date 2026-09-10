@@ -70,9 +70,17 @@ function marked(message: OrChatMessage): OrChatMessage {
  * also a prefix of the NEXT turn's request, but only while the replay window is still growing:
  * once a thread passes `HISTORY_LIMIT` the window slides, the oldest replayed message changes,
  * and the two requests diverge one message in. `MAX_REPLAYED_IMAGES` rotates images out the same
- * way. So a long thread's single-call turn does pay a write nothing reads. The first breakpoint
- * is the one with no such caveat: the system prompt is the same bytes on every turn of every
- * thread, whatever the window does.
+ * way, and that one is not detectable from the message count. The caller handles the window case
+ * — see `windowGrowing` in `agent.ts`, which withholds the history mark on the first call of a
+ * filled thread, since a turn that then answers in one call would have written for nobody.
+ *
+ * **The system prompt is the steadier of the two marks, not a constant.** It survives the window
+ * entirely, but `buildSystemPrompt` interpolates the reader, branches on whether anyone is
+ * driving the turn at all, and names the tools withheld from it — so a board has one system-prompt
+ * entry per reader plus one per unattended flavour, renewed whenever the project's PM settings,
+ * categories or MCP servers change. They are not competing for one endpoint: `pmSessionId` is
+ * keyed on (project, reader) too. Anyone wondering why cache writes are not falling to one should
+ * read `buildSystemPrompt` before suspecting this file.
  */
 export function withCacheBreakpoints(
   model: string,

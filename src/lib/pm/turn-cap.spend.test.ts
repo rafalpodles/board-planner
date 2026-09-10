@@ -86,6 +86,31 @@ describe("dailyPmSpend", () => {
     expect(spend.tokens).toBe(120_000);
   });
 
+  /**
+   * The subset premise is the provider's, and a provider that counted cache reads outside its
+   * prompt total would make the day's spend understate what was billed while the settings screen
+   * still rendered a plausible share. Nothing on screen could show that, so it goes to the log.
+   */
+  it("says so in the log when a provider reports more cached than spent", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    aggregate.mockResolvedValue([{ tokens: 1_000, cachedTokens: 4_000, cacheWriteTokens: 0, calls: 1, stepLimitHits: 0 }]);
+
+    await dailyPmSpend(PROJECT, {});
+
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("understated"));
+    warn.mockRestore();
+  });
+
+  // The control: the ordinary case is silent, so the warning means something when it appears
+  it("says nothing when the cached share is a share", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await dailyPmSpend(PROJECT, {});
+
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
   // A cached token is a token already counted, so a cheap day must not read as an over-spent one
   it("judges the ceiling on the total, not on the total plus its cached share", async () => {
     resolveDailyTokenCap.mockResolvedValue(150_000);

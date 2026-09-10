@@ -86,21 +86,37 @@ async function say(page: Page, prompt: string, directive: Record<string, unknown
 }
 
 /**
- * Answers the server has actually stored — an assistant row with content in it.
+ * Answers the server has actually stored — an assistant chat row with content in it.
  *
  * The signal to sync a second turn on, and not the stub's request count: that rises when the
  * FIRST call of a turn arrives, so a test waiting on it sends the next message while the turn is
  * still running. The per-project lock then refuses that POST, or the empty assistant row is
  * skipped by `replayHistory` and the request under inspection has no history in it at all.
  * `pm-trust-boundary.spec.ts` documents the same trap, reached from the rendered side.
+ *
+ * Polling `pm/messages` is safe **because of an ordering elsewhere**, which is worth naming since
+ * nothing here would survive its being changed: the route calls `finalizeAbandonedTurns` on every
+ * GET, and that would write an abandonment notice into a row this helper counts — but it returns
+ * immediately while `isTurnRunning`, and the chat route takes that lock BEFORE `runPmTurn` creates
+ * the empty assistant row. Move `acquireTurnLock` after the row and this file reddens for a reason
+ * that looks unrelated to it.
+ *
+ * `limit` is well past what these threads reach, and only chat turns are counted: the route
+ * returns the most recent N and a thread-wide filter, so a capped page or an autonomous turn
+ * landing mid-test would make this stop tracking the thing it stands for — the same shape as the
+ * bug it replaces.
  */
 const answered = async (request: APIRequestContext) => {
-  const res = await request.get(`/api/projects/${PROJECT_KEY}/pm/messages?limit=50`, {
+  const res = await request.get(`/api/projects/${PROJECT_KEY}/pm/messages?limit=200`, {
     headers: ADMIN_AUTH,
   });
   expect(res.status(), await res.text()).toBe(200);
-  const { messages } = (await res.json()) as { messages: { role: string; content: string }[] };
-  return messages.filter((m) => m.role === "assistant" && m.content.trim()).length;
+  const { messages } = (await res.json()) as {
+    messages: { role: string; content: string; trigger?: { type?: string } }[];
+  };
+  return messages.filter(
+    (m) => m.role === "assistant" && m.content.trim() && (m.trigger?.type ?? "chat") === "chat"
+  ).length;
 };
 
 /** Sends a message and waits for the server's own answer to it, not for the provider's first call. */

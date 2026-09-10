@@ -526,6 +526,19 @@ describe("PmAgentSection — what today's tokens actually cost", () => {
   });
 
   /**
+   * 2,000 of 3,000 is 66.67%, which rounds to 67 and truncates to 66 — the only shape of input
+   * that can tell the two apart. Every other case in this file lands on a whole number, so the
+   * rounding was free to be anything.
+   */
+  it("rounds the share rather than truncating it", async () => {
+    api.get.mockResolvedValue(usage({ tokens: 3_000, cachedTokens: 2_000 }));
+
+    renderSection(true);
+
+    expect(await cacheLine()).toContain("67%");
+  });
+
+  /**
    * The two numbers come from a provider, and nothing obliges it to report a cache read that it
    * also counted as a prompt token. "450% were read from the provider's cache" reads as a broken
    * product rather than as a broken provider, so the share is clamped (BP-568 review).

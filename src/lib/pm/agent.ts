@@ -316,6 +316,14 @@ export async function runPmTurn(opts: {
    * into the following turn depends on the replay window; `prompt-cache.ts` says where that ends.
    */
   const stablePrefixLength = 1 + replayed.length;
+  /**
+   * Whether the replayed history is still a growing prefix. Below `HISTORY_LIMIT` every following
+   * turn still opens with these same messages, so marking them is read back later whatever this
+   * turn does. Once the window has filled it slides instead, the next turn's request diverges one
+   * message in, and a turn that answers in a single call has written a cache entry nobody can ever
+   * read (BP-568 review).
+   */
+  const windowGrowing = history.length < HISTORY_LIMIT;
   const sessionId = pmSessionId(opts.projectId, opts.triggeredByUserId);
 
 
@@ -341,8 +349,11 @@ export async function runPmTurn(opts: {
       messages,
       tools: toolDefinitions,
       // Everything the loop appends from here — assistant tool calls and their results — grows
-      // past this mark, so the prefix it names is the same bytes on every one of the 15 calls
-      cachePrefixLength: stablePrefixLength,
+      // past this mark, so the prefix it names is the same bytes on every one of the 15 calls.
+      // On a filled window the first call marks the system prompt only: at that point nothing has
+      // yet proved the turn will make a second call, and if it does not, marking the history buys
+      // a write no request ever reads. From the second call on there is such a proof.
+      cachePrefixLength: windowGrowing || step > 0 ? stablePrefixLength : 1,
       sessionId,
       signal: opts.signal,
     });
