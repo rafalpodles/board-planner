@@ -469,6 +469,10 @@ describe("PmAgentSection — what today's tokens actually cost", () => {
 
   // Thousands separators follow the runner's locale — " " under pl-PL, "," under en-US — and a
   // test may not assume which machine it is on. The figure is the claim, not its punctuation.
+  //
+  // Compared WHOLE, never with `toContain`: a strip of the sentence is every number in it run
+  // together, so "9000075" contains "90000" and also contains "900" — and a component rendering
+  // ten times the value would satisfy a substring match.
   const figuresIn = async () => (await cacheLine()).replace(/\D/g, "");
 
   // `api.get` is stubbed per case here; without this the last stub outlives the block, because
@@ -482,7 +486,7 @@ describe("PmAgentSection — what today's tokens actually cost", () => {
 
     renderSection(true);
 
-    expect(await figuresIn()).toContain("90000");
+    expect(await figuresIn()).toBe("9000075");
     expect(await cacheLine()).toContain("75%");
     // Beside the total it is part of, not instead of it — read off the totals line, which is a
     // different element from the one under test
@@ -500,7 +504,8 @@ describe("PmAgentSection — what today's tokens actually cost", () => {
 
     renderSection(true);
 
-    expect(await cacheLine()).toContain("0%");
+    // "0 of those (0%)" — the whole strip, so a rendered non-zero cannot hide inside it
+    expect(await figuresIn()).toBe("00");
   });
 
   it("mentions cache writes only when the provider charged for some", async () => {
@@ -508,7 +513,7 @@ describe("PmAgentSection — what today's tokens actually cost", () => {
 
     renderSection(true);
 
-    expect(await figuresIn()).toContain("4000");
+    expect(await figuresIn()).toBe("90000754000");
     expect(await cacheLine()).toContain("written");
   });
 
@@ -530,7 +535,7 @@ describe("PmAgentSection — what today's tokens actually cost", () => {
 
     renderSection(true);
 
-    expect(await cacheLine()).toContain("100%");
+    expect(await figuresIn()).toBe("90000100");
     expect(await cacheLine()).not.toContain("450%");
   });
 

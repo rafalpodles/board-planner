@@ -75,7 +75,10 @@ vi.mock("./history", () => ({
   stripSpoofedLabels: (s: string) => s,
   HISTORY_AUTHOR_PREFIX: "",
 }));
-vi.mock("./attachments", () => ({ buildUserContent: async (s: string) => s }));
+// A function, not a constant: a turn carrying only a picture puts an extra system message in
+// front of the user content, and that nudge is one of the things the cache boundary must exclude
+const buildUserContentMock = vi.fn(async (text: string): Promise<unknown> => text);
+vi.mock("./attachments", () => ({ buildUserContent: (text: string) => buildUserContentMock(text) }));
 vi.mock("@/lib/columns", () => ({
   getProjectColumns: () => [{ id: "todo", role: "approved" }],
   defaultStatusFor: () => "todo",
@@ -458,6 +461,7 @@ describe("the prefix a turn asks to be cached", () => {
   afterEach(() => {
     chatCompletion.mockReset();
     replayHistoryMock.mockImplementation(async () => []);
+    buildUserContentMock.mockImplementation(async (text: string) => text);
   });
 
   const twoCalls = () =>
@@ -509,6 +513,41 @@ describe("the prefix a turn asks to be cached", () => {
    * reader to an endpoint holding somebody else's prefix, and swapping the pair would be a
    * different key for the same thread every time a different board is read (BP-568 review).
    */
+  /**
+   * A turn carrying a picture and no words puts a second system message — the "describe what you
+   * see and change nothing" nudge — between the history and the user content. Both it and the
+   * picture are this turn's, so both belong past the mark; a picture written into a cache that
+   * nothing reads back is the most expensive mistake available here.
+   *
+   * Without this case the boundary is untestable in the direction that matters: with no image in
+   * play, `1 + replayed.length` and `messages.length - 1` are the same number, so a whole suite
+   * of turns agrees with an off-by-one.
+   */
+  it("leaves the image nudge, and the picture, outside the marked prefix", async () => {
+    buildUserContentMock.mockResolvedValue([
+      { type: "image_url", image_url: { url: "data:image/png;base64,AAA" } },
+    ]);
+    answering({ type: "text", content: "a screenshot of a board" });
+
+    await runPmTurn({
+      projectId: PROJECT._id,
+      userMessage: "",
+      triggeredByUserId: "pm-user-id",
+      trigger: { type: "chat" },
+    });
+
+    const request = sent[0];
+    const marked = request.messages.slice(0, request.cachePrefixLength);
+
+    expect(marked.map((m) => m.role)).toEqual(["system", "user", "assistant"]);
+    // Both system messages went out; only the standing rules are inside the mark
+    expect(request.messages.filter((m) => m.role === "system")).toHaveLength(2);
+    expect(marked.filter((m) => m.role === "system")).toHaveLength(1);
+    // The control: the picture really was in the request, just past the boundary
+    expect(JSON.stringify(request.messages)).toContain("image_url");
+    expect(JSON.stringify(marked)).not.toContain("image_url");
+  });
+
   it("names one conversation for every call of the turn, keyed by board and reader", async () => {
     twoCalls();
 

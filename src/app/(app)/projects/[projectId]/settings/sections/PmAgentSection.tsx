@@ -560,7 +560,10 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                   has nothing to take a share of, which is the only case that hides the line. */}
               {usage.tokens > 0 && (
                 <p className="m-0 mt-1 text-text-muted" data-testid="pm-usage-cache">
-                  <strong className="text-text">{usage.cachedTokens.toLocaleString()}</strong> of
+                  <strong className="text-text" data-testid="pm-usage-cached-tokens">
+                    {usage.cachedTokens.toLocaleString()}
+                  </strong>{" "}
+                  of
                   those ({cachedShare(usage)}%) were read from the provider's cache, billed at a
                   fraction of a cold prompt
                   {usage.cacheWriteTokens > 0 && (

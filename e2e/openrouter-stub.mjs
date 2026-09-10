@@ -76,6 +76,12 @@ function prefixOf(messages) {
 const isMarked = (m) =>
   Array.isArray(m?.content) && m.content.some((part) => part?.cache_control);
 
+// A message's text whether its content is a plain string or an array of parts
+const textOf = (m) =>
+  typeof m?.content === "string"
+    ? m.content
+    : (m?.content ?? []).map((part) => (typeof part?.text === "string" ? part.text : "")).join(" ");
+
 // The roles carrying a breakpoint, in order — a count alone cannot say WHERE the second one
 // landed, which is the whole question about the prefix boundary
 const markedRolesIn = (messages) => messages.filter(isMarked).map((m) => m?.role);
@@ -197,21 +203,14 @@ serve({
       // The contents, not a count: a count cannot say whether a particular instruction was sent.
       // Since BP-321 the record of past board actions is NOT among these — it is a user-role DATA
       // message — which is exactly what pm-trust-boundary.spec.ts asserts.
-      systems: messages
-        .filter((m) => m?.role === "system")
-        .map((m) => String(m?.content ?? "").slice(0, 200)),
+      // textOf, not String(): since BP-568 a marked message carries an array of parts, and
+      // stringifying that gives "[object Object]" — which would empty every assertion other specs
+      // make about what the system prompt said
+      systems: messages.filter((m) => m?.role === "system").map((m) => textOf(m).slice(0, 200)),
       roles: messages.map((m) => m?.role),
       // Every message, whole and untruncated, so a test can ask which CHANNEL a given string
       // arrived in rather than only whether it arrived. Text parts only; images are counted above.
-      contents: messages.map((m) => ({
-        role: m?.role,
-        text:
-          typeof m?.content === "string"
-            ? m.content
-            : (m?.content ?? [])
-                .map((part) => (typeof part?.text === "string" ? part.text : ""))
-                .join(" "),
-      })),
+      contents: messages.map((m) => ({ role: m?.role, text: textOf(m) })),
     };
 
     const toolHasRun = messages.some((m) => m?.role === "tool");

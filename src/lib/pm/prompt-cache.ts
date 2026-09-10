@@ -62,9 +62,17 @@ function marked(message: OrChatMessage): OrChatMessage {
  * reads it back. A mark placed after the turn's own user message is read by the turn's later
  * calls, but a turn that answers in one call makes none, and the next turn cannot read it either
  * because its history has grown past that point. Marking the end of the *replayed history*
- * instead is read by every later call of this turn AND by every turn after it, so the write is
- * never wasted. The image case makes the difference concrete: a picture marked as cacheable and
- * then read back by nobody is the most expensive thing this file could do.
+ * instead is read by every later call of this turn. The image case makes the difference concrete:
+ * a picture marked cacheable and then read back by nobody is the most expensive thing this file
+ * could do.
+ *
+ * **How far it reaches beyond the turn is bounded, and not by this file.** The history mark is
+ * also a prefix of the NEXT turn's request, but only while the replay window is still growing:
+ * once a thread passes `HISTORY_LIMIT` the window slides, the oldest replayed message changes,
+ * and the two requests diverge one message in. `MAX_REPLAYED_IMAGES` rotates images out the same
+ * way. So a long thread's single-call turn does pay a write nothing reads. The first breakpoint
+ * is the one with no such caveat: the system prompt is the same bytes on every turn of every
+ * thread, whatever the window does.
  */
 export function withCacheBreakpoints(
   model: string,

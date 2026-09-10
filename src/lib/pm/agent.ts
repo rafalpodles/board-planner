@@ -309,10 +309,11 @@ export async function runPmTurn(opts: {
 
   /**
    * The system prompt and the replayed history — and deliberately not this turn's own user
-   * message, nor the image nudge in front of it. Both of those are read back by this turn's later
+   * message, nor the image nudge in front of it. Those two are read back by this turn's later
    * calls and by nothing else: a turn that answers in one call reads them never, and the next
    * turn's history has already grown past them. Since a cache write costs more than the cold
-   * prompt it replaces, a mark nothing reads is a loss (BP-568 review).
+   * prompt it replaces, a mark nothing reads is a loss (BP-568 review). How much of this survives
+   * into the following turn depends on the replay window; `prompt-cache.ts` says where that ends.
    */
   const stablePrefixLength = 1 + replayed.length;
   const sessionId = pmSessionId(opts.projectId, opts.triggeredByUserId);

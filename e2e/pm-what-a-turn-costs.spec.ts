@@ -85,6 +85,31 @@ async function say(page: Page, prompt: string, directive: Record<string, unknown
   await page.getByRole("button", { name: "Send", exact: true }).click();
 }
 
+/**
+ * Answers the server has actually stored — an assistant row with content in it.
+ *
+ * The signal to sync a second turn on, and not the stub's request count: that rises when the
+ * FIRST call of a turn arrives, so a test waiting on it sends the next message while the turn is
+ * still running. The per-project lock then refuses that POST, or the empty assistant row is
+ * skipped by `replayHistory` and the request under inspection has no history in it at all.
+ * `pm-trust-boundary.spec.ts` documents the same trap, reached from the rendered side.
+ */
+const answered = async (request: APIRequestContext) => {
+  const res = await request.get(`/api/projects/${PROJECT_KEY}/pm/messages?limit=50`, {
+    headers: ADMIN_AUTH,
+  });
+  expect(res.status(), await res.text()).toBe(200);
+  const { messages } = (await res.json()) as { messages: { role: string; content: string }[] };
+  return messages.filter((m) => m.role === "assistant" && m.content.trim()).length;
+};
+
+/** Sends a message and waits for the server's own answer to it, not for the provider's first call. */
+async function sayAndWait(page: Page, request: APIRequestContext, prompt: string, directive: Record<string, unknown>) {
+  const before = await answered(request);
+  await say(page, prompt, directive);
+  await expect.poll(() => answered(request), { timeout: 40_000 }).toBeGreaterThan(before);
+}
+
 test("a turn's real cost is recorded and shown, in calls and tokens", async ({ page, request }) => {
   // The premise: nothing has been spent yet, so the numbers below came from the turn and not from
   // the seed
@@ -267,7 +292,9 @@ test("what a turn read from the cache is recorded, and shown as a share of what 
 
     const cache = page.getByTestId("pm-usage-cache");
     await expect(cache).toContainText("read from the provider's cache");
-    expect(await figuresIn(cache)).toContain(String(spent.cachedTokens));
+    // The figure's own element, compared whole: a digit strip of the sentence would also match
+    // this number inside a larger one, so rendering ten times the value would still pass
+    expect(await figuresIn(page.getByTestId("pm-usage-cached-tokens"))).toBe(String(spent.cachedTokens));
     // The control: the total it is a share of is still on screen, unchanged by any of this — read
     // off the totals line specifically, which is not the line under test
     expect(await figuresIn(page.getByTestId("pm-usage-totals"))).toContain(String(spent.tokens));
@@ -298,6 +325,11 @@ test("the calls of one turn mark the same prefix, and name one session", async (
   await signIn(page, "admin");
   await page.goto(`/projects/${PROJECT_KEY}/pm`);
   await expect(page.getByPlaceholder(/Message the PM/)).toBeVisible();
+
+  // One conversational turn first, so the prefix under comparison is a replayed history and not
+  // the system prompt on its own
+  await sayAndWait(page, request, "an older question", {});
+  await request.post(`${PM_STUB_URL}/reset`);
 
   await say(page, "make a task", {
     name: "create_task",
@@ -338,13 +370,13 @@ test("the breakpoints go to a provider that needs them, and stop at the replayed
   await page.goto(`/projects/${PROJECT_KEY}/pm`);
   await expect(page.getByPlaceholder(/Message the PM/)).toBeVisible();
 
-  await say(page, "the first question", {});
-  await expect.poll(async () => (await sentRequests(request)).length, { timeout: 40_000 }).toBe(1);
-
-  await say(page, "the second question", {});
-  await expect.poll(async () => (await sentRequests(request)).length, { timeout: 40_000 }).toBe(2);
+  await sayAndWait(page, request, "the first question", {});
+  await sayAndWait(page, request, "the second question", {});
 
   const [first, second] = await sentRequests(request);
+  // Two conversational turns, one call each — if either had run long the pair below would be
+  // comparing the wrong two requests
+  expect(await sentRequests(request)).toHaveLength(2);
 
   // Nothing to replay yet, so the system prompt is the whole of what outlives the turn
   expect(first.markedRoles).toEqual(["system"]);
