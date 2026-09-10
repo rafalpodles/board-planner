@@ -77,3 +77,52 @@ describe("what chatCompletion reports about the call's cost", () => {
     expect("usage" in result ? result.usage : "missing").toBeUndefined();
   });
 });
+
+/**
+ * BP-568. The same block carries what the provider served from its cache, in
+ * `prompt_tokens_details`, and this client dropped it — so Settings reported every token as a cold
+ * prompt and the number an operator sets a budget from could not tell a cache hit from a miss.
+ */
+describe("what it reports about the cache", () => {
+  it("carries the cache read and write counts back", async () => {
+    respondWith({
+      ...TEXT,
+      usage: { ...USAGE, prompt_tokens_details: { cached_tokens: 1000, cache_write_tokens: 200 } },
+    });
+
+    expect(await call()).toMatchObject({
+      usage: { promptTokens: 1200, cachedPromptTokens: 1000, cacheWriteTokens: 200 },
+    });
+  });
+
+  /**
+   * A subset, never an addition. If the cache read were added to the prompt count the day's total
+   * would jump the moment caching started working, and the operator would read a saving as a
+   * fifty-percent overspend.
+   */
+  it("leaves the prompt total alone — a cached token was already counted once", async () => {
+    respondWith({
+      ...TEXT,
+      usage: { prompt_tokens: 1200, completion_tokens: 300, prompt_tokens_details: { cached_tokens: 1100 } },
+    });
+
+    expect(await call()).toMatchObject({ usage: { promptTokens: 1200, totalTokens: 1500 } });
+  });
+
+  // The degradation the ticket is about: a provider that caches nothing, or reports nothing about
+  // it, still produces a correct turn — with zeros, not with NaN and not with a missing field
+  it("reads a provider that says nothing about caching as nothing cached", async () => {
+    respondWith({ ...TEXT, usage: USAGE });
+
+    expect(await call()).toMatchObject({ usage: { cachedPromptTokens: 0, cacheWriteTokens: 0 } });
+  });
+
+  it("does not let a non-numeric or negative count through", async () => {
+    respondWith({
+      ...TEXT,
+      usage: { ...USAGE, prompt_tokens_details: { cached_tokens: "some", cache_write_tokens: -5 } },
+    });
+
+    expect(await call()).toMatchObject({ usage: { cachedPromptTokens: 0, cacheWriteTokens: 0 } });
+  });
+});

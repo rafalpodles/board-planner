@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const chatCompletion = vi.fn();
 const changeStatusExecute = vi.fn();
@@ -286,9 +286,15 @@ describe("an unattended turn and a project's MCP server", () => {
  * fail — a turn that burned nine calls and then met a provider error cost nine calls.
  */
 describe("what a turn records about its own cost", () => {
-  const withUsage = (result: object, tokens: number) => ({
+  const withUsage = (result: object, tokens: number, cached = 0, written = 0) => ({
     ...result,
-    usage: { promptTokens: tokens, completionTokens: tokens, totalTokens: tokens * 2 },
+    usage: {
+      promptTokens: tokens,
+      completionTokens: tokens,
+      totalTokens: tokens * 2,
+      cachedPromptTokens: cached,
+      cacheWriteTokens: written,
+    },
   });
 
   const lastMessage = () => createdMessages[createdMessages.length - 1];
@@ -364,5 +370,115 @@ describe("what a turn records about its own cost", () => {
     await turn([]);
 
     expect(lastMessage().usage).toMatchObject({ calls: 1, totalTokens: 0 });
+  });
+
+  /**
+   * BP-568. The saving lives in the calls after the first: the first pays a cache write for the
+   * prefix and the rest read it back. Recorded beside the tokens rather than inside them, so the
+   * day's total still means what a budget is set from.
+   */
+  it("sums what its round-trips read from the cache, without touching the total", async () => {
+    chatCompletion
+      .mockResolvedValueOnce(withUsage(toolCall("add_comment", { taskKey: "BP-1", body: "x" }), 100, 0, 90))
+      .mockResolvedValueOnce(withUsage({ type: "text", content: "done" }, 100, 90, 0));
+
+    await turn([]);
+
+    expect(lastMessage().usage).toMatchObject({
+      calls: 2,
+      totalTokens: 400,
+      cachedPromptTokens: 90,
+      cacheWriteTokens: 90,
+    });
+  });
+
+  // The control: a provider that caches nothing records zero, not the prompt count
+  it("records nothing cached when nothing was", async () => {
+    chatCompletion.mockResolvedValue(withUsage({ type: "text", content: "done" }, 100));
+
+    await turn([]);
+
+    expect(lastMessage().usage).toMatchObject({ cachedPromptTokens: 0, cacheWriteTokens: 0 });
+  });
+});
+
+/**
+ * BP-568. What the loop tells the client to cache. The prefix is named by a message count, and a
+ * count that drifted with the conversation would mark a boundary that moves on every call — every
+ * one of them a cache write, which is worse than not caching at all.
+ */
+describe("the prefix a turn asks to be cached", () => {
+  /**
+   * Snapshotted at call time, not read back off the mock afterwards. The loop pushes into one
+   * `messages` array and hands the same reference to every call, so `mock.calls[0]` and
+   * `mock.calls[1]` are the same object — comparing them proved only that an array equals itself,
+   * and the comparison passed with the prefix bookkeeping deleted.
+   */
+  const sent: { messages: { role: string }[]; cachePrefixLength: number; sessionId: string }[] = [];
+
+  function answering(...results: object[]) {
+    let i = 0;
+    chatCompletion.mockImplementation(async (opts: Record<string, unknown>) => {
+      sent.push(
+        JSON.parse(
+          JSON.stringify({
+            messages: opts.messages,
+            cachePrefixLength: opts.cachePrefixLength,
+            sessionId: opts.sessionId,
+          })
+        )
+      );
+      return results[Math.min(i++, results.length - 1)];
+    });
+  }
+
+  beforeEach(() => {
+    sent.length = 0;
+  });
+
+  // The implementation installed above outlives `vi.clearAllMocks`, which clears calls and not
+  // behaviour — a later test in this file would otherwise inherit a stub answering "done" forever
+  afterEach(() => {
+    chatCompletion.mockReset();
+  });
+
+  const twoCalls = () =>
+    answering(toolCall("add_comment", { taskKey: "BP-1", body: "x" }), { type: "text", content: "done" });
+
+  it("is the same messages, byte for byte, on the second call as on the first", async () => {
+    twoCalls();
+
+    await turn([]);
+
+    const prefixOf = (call: number) =>
+      JSON.stringify(sent[call].messages.slice(0, sent[call].cachePrefixLength));
+
+    expect(sent).toHaveLength(2);
+    expect(sent[1].cachePrefixLength).toBe(sent[0].cachePrefixLength);
+    expect(prefixOf(1)).toBe(prefixOf(0));
+    // The control: the second request really had grown past the mark, so the two were not equal
+    // for the trivial reason
+    expect(sent[1].messages.length).toBeGreaterThan(sent[0].messages.length);
+  });
+
+  it("stops before anything the turn itself appended", async () => {
+    twoCalls();
+
+    await turn([]);
+
+    const marked = sent[1].messages.slice(0, sent[1].cachePrefixLength);
+    expect(marked.some((m) => m.role === "tool")).toBe(false);
+    expect(marked[marked.length - 1].role).toBe("user");
+    // The control: the tool's answer was in that request, just past the mark
+    expect(sent[1].messages.some((m) => m.role === "tool")).toBe(true);
+  });
+
+  it("names one conversation for every call of the turn", async () => {
+    twoCalls();
+
+    await turn([]);
+
+    expect(sent[0].sessionId).toEqual(expect.stringMatching(/^[0-9a-f]{32}$/));
+    expect(sent[1].sessionId).toBe(sent[0].sessionId);
   });
 });

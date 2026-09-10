@@ -55,6 +55,43 @@ function reply(res, body) {
 // The shape of the last completion request, for /last
 let received = null;
 
+/**
+ * One entry per completion request, for /requests (BP-568). What a turn's second call sends in
+ * front of the cache breakpoint has to be the same bytes as its first, and no assertion on the
+ * app's own objects can see that: the agent hands `chatCompletion` one array and mutates it, so
+ * the arguments of call 1 and call 2 are the same object. These are the bodies as they arrived.
+ */
+let requests = [];
+
+/**
+ * The stable prefix, as the stub can see it: everything before the first assistant message
+ * carrying tool calls, which is where a turn starts appending to itself.
+ */
+function prefixOf(messages) {
+  const growth = messages.findIndex((m) => Array.isArray(m?.tool_calls) && m.tool_calls.length > 0);
+  return JSON.stringify(growth === -1 ? messages : messages.slice(0, growth));
+}
+
+const cacheControlsIn = (messages) =>
+  messages.reduce(
+    (n, m) => n + (Array.isArray(m?.content) ? m.content.filter((part) => part?.cache_control).length : 0),
+    0
+  );
+
+/**
+ * What a provider that caches reports. The first call of a turn writes the prefix into the cache
+ * and the rest read it back, which is the whole shape the ticket is about — a stub that always
+ * reported the same numbers could not tell the two apart.
+ */
+const usageWith = (fromCache) => ({
+  prompt_tokens: 1000,
+  completion_tokens: 200,
+  total_tokens: 1200,
+  prompt_tokens_details: fromCache
+    ? { cached_tokens: 900, cache_write_tokens: 0 }
+    : { cached_tokens: 0, cache_write_tokens: 900 },
+});
+
 serve({
   name: "openrouter stub",
   port: PORT,
@@ -65,6 +102,7 @@ serve({
     if (req.url === "/reset") {
       seen.clear();
       received = null;
+      requests = [];
       res.writeHead(200, { "Content-Type": "text/plain" }).end("ok");
       return;
     }
@@ -74,6 +112,12 @@ serve({
     // rather than merely that a turn ran (BP-451 review).
     if (req.url === "/last") {
       res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(received));
+      return;
+    }
+
+    // Every completion request of the run, in order, so a test can compare one against the next
+    if (req.url === "/requests") {
+      res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(requests));
       return;
     }
 
@@ -99,6 +143,12 @@ serve({
     try {
       const body = JSON.parse(raw);
       messages = body.messages ?? [];
+      requests.push({
+        sessionId: body.session_id ?? null,
+        prefix: prefixOf(messages),
+        messageCount: messages.length,
+        cacheControls: cacheControlsIn(messages),
+      });
       // The names the model was OFFERED, which is the whole subject of BP-569 and is carried
       // beside the conversation rather than inside it — no assertion on messages can see it.
       offeredTools = (body.tools ?? []).map((t) => t?.function?.name).filter(Boolean);
@@ -157,7 +207,7 @@ serve({
     const escalated = /^Task (\S+) was just moved to "needs_human_review"/m.exec(text ?? "");
     if (escalated && !toolHasRun) {
       reply(res, {
-        usage: { prompt_tokens: 1000, completion_tokens: 200, total_tokens: 1200 },
+        usage: usageWith(false),
         choices: [
           {
             finish_reason: "tool_calls",
@@ -200,7 +250,8 @@ serve({
       // pass. Delaying *this* answer is what holds the turn open while its action chips show.
       if (toolHasRun) {
         reply(res, {
-            usage: { prompt_tokens: 1000, completion_tokens: 200, total_tokens: 1200 },
+          // The turn's later calls read back the prefix its first call wrote (BP-568)
+          usage: usageWith(true),
           choices: [{ finish_reason: "stop", message: { role: "assistant", content: "Done." } }],
         });
         return;
@@ -212,7 +263,7 @@ serve({
       }
       if (!call.name) {
         reply(res, {
-            usage: { prompt_tokens: 1000, completion_tokens: 200, total_tokens: 1200 },
+          usage: usageWith(false),
           choices: [
             { finish_reason: "stop", message: { role: "assistant", content: call.say ?? "Noted." } },
           ],
@@ -221,7 +272,7 @@ serve({
       }
       reply(res, {
         // A real provider reports what the call cost on every answer; BP-284 reads it
-        usage: { prompt_tokens: 1000, completion_tokens: 200, total_tokens: 1200 },
+        usage: usageWith(false),
         choices: [
           {
             finish_reason: "tool_calls",

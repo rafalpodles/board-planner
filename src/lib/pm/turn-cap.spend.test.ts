@@ -11,7 +11,9 @@ const PROJECT = "507f1f77bcf86cd799439011";
 
 beforeEach(() => {
   vi.clearAllMocks();
-  aggregate.mockResolvedValue([{ tokens: 120_000, calls: 340, stepLimitHits: 2 }]);
+  aggregate.mockResolvedValue([
+    { tokens: 120_000, cachedTokens: 90_000, cacheWriteTokens: 4_000, calls: 340, stepLimitHits: 2 },
+  ]);
   resolveDailyTokenCap.mockResolvedValue(0);
 });
 
@@ -59,7 +61,36 @@ describe("dailyPmSpend", () => {
 
     const spend = await dailyPmSpend(PROJECT, {});
 
-    expect(spend).toMatchObject({ tokens: 0, calls: 0, stepLimitHits: 0, over: false });
+    expect(spend).toMatchObject({
+      tokens: 0,
+      cachedTokens: 0,
+      cacheWriteTokens: 0,
+      calls: 0,
+      stepLimitHits: 0,
+      over: false,
+    });
+  });
+
+  /**
+   * BP-568. What share of the day was served from cache, reported apart from the total it is
+   * already inside. The aggregate is mocked here, so this says the figures are carried and not
+   * what the pipeline computes — `pm-what-a-turn-costs.spec.ts` drives that against real Mongo,
+   * which is also the only place the schema's field name and the pipeline's path are compared.
+   */
+  it("carries the cache figures out beside the tokens they are part of", async () => {
+    const spend = await dailyPmSpend(PROJECT, {});
+
+    expect(spend.cachedTokens).toBe(90_000);
+    expect(spend.cacheWriteTokens).toBe(4_000);
+    // Not added to it: the ceiling is judged on the same total as before
+    expect(spend.tokens).toBe(120_000);
+  });
+
+  // A cached token is a token already counted, so a cheap day must not read as an over-spent one
+  it("judges the ceiling on the total, not on the total plus its cached share", async () => {
+    resolveDailyTokenCap.mockResolvedValue(150_000);
+
+    expect((await dailyPmSpend(PROJECT, { dailyTokenCap: 150_000 })).over).toBe(false);
   });
 
   // The project's day, the same one the turn cap already uses — a UTC server would otherwise turn

@@ -35,7 +35,14 @@ beforeEach(() => {
   check.mockResolvedValue(true);
   lean.mockResolvedValue({ pm: {} });
   isOverDailyTurnCap.mockResolvedValue({ used: 0, cap: 0 });
-  dailyPmSpend.mockResolvedValue({ calls: 0, tokens: 0, cap: 0, stepLimitHits: 0 });
+  dailyPmSpend.mockResolvedValue({
+    calls: 0,
+    tokens: 0,
+    cachedTokens: 0,
+    cacheWriteTokens: 0,
+    cap: 0,
+    stepLimitHits: 0,
+  });
 });
 
 /**
@@ -63,5 +70,25 @@ describe("GET pm/usage", () => {
     const response = await GET(new Request("http://x"), { params });
 
     expect(response.status).toBe(200);
+  });
+
+  /**
+   * BP-568. The figures exist in the aggregate and are read on the settings screen; a route that
+   * computed them and left them out of the body is exactly the silent gap this ticket is about,
+   * and nothing else in the chain would have failed.
+   */
+  it("reports what was served from cache, beside the tokens it is part of", async () => {
+    dailyPmSpend.mockResolvedValue({
+      calls: 12,
+      tokens: 120_000,
+      cachedTokens: 90_000,
+      cacheWriteTokens: 4_000,
+      cap: 0,
+      stepLimitHits: 0,
+    });
+
+    const body = await (await GET(new Request("http://x"), { params })).json();
+
+    expect(body).toMatchObject({ tokens: 120_000, cachedTokens: 90_000, cacheWriteTokens: 4_000 });
   });
 });

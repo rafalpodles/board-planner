@@ -9,7 +9,13 @@ const { api, toast } = vi.hoisted(() => ({
   // `get` reads today's PM spend on mount (BP-284). Rejecting rather than resolving keeps these
   // cases about what they were about: the section renders its settings whether or not the number
   // is available, which is the behaviour the catch beside the call exists for.
-  api: { post: vi.fn(), put: vi.fn(), get: vi.fn(() => Promise.reject(new Error("not stubbed here"))) },
+  api: {
+    post: vi.fn(),
+    put: vi.fn(),
+    // Typed rather than inferred: inferring from the rejecting default makes the resolved type
+    // `never`, so a case that wants to stub a real usage body cannot say so
+    get: vi.fn<() => Promise<unknown>>(() => Promise.reject(new Error("not stubbed here"))),
+  },
   toast: vi.fn(),
 }));
 
@@ -435,5 +441,82 @@ describe("the rows moving under a disconnect", () => {
 
     // A baseline captured before the save would come back here and make every saved field dirty
     expect(dirtyCount()).toBe(0);
+  });
+});
+
+/**
+ * BP-568. Today's spend read as if every token were a cold prompt, because the provider's cache
+ * figures were dropped before they ever reached this screen — so the one number an operator sets
+ * a budget from could not tell a cache hit from a miss.
+ */
+describe("PmAgentSection — what today's tokens actually cost", () => {
+  const usage = (over: Record<string, unknown> = {}) => ({
+    turns: { used: 3, cap: 100 },
+    calls: 12,
+    tokens: 120_000,
+    cachedTokens: 90_000,
+    cacheWriteTokens: 0,
+    tokenCap: 0,
+    stepLimitHits: 0,
+    maxCallsPerTurn: 15,
+    ...over,
+  });
+
+  const cacheLine = async () => {
+    const line = await screen.findByTestId("pm-usage-cache");
+    return line.textContent ?? "";
+  };
+
+  it("says how much of the day the provider served from its own cache", async () => {
+    api.get.mockResolvedValue(usage());
+
+    renderSection(true);
+
+    expect(await cacheLine()).toContain("90,000");
+    expect(await cacheLine()).toContain("75%");
+    // Beside the total it is part of, not instead of it
+    expect((await screen.findByTestId("pm-usage-today")).textContent).toContain("120,000");
+  });
+
+  /**
+   * The case the whole ticket exists for, and the one a "hide it when it is zero" rule would
+   * swallow: a deployment whose caching is not working looks exactly like one that was never
+   * measured unless the screen says nothing was cached.
+   */
+  it("says nothing was cached rather than going quiet about it", async () => {
+    api.get.mockResolvedValue(usage({ cachedTokens: 0 }));
+
+    renderSection(true);
+
+    expect(await cacheLine()).toContain("0%");
+  });
+
+  it("mentions cache writes only when the provider charged for some", async () => {
+    api.get.mockResolvedValue(usage({ cacheWriteTokens: 4_000 }));
+
+    renderSection(true);
+
+    expect(await cacheLine()).toContain("4,000");
+    expect(await cacheLine()).toContain("written");
+  });
+
+  it("keeps quiet about writes when there were none", async () => {
+    api.get.mockResolvedValue(usage());
+
+    renderSection(true);
+
+    expect(await cacheLine()).not.toContain("written");
+  });
+
+  // A day with no turns divides by zero. "NaN%" on a settings screen is how that would read.
+  it("says nothing at all on a day with no spend", async () => {
+    api.get.mockResolvedValue(usage({ tokens: 0, cachedTokens: 0, calls: 0, turns: { used: 0, cap: 100 } }));
+
+    renderSection(true);
+
+    // The control: the panel itself rendered, so the absence below is the cache line and not the
+    // whole section failing to load
+    await screen.findByTestId("pm-usage-today");
+    expect(screen.queryByTestId("pm-usage-cache")).toBeNull();
   });
 });
