@@ -19,6 +19,7 @@ import { execFileSync } from "node:child_process";
 import {
   judge,
   ranSuccessfully,
+  blockedBecause,
   ENFORCED_SEVERITIES,
   ACCEPTED_ADVISORIES,
   type Finding,
@@ -29,8 +30,12 @@ import {
  * its own copy of the same transitive dependencies — it shipped `fast-uri@3.1.0` while the root
  * had 3.1.3 — and auditing only the root left it unwatched (BP-599 review).
  *
- * `worker/` is deliberately not here: it runs on a machine somebody enrolled, not on the server,
- * and its tree is the operator's to keep. Say so rather than leaving the omission to be guessed at.
+ * `worker/` is deliberately not here, and the reason is remediability rather than ownership — its
+ * lockfile IS committed, so an operator installs these pins, and the worker holds board credentials
+ * and pushes branches. But a server advisory is cleared by a deploy this repo controls, while a
+ * worker one needs every enrolled machine to re-install, and a red check on a branch cannot make
+ * that happen. It reports zero vulnerable packages today; when that changes it wants a mechanism
+ * that can reach those machines, not a gate here (BP-599 review).
  */
 const AUDITED = [".", "mcp-server"];
 
@@ -76,18 +81,23 @@ function mustHaveRun(report: unknown, cwd: string): unknown {
 }
 
 const blocking: Finding[] = [];
-const accepted: Finding[] = [];
+const acceptedIds = new Set<string>();
 const seenIds = new Set<string>();
 
 for (const cwd of AUDITED) {
-  const verdict = judge(mustHaveRun(auditReport(cwd), cwd));
+  const verdict = judge(mustHaveRun(auditReport(cwd), cwd), ACCEPTED_ADVISORIES, cwd);
   for (const finding of verdict.blocking) {
-    console.log(`::error::${cwd}: ${finding.severity} advisory in ${finding.package}: ${finding.title} (${finding.id})`);
+    console.log(
+      `::error::${cwd}: ${finding.severity} advisory in ${finding.package}: ${finding.title} ` +
+        `(${finding.id}) — ${blockedBecause(finding, ACCEPTED_ADVISORIES, cwd)}`
+    );
     blocking.push(finding);
   }
   for (const finding of verdict.accepted) {
     console.log(`accepted in ${cwd}: ${finding.severity} ${finding.package} ${finding.id} — ${finding.title}`);
-    accepted.push(finding);
+    // Counted by id, not by occurrence: an advisory live in both trees is one decision, and the
+    // summary line saying "2 accepted" for it would misdescribe the allowlist
+    acceptedIds.add(finding.id);
   }
   for (const finding of [...verdict.blocking, ...verdict.accepted]) seenIds.add(finding.id);
 }
@@ -105,14 +115,16 @@ for (const entry of ACCEPTED_ADVISORIES) {
 if (blocking.length === 0) {
   console.log(
     `No unaccepted ${ENFORCED_SEVERITIES.join(" or ")} advisory in the production dependencies of ` +
-      `${AUDITED.join(" or ")} (${accepted.length} accepted).`
+      `${AUDITED.join(" or ")} (${acceptedIds.size} accepted).`
   );
   process.exit(0);
 }
 
 console.log(
-  `${blocking.length} unaccepted advisory(ies). Bump the package, or accept the advisory in ` +
-    `src/lib/audit-policy.ts with a reason the next person can check — and check it by loading ` +
-    `what the entry point loads, not by grepping a bundle.`
+  `${blocking.length} advisory(ies) stop this build. Bump the package — check whether the leaf can ` +
+    `move on its own before concluding a pinned parent blocks it, which is how both wrong ` +
+    `acceptances in BP-599 happened. Only where no fix exists short of a major does ` +
+    `src/lib/audit-policy.ts take a reason, and it must name the tree it is about and be checked ` +
+    `by loading what the entry point loads rather than by grepping a bundle.`
 );
 process.exit(1);

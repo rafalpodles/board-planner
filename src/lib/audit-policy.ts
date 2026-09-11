@@ -23,6 +23,13 @@ export interface AcceptedAdvisory {
   /** GHSA id, exactly as `npm audit --json` reports it in the advisory's `url` */
   id: string;
   package: string;
+  /**
+   * Which audited trees this reason covers. They are separate programs with separate lockfiles and
+   * they are built to diverge — the root pins its MCP SDK through mcp-handler while mcp-server
+   * floats — so a reason written about one of them must not quietly excuse the same advisory in
+   * the other (BP-599 review).
+   */
+  trees: string[];
   /** Why the vulnerable code path cannot be reached from this deployment */
   why: string;
   /** What would make this entry unnecessary, so it can be deleted rather than inherited */
@@ -30,46 +37,17 @@ export interface AcceptedAdvisory {
 }
 
 /**
- * The one advisory this repo accepts, and the reason had to be rewritten after a reviewer refuted
- * the first version of it (BP-599 review).
+ * Empty, and that is the finding rather than an oversight.
  *
- * What I claimed first: the whole `@modelcontextprotocol/sdk` chain reaches the tree only through
- * optional express and hono transports, checked by grepping the built server output. Both halves
- * were wrong. `fast-uri` arrives through the SDK's **core** `Server` class — `server/index.js`
- * imports an Ajv-backed schema validator, which loads `ajv`, which loads `fast-uri`, and the
- * constructor runs it once per MCP session. And grepping bundles never proved anything either
- * way: a minifier does not preserve a package's name, so absence of the string is not absence of
- * the code. Those six advisories are now fixed by a `fast-uri` bump instead of excused.
+ * Two reasons were written here and both were wrong in the same way: I concluded that `fast-uri`
+ * and then `ip-address` could not be bumped because the SDK above them is pinned, without checking
+ * whether the leaf itself could move. Both could — 3.1.6 and 10.3.1 were inside ranges their
+ * parents already declared — so six advisories and then a seventh were fixed rather than excused.
  *
- * The instrument that settles this question is loading what the route loads and reading the module
- * cache:
- *
- *     node -e "…; await import('mcp-handler'); Object.keys(require.cache) …"
- *
- * which reports `fast-uri` and `ajv` loaded, and `ip-address`, `express`, `express-rate-limit`,
- * `hono` and `qs` not.
+ * The guard below is what stops that happening a third time: an advisory npm reports as fixable
+ * without a major bump cannot be accepted at all, however good the reason reads.
  */
-const IP_ADDRESS_UNREACHABLE =
-  "Reaches the tree under express-rate-limit, which the SDK imports only from its Express OAuth " +
-  "handlers (server/auth/handlers/{authorize,token,register,revoke}.js). This app serves MCP " +
-  "through mcp-handler on a Next route and runs its own OAuth, so none of those modules is " +
-  "imported. Measured rather than reasoned: importing what src/app/api/mcp/route.ts imports " +
-  "leaves ip-address absent from the module cache, while fast-uri and ajv — which the same import " +
-  "does pull in — are present, so the absence is a reading and not a gap in the method.";
-
-const IP_ADDRESS_CLEARED_BY =
-  "A patched ip-address above 10.3.0, or the SDK dropping express-rate-limit. Unlike fast-uri, " +
-  "which had a fix inside its own semver range, there is none to bump to yet — re-check before " +
-  "assuming this entry is still needed.";
-
-export const ACCEPTED_ADVISORIES: AcceptedAdvisory[] = [
-  {
-    id: "GHSA-mwp4-54f8-5fhr",
-    package: "ip-address",
-    why: IP_ADDRESS_UNREACHABLE,
-    clearedBy: IP_ADDRESS_CLEARED_BY,
-  },
-];
+export const ACCEPTED_ADVISORIES: AcceptedAdvisory[] = [];
 
 export const ENFORCED_SEVERITIES = ["critical", "high"] as const;
 
@@ -78,6 +56,11 @@ export interface Finding {
   package: string;
   severity: string;
   title: string;
+  /**
+   * What npm says about remediation for the package this advisory came under: `true` when a fix is
+   * in reach, an object when it needs a major, `false` when there is none.
+   */
+  fixAvailable: boolean | { isSemVerMajor?: boolean };
 }
 
 /** One advisory as `npm audit --json` nests it under `vulnerabilities[name].via[]`. */
@@ -88,7 +71,7 @@ interface AuditVia {
 }
 
 interface AuditReport {
-  vulnerabilities?: Record<string, { severity?: unknown; via?: unknown }>;
+  vulnerabilities?: Record<string, { severity?: unknown; via?: unknown; fixAvailable?: unknown }>;
   metadata?: unknown;
   error?: unknown;
 }
@@ -150,7 +133,13 @@ export function findings(report: unknown): Finding[] {
       if (!enforced(severity)) continue;
       const text = String(title ?? "");
       const id = GHSA.exec(String(url ?? ""))?.[0] ?? unidentified(name, text);
-      seen.set(id, { id, package: name, severity: String(severity).toLowerCase(), title: text });
+      seen.set(id, {
+        id,
+        package: name,
+        severity: String(severity).toLowerCase(),
+        title: text,
+        fixAvailable: (entry?.fixAvailable ?? false) as Finding["fixAvailable"],
+      });
     }
   }
   return [...seen.values()];
@@ -164,18 +153,55 @@ export interface Verdict {
 }
 
 /**
+ * An acceptance npm itself contradicts. Both wrong entries this file has carried were of exactly
+ * this shape: a careful reason for tolerating something that had a patched version sitting inside
+ * a range its parent already declared. npm puts that answer in the report it hands us, so the
+ * cheapest way to stop writing the reason a third time is to refuse it.
+ *
+ * A fix needing a major version is a different question — it can break the thing it is protecting
+ * — so that one may still be argued.
+ */
+function bumpableWithoutAMajor(finding: Finding): boolean {
+  const fix = finding.fixAvailable;
+  if (fix === true) return true;
+  return typeof fix === "object" && fix !== null && fix.isSemVerMajor === false;
+}
+
+/**
  * `stale` is reported because an allowlist that only ever grows is how the thing this file exists
  * to prevent comes back: an entry whose advisory no longer appears is a reason nobody has re-read,
  * sitting where the next person will assume it was checked.
  */
-export function judge(report: unknown, accepted: AcceptedAdvisory[] = ACCEPTED_ADVISORIES): Verdict {
+export function judge(
+  report: unknown,
+  accepted: AcceptedAdvisory[] = ACCEPTED_ADVISORIES,
+  tree = "."
+): Verdict {
   const found = findings(report);
-  const acceptedById = new Map(accepted.map((a) => [a.id, a]));
+  const forThisTree = new Map(
+    accepted.filter((a) => a.trees.includes(tree)).map((a) => [a.id, a])
+  );
   const foundIds = new Set(found.map((f) => f.id));
 
+  const blocking: Finding[] = [];
+  const allowed: Finding[] = [];
+  for (const finding of found) {
+    if (!forThisTree.has(finding.id) || bumpableWithoutAMajor(finding)) blocking.push(finding);
+    else allowed.push(finding);
+  }
+
   return {
-    blocking: found.filter((f) => !acceptedById.has(f.id)),
-    accepted: found.filter((f) => acceptedById.has(f.id)),
+    blocking,
+    accepted: allowed,
     stale: accepted.filter((a) => !foundIds.has(a.id)),
   };
+}
+
+/** Why a blocked finding was blocked, for a message the reader can act on. */
+export function blockedBecause(finding: Finding, accepted: AcceptedAdvisory[], tree: string): string {
+  const entry = accepted.find((a) => a.id === finding.id && a.trees.includes(tree));
+  if (entry && bumpableWithoutAMajor(finding)) {
+    return "npm reports a fix within the declared ranges, so this cannot be accepted — bump it";
+  }
+  return "not accepted in src/lib/audit-policy.ts";
 }

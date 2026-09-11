@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { judge, findings, ranSuccessfully, ACCEPTED_ADVISORIES } from "./audit-policy";
+import { judge, findings, ranSuccessfully, ACCEPTED_ADVISORIES, type AcceptedAdvisory } from "./audit-policy";
 
 /**
  * BP-599. The gate this backs is the only thing standing between the repo and the situation that
@@ -20,8 +20,26 @@ const via = (id: string, severity: string, title = "something") => ({
   severity,
 });
 
-const report = (vulnerabilities: Record<string, { severity: string; via: unknown[] }>) => ({
-  vulnerabilities,
+/**
+ * `fixAvailable: false` by default. The guard added in the BP-599 review refuses an acceptance for
+ * anything npm says is bumpable, so a fixture that left this out would have its acceptances
+ * overruled for a reason the case was not about.
+ */
+const report = (
+  vulnerabilities: Record<string, { severity: string; via: unknown[]; fixAvailable?: unknown }>
+) => ({
+  vulnerabilities: Object.fromEntries(
+    Object.entries(vulnerabilities).map(([k, v]) => [k, { fixAvailable: false, ...v }])
+  ),
+  metadata: { vulnerabilities: { total: 0 } },
+});
+
+const accept = (over: Partial<AcceptedAdvisory> & { id: string }): AcceptedAdvisory => ({
+  package: "pkg",
+  trees: ["."],
+  why: "unreachable for a reason of at least the required length to satisfy the shape test",
+  clearedBy: "a ticket naming what would clear it",
+  ...over,
 });
 
 describe("what the gate blocks on", () => {
@@ -56,20 +74,20 @@ describe("what the gate blocks on", () => {
   });
 
   /**
-   * The script calls `judge(report)` with one argument. Nothing here did, so the default that
-   * production actually uses — the repo's own allowlist — was never exercised.
+   * The script calls `judge(report)` with one argument, so the default is what production uses.
+   * Asserted against the shipped list being empty, which is the state this ticket ended in: a
+   * finding a supplied list would accept must still block when the default is used.
    */
   it("uses this repo's allowlist when the caller names none", () => {
-    const live = ACCEPTED_ADVISORIES[0];
-    const verdict = judge(report({ [live.package]: { severity: "high", via: [via(live.id, "high")] } }));
+    const one = report({ p: { severity: "high", via: [via("GHSA-default-0006", "high")] } });
 
-    expect(verdict.blocking).toEqual([]);
-    expect(verdict.accepted.map((f) => f.id)).toEqual([live.id]);
+    expect(judge(one, [accept({ id: "GHSA-default-0006", package: "p" })]).blocking).toEqual([]);
+    expect(judge(one).blocking.map((f) => f.id)).toEqual(["GHSA-default-0006"]);
   });
 });
 
 describe("what an acceptance actually accepts", () => {
-  const accepted = [{ id: "GHSA-known-0000-0000", package: "fast-uri", why: "unreachable", clearedBy: "a ticket" }];
+  const accepted = [accept({ id: "GHSA-known-0000-0000", package: "fast-uri" })];
 
   it("lets the listed advisory through", () => {
     const verdict = judge(
@@ -214,7 +232,7 @@ describe("reading the report", () => {
   // asserted to be a real GHSA id
   it("cannot have an unidentified finding accepted", () => {
     const verdict = judge(report({ p: { severity: "critical", via: [{ title: "x", severity: "critical" }] } }), [
-      { id: "UNIDENTIFIED:p:x", package: "p", why: "a".repeat(50), clearedBy: "b".repeat(30) },
+      accept({ id: "UNIDENTIFIED:p:x", package: "p" }),
     ]);
 
     expect(ACCEPTED_ADVISORIES.every((a) => /^GHSA-/i.test(a.id))).toBe(true);
@@ -235,10 +253,79 @@ describe("reading the report", () => {
   });
 });
 
+/**
+ * The guard that exists because the reason was written wrongly twice, one package apart: a careful
+ * argument for tolerating something that had a patched version inside a range its parent already
+ * declared. npm puts that answer in the report, so the gate refuses the acceptance rather than
+ * relying on whoever writes the next one to check (BP-599 review).
+ */
+describe("an acceptance npm itself contradicts", () => {
+  const entry = [accept({ id: "GHSA-fixable-0007", package: "p" })];
+  const withFix = (fixAvailable: unknown) =>
+    report({ p: { severity: "high", fixAvailable, via: [via("GHSA-fixable-0007", "high")] } });
+
+  it("is refused when npm reports a fix in reach", () => {
+    expect(judge(withFix(true), entry).blocking.map((f) => f.id)).toEqual(["GHSA-fixable-0007"]);
+  });
+
+  it("is refused when the fix is a minor or patch", () => {
+    expect(judge(withFix({ name: "p", version: "1.2.3", isSemVerMajor: false }), entry).blocking).toHaveLength(1);
+  });
+
+  /**
+   * A major can break the thing it is protecting, so that one stays arguable — this is the line
+   * between "you did not look" and "you looked and it costs a migration".
+   */
+  it("stands when the only fix needs a major", () => {
+    const verdict = judge(withFix({ name: "p", version: "2.0.0", isSemVerMajor: true }), entry);
+
+    expect(verdict.blocking).toEqual([]);
+    expect(verdict.accepted.map((f) => f.id)).toEqual(["GHSA-fixable-0007"]);
+  });
+
+  it("stands when npm reports no fix at all", () => {
+    expect(judge(withFix(false), entry).accepted).toHaveLength(1);
+  });
+});
+
+/**
+ * The trees are separate programs with separate lockfiles, and they are built to diverge — the root
+ * pins its MCP SDK through mcp-handler while mcp-server floats. A reason written about one must not
+ * excuse the same advisory in the other.
+ */
+describe("which tree a reason covers", () => {
+  const rootOnly = [accept({ id: "GHSA-tree-0008", package: "p", trees: ["."] })];
+  const one = report({ p: { severity: "high", via: [via("GHSA-tree-0008", "high")] } });
+
+  it("accepts in the tree it names", () => {
+    expect(judge(one, rootOnly, ".").accepted.map((f) => f.id)).toEqual(["GHSA-tree-0008"]);
+  });
+
+  it("blocks the same advisory in a tree it does not name", () => {
+    expect(judge(one, rootOnly, "mcp-server").blocking.map((f) => f.id)).toEqual(["GHSA-tree-0008"]);
+  });
+
+  it("accepts in both when both are named", () => {
+    const both = [accept({ id: "GHSA-tree-0008", package: "p", trees: [".", "mcp-server"] })];
+
+    expect(judge(one, both, ".").blocking).toEqual([]);
+    expect(judge(one, both, "mcp-server").blocking).toEqual([]);
+  });
+});
+
 describe("the allowlist this repo ships", () => {
-  it("gives every entry a reason and a way to be deleted", () => {
+  /**
+   * Empty, and asserted as such. Both entries this file has carried turned out to be avoidable
+   * bumps; if a future one is genuinely needed this test is the place that says so out loud.
+   */
+  it("is empty — nothing here is excused today", () => {
+    expect(ACCEPTED_ADVISORIES).toEqual([]);
+  });
+
+  it("gives every entry a reason, a tree and a way to be deleted", () => {
     for (const entry of ACCEPTED_ADVISORIES) {
       expect(entry.id, `${entry.package} entry has no GHSA id`).toMatch(/^GHSA-[0-9a-z-]+$/i);
+      expect(entry.trees.length, `${entry.id} names no tree`).toBeGreaterThan(0);
       expect(entry.why.length, `${entry.id} has no reason`).toBeGreaterThan(40);
       expect(entry.clearedBy.length, `${entry.id} says nothing about what clears it`).toBeGreaterThan(20);
     }
