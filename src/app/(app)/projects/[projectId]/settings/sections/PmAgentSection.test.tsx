@@ -9,7 +9,13 @@ const { api, toast } = vi.hoisted(() => ({
   // `get` reads today's PM spend on mount (BP-284). Rejecting rather than resolving keeps these
   // cases about what they were about: the section renders its settings whether or not the number
   // is available, which is the behaviour the catch beside the call exists for.
-  api: { post: vi.fn(), put: vi.fn(), get: vi.fn(() => Promise.reject(new Error("not stubbed here"))) },
+  api: {
+    post: vi.fn(),
+    put: vi.fn(),
+    // Typed rather than inferred: inferring from the rejecting default makes the resolved type
+    // `never`, so a case that wants to stub a real usage body cannot say so
+    get: vi.fn<() => Promise<unknown>>(() => Promise.reject(new Error("not stubbed here"))),
+  },
   toast: vi.fn(),
 }));
 
@@ -435,5 +441,151 @@ describe("the rows moving under a disconnect", () => {
 
     // A baseline captured before the save would come back here and make every saved field dirty
     expect(dirtyCount()).toBe(0);
+  });
+});
+
+/**
+ * BP-568. Today's spend read as if every token were a cold prompt, because the provider's cache
+ * figures were dropped before they ever reached this screen — so the one number an operator sets
+ * a budget from could not tell a cache hit from a miss.
+ */
+describe("PmAgentSection — what today's tokens actually cost", () => {
+  const usage = (over: Record<string, unknown> = {}) => ({
+    turns: { used: 3, cap: 100 },
+    calls: 12,
+    tokens: 120_000,
+    // What a cache read is a share of. The day's total is larger because the model also wrote.
+    promptTokens: 100_000,
+    cachedTokens: 90_000,
+    cacheWriteTokens: 0,
+    tokenCap: 0,
+    stepLimitHits: 0,
+    maxCallsPerTurn: 15,
+    ...over,
+  });
+
+  const cacheLine = async () => {
+    const line = await screen.findByTestId("pm-usage-cache");
+    return line.textContent ?? "";
+  };
+
+  // Thousands separators follow the runner's locale — " " under pl-PL, "," under en-US — and a
+  // test may not assume which machine it is on. The figure is the claim, not its punctuation.
+  //
+  // Compared WHOLE, never with `toContain`: a strip of the sentence is every number in it run
+  // together, so "9000075" contains "90000" and also contains "900" — and a component rendering
+  // ten times the value would satisfy a substring match.
+  const figuresIn = async () => (await cacheLine()).replace(/\D/g, "");
+
+  // `api.get` is stubbed per case here; without this the last stub outlives the block, because
+  // `vi.clearAllMocks` clears calls and not behaviour
+  afterEach(() => {
+    api.get.mockImplementation(() => Promise.reject(new Error("not stubbed here")));
+  });
+
+  it("says how much of the day the provider served from its own cache", async () => {
+    api.get.mockResolvedValue(usage());
+
+    renderSection(true);
+
+    expect(await figuresIn()).toBe("9000010000090");
+    expect(await cacheLine()).toContain("90%");
+    // The denominator is on the line, so the reader can check the percentage without leaving it
+    expect(await cacheLine()).toContain("prompt tokens");
+    // Beside the total it is part of, not instead of it — read off the totals line, which is a
+    // different element from the one under test
+    const totals = (await screen.findByTestId("pm-usage-totals")).textContent ?? "";
+    expect(totals.replace(/\D/g, "")).toContain("120000");
+  });
+
+  /**
+   * The case the whole ticket exists for, and the one a "hide it when it is zero" rule would
+   * swallow: a deployment whose caching is not working looks exactly like one that was never
+   * measured unless the screen says nothing was cached.
+   */
+  it("says nothing was cached rather than going quiet about it", async () => {
+    api.get.mockResolvedValue(usage({ cachedTokens: 0 }));
+
+    renderSection(true);
+
+    // "0 of the day's 100,000 prompt tokens (0%)" — the whole strip, so a rendered non-zero
+    // cannot hide inside it
+    expect(await figuresIn()).toBe("01000000");
+  });
+
+  it("mentions cache writes only when the provider charged for some", async () => {
+    api.get.mockResolvedValue(usage({ cacheWriteTokens: 4_000 }));
+
+    renderSection(true);
+
+    expect(await figuresIn()).toBe("90000100000904000");
+    expect(await cacheLine()).toContain("written");
+  });
+
+  it("keeps quiet about writes when there were none", async () => {
+    api.get.mockResolvedValue(usage());
+
+    renderSection(true);
+
+    expect(await cacheLine()).not.toContain("written");
+  });
+
+  /**
+   * 2,000 of 3,000 is 66.67%, which rounds to 67 and truncates to 66 — the only shape of input
+   * that can tell the two apart. Every other case in this file lands on a whole number, so the
+   * rounding was free to be anything.
+   */
+  it("rounds the share rather than truncating it", async () => {
+    api.get.mockResolvedValue(usage({ tokens: 3_000, promptTokens: 3_000, cachedTokens: 2_000 }));
+
+    renderSection(true);
+
+    expect(await cacheLine()).toContain("67%");
+  });
+
+  /**
+   * The two numbers come from a provider, and nothing obliges it to report a cache read that it
+   * also counted as a prompt token. "450% were read from the provider's cache" reads as a broken
+   * product rather than as a broken provider, so the share is clamped (BP-568 review).
+   */
+  it("never claims more was cached than was spent, whatever the provider reports", async () => {
+    api.get.mockResolvedValue(usage({ tokens: 20_000, promptTokens: 20_000, cachedTokens: 90_000 }));
+
+    renderSection(true);
+
+    expect(await figuresIn()).toBe("9000020000100");
+    expect(await cacheLine()).not.toContain("450%");
+  });
+
+  /**
+   * A provider that reports `total_tokens` and no `prompt_tokens` leaves the denominator at zero
+   * while the day plainly had spend. Gating the line on the denominator would make it vanish for
+   * that instance permanently — the same "goes quiet" failure the case above forbids, reached from
+   * a different direction. It stays, minus the percentage it cannot compute (BP-568 review).
+   */
+  it("keeps the line, without a share, when the provider reported no prompt total", async () => {
+    api.get.mockResolvedValue(usage({ tokens: 18_000, promptTokens: 0, cachedTokens: 4_000 }));
+
+    renderSection(true);
+
+    expect(await cacheLine()).toContain("no prompt total");
+    expect(await cacheLine()).not.toContain("%");
+    // The control: the figure it does have is still there, so the line is informative rather than
+    // merely present
+    expect(await figuresIn()).toBe("4000");
+  });
+
+  // A day with no turns divides by zero. "NaN%" on a settings screen is how that would read.
+  it("says nothing at all on a day with no spend", async () => {
+    api.get.mockResolvedValue(
+      usage({ tokens: 0, promptTokens: 0, cachedTokens: 0, calls: 0, turns: { used: 0, cap: 100 } })
+    );
+
+    renderSection(true);
+
+    // The control: the panel itself rendered, so the absence below is the cache line and not the
+    // whole section failing to load
+    await screen.findByTestId("pm-usage-today");
+    expect(screen.queryByTestId("pm-usage-cache")).toBeNull();
   });
 });

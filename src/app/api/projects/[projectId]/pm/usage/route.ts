@@ -31,6 +31,17 @@ export const GET = withProjectOwner(async (_request, { params }) => {
     turns: { used: turns.used, cap: turns.cap },
     calls: spend.calls,
     tokens: spend.tokens,
+    // What the cached figure is a share OF. A cache read is part of the prompt count, never of the
+    // completion, so dividing by the day's total would understate the hit rate by whatever the
+    // model wrote — badly on a chatty board (BP-568 review).
+    promptTokens: spend.promptTokens,
+    // A share of `promptTokens`, not an addition to anything: what the provider served from cache.
+    // Without this every token reads as a cold prompt and the budget above is set from a number
+    // that cannot tell a cache hit from a miss (BP-568).
+    cachedTokens: spend.cachedTokens,
+    // Reported beside the two, never inside either — what a cache write cost is the provider's
+    // own accounting and is not documented as part of the prompt count
+    cacheWriteTokens: spend.cacheWriteTokens,
     tokenCap: spend.cap,
     // Turns that ran out of steps rather than finishing — the most expensive shape a turn takes,
     // and an event the operator may want to hear about on its own

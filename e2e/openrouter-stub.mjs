@@ -55,6 +55,62 @@ function reply(res, body) {
 // The shape of the last completion request, for /last
 let received = null;
 
+/**
+ * One entry per completion request, for /requests (BP-568). What a turn's second call sends in
+ * front of the cache breakpoint has to be the same bytes as its first, and no assertion on the
+ * app's own objects can see that: the agent hands `chatCompletion` one array and mutates it, so
+ * the arguments of call 1 and call 2 are the same object. These are the bodies as they arrived.
+ */
+let requests = [];
+
+const isMarked = (m) =>
+  Array.isArray(m?.content) && m.content.some((part) => part?.cache_control);
+
+/**
+ * A message's text whether its content is a plain string or an array of parts.
+ *
+ * The array branch is the guarded one, not the default: this runs OUTSIDE the body-parse try/catch,
+ * and a throw here is answered 500 with a crash marker rather than a completion. `String()` never
+ * threw on a number or a bare object, and this must not either — BP-575 is about exactly that kind
+ * of throw in this handler.
+ */
+const textOf = (m) =>
+  Array.isArray(m?.content)
+    ? m.content.map((part) => (typeof part?.text === "string" ? part.text : "")).join(" ")
+    : String(m?.content ?? "");
+
+// The roles carrying a breakpoint, in order — a count alone cannot say WHERE the second one
+// landed, which is the whole question about the prefix boundary
+const markedRolesIn = (messages) => messages.filter(isMarked).map((m) => m?.role);
+
+/**
+ * Everything up to and including the last marked message — the run of bytes the app has told the
+ * provider to cache. It is the app's OWN claim, and that is the point: a prefix the stub worked out
+ * for itself from the shape of the conversation would agree across a turn's calls however the app
+ * behaved, so a test on that could not fail.
+ */
+function markedPrefixOf(messages) {
+  let last = -1;
+  messages.forEach((m, i) => {
+    if (isMarked(m)) last = i;
+  });
+  return last === -1 ? null : JSON.stringify(messages.slice(0, last + 1));
+}
+
+/**
+ * What a provider that caches reports. The first call of a turn writes the prefix into the cache
+ * and the rest read it back, which is the whole shape the ticket is about — a stub that always
+ * reported the same numbers could not tell the two apart.
+ */
+const usageWith = (fromCache) => ({
+  prompt_tokens: 1000,
+  completion_tokens: 200,
+  total_tokens: 1200,
+  prompt_tokens_details: fromCache
+    ? { cached_tokens: 900, cache_write_tokens: 0 }
+    : { cached_tokens: 0, cache_write_tokens: 900 },
+});
+
 serve({
   name: "openrouter stub",
   port: PORT,
@@ -65,6 +121,7 @@ serve({
     if (req.url === "/reset") {
       seen.clear();
       received = null;
+      requests = [];
       res.writeHead(200, { "Content-Type": "text/plain" }).end("ok");
       return;
     }
@@ -74,6 +131,12 @@ serve({
     // rather than merely that a turn ran (BP-451 review).
     if (req.url === "/last") {
       res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(received));
+      return;
+    }
+
+    // Every completion request of the run, in order, so a test can compare one against the next
+    if (req.url === "/requests") {
+      res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(requests));
       return;
     }
 
@@ -99,6 +162,15 @@ serve({
     try {
       const body = JSON.parse(raw);
       messages = body.messages ?? [];
+      const markedRoles = markedRolesIn(messages);
+      requests.push({
+        sessionId: body.session_id ?? null,
+        messageCount: messages.length,
+        cacheControls: markedRoles.length,
+        markedRoles,
+        markedPrefix: markedPrefixOf(messages),
+        lastRole: messages[messages.length - 1]?.role ?? null,
+      });
       // The names the model was OFFERED, which is the whole subject of BP-569 and is carried
       // beside the conversation rather than inside it — no assertion on messages can see it.
       offeredTools = (body.tools ?? []).map((t) => t?.function?.name).filter(Boolean);
@@ -128,21 +200,14 @@ serve({
       // The contents, not a count: a count cannot say whether a particular instruction was sent.
       // Since BP-321 the record of past board actions is NOT among these — it is a user-role DATA
       // message — which is exactly what pm-trust-boundary.spec.ts asserts.
-      systems: messages
-        .filter((m) => m?.role === "system")
-        .map((m) => String(m?.content ?? "").slice(0, 200)),
+      // textOf, not String(): since BP-568 a marked message carries an array of parts, and
+      // stringifying that gives "[object Object]" — which would empty every assertion other specs
+      // make about what the system prompt said
+      systems: messages.filter((m) => m?.role === "system").map((m) => textOf(m).slice(0, 200)),
       roles: messages.map((m) => m?.role),
       // Every message, whole and untruncated, so a test can ask which CHANNEL a given string
       // arrived in rather than only whether it arrived. Text parts only; images are counted above.
-      contents: messages.map((m) => ({
-        role: m?.role,
-        text:
-          typeof m?.content === "string"
-            ? m.content
-            : (m?.content ?? [])
-                .map((part) => (typeof part?.text === "string" ? part.text : ""))
-                .join(" "),
-      })),
+      contents: messages.map((m) => ({ role: m?.role, text: textOf(m) })),
     };
 
     const toolHasRun = messages.some((m) => m?.role === "tool");
@@ -157,7 +222,7 @@ serve({
     const escalated = /^Task (\S+) was just moved to "needs_human_review"/m.exec(text ?? "");
     if (escalated && !toolHasRun) {
       reply(res, {
-        usage: { prompt_tokens: 1000, completion_tokens: 200, total_tokens: 1200 },
+        usage: usageWith(false),
         choices: [
           {
             finish_reason: "tool_calls",
@@ -200,7 +265,8 @@ serve({
       // pass. Delaying *this* answer is what holds the turn open while its action chips show.
       if (toolHasRun) {
         reply(res, {
-            usage: { prompt_tokens: 1000, completion_tokens: 200, total_tokens: 1200 },
+          // The turn's later calls read back the prefix its first call wrote (BP-568)
+          usage: usageWith(true),
           choices: [{ finish_reason: "stop", message: { role: "assistant", content: "Done." } }],
         });
         return;
@@ -212,7 +278,7 @@ serve({
       }
       if (!call.name) {
         reply(res, {
-            usage: { prompt_tokens: 1000, completion_tokens: 200, total_tokens: 1200 },
+          usage: usageWith(false),
           choices: [
             { finish_reason: "stop", message: { role: "assistant", content: call.say ?? "Noted." } },
           ],
@@ -221,7 +287,7 @@ serve({
       }
       reply(res, {
         // A real provider reports what the call cost on every answer; BP-284 reads it
-        usage: { prompt_tokens: 1000, completion_tokens: 200, total_tokens: 1200 },
+        usage: usageWith(false),
         choices: [
           {
             finish_reason: "tool_calls",

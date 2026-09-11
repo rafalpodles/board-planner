@@ -6,6 +6,7 @@ import { IPmMessage, PmAttachment, PmMessageTrigger } from "@/types";
 import { buildUserContent } from "./attachments";
 import { getPmUser, PM_USERNAME } from "./pm-user";
 import { chatCompletion, OrChatMessage } from "./openrouter";
+import { pmSessionId } from "./prompt-cache";
 import { isPmRunnable, pmDisabledReason, resolvePmModel } from "./availability";
 import { PM_TOOLS, pmToolDefinitions, PmToolContext, refuseUndeclaredArgs } from "./tools";
 import { discoverMcpTools, callMcpTool, McpRuntime, MAX_MCP_CALLS_PER_TURN } from "./mcp-tools";
@@ -260,7 +261,18 @@ export async function runPmTurn(opts: {
    * exit, including the ones that fail: a turn that burned nine calls and then hit a provider error
    * cost nine calls, and a record that forgave them would understate exactly the runs that hurt.
    */
-  const spend = { promptTokens: 0, completionTokens: 0, totalTokens: 0, calls: 0, hitStepLimit: false };
+  const spend = {
+    promptTokens: 0,
+    completionTokens: 0,
+    totalTokens: 0,
+    // A subset of promptTokens, recorded beside it rather than added to it: the operator sets a
+    // budget from the total, and needs to know how much of that total was billed at cache-read
+    // price (BP-568)
+    cachedPromptTokens: 0,
+    cacheWriteTokens: 0,
+    calls: 0,
+    hitStepLimit: false,
+  };
   const record = () => {
     assistantMessage.usage = { ...spend };
   };
@@ -279,9 +291,10 @@ export async function runPmTurn(opts: {
     return finalize("⚠️ That image could not be read, so there was nothing to send.");
   }
 
+  const replayed = await replayHistory(history, opts.projectId);
   const messages: OrChatMessage[] = [
     { role: "system", content: buildSystemPrompt(project, mcp, disallowedTools, actor) },
-    ...(await replayHistory(history, opts.projectId)),
+    ...replayed,
     ...(imageOnly
       ? [
           {
@@ -293,6 +306,29 @@ export async function runPmTurn(opts: {
       : []),
     { role: "user", content: userContent },
   ];
+
+  /**
+   * The system prompt and the replayed history — and deliberately not this turn's own user
+   * message, nor the image nudge in front of it. Those two could only be read back by this turn's
+   * later calls, and a turn that answers in one call makes none.
+   *
+   * **Marking from the first call is a bet, and it is worth stating as one.** The write costs
+   * 1.25x base input on Anthropic and the reads cost 0.1x, so a turn that answers in a single call
+   * pays about 25% more for its prefix than it would unmarked, while a two-call turn already saves
+   * ~30% and a six-call turn saves most of five prefixes. The ticket's own measurement — a
+   * one-call turn at 18.7k tokens against a six-call turn at 160k — is what makes the bet lopsided
+   * enough to take. What would overturn it: any turn that touches the board is already two calls
+   * or more, so the losing population is pure question-and-answer chat, and it would take a great
+   * deal of it to outweigh the turns that do work.
+   *
+   * An earlier version withheld the mark on a turn that looked single-call, on the theory that the
+   * NEXT turn would read it instead. That theory was wrong for a reason no message count can see:
+   * `cache_control: { type: "ephemeral" }` lives five minutes on Anthropic, and a human-paced
+   * conversation is slower than that. Cross-turn reads are a bonus when they happen, never a
+   * premise (BP-568 review).
+   */
+  const stablePrefixLength = 1 + replayed.length;
+  const sessionId = pmSessionId(opts.projectId, opts.triggeredByUserId);
 
 
   const interrupted = async (): Promise<PmTurnResult> => {
@@ -312,7 +348,17 @@ export async function runPmTurn(opts: {
   for (let step = 0; step < MAX_STEPS; step++) {
     if (opts.signal?.aborted) return interrupted();
 
-    const completion = await chatCompletion({ model, messages, tools: toolDefinitions, signal: opts.signal });
+    const completion = await chatCompletion({
+      model,
+      messages,
+      tools: toolDefinitions,
+      // Everything the loop appends from here — assistant tool calls and their results — grows
+      // past this mark, so the prefix it names is the same bytes on every one of the 15 calls.
+      // Marked from the first call, which is a bet: see the note on `stablePrefixLength`.
+      cachePrefixLength: stablePrefixLength,
+      sessionId,
+      signal: opts.signal,
+    });
 
     // Counted before the result is judged: the call was made and billed whatever it answered
     spend.calls++;
@@ -320,6 +366,8 @@ export async function runPmTurn(opts: {
       spend.promptTokens += completion.usage.promptTokens;
       spend.completionTokens += completion.usage.completionTokens;
       spend.totalTokens += completion.usage.totalTokens;
+      spend.cachedPromptTokens += completion.usage.cachedPromptTokens;
+      spend.cacheWriteTokens += completion.usage.cacheWriteTokens;
     }
 
     if (completion.type === "aborted") {

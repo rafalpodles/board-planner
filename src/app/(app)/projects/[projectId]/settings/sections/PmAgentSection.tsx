@@ -93,9 +93,28 @@ interface PmUsageToday {
   turns: { used: number; cap: number };
   calls: number;
   tokens: number;
+  promptTokens: number;
+  cachedTokens: number;
+  cacheWriteTokens: number;
   tokenCap: number;
   stepLimitHits: number;
   maxCallsPerTurn: number;
+}
+
+/**
+ * A share of the PROMPT tokens, which is what a cache read is part of — dividing by the day's
+ * total would fold in every token the model wrote, and report 23% on a chatty board whose real hit
+ * rate was 90%.
+ *
+ * Clamped because both numbers come from a provider rather than from us: nothing stops one
+ * reporting cached tokens it never counted as prompt tokens, and "450% were read from the cache"
+ * reads as a broken product rather than as a broken provider. `null` rather than a clamped zero
+ * when there is no prompt total to divide by — a provider reporting only `total_tokens` leaves
+ * this at 0, and `Math.round(NaN)` is `NaN`, which survives both bounds and would reach the page.
+ */
+function cachedShare(usage: PmUsageToday): number | null {
+  if (usage.promptTokens <= 0) return null;
+  return Math.min(100, Math.max(0, Math.round((usage.cachedTokens / usage.promptTokens) * 100)));
 }
 
 export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: SectionProps) {
@@ -529,7 +548,7 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
               data-testid="pm-usage-today"
               className="mt-4 rounded-lg border border-border bg-bg-input/40 px-3 py-2 text-sm"
             >
-              <p className="m-0 text-text-muted">
+              <p className="m-0 text-text-muted" data-testid="pm-usage-totals">
                 Today: <strong className="text-text">{usage.turns.used}</strong> turns,{" "}
                 <strong className="text-text">{usage.calls}</strong> model calls,{" "}
                 <strong className="text-text">{usage.tokens.toLocaleString()}</strong> tokens
@@ -542,6 +561,39 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                   </>
                 )}
               </p>
+              {/* A share of the day's PROMPT tokens, itself a share of the total above rather than an
+                  addition to it. The denominator is named on the line, because a percentage whose
+                  denominator is not on screen is one the reader cannot check. Shown when spent,
+                  including at zero cached: "none of it came from the cache" is the answer this
+                  number is asked for, and hiding that case would leave an instance whose caching
+                  stopped working looking exactly like one that never could. A day with no spend
+                  has nothing to take a share of, which is the only case that hides the line. */}
+              {usage.tokens > 0 && (
+                <p className="m-0 mt-1 text-text-muted" data-testid="pm-usage-cache">
+                  <strong className="text-text" data-testid="pm-usage-cached-tokens">
+                    {usage.cachedTokens.toLocaleString()}
+                  </strong>{" "}
+                  {cachedShare(usage) === null ? (
+                    <>
+                      tokens were read from the provider&apos;s cache. This provider reported no
+                      prompt total, so there is no share to take
+                    </>
+                  ) : (
+                    <>
+                      of the day&apos;s {usage.promptTokens.toLocaleString()} prompt tokens (
+                      {cachedShare(usage)}%) were read from the provider&apos;s cache, billed at a
+                      fraction of a cold prompt
+                    </>
+                  )}
+                  {/* The falsifier for the whole scheme, on the screen of the person who can see
+                      it: marking a prefix is a bet that later calls read it back, so writes
+                      climbing while reads stay near zero is that bet losing. */}
+                  {usage.cacheWriteTokens > 0 && (
+                    <>; {usage.cacheWriteTokens.toLocaleString()} were written to it</>
+                  )}
+                  .
+                </p>
+              )}
             </div>
           )}
         </SettingsCard>

@@ -45,7 +45,16 @@ export async function isOverDailyTurnCap(
 export async function dailyPmSpend(
   projectId: string,
   pm: { dailyTokenCap?: number; autonomy?: { timezone?: string } }
-): Promise<{ over: boolean; cap: number; tokens: number; calls: number; stepLimitHits: number }> {
+): Promise<{
+  over: boolean;
+  cap: number;
+  tokens: number;
+  promptTokens: number;
+  cachedTokens: number;
+  cacheWriteTokens: number;
+  calls: number;
+  stepLimitHits: number;
+}> {
   const cap = await resolveDailyTokenCap(pm.dailyTokenCap);
   const zone = pm.autonomy?.timezone;
   const startOfDay = startOfDayInTimezone(
@@ -54,6 +63,9 @@ export async function dailyPmSpend(
   );
   const [totals] = await PmMessage.aggregate<{
     tokens: number;
+    promptTokens: number;
+    cachedTokens: number;
+    cacheWriteTokens: number;
     calls: number;
     stepLimitHits: number;
   }>([
@@ -62,6 +74,15 @@ export async function dailyPmSpend(
       $group: {
         _id: null,
         tokens: { $sum: { $ifNull: ["$usage.totalTokens", 0] } },
+        // A cache read is a share of THIS, not of the day's total — it is what the settings screen
+        // divides by, and what the premise check below is a premise about
+        promptTokens: { $sum: { $ifNull: ["$usage.promptTokens", 0] } },
+        // Already inside `tokens`, reported apart from it so the operator can see what share of
+        // the day was billed at cache-read price rather than as a cold prompt (BP-568). Turns
+        // stored before this shipped carry neither field, and $ifNull reads those as 0 — which
+        // is what "we did not measure it" and "nothing was cached" both look like on that day.
+        cachedTokens: { $sum: { $ifNull: ["$usage.cachedPromptTokens", 0] } },
+        cacheWriteTokens: { $sum: { $ifNull: ["$usage.cacheWriteTokens", 0] } },
         calls: { $sum: { $ifNull: ["$usage.calls", 0] } },
         // Turns that ran out of steps rather than finishing — the most expensive shape a turn has
         stepLimitHits: { $sum: { $cond: [{ $eq: ["$usage.hitStepLimit", true] }, 1, 0] } },
@@ -70,11 +91,32 @@ export async function dailyPmSpend(
   ]);
 
   const tokens = totals?.tokens ?? 0;
+  const cachedTokens = totals?.cachedTokens ?? 0;
+  const promptTokens = totals?.promptTokens ?? 0;
+  /**
+   * The premise this reporting rests on is the provider's, not ours: a cache read is documented as
+   * part of `prompt_tokens`. A provider counting it outside would make the day's spend understate
+   * what was billed while the settings screen still rendered a plausible share. Nothing on screen
+   * could show that, so it goes to the log — the operator is not the one who can act on it.
+   *
+   * Compared against the PROMPT total, not the day's total. A day of 400k prompt and 300k
+   * completion tokens reporting 600k cached has broken the premise by 200k, and against
+   * prompt + completion it would look fine and say nothing (BP-568 review).
+   */
+  if (cachedTokens > promptTokens) {
+    console.warn(
+      `[pm] project ${projectId}: ${cachedTokens} cached tokens reported against ${promptTokens} prompt ` +
+        `tokens — the provider is counting cache reads outside its prompt total, so the day's spend is understated`
+    );
+  }
   return {
     // A cap of 0 is no cap: `over` must not become true for every project the moment this ships
     over: cap > 0 && tokens >= cap,
     cap,
     tokens,
+    promptTokens,
+    cachedTokens,
+    cacheWriteTokens: totals?.cacheWriteTokens ?? 0,
     calls: totals?.calls ?? 0,
     stepLimitHits: totals?.stepLimitHits ?? 0,
   };
