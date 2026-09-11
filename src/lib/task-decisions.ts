@@ -242,7 +242,8 @@ function decidedBy(value: ITaskDecision["decidedBy"]): ApiTaskDecision["decidedB
  */
 export function toApiDecision(
   decision: ITaskDecision | null | undefined,
-  worker?: { name?: string; lastSeenAt?: Date | null } | null
+  worker?: { name?: string; lastSeenAt?: Date | null } | null,
+  canDecide = false
 ): ApiTaskDecision | undefined {
   if (!decision?.gate) return undefined;
   return {
@@ -261,6 +262,7 @@ export function toApiDecision(
     title: decision.title ?? "",
     acceptable: Boolean(decision.acceptable),
     unacceptableReason: decision.unacceptableReason ?? "",
+    canDecide,
     state: decision.state,
     decidedBy: decidedBy(decision.decidedBy),
     decidedAt: decision.decidedAt ? new Date(decision.decidedAt).toISOString() : null,

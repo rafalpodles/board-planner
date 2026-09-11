@@ -760,6 +760,12 @@ export interface ApiTaskDecision {
   title: string;
   acceptable: boolean;
   unacceptableReason: string;
+  /**
+   * Whether the reader may answer at all. Computed where the machine's owner is known, so the
+   * screen does not offer a button that answers 403 — the bar is the owner or an instance admin,
+   * which is above project membership and above what reading this record takes.
+   */
+  canDecide: boolean;
   state: TaskDecisionState;
   decidedBy?: { _id: string; username: string; fullName: string } | null;
   decidedAt: string | null;

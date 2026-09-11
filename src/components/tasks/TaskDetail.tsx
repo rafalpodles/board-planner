@@ -14,6 +14,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Modal } from "@/components/ui/Modal";
 import { TaskForm } from "@/components/tasks/TaskForm";
 import { TaskActivityPanel } from "@/components/tasks/TaskActivityPanel";
+import { DecisionPanel } from "@/components/tasks/DecisionPanel";
 import { ExecutionPanel } from "@/components/tasks/ExecutionPanel";
 import { useToast } from "@/components/ui/Toast";
 import { GitlabActivity } from "@/components/tasks/GitlabActivity";
@@ -408,6 +409,13 @@ function TaskDetailView({
             />
 
             <ExecutionPanel execution={task.execution} />
+
+            <DecisionPanel
+              projectId={projectId}
+              taskId={task._id}
+              decision={task.decision}
+              onAnswered={onReload}
+            />
 
             <LinkedWork
               projectId={projectId}

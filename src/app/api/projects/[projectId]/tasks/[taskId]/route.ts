@@ -12,10 +12,10 @@ import { Project } from "@/models/project";
 import { Worker } from "@/models/worker";
 import { ITaskExecution } from "@/types";
 import { withApiExecution } from "@/lib/task-execution-view";
-import { toApiDecision } from "@/lib/task-decisions";
+import { mayDecide, toApiDecision } from "@/lib/task-decisions";
 
 
-export const GET = withProjectAccess(async (_request, { params }) => {
+export const GET = withProjectAccess(async (_request, { params, user }) => {
   const { projectId, taskId } = await params;
   if (!isValidObjectId(taskId)) {
     return NextResponse.json({ error: "Invalid task id" }, { status: 400 });
@@ -54,7 +54,11 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   // Serialised rather than published raw: the stored record carries `patchSha256` and the
   // settlement attempt count, and the panel renders the liveness of the machine that holds the
   // work — which is a second document.
-  taskObj.decision = toApiDecision(task.decision, await deciderOf(task.decision?.workerId));
+  taskObj.decision = toApiDecision(
+    task.decision,
+    await deciderOf(task.decision?.workerId),
+    task.decision ? await mayDecide(task.decision.workerId, user) : false
+  );
 
   return NextResponse.json(taskObj);
 });

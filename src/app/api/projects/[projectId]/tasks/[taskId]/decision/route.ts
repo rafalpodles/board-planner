@@ -107,5 +107,5 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
     } gate, ${decision.files.length} file(s)`,
   });
 
-  return NextResponse.json({ decision: toApiDecision(result.decision, worker) });
+  return NextResponse.json({ decision: toApiDecision(result.decision, worker, true) });
 });
