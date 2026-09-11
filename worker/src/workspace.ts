@@ -92,12 +92,21 @@ export interface Workspace {
 
 // A worktree under the worker's own root belongs to a run that died with its process. Nothing
 // holds it, and leaving it there makes the next attempt on that task collide with its own branch
-export async function reapOrphans(workspace: Workspace, worktreeRoot: string): Promise<number> {
+//
+// `held` is the exception, and it is required rather than defaulted for the reason
+// `quarantineProject` is: an assembly that forgot it would destroy the one copy of a change
+// somebody is being asked to accept, and would do it without anything failing to compile (BP-381).
+export async function reapOrphans(
+  workspace: Workspace,
+  worktreeRoot: string,
+  held: ReadonlySet<string>
+): Promise<number> {
   const prefix = worktreeRoot.endsWith(sep) ? worktreeRoot : `${worktreeRoot}${sep}`;
   const orphans = (await workspace.listWorktrees().catch(() => []))
     .filter((path) => path.startsWith(prefix))
     .map((path) => path.slice(prefix.length))
-    .filter((taskKey) => taskKey.length > 0 && !taskKey.includes(sep));
+    .filter((taskKey) => taskKey.length > 0 && !taskKey.includes(sep))
+    .filter((taskKey) => !held.has(taskKey));
 
   for (const taskKey of orphans) {
     await workspace.destroy(taskKey).catch(() => {});

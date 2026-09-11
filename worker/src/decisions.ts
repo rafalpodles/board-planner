@@ -1,0 +1,505 @@
+import { createHash } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { join, resolve, sep } from "node:path";
+import { ApiClient, DecisionSettlement } from "./api.js";
+import { Delivery } from "./delivery.js";
+import { childEnv } from "./env.js";
+import { Runner } from "./exec.js";
+import { gitArgs, GIT_SAFE_ENV } from "./git-safety.js";
+import { protectedPaths, workflowPaths } from "./gates/protected-paths.js";
+import { ClaimedTask, DiffStats } from "./types.js";
+
+/**
+ * What this machine has to remember about a refused change while a person reads it.
+ *
+ * It exists for the reaper. A worktree under the worker's own root belongs to a run that died with
+ * its process, and `reapOrphans` destroys it on the next pass — which for a decision is the whole
+ * point of the worktree, deleted. So the run leaves a note beside it.
+ *
+ * The note also carries what the settlement needs and the server deliberately does not store:
+ * `baseSha`, so the patch can be re-derived and compared, and `commit`, so a record naming some
+ * other commit is refused before anything is pushed. Both are this machine's own record of what it
+ * did, written before the server was told anything.
+ */
+export interface DecisionMarker {
+  taskKey: string;
+  /** Which worktree root this belongs to: two projects sharing a checkout share a root. */
+  worktreeRoot: string;
+  worktreePath: string;
+  projectId: string;
+  taskId: string;
+  commit: string;
+  baseSha: string;
+  createdAt: string;
+}
+
+export interface MarkerStore {
+  write(marker: DecisionMarker): void;
+  read(taskKey: string): DecisionMarker | null;
+  remove(taskKey: string): void;
+  list(): DecisionMarker[];
+}
+
+/** The same shape `api.ts` refuses a task key on: this one becomes a file name. */
+const SAFE_TASK_KEY = /^[A-Za-z0-9][A-Za-z0-9_-]*-\d+$/;
+
+export function isSafeTaskKey(taskKey: string): boolean {
+  return SAFE_TASK_KEY.test(taskKey);
+}
+
+/** Just enough of `node:fs` to be replaced in a test. */
+export interface MarkerFs {
+  mkdir(path: string): void;
+  writeFile(path: string, text: string): void;
+  readFile(path: string): string | null;
+  remove(path: string): void;
+  listNames(path: string): string[];
+}
+
+export const nodeMarkerFs: MarkerFs = {
+  // 0o700 and 0o600 for the reason every other state file here carries them: the directory sits
+  // beside the worker's credential, and its contents name paths on this machine.
+  mkdir: (path) => mkdirSync(path, { recursive: true, mode: 0o700 }),
+  writeFile: (path, text) => writeFileSync(path, text, { mode: 0o600 }),
+  readFile: (path) => (existsSync(path) ? readFileSync(path, "utf8") : null),
+  remove: (path) => rmSync(path, { force: true }),
+  listNames: (path) => (existsSync(path) ? readdirSync(path) : []),
+};
+
+function parse(text: string | null): DecisionMarker | null {
+  if (!text) return null;
+  try {
+    const marker = JSON.parse(text) as DecisionMarker;
+    return marker?.taskKey && marker.worktreeRoot ? marker : null;
+  } catch {
+    return null;
+  }
+}
+
+export function createMarkerStore(stateDir: string, fs: MarkerFs = nodeMarkerFs): MarkerStore {
+  const dir = join(stateDir, "decisions");
+  // Refused rather than sanitised, same as api.ts: a key this worker cannot name safely is one it
+  // must not write under some other name nobody chose.
+  const pathFor = (taskKey: string): string => {
+    if (!isSafeTaskKey(taskKey)) {
+      throw new Error(`refusing decision marker for task key ${JSON.stringify(taskKey)}`);
+    }
+    return join(dir, `${taskKey}.json`);
+  };
+
+  return {
+    write(marker) {
+      const path = pathFor(marker.taskKey);
+      fs.mkdir(dir);
+      fs.writeFile(path, JSON.stringify(marker));
+    },
+    read(taskKey) {
+      return parse(fs.readFile(pathFor(taskKey)));
+    },
+    remove(taskKey) {
+      fs.remove(pathFor(taskKey));
+    },
+    list() {
+      return fs
+        .listNames(dir)
+        .filter((name) => name.endsWith(".json"))
+        .flatMap((name) => {
+          const marker = parse(fs.readFile(join(dir, name)));
+          return marker ? [marker] : [];
+        });
+    },
+  };
+}
+
+/**
+ * The worktrees under this root that a decision is holding, by task key.
+ *
+ * Keyed on the root rather than on the project because `rebind` resolves several projects onto one
+ * checkout, and a root is shared by all of them — a marker filtered by project would let a sibling
+ * project's reaping pass destroy a worktree somebody is being asked about.
+ */
+export function heldTaskKeys(store: Pick<MarkerStore, "list">, worktreeRoot: string): Set<string> {
+  const root = resolve(worktreeRoot);
+  return new Set(
+    store
+      .list()
+      .filter((marker) => resolve(marker.worktreeRoot) === root)
+      .map((marker) => marker.taskKey)
+  );
+}
+
+export function sha256(text: string): string {
+  return createHash("sha256").update(text, "utf8").digest("hex");
+}
+
+/** Where a task's worktree is, by the one rule every assignment follows: the machine resolves it. */
+export function worktreePathFor(worktreeRoot: string, taskKey: string): string {
+  const root = resolve(worktreeRoot);
+  const path = resolve(root, taskKey);
+  if (!path.startsWith(`${root}${sep}`)) {
+    throw new Error(`refusing task key ${JSON.stringify(taskKey)}: its path falls outside ${root}`);
+  }
+  return path;
+}
+
+/**
+ * Whether accepting is on offer at all, and the sentence that says why not.
+ *
+ * Two refusals, and they are different in kind. A workflow file is the one family excluded on
+ * purpose — see WORKFLOW_FILE. A truncated patch is excluded because the record IS the reading
+ * surface: `collectDiff` bounds the patch, and a change too large to show is one nobody can
+ * honestly accept. The first draft of this design never consulted `truncated` at all.
+ */
+export function acceptability(diff: Pick<DiffStats, "changedFiles" | "truncated">): {
+  acceptable: boolean;
+  unacceptableReason: string;
+} {
+  const workflows = workflowPaths(diff.changedFiles);
+  if (workflows.length > 0) {
+    return {
+      acceptable: false,
+      unacceptableReason:
+        `the change edits what CI itself does (${workflows.join(", ")}). For a push event GitHub ` +
+        `runs the workflow from the pushed ref, so accepting would run the agent's own version of ` +
+        `it — and a workflow diff is the hardest thing on this list to read for safety. This one ` +
+        `is a person's own commit to make.`,
+    };
+  }
+  if (diff.truncated) {
+    return {
+      acceptable: false,
+      unacceptableReason:
+        "the change is larger than the patch this record can carry, so what is shown below is not " +
+        "all of it. Nobody can accept a change they have not been shown.",
+    };
+  }
+  return { acceptable: true, unacceptableReason: "" };
+}
+
+export interface OpenDecisionDeps {
+  markers: MarkerStore;
+  api: Pick<ApiClient, "createDecision">;
+  /** The same redaction every agent-authored string reaching the board goes through. */
+  scrub: (text: string) => string;
+}
+
+export interface OpenDecisionInput {
+  task: ClaimedTask;
+  gate: string;
+  diff: DiffStats;
+  worktreePath: string;
+  worktreeRoot: string;
+  baseSha: string;
+}
+
+/**
+ * Offer a refused change to a person.
+ *
+ * The marker goes first, and a marker that cannot be written aborts the whole thing: a button over
+ * a worktree the reaper is free to destroy is worse than no button. If the record itself cannot be
+ * posted the marker is taken back, so a failed offer does not pin a worktree for ever.
+ *
+ * The digest is taken over the patch as git printed it, not over the redacted copy stored beside
+ * it: the machine re-derives the former at settle time, and redaction is not reproducible from the
+ * board's side.
+ */
+export async function openDecision(
+  deps: OpenDecisionDeps,
+  input: OpenDecisionInput
+): Promise<void> {
+  const { acceptable, unacceptableReason } = acceptability(input.diff);
+
+  deps.markers.write({
+    taskKey: input.task.taskKey,
+    worktreeRoot: input.worktreeRoot,
+    worktreePath: input.worktreePath,
+    projectId: input.task.projectId,
+    taskId: input.task.taskId,
+    // `headSha`, not the last commit the run made: `collectDiff` resolved it with
+    // `rev-parse --verify HEAD^{commit}` and judged the change against it, so this is the one
+    // value for which "the commit named in the record is the change that was judged" is true.
+    commit: input.diff.headSha,
+    baseSha: input.baseSha,
+    createdAt: new Date().toISOString(),
+  });
+
+  try {
+    await deps.api.createDecision({
+      taskId: input.task.taskId,
+      runId: input.task.runId,
+      gate: input.gate,
+      // The whole change, not the gate's hits: accepting pushes the commit, all of it. The hits
+      // travel separately so the panel can say which of them is the reason this is here.
+      files: input.diff.changedFiles,
+      protectedFiles: protectedPaths(input.diff.changedFiles),
+      patch: deps.scrub(input.diff.patch),
+      patchTruncated: input.diff.truncated,
+      patchSha256: sha256(input.diff.patch),
+      commit: input.diff.headSha,
+      taskKey: input.task.taskKey,
+      title: input.task.title,
+      acceptable,
+      unacceptableReason,
+    });
+  } catch (error) {
+    deps.markers.remove(input.task.taskKey);
+    throw error;
+  }
+}
+
+/**
+ * The branch a run puts its work on. Recomputed here rather than stored on the record and sent
+ * back: a server-supplied string reaching `git push` is a force-push to the default branch waiting
+ * to happen, and this is derived from a task key `api.ts` has already refused to accept unless it
+ * is a name.
+ */
+export const WORKER_BRANCH_SLUG = "worker";
+
+export function branchFor(taskKey: string): string {
+  return `${taskKey.toLowerCase()}/${WORKER_BRANCH_SLUG}`;
+}
+
+/** One row of what the server says is waiting on this machine. */
+export interface ServerDecision {
+  taskId: string;
+  projectId: string;
+  taskKey: string;
+  commit: string;
+  patchSha256: string;
+  state: string;
+  /** The task's own title, so the pull request this opens is named like any other. */
+  title: string;
+  attempts?: number;
+}
+
+/** Everything that only exists relative to a bound checkout, resolved per project. */
+export interface DecisionContext {
+  worktreeRoot: string;
+  destroyWorktree: (taskKey: string) => Promise<void>;
+  delivery: Pick<Delivery, "push" | "openPr">;
+  runner: Runner;
+  collectDiff: (runner: Runner, worktreePath: string, baseSha: string) => Promise<DiffStats>;
+}
+
+export interface SettleDecisionsDeps {
+  markers: MarkerStore;
+  /** Null when this project is no longer bound here, which is what a lost assignment looks like. */
+  contextFor: (projectId: string) => Promise<DecisionContext | null>;
+  settle: (settlement: DecisionSettlement) => Promise<void>;
+  log: (message: string) => void;
+}
+
+const GIT_TIMEOUT_MS = 60_000;
+
+const PR_BODY = [
+  "The protected-paths gate refused this change, and a person read it and accepted the push.",
+  "",
+  "Accepting is not merging: this pull request is reviewed like any other.",
+].join("\n");
+
+/**
+ * Why the push did not happen, or null when nothing is wrong.
+ *
+ * `rev-parse --verify refs/heads/<branch>` rather than `rev-parse HEAD`: `git push -- <branch>`
+ * resolves the branch in the ref store the linked worktree SHARES with the main clone, so what
+ * HEAD happens to be in this directory is not what would be sent.
+ */
+async function whyNotPushable(
+  context: DecisionContext,
+  marker: DecisionMarker,
+  decision: ServerDecision
+): Promise<string | null> {
+  if (marker.commit !== decision.commit) {
+    return `this machine holds ${marker.commit} for ${decision.taskKey}, not the accepted ${decision.commit}`;
+  }
+
+  const branch = branchFor(decision.taskKey);
+  const head = await context.runner.run(
+    "git",
+    gitArgs(["rev-parse", "--verify", `refs/heads/${branch}`]),
+    {
+      cwd: marker.worktreePath,
+      timeoutMs: GIT_TIMEOUT_MS,
+      env: { ...childEnv(), ...GIT_SAFE_ENV },
+    }
+  );
+  if (head.code !== 0) {
+    return `\`${branch}\` is not a branch on this machine any more (${head.stderr || head.stdout})`;
+  }
+  if (head.stdout.trim() !== decision.commit) {
+    return `\`${branch}\` is at ${head.stdout.trim()}, not at the accepted ${decision.commit}`;
+  }
+
+  // Re-derived rather than trusted: the digest is over the patch git printed at refusal time, and
+  // a repository-local textconv or external diff driver planted since then would render the same
+  // commit as something else entirely — which is the change a person would NOT have accepted.
+  const diff = await context.collectDiff(context.runner, marker.worktreePath, marker.baseSha);
+  if (sha256(diff.patch) !== decision.patchSha256) {
+    return "the change in the worktree no longer matches the patch that was accepted";
+  }
+
+  return null;
+}
+
+/**
+ * Act on every verdict the server has for this machine, and tidy up after the ones that ended some
+ * other way.
+ *
+ * Drained from `drain()`, which runs even while the worker is paused: pause stops a machine taking
+ * NEW work, and has never stopped it finishing work it already holds.
+ *
+ * There is deliberately no clean-tree precondition. Pushing a named commit makes the working
+ * tree's state irrelevant, and demanding a clean one would inherit a false positive the pipeline
+ * goes out of its way to avoid.
+ */
+export async function settleDecisions(
+  deps: SettleDecisionsDeps,
+  decisions: ServerDecision[],
+  /** When the list was fetched, so a marker written after it is not mistaken for an orphan. */
+  decisionsAsOf: number
+): Promise<void> {
+  for (const decision of decisions) {
+    if (decision.state !== "accepted" && decision.state !== "declined") continue;
+    if (!isSafeTaskKey(decision.taskKey)) {
+      deps.log(`refusing decision for task key ${JSON.stringify(decision.taskKey)}`);
+      continue;
+    }
+
+    const context = await deps.contextFor(decision.projectId);
+    if (!context) continue;
+
+    const marker = deps.markers.read(decision.taskKey);
+
+    if (decision.state === "declined") {
+      // Removed and said so, rather than left to be found months later. Reported even when there
+      // is no worktree left to remove: the person is owed the answer either way.
+      await context.destroyWorktree(decision.taskKey).catch((error) => {
+        deps.log(`${decision.taskKey}: could not remove the declined worktree: ${String(error)}`);
+      });
+      deps.markers.remove(decision.taskKey);
+      await deps.settle({ taskId: decision.taskId, state: "discarded" });
+      continue;
+    }
+
+    if (!marker) {
+      await deps.settle({
+        taskId: decision.taskId,
+        state: "refused",
+        error: `this machine no longer holds a worktree for ${decision.taskKey}`,
+        attempts: (decision.attempts ?? 0) + 1,
+      });
+      continue;
+    }
+
+    const why = await whyNotPushable(context, marker, decision).catch((error) => String(error));
+    if (why) {
+      // `refused` and not `failed`: nothing went wrong with the machine, the answer is simply no.
+      // Either can be accepted again, so neither is a dead end.
+      await deps.settle({
+        taskId: decision.taskId,
+        state: "refused",
+        error: why,
+        attempts: (decision.attempts ?? 0) + 1,
+      });
+      continue;
+    }
+
+    try {
+      const branch = branchFor(decision.taskKey);
+      await context.delivery.push(marker.worktreePath, branch, decision.commit);
+      const prUrl = await context.delivery.openPr(
+        marker.worktreePath,
+        { taskKey: decision.taskKey, title: decision.title },
+        PR_BODY
+      );
+      await deps.settle({ taskId: decision.taskId, state: "delivered", prUrl });
+      // Only now: until the pull request exists, this worktree is the only copy of the work.
+      await context.destroyWorktree(decision.taskKey).catch(() => {});
+      deps.markers.remove(decision.taskKey);
+    } catch (error) {
+      await deps.settle({
+        taskId: decision.taskId,
+        state: "failed",
+        error: String(error),
+        attempts: (decision.attempts ?? 0) + 1,
+      });
+    }
+  }
+
+  await sweepMarkers(deps, decisions, decisionsAsOf);
+}
+
+/**
+ * A marker whose decision is no longer among the live ones — abandoned by a person, superseded by
+ * a second claim, or delivered on an earlier pass whose settlement landed but whose cleanup did
+ * not. The worktree it was holding back goes with it.
+ *
+ * Bounded by when the list was fetched. `refreshServerState` is floored at 30 seconds, so a run
+ * that opened a decision a moment ago is not yet in any list this pass has — and sweeping on that
+ * would destroy the worktree the person is about to be asked about.
+ */
+async function sweepMarkers(
+  deps: SettleDecisionsDeps,
+  decisions: ServerDecision[],
+  decisionsAsOf: number
+): Promise<void> {
+  const live = new Set(decisions.map((decision) => decision.taskKey));
+
+  for (const marker of deps.markers.list()) {
+    if (live.has(marker.taskKey)) continue;
+    if (Date.parse(marker.createdAt) >= decisionsAsOf) continue;
+
+    const context = await deps.contextFor(marker.projectId);
+    if (context) {
+      await context.destroyWorktree(marker.taskKey).catch((error) => {
+        deps.log(`${marker.taskKey}: could not remove a settled worktree: ${String(error)}`);
+      });
+    }
+    deps.markers.remove(marker.taskKey);
+  }
+}
+
+/**
+ * What the server said, rebuilt field by field.
+ *
+ * Server-controlled, like the assignment list beside it, and with a sharper edge: two of these
+ * values reach `git` as arguments. A row missing any of them is dropped whole rather than
+ * defaulted — a decision with an empty commit would be a push of nothing, reported as delivered.
+ */
+export function parseDecisions(value: unknown): ServerDecision[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (typeof entry !== "object" || entry === null) return [];
+    const row = entry as Record<string, unknown>;
+    const text = (key: string): string => (typeof row[key] === "string" ? (row[key] as string) : "");
+    const taskId = text("taskId");
+    const projectId = text("projectId");
+    const taskKey = text("taskKey");
+    const commit = text("commit");
+    const state = text("state");
+    if (!taskId || !projectId || !state) return [];
+    if (!isSafeTaskKey(taskKey)) return [];
+    // Checked here as well as at the route that stored it: this is the value that becomes the
+    // source half of a push refspec, and the check belongs on the side that spends it.
+    if (!/^[0-9a-f]{7,64}$/.test(commit)) return [];
+    return [
+      {
+        taskId,
+        projectId,
+        taskKey,
+        title: text("title"),
+        commit,
+        patchSha256: text("patchSha256"),
+        state,
+        attempts: typeof row.attempts === "number" && row.attempts >= 0 ? row.attempts : 0,
+      },
+    ];
+  });
+}

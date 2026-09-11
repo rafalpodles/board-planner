@@ -275,9 +275,11 @@ export interface WorkerDecision {
   taskId: string;
   projectId: string;
   taskKey: string;
+  title: string;
   commit: string;
   patchSha256: string;
   state: TaskDecisionState;
+  attempts: number;
 }
 
 /**
@@ -294,12 +296,21 @@ export async function decisionsForWorker(workerId: string): Promise<WorkerDecisi
     "decision.workerId": workerId,
     "decision.state": { $nin: SETTLED },
   })
-    .select("project decision.taskKey decision.commit decision.patchSha256 decision.state")
+    .select(
+      "project decision.taskKey decision.title decision.commit decision.patchSha256 decision.state decision.attempts"
+    )
     .lean<
       {
         _id: unknown;
         project: unknown;
-        decision?: { taskKey?: string; commit?: string; patchSha256?: string; state?: TaskDecisionState };
+        decision?: {
+          taskKey?: string;
+          title?: string;
+          commit?: string;
+          patchSha256?: string;
+          state?: TaskDecisionState;
+          attempts?: number;
+        };
       }[]
     >();
 
@@ -310,9 +321,11 @@ export async function decisionsForWorker(workerId: string): Promise<WorkerDecisi
             taskId: String(task._id),
             projectId: String(task.project),
             taskKey: task.decision.taskKey ?? "",
+            title: task.decision.title ?? "",
             commit: task.decision.commit ?? "",
             patchSha256: task.decision.patchSha256 ?? "",
             state: task.decision.state,
+            attempts: task.decision.attempts ?? 0,
           },
         ]
       : []
