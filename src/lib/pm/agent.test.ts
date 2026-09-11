@@ -512,12 +512,6 @@ describe("the prefix a turn asks to be cached", () => {
   });
 
   /**
-   * The key must be this board and this reader, in that order. A shape assertion alone leaves both
-   * mistakes green: a constant would be one conversation for the whole instance, sending every
-   * reader to an endpoint holding somebody else's prefix, and swapping the pair would be a
-   * different key for the same thread every time a different board is read (BP-568 review).
-   */
-  /**
    * A turn carrying a picture and no words puts a second system message — the "describe what you
    * see and change nothing" nudge — between the history and the user content. Both it and the
    * picture are this turn's, so both belong past the mark; a picture written into a cache that
@@ -553,35 +547,43 @@ describe("the prefix a turn asks to be cached", () => {
   });
 
   /**
-   * A cache write costs more than the cold prompt it replaces, so it has to be read back by
-   * something. While the replay window is still growing the history mark is read by the next turn
-   * whatever this one does — but once the window has filled it slides, the next turn opens with
-   * different bytes, and a turn that then answers in a single call has paid for an entry no
-   * request will ever read. The second call is the first proof that more calls are coming
-   * (BP-568 review).
+   * The mark goes on from the first call, whatever the thread looks like, and that is a bet rather
+   * than a certainty: a turn that answers in one call pays about 25% more for its prefix than it
+   * would unmarked, while a two-call turn already saves ~30% and a six-call turn saves most of
+   * five prefixes.
+   *
+   * An earlier version withheld the mark once the replay window had filled, reasoning that a
+   * single-call turn's write would be read by the NEXT turn instead. That is wrong for a reason no
+   * message count can see: an ephemeral entry lives five minutes on Anthropic and a conversation
+   * is slower than that. This test exists to stop the idea coming back — a filled window must look
+   * exactly like a growing one here (BP-568 review).
    */
-  it("withholds the history mark until a filled thread has proved the turn is not a one-call turn", async () => {
+  it("marks from the first call whether or not the replay window has filled", async () => {
     historyDocsMock.mockResolvedValue(Array.from({ length: 30 }, (_, i) => ({ content: `old ${i}` })));
     twoCalls();
 
     await turn([]);
 
-    expect(sent[0].cachePrefixLength).toBe(1);
-    expect(sent[1].cachePrefixLength).toBe(1 + HISTORY.length);
+    expect(sent.map((r) => r.cachePrefixLength)).toEqual([1 + HISTORY.length, 1 + HISTORY.length]);
   });
 
-  // The control: a thread still filling up marks the history from the first call, because there
-  // the next turn reads it back even if this one stops here
-  it("marks the history from the first call while the window is still growing", async () => {
+  // The control: the same on a thread with one older turn behind it, so the assertion above is
+  // about the mark rather than about the particular history the mock returned
+  it("marks the same prefix on a thread that has barely started", async () => {
     historyDocsMock.mockResolvedValue([{ content: "the only older turn" }]);
     twoCalls();
 
     await turn([]);
 
-    expect(sent[0].cachePrefixLength).toBe(1 + HISTORY.length);
-    expect(sent[1].cachePrefixLength).toBe(1 + HISTORY.length);
+    expect(sent.map((r) => r.cachePrefixLength)).toEqual([1 + HISTORY.length, 1 + HISTORY.length]);
   });
 
+  /**
+   * The key must be this board and this reader, in that order. A shape assertion alone leaves both
+   * mistakes green: a constant would be one conversation for the whole instance, sending every
+   * reader to an endpoint holding somebody else's prefix, and swapping the pair would be a
+   * different key for the same thread every time a different board is read (BP-568 review).
+   */
   it("names one conversation for every call of the turn, keyed by board and reader", async () => {
     twoCalls();
 

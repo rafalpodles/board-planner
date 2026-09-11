@@ -91,6 +91,8 @@ describe("dailyPmSpend", () => {
 
     expect(spend.cachedTokens).toBe(90_000);
     expect(spend.cacheWriteTokens).toBe(4_000);
+    // The denominator the settings screen needs, and the number the premise check uses
+    expect(spend.promptTokens).toBe(100_000);
     // Not added to it: the ceiling is judged on the same total as before
     expect(spend.tokens).toBe(120_000);
   });

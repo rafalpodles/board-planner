@@ -37,6 +37,7 @@ const usage = async (request: APIRequestContext) => {
     turns: { used: number; cap: number };
     calls: number;
     tokens: number;
+    promptTokens: number;
     cachedTokens: number;
     cacheWriteTokens: number;
     tokenCap: number;
@@ -57,7 +58,6 @@ const sentRequests = async (request: APIRequestContext) => {
   return res.json() as Promise<
     {
       sessionId: string | null;
-      prefix: string;
       messageCount: number;
       cacheControls: number;
       markedRoles: string[];
@@ -302,6 +302,9 @@ test("what a turn read from the cache is recorded, and shown as a share of what 
       cacheWriteTokens: 900,
       cachedTokens: 900,
       tokens: 2 * 1200,
+      // The denominator the share is taken over: prompt tokens only, since a cache read is never
+      // part of what the model wrote. 900 of 2000 is 45%; over the day's 2400 it would read 38%
+      promptTokens: 2 * 1000,
     });
   });
 
@@ -313,6 +316,9 @@ test("what a turn read from the cache is recorded, and shown as a share of what 
     // The figure's own element, compared whole: a digit strip of the sentence would also match
     // this number inside a larger one, so rendering ten times the value would still pass
     expect(await figuresIn(page.getByTestId("pm-usage-cached-tokens"))).toBe(String(spent.cachedTokens));
+    // The share, and the denominator it is a share of, both on the line the operator reads
+    await expect(cache).toContainText("45%");
+    await expect(cache).toContainText("prompt tokens");
     // The control: the total it is a share of is still on screen, unchanged by any of this — read
     // off the totals line specifically, which is not the line under test
     expect(await figuresIn(page.getByTestId("pm-usage-totals"))).toContain(String(spent.tokens));

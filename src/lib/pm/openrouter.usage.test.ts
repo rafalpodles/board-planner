@@ -117,6 +117,23 @@ describe("what it reports about the cache", () => {
     expect(await call()).toMatchObject({ usage: { cachedPromptTokens: 0, cacheWriteTokens: 0 } });
   });
 
+  /**
+   * The two guards meet here. `usageOf` returns `undefined` when no token count parses, and the
+   * cache figures ride on that object — so a block carrying detail but no countable tokens reports
+   * nothing at all rather than a cache read against an unknown total. Untested until now, and the
+   * arm where the two rules could have disagreed (BP-568 review).
+   */
+  it("reports nothing when the only parseable numbers are the cache ones", async () => {
+    respondWith({
+      ...TEXT,
+      usage: { prompt_tokens: "lots", prompt_tokens_details: { cached_tokens: 900 } },
+    });
+
+    const result = await call();
+
+    expect("usage" in result ? result.usage : "missing").toBeUndefined();
+  });
+
   it("does not let a non-numeric or negative count through", async () => {
     respondWith({
       ...TEXT,

@@ -57,22 +57,24 @@ function marked(message: OrChatMessage): OrChatMessage {
  * `prefixLength`, and a thread with nothing to replay yet has only the first. Anthropic permits
  * four.
  *
- * **`prefixLength` must name only what outlives this turn.** A cache write costs more than the
- * cold prompt it replaces — 1.25x base on Anthropic — and only pays for itself once something
- * reads it back. A mark placed after the turn's own user message is read by the turn's later
- * calls, but a turn that answers in one call makes none, and the next turn cannot read it either
- * because its history has grown past that point. Marking the end of the *replayed history*
- * instead is read by every later call of this turn. The image case makes the difference concrete:
- * a picture marked cacheable and then read back by nobody is the most expensive thing this file
- * could do.
+ * **`prefixLength` must name only what this turn's later calls will send again.** A cache write
+ * costs more than the cold prompt it replaces — 1.25x base on Anthropic — and only pays for itself
+ * once something reads it back, so the bytes worth marking are the ones every call of the turn
+ * repeats. That is the system prompt and the replayed history, and it stops there: this turn's own
+ * user message is repeated too, but marking past it buys nothing the history mark has not already
+ * bought, and the image case shows what it can cost — a picture written into a cache is the most
+ * expensive thing this file could do, and on a one-call turn nothing reads it.
  *
- * **How far it reaches beyond the turn is bounded, and not by this file.** The history mark is
- * also a prefix of the NEXT turn's request, but only while the replay window is still growing:
- * once a thread passes `HISTORY_LIMIT` the window slides, the oldest replayed message changes,
- * and the two requests diverge one message in. `MAX_REPLAYED_IMAGES` rotates images out the same
- * way, and that one is not detectable from the message count. The caller handles the window case
- * — see `windowGrowing` in `agent.ts`, which withholds the history mark on the first call of a
- * filled thread, since a turn that then answers in one call would have written for nobody.
+ * **A cached entry has a life, not only a shape.** `{ type: "ephemeral" }` is five minutes on
+ * Anthropic — a one-hour TTL exists and costs 2x base input to write instead of 1.25x — and
+ * OpenRouter drops a sticky session after ten idle minutes. So the reads that can be relied on are
+ * the ones inside a single turn, where the calls are seconds apart. A prefix surviving into the
+ * next turn needs the replay window still to be growing AND the person to come back within five
+ * minutes; treat it as a bonus, never as the reason for a mark.
+ *
+ * The replay window is the other bound: past `HISTORY_LIMIT` it slides, so the next turn's request
+ * diverges one message in, and `MAX_REPLAYED_IMAGES` rotates pictures out the same way without
+ * changing the row count at all.
  *
  * **The system prompt is the steadier of the two marks, not a constant.** It survives the window
  * entirely, but `buildSystemPrompt` interpolates the reader, branches on whether anyone is

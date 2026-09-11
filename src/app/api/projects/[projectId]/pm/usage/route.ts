@@ -31,7 +31,11 @@ export const GET = withProjectOwner(async (_request, { params }) => {
     turns: { used: turns.used, cap: turns.cap },
     calls: spend.calls,
     tokens: spend.tokens,
-    // A share of `tokens`, not an addition to it: what the provider served from its own cache.
+    // What the cached figure is a share OF. A cache read is part of the prompt count, never of the
+    // completion, so dividing by the day's total would understate the hit rate by whatever the
+    // model wrote — badly on a chatty board (BP-568 review).
+    promptTokens: spend.promptTokens,
+    // A share of `promptTokens`, not an addition to anything: what the provider served from cache.
     // Without this every token reads as a cold prompt and the budget above is set from a number
     // that cannot tell a cache hit from a miss (BP-568).
     cachedTokens: spend.cachedTokens,

@@ -454,6 +454,8 @@ describe("PmAgentSection — what today's tokens actually cost", () => {
     turns: { used: 3, cap: 100 },
     calls: 12,
     tokens: 120_000,
+    // What a cache read is a share of. The day's total is larger because the model also wrote.
+    promptTokens: 100_000,
     cachedTokens: 90_000,
     cacheWriteTokens: 0,
     tokenCap: 0,
@@ -486,8 +488,10 @@ describe("PmAgentSection — what today's tokens actually cost", () => {
 
     renderSection(true);
 
-    expect(await figuresIn()).toBe("9000075");
-    expect(await cacheLine()).toContain("75%");
+    expect(await figuresIn()).toBe("9000010000090");
+    expect(await cacheLine()).toContain("90%");
+    // The denominator is on the line, so the reader can check the percentage without leaving it
+    expect(await cacheLine()).toContain("prompt tokens");
     // Beside the total it is part of, not instead of it — read off the totals line, which is a
     // different element from the one under test
     const totals = (await screen.findByTestId("pm-usage-totals")).textContent ?? "";
@@ -504,8 +508,9 @@ describe("PmAgentSection — what today's tokens actually cost", () => {
 
     renderSection(true);
 
-    // "0 of those (0%)" — the whole strip, so a rendered non-zero cannot hide inside it
-    expect(await figuresIn()).toBe("00");
+    // "0 of the day's 100,000 prompt tokens (0%)" — the whole strip, so a rendered non-zero
+    // cannot hide inside it
+    expect(await figuresIn()).toBe("01000000");
   });
 
   it("mentions cache writes only when the provider charged for some", async () => {
@@ -513,7 +518,7 @@ describe("PmAgentSection — what today's tokens actually cost", () => {
 
     renderSection(true);
 
-    expect(await figuresIn()).toBe("90000754000");
+    expect(await figuresIn()).toBe("90000100000904000");
     expect(await cacheLine()).toContain("written");
   });
 
@@ -531,7 +536,7 @@ describe("PmAgentSection — what today's tokens actually cost", () => {
    * rounding was free to be anything.
    */
   it("rounds the share rather than truncating it", async () => {
-    api.get.mockResolvedValue(usage({ tokens: 3_000, cachedTokens: 2_000 }));
+    api.get.mockResolvedValue(usage({ tokens: 3_000, promptTokens: 3_000, cachedTokens: 2_000 }));
 
     renderSection(true);
 
@@ -544,17 +549,19 @@ describe("PmAgentSection — what today's tokens actually cost", () => {
    * product rather than as a broken provider, so the share is clamped (BP-568 review).
    */
   it("never claims more was cached than was spent, whatever the provider reports", async () => {
-    api.get.mockResolvedValue(usage({ tokens: 20_000, cachedTokens: 90_000 }));
+    api.get.mockResolvedValue(usage({ tokens: 20_000, promptTokens: 20_000, cachedTokens: 90_000 }));
 
     renderSection(true);
 
-    expect(await figuresIn()).toBe("90000100");
+    expect(await figuresIn()).toBe("9000020000100");
     expect(await cacheLine()).not.toContain("450%");
   });
 
   // A day with no turns divides by zero. "NaN%" on a settings screen is how that would read.
   it("says nothing at all on a day with no spend", async () => {
-    api.get.mockResolvedValue(usage({ tokens: 0, cachedTokens: 0, calls: 0, turns: { used: 0, cap: 100 } }));
+    api.get.mockResolvedValue(
+      usage({ tokens: 0, promptTokens: 0, cachedTokens: 0, calls: 0, turns: { used: 0, cap: 100 } })
+    );
 
     renderSection(true);
 

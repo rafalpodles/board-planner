@@ -309,27 +309,23 @@ export async function runPmTurn(opts: {
 
   /**
    * The system prompt and the replayed history — and deliberately not this turn's own user
-   * message, nor the image nudge in front of it. Those two are read back by this turn's later
-   * calls and by nothing else: a turn that answers in one call reads them never, and the next
-   * turn's history has already grown past them. Since a cache write costs more than the cold
-   * prompt it replaces, a mark nothing reads is a loss (BP-568 review). How much of this survives
-   * into the following turn depends on the replay window; `prompt-cache.ts` says where that ends.
+   * message, nor the image nudge in front of it. Those two could only be read back by this turn's
+   * later calls, and a turn that answers in one call makes none.
+   *
+   * **Marking from the first call is a bet, and it is worth stating as one.** The write costs
+   * 1.25x base input on Anthropic and the reads cost 0.1x, so a turn that answers in a single call
+   * pays about 25% more for its prefix than it would unmarked, while a two-call turn already saves
+   * ~30% and a six-call turn saves most of five prefixes. The ticket's own measurement — a
+   * one-call turn at 18.7k tokens against a six-call turn at 160k — is what makes the bet lopsided
+   * enough to take.
+   *
+   * An earlier version withheld the mark on a turn that looked single-call, on the theory that the
+   * NEXT turn would read it instead. That theory was wrong for a reason no message count can see:
+   * `cache_control: { type: "ephemeral" }` lives five minutes on Anthropic, and a human-paced
+   * conversation is slower than that. Cross-turn reads are a bonus when they happen, never a
+   * premise (BP-568 review).
    */
   const stablePrefixLength = 1 + replayed.length;
-  /**
-   * Whether the replayed history is still a growing prefix. Below `HISTORY_LIMIT` the next turn
-   * opens with these same messages, so marking them is normally read back later whatever this turn
-   * does. Once the window has filled it slides instead, the next turn's request diverges one
-   * message in, and a turn that answers in a single call has written a cache entry nobody can ever
-   * read (BP-568 review).
-   *
-   * Necessary rather than sufficient: `MAX_REPLAYED_IMAGES` rotates a picture out of an older
-   * entry long before the row count approaches `HISTORY_LIMIT`, which diverges the prefix just as
-   * a slide does and is invisible to a count of messages. Catching that means counting
-   * image-bearing entries out of `replayHistory`; `prompt-cache.ts` records why that is left
-   * undone rather than done badly.
-   */
-  const windowGrowing = history.length < HISTORY_LIMIT;
   const sessionId = pmSessionId(opts.projectId, opts.triggeredByUserId);
 
 
@@ -356,10 +352,8 @@ export async function runPmTurn(opts: {
       tools: toolDefinitions,
       // Everything the loop appends from here — assistant tool calls and their results — grows
       // past this mark, so the prefix it names is the same bytes on every one of the 15 calls.
-      // On a filled window the first call marks the system prompt only: at that point nothing has
-      // yet proved the turn will make a second call, and if it does not, marking the history buys
-      // a write no request ever reads. From the second call on there is such a proof.
-      cachePrefixLength: windowGrowing || step > 0 ? stablePrefixLength : 1,
+      // Marked from the first call, which is a bet: see the note on `stablePrefixLength`.
+      cachePrefixLength: stablePrefixLength,
       sessionId,
       signal: opts.signal,
     });

@@ -63,16 +63,6 @@ let received = null;
  */
 let requests = [];
 
-/**
- * The stable prefix as the STUB works it out — everything before the first assistant message
- * carrying tool calls. Structural, so two calls of one turn agree here whatever the app did; use
- * `markedPrefix` when the question is what the app claimed, and this only as a coarse shape.
- */
-function prefixOf(messages) {
-  const growth = messages.findIndex((m) => Array.isArray(m?.tool_calls) && m.tool_calls.length > 0);
-  return JSON.stringify(growth === -1 ? messages : messages.slice(0, growth));
-}
-
 const isMarked = (m) =>
   Array.isArray(m?.content) && m.content.some((part) => part?.cache_control);
 
@@ -95,8 +85,9 @@ const markedRolesIn = (messages) => messages.filter(isMarked).map((m) => m?.role
 
 /**
  * Everything up to and including the last marked message — the run of bytes the app has told the
- * provider to cache. Unlike `prefixOf` below, which the stub works out for itself from the shape
- * of the conversation, this is the app's own claim: two calls of one turn must make the same one.
+ * provider to cache. It is the app's OWN claim, and that is the point: a prefix the stub worked out
+ * for itself from the shape of the conversation would agree across a turn's calls however the app
+ * behaved, so a test on that could not fail.
  */
 function markedPrefixOf(messages) {
   let last = -1;
@@ -174,7 +165,6 @@ serve({
       const markedRoles = markedRolesIn(messages);
       requests.push({
         sessionId: body.session_id ?? null,
-        prefix: prefixOf(messages),
         messageCount: messages.length,
         cacheControls: markedRoles.length,
         markedRoles,

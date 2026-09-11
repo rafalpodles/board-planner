@@ -49,6 +49,7 @@ export async function dailyPmSpend(
   over: boolean;
   cap: number;
   tokens: number;
+  promptTokens: number;
   cachedTokens: number;
   cacheWriteTokens: number;
   calls: number;
@@ -73,8 +74,8 @@ export async function dailyPmSpend(
       $group: {
         _id: null,
         tokens: { $sum: { $ifNull: ["$usage.totalTokens", 0] } },
-        // Not reported — summed only so the cache-read premise below can be checked against the
-        // number it is actually a premise about
+        // A cache read is a share of THIS, not of the day's total — it is what the settings screen
+        // divides by, and what the premise check below is a premise about
         promptTokens: { $sum: { $ifNull: ["$usage.promptTokens", 0] } },
         // Already inside `tokens`, reported apart from it so the operator can see what share of
         // the day was billed at cache-read price rather than as a cold prompt (BP-568). Turns
@@ -91,6 +92,7 @@ export async function dailyPmSpend(
 
   const tokens = totals?.tokens ?? 0;
   const cachedTokens = totals?.cachedTokens ?? 0;
+  const promptTokens = totals?.promptTokens ?? 0;
   /**
    * The premise this reporting rests on is the provider's, not ours: a cache read is documented as
    * part of `prompt_tokens`. A provider counting it outside would make the day's spend understate
@@ -101,7 +103,6 @@ export async function dailyPmSpend(
    * completion tokens reporting 600k cached has broken the premise by 200k, and against
    * prompt + completion it would look fine and say nothing (BP-568 review).
    */
-  const promptTokens = totals?.promptTokens ?? 0;
   if (cachedTokens > promptTokens) {
     console.warn(
       `[pm] project ${projectId}: ${cachedTokens} cached tokens reported against ${promptTokens} prompt ` +
@@ -113,6 +114,7 @@ export async function dailyPmSpend(
     over: cap > 0 && tokens >= cap,
     cap,
     tokens,
+    promptTokens,
     cachedTokens,
     cacheWriteTokens: totals?.cacheWriteTokens ?? 0,
     calls: totals?.calls ?? 0,

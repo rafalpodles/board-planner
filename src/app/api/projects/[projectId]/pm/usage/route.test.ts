@@ -38,6 +38,7 @@ beforeEach(() => {
   dailyPmSpend.mockResolvedValue({
     calls: 0,
     tokens: 0,
+    promptTokens: 0,
     cachedTokens: 0,
     cacheWriteTokens: 0,
     cap: 0,
@@ -81,6 +82,7 @@ describe("GET pm/usage", () => {
     dailyPmSpend.mockResolvedValue({
       calls: 12,
       tokens: 120_000,
+      promptTokens: 100_000,
       cachedTokens: 90_000,
       cacheWriteTokens: 4_000,
       cap: 0,
@@ -89,6 +91,13 @@ describe("GET pm/usage", () => {
 
     const body = await (await GET(new Request("http://x"), { params })).json();
 
-    expect(body).toMatchObject({ tokens: 120_000, cachedTokens: 90_000, cacheWriteTokens: 4_000 });
+    // `promptTokens` is what the screen divides the cached figure by; without it in the body the
+    // page can only divide by the day's total, which folds in everything the model wrote
+    expect(body).toMatchObject({
+      tokens: 120_000,
+      promptTokens: 100_000,
+      cachedTokens: 90_000,
+      cacheWriteTokens: 4_000,
+    });
   });
 });
