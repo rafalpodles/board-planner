@@ -124,6 +124,24 @@ describe("reading the report", () => {
     expect(verdict.blocking[0].severity).toBe("high");
   });
 
+  /**
+   * The case that actually separates the two readings, and the reason the one above does not: when
+   * a package's summary and its advisory agree, judging on either gives the same answer. `npm audit`
+   * gives a package the worst severity in its whole chain, so a package summarised "critical" on
+   * account of a dependency can carry a moderate advisory of its own — and judging on the summary
+   * would block on it. Verified by mutation: swapping the check to the summary leaves every other
+   * case in this file green.
+   */
+  it("does not block a moderate advisory under a package summarised worse", () => {
+    const verdict = judge(
+      report({ parent: { severity: "critical", via: [via("GHSA-moderate-0004", "moderate")] } }),
+      []
+    );
+
+    expect(verdict.blocking).toEqual([]);
+    expect(findings(report({ parent: { severity: "critical", via: [via("GHSA-moderate-0004", "moderate")] } }))).toEqual([]);
+  });
+
   it("counts one advisory once however many packages report it", () => {
     const shared = via("GHSA-shared-0002", "high");
 
