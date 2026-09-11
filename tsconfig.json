@@ -13,6 +13,10 @@
     "esModuleInterop": true,
     "module": "esnext",
     "moduleResolution": "bundler",
+    // `scripts/*.ts` are run by `node file.ts` (Node 26 strips types), and Node requires the
+    // real extension on a relative import while bundler resolution forbids it. Valid only
+    // alongside `noEmit`, which is set below — nothing is emitted from these paths (BP-599).
+    "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "react-jsx",

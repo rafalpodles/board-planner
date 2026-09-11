@@ -61,6 +61,23 @@ jobs:
         env:
           MONGODB_URI: mongodb://127.0.0.1:1/build-does-not-connect
 
+      # Last, and `if: !cancelled()` for the same reason: this step fails on advisories published
+      # by other people overnight, which nobody can fix from their own branch. Run first it would
+      # hide a type error behind a supply-chain event; run last and skipped on cancellation, the
+      # compile and build results still reach whoever is waiting for them.
+      #
+      # Both trees that reach production, root and mcp-server — `npm audit` reads the lockfile, so
+      # neither needs installing first. Fails on a critical or high against a production dependency
+      # unless src/lib/audit-policy.ts accepts that exact advisory with a reason, and on an audit
+      # that could not run at all. BP-599 exists because a reachability judgement written on a
+      # ticket in August was false by September with nothing failing in between.
+      - name: Production dependencies carry no unaccepted advisory
+        if: ${{ !cancelled() }}
+        # `--disable-warning` rather than `"type": "module"` in package.json: Node warns on every
+        # run that it had to reparse a .ts file as ESM, and the documented fix would change the
+        # semantics of every .js in the repo to silence two lines on one step's stderr.
+        run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/audit-production.ts
+
   worker:
     name: Worker — the package npm test never reaches
     runs-on: ubuntu-latest
