@@ -585,6 +585,9 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                       fraction of a cold prompt
                     </>
                   )}
+                  {/* The falsifier for the whole scheme, on the screen of the person who can see
+                      it: marking a prefix is a bet that later calls read it back, so writes
+                      climbing while reads stay near zero is that bet losing. */}
                   {usage.cacheWriteTokens > 0 && (
                     <>; {usage.cacheWriteTokens.toLocaleString()} were written to it</>
                   )}

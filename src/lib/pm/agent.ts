@@ -317,7 +317,9 @@ export async function runPmTurn(opts: {
    * pays about 25% more for its prefix than it would unmarked, while a two-call turn already saves
    * ~30% and a six-call turn saves most of five prefixes. The ticket's own measurement — a
    * one-call turn at 18.7k tokens against a six-call turn at 160k — is what makes the bet lopsided
-   * enough to take.
+   * enough to take. What would overturn it: any turn that touches the board is already two calls
+   * or more, so the losing population is pure question-and-answer chat, and it would take a great
+   * deal of it to outweigh the turns that do work.
    *
    * An earlier version withheld the mark on a turn that looked single-call, on the theory that the
    * NEXT turn would read it instead. That theory was wrong for a reason no message count can see:
