@@ -6,6 +6,8 @@ import {
   staleEntries,
   ACCEPTED_ADVISORIES,
   AUDITED_TREES,
+  AUTHORITATIVE_REGISTRY,
+  isAuthoritativeRegistry,
   type AcceptedAdvisory,
 } from "./audit-policy";
 
@@ -389,6 +391,43 @@ describe("which tree a reason covers", () => {
 
     expect(judge(one, both, ".").blocking).toEqual([]);
     expect(judge(one, both, "mcp-server").blocking).toEqual([]);
+  });
+});
+
+/**
+ * The gate's answer is only as good as the host it asked, and nothing in a report shows which host
+ * that was — a mirror serving no advisories returns a structurally perfect clean bill. This was the
+ * least-covered code in the change: the comparison lived in a script with no tests, and swapping
+ * the constant for a mirror left the whole suite green (BP-599 review).
+ */
+describe("which registry the gate will trust", () => {
+  it.each([AUTHORITATIVE_REGISTRY, "https://registry.npmjs.org", " https://registry.npmjs.org/ "])(
+    "accepts %p — the trailing slash is a spelling, not a host",
+    (registry) => {
+      expect(isAuthoritativeRegistry(registry)).toBe(true);
+    }
+  );
+
+  it.each([
+    ["a mirror", "https://mirror.example.invalid/"],
+    // The one normalisation must never soften into: a prefix match would call this the public
+    // registry, and it is a different host entirely
+    ["a lookalike host", "https://registry.npmjs.org.evil.test/"],
+    ["a subdomain", "https://evil.registry.npmjs.org/"],
+    ["plain http", "http://registry.npmjs.org/"],
+    ["nothing at all", ""],
+  ])("refuses %s", (_name, registry) => {
+    expect(isAuthoritativeRegistry(registry)).toBe(false);
+  });
+});
+
+/**
+ * The script audits exactly these, so dropping one here silently stops auditing a program that
+ * ships — the same shape of hole this whole ticket is about, one level up.
+ */
+describe("which trees are audited", () => {
+  it("covers both programs that reach production", () => {
+    expect([...AUDITED_TREES]).toEqual([".", "mcp-server"]);
   });
 });
 

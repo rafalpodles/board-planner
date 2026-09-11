@@ -73,7 +73,10 @@ jobs:
       # ticket in August was false by September with nothing failing in between.
       - name: Production dependencies carry no unaccepted advisory
         if: ${{ !cancelled() }}
-        run: node scripts/audit-production.ts
+        # `--disable-warning` rather than `"type": "module"` in package.json: Node warns on every
+        # run that it had to reparse a .ts file as ESM, and the documented fix would change the
+        # semantics of every .js in the repo to silence two lines on one step's stderr.
+        run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/audit-production.ts
 
   worker:
     name: Worker — the package npm test never reaches

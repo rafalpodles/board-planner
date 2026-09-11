@@ -25,6 +25,7 @@ import {
   ACCEPTED_ADVISORIES,
   AUDITED_TREES,
   AUTHORITATIVE_REGISTRY,
+  isAuthoritativeRegistry,
   type Finding,
 } from "../src/lib/audit-policy.ts";
 
@@ -107,8 +108,7 @@ function mustHaveRun(report: unknown, cwd: string): unknown {
  */
 function mustAskAnAuthoritativeRegistry(cwd: string): string {
   const registry = registryInUse(cwd);
-  const same = registry.replace(/\/+$/, "") === AUTHORITATIVE_REGISTRY.replace(/\/+$/, "");
-  if (same) return registry;
+  if (isAuthoritativeRegistry(registry)) return registry;
   console.log(
     `::error::npm in ${cwd} is configured to use ${registry}, and this gate only trusts ` +
       `${AUTHORITATIVE_REGISTRY}. A registry that does not serve the advisory endpoint returns an ` +
@@ -117,6 +117,18 @@ function mustAskAnAuthoritativeRegistry(cwd: string): string {
       `authoritative and say so in src/lib/audit-policy.ts.`
   );
   process.exit(1);
+}
+
+/**
+ * A proxy redirects the audit somewhere npm's own config cannot show: `npm config get https-proxy`
+ * answers `null` for a standard `HTTPS_PROXY`, while the request goes through it all the same — and
+ * a proxy answering `{}` produces the same structurally perfect empty report a mirror does. Not
+ * something this gate can refuse without breaking every runner that legitimately needs one, so it
+ * is named instead: a green tick should say where its answer came from (BP-599 review).
+ */
+for (const name of ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "npm_config_proxy", "npm_config_https_proxy"]) {
+  const value = process.env[name];
+  if (value) console.log(`note: ${name} is set to ${value} — the audit's answer came through it.`);
 }
 
 const blocking: Finding[] = [];

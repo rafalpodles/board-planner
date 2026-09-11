@@ -72,6 +72,22 @@ export const AUDITED_TREES = [".", "mcp-server"] as const;
  */
 export const AUTHORITATIVE_REGISTRY = "https://registry.npmjs.org/";
 
+/**
+ * Whether npm is pointed at the registry whose answer this gate trusts.
+ *
+ * A predicate rather than a comparison in the script, because the script has no tests and this was
+ * the least-covered line in the change: swapping the constant for a mirror left the whole suite
+ * green (BP-599 review).
+ *
+ * The trailing slash is normalised because `registry=https://registry.npmjs.org` is a legal
+ * configuration that npm returns as written. That normalisation must not soften into a prefix
+ * match — `https://registry.npmjs.org.evil.test/` is a different host and is not this one.
+ */
+export function isAuthoritativeRegistry(registry: string): boolean {
+  const trim = (url: string) => url.trim().replace(/\/+$/, "");
+  return trim(registry) === trim(AUTHORITATIVE_REGISTRY);
+}
+
 export interface Finding {
   id: string;
   package: string;
