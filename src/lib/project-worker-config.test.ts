@@ -215,6 +215,17 @@ describe("resetting a field to the default", () => {
     expect(parseProjectWorkerConfig({ reset: "model" })).toMatchObject({ ok: false });
     expect(parseProjectWorkerConfig({ reset: [7] })).toMatchObject({ ok: false });
   });
+
+  // BP-579: the pair BP-458 retired is not a policy field any more. This refusal is why the audit
+  // branch that watched them in the project route was removed — no request can change a field the
+  // parser refuses. The reset assertion is the red-check: it fails the moment either is added back
+  // to PROJECT_POLICY_DEFAULTS. The policy assertions pin the boolean shape too — a boolean field
+  // would need a BOOLEAN_FIELDS registration to be writable, and the parser has none.
+  it("refuses the retired autoMerge and reviewGate fields", () => {
+    expect(parseProjectWorkerConfig({ policy: { autoMerge: true } })).toMatchObject({ ok: false });
+    expect(parseProjectWorkerConfig({ policy: { reviewGate: false } })).toMatchObject({ ok: false });
+    expect(parseProjectWorkerConfig({ reset: ["autoMerge"] })).toMatchObject({ ok: false });
+  });
 });
 
 // The rule no per-field validator could hold: every field is checked in isolation, so nothing

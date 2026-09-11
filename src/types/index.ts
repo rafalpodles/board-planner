@@ -509,10 +509,12 @@ export interface WorkerPolicy {
 }
 
 export interface ProjectWorkerPolicy {
+  // Retained data, BP-458/BP-579: retired and read by nothing — whether a change reaches a base
+  // branch unreviewed is decided by the agent's sequence, not here. Stored projects still carry the
+  // values, and dropping either from this type would stop the app acknowledging a field the
+  // documents hold. Nothing can write them any more: parseProjectWorkerConfig refuses any field
+  // outside PROJECT_POLICY_DEFAULTS.
   autoMerge: boolean;
-  // Retired at BP-458 along with autoMerge above, and read by nothing. What now decides whether a
-  // second model reads the diff is a review gate in the agent's sequence. Kept on the type because
-  // stored projects still carry the values.
   reviewGate: boolean;
   baseBranch: string;
   taskTimeoutMs: number;
@@ -1287,7 +1289,6 @@ export const INSTANCE_AUDIT_ACTIONS = [
   "enrolment_token_spent",
   "project_workers_enabled",
   "project_workers_disabled",
-  "project_worker_policy_changed",
   "worker_command_sent",
   "user_password_reset",
   "user_email_changed",
