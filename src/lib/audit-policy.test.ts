@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { judge, findings, ACCEPTED_ADVISORIES } from "./audit-policy";
+import { judge, findings, ranSuccessfully, ACCEPTED_ADVISORIES } from "./audit-policy";
 
 /**
  * BP-599. The gate this backs is the only thing standing between the repo and the situation that
@@ -50,7 +50,21 @@ describe("what the gate blocks on", () => {
     const verdict = judge(report({ p: { severity, via: [via("GHSA-4444-5555-6666", severity)] } }), []);
 
     expect(verdict.blocking).toEqual([]);
-    expect(verdict.accepted).toEqual([]);
+    // Not merely unblocked — unseen. `accepted` is empty here whatever the code does, so the claim
+    // that this severity never reaches the gate is `findings` returning nothing at all.
+    expect(findings(report({ p: { severity, via: [via("GHSA-4444-5555-6666", severity)] } }))).toEqual([]);
+  });
+
+  /**
+   * The script calls `judge(report)` with one argument. Nothing here did, so the default that
+   * production actually uses — the repo's own allowlist — was never exercised.
+   */
+  it("uses this repo's allowlist when the caller names none", () => {
+    const live = ACCEPTED_ADVISORIES[0];
+    const verdict = judge(report({ [live.package]: { severity: "high", via: [via(live.id, "high")] } }));
+
+    expect(verdict.blocking).toEqual([]);
+    expect(verdict.accepted.map((f) => f.id)).toEqual([live.id]);
   });
 });
 
@@ -156,15 +170,68 @@ describe("reading the report", () => {
     }
   );
 
-  // A `via` entry with no recognisable id cannot be accepted by id either, so letting it through
-  // silently would be a hole; it is skipped, and the package's other advisories still count
-  it("skips a via entry carrying no GHSA id", () => {
+  /**
+   * ...which is only safe because the caller asks this question first. `npm audit` reports an
+   * unreachable registry, a missing lockfile or an auth failure as well-formed JSON with an
+   * `error` key and no `vulnerabilities`, and exits 0 for the first of those — so "no findings"
+   * and "we could not look" are the same value, and the gate has to tell them apart before it
+   * judges anything (BP-599 review).
+   */
+  describe("did the audit actually run", () => {
+    it("accepts a report that has both halves of a real answer", () => {
+      expect(ranSuccessfully({ vulnerabilities: {}, metadata: { vulnerabilities: { total: 0 } } })).toBe(true);
+    });
+
+    it.each([
+      ["an unreachable registry", { message: "ECONNREFUSED", error: { summary: "", detail: "" } }],
+      ["a missing lockfile", { error: { code: "ENOLOCK", summary: "no lock file" } }],
+      ["no vulnerabilities key", { metadata: {} }],
+      ["no metadata", { vulnerabilities: {} }],
+      ["not an object", "ECONNREFUSED"],
+      ["nothing at all", undefined],
+    ])("refuses %s", (_name, input) => {
+      expect(ranSuccessfully(input)).toBe(false);
+    });
+  });
+
+  /**
+   * This case used to assert the opposite, with a comment claiming that skipping such an entry was
+   * safe because it "could not be accepted by id either" — but skipping IS letting through, and a
+   * critical with no advisory URL passed the gate in silence. Something unrecognised in a security
+   * feed is the last thing that should pass quietly, so it blocks under a synthetic key that no
+   * allowlist can hold (BP-599 review).
+   */
+  it("blocks an enforced advisory carrying no GHSA id, rather than skipping it", () => {
     const verdict = judge(
       report({ p: { severity: "high", via: [{ title: "no url", severity: "high" }, via("GHSA-real-0003", "high")] } }),
       []
     );
 
-    expect(verdict.blocking.map((f) => f.id)).toEqual(["GHSA-real-0003"]);
+    expect(verdict.blocking.map((f) => f.id)).toEqual(["UNIDENTIFIED:p:no url", "GHSA-real-0003"]);
+  });
+
+  // ...and it cannot be silenced by adding it to the allowlist, because every entry there is
+  // asserted to be a real GHSA id
+  it("cannot have an unidentified finding accepted", () => {
+    const verdict = judge(report({ p: { severity: "critical", via: [{ title: "x", severity: "critical" }] } }), [
+      { id: "UNIDENTIFIED:p:x", package: "p", why: "a".repeat(50), clearedBy: "b".repeat(30) },
+    ]);
+
+    expect(ACCEPTED_ADVISORIES.every((a) => /^GHSA-/i.test(a.id))).toBe(true);
+    expect(verdict.accepted.map((f) => f.id)).toEqual(["UNIDENTIFIED:p:x"]);
+  });
+
+  // npm has spelled severities in capitals before; a gate that only recognises one casing turns a
+  // critical into silence
+  it.each(["CRITICAL", "High"])("recognises %s however it is cased", (severity) => {
+    const verdict = judge(report({ p: { severity, via: [via("GHSA-cased-0005", severity)] } }), []);
+
+    expect(verdict.blocking.map((f) => f.id)).toEqual(["GHSA-cased-0005"]);
+    expect(verdict.blocking[0].severity).toBe(severity.toLowerCase());
+  });
+
+  it("does not throw or report a finding for a via entry that is a plain package name", () => {
+    expect(findings(report({ p: { severity: "high", via: ["another-package"] } }))).toEqual([]);
   });
 });
 

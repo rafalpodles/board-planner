@@ -89,9 +89,41 @@ interface AuditVia {
 
 interface AuditReport {
   vulnerabilities?: Record<string, { severity?: unknown; via?: unknown }>;
+  metadata?: unknown;
+  error?: unknown;
 }
 
 const GHSA = /GHSA-[0-9a-z-]+/i;
+
+/**
+ * Whether this is an audit that ran, as opposed to one that failed and said so in JSON.
+ *
+ * `npm audit` reports an unreachable registry, a missing lockfile and an auth failure as a
+ * well-formed object with an `error` key and no `vulnerabilities` — and exits 0 for at least the
+ * first of those. Treating that as "nothing found" is how a security gate reports success on a day
+ * it did no work, which is worse than having no gate: it is a green tick that means nothing
+ * (BP-599 review).
+ */
+export function ranSuccessfully(report: unknown): boolean {
+  const r = report as AuditReport;
+  if (!r || typeof r !== "object") return false;
+  if (r.error !== undefined) return false;
+  return Boolean(r.vulnerabilities && typeof r.vulnerabilities === "object" && r.metadata);
+}
+
+const enforced = (severity: unknown) =>
+  ENFORCED_SEVERITIES.includes(String(severity).toLowerCase() as (typeof ENFORCED_SEVERITIES)[number]);
+
+/**
+ * An advisory serious enough to enforce but carrying no id we can key on. It gets one that no
+ * allowlist can contain — every accepted entry is asserted to be a real GHSA id — so it blocks and
+ * has to be looked at by a person.
+ *
+ * Skipping it instead was the original behaviour, and a test pinned it as intentional with a
+ * comment saying the opposite of what the code did. Something unrecognised in a security feed is
+ * the last thing that should pass quietly.
+ */
+const unidentified = (pkg: string, title: string) => `UNIDENTIFIED:${pkg}:${title}`;
 
 /**
  * Every enforced-severity advisory in the report, deduplicated by id.
@@ -99,6 +131,9 @@ const GHSA = /GHSA-[0-9a-z-]+/i;
  * Read off the `via` entries rather than the package's own summary severity, because that summary
  * is the worst of the chain: a package can be reported "high" on account of a dependency's
  * advisory that has its own id and its own reason, and accepting the package would accept both.
+ *
+ * Severity is judged before the id, and case-insensitively, so that neither an unfamiliar spelling
+ * nor a missing advisory URL can turn a critical into silence.
  */
 export function findings(report: unknown): Finding[] {
   const vulnerabilities = (report as AuditReport)?.vulnerabilities;
@@ -108,12 +143,14 @@ export function findings(report: unknown): Finding[] {
   for (const [name, entry] of Object.entries(vulnerabilities)) {
     const via = Array.isArray(entry?.via) ? entry.via : [];
     for (const item of via) {
+      // A string here names another package rather than an advisory; it carries no severity, so it
+      // falls out below rather than needing a guard of its own
       if (!item || typeof item !== "object") continue;
       const { url, title, severity } = item as AuditVia;
-      const id = GHSA.exec(String(url ?? ""))?.[0];
-      if (!id) continue;
-      if (!ENFORCED_SEVERITIES.includes(String(severity) as (typeof ENFORCED_SEVERITIES)[number])) continue;
-      seen.set(id, { id, package: name, severity: String(severity), title: String(title ?? "") });
+      if (!enforced(severity)) continue;
+      const text = String(title ?? "");
+      const id = GHSA.exec(String(url ?? ""))?.[0] ?? unidentified(name, text);
+      seen.set(id, { id, package: name, severity: String(severity).toLowerCase(), title: text });
     }
   }
   return [...seen.values()];

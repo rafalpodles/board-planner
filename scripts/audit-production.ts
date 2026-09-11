@@ -8,12 +8,21 @@
  * can run immediately after `npm ci`, which is the only moment at which the answer is about the
  * tree CI is actually going to build.
  *
- * `--omit=dev` on purpose: a path-traversal in the test runner is not a production exposure, and a
- * gate that fails on one teaches people to pass `--force`. The dev tree is still reported by a
+ * `--omit=dev` on purpose: a path traversal in the test runner is not a production exposure, and a
+ * gate that fails on one teaches people to reach for `--force`. Worth knowing that this repo's
+ * `dependencies` are wider than "what the server runs" — `@types/*`, `postcss` and
+ * `@tailwindcss/postcss` are declared there — so the audited tree already includes build-time
+ * packages, and the flag removes less than its name suggests. The dev tree is still reported by a
  * plain `npm audit`; it is just not what stops a deploy.
  */
 import { execFileSync } from "node:child_process";
-import { judge, ENFORCED_SEVERITIES, ACCEPTED_ADVISORIES, type Finding } from "../src/lib/audit-policy.ts";
+import {
+  judge,
+  ranSuccessfully,
+  ENFORCED_SEVERITIES,
+  ACCEPTED_ADVISORIES,
+  type Finding,
+} from "../src/lib/audit-policy.ts";
 
 /**
  * Both packages that reach production. `mcp-server/` is a separate tree with its own lockfile and
@@ -52,12 +61,26 @@ function auditReport(cwd: string): unknown {
   }
 }
 
+/**
+ * A report that is well-formed JSON but is npm telling us it could not run — no lockfile, no
+ * registry, bad auth — has no `vulnerabilities` at all, and `npm audit` exits 0 for at least the
+ * unreachable-registry case. Passing on that is a green tick meaning "we did not look".
+ */
+function mustHaveRun(report: unknown, cwd: string): unknown {
+  if (ranSuccessfully(report)) return report;
+  const message = (report as { message?: unknown })?.message;
+  throw new Error(
+    `npm audit in ${cwd} did not run: ${message ? String(message) : JSON.stringify(report).slice(0, 300)}. ` +
+      `Refusing to report a clean bill of health from an audit that did not happen.`
+  );
+}
+
 const blocking: Finding[] = [];
 const accepted: Finding[] = [];
 const seenIds = new Set<string>();
 
 for (const cwd of AUDITED) {
-  const verdict = judge(auditReport(cwd));
+  const verdict = judge(mustHaveRun(auditReport(cwd), cwd));
   for (const finding of verdict.blocking) {
     console.log(`::error::${cwd}: ${finding.severity} advisory in ${finding.package}: ${finding.title} (${finding.id})`);
     blocking.push(finding);
