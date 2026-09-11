@@ -668,7 +668,7 @@ describe("reapOrphans", () => {
   it("removes every worktree left under the worker's own root", async () => {
     const workspace = workspaceListing(["/repo", "/worktrees/CP-1", "/worktrees/CP-2"]);
 
-    expect(await reapOrphans(workspace, "/worktrees")).toBe(2);
+    expect(await reapOrphans(workspace, "/worktrees", new Set())).toBe(2);
     expect(workspace.destroy.mock.calls.map(([key]) => key)).toEqual(["CP-1", "CP-2"]);
   });
 
@@ -676,35 +676,35 @@ describe("reapOrphans", () => {
   it("leaves a sibling directory whose name merely starts the same alone", async () => {
     const workspace = workspaceListing(["/worktrees-archive/CP-1", "/worktrees.bak/CP-2"]);
 
-    expect(await reapOrphans(workspace, "/worktrees")).toBe(0);
+    expect(await reapOrphans(workspace, "/worktrees", new Set())).toBe(0);
     expect(workspace.destroy).not.toHaveBeenCalled();
   });
 
   it("leaves the repository checkout and every worktree outside the root alone", async () => {
     const workspace = workspaceListing(["/repo", "/repo/.claude/worktrees/cp-158"]);
 
-    expect(await reapOrphans(workspace, "/worktrees")).toBe(0);
+    expect(await reapOrphans(workspace, "/worktrees", new Set())).toBe(0);
     expect(workspace.destroy).not.toHaveBeenCalled();
   });
 
   it("ignores a nested path that names no task of its own", async () => {
     const workspace = workspaceListing(["/worktrees/CP-1/inner", "/worktrees/"]);
 
-    expect(await reapOrphans(workspace, "/worktrees")).toBe(0);
+    expect(await reapOrphans(workspace, "/worktrees", new Set())).toBe(0);
   });
 
   it("reports nothing to reap when the worktree list cannot be read", async () => {
     const workspace = workspaceListing([]);
     workspace.listWorktrees = vi.fn<Workspace["listWorktrees"]>().mockRejectedValue(new Error("no git"));
 
-    expect(await reapOrphans(workspace, "/worktrees")).toBe(0);
+    expect(await reapOrphans(workspace, "/worktrees", new Set())).toBe(0);
   });
 
   it("keeps reaping after one removal fails", async () => {
     const workspace = workspaceListing(["/worktrees/CP-1", "/worktrees/CP-2"]);
     workspace.destroy.mockRejectedValueOnce(new Error("locked"));
 
-    expect(await reapOrphans(workspace, "/worktrees")).toBe(2);
+    expect(await reapOrphans(workspace, "/worktrees", new Set())).toBe(2);
     expect(workspace.destroy).toHaveBeenCalledTimes(2);
   });
 });

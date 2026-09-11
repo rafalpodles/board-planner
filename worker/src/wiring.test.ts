@@ -423,9 +423,12 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       statusIds: vi
         .fn<ApiClient["statusIds"]>()
         .mockResolvedValue({ approved: "todo", review: "in_review", done: "done" }),
-      columnIds: vi
-        .fn<ApiClient["columnIds"]>()
-        .mockResolvedValue(["todo", "in_progress", "in_review", "done"]),
+      boardColumns: vi.fn<ApiClient["boardColumns"]>().mockResolvedValue([
+        { id: "todo", role: "approved" },
+        { id: "in_progress", role: "active" },
+        { id: "in_review", role: "review" },
+        { id: "done", role: "done" },
+      ]),
       postEvent: (event: PhaseEvent) => {
         posted.push(event);
         return postEvent(event);
@@ -604,7 +607,12 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
           comment: vi.fn().mockResolvedValue(undefined),
           release: vi.fn().mockResolvedValue(undefined),
           statusIds: vi.fn().mockResolvedValue({ approved: "todo", review: "in_review", done: "done" }),
-          columnIds: vi.fn().mockResolvedValue(["todo", "in_progress", "in_review", "done"]),
+          boardColumns: vi.fn().mockResolvedValue([
+            { id: "todo", role: "approved" },
+            { id: "in_progress", role: "active" },
+            { id: "in_review", role: "review" },
+            { id: "done", role: "done" },
+          ]),
           postEvent: async () => ({ applied: true }),
         }) as unknown as ApiClient,
       startHeartbeat: () => fakeHeartbeat(),
@@ -663,7 +671,12 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       comment: vi.fn().mockResolvedValue(undefined),
       release: vi.fn().mockResolvedValue(undefined),
       statusIds: vi.fn().mockResolvedValue({ approved: "todo", review: "in_review", done: "done" }),
-      columnIds: vi.fn().mockResolvedValue(["todo", "in_progress", "in_review", "done"]),
+      boardColumns: vi.fn().mockResolvedValue([
+        { id: "todo", role: "approved" },
+        { id: "in_progress", role: "active" },
+        { id: "in_review", role: "review" },
+        { id: "done", role: "done" },
+      ]),
       postEvent: async () => ({ applied: true }),
       postRun: vi.fn().mockResolvedValue(undefined),
     };

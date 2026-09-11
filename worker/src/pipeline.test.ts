@@ -69,7 +69,12 @@ const completed: ExecutionResult = {
 
 // Deliberately none of the seeded ids, so any surviving literal fails
 const statuses: StatusIds = { approved: "ready", review: "checking", done: "shipped" };
-const board = ["ready", "doing", "checking", "shipped"];
+const board = [
+  { id: "ready", role: "approved" },
+  { id: "doing", role: "active" },
+  { id: "checking", role: "review" },
+  { id: "shipped", role: "done" },
+];
 
 const diff: DiffStats = { changedLines: 10, changedFiles: ["a.ts"], patch: "d", truncated: false, headSha: "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c" , symlinks: []};
 
@@ -137,11 +142,13 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
     comment: vi.fn<ApiClient["comment"]>().mockResolvedValue(undefined),
     release: vi.fn<ApiClient["release"]>().mockResolvedValue(undefined),
     statusIds: vi.fn<ApiClient["statusIds"]>().mockResolvedValue(statuses),
-    columnIds: vi.fn<ApiClient["columnIds"]>().mockResolvedValue(board),
     postEvent: vi.fn<ApiClient["postEvent"]>().mockResolvedValue({ applied: true }),
     postRun: vi.fn<ApiClient["postRun"]>().mockResolvedValue(undefined),
+    boardColumns: vi.fn<ApiClient["boardColumns"]>().mockResolvedValue(board),
+    createDecision: vi.fn<ApiClient["createDecision"]>().mockResolvedValue(undefined),
+    settleDecision: vi.fn<ApiClient["settleDecision"]>().mockResolvedValue(undefined),
   };
-  const columnIds = vi.fn<PipelineDeps["columnIds"]>().mockResolvedValue(board);
+  const boardColumns = vi.fn<PipelineDeps["boardColumns"]>().mockResolvedValue(board);
   const reporter = {
     blocked: vi.fn<Reporter["blocked"]>().mockResolvedValue(undefined),
     gateRejected: vi.fn<Reporter["gateRejected"]>().mockResolvedValue(undefined),
@@ -175,7 +182,7 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
   const deps: PipelineDeps = {
     config,
     api,
-    columnIds,
+    boardColumns,
     createReporter,
     createDelivery,
     workspace,
@@ -191,7 +198,7 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
   return {
     deps,
     api,
-    columnIds,
+    boardColumns,
     reporter,
     createReporter,
     delivery,
@@ -234,7 +241,7 @@ describe("resolveStatusIds", () => {
   it("names every role the board cannot route", async () => {
     const promise = resolveStatusIds(
       { statusIds: vi.fn<ApiClient["statusIds"]>().mockResolvedValue(statuses) },
-      async () => ["ready", "doing"],
+      async () => board.filter((column) => ["ready", "doing"].includes(column.id)),
       "CP"
     );
 
@@ -252,7 +259,7 @@ describe("resolveStatusIds", () => {
           .fn<ApiClient["statusIds"]>()
           .mockResolvedValue({ ...statuses, done: "" }),
       },
-      async () => ["ready", "doing", "checking"],
+      async () => board.filter((column) => column.id !== "shipped"),
       "CP"
     );
 
@@ -459,16 +466,16 @@ describe("runTask", () => {
     await runTask(h.deps, task);
 
     expect(h.api.statusIds).toHaveBeenCalledTimes(2);
-    expect(h.columnIds).toHaveBeenCalledTimes(2);
+    expect(h.boardColumns).toHaveBeenCalledTimes(2);
     expect(h.createReporter).toHaveBeenCalledTimes(2);
     expect(h.createReporter).toHaveBeenCalledWith(h.api, statuses);
   });
 
   it("does no work on a board that cannot route the outcome and hands the task back", async () => {
-    const columnIds = vi
-      .fn<PipelineDeps["columnIds"]>()
-      .mockResolvedValue(["ready", "doing", "checking"]);
-    const h = harness({ columnIds });
+    const boardColumns = vi
+      .fn<PipelineDeps["boardColumns"]>()
+      .mockResolvedValue(board.filter((column) => column.id !== "shipped"));
+    const h = harness({ boardColumns });
     await runTask(h.deps, task);
 
     expect(h.workspace.create).not.toHaveBeenCalled();
@@ -483,10 +490,13 @@ describe("runTask", () => {
   // still on the board while no column carries the role. statusIds answers "" for it now, and the
   // run has to hand the task back — charged — rather than deliver into the column that is left
   it("hands back a task whose board still has a column called done but none meaning it", async () => {
-    const columnIds = vi
-      .fn<PipelineDeps["columnIds"]>()
-      .mockResolvedValue(["ready", "doing", "checking", "done"]);
-    const h = harness({ columnIds });
+    const boardColumns = vi
+      .fn<PipelineDeps["boardColumns"]>()
+      .mockResolvedValue([
+        ...board.filter((column) => column.id !== "shipped"),
+        { id: "done", role: "review" },
+      ]);
+    const h = harness({ boardColumns });
     h.api.statusIds.mockResolvedValue({ ...statuses, done: "" });
 
     await runTask(h.deps, task);
@@ -1199,10 +1209,10 @@ describe("runTask", () => {
   // Every other exit settles; this one returned bare, so the menubar showed the run parked in
   // "claiming" for ever and no record was written for a task that was claimed and handed back
   it("leaves a record when the board cannot route the outcome", async () => {
-    const columnIds = vi
-      .fn<PipelineDeps["columnIds"]>()
-      .mockResolvedValue(["ready", "doing", "checking"]);
-    const h = harness({ columnIds });
+    const boardColumns = vi
+      .fn<PipelineDeps["boardColumns"]>()
+      .mockResolvedValue(board.filter((column) => column.id !== "shipped"));
+    const h = harness({ boardColumns });
 
     await runTask(h.deps, task);
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { StatusIds } from "./api.js";
+import { ApiClient, StatusIds } from "./api.js";
 import { createReporter, ReleaseMemory } from "./reporter.js";
 import { ClaimedTask } from "./types.js";
 import { claimedTask } from "./__fixtures__/task.js";
@@ -21,9 +21,11 @@ function apiSpy() {
     release: vi.fn<(projectId: string, taskId: string) => Promise<void>>().mockResolvedValue(undefined),
     statusIds: vi.fn<() => Promise<StatusIds>>().mockResolvedValue(statuses),
     // Not used by the reporter, but an ApiClient carries them — and this mock stands in for one
-    columnIds: vi.fn<() => Promise<string[]>>().mockResolvedValue([]),
+    boardColumns: vi.fn<ApiClient["boardColumns"]>().mockResolvedValue([]),
     postEvent: vi.fn().mockResolvedValue({ applied: true }),
     postRun: vi.fn().mockResolvedValue(undefined),
+    createDecision: vi.fn().mockResolvedValue(undefined),
+    settleDecision: vi.fn().mockResolvedValue(undefined),
   };
 }
 
