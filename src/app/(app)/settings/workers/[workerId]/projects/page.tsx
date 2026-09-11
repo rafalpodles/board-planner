@@ -212,9 +212,9 @@ export default function MachineProjectsPage() {
             ))}
           </ul>
           <p className="mt-2 text-text-muted">
-            The app does the removing, and refuses any checkout with uncommitted changes, unpushed
-            commits, or a task running in it. Saving does not delete anything: the app asks on the
-            machine first, naming every directory it is about to remove.
+            Saving does not delete anything. The app asks on the machine first, naming every
+            directory it is about to remove, and refuses any checkout with uncommitted changes,
+            unpushed commits, or a task running in it.
           </p>
         </div>
       )}

@@ -803,12 +803,15 @@ test("the checkout picker: what a machine has, what it is given, and what saving
   await expect(warning).toBeVisible();
   await expect(warning.getByRole("listitem")).toHaveText([`${PROJECT_NAME} · ${PROJECT_KEY}`]);
   await expect(warning).toContainText("refuses any checkout with uncommitted changes");
+  // The reassurance leads: this block is read by somebody who has just been told a directory is
+  // about to go, and burying "saving does not delete anything" under the scary sentence made the
+  // phone layout six lines of grey before it got to the point.
   // BP-378, criterion 8. This screen shipped saying "It names the directory before it deletes
   // anything" — a promise made in the interface instead of in code, and one it cannot keep: the
   // socket carries no paths, so the directory is a thing only the machine knows. What it says now
   // is what happens, and the assertion is on both halves so neither can come back on its own.
   await expect(warning).toContainText("Saving does not delete anything");
-  await expect(warning).toContainText("the app asks on the machine first");
+  await expect(warning).toContainText("The app asks on the machine first");
   await expect(warning).not.toContainText("It names the directory");
 
   const removed = await save(page);

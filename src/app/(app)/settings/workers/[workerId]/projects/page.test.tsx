@@ -140,7 +140,7 @@ describe("saving the machine's projects", () => {
 
     const warning = screen.getByText(/Saving removes/).parentElement!;
     expect(warning.textContent).toContain("Saving does not delete anything");
-    expect(warning.textContent).toContain("the app asks on the machine first");
+    expect(warning.textContent).toContain("The app asks on the machine first");
     expect(warning.textContent).toContain("naming every directory it is about to remove");
     expect(warning.textContent).not.toContain("It names the directory");
   });
