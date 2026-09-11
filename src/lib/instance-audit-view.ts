@@ -16,9 +16,8 @@ const LABELS: Partial<Record<InstanceAuditAction, string>> = {
   enrolment_token_spent: "Enrolment token spent",
   project_workers_enabled: "Workers enabled for project",
   project_workers_disabled: "Workers disabled for project",
-  // Only the safety pair reaches this log — the rest of a project's worker policy describes how
-  // work is done and stays in that project's own log
-  project_worker_policy_changed: "Merge safety changed for project",
+  // The retired pair's `project_worker_policy_changed` action went with the fields (BP-579). A
+  // row still carrying it renders through the fallback below, as a sentence without the verb.
   user_password_reset: "Password set by an admin",
   user_email_changed: "Address changed by an admin",
   user_email_changed_self: "Address changed by the account itself",

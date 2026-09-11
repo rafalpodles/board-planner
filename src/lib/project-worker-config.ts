@@ -30,10 +30,7 @@ function isPositiveInt(value: unknown): value is number {
 // overwrote the object would silently reset every field the caller did not mention.
 export function parseProjectWorkerConfig(
   input: unknown,
-  existingOverrides: string[] = [],
-  // Read by nothing since the cross-field rule below was retired. Kept so the one caller does not
-  // have to change in a comment-only fix; removing both is BP-579.
-  existingPolicy: Record<string, unknown> = {}
+  existingOverrides: string[] = []
 ): WorkerConfigPatch {
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
     return { ok: false, error: "worker must be an object" };

@@ -123,9 +123,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     }
     const parsed = parseProjectWorkerConfig(
       body.worker,
-      existing.worker?.policyOverrides ?? [],
-      // Nothing reads this any more — see the parameter it lands on
-      (existing.worker?.policy ?? {}) as unknown as Record<string, unknown>
+      existing.worker?.policyOverrides ?? []
     );
     if (!parsed.ok) {
       return NextResponse.json({ error: parsed.error }, { status: 400 });
@@ -332,12 +330,8 @@ type PendingWorkerAudit = { action: InstanceAuditAction; target: string; detail?
 
 // Decided from the values already stored, because the update is a dotted patch: a field the request
 // never mentioned is not a change, and one carrying the value it already had is not either.
-//
-// A single verb with a detail for the policy pair, unlike the fleet verbs: "who stopped this
-// machine" wants an answer in the action column, while "what did this project's rules become"
-// is a question about the values, and they belong together on one row.
 function pendingWorkerAudit(
-  existing: { worker?: { enabled?: boolean; policy?: { autoMerge?: boolean; reviewGate?: boolean } } },
+  existing: { worker?: { enabled?: boolean } },
   updates: Record<string, unknown>,
   target: string
 ): PendingWorkerAudit[] {
@@ -353,23 +347,10 @@ function pendingWorkerAudit(
     });
   }
 
-  // Both retired at BP-458 and read by nothing: what reaches a base branch unreviewed is now
-  // decided by the agent's own sequence, not by these. Still audited because a direct API call can
-  // still set them, and a row nobody can explain is worse than one nobody needs.
-  const changed: string[] = [];
-  for (const field of ["autoMerge", "reviewGate"] as const) {
-    const next = updates[`worker.policy.${field}`];
-    if (typeof next === "boolean" && next !== !!existing.worker?.policy?.[field]) {
-      changed.push(`${field} ${next ? "on" : "off"}`);
-    }
-  }
-  if (changed.length > 0) {
-    entries.push({
-      action: "project_worker_policy_changed",
-      target,
-      detail: changed.join(", "),
-    });
-  }
+  // The autoMerge/reviewGate pair used to be audited here. Nothing can change them any more:
+  // parseProjectWorkerConfig refuses any field outside PROJECT_POLICY_DEFAULTS, and neither is one,
+  // so no request reaches a branch that watches them. Removed at BP-579, with the fields still
+  // stored as data nothing reads.
 
   return entries;
 }
