@@ -92,7 +92,7 @@ export default function MachineProjectsPage() {
       setSaved(
         left.length
           ? `Saved. ${left.join(", ")} ${left.length === 1 ? "does not run machines" : "do not run machines"} yet, and only an instance admin can turn that on — the machine will leave ${left.length === 1 ? "it" : "them"} alone until somebody does.`
-          : "Saved. The app picks this up and sets up the checkouts."
+          : "Saved. The app picks this up the next time it connects to the worker."
       );
     } catch (e) {
       setSaved("");
@@ -150,8 +150,8 @@ export default function MachineProjectsPage() {
         subtitle={view.worker.host || undefined}
       />
       <p className="mt-2 text-text-muted">
-        Tick a project and this machine sets up a checkout for it. Untick one and the checkout is
-        removed from the machine.
+        Tick a project and this machine sets up a checkout for it. Untick one and the app offers to
+        remove the checkout, asking on the machine first.
       </p>
 
       <div className="mt-6 space-y-2">
@@ -197,8 +197,10 @@ export default function MachineProjectsPage() {
         ))}
       </div>
 
-      {/* Named by path before it happens, because "which directory" is the last question anybody
-          gets to ask about a delete. */}
+      {/* Named by project here and by path on the machine. This screen never learns a path — the
+          socket carries none — and the one the server could infer from a heartbeat is matched by a
+          looser rule than the one the app deletes by, so naming it here could name the wrong
+          directory. Worse than naming none. */}
       {removing.length > 0 && (
         <div className="mt-6 rounded-lg border border-danger/40 bg-danger/10 p-4 text-sm text-text">
           <p className="font-medium">Saving removes {removing.length === 1 ? "a checkout" : "checkouts"} from this machine:</p>
@@ -211,7 +213,8 @@ export default function MachineProjectsPage() {
           </ul>
           <p className="mt-2 text-text-muted">
             The app does the removing, and refuses any checkout with uncommitted changes, unpushed
-            commits, or a task running in it. It names the directory before it deletes anything.
+            commits, or a task running in it. Saving does not delete anything: the app asks on the
+            machine first, naming every directory it is about to remove.
           </p>
         </div>
       )}
@@ -219,7 +222,7 @@ export default function MachineProjectsPage() {
       {adding.length > 0 && (
         <p className="mt-4 text-sm text-text-muted">
           {adding.length === 1 ? "One project" : `${adding.length} projects`} will be cloned by the
-          app the next time it looks — which is right after you save.
+          app the next time it connects to the worker.
         </p>
       )}
 

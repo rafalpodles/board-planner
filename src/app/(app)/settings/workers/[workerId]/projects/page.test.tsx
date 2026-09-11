@@ -126,6 +126,45 @@ describe("saving the machine's projects", () => {
 
   // The warning is future tense — "Saving removes a checkout from this machine" — so it must not
   // outlive the save that did it. It is built from `view`, which a failed re-read leaves stale
+  // BP-378, criterion 8. This shipped saying "It names the directory before it deletes anything",
+  // which it never did and cannot: the socket carries no paths, so the directory is known only to
+  // the machine, and the one the server could infer from a heartbeat is matched by a looser rule
+  // than the one the app deletes by. A warning pointing at the wrong directory is worse than none.
+  it("says the machine will ask, rather than claiming this screen names the directory", async () => {
+    render(<MachineProjectsPage />);
+    await screen.findByRole("button", { name: "Save" });
+
+    await act(async () => {
+      (screen.getByRole("checkbox") as HTMLInputElement).click();
+    });
+
+    const warning = screen.getByText(/Saving removes/).parentElement!;
+    expect(warning.textContent).toContain("Saving does not delete anything");
+    expect(warning.textContent).toContain("the app asks on the machine first");
+    expect(warning.textContent).toContain("naming every directory it is about to remove");
+    expect(warning.textContent).not.toContain("It names the directory");
+  });
+
+  // The same promise in the other tense: the app reads the catalogue when it connects to the
+  // worker, not on a poll, so "right after you save" was a claim about a moment nobody can name
+  it("does not promise the clone happens right after the save", async () => {
+    const absent = {
+      ...VIEW,
+      catalogue: [{ ...VIEW.catalogue[0], wanted: false, servedHere: false }],
+    };
+    api.get.mockResolvedValue(absent);
+    render(<MachineProjectsPage />);
+    await screen.findByRole("button", { name: "Save" });
+
+    await act(async () => {
+      (screen.getByRole("checkbox") as HTMLInputElement).click();
+    });
+
+    const line = screen.getByText(/will be cloned by the app/);
+    expect(line.textContent).toContain("the next time it connects to the worker");
+    expect(line.textContent).not.toContain("right after you save");
+  });
+
   it("stops promising a removal that has already happened", async () => {
     api.get.mockResolvedValueOnce(VIEW).mockRejectedValueOnce(new Error("read timed out"));
     render(<MachineProjectsPage />);

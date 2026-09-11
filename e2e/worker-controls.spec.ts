@@ -734,6 +734,12 @@ test("the checkout picker: what a machine has, what it is given, and what saving
   await signIn(page);
   await page.goto(`/settings/workers/${WORKER_ID}/projects`);
   await expect(page.getByRole("heading", { name: `Projects for ${WORKER_NAME}` })).toBeVisible();
+  // Unticking is a proposal, and the screen says so before anybody has unticked anything
+  await expect(
+    page.getByText(
+      "Untick one and the app offers to remove the checkout, asking on the machine first."
+    )
+  ).toBeVisible();
 
   // The seeded board names no repository, so there is nothing to clone — shown and disabled
   // rather than hidden, with the fix named
@@ -759,13 +765,15 @@ test("the checkout picker: what a machine has, what it is given, and what saving
   await ib.getByRole("checkbox").check();
   await expect(
     page.getByText(
-      "One project will be cloned by the app the next time it looks — which is right after you save."
+      "One project will be cloned by the app the next time it connects to the worker."
     )
   ).toBeVisible();
   const saved = await save(page);
   expect(saved).toMatchObject({ leftDisabled: [], refused: [] });
   expect([...saved.projects].sort()).toEqual([String(PROJECT_ID), String(SECOND_PROJECT_ID)].sort());
-  await expect(page.getByText("Saved. The app picks this up and sets up the checkouts.")).toBeVisible();
+  await expect(
+    page.getByText("Saved. The app picks this up the next time it connects to the worker.")
+  ).toBeVisible();
 
   // Ticking it turned workers on for that project, which is an instance-admin act and audited as one
   expect((await projectRow(SECOND_PROJECT_ID))?.worker.enabled).toBe(true);
@@ -795,6 +803,13 @@ test("the checkout picker: what a machine has, what it is given, and what saving
   await expect(warning).toBeVisible();
   await expect(warning.getByRole("listitem")).toHaveText([`${PROJECT_NAME} · ${PROJECT_KEY}`]);
   await expect(warning).toContainText("refuses any checkout with uncommitted changes");
+  // BP-378, criterion 8. This screen shipped saying "It names the directory before it deletes
+  // anything" — a promise made in the interface instead of in code, and one it cannot keep: the
+  // socket carries no paths, so the directory is a thing only the machine knows. What it says now
+  // is what happens, and the assertion is on both halves so neither can come back on its own.
+  await expect(warning).toContainText("Saving does not delete anything");
+  await expect(warning).toContainText("the app asks on the machine first");
+  await expect(warning).not.toContainText("It names the directory");
 
   const removed = await save(page);
   expect(removed.projects).toEqual([String(SECOND_PROJECT_ID)]);
