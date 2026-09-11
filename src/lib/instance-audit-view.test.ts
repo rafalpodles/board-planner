@@ -34,6 +34,15 @@ describe("auditActionLabel", () => {
     expect(auditActionLabel(entry("worker_locked"))).toBe("Kill switch on");
     expect(auditActionLabel(entry("enrolment_token_minted"))).toBe("Enrolment token minted");
   });
+
+  // BP-579: the retired pair's action is no longer producible and its label went with it. A row
+  // still carrying it — written before this build — renders through the fallback as a sentence.
+  // Red if the label ever comes back, which would be the retirement being unmade.
+  it("reads a retired action's historical row as a sentence", () => {
+    expect(
+      auditActionLabel(entry("project_worker_policy_changed" as InstanceAuditAction))
+    ).toBe("project worker policy changed");
+  });
 });
 
 describe("auditIsNotable", () => {
