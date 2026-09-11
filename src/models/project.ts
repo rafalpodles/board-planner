@@ -186,6 +186,9 @@ const projectSchema = new Schema<IProject>(
     worker: {
       enabled: { type: Boolean, default: false },
       policy: {
+        // Retained data (BP-458/BP-579): both retired and read by nothing. Stored projects still
+        // carry the values and the schema still declares them so the documents read true; nothing
+        // can write either any more — see parseProjectWorkerConfig.
         autoMerge: { type: Boolean, default: false },
         reviewGate: { type: Boolean, default: true },
         baseBranch: { type: String, default: "main" },
