@@ -13,14 +13,25 @@
  * plain `npm audit`; it is just not what stops a deploy.
  */
 import { execFileSync } from "node:child_process";
-import { judge, ENFORCED_SEVERITIES } from "../src/lib/audit-policy.ts";
+import { judge, ENFORCED_SEVERITIES, ACCEPTED_ADVISORIES, type Finding } from "../src/lib/audit-policy.ts";
 
-function auditReport(): unknown {
+/**
+ * Both packages that reach production. `mcp-server/` is a separate tree with its own lockfile and
+ * its own copy of the same transitive dependencies — it shipped `fast-uri@3.1.0` while the root
+ * had 3.1.3 — and auditing only the root left it unwatched (BP-599 review).
+ *
+ * `worker/` is deliberately not here: it runs on a machine somebody enrolled, not on the server,
+ * and its tree is the operator's to keep. Say so rather than leaving the omission to be guessed at.
+ */
+const AUDITED = [".", "mcp-server"];
+
+function auditReport(cwd: string): unknown {
   try {
     // `npm audit` exits non-zero whenever it finds anything at all, which is not the question being
     // asked here — the JSON is the answer, and the policy decides. Only a failure to produce JSON
     // is a real error.
     const out = execFileSync("npm", ["audit", "--json", "--omit=dev"], {
+      cwd,
       encoding: "utf8",
       maxBuffer: 64 * 1024 * 1024,
     });
@@ -35,38 +46,50 @@ function auditReport(): unknown {
       }
     }
     throw new Error(
-      `npm audit produced no usable JSON: ${error instanceof Error ? error.message : String(error)}`
+      `npm audit in ${cwd} produced no usable JSON: ` +
+        `${error instanceof Error ? error.message : String(error)}`
     );
   }
 }
 
-const { blocking, accepted, stale } = judge(auditReport());
+const blocking: Finding[] = [];
+const accepted: Finding[] = [];
+const seenIds = new Set<string>();
 
-for (const entry of stale) {
-  console.log(
-    `note: ${entry.id} (${entry.package}) is accepted in audit-policy.ts but no longer reported — ` +
-      `delete the entry rather than leaving a reason nobody has re-read`
-  );
+for (const cwd of AUDITED) {
+  const verdict = judge(auditReport(cwd));
+  for (const finding of verdict.blocking) {
+    console.log(`::error::${cwd}: ${finding.severity} advisory in ${finding.package}: ${finding.title} (${finding.id})`);
+    blocking.push(finding);
+  }
+  for (const finding of verdict.accepted) {
+    console.log(`accepted in ${cwd}: ${finding.severity} ${finding.package} ${finding.id} — ${finding.title}`);
+    accepted.push(finding);
+  }
+  for (const finding of [...verdict.blocking, ...verdict.accepted]) seenIds.add(finding.id);
 }
 
-for (const finding of accepted) {
-  console.log(`accepted: ${finding.severity} ${finding.package} ${finding.id} — ${finding.title}`);
+// Stale is judged across BOTH trees: an entry earning its keep in one of them is not dead, and
+// reporting it as dead per-package would teach people to ignore the line
+for (const entry of ACCEPTED_ADVISORIES) {
+  if (seenIds.has(entry.id)) continue;
+  console.log(
+    `note: ${entry.id} (${entry.package}) is accepted in audit-policy.ts but no longer reported ` +
+      `by either package — delete the entry rather than leaving a reason nobody has re-read`
+  );
 }
 
 if (blocking.length === 0) {
   console.log(
-    `No unaccepted ${ENFORCED_SEVERITIES.join(" or ")} advisory in production dependencies ` +
-      `(${accepted.length} accepted, ${stale.length} stale).`
+    `No unaccepted ${ENFORCED_SEVERITIES.join(" or ")} advisory in the production dependencies of ` +
+      `${AUDITED.join(" or ")} (${accepted.length} accepted).`
   );
   process.exit(0);
 }
 
-for (const finding of blocking) {
-  console.log(
-    `::error::${finding.severity} advisory in ${finding.package}: ${finding.title} ` +
-      `(${finding.id}). Bump it, or accept it in src/lib/audit-policy.ts with a reason the ` +
-      `next person can check.`
-  );
-}
-console.log(`${blocking.length} unaccepted advisory(ies) in production dependencies.`);
+console.log(
+  `${blocking.length} unaccepted advisory(ies). Bump the package, or accept the advisory in ` +
+    `src/lib/audit-policy.ts with a reason the next person can check — and check it by loading ` +
+    `what the entry point loads, not by grepping a bundle.`
+);
 process.exit(1);

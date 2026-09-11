@@ -29,34 +29,46 @@ export interface AcceptedAdvisory {
   clearedBy: string;
 }
 
-const MCP_CHAIN_UNREACHABLE =
-  "Reaches the tree only through @modelcontextprotocol/sdk's optional express/hono server " +
-  "transports. This app serves MCP through mcp-handler on a Next route and imports only " +
-  "server/mcp.js, server/stdio.js and the auth types; the PM agent's MCP client is plain fetch. " +
-  "Verified against the built output, not the import graph: no express, hono, ajv, qs, fast-uri " +
-  "or ip-address code appears in .next/server or in .next/standalone/node_modules, while " +
-  "nodemailer — a package that IS used — does appear, which is what makes the absence meaningful.";
+/**
+ * The one advisory this repo accepts, and the reason had to be rewritten after a reviewer refuted
+ * the first version of it (BP-599 review).
+ *
+ * What I claimed first: the whole `@modelcontextprotocol/sdk` chain reaches the tree only through
+ * optional express and hono transports, checked by grepping the built server output. Both halves
+ * were wrong. `fast-uri` arrives through the SDK's **core** `Server` class — `server/index.js`
+ * imports an Ajv-backed schema validator, which loads `ajv`, which loads `fast-uri`, and the
+ * constructor runs it once per MCP session. And grepping bundles never proved anything either
+ * way: a minifier does not preserve a package's name, so absence of the string is not absence of
+ * the code. Those six advisories are now fixed by a `fast-uri` bump instead of excused.
+ *
+ * The instrument that settles this question is loading what the route loads and reading the module
+ * cache:
+ *
+ *     node -e "…; await import('mcp-handler'); Object.keys(require.cache) …"
+ *
+ * which reports `fast-uri` and `ajv` loaded, and `ip-address`, `express`, `express-rate-limit`,
+ * `hono` and `qs` not.
+ */
+const IP_ADDRESS_UNREACHABLE =
+  "Reaches the tree under express-rate-limit, which the SDK imports only from its Express OAuth " +
+  "handlers (server/auth/handlers/{authorize,token,register,revoke}.js). This app serves MCP " +
+  "through mcp-handler on a Next route and runs its own OAuth, so none of those modules is " +
+  "imported. Measured rather than reasoned: importing what src/app/api/mcp/route.ts imports " +
+  "leaves ip-address absent from the module cache, while fast-uri and ajv — which the same import " +
+  "does pull in — are present, so the absence is a reading and not a gap in the method.";
 
-const MCP_CHAIN_CLEARED_BY =
-  "mcp-handler 1.1.0 pins @modelcontextprotocol/sdk to exactly 1.26.0, and mcp-handler 2.x peers " +
-  "on a different package (@modelcontextprotocol/server), so clearing these means migrating the " +
-  "/api/mcp handler. Delete these entries when that lands.";
+const IP_ADDRESS_CLEARED_BY =
+  "A patched ip-address above 10.3.0, or the SDK dropping express-rate-limit. Unlike fast-uri, " +
+  "which had a fix inside its own semver range, there is none to bump to yet — re-check before " +
+  "assuming this entry is still needed.";
 
 export const ACCEPTED_ADVISORIES: AcceptedAdvisory[] = [
-  ...[
-    "GHSA-v2hh-gcrm-f6hx",
-    "GHSA-7p8r-x3mc-p8w7",
-    "GHSA-5jgf-p345-68v8",
-    "GHSA-f65p-4m7j-42xc",
-    "GHSA-fph4-wmhf-6fwf",
-    "GHSA-jqff-g426-hqxp",
-  ].map((id) => ({ id, package: "fast-uri", why: MCP_CHAIN_UNREACHABLE, clearedBy: MCP_CHAIN_CLEARED_BY })),
-  ...["GHSA-mwp4-54f8-5fhr"].map((id) => ({
-    id,
+  {
+    id: "GHSA-mwp4-54f8-5fhr",
     package: "ip-address",
-    why: MCP_CHAIN_UNREACHABLE,
-    clearedBy: MCP_CHAIN_CLEARED_BY,
-  })),
+    why: IP_ADDRESS_UNREACHABLE,
+    clearedBy: IP_ADDRESS_CLEARED_BY,
+  },
 ];
 
 export const ENFORCED_SEVERITIES = ["critical", "high"] as const;
