@@ -19,7 +19,7 @@ final class ProjectSyncRunner {
     /// A catalogue that arrived while a pass was running, kept for when it ends.
     private var pending: [ProjectCatalogueRow]?
 
-    private let file = ReposFile(path: ReposFile.defaultPath())
+    private let file = ReposFile()
 
     /// `isBusy` answers "is the worker running a task", asked at the moment it is called — what it
     /// asks is the caller's business. A question rather than an answer: the value used to be
@@ -46,10 +46,10 @@ final class ProjectSyncRunner {
         var next: [ProjectCatalogueRow]? = catalogue
         while let current = next {
             // Cleared before the pass, so only a catalogue that arrives *during* it re-arms the
-            // loop. The pump produces one per reconnect, so this drains rather than spins.
+            // loop. `CatalogueQueue` decides whether it is worth one, and carries the reason.
             pending = nil
             await pass(catalogue: current, isBusy: isBusy)
-            next = pending
+            next = CatalogueQueue.next(after: current, arrived: pending)
         }
         pending = nil
     }
