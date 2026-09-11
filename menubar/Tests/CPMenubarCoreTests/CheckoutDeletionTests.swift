@@ -263,7 +263,11 @@ final class CheckoutDeletionTests: XCTestCase {
         guard case .refused(_, let reason) = step else {
             return XCTFail("expected a refusal, got \(step)")
         }
-        XCTAssertTrue(reason.contains("changed while the question was on screen"), reason)
+        // The line lands in the Repositories pane as something to act on, so it has to name what
+        // changed. "Something changed" is not something anybody can act on.
+        XCTAssertTrue(reason.contains("/wt/late appeared"), reason)
+        XCTAssertTrue(reason.contains("while the question was on screen"), reason)
+        XCTAssertTrue(reason.contains("it will ask again"), reason)
         XCTAssertEqual(r.removed, [], "and /wt/late, which nobody was shown, is still there")
     }
 

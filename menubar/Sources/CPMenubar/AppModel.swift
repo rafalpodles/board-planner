@@ -54,10 +54,21 @@ final class AppModel {
                 //
                 // A socket that will not answer counts as busy — SyncPass.busy(asking:) states why,
                 // and is where that rule is tested.
+                //
+                // Detached from the pump on purpose. Since BP-378 a removal waits on a person
+                // answering a modal, and awaiting that here held the pump short of
+                // `client.stream()`: no telemetry, no `markDisconnected`, a menubar frozen on
+                // whatever the last `/status` said — for as long as nobody was at the machine.
+                // Workers are unattended by definition, so "as long as" is the whole night.
+                //
+                // Safe to let go of: `sync` claims `running` before its first await and clears it
+                // in a `defer`, so a reconnect during a pass is refused rather than overlapping.
                 if let catalogue = config?.catalogue {
-                    await ProjectSyncRunner.shared.sync(
-                        catalogue: catalogue,
-                        isBusy: SyncPass.busy(asking: { [client] in try await client.status() }))
+                    Task {
+                        await ProjectSyncRunner.shared.sync(
+                            catalogue: catalogue,
+                            isBusy: SyncPass.busy(asking: { [client] in try await client.status() }))
+                    }
                 }
                 for await event in client.stream() {
                     state.apply(event, at: Date())

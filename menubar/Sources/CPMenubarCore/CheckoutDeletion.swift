@@ -45,7 +45,7 @@ public struct CheckoutDeletion: Sendable {
         checking removal: CheckoutRemoval,
         asking ask: Ask
     ) async -> SyncStep {
-        switch removal.check(path: path, workerIsBusy: await isBusy()) {
+        switch await verdict(removal, path: path, busy: await isBusy()) {
         case .refused(let reason):
             return .refused(project: project, reason: reason)
         case .go(let worktrees):
@@ -68,16 +68,19 @@ public struct CheckoutDeletion: Sendable {
             // — a worker idle before a clone and running after it — so asking once before the
             // modal would be the same bug with a longer window: a task claimed while the dialog
             // was up, and its worktree deleted underneath it.
-            switch removal.check(path: path, workerIsBusy: await isBusy()) {
+            switch await verdict(removal, path: path, busy: await isBusy()) {
             case .refused(let reason):
                 return .refused(project: project, reason: reason)
             case .go(let now):
                 // The operator agreed to a list, not to a removal. Anything else on disk now is
                 // something they were never shown.
-                guard doomedPaths(path: path, worktrees: now) == doomed else {
+                let second = doomedPaths(path: path, worktrees: now)
+                guard second == doomed else {
+                    // Named both ways. This line lands in the Repositories pane as something to
+                    // act on, and "something changed" is not something anybody can act on.
                     return .refused(
                         project: project,
-                        reason: "what is on disk changed while the question was on screen — nothing was deleted, and it will ask again")
+                        reason: changedReason(from: doomed, to: second))
                 }
                 return perform(project: project, path: path, worktrees: now)
             }
@@ -89,6 +92,31 @@ public struct CheckoutDeletion: Sendable {
     /// list that gets named, and the list the second verdict is compared against.
     private func doomedPaths(path: String, worktrees: [String]) -> [String] {
         (exists(path) ? [path] : []) + worktrees
+    }
+
+    /// `check` spawns half a dozen `git` processes and waits on each; on a large repository that
+    /// is seconds, and the menubar draws on the actor this method is isolated to. Asking the
+    /// question twice doubled what was already a freeze, so both looks go off it.
+    private static func verdict(
+        _ removal: CheckoutRemoval, path: String, busy: Bool
+    ) async -> RemovalVerdict {
+        await Task.detached { removal.check(path: path, workerIsBusy: busy) }.value
+    }
+
+    private func verdict(
+        _ removal: CheckoutRemoval, path: String, busy: Bool
+    ) async -> RemovalVerdict {
+        await CheckoutDeletion.verdict(removal, path: path, busy: busy)
+    }
+
+    private func changedReason(from before: [String], to after: [String]) -> String {
+        let appeared = after.filter { !before.contains($0) }
+        let vanished = before.filter { !after.contains($0) }
+        var parts: [String] = []
+        if !appeared.isEmpty { parts.append("\(appeared.joined(separator: ", ")) appeared") }
+        if !vanished.isEmpty { parts.append("\(vanished.joined(separator: ", ")) went") }
+        let what = parts.isEmpty ? "what is on disk changed" : parts.joined(separator: " and ")
+        return "\(what) while the question was on screen — nothing was deleted, and it will ask again"
     }
 
     // Not public: the comment above argues for one entry point, and `internal` is what makes
