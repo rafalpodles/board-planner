@@ -12,7 +12,16 @@ const PROJECT = "507f1f77bcf86cd799439011";
 beforeEach(() => {
   vi.clearAllMocks();
   aggregate.mockResolvedValue([
-    { tokens: 120_000, cachedTokens: 90_000, cacheWriteTokens: 4_000, calls: 340, stepLimitHits: 2 },
+    {
+      tokens: 120_000,
+      // Summed but never reported: the premise "a cache read is part of the prompt count" is
+      // checked against this, not against the day's total
+      promptTokens: 100_000,
+      cachedTokens: 90_000,
+      cacheWriteTokens: 4_000,
+      calls: 340,
+      stepLimitHits: 2,
+    },
   ]);
   resolveDailyTokenCap.mockResolvedValue(0);
 });
@@ -93,11 +102,30 @@ describe("dailyPmSpend", () => {
    */
   it("says so in the log when a provider reports more cached than spent", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    aggregate.mockResolvedValue([{ tokens: 1_000, cachedTokens: 4_000, cacheWriteTokens: 0, calls: 1, stepLimitHits: 0 }]);
+    aggregate.mockResolvedValue([
+      { tokens: 1_000, promptTokens: 800, cachedTokens: 4_000, cacheWriteTokens: 0, calls: 1, stepLimitHits: 0 },
+    ]);
 
     await dailyPmSpend(PROJECT, {});
 
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("understated"));
+    warn.mockRestore();
+  });
+
+  /**
+   * The case that decides which number the premise is about. 600k cached against 400k prompt is a
+   * broken premise by 200k — but the day's total is 700k, so a comparison against *that* sees
+   * 600k < 700k and says nothing. The understatement is real and silent (BP-568 review).
+   */
+  it("catches a broken premise that hides under the completion tokens", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    aggregate.mockResolvedValue([
+      { tokens: 700_000, promptTokens: 400_000, cachedTokens: 600_000, cacheWriteTokens: 0, calls: 9, stepLimitHits: 0 },
+    ]);
+
+    await dailyPmSpend(PROJECT, {});
+
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("400000 prompt"));
     warn.mockRestore();
   });
 

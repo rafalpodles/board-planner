@@ -101,13 +101,15 @@ async function say(page: Page, prompt: string, directive: Record<string, unknown
  * the empty assistant row. Move `acquireTurnLock` after the row and this file reddens for a reason
  * that looks unrelated to it.
  *
- * `limit` is well past what these threads reach, and only chat turns are counted: the route
- * returns the most recent N and a thread-wide filter, so a capped page or an autonomous turn
- * landing mid-test would make this stop tracking the thing it stands for — the same shape as the
- * bug it replaces.
+ * `limit` asks for the most the route will give — it clamps to 100 (`pm/messages/route.ts:14`), so
+ * a larger number here would read as a bound it is not. Past 100 messages in one thread this stops
+ * rising and the poll times out rather than lying; these threads hold at most six. Only chat turns
+ * are counted, because `pmThreadFilter` is thread-wide and an autonomous turn landing mid-test
+ * would satisfy the wait without this test's own turn having finished — the same shape as the bug
+ * it replaces.
  */
 const answered = async (request: APIRequestContext) => {
-  const res = await request.get(`/api/projects/${PROJECT_KEY}/pm/messages?limit=200`, {
+  const res = await request.get(`/api/projects/${PROJECT_KEY}/pm/messages?limit=100`, {
     headers: ADMIN_AUTH,
   });
   expect(res.status(), await res.text()).toBe(200);
@@ -334,6 +336,12 @@ test("what a turn read from the cache is recorded, and shown as a share of what 
  * two calls of one turn therefore agree on however the app behaved. That version of this test
  * could not fail. It needs a marking model for the same reason: without breakpoints there is no
  * claim on the wire to compare.
+ *
+ * The equality is conditional, and the condition holds here rather than being asserted: a thread
+ * whose replay window has filled marks only the system prompt on its first call and the history
+ * from the second, so the two would differ by design. This thread is two turns old. The unit
+ * suite drives the filled window, where a Playwright spec would need thirty seeded turns to say
+ * the same thing.
  */
 test("the calls of one turn mark the same prefix, and name one session", async ({ page, request }) => {
   await useMarkingModel(request);

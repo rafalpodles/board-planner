@@ -62,6 +62,7 @@ export async function dailyPmSpend(
   );
   const [totals] = await PmMessage.aggregate<{
     tokens: number;
+    promptTokens: number;
     cachedTokens: number;
     cacheWriteTokens: number;
     calls: number;
@@ -72,6 +73,9 @@ export async function dailyPmSpend(
       $group: {
         _id: null,
         tokens: { $sum: { $ifNull: ["$usage.totalTokens", 0] } },
+        // Not reported — summed only so the cache-read premise below can be checked against the
+        // number it is actually a premise about
+        promptTokens: { $sum: { $ifNull: ["$usage.promptTokens", 0] } },
         // Already inside `tokens`, reported apart from it so the operator can see what share of
         // the day was billed at cache-read price rather than as a cold prompt (BP-568). Turns
         // stored before this shipped carry neither field, and $ifNull reads those as 0 — which
@@ -89,14 +93,19 @@ export async function dailyPmSpend(
   const cachedTokens = totals?.cachedTokens ?? 0;
   /**
    * The premise this reporting rests on is the provider's, not ours: a cache read is documented as
-   * part of `prompt_tokens`. A provider counting it outside would make `tokens` understate what was
-   * billed while the settings screen still rendered a plausible share. Nothing on screen could show
-   * that, so it goes to the log — the operator is not the one who can act on it (BP-568 review).
+   * part of `prompt_tokens`. A provider counting it outside would make the day's spend understate
+   * what was billed while the settings screen still rendered a plausible share. Nothing on screen
+   * could show that, so it goes to the log — the operator is not the one who can act on it.
+   *
+   * Compared against the PROMPT total, not the day's total. A day of 400k prompt and 300k
+   * completion tokens reporting 600k cached has broken the premise by 200k, and against
+   * prompt + completion it would look fine and say nothing (BP-568 review).
    */
-  if (cachedTokens > tokens) {
+  const promptTokens = totals?.promptTokens ?? 0;
+  if (cachedTokens > promptTokens) {
     console.warn(
-      `[pm] project ${projectId}: ${cachedTokens} cached tokens reported against ${tokens} total — ` +
-        `the provider is counting cache reads outside its prompt total, so the day's spend is understated`
+      `[pm] project ${projectId}: ${cachedTokens} cached tokens reported against ${promptTokens} prompt ` +
+        `tokens — the provider is counting cache reads outside its prompt total, so the day's spend is understated`
     );
   }
   return {

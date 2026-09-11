@@ -317,11 +317,17 @@ export async function runPmTurn(opts: {
    */
   const stablePrefixLength = 1 + replayed.length;
   /**
-   * Whether the replayed history is still a growing prefix. Below `HISTORY_LIMIT` every following
-   * turn still opens with these same messages, so marking them is read back later whatever this
-   * turn does. Once the window has filled it slides instead, the next turn's request diverges one
+   * Whether the replayed history is still a growing prefix. Below `HISTORY_LIMIT` the next turn
+   * opens with these same messages, so marking them is normally read back later whatever this turn
+   * does. Once the window has filled it slides instead, the next turn's request diverges one
    * message in, and a turn that answers in a single call has written a cache entry nobody can ever
    * read (BP-568 review).
+   *
+   * Necessary rather than sufficient: `MAX_REPLAYED_IMAGES` rotates a picture out of an older
+   * entry long before the row count approaches `HISTORY_LIMIT`, which diverges the prefix just as
+   * a slide does and is invisible to a count of messages. Catching that means counting
+   * image-bearing entries out of `replayHistory`; `prompt-cache.ts` records why that is left
+   * undone rather than done badly.
    */
   const windowGrowing = history.length < HISTORY_LIMIT;
   const sessionId = pmSessionId(opts.projectId, opts.triggeredByUserId);
