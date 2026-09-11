@@ -78,9 +78,18 @@ describe("breakpoints on the wire", () => {
    * miss and is billed as a cold prompt.
    */
   it("put the same prefix bytes on the wire on the second call as on the first", async () => {
-    const first = [...MESSAGES];
+    // Built twice rather than spread from one array, so the two requests share no objects. That is
+    // hygiene and not a guard: this comparison cannot catch an in-place `marked()` either way,
+    // because a mutation marks each array at its own indices and the two serialised prefixes still
+    // agree. `prompt-cache.test.ts` is what catches that — three of its cases redden on it, which
+    // I checked by making the mutation rather than by reasoning about it (BP-568 review).
+    const conversation = () => [
+      { role: "system", content: "the standing rules" },
+      { role: "user", content: "the question" },
+    ];
+    const first = conversation();
     const second = [
-      ...MESSAGES,
+      ...conversation(),
       { role: "assistant", content: "", tool_calls: [{ id: "c1" }] },
       { role: "tool", content: "the tool's answer" },
     ];

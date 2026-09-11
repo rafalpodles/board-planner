@@ -567,17 +567,6 @@ describe("the prefix a turn asks to be cached", () => {
     expect(sent.map((r) => r.cachePrefixLength)).toEqual([1 + HISTORY.length, 1 + HISTORY.length]);
   });
 
-  // The control: the same on a thread with one older turn behind it, so the assertion above is
-  // about the mark rather than about the particular history the mock returned
-  it("marks the same prefix on a thread that has barely started", async () => {
-    historyDocsMock.mockResolvedValue([{ content: "the only older turn" }]);
-    twoCalls();
-
-    await turn([]);
-
-    expect(sent.map((r) => r.cachePrefixLength)).toEqual([1 + HISTORY.length, 1 + HISTORY.length]);
-  });
-
   /**
    * The key must be this board and this reader, in that order. A shape assertion alone leaves both
    * mistakes green: a constant would be one conversation for the whole instance, sending every

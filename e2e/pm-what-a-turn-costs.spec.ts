@@ -337,17 +337,15 @@ test("what a turn read from the cache is recorded, and shown as a share of what 
  * BP-568, the other half: what goes on the wire. A prefix that differs by one byte between two
  * calls of the same turn is a cache miss whatever the provider does.
  *
- * Asserted on `markedPrefix` — the bytes up to the app's own last breakpoint — and not on the
- * stub's structural `prefix`, which the stub derives from the shape of the conversation and which
- * two calls of one turn therefore agree on however the app behaved. That version of this test
- * could not fail. It needs a marking model for the same reason: without breakpoints there is no
- * claim on the wire to compare.
+ * Asserted on `markedPrefix`, the bytes up to the app's own last breakpoint. An earlier version
+ * compared a prefix the stub worked out for itself from the shape of the conversation — which two
+ * calls of one turn agree on however the app behaves, so it could not fail. It needs a marking
+ * model for the same reason: with no breakpoints there is no claim on the wire to compare.
  *
- * The equality is conditional, and the condition holds here rather than being asserted: a thread
- * whose replay window has filled marks only the system prompt on its first call and the history
- * from the second, so the two would differ by design. This thread is two turns old. The unit
- * suite drives the filled window, where a Playwright spec would need thirty seeded turns to say
- * the same thing.
+ * The equality is unconditional. Nothing about the thread's length or age changes where the mark
+ * goes, which is deliberate and is the thing most likely to be undone by someone reasoning that a
+ * short turn should not pay for a write — `agent.test.ts` carries that argument and why it is
+ * wrong.
  */
 test("the calls of one turn mark the same prefix, and name one session", async ({ page, request }) => {
   await useMarkingModel(request);

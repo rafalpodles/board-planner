@@ -557,6 +557,24 @@ describe("PmAgentSection — what today's tokens actually cost", () => {
     expect(await cacheLine()).not.toContain("450%");
   });
 
+  /**
+   * A provider that reports `total_tokens` and no `prompt_tokens` leaves the denominator at zero
+   * while the day plainly had spend. Gating the line on the denominator would make it vanish for
+   * that instance permanently — the same "goes quiet" failure the case above forbids, reached from
+   * a different direction. It stays, minus the percentage it cannot compute (BP-568 review).
+   */
+  it("keeps the line, without a share, when the provider reported no prompt total", async () => {
+    api.get.mockResolvedValue(usage({ tokens: 18_000, promptTokens: 0, cachedTokens: 4_000 }));
+
+    renderSection(true);
+
+    expect(await cacheLine()).toContain("no prompt total");
+    expect(await cacheLine()).not.toContain("%");
+    // The control: the figure it does have is still there, so the line is informative rather than
+    // merely present
+    expect(await figuresIn()).toBe("4000");
+  });
+
   // A day with no turns divides by zero. "NaN%" on a settings screen is how that would read.
   it("says nothing at all on a day with no spend", async () => {
     api.get.mockResolvedValue(

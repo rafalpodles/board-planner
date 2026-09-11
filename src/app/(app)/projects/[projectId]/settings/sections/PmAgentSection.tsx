@@ -108,11 +108,12 @@ interface PmUsageToday {
  *
  * Clamped because both numbers come from a provider rather than from us: nothing stops one
  * reporting cached tokens it never counted as prompt tokens, and "450% were read from the cache"
- * reads as a broken product rather than as a broken provider. The clamp does not make this safe at
- * zero — `Math.round(NaN)` is `NaN` and survives both bounds — so the caller's `promptTokens > 0`
- * gate is what keeps "NaN%" off the screen.
+ * reads as a broken product rather than as a broken provider. `null` rather than a clamped zero
+ * when there is no prompt total to divide by — a provider reporting only `total_tokens` leaves
+ * this at 0, and `Math.round(NaN)` is `NaN`, which survives both bounds and would reach the page.
  */
-function cachedShare(usage: PmUsageToday): number {
+function cachedShare(usage: PmUsageToday): number | null {
+  if (usage.promptTokens <= 0) return null;
   return Math.min(100, Math.max(0, Math.round((usage.cachedTokens / usage.promptTokens) * 100)));
 }
 
@@ -567,14 +568,23 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
                   number is asked for, and hiding that case would leave an instance whose caching
                   stopped working looking exactly like one that never could. A day with no spend
                   has nothing to take a share of, which is the only case that hides the line. */}
-              {usage.promptTokens > 0 && (
+              {usage.tokens > 0 && (
                 <p className="m-0 mt-1 text-text-muted" data-testid="pm-usage-cache">
                   <strong className="text-text" data-testid="pm-usage-cached-tokens">
                     {usage.cachedTokens.toLocaleString()}
                   </strong>{" "}
-                  of the day&apos;s {usage.promptTokens.toLocaleString()} prompt tokens (
-                  {cachedShare(usage)}%) were read from the provider&apos;s cache, billed at a
-                  fraction of a cold prompt
+                  {cachedShare(usage) === null ? (
+                    <>
+                      tokens were read from the provider&apos;s cache. This provider reported no
+                      prompt total, so there is no share to take
+                    </>
+                  ) : (
+                    <>
+                      of the day&apos;s {usage.promptTokens.toLocaleString()} prompt tokens (
+                      {cachedShare(usage)}%) were read from the provider&apos;s cache, billed at a
+                      fraction of a cold prompt
+                    </>
+                  )}
                   {usage.cacheWriteTokens > 0 && (
                     <>; {usage.cacheWriteTokens.toLocaleString()} were written to it</>
                   )}

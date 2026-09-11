@@ -72,6 +72,7 @@ describe("dailyPmSpend", () => {
 
     expect(spend).toMatchObject({
       tokens: 0,
+      promptTokens: 0,
       cachedTokens: 0,
       cacheWriteTokens: 0,
       calls: 0,
