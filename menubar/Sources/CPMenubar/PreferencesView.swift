@@ -177,6 +177,12 @@ private struct RepositoriesTab: View {
                         .font(.caption2).foregroundStyle(.secondary)
                 case .refused(let project, let reason):
                     Text("Left \(project) alone: \(reason)").font(.caption2).foregroundStyle(.orange)
+                case .declined(let project, let paths):
+                    // Not orange: nothing went wrong and there is nothing to fix. The unticking
+                    // still stands, so say it will ask again rather than leave it reading as a
+                    // wish that was quietly dropped.
+                    Text("Kept \(project) — you chose not to delete \(paths.joined(separator: ", ")). It will ask again.")
+                        .font(.caption2).foregroundStyle(.secondary)
                 case .partiallyRemoved(let project, let removed, let reason):
                     // Named in full: this is the one message that reports destruction the operator
                     // did not ask about and cannot undo.

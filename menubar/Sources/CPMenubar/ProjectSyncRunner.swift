@@ -22,8 +22,9 @@ final class ProjectSyncRunner {
     /// asks is the caller's business. A question rather than an answer: the value used to be
     /// sampled before the pass, and a clone takes minutes, so a worker that picked up a task in
     /// between had its checkout deleted underneath it. `SyncPass` asks again before each removal
-    /// (BP-424).
-    func sync(catalogue: [ProjectCatalogueRow], isBusy: @escaping () async -> Bool) async {
+    /// (BP-424), and again after the operator has answered the confirmation, which is the longer
+    /// window of the two (BP-378).
+    func sync(catalogue: [ProjectCatalogueRow], isBusy: @escaping SyncPass.IsBusy) async {
         guard !running else { return }
         // Claimed here rather than after the plan is built: reading every checkout's origin awaits,
         // and a second pass entering during that await used to clear this guard as well. Not
@@ -65,6 +66,7 @@ final class ProjectSyncRunner {
             isBusy: isBusy,
             deletion: deletion,
             removal: removal,
+            asking: { project, paths in DeletionPrompt.ask(project: project, paths: paths) },
             onStep: { step in self.steps.append(step) })
     }
 

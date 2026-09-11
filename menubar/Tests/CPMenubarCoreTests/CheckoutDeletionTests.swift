@@ -6,6 +6,9 @@ private struct Boom: Error, LocalizedError {
     var errorDescription: String? { "could not remove \(path)" }
 }
 
+// @MainActor for `removeIfSafe`, which is isolated to it because asking the operator is a modal.
+// `perform` is not, and the tests above it would compile either way.
+@MainActor
 final class CheckoutDeletionTests: XCTestCase {
     /// Captures what was asked of the disk, in order, so the sequence can be asserted rather than
     /// described. The order is the whole point: the grant is what lets the worker touch the
@@ -125,28 +128,160 @@ final class CheckoutDeletionTests: XCTestCase {
             exists: { _ in true })
     }
 
-    func testARefusalNeverReachesTheDisk() {
-        let r = Recorder()
+    /// Records what the operator was asked, so "it named every path" can be asserted rather than
+    /// described, and answers whatever the test told it to.
+    private final class Asked: @unchecked Sendable {
+        var calls: [(project: String, paths: [String])] = []
+        var answer = true
 
-        let step = deletion(r).removeIfSafe(
-            project: "BP", path: "/co", workerIsBusy: false, checking: alwaysRefusing())
+        func ask(_ project: String, _ paths: [String]) -> Bool {
+            calls.append((project, paths))
+            return answer
+        }
+    }
+
+    private func idle() -> CheckoutDeletion.IsBusy { { false } }
+
+    func testARefusalNeverReachesTheDisk() async {
+        let r = Recorder()
+        let asked = Asked()
+
+        let step = await deletion(r).removeIfSafe(
+            project: "BP", path: "/co", isBusy: idle(), checking: alwaysRefusing(),
+            asking: { asked.ask($0, $1) })
 
         guard case .refused = step else { return XCTFail("expected the guard's refusal, got \(step)") }
         XCTAssertEqual(r.removed, [], "nothing is deleted when the guard says no")
         XCTAssertEqual(r.forgotten, [], "and the grant stays, so the worker may still clean up")
+        XCTAssertEqual(asked.calls.count, 0, "nobody is asked about a deletion that is not going to happen")
     }
 
     /// What the guard found is what gets deleted. The two used to be wired together by hand in the
     /// app target, where passing an empty list would have deleted no worktrees and told nobody.
-    func testItDeletesExactlyTheWorktreesTheGuardFound() {
+    func testItDeletesExactlyTheWorktreesTheGuardFound() async {
         let r = Recorder()
+        let asked = Asked()
 
-        let step = deletion(r).removeIfSafe(
-            project: "BP", path: "/co", workerIsBusy: false,
-            checking: allowing(["/wt/one", "/wt/two"]))
+        let step = await deletion(r).removeIfSafe(
+            project: "BP", path: "/co", isBusy: idle(),
+            checking: allowing(["/wt/one", "/wt/two"]),
+            asking: { asked.ask($0, $1) })
 
         XCTAssertEqual(step, .removed(project: "BP", path: "/co"))
         XCTAssertEqual(r.removed, ["/wt/one", "/wt/two", "/co"])
+    }
+
+    // MARK: - BP-378: unticking is a proposal, and the machine is where it is put
+
+    /// The criterion, directly: every resolved path is named — the checkout and each linked
+    /// worktree — and they are the paths the guard resolved, not ones the server guessed.
+    func testTheOperatorIsAskedWithTheCheckoutAndEveryWorktree() async {
+        let r = Recorder()
+        let asked = Asked()
+
+        _ = await deletion(r).removeIfSafe(
+            project: "BP", path: "/co", isBusy: idle(),
+            checking: allowing(["/wt/one", "/wt/two"]),
+            asking: { asked.ask($0, $1) })
+
+        XCTAssertEqual(asked.calls.count, 1, "asked once, immediately before the delete")
+        XCTAssertEqual(asked.calls.first?.project, "BP")
+        XCTAssertEqual(
+            asked.calls.first?.paths, ["/co", "/wt/one", "/wt/two"],
+            "the checkout first, then what goes with it — nothing deleted goes unnamed")
+    }
+
+    func testDecliningDeletesNothingAndKeepsTheGrant() async {
+        let r = Recorder()
+        let asked = Asked()
+        asked.answer = false
+
+        let step = await deletion(r).removeIfSafe(
+            project: "BP", path: "/co", isBusy: idle(),
+            checking: allowing(["/wt/one"]),
+            asking: { asked.ask($0, $1) })
+
+        XCTAssertEqual(step, .declined(project: "BP", paths: ["/co", "/wt/one"]))
+        XCTAssertEqual(r.removed, [], "no is a no about the disk")
+        XCTAssertEqual(
+            r.forgotten, [],
+            "and about the allowlist: dropping the grant would leave a checkout the worker may no longer touch")
+    }
+
+    /// A checkout that went on its own. The grant is stale and dropping it destroys nothing, so
+    /// putting a deletion dialog in front of somebody would be asking about nothing.
+    func testNothingToDeleteIsNotWorthAsking() async {
+        let r = Recorder()
+        let asked = Asked()
+
+        let step = await deletion(r, exists: { _ in false }).removeIfSafe(
+            project: "BP", path: "/co", isBusy: idle(), checking: allowing([]),
+            asking: { asked.ask($0, $1) })
+
+        XCTAssertEqual(step, .forgotten(project: "BP", path: "/co"))
+        XCTAssertEqual(asked.calls.count, 0, "nothing was going to be deleted")
+        XCTAssertEqual(r.forgotten, ["/co"], "the stale entry still goes")
+    }
+
+    /// BP-424 with a longer window. That ticket was about a worker picking up a task during a
+    /// clone; a modal waits on a person, which is longer still. A `removeIfSafe` that asked once
+    /// before the dialog would pass every test above and delete a live worktree here.
+    func testAWorkerThatPicksUpATaskWhileTheQuestionIsOnScreenStopsTheDelete() async {
+        let r = Recorder()
+        let asked = Asked()
+        let busy = Counter()
+
+        let step = await deletion(r).removeIfSafe(
+            project: "BP", path: "/co", isBusy: { busy.next() },
+            checking: allowing(["/wt/one"]),
+            asking: { asked.ask($0, $1) })
+
+        XCTAssertEqual(asked.calls.count, 1, "it did ask — the worker was idle when the guards ran")
+        guard case .refused(_, let reason) = step else {
+            return XCTFail("expected a refusal on the second look, got \(step)")
+        }
+        XCTAssertTrue(reason.contains("running a task"), "and says why: \(reason)")
+        XCTAssertEqual(r.removed, [], "nothing is taken from under a run")
+        XCTAssertEqual(r.forgotten, [])
+    }
+
+    /// The operator agreed to a list. A worktree created while the dialog sat on screen is not on
+    /// it, and deleting it would be destroying something they were never shown.
+    func testAWorktreeThatAppearsWhileTheQuestionIsOnScreenStopsTheDelete() async {
+        let r = Recorder()
+        let asked = Asked()
+        let worktrees = Growing(first: ["/wt/one"], then: ["/wt/one", "/wt/late"])
+
+        let step = await deletion(r).removeIfSafe(
+            project: "BP", path: "/co", isBusy: idle(),
+            checking: CheckoutRemoval(
+                run: { args, _ in stubGit(args, worktrees: worktrees) },
+                exists: { _ in true }),
+            asking: { asked.ask($0, $1) })
+
+        XCTAssertEqual(asked.calls.first?.paths, ["/co", "/wt/one"], "asked about what was there then")
+        guard case .refused(_, let reason) = step else {
+            return XCTFail("expected a refusal, got \(step)")
+        }
+        XCTAssertTrue(reason.contains("changed while the question was on screen"), reason)
+        XCTAssertEqual(r.removed, [], "and /wt/late, which nobody was shown, is still there")
+    }
+
+    /// The control for the two above: when nothing changes between the two looks, agreeing still
+    /// deletes. Without it, a `removeIfSafe` that refused everything after a confirmation would
+    /// pass both.
+    func testAgreeingWithNothingChangingStillDeletes() async {
+        let r = Recorder()
+        let asked = Asked()
+
+        let step = await deletion(r).removeIfSafe(
+            project: "BP", path: "/co", isBusy: idle(),
+            checking: allowing(["/wt/one"]),
+            asking: { asked.ask($0, $1) })
+
+        XCTAssertEqual(step, .removed(project: "BP", path: "/co"))
+        XCTAssertEqual(r.removed, ["/wt/one", "/co"])
+        XCTAssertEqual(r.forgotten, ["/co"])
     }
 
     // MARK: - BP-427: what the operator is told when only some of it went
@@ -203,4 +338,45 @@ final class CheckoutDeletionTests: XCTestCase {
         XCTAssertEqual(r.removed, ["/wt/one", "/co"])
         XCTAssertEqual(r.forgotten, ["/co"])
     }
+}
+
+/// Idle on the first question, running on every one after it — the worker picking up a task while
+/// the confirmation is on screen.
+private final class Counter: @unchecked Sendable {
+    private var asked = 0
+    func next() -> Bool {
+        defer { asked += 1 }
+        return asked > 0
+    }
+}
+
+/// One set of worktrees for the first `check`, another for the second.
+private final class Growing: @unchecked Sendable {
+    private let first: [String]
+    private let then: [String]
+    private var looks = 0
+
+    init(first: [String], then: [String]) {
+        self.first = first
+        self.then = then
+    }
+
+    func next() -> [String] {
+        defer { looks += 1 }
+        return looks == 0 ? first : then
+    }
+}
+
+/// A git that answers every question `CheckoutRemoval` asks with yes, naming whichever set of
+/// worktrees this look is meant to see. The set advances on the `worktree list` call alone — a
+/// check runs half a dozen git commands, and advancing on each one made the first look already see
+/// the second set.
+@Sendable private func stubGit(_ args: [String], worktrees: Growing) -> (code: Int32, output: String) {
+    if args.contains("--show-toplevel") { return (0, "/co\n") }
+    if args.contains("--git-dir") || args.contains("--git-common-dir") { return (0, ".git") }
+    if args.contains("worktree") {
+        let listed = worktrees.next()
+        return (0, porcelainZ((["/co"] + listed).map { "worktree \($0)" }.joined(separator: "\n\n")))
+    }
+    return (0, "")
 }

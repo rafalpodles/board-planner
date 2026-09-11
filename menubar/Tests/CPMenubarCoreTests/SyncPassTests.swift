@@ -102,6 +102,7 @@ final class SyncPassTests: XCTestCase {
             isBusy: { busy },
             deletion: deletion(grants),
             removal: removal,
+            asking: { _, _ in true },
             onStep: { steps.append($0) })
 
         XCTAssertEqual(
@@ -124,7 +125,7 @@ final class SyncPassTests: XCTestCase {
         let first = try checkout("first")
         let second = try checkout("second")
         let grants = Grants()
-        var busy = false
+        var asked = 0
         var steps: [SyncStep] = []
 
         await SyncPass.run(
@@ -135,13 +136,16 @@ final class SyncPassTests: XCTestCase {
                     PlannedRemoval(project: offer("TWO"), path: second),
                 ]),
             add: { _ in .success("") },
-            // Idle for the first question, running by the second: a removal takes time too.
+            // Idle through the first removal, running by the time the second is reached: a removal
+            // takes time too. Two questions per removal since BP-378 — the guards ask, and the
+            // confirmation asks again after the operator has answered — so this flips on the third.
             isBusy: {
-                defer { busy = true }
-                return busy
+                defer { asked += 1 }
+                return asked >= 2
             },
             deletion: deletion(grants),
             removal: removal,
+            asking: { _, _ in true },
             onStep: { steps.append($0) })
 
         XCTAssertEqual(steps.first, .removed(project: "ONE", path: first))
@@ -169,6 +173,7 @@ final class SyncPassTests: XCTestCase {
             isBusy: { false },
             deletion: deletion(grants),
             removal: removal,
+            asking: { _, _ in true },
             onStep: { steps.append($0) })
 
         XCTAssertEqual(
@@ -176,6 +181,35 @@ final class SyncPassTests: XCTestCase {
             [.added(project: "NEW", path: root + "/new"), .removed(project: "OLD", path: path)])
         XCTAssertFalse(FileManager.default.fileExists(atPath: path))
         XCTAssertEqual(grants.forgotten, [path])
+    }
+
+    // MARK: - BP-378: the whole pass, against a real directory, when the operator says no
+
+    /// The seam is asserted in CheckoutDeletionTests against a recorder. This is the same question
+    /// put through the pass at a directory that really exists, because what the criterion is about
+    /// is whether it is still there afterwards.
+    func testADeclinedRemovalLeavesTheCheckoutOnDisk() async throws {
+        let path = try checkout("kept")
+        let grants = Grants()
+        var asked: [[String]] = []
+        var steps: [SyncStep] = []
+
+        await SyncPass.run(
+            plan: SyncPlan(add: [], remove: [PlannedRemoval(project: offer("OLD"), path: path)]),
+            add: { _ in .success("") },
+            isBusy: { false },
+            deletion: deletion(grants),
+            removal: removal,
+            asking: { _, paths in
+                asked.append(paths)
+                return false
+            },
+            onStep: { steps.append($0) })
+
+        XCTAssertEqual(asked, [[path]], "asked by path, and only about what is there")
+        XCTAssertEqual(steps, [.declined(project: "OLD", paths: [path])])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: path), "it is still there — the point")
+        XCTAssertEqual(grants.forgotten, [], "and still granted, so the unticking stands and it asks again")
     }
 
     func testAPassWithNoClonesBehavesAsItDid() async throws {
@@ -193,10 +227,13 @@ final class SyncPassTests: XCTestCase {
             },
             deletion: deletion(grants),
             removal: removal,
+            asking: { _, _ in true },
             onStep: { steps.append($0) })
 
         XCTAssertEqual(steps, [.removed(project: "OLD", path: path)])
-        XCTAssertEqual(asked, 1, "asked once, for the one removal")
+        XCTAssertEqual(
+            asked, 2,
+            "twice for the one removal: once for the guards, once after the operator answered — the confirmation is the longer of the two windows (BP-378)")
     }
 
     func testAWorkerBusyFromTheStartIsRefusedAsBefore() async throws {
@@ -210,6 +247,7 @@ final class SyncPassTests: XCTestCase {
             isBusy: { true },
             deletion: deletion(grants),
             removal: removal,
+            asking: { _, _ in true },
             onStep: { steps.append($0) })
 
         // The step, not just the count: a `.failed` would also be one step, and would also leave
@@ -237,6 +275,7 @@ final class SyncPassTests: XCTestCase {
             isBusy: { false },
             deletion: deletion(grants),
             removal: removal,
+            asking: { _, _ in true },
             onStep: { steps.append($0) })
 
         XCTAssertEqual(

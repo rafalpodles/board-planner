@@ -12,12 +12,15 @@ import Foundation
 ///
 /// So it arrives as a question instead of an answer, and the question is asked again before each
 /// removal — not once before the loop, because removals take time too and a worker can pick up a
-/// task between two of them.
+/// task between two of them. `CheckoutDeletion` asks it twice more per removal since BP-378: once
+/// for the guards, and once after the operator has answered the confirmation, which is the longest
+/// window of the three.
 @MainActor
 public enum SyncPass {
     public typealias Add = (ProjectOffer) async -> Result<String, ProjectSetup.Failure>
-    /// Whether the worker is running a task, asked now.
-    public typealias IsBusy = () async -> Bool
+    /// Whether the worker is running a task, asked now. Declared by `CheckoutDeletion`, which is
+    /// where it is asked from — this pass only carries it there.
+    public typealias IsBusy = CheckoutDeletion.IsBusy
 
     /// Turns "what is the worker doing" into "may I delete this". Lives here rather than at the
     /// call site so the answer to an unanswerable question is testable: a socket that will not
@@ -39,6 +42,7 @@ public enum SyncPass {
         isBusy: IsBusy,
         deletion: CheckoutDeletion,
         removal: CheckoutRemoval,
+        asking ask: CheckoutDeletion.Ask,
         onStep: (SyncStep) -> Void
     ) async {
         for offer in plan.add {
@@ -52,11 +56,12 @@ public enum SyncPass {
 
         for planned in plan.remove {
             onStep(
-                deletion.removeIfSafe(
+                await deletion.removeIfSafe(
                     project: planned.project.label,
                     path: planned.path,
-                    workerIsBusy: await isBusy(),
-                    checking: removal))
+                    isBusy: isBusy,
+                    checking: removal,
+                    asking: ask))
         }
     }
 }

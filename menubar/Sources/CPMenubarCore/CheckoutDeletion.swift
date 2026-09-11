@@ -10,6 +10,11 @@ public struct CheckoutDeletion: Sendable {
     /// Drops the path from the allowlist. Separate from `remove` because it is the one act that
     /// leaves the disk alone.
     public typealias Forget = @Sendable (String) throws -> Void
+    /// Whether the worker is running a task, asked now rather than handed over as a value somebody
+    /// sampled earlier (BP-424).
+    public typealias IsBusy = @MainActor () async -> Bool
+    /// Puts the whole list to the operator, on the machine, and answers whether to go ahead.
+    public typealias Ask = @MainActor (_ project: String, _ paths: [String]) async -> Bool
 
     private let remove: Remove
     private let exists: Exists
@@ -25,22 +30,65 @@ public struct CheckoutDeletion: Sendable {
         self.forget = forget
     }
 
-    /// The whole removal: ask the guards, and delete only what they allowed. One entry point
-    /// because the seam between the two used to be a call site in the app target, where nothing
-    /// is tested — the list `check` returns and the list `perform` deletes could drift apart and
-    /// every test would stay green.
+    /// The whole removal: ask the guards, ask the operator, and delete only what both allowed. One
+    /// entry point because the seam between guard and act used to be a call site in the app target,
+    /// where nothing is tested — the list `check` returns and the list `perform` deletes could
+    /// drift apart and every test would stay green.
+    ///
+    /// `@MainActor` because asking is what this method does, and on this machine a question is a
+    /// modal on the main thread. `perform` stays off it: deleting needs nobody's attention.
+    @MainActor
     public func removeIfSafe(
         project: String,
         path: String,
-        workerIsBusy: Bool,
-        checking removal: CheckoutRemoval
-    ) -> SyncStep {
-        switch removal.check(path: path, workerIsBusy: workerIsBusy) {
+        isBusy: IsBusy,
+        checking removal: CheckoutRemoval,
+        asking ask: Ask
+    ) async -> SyncStep {
+        switch removal.check(path: path, workerIsBusy: await isBusy()) {
         case .refused(let reason):
             return .refused(project: project, reason: reason)
         case .go(let worktrees):
-            return perform(project: project, path: path, worktrees: worktrees)
+            let doomed = doomedPaths(path: path, worktrees: worktrees)
+            // Nothing is about to be deleted — the checkout went on its own and left no worktrees,
+            // so all that happens is a stale grant being dropped. There is no question to ask.
+            guard !doomed.isEmpty else {
+                return perform(project: project, path: path, worktrees: worktrees)
+            }
+
+            guard await ask(project, doomed) else {
+                // Not `.refused`: a guard saying no is a fact about the checkout, and this is a
+                // fact about the operator. Nothing is forgotten either, so the unticking still
+                // stands and the next pass asks again.
+                return .declined(project: project, paths: doomed)
+            }
+
+            // The guards above were true when they ran; the question then sat on screen for as
+            // long as a person took to answer it. That is far longer than the gap BP-424 was about
+            // — a worker idle before a clone and running after it — so asking once before the
+            // modal would be the same bug with a longer window: a task claimed while the dialog
+            // was up, and its worktree deleted underneath it.
+            switch removal.check(path: path, workerIsBusy: await isBusy()) {
+            case .refused(let reason):
+                return .refused(project: project, reason: reason)
+            case .go(let now):
+                // The operator agreed to a list, not to a removal. Anything else on disk now is
+                // something they were never shown.
+                guard doomedPaths(path: path, worktrees: now) == doomed else {
+                    return .refused(
+                        project: project,
+                        reason: "what is on disk changed while the question was on screen — nothing was deleted, and it will ask again")
+                }
+                return perform(project: project, path: path, worktrees: now)
+            }
         }
+    }
+
+    /// Everything the operator is about to lose, in reading order: the checkout, then the worktrees
+    /// that go with it. `perform` deletes in the opposite order for its own reasons; this is the
+    /// list that gets named, and the list the second verdict is compared against.
+    private func doomedPaths(path: String, worktrees: [String]) -> [String] {
+        (exists(path) ? [path] : []) + worktrees
     }
 
     // Not public: the comment above argues for one entry point, and `internal` is what makes
