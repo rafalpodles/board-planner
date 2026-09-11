@@ -60,6 +60,18 @@ export const ENFORCED_SEVERITIES = ["critical", "high"] as const;
  */
 export const AUDITED_TREES = [".", "mcp-server"] as const;
 
+/**
+ * The registry whose answer this gate is willing to treat as authoritative.
+ *
+ * Nothing in a report distinguishes "the advisory database has nothing on these packages" from
+ * "the host we asked does not serve advisories": a mirror answering `200 {}` on the bulk endpoint
+ * produces a perfectly well-formed report with an empty `vulnerabilities` and a full `metadata`,
+ * and every check in this file passes it. The only place that difference is visible is which host
+ * was asked, so the gate asks — and refuses an unfamiliar one rather than inheriting whatever
+ * `npm_config_registry` happened to be set to (BP-599 review).
+ */
+export const AUTHORITATIVE_REGISTRY = "https://registry.npmjs.org/";
+
 export interface Finding {
   id: string;
   package: string;
@@ -93,10 +105,14 @@ const GHSA = /GHSA-[0-9a-z-]+/i;
  * Whether this is an audit that ran, as opposed to one that failed and said so in JSON.
  *
  * `npm audit` reports an unreachable registry, a missing lockfile and an auth failure as a
- * well-formed object with an `error` key and no `vulnerabilities` — and exits 0 for at least the
- * first of those. Treating that as "nothing found" is how a security gate reports success on a day
- * it did no work, which is worse than having no gate: it is a green tick that means nothing
- * (BP-599 review).
+ * well-formed object with an `error` key and no `vulnerabilities`. Its exit code cannot separate
+ * those from a successful run either: it exits 1 whenever it finds anything at all, so failure and
+ * "found three moderates" look identical from the outside and the JSON is the only answer. Reading
+ * an empty verdict as "nothing found" is how a security gate reports success on a day it did no
+ * work, which is worse than having no gate: it is a green tick that means nothing (BP-599 review).
+ *
+ * An earlier version of this note said npm exits 0 on an unreachable registry. It does not — that
+ * reading came from a shell pipeline whose `$?` was `echo`'s.
  */
 export function ranSuccessfully(report: unknown): boolean {
   const r = report as AuditReport;
@@ -133,11 +149,10 @@ const unidentified = (pkg: string, title: string) => `UNIDENTIFIED:${pkg}:${titl
  * that nobody has to trust a judgement about what npm will emit (BP-599 review).
  */
 function bumpableWithoutAMajor(fixAvailable: unknown): boolean {
-  // Spelled out rather than `!fixAvailable`: only these three are npm saying no fix exists. `0`
-  // and `""` are falsy too, and lumping them in would send an unrecognised shape back to the
-  // permissive branch this guard was inverted to escape.
-  const npmFoundNothing = fixAvailable === false || fixAvailable === undefined || fixAvailable === null;
-  if (npmFoundNothing) return false;
+  // Only an explicit `false` is npm saying there is no fix. Absent is npm not answering — every
+  // real vulnerability entry carries this field — and `0` and `""` are falsy but unrecognised, so
+  // all of them fall through to the refusing branch this guard was inverted to reach.
+  if (fixAvailable === false) return false;
   if (fixAvailable && typeof fixAvailable === "object") {
     return (fixAvailable as { isSemVerMajor?: unknown }).isSemVerMajor !== true;
   }
@@ -162,9 +177,10 @@ export function findings(report: unknown): Finding[] {
   for (const [name, entry] of Object.entries(vulnerabilities)) {
     const via = Array.isArray(entry?.via) ? entry.via : [];
     for (const item of via) {
-      // A string here names another package rather than an advisory; it carries no severity, so it
-      // falls out below rather than needing a guard of its own
-      if (!item || typeof item !== "object") continue;
+      // Guards `null`, which destructuring throws on. A string here names another package rather
+      // than an advisory and needs no guard: it destructures to undefined fields and falls out at
+      // the severity check below.
+      if (!item) continue;
       const { url, title, severity } = item as AuditVia;
       if (!enforced(severity)) continue;
       const text = String(title ?? "");
@@ -197,8 +213,12 @@ export function judge(
   tree = "."
 ): Verdict {
   const found = findings(report);
+  // An entry whose id is not a real advisory id is ignored outright, so the synthetic key given to
+  // an unidentified finding cannot be written into the allowlist to silence it. The shipped-list
+  // test asserts the same shape, but on an empty list that assertion is vacuously true — the
+  // property has to live here (BP-599 review).
   const forThisTree = new Map(
-    accepted.filter((a) => a.trees.includes(tree)).map((a) => [a.id, a])
+    accepted.filter((a) => a.trees.includes(tree) && GHSA.test(a.id)).map((a) => [a.id, a])
   );
 
   const blocking: Finding[] = [];

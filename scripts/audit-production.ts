@@ -24,6 +24,7 @@ import {
   ENFORCED_SEVERITIES,
   ACCEPTED_ADVISORIES,
   AUDITED_TREES,
+  AUTHORITATIVE_REGISTRY,
   type Finding,
 } from "../src/lib/audit-policy.ts";
 
@@ -41,11 +42,21 @@ import {
  */
 const AUDITED = AUDITED_TREES;
 
+/**
+ * Which host the audit will actually ask. A report from a registry that serves no advisories is
+ * indistinguishable from a clean bill of health once parsed — empty `vulnerabilities`, full
+ * `metadata`, every structural check satisfied — so the question has to be asked before the answer
+ * arrives rather than inferred from it.
+ */
+function registryInUse(cwd: string): string {
+  return execFileSync("npm", ["config", "get", "registry"], { cwd, encoding: "utf8" }).trim();
+}
+
 function auditReport(cwd: string): unknown {
   try {
-    // `npm audit` exits non-zero whenever it finds anything at all, which is not the question being
-    // asked here — the JSON is the answer, and the policy decides. Only a failure to produce JSON
-    // is a real error.
+    // The exit code answers neither question — non-zero on a finding and non-zero on a failure —
+    // so the JSON is the answer and the policy decides. Only a failure to produce JSON is an error
+    // here.
     const out = execFileSync("npm", ["audit", "--json", "--omit=dev"], {
       cwd,
       encoding: "utf8",
@@ -70,8 +81,10 @@ function auditReport(cwd: string): unknown {
 
 /**
  * A report that is well-formed JSON but is npm telling us it could not run — no lockfile, no
- * registry, bad auth — has no `vulnerabilities` at all, and `npm audit` exits 0 for at least the
- * unreachable-registry case. Passing on that is a green tick meaning "we did not look".
+ * registry, bad auth — has no `vulnerabilities` at all. The exit code cannot be used to tell those
+ * apart from a good run either: `npm audit` exits non-zero whenever it finds anything AND when it
+ * fails outright, so the shape of the JSON is the only signal there is. Passing on it would be a
+ * green tick meaning "we did not look".
  */
 function mustHaveRun(report: unknown, cwd: string): unknown {
   if (ranSuccessfully(report)) return report;
@@ -81,6 +94,19 @@ function mustHaveRun(report: unknown, cwd: string): unknown {
       `Refusing to report a clean bill of health from an audit that did not happen.`
   );
 }
+
+const registry = registryInUse(".");
+if (registry !== AUTHORITATIVE_REGISTRY) {
+  console.log(
+    `::error::npm is configured to use ${registry}, and this gate only trusts ` +
+      `${AUTHORITATIVE_REGISTRY}. A registry that does not serve the advisory endpoint returns an ` +
+      `empty report that looks exactly like a clean one, so a pass from here would mean nothing. ` +
+      `Point npm at the public registry for this step, or decide deliberately that the mirror is ` +
+      `authoritative and say so in src/lib/audit-policy.ts.`
+  );
+  process.exit(1);
+}
+console.log(`Advisories from ${registry}.`);
 
 const blocking: Finding[] = [];
 const acceptedIds = new Set<string>();

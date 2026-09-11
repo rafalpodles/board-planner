@@ -216,6 +216,12 @@ describe("reading the report", () => {
 
     it.each([
       ["an unreachable registry", { message: "ECONNREFUSED", error: { summary: "", detail: "" } }],
+      // The `error` key on its own has to be disqualifying: without this case, removing that check
+      // changed nothing, because every other fixture was already rejected for missing a field
+      [
+        "an error alongside otherwise complete fields",
+        { error: { code: "ENOLOCK" }, vulnerabilities: {}, metadata: { dependencies: { prod: 1 } } },
+      ],
       ["a missing lockfile", { error: { code: "ENOLOCK", summary: "no lock file" } }],
       ["no vulnerabilities key", { metadata: {} }],
       ["no metadata", { vulnerabilities: {} }],
@@ -242,15 +248,29 @@ describe("reading the report", () => {
     expect(verdict.blocking.map((f) => f.id)).toEqual(["UNIDENTIFIED:p:no url", "GHSA-real-0003"]);
   });
 
-  // ...and it cannot be silenced by adding it to the allowlist, because every entry there is
-  // asserted to be a real GHSA id
+  /**
+   * ...and it cannot be silenced by writing the synthetic key into the allowlist. This case used to
+   * assert the opposite of its own name — that the entry WAS accepted — leaning on a shipped-list
+   * assertion that is vacuously true while the list is empty. The property belongs in the code:
+   * `judge` ignores an allowlist entry whose id is not a real advisory id (BP-599 review).
+   */
   it("cannot have an unidentified finding accepted", () => {
     const verdict = judge(report({ p: { severity: "critical", via: [{ title: "x", severity: "critical" }] } }), [
       accept({ id: "UNIDENTIFIED:p:x", package: "p" }),
     ]);
 
-    expect(ACCEPTED_ADVISORIES.every((a) => /^GHSA-/i.test(a.id))).toBe(true);
-    expect(verdict.accepted.map((f) => f.id)).toEqual(["UNIDENTIFIED:p:x"]);
+    expect(verdict.accepted).toEqual([]);
+    expect(verdict.blocking.map((f) => f.id)).toEqual(["UNIDENTIFIED:p:x"]);
+  });
+
+  // The control: a real GHSA id in the same position is honoured, so the rule above is about the
+  // shape of the id and not about acceptance being broken
+  it("still honours a real advisory id in the allowlist", () => {
+    const verdict = judge(report({ p: { severity: "critical", via: [via("GHSA-shaped-0010", "critical")] } }), [
+      accept({ id: "GHSA-shaped-0010", package: "p" }),
+    ]);
+
+    expect(verdict.blocking).toEqual([]);
   });
 
   // npm has spelled severities in capitals before; a gate that only recognises one casing turns a
@@ -262,8 +282,14 @@ describe("reading the report", () => {
     expect(verdict.blocking[0].severity).toBe(severity.toLowerCase());
   });
 
-  it("does not throw or report a finding for a via entry that is a plain package name", () => {
-    expect(findings(report({ p: { severity: "high", via: ["another-package"] } }))).toEqual([]);
+  it.each([
+    ["a plain package name", "another-package"],
+    // `null` is the one that throws on destructuring, which is what the guard is actually for
+    ["a null", null],
+    ["a number", 7],
+  ])("does not throw or report a finding for a via entry that is %s", (_name, entry) => {
+    expect(() => findings(report({ p: { severity: "high", via: [entry] } }))).not.toThrow();
+    expect(findings(report({ p: { severity: "high", via: [entry] } }))).toEqual([]);
   });
 });
 
