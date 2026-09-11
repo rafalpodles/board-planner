@@ -12,6 +12,7 @@ import { Project } from "@/models/project";
 import { Worker } from "@/models/worker";
 import { ITaskExecution } from "@/types";
 import { withApiExecution } from "@/lib/task-execution-view";
+import { toApiDecision } from "@/lib/task-decisions";
 
 
 export const GET = withProjectAccess(async (_request, { params }) => {
@@ -50,10 +51,22 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   );
 
   taskObj.execution = toApiExecution(task.execution, await workerNamesFor([task.execution]));
+  // Serialised rather than published raw: the stored record carries `patchSha256` and the
+  // settlement attempt count, and the panel renders the liveness of the machine that holds the
+  // work — which is a second document.
+  taskObj.decision = toApiDecision(task.decision, await deciderOf(task.decision?.workerId));
 
   return NextResponse.json(taskObj);
 });
 
+
+/** The machine a refused change is waiting on, for its name and for whether it is still there. */
+async function deciderOf(workerId: string | undefined) {
+  if (!workerId || !isValidObjectId(workerId)) return null;
+  return Worker.findById(workerId)
+    .select("name lastSeenAt")
+    .lean<{ name?: string; lastSeenAt?: Date | null } | null>();
+}
 
 // Only runs still holding a task carry a workerId, so this reads a handful of documents at most —
 // and skips the query entirely when nothing is running.

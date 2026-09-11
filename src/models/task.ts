@@ -1,5 +1,5 @@
 import mongoose, { Schema, Model } from "mongoose";
-import { ITask, PRIORITIES, DEFAULT_PRIORITY, RECURRENCE_FREQUENCIES } from "@/types";
+import { ITask, PRIORITIES, DEFAULT_PRIORITY, RECURRENCE_FREQUENCIES, TASK_DECISION_STATES } from "@/types";
 
 const taskSchema = new Schema<ITask>(
   {
@@ -151,6 +151,37 @@ const taskSchema = new Schema<ITask>(
       phaseAt: { type: Date },
       phaseSeq: { type: Number },
     },
+    // A change the protected-paths gate refused, waiting on a person. `default: null` and nothing
+    // else: unlike `execution` above, whose defaults make it serialise as a truthy object on every
+    // task ever written, this must be absent until a gate actually refuses something — the panel
+    // reads a truthy `decision` as "there is something to answer".
+    //
+    // Written only by POST /api/workers/:workerId/decisions, and deliberately not reachable from
+    // `updateTask`'s field list, which is what keeps MCP, the edit form and the PM agent out of it.
+    decision: {
+      type: {
+        gate: { type: String, required: true },
+        files: { type: [String], default: [] },
+        protectedFiles: { type: [String], default: [] },
+        patch: { type: String, default: "" },
+        patchTruncated: { type: Boolean, default: false },
+        patchSha256: { type: String, default: "" },
+        commit: { type: String, required: true },
+        workerId: { type: String, required: true },
+        taskKey: { type: String, default: "" },
+        title: { type: String, default: "" },
+        acceptable: { type: Boolean, default: false },
+        unacceptableReason: { type: String, default: "" },
+        state: { type: String, enum: TASK_DECISION_STATES, default: "pending" },
+        decidedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+        decidedAt: { type: Date, default: null },
+        prUrl: { type: String, default: "" },
+        error: { type: String, default: "" },
+        attempts: { type: Number, default: 0 },
+        createdAt: { type: Date, default: Date.now },
+      },
+      default: null,
+    },
     createdBy: {
       type: Schema.Types.ObjectId,
       ref: "User",
@@ -171,6 +202,9 @@ taskSchema.index({ sprint: 1 });
 taskSchema.index({ agent: 1 });
 // The fleet console polls the worker join every 5s; unindexed, each poll scans the collection
 taskSchema.index({ "execution.workerId": 1 });
+// The worker asks "what is waiting on me" on every refresh, and the answer is nearly always
+// nothing — unindexed, that question is a scan of every task in every project on each poll
+taskSchema.index({ "decision.workerId": 1 });
 // Closing a recurring task asks whether it already has a successor; unindexed that is a scan of
 // every task in every project, and the usual answer — no — is the one that scans to the end
 taskSchema.index({ recurringParentId: 1 });

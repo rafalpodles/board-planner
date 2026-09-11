@@ -51,8 +51,12 @@ import { onTaskStatusChanged } from "@/lib/pm/triggers";
 import { canBeAssigned } from "@/lib/grants";
 import { workerUsername } from "@/lib/worker-user";
 import { pmUserId } from "@/lib/pm/pm-user";
+import { supersedableStates } from "@/lib/task-decisions";
 
 export const MAX_EXECUTION_ATTEMPTS = 3;
+
+// Read once, so the claim below and the state machine that defines these cannot drift apart
+const SUPERSEDABLE_DECISIONS = supersedableStates();
 
 // Long enough for "gates:build" or "Edit src/lib/task-service.ts", short enough that a badge
 // cannot become a payload
@@ -1799,6 +1803,23 @@ export async function claimNextTask(
           "execution.startedAt": new Date(),
           "execution.lastError": "",
           "execution.attempts": { $add: [{ $ifNull: ["$execution.attempts", 0] }, 1] },
+          // A change somebody was still being asked about belongs to the run that produced it, and
+          // that run is over the moment this claim lands: the worktree it named is rebuilt by
+          // `worktree add -B` a few seconds from now, so the commit the record points at stops
+          // existing. Marked in the same update that hands the task out, because a second write
+          // would leave a window in which the panel offers a button over work that is already gone.
+          //
+          // The whole field is replaced rather than `decision.state` alone: an aggregation `$set`
+          // on a dotted path whose parent is not a document REPLACES the parent, so a task with
+          // `decision: null` — which is nearly all of them — would grow a decision made of one
+          // field on every claim.
+          decision: {
+            $cond: [
+              { $in: [{ $ifNull: ["$decision.state", ""] }, SUPERSEDABLE_DECISIONS] },
+              { $mergeObjects: ["$decision", { state: "superseded" }] },
+              "$decision",
+            ],
+          },
         },
       },
       // A run counts its own phases from one, so a phaseSeq left by an earlier run would swallow

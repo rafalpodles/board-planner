@@ -157,6 +157,10 @@ export const GET = withProjectAccess(async (request, { params }) => {
     tasks.map((task) => ({
       ...task.toObject(),
       execution: toApiExecution(task.execution, workerNames),
+      // The board loads every task, and a refused change carries the whole patch — up to 200 KB
+      // per card, to every member, on every poll. The panel that renders one is on the task
+      // screen, which reads the task on its own.
+      decision: undefined,
     }))
   );
 });

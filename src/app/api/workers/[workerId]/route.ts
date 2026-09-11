@@ -7,6 +7,7 @@ import { Worker } from "@/models/worker";
 import { Project } from "@/models/project";
 import { assignmentsFor, catalogueFor, offersFor, overriddenWorkerPolicy, ownerReachableProjectIds, toApiWorker, usableRepos } from "@/lib/worker-service";
 import { logInstanceAudit } from "@/lib/instanceAudit";
+import { decisionsForWorker } from "@/lib/task-decisions";
 import { InstanceAuditAction } from "@/types";
 
 // Everything a worker document still carries is fleet management: what this machine is called,
@@ -63,6 +64,11 @@ export const GET = withWorker(async (_request, { worker }) => {
       reachable,
       worker.desiredProjects?.map(String)
     ),
+    // What is waiting on this machine: refused changes a person has answered, and the ones they
+    // have not. The pending ones travel too — the worker keeps a marker per task to hold its
+    // worktree back from the reaper, and seeing a decision leave this list is the only way it
+    // learns a marker should be dropped.
+    decisions: await decisionsForWorker(String(worker._id)),
   });
 });
 

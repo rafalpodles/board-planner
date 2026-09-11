@@ -18,6 +18,7 @@ export const PROTECTED_PATHS_BRIEF = [
   "build and test tool configs (vite, vitest, next, webpack, jest, babel, playwright, tailwind and the like),",
   "anything under scripts/, .husky/, .github/workflows/ or .claude/,",
   "agent instruction files (CLAUDE.md, AGENTS.md, .mcp.json),",
+  "the repository's own git metadata (.gitattributes, .gitmodules),",
   "container and CI manifests (Dockerfile, docker-compose.yml, .gitlab-ci.yml, Jenkinsfile),",
   "and the build manifests of other ecosystems (pyproject.toml, Cargo.toml, go.mod, pom.xml, Gemfile and their lockfiles).",
   "If the task cannot be finished without touching one of those, do not touch it: return status 'blocked' naming the file and what you would have changed in it.",
@@ -36,8 +37,15 @@ export const AGENT_INSTRUCTION_FILE =
 // check the change (BP-333). The same holds for every bundler and test-runner config a build or
 // test script loads, and for scripts/, because a package.json script pointing at scripts/build.js
 // means editing that file is code execution without touching package.json at all.
+// `.gitattributes` earns its place here for a reason the rest of the list does not share: it does
+// not run anything itself, it decides what git SHOWS. `diff.<driver>.textconv` and
+// `filter.<name>.smudge` are selected per path by an attribute, so an agent that adds
+// `package.json -diff` leaves the gate firing on the path exactly as before while the patch a
+// human is handed reads `Binary files … differ`. The driver still has to be defined somewhere the
+// config scan reads, but the attribute is the half that lives in the tree and was invisible here.
+// `.gitmodules` is its neighbour: it names other repositories a checkout pulls in.
 export const EXECUTABLE_CONFIG_FILE =
-  /(^|\/)(package(-lock)?\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.ya?ml|\.npmrc|\.yarnrc(\.yml)?|binding\.gyp)$|(^|\/)(next|vite|vitest|webpack|rollup|jest|babel|astro|svelte|nuxt|tailwind|postcss|playwright|esbuild|metro|remix|gatsby)\.config\.[cm]?[jt]sx?$|(^|\/)(\.babelrc(\.[cm]?js(on)?)?|Makefile|CMakeLists\.txt)$|(^|\/)(\.husky|\.git\/hooks|\.github\/workflows|scripts)\//i;
+  /(^|\/)(package(-lock)?\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.ya?ml|\.npmrc|\.yarnrc(\.yml)?|binding\.gyp)$|(^|\/)(next|vite|vitest|webpack|rollup|jest|babel|astro|svelte|nuxt|tailwind|postcss|playwright|esbuild|metro|remix|gatsby)\.config\.[cm]?[jt]sx?$|(^|\/)(\.babelrc(\.[cm]?js(on)?)?|Makefile|CMakeLists\.txt|\.gitattributes|\.gitmodules)$|(^|\/)(\.husky|\.git\/hooks|\.github\/workflows|scripts)\//i;
 
 // Manifests that decide what runs *after* this change lands, in a repository this worker's gates
 // cannot execute at all. A non-JS repo fails the build gate on `npm ci` before reading anything, so
@@ -53,6 +61,31 @@ export const EXECUTABLE_CONFIG_FILE =
 // one editing the root — so anchoring to the root would protect the least interesting one.
 export const BUILD_MANIFEST_FILE =
   /(^|\/)(pyproject\.toml|poetry\.lock|Pipfile(\.lock)?|requirements[^/]*\.txt|setup\.(py|cfg)|tox\.ini|pom\.xml|build\.gradle(\.kts)?|settings\.gradle(\.kts)?|gradle\.properties|Gemfile(\.lock)?|Rakefile|Cargo\.(toml|lock)|go\.(mod|sum)|composer\.(json|lock)|mix\.exs|pubspec\.yaml|Dockerfile|docker-compose\.ya?ml|\.gitlab-ci\.ya?ml|Jenkinsfile)$/i;
+
+/**
+ * A file that decides what CI itself does.
+ *
+ * Its own predicate rather than another clause in `isProtectedPath`, because these are the one
+ * family a person may not accept through the decision panel. The reason is narrower than the first
+ * draft of that design gave: workflow files are not the line between "executes" and "does not" —
+ * almost everything on the list above executes, and on this repository `npm ci` runs on every
+ * push. What excluding them buys is that the agent cannot change *what CI does*: for a `push`
+ * event GitHub runs the workflow from the pushed ref, and a workflow diff is the hardest thing on
+ * the list to read for safety.
+ *
+ * A composite action under `.github/actions` is here for the same reason: a workflow executes it,
+ * and it matches none of the three patterns above.
+ */
+export const WORKFLOW_FILE =
+  /(^|\/)\.github\/workflows\/[^/]+\.ya?ml$|(^|\/)\.github\/actions\/.+\/action\.ya?ml$/i;
+
+export function isWorkflowPath(file: string): boolean {
+  return WORKFLOW_FILE.test(file);
+}
+
+export function workflowPaths(files: string[]): string[] {
+  return files.filter(isWorkflowPath);
+}
 
 /** Every file this gate treats as deciding what gets executed, here or after the change lands. */
 export function isProtectedPath(file: string): boolean {

@@ -33,5 +33,8 @@ export async function withApiExecution<T extends { execution?: ITaskExecution }>
   const asDocument = task as unknown as { toObject?: () => Record<string, unknown> };
   const plain = typeof asDocument.toObject === "function" ? asDocument.toObject() : { ...task };
   const names = await workerNamesFor([task.execution]);
-  return { ...plain, execution: toApiExecution(task.execution, names) };
+  // `decision` goes the same way, and for a second reason on top of its size: the stored record
+  // carries `patchSha256` and the settlement attempt count, which are the machine's own
+  // bookkeeping. The task screen asks for it through the detail route, which serialises it.
+  return { ...plain, execution: toApiExecution(task.execution, names), decision: undefined };
 }

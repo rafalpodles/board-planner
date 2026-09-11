@@ -683,6 +683,91 @@ export interface ITaskExecution {
   phaseSeq?: number;
 }
 
+/**
+ * How far a refused change has got. `pending` waits on a person; `accepted` and `declined` wait on
+ * the machine that holds the work; the rest are what it reported back.
+ *
+ * ```
+ * pending  -> accepted | declined | abandoned
+ * accepted -> delivered | refused | failed
+ * declined -> discarded
+ * refused | failed -> accepted            (a second reading is not owed for a network fault)
+ * anything not settled -> superseded      (a new claim on the same task)
+ * ```
+ */
+export const TASK_DECISION_STATES = [
+  "pending",
+  "accepted",
+  "declined",
+  "abandoned",
+  "delivered",
+  "refused",
+  "failed",
+  "discarded",
+  "superseded",
+] as const;
+
+export type TaskDecisionState = (typeof TASK_DECISION_STATES)[number];
+
+/**
+ * A change a gate refused, offered to a person to accept or decline.
+ *
+ * Neither the branch nor the worktree path is stored. A server-supplied branch name reaching
+ * `git push` is a force-push to the default branch waiting to happen, and where a checkout lives
+ * has always been the machine's own business — the worker recomputes both.
+ */
+export interface ITaskDecision {
+  /** The gate that refused, by name, so the panel says what this is a reply to. */
+  gate: string;
+  /** Every file the change touches — not the subset that tripped the gate. Accepting pushes all of it. */
+  files: string[];
+  /** The subset that tripped the gate, so the panel can say why it is here. */
+  protectedFiles: string[];
+  /** The change itself, as `collectDiff` bounded it and with secrets redacted. */
+  patch: string;
+  /** `DiffStats.truncated`: a change too large to show is one nobody can honestly accept. */
+  patchTruncated: boolean;
+  /** Over the patch before redaction, which is what the machine re-derives at settle time. */
+  patchSha256: string;
+  commit: string;
+  workerId: string;
+  taskKey: string;
+  title: string;
+  /** False when accepting is not on offer at all — a workflow file, or a patch that was cut. */
+  acceptable: boolean;
+  unacceptableReason: string;
+  state: TaskDecisionState;
+  decidedBy: Types.ObjectId | IUser | null;
+  decidedAt: Date | null;
+  prUrl: string;
+  error: string;
+  attempts: number;
+  createdAt: Date;
+}
+
+export interface ApiTaskDecision {
+  gate: string;
+  files: string[];
+  protectedFiles: string[];
+  patch: string;
+  patchTruncated: boolean;
+  commit: string;
+  workerId: string;
+  workerName?: string;
+  /** When that machine was last heard from, so the panel can say nobody is coming back. */
+  workerLastSeenAt?: string | null;
+  taskKey: string;
+  title: string;
+  acceptable: boolean;
+  unacceptableReason: string;
+  state: TaskDecisionState;
+  decidedBy?: { _id: string; username: string; fullName: string } | null;
+  decidedAt: string | null;
+  prUrl: string;
+  error: string;
+  createdAt: string;
+}
+
 export interface IProject {
   _id: Types.ObjectId;
   name: string;
@@ -895,6 +980,8 @@ export interface ITask {
   recurringParentId: Types.ObjectId | null;
   order: number;
   execution: ITaskExecution;
+  // Absent on every task that has never had a change refused, which is nearly all of them
+  decision?: ITaskDecision | null;
   createdBy: Types.ObjectId | IUser;
   createdAt: Date;
   updatedAt: Date;
@@ -1133,6 +1220,7 @@ export interface ApiTask {
   createdAt: string;
   updatedAt: string;
   execution?: ApiTaskExecution;
+  decision?: ApiTaskDecision;
 }
 
 // Only what a reader needs. lastError is deliberately absent — task-service writes it as "" and
@@ -1307,6 +1395,12 @@ export const INSTANCE_AUDIT_ACTIONS = [
   "user_created",
   "user_deleted",
   "user_role_changed",
+  // A refused change accepted, declined, or given up on. Audited at the instance rather than the
+  // project, because what accepting spends is the machine owner's pinned GitHub identity and the
+  // CI minutes of whatever repository the push lands in — neither of which belongs to the board.
+  "worker_decision_accepted",
+  "worker_decision_declined",
+  "worker_decision_abandoned",
 ] as const;
 
 export type InstanceAuditAction = (typeof INSTANCE_AUDIT_ACTIONS)[number];
