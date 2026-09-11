@@ -19,18 +19,18 @@ enum DeletionPrompt {
             """
         alert.addButton(withTitle: "Delete")
         alert.addButton(withTitle: "Keep")
-        // Return hits the first button by default, and here that key would be irreversible. Both
-        // reflexes go to Keep instead, because this dialog arrives unasked and can land while
-        // somebody is typing in another app.
+        // Return hits the first button by default, and here that key would be irreversible. Escape
+        // goes to Keep instead: this dialog arrives unasked and can land while somebody is typing
+        // in another app, and Escape is the reflex for that. AppKit hands Escape out for free only
+        // to a button titled "Cancel", which does not say what survives.
         //
-        // A button carries one key equivalent, so Keep takes Escape and is made the default cell
-        // for Return. AppKit hands Escape out for free only to a button titled "Cancel", and
-        // "Cancel" does not say what survives.
+        // What this costs, measured rather than assumed: a button carries one key equivalent, and
+        // claiming Escape leaves the panel with no default button — nothing is drawn highlighted,
+        // and Return reaches Keep through first responder rather than through a default-button
+        // contract. So a Return after tabbing to Delete does delete. That is somebody who went to
+        // Delete on purpose; an unasked modal and a dead Escape is not.
         alert.buttons.first?.keyEquivalent = ""
         alert.buttons.last?.keyEquivalent = "\u{1b}"
-        if let keep = alert.buttons.last?.cell as? NSButtonCell {
-            alert.window.defaultButtonCell = keep
-        }
         // A menubar app with its popover shut has no window to put this in front of, and an alert
         // behind everything is a deletion that looks like a hang.
         NSApp.activate(ignoringOtherApps: true)
