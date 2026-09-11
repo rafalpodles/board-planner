@@ -20,8 +20,10 @@ import {
   judge,
   ranSuccessfully,
   blockedBecause,
+  staleEntries,
   ENFORCED_SEVERITIES,
   ACCEPTED_ADVISORIES,
+  AUDITED_TREES,
   type Finding,
 } from "../src/lib/audit-policy.ts";
 
@@ -37,7 +39,7 @@ import {
  * that happen. It reports zero vulnerable packages today; when that changes it wants a mechanism
  * that can reach those machines, not a gate here (BP-599 review).
  */
-const AUDITED = [".", "mcp-server"];
+const AUDITED = AUDITED_TREES;
 
 function auditReport(cwd: string): unknown {
   try {
@@ -102,13 +104,12 @@ for (const cwd of AUDITED) {
   for (const finding of [...verdict.blocking, ...verdict.accepted]) seenIds.add(finding.id);
 }
 
-// Stale is judged across BOTH trees: an entry earning its keep in one of them is not dead, and
-// reporting it as dead per-package would teach people to ignore the line
-for (const entry of ACCEPTED_ADVISORIES) {
-  if (seenIds.has(entry.id)) continue;
+// Across every tree at once: an entry earning its keep in one of them is not dead, and a line that
+// cries wolf is a line people stop reading
+for (const entry of staleEntries(seenIds)) {
   console.log(
     `note: ${entry.id} (${entry.package}) is accepted in audit-policy.ts but no longer reported ` +
-      `by either package — delete the entry rather than leaving a reason nobody has re-read`
+      `by any audited tree — delete the entry rather than leaving a reason nobody has re-read`
   );
 }
 

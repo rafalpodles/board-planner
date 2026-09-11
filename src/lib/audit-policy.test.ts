@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { judge, findings, ranSuccessfully, ACCEPTED_ADVISORIES, type AcceptedAdvisory } from "./audit-policy";
+import {
+  judge,
+  findings,
+  ranSuccessfully,
+  staleEntries,
+  ACCEPTED_ADVISORIES,
+  AUDITED_TREES,
+  type AcceptedAdvisory,
+} from "./audit-policy";
 
 /**
  * BP-599. The gate this backs is the only thing standing between the repo and the situation that
@@ -120,20 +128,26 @@ describe("what an acceptance actually accepts", () => {
   });
 
   it("reports an acceptance whose advisory has gone as stale", () => {
-    const verdict = judge(report({}), accepted);
-
-    expect(verdict.stale.map((a) => a.id)).toEqual(["GHSA-known-0000-0000"]);
+    expect(staleEntries([], accepted).map((a) => a.id)).toEqual(["GHSA-known-0000-0000"]);
   });
 
   // The control: an entry that is still doing work is not reported as stale, so the signal means
   // something when it appears
   it("does not call an acceptance stale while its advisory is still reported", () => {
-    const verdict = judge(
-      report({ "fast-uri": { severity: "high", via: [via("GHSA-known-0000-0000", "high")] } }),
-      accepted
-    );
+    expect(staleEntries(["GHSA-known-0000-0000"], accepted)).toEqual([]);
+  });
 
-    expect(verdict.stale).toEqual([]);
+  /**
+   * Staleness is asked across every tree at once, never per verdict. An entry scoped to mcp-server
+   * is doing its job there while the root's verdict has never heard of it, and reporting it dead
+   * on that basis is how a line stops being read.
+   */
+  it("does not call an entry stale because the tree being judged did not see it", () => {
+    const mcpOnly = [accept({ id: "GHSA-scoped-0009", package: "p", trees: ["mcp-server"] })];
+    const one = report({ p: { severity: "high", via: [via("GHSA-scoped-0009", "high")] } });
+
+    expect(judge(one, mcpOnly, ".").blocking.map((f) => f.id)).toEqual(["GHSA-scoped-0009"]);
+    expect(staleEntries(["GHSA-scoped-0009"], mcpOnly)).toEqual([]);
   });
 });
 
@@ -273,6 +287,45 @@ describe("an acceptance npm itself contradicts", () => {
   });
 
   /**
+   * Only a **confirmed** major escapes. The first version of this guard returned "not bumpable"
+   * for anything it did not recognise, so four shapes npm could plausibly emit let an acceptance
+   * stand — and the guard exists precisely so that nobody has to trust a judgement about what npm
+   * will emit (BP-599 review).
+   */
+  it.each([
+    ["an object with no flag", { name: "p", version: "1.2.3" }],
+    ["a stringified false", { isSemVerMajor: "false" }],
+    ["a stringified true", { isSemVerMajor: "true" }],
+    ["a number", { isSemVerMajor: 1 }],
+    ["a bare truthy value", "yes"],
+    // Falsy but not one of npm's three ways of saying "no fix" — `!fixAvailable` would have let
+    // these back into the permissive branch the guard was inverted to escape
+    ["a zero", 0],
+    ["an empty string", ""],
+  ])("is refused when the fix shape is unrecognised — %s", (_name, shape) => {
+    expect(judge(withFix(shape), entry).blocking).toHaveLength(1);
+  });
+
+  /**
+   * One advisory is reported under every package that pulls it in, and npm can answer differently
+   * for each. Merged worst-case, so the order npm happened to list the packages in cannot decide
+   * the verdict — which it did before: aaa(fixable) then zzz(no fix) accepted, the reverse blocked.
+   */
+  it.each([
+    ["fixable first", { aaa: true, zzz: false }],
+    ["fixable last", { aaa: false, zzz: true }],
+  ])("blocks when any package reporting it says a bump would do — %s", (_name, fixes) => {
+    const shared = via("GHSA-fixable-0007", "high");
+    const multi = report(
+      Object.fromEntries(
+        Object.entries(fixes).map(([pkg, fixAvailable]) => [pkg, { severity: "high", fixAvailable, via: [shared] }])
+      )
+    );
+
+    expect(judge(multi, entry).blocking.map((f) => f.id)).toEqual(["GHSA-fixable-0007"]);
+  });
+
+  /**
    * A major can break the thing it is protecting, so that one stays arguable — this is the line
    * between "you did not look" and "you looked and it costs a migration".
    */
@@ -326,6 +379,11 @@ describe("the allowlist this repo ships", () => {
     for (const entry of ACCEPTED_ADVISORIES) {
       expect(entry.id, `${entry.package} entry has no GHSA id`).toMatch(/^GHSA-[0-9a-z-]+$/i);
       expect(entry.trees.length, `${entry.id} names no tree`).toBeGreaterThan(0);
+      // A misspelled tree matches nothing and the advisory blocks — safe, but the entry then reads
+      // as authoritative while doing nothing at all
+      for (const tree of entry.trees) {
+        expect(AUDITED_TREES, `${entry.id} names a tree nothing audits: ${tree}`).toContain(tree);
+      }
       expect(entry.why.length, `${entry.id} has no reason`).toBeGreaterThan(40);
       expect(entry.clearedBy.length, `${entry.id} says nothing about what clears it`).toBeGreaterThan(20);
     }

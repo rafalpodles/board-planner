@@ -6,10 +6,12 @@
  * then, and was quietly false three weeks later while nothing failed. A judgement about
  * reachability has to live where a build can re-check it, or it decays into folklore.
  *
- * So: **critical and high advisories against production dependencies fail the build** unless the
- * exact advisory is listed below with a reason. Keyed on the GHSA id rather than the package, so a
- * *new* advisory in an already-accepted package still stops the build — the acceptance is of one
- * finding, never of a dependency.
+ * So: **critical and high advisories against production dependencies fail the build**, and an
+ * acceptance has to clear three bars at once — the exact GHSA id, the tree it is about, and npm
+ * reporting no fix short of a major version. Keyed on id and tree rather than on the package, so a
+ * *new* advisory in an already-accepted dependency still stops the build, and a reason written
+ * about one program does not excuse the same finding in the other. The acceptance is of one
+ * finding in one place, never of a dependency.
  *
  * Moderate and low are reported, not enforced. There is no cliff that makes them safe; the line is
  * where a gate stops being read and starts being routed around, and every moderate on this repo
@@ -51,16 +53,25 @@ export const ACCEPTED_ADVISORIES: AcceptedAdvisory[] = [];
 
 export const ENFORCED_SEVERITIES = ["critical", "high"] as const;
 
+/**
+ * The trees a `trees` entry may name. Exported so the allowlist can be held to it: a misspelled
+ * tree matches nothing and the advisory blocks, which is the safe direction but leaves an entry
+ * that reads as authoritative while doing nothing (BP-599 review).
+ */
+export const AUDITED_TREES = [".", "mcp-server"] as const;
+
 export interface Finding {
   id: string;
   package: string;
   severity: string;
   title: string;
   /**
-   * What npm says about remediation for the package this advisory came under: `true` when a fix is
-   * in reach, an object when it needs a major, `false` when there is none.
+   * Whether npm says this can be bumped without a major, decided at read time rather than carried
+   * as npm's raw shape. One advisory is reported under every package that pulls it in, and those
+   * entries can disagree — so the merge has to be worst-case, and a boolean is the only thing that
+   * merges with `||` without the consumer re-deriving it (BP-599 review).
    */
-  fixAvailable: boolean | { isSemVerMajor?: boolean };
+  bumpable: boolean;
 }
 
 /** One advisory as `npm audit --json` nests it under `vulnerabilities[name].via[]`. */
@@ -109,6 +120,31 @@ const enforced = (severity: unknown) =>
 const unidentified = (pkg: string, title: string) => `UNIDENTIFIED:${pkg}:${title}`;
 
 /**
+ * Whether npm's `fixAvailable` means "you could just bump this".
+ *
+ * The default is the whole point. `false` and an absent field are npm saying no fix exists, which
+ * is the one honest reason to accept something — so those permit. Everything else permits only
+ * when it is a **confirmed** major: an object whose `isSemVerMajor` is literally `true`. A shape
+ * this does not recognise — `{name, version}` with no flag, a stringified `"false"`, a number —
+ * counts as bumpable and refuses the acceptance.
+ *
+ * That direction is deliberate. The first version returned "not bumpable" for anything it did not
+ * recognise, so four unfamiliar shapes let an acceptance stand; and the guard exists precisely so
+ * that nobody has to trust a judgement about what npm will emit (BP-599 review).
+ */
+function bumpableWithoutAMajor(fixAvailable: unknown): boolean {
+  // Spelled out rather than `!fixAvailable`: only these three are npm saying no fix exists. `0`
+  // and `""` are falsy too, and lumping them in would send an unrecognised shape back to the
+  // permissive branch this guard was inverted to escape.
+  const npmFoundNothing = fixAvailable === false || fixAvailable === undefined || fixAvailable === null;
+  if (npmFoundNothing) return false;
+  if (fixAvailable && typeof fixAvailable === "object") {
+    return (fixAvailable as { isSemVerMajor?: unknown }).isSemVerMajor !== true;
+  }
+  return true;
+}
+
+/**
  * Every enforced-severity advisory in the report, deduplicated by id.
  *
  * Read off the `via` entries rather than the package's own summary severity, because that summary
@@ -133,12 +169,17 @@ export function findings(report: unknown): Finding[] {
       if (!enforced(severity)) continue;
       const text = String(title ?? "");
       const id = GHSA.exec(String(url ?? ""))?.[0] ?? unidentified(name, text);
+      // One advisory is reported under every package that pulls it in, and those entries can carry
+      // different `fixAvailable` answers. Merged worst-case: if any of them says a bump would do,
+      // the finding is bumpable, whatever order npm happened to list the packages in.
+      const bumpable = bumpableWithoutAMajor(entry?.fixAvailable);
+      const already = seen.get(id);
       seen.set(id, {
         id,
-        package: name,
+        package: already?.package ?? name,
         severity: String(severity).toLowerCase(),
         title: text,
-        fixAvailable: (entry?.fixAvailable ?? false) as Finding["fixAvailable"],
+        bumpable: bumpable || Boolean(already?.bumpable),
       });
     }
   }
@@ -148,30 +189,8 @@ export function findings(report: unknown): Finding[] {
 export interface Verdict {
   blocking: Finding[];
   accepted: Finding[];
-  /** Entries that matched nothing in the report — a decision whose subject is gone */
-  stale: AcceptedAdvisory[];
 }
 
-/**
- * An acceptance npm itself contradicts. Both wrong entries this file has carried were of exactly
- * this shape: a careful reason for tolerating something that had a patched version sitting inside
- * a range its parent already declared. npm puts that answer in the report it hands us, so the
- * cheapest way to stop writing the reason a third time is to refuse it.
- *
- * A fix needing a major version is a different question — it can break the thing it is protecting
- * — so that one may still be argued.
- */
-function bumpableWithoutAMajor(finding: Finding): boolean {
-  const fix = finding.fixAvailable;
-  if (fix === true) return true;
-  return typeof fix === "object" && fix !== null && fix.isSemVerMajor === false;
-}
-
-/**
- * `stale` is reported because an allowlist that only ever grows is how the thing this file exists
- * to prevent comes back: an entry whose advisory no longer appears is a reason nobody has re-read,
- * sitting where the next person will assume it was checked.
- */
 export function judge(
   report: unknown,
   accepted: AcceptedAdvisory[] = ACCEPTED_ADVISORIES,
@@ -181,27 +200,43 @@ export function judge(
   const forThisTree = new Map(
     accepted.filter((a) => a.trees.includes(tree)).map((a) => [a.id, a])
   );
-  const foundIds = new Set(found.map((f) => f.id));
 
   const blocking: Finding[] = [];
   const allowed: Finding[] = [];
   for (const finding of found) {
-    if (!forThisTree.has(finding.id) || bumpableWithoutAMajor(finding)) blocking.push(finding);
+    if (!forThisTree.has(finding.id) || finding.bumpable) blocking.push(finding);
     else allowed.push(finding);
   }
 
-  return {
-    blocking,
-    accepted: allowed,
-    stale: accepted.filter((a) => !foundIds.has(a.id)),
-  };
+  return { blocking, accepted: allowed };
+}
+
+/**
+ * Entries whose advisory no longer appears **anywhere** — the reason nobody has re-read, sitting
+ * where the next person will assume it was checked. An allowlist that only ever grows is how the
+ * thing this file exists to prevent comes back.
+ *
+ * Takes the ids seen across every audited tree rather than one verdict's, because an entry earning
+ * its keep in one program is not dead. Judging it per-tree would report an mcp-server acceptance
+ * as stale while looking at the root, and a line that cries wolf is a line people stop reading.
+ */
+export function staleEntries(
+  seenAnywhere: Iterable<string>,
+  accepted: AcceptedAdvisory[] = ACCEPTED_ADVISORIES
+): AcceptedAdvisory[] {
+  const seen = new Set(seenAnywhere);
+  return accepted.filter((a) => !seen.has(a.id));
 }
 
 /** Why a blocked finding was blocked, for a message the reader can act on. */
 export function blockedBecause(finding: Finding, accepted: AcceptedAdvisory[], tree: string): string {
   const entry = accepted.find((a) => a.id === finding.id && a.trees.includes(tree));
-  if (entry && bumpableWithoutAMajor(finding)) {
-    return "npm reports a fix within the declared ranges, so this cannot be accepted — bump it";
+  if (entry) {
+    return "npm reports a fix short of a major, so this cannot be accepted — bump it";
+  }
+  const elsewhere = accepted.find((a) => a.id === finding.id);
+  if (elsewhere) {
+    return `accepted, but only for ${elsewhere.trees.join(", ")} — this is ${tree}`;
   }
   return "not accepted in src/lib/audit-policy.ts";
 }
