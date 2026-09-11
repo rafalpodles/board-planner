@@ -125,10 +125,43 @@ function mustAskAnAuthoritativeRegistry(cwd: string): string {
  * a proxy answering `{}` produces the same structurally perfect empty report a mirror does. Not
  * something this gate can refuse without breaking every runner that legitimately needs one, so it
  * is named instead: a green tick should say where its answer came from (BP-599 review).
+ *
+ * **Origin only.** A proxy URL routinely carries userinfo, and printing it whole would put
+ * `http://user:token@host` into a build log — a self-hosted runner, which is what has a proxy, has
+ * that as a plain environment variable rather than as a registered secret, so nothing masks it.
+ *
+ * And *may*, not *did*: `NO_PROXY` can send the request straight past it, so the honest claim is
+ * that a proxy is configured, not that this answer travelled through one. Saying otherwise would
+ * be the same overclaim as a comment promising what the code does not do, moved into output a
+ * person reads under pressure.
  */
-for (const name of ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "npm_config_proxy", "npm_config_https_proxy"]) {
+const PROXY_VARS = [
+  "HTTPS_PROXY",
+  "https_proxy",
+  "HTTP_PROXY",
+  "http_proxy",
+  "npm_config_proxy",
+  "npm_config_https_proxy",
+];
+
+function withoutCredentials(value: string): string {
+  try {
+    return new URL(value).origin;
+  } catch {
+    // Not a URL npm would use either, but printing the raw string is the one thing not to do
+    return "(unparseable)";
+  }
+}
+
+for (const name of PROXY_VARS) {
   const value = process.env[name];
-  if (value) console.log(`note: ${name} is set to ${value} — the audit's answer came through it.`);
+  if (value) {
+    console.log(`note: ${name} names ${withoutCredentials(value)} — this answer may have come through it.`);
+  }
+}
+for (const name of ["NO_PROXY", "no_proxy"]) {
+  const value = process.env[name];
+  if (value) console.log(`note: ${name} is ${value}, so some hosts bypass any proxy above.`);
 }
 
 const blocking: Finding[] = [];

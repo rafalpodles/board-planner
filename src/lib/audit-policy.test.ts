@@ -6,7 +6,6 @@ import {
   staleEntries,
   ACCEPTED_ADVISORIES,
   AUDITED_TREES,
-  AUTHORITATIVE_REGISTRY,
   isAuthoritativeRegistry,
   type AcceptedAdvisory,
 } from "./audit-policy";
@@ -401,7 +400,9 @@ describe("which tree a reason covers", () => {
  * the constant for a mirror left the whole suite green (BP-599 review).
  */
 describe("which registry the gate will trust", () => {
-  it.each([AUTHORITATIVE_REGISTRY, "https://registry.npmjs.org", " https://registry.npmjs.org/ "])(
+  // Spelled out rather than starting from the constant: a case whose input IS the value under test
+  // is a mirror of the implementation and cannot fail
+  it.each(["https://registry.npmjs.org/", "https://registry.npmjs.org", " https://registry.npmjs.org/ "])(
     "accepts %p — the trailing slash is a spelling, not a host",
     (registry) => {
       expect(isAuthoritativeRegistry(registry)).toBe(true);
