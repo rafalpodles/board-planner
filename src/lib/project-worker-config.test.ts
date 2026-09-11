@@ -215,6 +215,15 @@ describe("resetting a field to the default", () => {
     expect(parseProjectWorkerConfig({ reset: "model" })).toMatchObject({ ok: false });
     expect(parseProjectWorkerConfig({ reset: [7] })).toMatchObject({ ok: false });
   });
+
+  // BP-579: the pair BP-458 retired is not a policy field any more. This refusal is why the audit
+  // branch that watched them in the project route was removed — no request can change a field the
+  // parser refuses. Goes red if either is ever added back to PROJECT_POLICY_DEFAULTS.
+  it("refuses the retired autoMerge and reviewGate fields", () => {
+    expect(parseProjectWorkerConfig({ policy: { autoMerge: true } })).toMatchObject({ ok: false });
+    expect(parseProjectWorkerConfig({ policy: { reviewGate: false } })).toMatchObject({ ok: false });
+    expect(parseProjectWorkerConfig({ reset: ["autoMerge"] })).toMatchObject({ ok: false });
+  });
 });
 
 // The rule no per-field validator could hold: every field is checked in isolation, so nothing
