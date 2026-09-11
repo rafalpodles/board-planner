@@ -95,10 +95,22 @@ function mustHaveRun(report: unknown, cwd: string): unknown {
   );
 }
 
-const registry = registryInUse(".");
-if (registry !== AUTHORITATIVE_REGISTRY) {
+/**
+ * Asked per tree, inside the loop, because `npm config get registry` is answered by whatever
+ * `.npmrc` is in scope for that directory. Asking once about the root and then auditing
+ * `mcp-server` would leave half the surface pointed wherever an `.npmrc` there said — which is
+ * exactly the failure this check exists to stop (BP-599 review).
+ *
+ * The trailing slash is normalised away before comparing: npm returns `registry=…npmjs.org` as
+ * written, and refusing it would mean a message naming two URLs that differ by one invisible
+ * character.
+ */
+function mustAskAnAuthoritativeRegistry(cwd: string): string {
+  const registry = registryInUse(cwd);
+  const same = registry.replace(/\/+$/, "") === AUTHORITATIVE_REGISTRY.replace(/\/+$/, "");
+  if (same) return registry;
   console.log(
-    `::error::npm is configured to use ${registry}, and this gate only trusts ` +
+    `::error::npm in ${cwd} is configured to use ${registry}, and this gate only trusts ` +
       `${AUTHORITATIVE_REGISTRY}. A registry that does not serve the advisory endpoint returns an ` +
       `empty report that looks exactly like a clean one, so a pass from here would mean nothing. ` +
       `Point npm at the public registry for this step, or decide deliberately that the mirror is ` +
@@ -106,13 +118,13 @@ if (registry !== AUTHORITATIVE_REGISTRY) {
   );
   process.exit(1);
 }
-console.log(`Advisories from ${registry}.`);
 
 const blocking: Finding[] = [];
 const acceptedIds = new Set<string>();
 const seenIds = new Set<string>();
 
 for (const cwd of AUDITED) {
+  console.log(`Advisories for ${cwd} from ${mustAskAnAuthoritativeRegistry(cwd)}.`);
   const verdict = judge(mustHaveRun(auditReport(cwd), cwd), ACCEPTED_ADVISORIES, cwd);
   for (const finding of verdict.blocking) {
     console.log(
