@@ -21,7 +21,7 @@ public struct PlannedRemoval: Equatable {
     public let path: String
 }
 
-public enum SyncStep: Equatable {
+public enum SyncStep: Equatable, Sendable {
     case added(project: String, path: String)
     case removed(project: String, path: String)
     /// The grant was dropped and the checkout directory was not deleted, because it had already

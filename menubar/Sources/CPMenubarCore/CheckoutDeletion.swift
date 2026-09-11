@@ -53,7 +53,7 @@ public struct CheckoutDeletion: Sendable {
             // Nothing is about to be deleted — the checkout went on its own and left no worktrees,
             // so all that happens is a stale grant being dropped. There is no question to ask.
             guard !doomed.isEmpty else {
-                return perform(project: project, path: path, worktrees: worktrees)
+                return await performOffTheActor(project: project, path: path, worktrees: worktrees)
             }
 
             guard await ask(project, doomed) else {
@@ -82,7 +82,7 @@ public struct CheckoutDeletion: Sendable {
                         project: project,
                         reason: changedReason(from: doomed, to: second))
                 }
-                return perform(project: project, path: path, worktrees: now)
+                return await performOffTheActor(project: project, path: path, worktrees: now)
             }
         }
     }
@@ -92,6 +92,16 @@ public struct CheckoutDeletion: Sendable {
     /// list that gets named, and the list the second verdict is compared against.
     private func doomedPaths(path: String, worktrees: [String]) -> [String] {
         (exists(path) ? [path] : []) + worktrees
+    }
+
+    /// Deleting is the heavier half of the two: a recursive `removeItem` over a checkout carrying
+    /// `node_modules` or a large `.git` runs for seconds. Moving only the guards off the actor
+    /// would have left the menubar frozen at exactly the moment somebody has just pressed Delete
+    /// and is watching to see what happens.
+    private func performOffTheActor(
+        project: String, path: String, worktrees: [String]
+    ) async -> SyncStep {
+        await Task.detached { self.perform(project: project, path: path, worktrees: worktrees) }.value
     }
 
     /// `check` spawns half a dozen `git` processes and waits on each; on a large repository that
