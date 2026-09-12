@@ -1,5 +1,8 @@
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "fs";
+import { tmpdir } from "os";
 import { dirname, join } from "path";
-import { childEnv } from "./env.js";
+import { childEnv, UNCONFINED_ESCAPE_HATCH, unconfinedAgentAllowed } from "./env.js";
+import { confine } from "./sandbox.js";
 import { Runner } from "./exec.js";
 import { GhAccount, parseGhAccounts, resolveGhToken, usableAccount } from "./github-account.js";
 
@@ -270,6 +273,64 @@ async function ghSession(
   };
 }
 
+const SANDBOX_PROBE_TIMEOUT_MS = 10_000;
+
+/**
+ * Whether this machine can actually confine the agent — asked by confining something and watching
+ * it fail to escape, not by reading `process.platform`.
+ *
+ * At boot rather than only per run, because the alternative is an operator discovering it from a
+ * task that claimed, ran and failed. The probe writes to a path outside the one directory it is
+ * allowed, in a temp tree of its own: if that file exists afterwards, whatever the profile said,
+ * this machine does not confine anything (BP-349).
+ */
+async function sandboxCheck(deps: PreflightDeps, env: NodeJS.ProcessEnv): Promise<PreflightCheck> {
+  const name = "sandbox";
+
+  if (unconfinedAgentAllowed(deps.env)) {
+    return {
+      name,
+      ok: true,
+      detail: `${UNCONFINED_ESCAPE_HATCH} is set — the agent runs with nothing confining its writes and can reach anything this user can`,
+    };
+  }
+
+  const root = mkdtempSync(join(tmpdir(), "cp-sandbox-probe-"));
+  const worktree = join(root, "worktree");
+  const beyond = join(root, "beyond.txt");
+  mkdirSync(worktree);
+
+  try {
+    // The path as $0 rather than inside the script, so nothing about a temp directory's name can
+    // become shell syntax.
+    const spawn = confine("/bin/sh", ["-c", 'printf escaped > "$0"', beyond], {
+      writable: [worktree],
+      env: deps.env,
+    });
+    if ("refusal" in spawn) return { name, ok: false, detail: spawn.refusal };
+
+    await deps.runner.run(spawn.command, spawn.args, {
+      cwd: worktree,
+      timeoutMs: SANDBOX_PROBE_TIMEOUT_MS,
+      env,
+    });
+
+    if (existsSync(beyond)) {
+      return {
+        name,
+        ok: false,
+        detail: "sandbox-exec ran but did not stop a write outside the directory it was given — the agent would not be confined to its worktree",
+      };
+    }
+
+    return { name, ok: true, detail: "the agent can only write inside its own worktree" };
+  } catch (error) {
+    return { name, ok: false, detail: `the sandbox could not be tested: ${String(error)}` };
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
 export async function runPreflight(deps: PreflightDeps): Promise<PreflightReport> {
   // Resolve everything before verifying anything. Asking `npm --version` on the PATH this process
   // was started with is how a working npm reports itself broken: its shebang is `env node`, and the
@@ -318,6 +379,8 @@ export async function runPreflight(deps: PreflightDeps): Promise<PreflightReport
       checks.push({ name: tool, ok: true, detail: path });
     }
   }
+
+  checks.push(await sandboxCheck(deps, env));
 
   return {
     ok: checks.every((c) => c.ok),

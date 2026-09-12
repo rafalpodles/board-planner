@@ -1,5 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
-import { CommandResult, Runner } from "./exec.js";
+import { existsSync, writeFileSync } from "node:fs";
+import { CommandResult, createRunner, Runner } from "./exec.js";
+import { SANDBOX_COMMAND, UNCONFINED_REASON } from "./sandbox.js";
+import { UNCONFINED_ESCAPE_HATCH } from "./env.js";
 import { checkRepo, pathWithTools, runPreflight } from "./preflight.js";
 
 const LOGGED_IN = JSON.stringify({
@@ -84,7 +87,7 @@ const env = { SHELL: "/bin/zsh", HOME: "/Users/someone", PATH: "/usr/bin:/bin" }
 
 function depsFor(
   m: ReturnType<typeof machine>,
-  override: Partial<{ env: typeof env; pinnedGithubAccount: string }> = {}
+  override: Partial<{ env: Record<string, string | undefined>; pinnedGithubAccount: string }> = {}
 ) {
   return {
     runner: m.runner,
@@ -434,5 +437,97 @@ describe("checkRepo", () => {
     const checks = checkRepo(() => null, "/Users/me/checkouts/thing");
 
     expect(checks.every((c) => c.detail.includes("/Users/me/checkouts/thing"))).toBe(true);
+  });
+});
+
+/**
+ * BP-349. The sandbox check is the one preflight row that cannot be answered by asking a binary its
+ * version: it is only true if a write outside the allowed directory actually fails. So the stubbed
+ * runner is not enough on its own here — one of these runs the real thing.
+ */
+describe("the sandbox check", () => {
+  it("passes on this machine, driving the real sandbox rather than a stub", async () => {
+    const m = machine();
+    // The probe is the only call that must not be stubbed; everything else still is.
+    const real = createRunner();
+    const runner: Runner = {
+      run: (command, args, opts) =>
+        command === SANDBOX_COMMAND ? real.run(command, args, opts) : m.runner.run(command, args, opts),
+    };
+
+    const report = await runPreflight({ ...depsFor(m), runner });
+
+    expect(check(report, "sandbox")).toMatchObject({ ok: true });
+  });
+
+  // A runner that lets the probe's write through is what a machine with no working sandbox looks
+  // like from here — whatever the profile said, and whatever the platform claims.
+  it("fails when the probe's write outside lands anyway", async () => {
+    const m = machine();
+    const runner: Runner = {
+      run: async (command, args, opts) => {
+        if (command !== SANDBOX_COMMAND) return m.runner.run(command, args, opts);
+        const beyond = args[args.length - 1];
+        writeFileSync(beyond, "escaped");
+        return { code: 0, stdout: "", stderr: "", timedOut: false };
+      },
+    };
+
+    const report = await runPreflight({ ...depsFor(m), runner });
+
+    const row = check(report, "sandbox");
+    expect(row.ok).toBe(false);
+    expect(row.detail).toMatch(/did not stop a write outside/);
+    expect(report.ok).toBe(false);
+  });
+
+  it("fails on a machine there is no sandbox for, rather than reporting nothing", async () => {
+    const m = machine();
+    const real = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+
+    try {
+      const report = await runPreflight(depsFor(m));
+
+      expect(check(report, "sandbox")).toMatchObject({ ok: false, detail: UNCONFINED_REASON });
+      expect(report.ok).toBe(false);
+    } finally {
+      Object.defineProperty(process, "platform", real);
+    }
+  });
+
+  // The operator's risk acceptance is a green row that says what was accepted, not a hidden one:
+  // it is the only place a machine running the agent unconfined announces itself.
+  it("says so, and stays green, once the operator has accepted the risk", async () => {
+    const m = machine();
+
+    const report = await runPreflight(
+      depsFor(m, { env: { ...env, [UNCONFINED_ESCAPE_HATCH]: "1" } })
+    );
+
+    const row = check(report, "sandbox");
+    expect(row.ok).toBe(true);
+    expect(row.detail).toContain(UNCONFINED_ESCAPE_HATCH);
+    expect(row.detail).toMatch(/nothing confining its writes/);
+  });
+
+  // Nothing is left behind on a machine that boots a hundred times
+  it("removes the directory it probed in", async () => {
+    const m = machine();
+    const probed: string[] = [];
+    const real = createRunner();
+    const runner: Runner = {
+      run: (command, args, opts) => {
+        if (command === SANDBOX_COMMAND) probed.push(opts.cwd);
+        return command === SANDBOX_COMMAND
+          ? real.run(command, args, opts)
+          : m.runner.run(command, args, opts);
+      },
+    };
+
+    await runPreflight({ ...depsFor(m), runner });
+
+    expect(probed).toHaveLength(1);
+    expect(existsSync(probed[0])).toBe(false);
   });
 });
