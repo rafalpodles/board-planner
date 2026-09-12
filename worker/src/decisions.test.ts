@@ -343,7 +343,8 @@ describe("acting on a verdict", () => {
     };
   }
 
-  const LATER = 10_000;
+  // A real wall-clock instant: the unbound-marker bound below is measured against Date.now()
+  const LATER = Date.now();
 
   it("pushes the accepted commit by name and opens a pull request", async () => {
     const h = harness();
@@ -590,8 +591,20 @@ describe("acting on a verdict", () => {
     expect(h.markers.read("CP-158")).not.toBeNull();
     // Settled, not skipped: skipping leaves the record live for ever, answered by nothing and
     // logged on every poll
-    expect(h.settled[0]).toMatchObject({ state: "refused" });
+    expect(h.settled[0]).toMatchObject({ state: "refused", attempts: 1 });
     expect(h.settled[0].error).toMatch(/another project/);
+  });
+
+  // The fourth site, and the one D6 left out when it pinned the other three
+  it("counts the attempt on a project mismatch too", async () => {
+    const h = harness();
+    await settleDecisions(
+      h.deps,
+      [decision({ projectId: "another-project", attempts: 4 })],
+      LATER
+    );
+
+    expect(h.settled[0]).toMatchObject({ attempts: 5 });
   });
 
   it("does nothing for a project this machine no longer serves", async () => {
@@ -605,7 +618,33 @@ describe("acting on a verdict", () => {
     expect(h.push).not.toHaveBeenCalled();
     expect(h.settled).toEqual([]);
     // The marker is the only thing holding that worktree back from the reaper. Dropping it here
-    // would hand the work to the reaper and leave the directory behind for it to find.
+    // would hand the work to a reaper equally unable to run, and exempt nothing from anything.
+    expect(h.markers.read("CP-158")).not.toBeNull();
+  });
+
+  /**
+   * Kept, but not for ever: the decision is settled, nothing will ever answer it, and
+   * `heldTaskKeys` would otherwise exempt that directory from every future pass — including a
+   * sibling project's that shares the root.
+   */
+  it("lets an unbound project's hold go once the assignment plainly is not coming back", async () => {
+    const h = harness();
+    const log = vi.fn();
+    h.markers.write(marker({ createdAt: new Date(LATER - 8 * 24 * 60 * 60_000).toISOString() }));
+
+    await settleDecisions({ ...h.deps, contextFor: async () => null, log }, [], LATER);
+
+    expect(h.markers.read("CP-158")).toBeNull();
+    // And says where the directory it stopped holding is, because that is now a person's to remove
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("/wt/CP-158"));
+  });
+
+  it("keeps holding one that is merely a few days old", async () => {
+    const h = harness();
+    h.markers.write(marker({ createdAt: new Date(LATER - 2 * 24 * 60 * 60_000).toISOString() }));
+
+    await settleDecisions({ ...h.deps, contextFor: async () => null }, [], LATER);
+
     expect(h.markers.read("CP-158")).not.toBeNull();
   });
 });

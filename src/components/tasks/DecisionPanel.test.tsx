@@ -110,8 +110,10 @@ describe("what accepting consents to", () => {
     fireEvent.click(screen.getByRole("button", { name: "Accept and push" }));
 
     expect(screen.getByText(/runs this repository's CI/)).toBeTruthy();
-    // Whose account it spends, which is the half a name alone hides
-    expect(screen.getByText(/not necessarily yours/)).toBeTruthy();
+    // Whose account it spends, which is the half a machine name alone hides — and it is not
+    // "the owner's" either: a machine with nothing pinned pushes as whatever gh has active
+    expect(screen.getByText(/whichever GitHub account/)).toBeTruthy();
+    expect(screen.getByText(/not as you/)).toBeTruthy();
     expect(post).not.toHaveBeenCalled();
   });
 
@@ -322,7 +324,7 @@ describe("giving up", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Give up and delete the work" }));
 
-    expect(screen.getByRole("dialog").textContent).toContain("worktree holding this change is deleted");
+    expect(screen.getByRole("dialog").textContent).toContain("removes the worktree");
     expect(post).not.toHaveBeenCalled();
   });
 
@@ -389,13 +391,19 @@ describe("while the verdict is with the machine", () => {
     await waitFor(() => expect(onAnswered).toHaveBeenCalled());
   });
 
+  /**
+   * `advanceTimersByTimeAsync`, not one `Promise.resolve()`: three polls fire in thirty seconds and
+   * each awaits `api.get`, so a single microtask drains one link of the chain rather than the
+   * chain. The positive case above needs `waitFor` to SEE its effect — a negative settled sooner
+   * than that has excluded nothing.
+   */
   it("leaves the task alone while the answer is where it was", async () => {
     get.mockResolvedValue({ decision: { state: "accepted" } });
     const onAnswered = panel({ state: "accepted" });
 
-    vi.advanceTimersByTime(30_000);
-    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(30_000);
 
+    expect(get).toHaveBeenCalledTimes(3);
     expect(onAnswered).not.toHaveBeenCalled();
   });
 
@@ -404,9 +412,9 @@ describe("while the verdict is with the machine", () => {
     get.mockRejectedValue(new Error("offline"));
     panel({ state: "accepted" });
 
-    vi.advanceTimersByTime(30_000);
-    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(30_000);
 
+    expect(get).toHaveBeenCalledTimes(3);
     expect(toast).not.toHaveBeenCalled();
   });
 });
@@ -547,7 +555,7 @@ describe("when the machine is not coming back", () => {
  */
 describe("what giving up is warned to cost", () => {
   it.each([
-    ["pending", "stops waiting for an answer"],
+    ["pending", "withdraws the question"],
     ["accepted", "may be pushing it right now"],
     ["declined", "is removing it"],
   ] as const)("describes the moment it is offered at, on %s", (state, said) => {
@@ -558,14 +566,23 @@ describe("what giving up is warned to cost", () => {
     expect(screen.getByRole("dialog").textContent).toContain(said);
   });
 
-  // Whatever the moment, it always says what happens to the work
-  it.each(["pending", "accepted", "declined"] as const)("always says the work goes, on %s", (state) => {
-    panel({ state });
+  /**
+   * Whatever the moment, it says who removes the worktree and when — which is the machine, on its
+   * next poll. The promise "the worktree is deleted" is least true in the case this button is
+   * named for: a machine that is not coming back never polls.
+   */
+  it.each(["pending", "accepted", "declined"] as const)(
+    "says the deletion is the machine's own, on %s",
+    (state) => {
+      panel({ state });
 
-    fireEvent.click(screen.getByRole("button", { name: "Give up and delete the work" }));
+      fireEvent.click(screen.getByRole("button", { name: "Give up and delete the work" }));
 
-    expect(screen.getByRole("dialog").textContent).toContain("deleted");
-  });
+      const said = screen.getByRole("dialog").textContent ?? "";
+      expect(said).toContain("removes the worktree on its next poll");
+      expect(said).toContain("until somebody clears it by hand");
+    }
+  );
 });
 
 /**

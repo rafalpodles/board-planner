@@ -40,14 +40,20 @@ const QUIET_POLL_MS = 60_000;
  * the button and make the label honest — including whose name it spends.
  */
 function acceptWarning(machine: string): string {
-  // Three short sentences rather than one long one, and "not necessarily yours" rather than a
-  // name: the push carries the token `githubIdentityToken()` resolves, which is the account pinned
-  // on the MACHINE — its owner's — and an instance admin may be answering for a machine that is
-  // not theirs. A laptop has no GitHub identity, so naming the machine alone answers which token
-  // while hiding whose, which is the half that matters.
+  /*
+   * Three short sentences rather than one long one, and "whichever account … pushes as" rather
+   * than a name.
+   *
+   * Two earlier drafts of this sentence were false. "Your own GitHub identity" is wrong because
+   * the push happens on the machine, under the token `githubIdentityToken()` resolves there — and
+   * an instance admin may be answering for a machine that is not theirs. "Its owner's account" is
+   * wrong too: that function returns the account pinned in the machine's own `github.json`, and a
+   * machine with nothing pinned falls through to whichever account `gh` has active. The board's
+   * record of who owns the machine does not decide it.
+   */
   return [
     "Accepting pushes this commit and opens a pull request.",
-    `The push goes out under the GitHub identity pinned to ${machine} — its owner's account, not necessarily yours.`,
+    `The push goes out as whichever GitHub account ${machine} pushes as — not as you.`,
     "It runs this repository's CI on the change, and does not merge it.",
   ].join(" ");
 }
@@ -63,16 +69,22 @@ function acceptWarning(machine: string): string {
  * who got impatient is racing a push that may already have succeeded, and one message saying "stops
  * waiting for an answer" would be simply false there.
  */
-function abandonWarning(state: TaskDecisionState): string {
-  const deletes =
-    "The worktree holding this change is deleted, the same as declining. Use it when that machine is not coming back.";
+function abandonWarning(state: TaskDecisionState, machine: string): string {
+  /*
+   * What giving up actually does is settle the record, so the task stops waiting. The DELETION is
+   * the machine's: `sweepMarkers` removes the worktree on the poll that finds the decision no
+   * longer live. Which means the promise "the worktree is deleted" is least true in the case this
+   * button is named for — a machine that is not coming back never polls, and its checkout stays
+   * where it is.
+   */
+  const after = `The task stops waiting. ${machine} removes the worktree on its next poll, so if it is really gone the checkout stays on it until somebody clears it by hand.`;
   if (state === "accepted") {
-    return `This change was accepted and the machine may be pushing it right now. Giving up stops waiting for the result — it does not undo a push that has already landed. ${deletes}`;
+    return `This change was accepted and ${machine} may be pushing it right now. Giving up does not undo a push that has already landed — check for a pull request before you do. ${after}`;
   }
   if (state === "declined") {
-    return `This change was declined and the machine is removing it. Giving up stops waiting for it to confirm. ${deletes}`;
+    return `This change was declined and ${machine} is removing it. Giving up stops waiting for it to confirm. ${after}`;
   }
-  return `The machine stops waiting for an answer. ${deletes}`;
+  return `Nobody has answered this change, and giving up is not an answer — it withdraws the question. ${after}`;
 }
 
 const HEADLINE: Record<TaskDecisionState, string> = {
@@ -367,7 +379,7 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
         onClose={() => setAsking(null)}
         onConfirm={() => answer("abandon")}
         title="Give up on this change?"
-        message={abandonWarning(state)}
+        message={abandonWarning(state, decision.workerName || "That machine")}
         confirmLabel="Give up and delete"
         loadingLabel="Giving up..."
         loading={busy === "abandon"}

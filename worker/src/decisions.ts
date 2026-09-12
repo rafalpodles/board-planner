@@ -335,6 +335,10 @@ export interface SettleDecisionsDeps {
 
 const GIT_TIMEOUT_MS = 60_000;
 
+/** How long a settled decision's marker keeps holding a worktree on a project nobody serves. */
+const UNBOUND_MARKER_TTL_DAYS = 7;
+const UNBOUND_MARKER_TTL_MS = UNBOUND_MARKER_TTL_DAYS * 24 * 60 * 60_000;
+
 const PR_BODY = [
   "The protected-paths gate refused this change, and a person read it and accepted the push.",
   "",
@@ -517,10 +521,28 @@ async function sweepMarkers(
     if (Date.parse(marker.createdAt) >= decisionsAsOf) continue;
 
     const context = await deps.contextFor(marker.projectId);
-    // Kept, not dropped, for a project this machine no longer serves. The marker is the only thing
-    // holding that worktree back from `reapOrphans`, and dropping it here would hand the work to
-    // the reaper while leaving the directory behind for it to find.
-    if (!context) continue;
+    if (!context) {
+      /*
+       * A project this machine no longer serves: it can neither remove the worktree nor reap it,
+       * because both resolve through the binding. Keeping the marker is the right answer at first
+       * — dropping it hands the directory to a reaper that is equally unable to run, and exempts
+       * nothing from anything.
+       *
+       * But kept for ever it is a state with no exit: the decision is settled, nothing will ever
+       * answer it, and `heldTaskKeys` goes on exempting that directory from every future pass,
+       * including a sibling project's that shares the root. So it is kept only until the
+       * assignment plainly is not coming back, after which the marker goes and an eventual rebind
+       * can collect the directory. The worktree itself is a person's to remove; `worker/README.md`
+       * says so.
+       */
+      if (Date.now() - Date.parse(marker.createdAt) > UNBOUND_MARKER_TTL_MS) {
+        deps.log(
+          `${marker.taskKey}: project ${marker.projectId} has not been served for ${UNBOUND_MARKER_TTL_DAYS} days; releasing the hold on ${marker.worktreePath}, which is yours to remove`
+        );
+        deps.markers.remove(marker.taskKey);
+      }
+      continue;
+    }
 
     await context.destroyWorktree(marker.taskKey).catch((error) => {
       deps.log(`${marker.taskKey}: could not remove a settled worktree: ${String(error)}`);
