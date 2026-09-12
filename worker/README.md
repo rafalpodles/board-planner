@@ -47,7 +47,7 @@ repeating failure runs out of retries and lands in front of a human instead of c
 
 Bootstrap is everything the worker needs before it can even register — where the server is, how
 to authenticate to it once, a name to register under, and where to keep the identity that
-registration mints. Nothing else is read from the environment.
+registration mints.
 
 | Variable | Required | Default |
 |---|---|---|
@@ -55,6 +55,12 @@ registration mints. Nothing else is read from the environment.
 | `CP_ENROLMENT_TOKEN` or `CP_ENROLMENT_TOKEN_FILE` | first start only | — |
 | `CP_WORKER_NAME` | yes | — |
 | `CP_STATE_DIR` | no | `~/.boardplanner` |
+| `CP_ALLOW_UNCONFINED_AGENT` | no | unset |
+
+The last one is a risk acceptance rather than a setting, and it is the one thing besides bootstrap
+that is read from the environment: it runs the agent with nothing confining its writes. See
+**Safety** for what that means and why it is not a policy field. Everything else an operator can
+choose is worker policy, below.
 
 A worker holds **one** credential. An enrolment token is spent by the first registration, and
 everything after that — claiming, reporting status, commenting, releasing, and all of
@@ -227,6 +233,46 @@ and `SIGINT` both finish the task in flight before the loop exits.
 
   The key is **not** cleared for you. Writing to a config an attacker also writes is a race, and it
   destroys the evidence of what was planted.
+- **The agent cannot write outside its own worktree.** Both calls to the CLI — the step that
+  writes the change and the review gate — run under `sandbox-exec` with a profile that denies every
+  write and then allows back exactly one directory: the worktree for the step, the throwaway
+  checkout for the reviewer. It is the kernel refusing, so it holds for `Write`, for `Edit`, for a
+  symlink the agent plants inside the worktree and writes through, and for anything the CLI spawns
+  underneath itself.
+
+  The escape it closes: a step runs with `--permission-mode bypassPermissions`, so `Write` used to
+  take any absolute path this user can reach. `$HOME/.claude/settings.json` is the shortest one —
+  a hook entry there runs a shell command on the **next** `claude` invocation, which in every
+  shipped composition is a later step or the review gate. Nothing downstream could see it: the file
+  is outside the repository, so it never reaches the diff and `protected-paths` cannot match a path
+  it is never given. `~/.zshrc`, `~/Library/LaunchAgents/*.plist` and `~/.gitconfig` were the same
+  escape with different timing.
+
+  **Not a per-run `HOME`**, which is the cheaper thing this looks like. Measured: a fresh home
+  answers `Not logged in · Please run /login`, with or without a `hasCompletedOnboarding` file, and
+  there is no credential file under `~/.claude` to copy into one. It would not have been enough
+  either — moving `HOME` does not stop `/Users/<you>/.claude/settings.json` being written by name,
+  and `USER` is on the same allowlist that forwards `HOME`.
+
+  The allowance is one directory rather than a list of the instruction channels inside your home,
+  because measured, the CLI needs no write access to `~/.claude` or `~/.claude.json` at all: it
+  runs under the profile with exit 0, empty stderr and no permission denials.
+
+  **macOS only.** Seatbelt is what this uses, and there is no equivalent wired up elsewhere. On any
+  other platform the worker **refuses the step** rather than running it unconfined, and says so.
+  Preflight asks the question at boot by confining a probe and watching it fail to escape, so the
+  row on Settings → Workers is the answer for this machine rather than for this platform.
+
+  To run unconfined anyway — a Linux machine, or a macOS one where the profile gets in the way —
+  set `CP_ALLOW_UNCONFINED_AGENT=1` in the worker's own environment. It is an environment variable
+  and never a worker policy field, because policy comes down from the server and a setting that
+  turns the sandbox off must not be reachable by anything the agent can also reach. It is left out
+  of the child allowlist too, so the agent is never told whether it is confined.
+
+  What this does **not** claim: reads are untouched, the network is untouched, and the gates that
+  run agent-written code — `npm test`, `npm run build` — are not inside this profile. An agent that
+  writes a test which writes to your home, and a composition that then runs the tests, is a
+  different hole with a different fix.
 - **No subprocess inherits the worker's secrets through its environment.** The child environment is
   an allowlist, so the worker's credential reaches neither the agent nor any dependency's install
   script. Only delivery carries what `git` and `gh` need for the remote — and it runs inside the
@@ -249,8 +295,9 @@ and `SIGINT` both finish the task in flight before the loop exits.
   own child, so the destination's `post-receive` would hold the credentials. Both are refused.
 
   What this does **not** claim: the allowlist includes `HOME`, because the CLI authenticates from
-  its logged-in session there. An agent that goes looking can read what is under it — the
-  environment is the boundary, the filesystem is not.
+  its logged-in session there. An agent that goes looking can **read** what is under it. Writing is
+  a different matter since BP-349 — see the next bullet — but the environment is the boundary for
+  reading, and the filesystem is not.
 
   **What it costs.** `~/.gitconfig` is not read on those calls, so anything an operator keeps there
   no longer applies to delivery: a deploy key set through `core.sshCommand`, a `url.*.insteadOf`
