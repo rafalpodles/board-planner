@@ -18,7 +18,7 @@ function apiSpy(overrides: Partial<ApiClient> = {}): ApiClient {
   return {
     claim: vi.fn(),
     statusIds: vi.fn(),
-    columnIds: vi.fn(),
+    boardColumns: vi.fn(),
     comment: vi.fn<ApiClient["comment"]>().mockResolvedValue(undefined),
     setStatus: vi.fn<ApiClient["setStatus"]>().mockResolvedValue(undefined),
     release: vi.fn<ApiClient["release"]>().mockResolvedValue(undefined),

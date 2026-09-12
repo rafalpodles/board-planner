@@ -292,7 +292,29 @@ export interface SettleDecisionsDeps {
   markers: MarkerStore;
   /** Null when this project is no longer bound here, which is what a lost assignment looks like. */
   contextFor: (projectId: string) => Promise<DecisionContext | null>;
-  settle: (settlement: DecisionSettlement) => Promise<void>;
+  /**
+   * Report the outcome. **False means the server did not take it**, and every caller below acts on
+   * that rather than assuming it landed.
+   *
+   * Deliberately NOT routed through the outbox, unlike every other report this worker makes, and
+   * the difference is the reason. An outbox entry is retried until it succeeds or twenty attempts
+   * run out, and it blocks everything queued behind it in the meantime. A decision settlement can
+   * be *permanently* invalid — `superseded` by a second claim, `abandoned` by a person, or simply
+   * overtaken — and a 409 that can never succeed would hold every comment, status move and run
+   * record on this machine for twenty polls.
+   *
+   * Worse, a queued settlement is invisible to the pass that queued it: with `delivered` sitting
+   * in the outbox the worktree was destroyed, the marker dropped, and the NEXT pass — seeing the
+   * server still say `accepted` and no marker — settled `refused` ("this machine no longer holds a
+   * worktree"), which landed first and made the real `delivered` a permanent 409. The result was
+   * an open pull request the board never named.
+   *
+   * Retrying the whole settlement next pass is what replaces it. The push is idempotent — the same
+   * commit to the same branch is "Everything up-to-date", and `openPr` returns the pull request
+   * that already exists — and the retry stops on its own, because a settled decision leaves the
+   * list the server sends.
+   */
+  settle: (settlement: DecisionSettlement) => Promise<boolean>;
   log: (message: string) => void;
 }
 
@@ -376,15 +398,28 @@ export async function settleDecisions(
     if (!context) continue;
 
     const marker = deps.markers.read(decision.taskKey);
+    // A task key is unique per project, not per machine, and `rebind` can put two projects on one
+    // checkout. `destroyWorktree` resolves against the project the CONTEXT names, so acting on a
+    // row whose project is not the one this worktree was made for deletes the wrong directory —
+    // and `parseDecisions` already treats these rows as something to be checked rather than
+    // trusted.
+    if (marker && marker.projectId !== decision.projectId) {
+      deps.log(
+        `${decision.taskKey}: the decision names project ${decision.projectId}, the worktree here belongs to ${marker.projectId}`
+      );
+      continue;
+    }
 
     if (decision.state === "declined") {
-      // Removed and said so, rather than left to be found months later. Reported even when there
-      // is no worktree left to remove: the person is owed the answer either way.
+      // Reported first, and the worktree removed only once the board has taken the answer: the
+      // other order deletes the only copy of the work and then finds out the report did not land,
+      // leaving a record that still says `declined` with nothing left to decline.
+      if (!(await deps.settle({ taskId: decision.taskId, state: "discarded" }))) continue;
+      // Removed and said so, rather than left to be found months later.
       await context.destroyWorktree(decision.taskKey).catch((error) => {
         deps.log(`${decision.taskKey}: could not remove the declined worktree: ${String(error)}`);
       });
       deps.markers.remove(decision.taskKey);
-      await deps.settle({ taskId: decision.taskId, state: "discarded" });
       continue;
     }
 
@@ -419,9 +454,13 @@ export async function settleDecisions(
         { taskKey: decision.taskKey, title: decision.title },
         PR_BODY
       );
-      await deps.settle({ taskId: decision.taskId, state: "delivered", prUrl });
-      // Only now: until the pull request exists, this worktree is the only copy of the work.
-      await context.destroyWorktree(decision.taskKey).catch(() => {});
+      // Only once the board holds the url. Until then this worktree and this marker are the only
+      // things that say where the work is, and a settlement that did not land is retried whole.
+      if (!(await deps.settle({ taskId: decision.taskId, state: "delivered", prUrl }))) continue;
+      await context.destroyWorktree(decision.taskKey).catch((error) => {
+        // Left for the sweep: the decision has left the live list, so the next pass takes it.
+        deps.log(`${decision.taskKey}: could not remove the delivered worktree: ${String(error)}`);
+      });
       deps.markers.remove(decision.taskKey);
     } catch (error) {
       await deps.settle({
@@ -457,11 +496,14 @@ async function sweepMarkers(
     if (Date.parse(marker.createdAt) >= decisionsAsOf) continue;
 
     const context = await deps.contextFor(marker.projectId);
-    if (context) {
-      await context.destroyWorktree(marker.taskKey).catch((error) => {
-        deps.log(`${marker.taskKey}: could not remove a settled worktree: ${String(error)}`);
-      });
-    }
+    // Kept, not dropped, for a project this machine no longer serves. The marker is the only thing
+    // holding that worktree back from `reapOrphans`, and dropping it here would hand the work to
+    // the reaper while leaving the directory behind for it to find.
+    if (!context) continue;
+
+    await context.destroyWorktree(marker.taskKey).catch((error) => {
+      deps.log(`${marker.taskKey}: could not remove a settled worktree: ${String(error)}`);
+    });
     deps.markers.remove(marker.taskKey);
   }
 }

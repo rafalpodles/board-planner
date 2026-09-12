@@ -654,6 +654,88 @@ describe("createApiClient", () => {
     expect(init.headers["X-Worker-Id"]).toBe("6a7c686f70ed274cf658b1b3");
   });
 
+  /**
+   * BP-381. Not on a project path, deliberately: `withProjectAccessOrWorker` falls through to
+   * project access when no worker header is present, so a project route would let any member post
+   * a record marked acceptable and then accept it.
+   *
+   * POST and PATCH share one URL, so the method is the only thing telling "a change was refused"
+   * from "here is what came of the verdict" — swapping them would turn every settlement into a
+   * fresh refusal record.
+   */
+  it("opens a decision on the worker's own decisions endpoint, with POST", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 201 });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+
+    await api.createDecision({
+      taskId: "t1",
+      runId: "run-1",
+      gate: "protected-paths",
+      files: ["package.json"],
+      protectedFiles: ["package.json"],
+      patch: "diff",
+      patchTruncated: false,
+      patchSha256: "b".repeat(64),
+      commit: "a".repeat(40),
+      taskKey: "CP-158",
+      title: "Add a thing",
+      acceptable: true,
+      unacceptableReason: "",
+    });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(
+      "https://app.example.com/api/workers/6a7c686f70ed274cf658b1b3/decisions"
+    );
+    expect(init.method).toBe("POST");
+    expect(init.headers.Authorization).toBe("Bearer cpw_secret");
+    expect(init.headers["X-Worker-Id"]).toBe("6a7c686f70ed274cf658b1b3");
+    expect(JSON.parse(init.body)).toMatchObject({ taskId: "t1", commit: "a".repeat(40) });
+  });
+
+  it("settles a decision on the same endpoint, with PATCH", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+
+    await api.settleDecision({ taskId: "t1", state: "delivered", prUrl: "https://x/pull/7" });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(
+      "https://app.example.com/api/workers/6a7c686f70ed274cf658b1b3/decisions"
+    );
+    expect(init.method).toBe("PATCH");
+    expect(JSON.parse(init.body)).toEqual({
+      taskId: "t1",
+      state: "delivered",
+      prUrl: "https://x/pull/7",
+    });
+  });
+
+  // The caller reads a throw as "the board did not take it" and keeps the worktree; a swallowed
+  // failure would destroy the only copy of the work
+  it("throws when the server refuses a settlement", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      text: async () => '{"error":"no longer waiting"}',
+    });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+
+    await expect(
+      api.settleDecision({ taskId: "t1", state: "delivered" })
+    ).rejects.toThrow(/409/);
+  });
+
+  it("refuses to open a decision, without a network call, when no identity is stored", async () => {
+    const fetchMock = vi.fn();
+    const api = createApiClient(config, fetchMock as never, { read: () => "" });
+
+    await expect(
+      api.createDecision({ taskId: "t1" } as never)
+    ).rejects.toThrow(/not registered/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("posts a phase event to the worker's own events endpoint, not a project one", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     const api = createApiClient(config, fetchMock as never, identityStore);

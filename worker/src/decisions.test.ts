@@ -100,7 +100,7 @@ function marker(over: Partial<DecisionMarker> = {}): DecisionMarker {
     taskKey: "CP-158",
     worktreeRoot: "/wt",
     worktreePath: "/wt/CP-158",
-    projectId: "CP",
+    projectId: "p1",
     taskId: "t1",
     commit: "c0ffee",
     baseSha: "base1",
@@ -179,7 +179,15 @@ describe("opening a decision", () => {
     await openDecision(d, input());
 
     expect(d.createDecision.mock.calls[0][0].commit).toBe("a".repeat(40));
-    expect(d.markers.read("CP-158")?.commit).toBe("a".repeat(40));
+    expect(d.markers.read("CP-158")).toMatchObject({
+      commit: "a".repeat(40),
+      // The settlement re-derives the patch against this, and it is stored nowhere else: the
+      // server deliberately holds neither the base nor the worktree path
+      baseSha: "base1",
+      worktreePath: "/wt/CP-158",
+      worktreeRoot: "/wt",
+      projectId: "CP",
+    });
   });
 
   // Redaction is not reproducible from the board's side, and the machine re-derives git's own
@@ -263,6 +271,9 @@ describe("acting on a verdict", () => {
     markers.write(marker({ commit: "a".repeat(40) }));
 
     const settled: DecisionSettlement[] = [];
+    // What the server did with each report. `settle` answering false is the case every branch
+    // below has to survive without destroying the only copy of the work.
+    let settleLands = true;
     const push = vi.fn().mockResolvedValue(undefined);
     const openPr = vi.fn().mockResolvedValue("https://github.com/o/r/pull/7");
     const destroyWorktree = vi.fn().mockResolvedValue(undefined);
@@ -281,6 +292,9 @@ describe("acting on a verdict", () => {
     return {
       markers,
       settled,
+      settleFails: () => {
+        settleLands = false;
+      },
       push,
       openPr,
       destroyWorktree,
@@ -291,6 +305,7 @@ describe("acting on a verdict", () => {
         contextFor: async () => context,
         settle: async (settlement: DecisionSettlement) => {
           settled.push(settlement);
+          return settleLands;
         },
         log: vi.fn(),
       },
@@ -359,6 +374,26 @@ describe("acting on a verdict", () => {
 
     expect(h.push).not.toHaveBeenCalled();
     expect(h.settled[0]).toMatchObject({ state: "refused" });
+  });
+
+  // Against the base the run recorded, which is the only thing that makes the digest comparable:
+  // a re-derivation against some other base is a different patch and would always differ
+  it("re-derives the patch against the base the run recorded", async () => {
+    const h = harness();
+    await settleDecisions(h.deps, [decision()], LATER);
+
+    expect(h.collectDiff).toHaveBeenCalledWith(expect.anything(), "/wt/CP-158", "base1");
+  });
+
+  // The panel renders this; a settlement that always reported the first attempt would say a
+  // machine had tried once when it had tried five times
+  it("counts the attempt on every settlement that did not deliver", async () => {
+    const h = harness();
+    h.push.mockRejectedValue(new Error("remote hung up"));
+
+    await settleDecisions(h.deps, [decision({ attempts: 2 })], LATER);
+
+    expect(h.settled[0]).toMatchObject({ state: "failed", attempts: 3 });
   });
 
   it("refuses when this machine no longer holds a worktree for the task", async () => {
@@ -445,6 +480,70 @@ describe("acting on a verdict", () => {
     expect(h.markers.read("CP-158")).not.toBeNull();
   });
 
+  /**
+   * BP-381 review. `deps.settle` used to swallow a failure onto the outbox, so the lines after it
+   * always ran: the worktree was destroyed, the marker dropped, and the NEXT pass — seeing the
+   * server still say `accepted` and no marker — settled `refused`, which landed first and made the
+   * real `delivered` a permanent 409. An open pull request the board never named.
+   */
+  describe("when the board does not take the report", () => {
+    it("keeps the worktree and the marker after a delivered settlement is lost", async () => {
+      const h = harness();
+      h.settleFails();
+
+      await settleDecisions(h.deps, [decision()], LATER);
+
+      expect(h.push).toHaveBeenCalled();
+      expect(h.destroyWorktree).not.toHaveBeenCalled();
+      expect(h.markers.read("CP-158")).not.toBeNull();
+    });
+
+    // Idempotent by construction: the same commit to the same branch is "Everything up-to-date",
+    // and openPr returns the pull request that already exists
+    it("does the whole settlement again on the next pass, and finishes it", async () => {
+      const h = harness();
+      h.settleFails();
+      await settleDecisions(h.deps, [decision()], LATER);
+
+      h.settled.length = 0;
+      const second = harness();
+      second.markers.write(marker({ commit: "a".repeat(40) }));
+      await settleDecisions(second.deps, [decision()], LATER);
+
+      expect(second.settled).toEqual([
+        { taskId: "t1", state: "delivered", prUrl: "https://github.com/o/r/pull/7" },
+      ]);
+      expect(second.destroyWorktree).toHaveBeenCalledWith("CP-158");
+    });
+
+    // The other order deletes the only copy of the work and then finds out the report did not land
+    it("does not remove a declined worktree until the board has the answer", async () => {
+      const h = harness();
+      h.settleFails();
+
+      await settleDecisions(h.deps, [decision({ state: "declined" })], LATER);
+
+      expect(h.settled).toEqual([{ taskId: "t1", state: "discarded" }]);
+      expect(h.destroyWorktree).not.toHaveBeenCalled();
+      expect(h.markers.read("CP-158")).not.toBeNull();
+    });
+  });
+
+  /**
+   * A task key is unique per project, not per machine, and `rebind` can put two projects on one
+   * checkout. `destroyWorktree` resolves against the project the CONTEXT names, so a row naming a
+   * sibling project would delete the wrong directory for the same key.
+   */
+  it("refuses a row whose project is not the one the worktree belongs to", async () => {
+    const h = harness();
+    await settleDecisions(h.deps, [decision({ projectId: "another-project" })], LATER);
+
+    expect(h.push).not.toHaveBeenCalled();
+    expect(h.destroyWorktree).not.toHaveBeenCalled();
+    expect(h.settled).toEqual([]);
+    expect(h.markers.read("CP-158")).not.toBeNull();
+  });
+
   it("does nothing for a project this machine no longer serves", async () => {
     const h = harness();
     await settleDecisions(
@@ -455,6 +554,9 @@ describe("acting on a verdict", () => {
 
     expect(h.push).not.toHaveBeenCalled();
     expect(h.settled).toEqual([]);
+    // The marker is the only thing holding that worktree back from the reaper. Dropping it here
+    // would hand the work to the reaper and leave the directory behind for it to find.
+    expect(h.markers.read("CP-158")).not.toBeNull();
   });
 });
 

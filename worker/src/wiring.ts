@@ -455,7 +455,14 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
           "X-CP-Protocol": String(PROTOCOL_VERSION),
         },
       });
-      if (!response.ok) return;
+      // A locked or disabled machine is refused here with 403, and the previous list must not
+      // survive that: `drain()` runs while paused, so a stale `accepted` would go on being pushed
+      // every poll with the kill switch on — the badge true and the machine still working.
+      if (!response.ok) {
+        decisions = [];
+        decisionsAsOf = 0;
+        return;
+      }
       const body = (await response.json()) as {
         policy?: unknown;
         assignments?: unknown;
@@ -626,12 +633,16 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       {
         markers,
         contextFor: decisionContext,
+        // Not queued on failure — see SettleDecisionsDeps.settle for why this one report is the
+        // exception. The caller keeps the worktree and the marker, and the next pass does the
+        // whole settlement again.
         settle: async (settlement) => {
           try {
             await api.settleDecision(settlement);
+            return true;
           } catch (error) {
             deps.logError(`could not settle a decision: ${String(error)}`);
-            outbox.add({ kind: "decision", settlement });
+            return false;
           }
         },
         log: deps.logError,

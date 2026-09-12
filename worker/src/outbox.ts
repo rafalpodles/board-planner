@@ -1,4 +1,4 @@
-import { ApiClient, DecisionSettlement } from "./api.js";
+import { ApiClient } from "./api.js";
 import { RunRecord } from "./run-record.js";
 
 // A report that cannot be delivered is worse than a failed run: the merge already happened, so
@@ -11,11 +11,7 @@ export type OutboxOp =
   | { kind: "release"; projectId: string; taskId: string; refund: boolean }
   // A record posted after a merge hits the same redeploy the comment does, and it is the only
   // trace the run leaves — losing it makes a finished run indistinguishable from one that never ran.
-  | { kind: "run"; projectId: string; record: RunRecord }
-  // A settlement lost is a decision the board goes on showing as accepted while the branch is
-  // already pushed — and the next refresh would push it again. It survives the process for the
-  // same reason a report does.
-  | { kind: "decision"; settlement: DecisionSettlement };
+  | { kind: "run"; projectId: string; record: RunRecord };
 
 interface Entry {
   op: OutboxOp;
@@ -57,16 +53,13 @@ function serialise(entries: Entry[]): string {
 }
 
 function taskOf(op: OutboxOp): string {
-  if (op.kind === "run") return op.record.taskId;
-  if (op.kind === "decision") return op.settlement.taskId;
-  return op.taskId;
+  return op.kind === "run" ? op.record.taskId : op.taskId;
 }
 
 async function deliver(api: ApiClient, op: OutboxOp): Promise<void> {
   if (op.kind === "comment") return api.comment(op.projectId, op.taskId, op.body);
   if (op.kind === "status") return api.setStatus(op.projectId, op.taskId, op.status);
   if (op.kind === "run") return api.postRun(op.projectId, op.record);
-  if (op.kind === "decision") return api.settleDecision(op.settlement);
   return op.refund
     ? api.release(op.projectId, op.taskId)
     : api.release(op.projectId, op.taskId, { refund: false });
