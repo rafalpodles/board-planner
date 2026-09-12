@@ -1,0 +1,153 @@
+"use client";
+
+import type { CSSProperties } from "react";
+import type { ApiLinkedPR } from "@/types";
+
+/**
+ * One pull request, as a badge, in the three places that show one: the kanban card, the list row
+ * and the task detail.
+ *
+ * Written once because it had already been written twice — the card and `LinkedWork` each carried
+ * their own copy of the open/merged/closed colour mapping, and a third copy was what this ticket
+ * would otherwise have added.
+ */
+
+export type PullRequestLook =
+  | "open"
+  | "running"
+  | "success"
+  | "failure"
+  | "unknown"
+  | "merged"
+  | "closed";
+
+/**
+ * What the badge says, from the pull request's own state and what CI said about its head commit.
+ *
+ * The pull request's state wins: a merged branch's build is history, and a red check on work that
+ * shipped a week ago is not news. CI only decides the look while the pull request is open.
+ */
+export function pullRequestLook(pr: Pick<ApiLinkedPR, "state" | "ci">): PullRequestLook {
+  if (pr.state === "merged") return "merged";
+  if (pr.state === "closed") return "closed";
+  // Absent on every link written before BP-443, and on every GitLab link: nothing has been read,
+  // which is what `open` already means
+  return pr.ci && pr.ci !== "none" ? pr.ci : "open";
+}
+
+/** The sentence the badge carries as its tooltip and as its accessible name. */
+export function pullRequestSummary(pr: Pick<ApiLinkedPR, "number" | "title" | "state" | "ci" | "ciLabel">): string {
+  const look = pullRequestLook(pr);
+  const what = pr.ciLabel ?? "checks";
+  const suffix: Record<PullRequestLook, string> = {
+    merged: "merged",
+    closed: "closed without merging",
+    open: "open",
+    running: `${what} running`,
+    success: `${what} passed`,
+    failure: `${what} failed`,
+    // The one state GitHub never reports. Said in full, because a reader who cannot tell this from
+    // "nothing has run" will read a broken token as a quiet board.
+    unknown: "checks could not be read",
+  };
+  return `#${pr.number} ${pr.title} — ${suffix[look]}`;
+}
+
+// Shape as well as colour, every time. Red against green on a badge this size is the pair that
+// colour blindness separates worst, and the pulse below is dropped under reduced motion — so
+// neither hue nor movement is ever the only thing carrying the state.
+const GLYPH: Record<PullRequestLook, string> = {
+  open: "",
+  running: "●",
+  success: "✓",
+  failure: "✕",
+  unknown: "?",
+  merged: "",
+  closed: "",
+};
+
+const ACCENT: Record<PullRequestLook, string> = {
+  open: "var(--color-text-muted)",
+  running: "var(--color-warning)",
+  success: "var(--color-success)",
+  failure: "var(--color-danger)",
+  unknown: "var(--color-text-muted)",
+  merged: "#8b5cf6",
+  closed: "var(--color-text-muted)",
+};
+
+const MERGED_PATH =
+  "M5.45 5.154A4.25 4.25 0 004.5 7.5h1.1a3.15 3.15 0 01.65-1.54l-.8-.806zM7.5 10.25a2.25 2.25 0 100-4.5 2.25 2.25 0 000 4.5zM12 7.5a4.25 4.25 0 01-.95 2.346l.8.806A5.35 5.35 0 0013.1 7.5H12zM8.55 10.846A4.25 4.25 0 017.5 11.1v1.1a5.35 5.35 0 001.854-.548l-.804-.806z";
+const PR_PATH =
+  "M7.177 3.073L9.573.677A.25.25 0 0110 .854v4.792a.25.25 0 01-.427.177L7.177 3.427a.25.25 0 010-.354zM3.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.25.75a2.25 2.25 0 113 2.122v5.256a2.251 2.251 0 11-1.5 0V5.372A2.25 2.25 0 011.5 3.25zM11 2.5h-1V4h1a1 1 0 011 1v5.628a2.251 2.251 0 101.5 0V5A2.5 2.5 0 0011 2.5zm1 10.25a.75.75 0 111.5 0 .75.75 0 01-1.5 0zM3.75 12a.75.75 0 100 1.5.75.75 0 000-1.5z";
+
+const CHIP = `chip chip-custom inline-flex items-center gap-1 rounded px-1.5 py-0.5
+  text-[11px] font-medium`;
+
+function Face({ look, number }: { look: PullRequestLook; number: number }) {
+  const glyph = GLYPH[look];
+  return (
+    <>
+      <svg className="h-3 w-3 shrink-0" fill="currentColor" viewBox="0 0 16 16" aria-hidden>
+        <path d={look === "merged" ? MERGED_PATH : PR_PATH} />
+      </svg>
+      <span>#{number}</span>
+      {glyph && (
+        <span
+          aria-hidden
+          className={look === "running" ? "animate-pulse motion-reduce:animate-none" : undefined}
+        >
+          {glyph}
+        </span>
+      )}
+    </>
+  );
+}
+
+/**
+ * The badge as plain text, for the one place that is already inside a link — the task detail's
+ * row. Nesting an anchor in an anchor is markup no two browsers agree on.
+ */
+export function PullRequestState({ pr, className = "" }: { pr: ApiLinkedPR; className?: string }) {
+  const look = pullRequestLook(pr);
+  const summary = pullRequestSummary(pr);
+  return (
+    <span
+      data-testid="pr-state"
+      data-look={look}
+      title={summary}
+      className={`${CHIP} ${className}`}
+      style={{ "--chip": ACCENT[look] } as CSSProperties}
+    >
+      <Face look={look} number={pr.number} />
+      <span className="sr-only">{summary}</span>
+    </span>
+  );
+}
+
+/** The badge as a link to the pull request, for the board and the list. */
+export function PullRequestBadge({ pr, className = "" }: { pr: ApiLinkedPR; className?: string }) {
+  const look = pullRequestLook(pr);
+  const summary = pullRequestSummary(pr);
+
+  return (
+    <a
+      href={pr.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      // The card behind this is itself a click target and a drag handle. Without this, opening the
+      // pull request also opens the task underneath it.
+      onClick={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
+      draggable={false}
+      data-testid="pr-badge"
+      data-look={look}
+      title={summary}
+      aria-label={summary}
+      className={`${CHIP} focus-ring transition-opacity hover:opacity-80 ${className}`}
+      style={{ "--chip": ACCENT[look] } as CSSProperties}
+    >
+      <Face look={look} number={pr.number} />
+    </a>
+  );
+}

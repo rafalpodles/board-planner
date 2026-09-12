@@ -42,6 +42,7 @@ import { Combobox, ComboboxOption } from "@/components/ui/Combobox";
 import { categoryColor, categoryTint } from "@/lib/category-colors";
 import { timeAgo } from "@/lib/time";
 import { RunDot } from "@/components/kanban/RunDot";
+import { PullRequestBadge } from "@/components/tasks/PullRequestBadge";
 
 interface ListViewProps {
   tasks: ApiTask[];
@@ -362,6 +363,11 @@ export function ListView({
                   className="min-w-28"
                 />
               )}
+              {show("pr") && (
+                <th scope="col" className="px-2 py-2 text-left font-medium">
+                  PR
+                </th>
+              )}
               {show("assignee") && (
                 <SortHeader
                   label="Assignee"
@@ -582,6 +588,18 @@ export function ListView({
                           </span>
                         </Badge>
                       )}
+                    </td>
+                  )}
+                  {show("pr") && (
+                    <td className="px-2 py-2">
+                      <span className="flex flex-wrap items-center gap-1">
+                        {(task.linkedPRs ?? []).map((pr) => (
+                          <PullRequestBadge
+                            key={`${pr.provider ?? "github"}-${pr.number}`}
+                            pr={pr}
+                          />
+                        ))}
+                      </span>
                     </td>
                   )}
                   {show("assignee") && (

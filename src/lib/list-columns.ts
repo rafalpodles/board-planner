@@ -26,6 +26,11 @@ export interface ListColumnDef {
   label: string;
   /** Cannot be hidden — a row with no title is not a row */
   fixed?: boolean;
+  /**
+   * Every other column id doubles as a sort field, which is the typo guard `list-columns.test.ts`
+   * enforces. A column that is not one has to say so here, and then say so in the header too.
+   */
+  sortable?: false;
   /** Set for a project field, so the picker can group the two apart */
   field?: ApiCustomField;
 }
@@ -34,6 +39,9 @@ export const BUILT_IN_COLUMNS: ListColumnDef[] = [
   { id: "key", label: "Key", fixed: true },
   { id: "title", label: "Title", fixed: true },
   { id: "status", label: "Status" },
+  // There is no ordering of pull-request states anybody asked for, so this one is not a sort
+  // field: its header is plain, and the picker is the only thing that acts on it.
+  { id: "pr", label: "PR", sortable: false },
   { id: "assignee", label: "Assignee" },
   { id: "priority", label: "Priority" },
   { id: "sprint", label: "Sprint" },
