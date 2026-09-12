@@ -18,6 +18,14 @@ import { UNCONFINED_ESCAPE_HATCH, unconfinedAgentAllowed } from "./env.js";
  * enough either — moving `HOME` does not stop `/Users/<operator>/.claude/settings.json` being
  * written by name, and `USER` is on the same allowlist that forwards `HOME`.
  *
+ * What this does not reach — writes a *daemon* performs on the process's behalf. `(allow default)`
+ * leaves `process-exec` and `mach-lookup` open, and measured under this exact profile,
+ * `defaults write <domain> <key> <value>` returns 0 and cfprefsd writes the plist under
+ * `~/Library/Preferences`, outside the worktree. It is not reachable by the agent this worker runs
+ * — `--tools` gives it no shell, so it spawns nothing — which means that particular gap is closed
+ * by the tool allowlist in executor.ts and not by the kernel. A capability that ever yields process
+ * execution has to close it here instead.
+ *
  * What this does not reach: the gates. `npm ci`, `npm run build` and `npm test` run agent-written
  * code in the worktree and are not inside this profile, so a test the agent wrote can still write
  * where the agent itself now cannot (BP-608). This closes the agent's own tools, which is the move
@@ -54,8 +62,12 @@ export interface ConfineOptions {
   env?: NodeJS.ProcessEnv;
 }
 
-// `(allow default)` has to come first: seatbelt reads a later rule as overriding an earlier one, so
-// the same two lines the other way round permit every write again.
+// The order is the conventional one and not load-bearing here: measured on macOS 26.6.2, this
+// profile denies the outside write with `(allow default)` moved last AND with the deny placed after
+// the allow-back, so seatbelt on this system resolves by specificity rather than by last-match. It
+// is kept in this order because that is also correct under last-match semantics, which is what SBPL
+// has historically documented. What IS load-bearing is that the deny exists at all: the same
+// profile without it lets the outside write through, measured in the same run.
 //
 // Reads are deliberately untouched. The agent has `Read` over the disk already — scrub.ts is built
 // on that being true — and confining reads would take the CLI's own session with it.

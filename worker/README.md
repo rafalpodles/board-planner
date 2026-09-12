@@ -237,8 +237,16 @@ and `SIGINT` both finish the task in flight before the loop exits.
   writes the change and the review gate — run under `sandbox-exec` with a profile that denies every
   write and then allows back exactly one directory: the worktree for the step, the throwaway
   checkout for the reviewer. It is the kernel refusing, so it holds for `Write`, for `Edit`, for a
-  symlink the agent plants inside the worktree and writes through, and for anything the CLI spawns
-  underneath itself.
+  symlink the agent plants inside the worktree and writes through, and for a process the CLI spawns
+  writing a file itself — measured against the real kernel in `sandbox.integration.test.ts`.
+
+  It does **not** hold for a write a system daemon performs on a spawned process's behalf.
+  `(allow default)` leaves `process-exec` and `mach-lookup` open, and measured under this exact
+  profile, `defaults write <domain> <key> <value>` exits 0 and `cfprefsd` writes the plist under
+  `~/Library/Preferences`, outside the worktree. The agent this worker runs cannot reach it — it is
+  given no shell, so it spawns nothing — which means that gap is closed by the tool list in
+  `executor.ts`, not by the kernel. Any future capability that yields process execution has to close
+  it in the profile instead.
 
   **What it does not cover, said first rather than last: the gates that run agent-written code.**
   `npm ci`, `npm run build` and `npm test` run in the worktree and are *not* inside this profile,
@@ -279,6 +287,16 @@ and `SIGINT` both finish the task in flight before the loop exits.
 
   What this does **not** claim: reads are untouched, and the network is untouched. The gates are
   the other half, and they are above rather than here.
+
+  **What it costs.** The implementer step does not pass `--safe-mode`, so it still loads
+  `~/.claude/settings.json` — and every hook there that writes anything now fails under the profile.
+  Measured on CLI 2.1.269: two `SessionStart` hooks came back
+  `Failed to run: EPERM … mkdir '~/.claude/session-env/<session>'`. They exit 1, which is
+  non-blocking, and the run completed with a schema-valid result; a `PreToolUse` hook that exits 2
+  when its own write fails would instead block every tool call of every run on that machine, and
+  reach the board as the agent failing. A run also leaves no `~/.claude/projects/**.jsonl`
+  transcript any more — the worker keeps its own stream-json, so nothing is lost that the run needs,
+  but a debugging surface is gone.
 - **No subprocess inherits the worker's secrets through its environment.** The child environment is
   an allowlist, so the worker's credential reaches neither the agent nor any dependency's install
   script. Only delivery carries what `git` and `gh` need for the remote — and it runs inside the

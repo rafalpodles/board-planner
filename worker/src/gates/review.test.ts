@@ -4,6 +4,7 @@ import { basename, join } from "node:path";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { reviewGate } from "./review.js";
 import { SANDBOX_COMMAND, UNCONFINED_REASON } from "../sandbox.js";
+import { isAgentSpawn } from "../__fixtures__/agent-spawn.js";
 import { CommandResult, Runner } from "../exec.js";
 import { ClaimedTask, DiffStats, GateContext } from "../types.js";
 import { claimedTask } from "../__fixtures__/task.js";
@@ -52,9 +53,7 @@ function claudeStdout(stdout: string, overrides: Partial<CommandResult> = {}) {
 // sit inside that call rather than being it. Unwrapped here so every assertion below still reads as
 // an assertion about what the reviewer was asked; the confinement itself is asserted on its own.
 function claudeCall(run: ReturnType<typeof claudeStdout>["run"]) {
-  const call = run.mock.calls.find(
-    ([command, args]) => command === "claude" || args.includes("claude")
-  );
+  const call = run.mock.calls.find(([command, args]) => isAgentSpawn(command, args));
   if (!call) throw new Error("the reviewer was never run");
   const start = call[1].indexOf("claude");
   if (call[0] === "claude") return call;
@@ -63,9 +62,7 @@ function claudeCall(run: ReturnType<typeof claudeStdout>["run"]) {
 
 /** The spawn as it was actually made, wrapper and all. */
 function spawnCall(run: ReturnType<typeof claudeStdout>["run"]) {
-  const call = run.mock.calls.find(
-    ([command, args]) => command === "claude" || args.includes("claude")
-  );
+  const call = run.mock.calls.find(([command, args]) => isAgentSpawn(command, args));
   if (!call) throw new Error("the reviewer was never run");
   return call;
 }
@@ -302,7 +299,7 @@ describe("reviewGate", () => {
       expect(result.ok).toBe(false);
       expect(result.reason).toBe(UNCONFINED_REASON);
       expect(
-        run.mock.calls.some(([command, args]) => command === "claude" || args.includes("claude"))
+        run.mock.calls.some(([command, args]) => isAgentSpawn(command, args))
       ).toBe(false);
     } finally {
       Object.defineProperty(process, "platform", real);
@@ -322,7 +319,7 @@ describe("reviewGate", () => {
 
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/could not be checked out/i);
-    expect(run.mock.calls.find(([command]) => command === "claude")).toBeUndefined();
+    expect(run.mock.calls.find(([command, args]) => isAgentSpawn(command, args))).toBeUndefined();
   });
 
   // `git worktree add` fires .git/hooks/post-checkout — measured — and core.hooksPath=/dev/null is
@@ -402,7 +399,7 @@ describe("reviewGate", () => {
     expect(result.reason).toMatch(/filter\.z\.smudge/);
     expect(run.mock.calls.find(([command, args]) => command === "git" && args.includes("worktree")))
       .toBeUndefined();
-    expect(run.mock.calls.find(([command]) => command === "claude")).toBeUndefined();
+    expect(run.mock.calls.find(([command, args]) => isAgentSpawn(command, args))).toBeUndefined();
   });
 
   // A review checkout left behind is a copy of the change sitting in a world-readable tmpdir

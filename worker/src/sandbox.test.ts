@@ -44,23 +44,18 @@ describe("confine", () => {
   });
 
   // The whole shape of the profile: everything is allowed except writing, and writing is allowed
-  // back only under the paths named. A profile that denied nothing would still spawn, still pass
-  // every argument test above, and confine nothing at all.
-  it("denies every write before allowing any back", () => {
-    const profile = profileOf(confined(["/work/bp-1"]));
-    const denyAll = profile.indexOf("(deny file-write*)");
-    const allowBack = profile.indexOf("(allow file-write*");
-
-    expect(denyAll).toBeGreaterThan(-1);
-    expect(allowBack).toBeGreaterThan(denyAll);
-  });
-
-  // Seatbelt reads later rules as overriding earlier ones, so an `(allow default)` placed after the
-  // deny would silently restore every write. Pinned because the two lines look interchangeable.
-  it("puts allow default before the deny, not after it", () => {
+  // back only under the paths named. A profile that denied nothing would still spawn and still pass
+  // every argument test above — measured, and it lets the outside write through.
+  //
+  // Their ORDER is deliberately not asserted. It reads as though it must matter, and it does not:
+  // measured on macOS 26.6.2, the outside write is denied with `(allow default)` moved last and
+  // with the deny placed after the allow-back. A test pinning the order would look like a safety
+  // net over a property this system does not have. The order that ships is justified in sandbox.ts.
+  it("denies every write, and allows back only the paths it was given", () => {
     const profile = profileOf(confined(["/work/bp-1"]));
 
-    expect(profile.indexOf("(allow default)")).toBeLessThan(profile.indexOf("(deny file-write*)"));
+    expect(profile).toContain("(deny file-write*)");
+    expect(profile).toContain("(allow file-write* (subpath (param \"W0\")))");
   });
 
   // A path travels as a -D parameter rather than as text inside the profile, so a directory name

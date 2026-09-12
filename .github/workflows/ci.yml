@@ -80,7 +80,13 @@ jobs:
 
   worker:
     name: Worker — the package npm test never reaches
-    runs-on: ubuntu-latest
+    # macOS since BP-349, and not for convenience: the worker confines the agent it runs with
+    # seatbelt, which is macOS only, so on Linux `confine()` refuses and 114 tests across eight
+    # files assert a spawn that never happens. Pinning the platform in those tests instead would
+    # buy a green Linux job that exercises a configuration nobody runs, and would leave
+    # sandbox.integration.test.ts — the only evidence that the kernel actually denies the write —
+    # skipped in CI, which is where it was measured to be worth the most.
+    runs-on: macos-15
     # The root vitest config includes src/** only, so these 680-odd tests run nowhere else
     defaults:
       run:
