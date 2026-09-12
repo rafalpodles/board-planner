@@ -25,6 +25,16 @@ function evaluateExpr(expr: unknown, doc: Record<string, unknown>): unknown {
   if (!expr || typeof expr !== "object" || Array.isArray(expr)) return expr;
 
   const [op, args] = Object.entries(expr as Record<string, unknown>)[0];
+  // A document literal, not an operator — what `$mergeObjects` is handed. Aggregation reads any
+  // object whose keys are not operators as a document whose values are themselves expressions.
+  if (!op.startsWith("$")) {
+    return Object.fromEntries(
+      Object.entries(expr as Record<string, unknown>).map(([key, value]) => [
+        key,
+        evaluateExpr(value, doc),
+      ])
+    );
+  }
   const list = (Array.isArray(args) ? args : [args]).map((a) => evaluateExpr(a, doc));
 
   if (op === "$cond") return mongoTruthy(list[0]) ? list[1] : list[2];
@@ -32,6 +42,9 @@ function evaluateExpr(expr: unknown, doc: Record<string, unknown>): unknown {
   if (op === "$ne") return list[0] !== list[1];
   if (op === "$eq") return list[0] === list[1];
   if (op === "$and") return list.every(mongoTruthy);
+  if (op === "$in") return (list[1] as unknown[]).includes(list[0]);
+  if (op === "$mergeObjects")
+    return Object.assign({}, ...list.map((entry) => entry ?? {})) as Record<string, unknown>;
   throw new Error(`the evaluator does not know ${op}`);
 }
 
@@ -401,6 +414,49 @@ describe("claimNextTask", () => {
     const filter = findOneAndUpdate.mock.calls[0][0];
     expect(filter.status).toEqual({ $in: ["ready"] });
     expect(filter.project).toBe("p1");
+  });
+
+  /**
+   * BP-381. A change somebody was still being asked about belongs to the run that produced it, and
+   * that run is over the moment this claim lands: the worktree it named is rebuilt by
+   * `worktree add -B` a few seconds from now, so the commit the record points at stops existing.
+   *
+   * Evaluated rather than read: the whole `decision` field is replaced through a `$cond`, because
+   * an aggregation `$set` on a dotted path whose parent is not a document REPLACES the parent —
+   * so `decision.state` alone would grow a one-field decision on every task with `decision: null`,
+   * which is nearly all of them.
+   */
+  describe("a change still waiting on somebody", () => {
+    async function claimedDecision(before: unknown): Promise<unknown> {
+      findOneAndUpdate.mockResolvedValue({ _id: "t1", taskNumber: 1 });
+      await claimNextTask("p1", "worker-a", "run-1", OWNER);
+      const expr = claimSet(findOneAndUpdate.mock.calls[0]).decision;
+      return evaluateExpr(expr, { decision: before } as Record<string, unknown>);
+    }
+
+    it.each(["pending", "accepted", "declined", "refused", "failed"])(
+      "is superseded when it was %s",
+      async (state) => {
+        expect(await claimedDecision({ commit: "abc", state })).toEqual({
+          commit: "abc",
+          state: "superseded",
+        });
+      }
+    );
+
+    it("is left alone once it has settled", async () => {
+      expect(await claimedDecision({ commit: "abc", state: "delivered" })).toEqual({
+        commit: "abc",
+        state: "delivered",
+      });
+    });
+
+    // Which is nearly every task on the board: `decision` defaults to null, and a claim must not
+    // turn that into a decision made of one field
+    it("leaves a task that never had one exactly as it was", async () => {
+      expect(await claimedDecision(null)).toBeNull();
+      expect(await claimedDecision(undefined)).toBeUndefined();
+    });
   });
 
   it("derives the claimed status from the active role, not a fixed id", async () => {
@@ -2972,6 +3028,24 @@ describe("a task records who assigned it", () => {
     await updateTask("p1", "t1", { title: "renamed", assignedBy: "somebody-else" }, "actor");
 
     expect(setStage(findOneAndUpdate.mock.calls[0][1])).not.toHaveProperty("assignedBy");
+  });
+
+  /**
+   * BP-381, and the same rule one field along. `decision` is what says a person read a change and
+   * accepted the push; it is written by one worker-credentialed route and nowhere else, and the
+   * only thing keeping MCP, the edit form and the PM agent out of it is that it is not on this
+   * list. A record forged here with `acceptable: true` and `state: "accepted"` is an unattended
+   * agent authorising its own push.
+   */
+  it("ignores a decision the caller supplied, rather than storing it", async () => {
+    await updateTask(
+      "p1",
+      "t1",
+      { title: "renamed", decision: { state: "accepted", acceptable: true } },
+      "actor"
+    );
+
+    expect(setStage(findOneAndUpdate.mock.calls[0][1])).not.toHaveProperty("decision");
   });
 });
 

@@ -1136,6 +1136,91 @@ describe("runTask", () => {
     expect(h.workspace.destroy).not.toHaveBeenCalled();
   });
 
+  /**
+   * BP-381. The work exists only as a commit in a worktree on whichever machine claimed the task,
+   * and twice in one afternoon good work went to sit on a laptop. This is the reply: the change is
+   * offered to a person, from the one branch that already decides `withholdsPush`.
+   */
+  describe("offering the refused change to a person", () => {
+    it("opens a decision, naming the gate and the change it judged", async () => {
+      const openDecision = vi.fn<NonNullable<PipelineDeps["openDecision"]>>().mockResolvedValue(undefined);
+      const h = harness({
+        openDecision,
+        gateFor: () => rejectingGate("protected-paths", "it edits package.json"),
+      });
+
+      await runTask(h.deps, running("implement", "protected-paths"));
+
+      expect(openDecision).toHaveBeenCalledTimes(1);
+      expect(openDecision.mock.calls[0][0]).toMatchObject({
+        gate: "protected-paths",
+        diff,
+        worktreePath: "/wt",
+        worktreeRoot: config.worktreeRoot,
+        baseSha: "base1",
+      });
+    });
+
+    /**
+     * The comment moves the task out of the active column, and a person who follows it there has
+     * to find the panel already offering the reply. Ordering is the entitlement, not a nicety.
+     */
+    it("writes the record before the report that sends somebody to look at it", async () => {
+      const order: string[] = [];
+      const h = harness({
+        openDecision: vi.fn(async () => {
+          order.push("decision");
+        }),
+        gateFor: () => rejectingGate("protected-paths", "it edits package.json"),
+      });
+      h.reporter.gateRejected.mockImplementation(async () => {
+        order.push("report");
+      });
+
+      await runTask(h.deps, running("implement", "protected-paths"));
+
+      expect(order).toEqual(["decision", "report"]);
+    });
+
+    // The single condition that keeps this out of every other gate's rejection
+    it("offers nothing for a gate whose branch is pushed anyway", async () => {
+      const openDecision = vi.fn<NonNullable<PipelineDeps["openDecision"]>>().mockResolvedValue(undefined);
+      const h = harness({
+        openDecision,
+        gateFor: () => rejectingGate("diff-size", "1200 lines"),
+      });
+
+      await runTask(h.deps, running("implement", "diff-size"));
+
+      expect(openDecision).not.toHaveBeenCalled();
+      expect(h.delivery.push).toHaveBeenCalled();
+    });
+
+    it("offers nothing for a run that passes its gates", async () => {
+      const openDecision = vi.fn<NonNullable<PipelineDeps["openDecision"]>>().mockResolvedValue(undefined);
+      const h = harness({ openDecision });
+
+      await runTask(h.deps, running("implement", "protected-paths", "push"));
+
+      expect(openDecision).not.toHaveBeenCalled();
+    });
+
+    // The board had the patch in the comment before any of this existed, and still does
+    it("still reports the refusal when the offer cannot be made", async () => {
+      const h = harness({
+        openDecision: vi.fn().mockRejectedValue(new Error("state directory is read-only")),
+        gateFor: () => rejectingGate("protected-paths", "it edits package.json"),
+        logError: vi.fn(),
+      });
+
+      await runTask(h.deps, running("implement", "protected-paths"));
+
+      expect(h.reporter.gateRejected).toHaveBeenCalled();
+      expect(h.workspace.destroy).not.toHaveBeenCalled();
+      expect(h.deps.logError).toHaveBeenCalledWith(expect.stringMatching(/read-only/));
+    });
+  });
+
   // Nothing read the timeout a step or a gate was handed, so folding both onto the gate's cap cut
   // every model step from thirty minutes to ten without a single test noticing
   it("bounds a model step by the project's step timeout, and a gate by the gate cap", async () => {
