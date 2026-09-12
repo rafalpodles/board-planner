@@ -169,6 +169,18 @@ private func gateFault(_ taskKey: String) -> TelemetryEvent {
     #expect(streak.admit(recurring) != nil)
 }
 
+// Restarting the worker is what an operator does to fix a machine, and it emits no outcome — so
+// the streak has to end with the socket or the first fault afterwards is the silent one.
+@Test func aFaultAfterTheWorkerWentAwayIsReportedAgain() {
+    var streak = FaultStreak()
+    let recurring = gateFault("CP-1")
+
+    #expect(streak.admit(recurring) != nil)
+    #expect(streak.admit(recurring) == nil)
+    streak.disconnected()
+    #expect(streak.admit(recurring) != nil)
+}
+
 @Test func progressBetweenTwoFaultsDoesNotMakeTheSecondNews() {
     var streak = FaultStreak()
     let recurring = gateFault("CP-1")

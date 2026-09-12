@@ -76,11 +76,20 @@ public func notification(for event: TelemetryEvent) -> NotificationRequest? {
  * already been told to go and look, and the run history keeps every reason. Cleared by an outcome
  * that is not a fault, which is the machine proving it can work; not by a run merely starting,
  * because a fault emits after a progress event on every recurrence.
+ *
+ * Also cleared when the socket drops. Restarting the worker is what an operator does to fix a
+ * machine, and it emits no outcome — so without this the first fault after the restart, which is
+ * the moment they are most likely to be watching, would be the one they are not told about.
  */
 public struct FaultStreak: Sendable {
     private var faulting = false
 
     public init() {}
+
+    /// The worker went away. Whatever it does next is news again.
+    public mutating func disconnected() {
+        faulting = false
+    }
 
     /// The notification this event deserves, or nil — including nil for a fault already reported.
     public mutating func admit(_ event: TelemetryEvent) -> NotificationRequest? {
@@ -105,6 +114,11 @@ public final class Notifier: Sendable {
 
     public func requestAuthorization() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    }
+
+    @MainActor
+    public func forgetTheWorker() {
+        Notifier.faults.disconnected()
     }
 
     @MainActor

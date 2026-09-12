@@ -77,6 +77,7 @@ final class AppModel {
             } catch {}
             if Task.isCancelled { return }
             state.markDisconnected()
+            Notifier.shared.forgetTheWorker()
             try? await Task.sleep(for: .seconds(5))
         }
     }

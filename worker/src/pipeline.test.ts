@@ -1838,6 +1838,32 @@ describe("what a machine fault is recorded as", () => {
    * four paths had the reason in hand and passed a fixed sentence instead, so every DNS outage and
    * every broken checkout read identically (found in review).
    */
+  /**
+   * The cap is where the reason was being lost. `settle` cuts the emitted detail at 200 characters,
+   * workspace.ts wraps one BaseUnavailableError in another to keep its kind, and git's stderr — the
+   * half that says what broke — is last. Against this repository's own remote the nested class
+   * names and the URL alone reached 200 before the cause began, so the operator got boilerplate.
+   *
+   * Built from the real message rather than a short stand-in, because a short one fits either way
+   * and proves nothing (found in review).
+   */
+  it("keeps git's own answer inside the cap the menubar reads", async () => {
+    const url = "git@github-rafalpodles:rafalpodles/board-planner.git";
+    const inner = new BaseUnavailableError(
+      `could not read refs/heads/main from ${url} (fatal: Could not read from remote repository.)`
+    );
+    const { h, outcomes } = watchedOutcomes();
+    h.workspace.create.mockRejectedValue(
+      new BaseUnavailableError(`could not resolve base branch main: ${String(inner)}`)
+    );
+
+    await runTask(h.deps, task);
+
+    const emitted = outcomes().at(-1) as { detail: string };
+    expect(emitted.detail).toContain("Could not read from remote repository");
+    expect(emitted.detail).toContain("could not resolve base branch main");
+  });
+
   it("carries the reason into the record, on the two paths that had it in hand", async () => {
     const gate = await settledBy({
       gateFor: () => ({

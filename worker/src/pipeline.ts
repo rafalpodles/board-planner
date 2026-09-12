@@ -399,9 +399,16 @@ export async function runTask(
       // again. Released with the attempt refunded, and the loop is told to stop claiming.
       // With the error, not without it: the detail is the only durable account of the fault — the
       // card's comment is not reachable from the run history, and the menubar keeps no reason at
-      // all once its notification is gone. "could not be established" alone cannot tell a DNS
-      // outage from a revoked token. settle() scrubs and caps it.
-      settle("machineFault", `the base branch could not be established: ${String(error)}`);
+      // all once its notification is gone. A fixed sentence cannot tell a DNS outage from a
+      // revoked token.
+      //
+      // Unprefixed, and with the class names dropped, because settle() caps at 200 characters and
+      // git's own stderr — the half that says what broke — is last. `String(error)` here is two
+      // BaseUnavailableErrors nested (workspace.ts wraps to keep the kind), and against this
+      // repository's own remote the boilerplate alone reached 200 before the cause began. The
+      // error's text already opens with "could not resolve base branch", so it needs no sentence
+      // of ours in front of it.
+      settle("machineFault", String(error).replace(/BaseUnavailableError: /g, ""));
       await reporter.released(task, String(error));
       return "machine-fault";
     }
