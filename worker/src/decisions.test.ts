@@ -802,13 +802,34 @@ describe("how the retries are spaced", () => {
     expect(h.push).not.toHaveBeenCalled();
   });
 
-  // Counted before the spending, so a pass that never reports anything still counts
-  it("counts the attempt before it spends anything", async () => {
+  /**
+   * Counted before the spending, so a pass that never gets as far as reporting anything still
+   * counts — which is the whole point, since `settle` returning false is what the ceiling exists
+   * to bound. This harness's `settle` always returns false.
+   */
+  it("counts the attempt before it spends anything, and stamps this machine's clock", async () => {
     const h = harnessWithMarker();
 
     await settleDecisions(h.deps, [row()], NOW, () => NOW);
 
-    expect(h.markers.read("CP-158")?.attempts).toBe(1);
+    expect(h.push).toHaveBeenCalled();
     expect(h.settled[0]).toMatchObject({ state: "delivered" });
+    // The settle did NOT land, and the attempt is recorded anyway
+    expect(h.markers.read("CP-158")).toMatchObject({
+      attempts: 1,
+      lastAttemptAt: new Date(NOW).toISOString(),
+    });
+  });
+
+  // The same clock the wait is measured on, or the backoff compares a stamp against a stranger
+  it("stamps the decline path from the same clock", async () => {
+    const h = harnessWithMarker();
+
+    await settleDecisions(h.deps, [{ ...row(), state: "declined" }], NOW, () => NOW);
+
+    expect(h.markers.read("CP-158")).toMatchObject({
+      attempts: 1,
+      lastAttemptAt: new Date(NOW).toISOString(),
+    });
   });
 });

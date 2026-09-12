@@ -386,6 +386,11 @@ const MAX_SETTLEMENT_ATTEMPTS = 5;
 const SETTLE_BACKOFF_MS = 60_000;
 const MAX_SETTLE_BACKOFF_MS = 15 * 60_000;
 
+/** One more try, at this machine's clock — the same clock `readyToRetry` measures the wait on. */
+function spent(marker: DecisionMarker, tried: number, now: () => number): DecisionMarker {
+  return { ...marker, attempts: tried + 1, lastAttemptAt: new Date(now()).toISOString() };
+}
+
 function readyToRetry(marker: DecisionMarker | null, now: number): boolean {
   const attempts = marker?.attempts ?? 0;
   if (attempts === 0 || !marker?.lastAttemptAt) return true;
@@ -538,16 +543,10 @@ export async function settleDecisions(
     }
 
     if (decision.state === "declined") {
-      if (marker) {
       // Counted here as well, cheap though this path is: without it the ceiling's `discarded` arm
-      // is unreachable and the code reads as though a decline stops after five tries when it never
-      // would.
-        deps.markers.write({
-          ...marker,
-          attempts: tried + 1,
-          lastAttemptAt: new Date(now()).toISOString(),
-        });
-      }
+      // is unreachable, and the code reads as though a decline stops after five tries when it
+      // never would.
+      if (marker) deps.markers.write(spent(marker, tried, now));
       // Reported first, and the worktree removed only once the board has taken the answer: the
       // other order deletes the only copy of the work and then finds out the report did not land,
       // leaving a record that still says `declined` with nothing left to decline.
@@ -585,7 +584,7 @@ export async function settleDecisions(
 
     // Before the spending, not after it: the whole point is to count a pass that never gets as far
     // as reporting anything.
-    deps.markers.write({ ...marker, attempts: tried + 1, lastAttemptAt: new Date().toISOString() });
+    deps.markers.write(spent(marker, tried, now));
 
     try {
       const branch = branchFor(decision.taskKey);
