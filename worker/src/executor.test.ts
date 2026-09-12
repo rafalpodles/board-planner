@@ -1,6 +1,9 @@
-import { readFileSync } from "fs";
+import { mkdtempSync, readFileSync, realpathSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { createExecutor } from "./executor.js";
+import { SANDBOX_COMMAND, UNCONFINED_ESCAPE_HATCH } from "./sandbox.js";
 import { parseStream, StreamEvent } from "./stream.js";
 import { claimedTask } from "./__fixtures__/task.js";
 import { workerConfig } from "./__fixtures__/config.js";
@@ -16,9 +19,14 @@ const task = claimedTask({ description: "Do it well", acceptanceCriteria: ["work
 
 // What the pipeline hands one writing step. The brief carries the block's prompt and models; the
 // tool list is not in it, and never comes from the server.
+// A real directory, because the executor confines the agent to it and seatbelt is given the
+// resolved path — a name that does not exist cannot be resolved, and `confine` refuses rather than
+// installing a rule matching nothing. Every test below therefore runs through the confinement.
+const worktreePath = mkdtempSync(join(tmpdir(), "bp349-exec-"));
+
 const options = {
   task,
-  worktreePath: "/wt",
+  worktreePath,
   brief: {
     prompt: "Make the change the task describes.",
     capability: "edit" as const,
@@ -633,5 +641,62 @@ describe("the environment handed to the agent", () => {
     const env = run.mock.calls[0][2].env;
     expect(env.HOME).toBe("/Users/owner");
     expect(env.PATH).toBe("/usr/bin");
+  });
+});
+
+/**
+ * BP-349. HOME is on that allowlist because the CLI authenticates from its session there, and the
+ * step below runs with `bypassPermissions` — so `Write` reaches `$HOME/.claude/settings.json`,
+ * whose hooks run on the next `claude` in the same composition. sandbox.ts is what closes it; this
+ * is the wiring, which is a separate thing to get wrong.
+ */
+describe("the agent is confined to its worktree", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("spawns the CLI through the sandbox rather than directly", async () => {
+    const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
+
+    await createExecutor(config, runner).execute(options);
+
+    expect(run.mock.calls[0][0]).toBe(SANDBOX_COMMAND);
+  });
+
+  // The one directory it may write to is the one it was told to work in. Read off the -D parameter
+  // rather than off the profile text, which is where sandbox.ts deliberately never puts a path.
+  it("names the worktree as the only writable path", async () => {
+    const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
+
+    await createExecutor(config, runner).execute(options);
+
+    const args = run.mock.calls[0][1] as string[];
+    const params = args.filter((_, index) => args[index - 1] === "-D");
+    expect(params).toEqual([`W0=${realpathSync(worktreePath)}`]);
+  });
+
+  // The step that cannot be confined does not run half-confined, and does not run at all. A
+  // worktree that cannot be resolved is the reachable form of that here; a machine with no seatbelt
+  // is the other, and sandbox.test.ts pins it.
+  it("fails the step instead of spawning when it cannot be confined", async () => {
+    const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
+
+    const outcome = await createExecutor(config, runner).execute({
+      ...options,
+      worktreePath: join(worktreePath, "never-created"),
+    });
+
+    expect(run).not.toHaveBeenCalled();
+    expect(outcome.kind).toBe("error");
+  });
+
+  // What the operator accepted, honoured: the run happens, and it happens unwrapped.
+  it("runs the CLI directly once the operator has accepted the risk", async () => {
+    vi.stubEnv(UNCONFINED_ESCAPE_HATCH, "1");
+    const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
+
+    await createExecutor(config, runner).execute(options);
+
+    expect(run.mock.calls[0][0]).toBe("claude");
   });
 });

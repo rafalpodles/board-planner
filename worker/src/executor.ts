@@ -2,6 +2,7 @@ import { DEFAULT_FALLBACK_MODEL, DEFAULT_MODEL, modelOr, WorkerConfig } from "./
 import { childEnv } from "./env.js";
 import { PROTECTED_PATHS_BRIEF } from "./gates/protected-paths.js";
 import { Runner } from "./exec.js";
+import { confine } from "./sandbox.js";
 import { isRateLimitEvent, lastResultEvent, parseStream, ResultEvent, StreamEvent } from "./stream.js";
 import { ClaimedTask, ExecutionResult, RunOutcome } from "./types.js";
 
@@ -205,9 +206,7 @@ export function createExecutor(config: WorkerConfig, runner: Runner): Executor {
       const env = childEnv();
       const parser = onEvent ? incrementalParser(onEvent) : undefined;
 
-      const result = await runner.run(
-        "claude",
-        [
+      const claudeArgs = [
           "-p",
           buildPrompt(task),
           "--output-format",
@@ -232,7 +231,23 @@ export function createExecutor(config: WorkerConfig, runner: Runner): Executor {
           modelOr(brief.model || config.model, DEFAULT_MODEL),
           "--fallback-model",
           modelOr(brief.fallbackModel || config.fallbackModel, DEFAULT_FALLBACK_MODEL),
-        ],
+      ];
+
+      // The worktree and nothing else. `bypassPermissions` above is what makes an unattended step
+      // possible and also what makes `Write` reach any absolute path this uid can — measured, the
+      // CLI needs no write access to `~/.claude` or `~/.claude.json` to run, so the allowance is
+      // one directory rather than a denylist of the instruction channels inside the operator's
+      // home. See sandbox.ts for why this is not a per-run HOME.
+      const spawn = confine("claude", claudeArgs, { writable: [worktreePath] });
+
+      // Before the spawn, not after: a step that cannot be confined does not run half-confined and
+      // does not run at all. The message is the operator's, so it names the variable that accepts
+      // the risk rather than reading as a defect in the task.
+      if ("refusal" in spawn) return { kind: "error", message: spawn.refusal };
+
+      const result = await runner.run(
+        spawn.command,
+        spawn.args,
         {
           cwd: worktreePath,
           timeoutMs: brief.timeoutMs,
