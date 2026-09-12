@@ -22,6 +22,7 @@ function decision(over: Partial<ApiTaskDecision> = {}): ApiTaskDecision {
   return {
     gate: "protected-paths",
     files: ["package.json", "src/a.ts", "src/b.ts"],
+    fileCount: 3,
     protectedFiles: ["package.json"],
     patch: "diff --git a/package.json b/package.json\n+  \"build\": \"x\"\n",
     patchTruncated: false,
@@ -130,10 +131,23 @@ describe("what accepting consents to", () => {
     await waitFor(() => expect(onAnswered).toHaveBeenCalled());
   });
 
+  /**
+   * The label names what the BOARD does, and the body carries the machine's part. It used to say
+   * "Decline and delete" — an unconditional promise, and falsest in the case Give up is named for,
+   * since a machine that is not coming back never polls and so never removes anything.
+   */
+  it("names what the board does, not a deletion it cannot promise", () => {
+    panel();
+
+    expect(screen.getByRole("button", { name: "Decline" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Give up" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /delete/i })).toBeNull();
+  });
+
   it("declines without a dialog — nothing is spent by saying no", async () => {
     panel();
 
-    fireEvent.click(screen.getByRole("button", { name: "Decline and delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Decline" }));
 
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith("/api/projects/p1/tasks/t1/decision", { verdict: "decline" })
@@ -145,7 +159,7 @@ describe("what accepting consents to", () => {
     post.mockRejectedValue(new Error("already answered"));
     panel();
 
-    fireEvent.click(screen.getByRole("button", { name: "Decline and delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Decline" }));
 
     await waitFor(() => expect(toast).toHaveBeenCalledWith("already answered", "error"));
   });
@@ -170,7 +184,7 @@ describe("a change that may not be accepted here", () => {
   it("still offers Decline", () => {
     panel(workflow);
 
-    expect(screen.getByRole("button", { name: "Decline and delete" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Decline" })).toBeTruthy();
   });
 });
 
@@ -333,7 +347,7 @@ describe("giving up", () => {
   it("says it deletes the work, and asks first", async () => {
     panel();
 
-    fireEvent.click(screen.getByRole("button", { name: "Give up and delete the work" }));
+    fireEvent.click(screen.getByRole("button", { name: "Give up" }));
 
     expect(screen.getByRole("dialog").textContent).toContain("removes the worktree");
     expect(post).not.toHaveBeenCalled();
@@ -342,9 +356,9 @@ describe("giving up", () => {
   it("posts only once confirmed", async () => {
     panel();
 
-    fireEvent.click(screen.getByRole("button", { name: "Give up and delete the work" }));
+    fireEvent.click(screen.getByRole("button", { name: "Give up" }));
     const dialog = screen.getByRole("dialog");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Give up and delete" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Give up on it" }));
 
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith("/api/projects/p1/tasks/t1/decision", {
@@ -359,7 +373,7 @@ describe("giving up", () => {
     (state) => {
       panel({ state });
 
-      expect(screen.getByRole("button", { name: "Give up and delete the work" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Give up" })).toBeTruthy();
     }
   );
 });
@@ -499,7 +513,7 @@ describe("when the verdict is refused", () => {
     post.mockRejectedValue(new Error("no longer the one you read"));
     const onAnswered = panel();
 
-    fireEvent.click(screen.getByRole("button", { name: "Decline and delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Decline" }));
 
     await waitFor(() => expect(toast).toHaveBeenCalled());
     await waitFor(() => expect(onAnswered).toHaveBeenCalled());
@@ -547,7 +561,7 @@ describe("when the machine is not coming back", () => {
 
     // The control: the panel says why, and offers the way out
     expect(screen.getByTestId("decision-machine-quiet")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Give up and delete the work" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Give up" })).toBeTruthy();
   });
 
   // The control for the one above: while the machine is answering, the fast interval is the one
@@ -572,7 +586,7 @@ describe("what giving up is warned to cost", () => {
   ] as const)("describes the moment it is offered at, on %s", (state, said) => {
     panel({ state });
 
-    fireEvent.click(screen.getByRole("button", { name: "Give up and delete the work" }));
+    fireEvent.click(screen.getByRole("button", { name: "Give up" }));
 
     expect(screen.getByRole("dialog").textContent).toContain(said);
   });
@@ -587,7 +601,7 @@ describe("what giving up is warned to cost", () => {
     (state) => {
       panel({ state });
 
-      fireEvent.click(screen.getByRole("button", { name: "Give up and delete the work" }));
+      fireEvent.click(screen.getByRole("button", { name: "Give up" }));
 
       const said = screen.getByRole("dialog").textContent ?? "";
       expect(said).toContain("removes the worktree on its next poll");
@@ -608,7 +622,7 @@ describe("while a verdict is in flight", () => {
     post.mockReturnValue(new Promise((resolve) => (resolvePost = resolve)));
     panel();
 
-    fireEvent.click(screen.getByRole("button", { name: "Decline and delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Decline" }));
 
     // Scoped to the live region: the button says it too, and the button is what is NOT announced
     const live = screen.getByRole("status");
@@ -716,7 +730,7 @@ describe("a machine the fleet no longer names", () => {
   it("reads as a sentence wherever it lands", () => {
     panel({ state: "accepted", workerName: undefined });
 
-    fireEvent.click(screen.getByRole("button", { name: "Give up and delete the work" }));
+    fireEvent.click(screen.getByRole("button", { name: "Give up" }));
     const said = screen.getByRole("dialog").textContent ?? "";
 
     expect(said).toContain("accepted and that machine may be pushing it");
@@ -739,5 +753,44 @@ describe("a machine the fleet no longer names", () => {
     panel({ canDecide: false, workerName: undefined });
 
     expect(screen.getByTestId("decision-not-yours").textContent).toContain("that machine");
+  });
+});
+
+/**
+ * The host is in the visible text because the url is worker-supplied and its host is not checked.
+ * An anchor reading "an unknown host" is the one shape that asks somebody to click without telling
+ * them where — so a url the panel cannot read is not offered at all.
+ */
+describe("a pull request url the panel cannot read", () => {
+  it("is not offered as a link", () => {
+    panel({ state: "delivered", prUrl: "not a url" });
+
+    expect(screen.queryByTestId("decision-pr")).toBeNull();
+  });
+
+  // The control: a real one still is
+  it("is offered when it is one", () => {
+    panel({ state: "delivered", prUrl: "https://github.com/o/r/pull/1" });
+
+    expect(screen.getByTestId("decision-pr")).toBeTruthy();
+  });
+});
+
+/**
+ * `touchWorker` moves `lastSeenAt` on every heartbeat — every thirty seconds by default — while
+ * the panel polls every ten. Comparing the value alone reloaded three endpoints, one of them
+ * carrying the patch, twice a minute over a machine that was never anything but healthy.
+ */
+describe("a healthy machine's heartbeat", () => {
+  it("does not reload the task on every poll", async () => {
+    get.mockResolvedValue({
+      decision: { state: "accepted", workerLastSeenAt: new Date(NOW + 5_000).toISOString() },
+    });
+    const onAnswered = panel({ state: "accepted" });
+
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(get).toHaveBeenCalledTimes(3);
+    expect(onAnswered).not.toHaveBeenCalled();
   });
 });

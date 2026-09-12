@@ -58,6 +58,7 @@ export function supersedableStates(): TaskDecisionState[] {
 export interface DecisionRecord {
   gate: string;
   files: string[];
+  fileCount: number;
   protectedFiles: string[];
   patch: string;
   patchTruncated: boolean;
@@ -288,6 +289,8 @@ export function toApiDecision(
   return {
     gate: decision.gate,
     files: decision.files ?? [],
+    // The list may have been bounded; the count never is
+    fileCount: decision.fileCount || (decision.files ?? []).length,
     protectedFiles: decision.protectedFiles ?? [],
     patch: decision.patch ?? "",
     patchTruncated: Boolean(decision.patchTruncated),

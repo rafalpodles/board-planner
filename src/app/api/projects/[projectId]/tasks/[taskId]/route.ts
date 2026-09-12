@@ -60,10 +60,11 @@ export const GET = withProjectAccess(async (_request, { params, user }) => {
   // Serialised rather than published raw: the stored record carries `patchSha256` and the
   // settlement attempt count, and the panel renders the liveness of the machine that holds the
   // work — which is a second document.
+  const decider = await deciderOf(task.decision?.workerId);
   taskObj.decision = toApiDecision(
     task.decision,
-    await deciderOf(task.decision?.workerId),
-    task.decision ? await mayDecide(task.decision.workerId, user) : false
+    decider,
+    task.decision ? await mayDecide(task.decision.workerId, user, decider) : false
   );
 
   return NextResponse.json(taskObj);
@@ -73,9 +74,12 @@ export const GET = withProjectAccess(async (_request, { params, user }) => {
 /** The machine a refused change is waiting on, for its name and for whether it is still there. */
 async function deciderOf(workerId: string | undefined) {
   if (!workerId || !isValidObjectId(workerId)) return null;
+  // `owner` with the two the panel renders, so `mayDecide` can be handed the document rather than
+  // reading it again. Passing one WITHOUT `owner` would silently deny the real owner, which is why
+  // the field and the call have to move together.
   return Worker.findById(workerId)
-    .select("name lastSeenAt")
-    .lean<{ name?: string; lastSeenAt?: Date | null } | null>();
+    .select("name lastSeenAt owner")
+    .lean<{ name?: string; lastSeenAt?: Date | null; owner?: unknown } | null>();
 }
 
 // Only runs still holding a task carry a workerId, so this reads a handful of documents at most —

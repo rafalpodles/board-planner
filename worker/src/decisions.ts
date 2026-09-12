@@ -38,6 +38,20 @@ export interface DecisionMarker {
   commit: string;
   baseSha: string;
   createdAt: string;
+  /**
+   * How many times this machine has tried to act on a verdict, counted HERE rather than read off
+   * the record.
+   *
+   * The record's own `attempts` only advances when a settlement lands — so it counts the passes
+   * that reported something, and not the passes where the board would not take the report. Those
+   * are exactly the runaway: each one spends `collectDiff`, a push and a `gh pr create` on the
+   * owner's pinned token before discovering the settle failed, and the counter it was bounded by
+   * never moved. A count on this machine's own disk is independent of the channel that is failing,
+   * and survives a restart where an in-memory one would not.
+   */
+  attempts?: number;
+  /** When the last of those was, so the retries can be spaced rather than merely counted. */
+  lastAttemptAt?: string;
 }
 
 export interface MarkerStore {
@@ -200,8 +214,9 @@ export function acceptability(
       // that explains the missing button with it.
       unacceptableReason:
         `git does not show what changed in ${nameAFew(diff.suppressedDiffs)} — the patch below ` +
-        "lists the file and not its contents, whether because it is binary or because something " +
-        "in the repository says not to show it. Nobody can accept a change they have not been shown.",
+        "lists it and not its contents, whether because it is binary, because something in the " +
+        "repository says not to show it, or because it is a submodule whose whole diff is two " +
+        "object ids. Nobody can accept a change they have not been shown.",
     };
   }
   return { acceptable: true, unacceptableReason: "" };
@@ -262,6 +277,7 @@ export async function openDecision(
       // The whole change, not the gate's hits: accepting pushes the commit, all of it. The hits
       // travel separately so the panel can say which of them is the reason this is here.
       files: input.diff.changedFiles,
+      fileCount: input.diff.changedFiles.length,
       protectedFiles: protectedPaths(input.diff.changedFiles),
       patch: deps.scrub(input.diff.patch),
       patchTruncated: input.diff.truncated,
@@ -359,6 +375,24 @@ const UNBOUND_MARKER_TTL_MS = UNBOUND_MARKER_TTL_DAYS * 24 * 60 * 60_000;
  */
 const MAX_SETTLEMENT_ATTEMPTS = 5;
 
+/**
+ * How long before the next try, doubling.
+ *
+ * Five attempts against a thirty-second refresh floor is a two-and-a-half-minute budget, which an
+ * ordinary redeploy eats whole — and then the record says a machine gave up when what actually
+ * happened is that the board restarted. Spaced, the ceiling means "this has been failing for half
+ * an hour" rather than "the board was busy".
+ */
+const SETTLE_BACKOFF_MS = 60_000;
+const MAX_SETTLE_BACKOFF_MS = 15 * 60_000;
+
+function readyToRetry(marker: DecisionMarker | null, now: number): boolean {
+  const attempts = marker?.attempts ?? 0;
+  if (attempts === 0 || !marker?.lastAttemptAt) return true;
+  const wait = Math.min(SETTLE_BACKOFF_MS * 2 ** (attempts - 1), MAX_SETTLE_BACKOFF_MS);
+  return now - Date.parse(marker.lastAttemptAt) >= wait;
+}
+
 const PR_BODY = [
   "The protected-paths gate refused this change, and a person read it and accepted the push.",
   "",
@@ -424,7 +458,9 @@ export async function settleDecisions(
   deps: SettleDecisionsDeps,
   decisions: ServerDecision[],
   /** When the list was fetched, so a marker written after it is not mistaken for an orphan. */
-  decisionsAsOf: number
+  decisionsAsOf: number,
+  /** Injected only so a test can move the retry clock; the pass itself reads the wall clock. */
+  now: () => number = Date.now
 ): Promise<void> {
   for (const decision of decisions) {
     if (decision.state !== "accepted" && decision.state !== "declined") continue;
@@ -436,26 +472,39 @@ export async function settleDecisions(
     const context = await deps.contextFor(decision.projectId);
     if (!context) continue;
 
+    const marker = deps.markers.read(decision.taskKey);
+    const tried = marker?.attempts ?? 0;
+
     /*
-     * Before anything is spent. `attempts` is the count the machine itself has been reporting, so
-     * a decision that has failed this many times has already cost five full settlements; going on
-     * would be the loop the outbox's twenty attempts used to bound, with no bound at all.
+     * Before anything is spent, and counted on this machine's own disk.
      *
-     * Reported as `failed` rather than `refused`: nothing is known to be wrong with the change.
-     * A person accepting it again resets the count, which is what makes this a pause and not a
-     * verdict.
+     * Reading the record's `attempts` instead was the first shape of this, and it bounded the
+     * wrong thing: that number only advances when a settlement LANDS, so the passes it counts are
+     * the ones that reported something. A board that will not take the report — an outage, a 409,
+     * a url this side refuses — leaves it where it was, while each pass goes on spending
+     * `collectDiff`, a push and a `gh pr create` on the owner's pinned token. Exactly the runaway,
+     * and exactly the case the counter could not see.
+     *
+     * Reported as `failed` rather than `refused`: nothing is known to be wrong with the change. A
+     * person accepting it again resets the record's count and `recordVerdict` is what clears this
+     * marker's, so the pause is theirs to lift.
      */
-    if ((decision.attempts ?? 0) >= MAX_SETTLEMENT_ATTEMPTS) {
-      await deps.settle({
+    if (tried >= MAX_SETTLEMENT_ATTEMPTS) {
+      const stopped = await deps.settle({
         taskId: decision.taskId,
         state: decision.state === "declined" ? "discarded" : "failed",
-        error: `this machine has tried ${decision.attempts} times and stopped; accept it again to have another go`,
-        attempts: decision.attempts ?? 0,
+        error: `this machine has tried ${tried} times and stopped; accept it again to have another go`,
+        attempts: tried,
       });
+      // Only once the board has been told. Otherwise a machine whose board is down stops trying
+      // AND stops saying so, which is the silence this ceiling exists to make legible.
+      if (stopped && marker) deps.markers.write({ ...marker, attempts: 0, lastAttemptAt: undefined });
       continue;
     }
 
-    const marker = deps.markers.read(decision.taskKey);
+    // Spaced, not merely counted: five tries against a thirty-second floor is a two-minute budget,
+    // which an ordinary redeploy eats whole.
+    if (!readyToRetry(marker, now())) continue;
     // A task key is unique per project, not per machine, and `rebind` can put two projects on one
     // checkout. `destroyWorktree` resolves against the project the CONTEXT names, so acting on a
     // row whose project is not the one this worktree was made for deletes the wrong directory —
@@ -489,6 +538,16 @@ export async function settleDecisions(
     }
 
     if (decision.state === "declined") {
+      if (marker) {
+      // Counted here as well, cheap though this path is: without it the ceiling's `discarded` arm
+      // is unreachable and the code reads as though a decline stops after five tries when it never
+      // would.
+        deps.markers.write({
+          ...marker,
+          attempts: tried + 1,
+          lastAttemptAt: new Date(now()).toISOString(),
+        });
+      }
       // Reported first, and the worktree removed only once the board has taken the answer: the
       // other order deletes the only copy of the work and then finds out the report did not land,
       // leaving a record that still says `declined` with nothing left to decline.
@@ -523,6 +582,10 @@ export async function settleDecisions(
       });
       continue;
     }
+
+    // Before the spending, not after it: the whole point is to count a pass that never gets as far
+    // as reporting anything.
+    deps.markers.write({ ...marker, attempts: tried + 1, lastAttemptAt: new Date().toISOString() });
 
     try {
       const branch = branchFor(decision.taskKey);

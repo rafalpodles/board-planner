@@ -172,6 +172,23 @@ describe("POST /api/workers/:workerId/decisions", () => {
     expect(Buffer.byteLength(body) * 6).toBeLessThan(4 * 1024 * 1024);
   });
 
+  /**
+   * The list is bounded for rendering; the count is not. The panel says "pushes the whole commit —
+   * N files", and a sliced list would make that sentence describe five hundred files while the
+   * push carried seven hundred — the same defect `patchTruncated` exists to prevent one field over.
+   */
+  it("counts every file, even where it only stores five hundred of them", async () => {
+    const { req, ctx } = call(
+      "POST",
+      record({ files: Array.from({ length: 700 }, (_, at) => `src/f${at}.ts`) })
+    );
+
+    await POST(req, ctx);
+    const stored = createDecision.mock.calls[0][3];
+    expect(stored.files).toHaveLength(500);
+    expect(stored.fileCount).toBe(700);
+  });
+
   // A list carrying anything that is not a path is rebuilt, not trusted: it is rendered as the
   // whole change a person is consenting to
   it("drops entries that are not paths at all", async () => {

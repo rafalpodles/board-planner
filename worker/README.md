@@ -383,9 +383,10 @@ decision can be accepted again — a network fault does not cost a second readin
   because for a `push` event GitHub runs the workflow from the pushed ref — accepting one would run
   the agent's own version of CI.
 - A change whose patch was too large to carry.
-- A change holding a file `git diff` will not print — a binary asset, or one something in the
-  repository marks as one. `--numstat` reports `-` for both counts and the patch says
-  `Binary files … differ`; see `DiffStats.suppressedDiffs` for the four ways that happens.
+- A change holding a file `git diff` will not print — a binary asset, one something in the
+  repository marks as one, or a submodule pointer, whose whole diff is two object ids. For the
+  first three `--numstat` reports `-` for both counts and the patch says `Binary files … differ`;
+  a gitlink is read from its file mode instead. See `DiffStats.suppressedDiffs`.
 
 The last two are the same rule twice: the record is the reading surface, and nobody can accept what
 they were not shown.

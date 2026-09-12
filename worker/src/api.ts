@@ -56,6 +56,7 @@ export interface DecisionRequest {
   runId: string;
   gate: string;
   files: string[];
+  fileCount: number;
   protectedFiles: string[];
   patch: string;
   patchTruncated: boolean;

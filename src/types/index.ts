@@ -719,8 +719,14 @@ export type TaskDecisionState = (typeof TASK_DECISION_STATES)[number];
 export interface ITaskDecision {
   /** The gate that refused, by name, so the panel says what this is a reply to. */
   gate: string;
-  /** Every file the change touches — not the subset that tripped the gate. Accepting pushes all of it. */
+  /**
+   * Every file the change touches — not the subset that tripped the gate. Accepting pushes all of
+   * it, and the panel says so, which is why the COUNT is stored beside the list: the list is
+   * bounded for rendering and the count is not, so a change of seven hundred files cannot be
+   * shown as five hundred on the one sentence whose job is to say how much is being consented to.
+   */
   files: string[];
+  fileCount: number;
   /** The subset that tripped the gate, so the panel can say why it is here. */
   protectedFiles: string[];
   /** The change itself, as `collectDiff` bounded it and with secrets redacted. */
@@ -748,6 +754,7 @@ export interface ITaskDecision {
 export interface ApiTaskDecision {
   gate: string;
   files: string[];
+  fileCount: number;
   protectedFiles: string[];
   patch: string;
   patchTruncated: boolean;

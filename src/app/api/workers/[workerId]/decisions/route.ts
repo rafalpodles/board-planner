@@ -43,7 +43,7 @@ const MAX_PATCH_CHARS = 220_000;
 // A change touching more paths than this is not one anybody reads file by file, and the list is
 // rendered in a browser. Kept small enough that `MAX_FILES × MAX_PATH_CHARS`, twice — `files` and
 // `protectedFiles` — plus MAX_PATCH_CHARS still clears MAX_BODY_BYTES with room for JSON escaping:
-// 2 × 500 × 256 is 256 KB against a 220 KB patch, inside a 2 MB cap even if every character
+// 2 × 500 × 256 is 256 KB against a 220 KB patch, against the 4 MB cap above.
 // escapes to six bytes.
 const MAX_FILES = 500;
 const MAX_PATH_CHARS = 256;
@@ -139,9 +139,14 @@ export const POST = withWorker(async (request, { worker }) => {
       ? ""
       : "the change is larger than the patch this record can carry, so what is shown below is not all of it. Nobody can accept a change they have not been shown.");
 
+  const sentFiles = Array.isArray(body.value.files) ? body.value.files.length : 0;
+
   const result = await createDecision(taskId, String(worker._id), runId, {
     gate,
     files: strings(body.value.files),
+    // Beside the bounded list, because the panel renders it as "the whole commit — N files" and a
+    // sliced list would make that sentence smaller than the change it describes.
+    fileCount: sentFiles,
     protectedFiles: strings(body.value.protectedFiles),
     patch,
     patchTruncated,

@@ -189,7 +189,7 @@ test("giving up says it deletes the work, and asks before it does", async ({ pag
   await signIn(page, "owner");
   await openTheTask(page);
 
-  await page.getByRole("button", { name: "Give up and delete the work" }).click();
+  await page.getByRole("button", { name: "Give up" }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toContainText("removes the worktree on its next poll");
 
@@ -200,7 +200,7 @@ test("giving up says it deletes the work, and asks before it does", async ({ pag
     (response) =>
       response.url().includes(`/tasks/${HELD_TASK_ID}/decision`) && response.request().method() === "POST"
   );
-  await dialog.getByRole("button", { name: "Give up and delete" }).click();
+  await dialog.getByRole("button", { name: "Give up on it" }).click();
   expect((await answered).status()).toBe(200);
 
   await expect.poll(async () => (await storedDecision())?.state).toBe("abandoned");
@@ -219,7 +219,7 @@ test("declining says so without a dialog, and is recorded", async ({ page, reque
     (response) =>
       response.url().includes(`/tasks/${HELD_TASK_ID}/decision`) && response.request().method() === "POST"
   );
-  await page.getByRole("button", { name: "Decline and delete" }).click();
+  await page.getByRole("button", { name: "Decline" }).click();
   expect((await answered).status()).toBe(200);
 
   await expect.poll(async () => (await storedDecision())?.state).toBe("declined");
@@ -277,7 +277,7 @@ test("a change that edits what CI does is shown, explained, and cannot be accept
   await expect(page.getByTestId("decision-unacceptable")).toContainText(".github/workflows/ci.yml");
   await expect(page.getByRole("button", { name: "Accept and push" })).toHaveCount(0);
   // The control: the work must not be stuck on that laptop either way
-  await expect(page.getByRole("button", { name: "Decline and delete" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Decline" })).toBeVisible();
 
   // SAME_ORIGIN because Playwright's request context sends no Origin and the provenance check is
   // fail-closed — without it every refusal below would be that 403 rather than the one under test

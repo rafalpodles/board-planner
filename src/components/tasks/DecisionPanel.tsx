@@ -121,12 +121,18 @@ const ANSWERED_BY: Record<TaskDecisionState, string> = {
   superseded: "Last answered by",
 };
 
-/** Where a link goes, for a reader to judge. Falsy urls never reach this. */
+/**
+ * Where a link goes, for a reader to judge — and "" for a url this cannot read.
+ *
+ * The panel drops the link rather than labelling it unverifiable: the whole reason the host is in
+ * the visible text is that the url is worker-supplied, and an anchor reading "an unknown host" is
+ * the one shape that asks somebody to click without telling them where.
+ */
 function hostOf(url: string): string {
   try {
     return new URL(url).host;
   } catch {
-    return "an unknown host";
+    return "";
   }
 }
 
@@ -187,8 +193,13 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
           // Liveness as well as the state. The read already carries `workerLastSeenAt`, and
           // without this the panel goes on saying "may never see this" over a machine that came
           // back and is mid-push, because the state has not moved yet.
+          // Only out of quiet. `touchWorker` moves `lastSeenAt` on every heartbeat, which is
+          // every thirty seconds by default — so comparing the value alone reloaded three
+          // endpoints twice a minute over a machine that was never anything but healthy. While
+          // the machine is not quiet a fresher timestamp changes nothing on screen: `presumedGone`
+          // is its only reader.
           const seen = body.decision.workerLastSeenAt;
-          const cameBack = Boolean(seen) && seen !== lastSeen;
+          const cameBack = quiet && Boolean(seen) && seen !== lastSeen;
           if (body.decision.state !== state || cameBack) onAnswered();
         })
         .catch(() => {
@@ -319,7 +330,7 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
             {/* Named for the button that is actually on screen: in the retry states it says
                 "Try again", and "Accepting pushes…" points at a verb nothing offers. */}
             {state === "pending" ? "Accepting" : "Trying again"} pushes the whole commit —{" "}
-            {decision.files.length} {decision.files.length === 1 ? "file" : "files"}.
+            {decision.fileCount} {decision.fileCount === 1 ? "file" : "files"}.
           </div>
         )}
 
@@ -347,7 +358,7 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
           </p>
         )}
 
-        {decision.prUrl && (
+        {decision.prUrl && hostOf(decision.prUrl) && (
           <a
             className="text-sm text-primary underline"
             href={decision.prUrl}
@@ -394,7 +405,7 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
                 onClick={() => answer("decline")}
                 disabled={busy !== null}
               >
-                {busy === "decline" ? "Declining..." : "Decline and delete"}
+                {busy === "decline" ? "Declining..." : "Decline"}
               </Button>
             )}
             <Button
@@ -403,7 +414,7 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
               onClick={() => setAsking("abandon")}
               disabled={busy !== null}
             >
-              Give up and delete the work
+              Give up
             </Button>
           </div>
         )}
@@ -433,7 +444,7 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
         onConfirm={() => answer("abandon")}
         title="Give up on this change?"
         message={abandonWarning(state, decision.workerName || "that machine")}
-        confirmLabel="Give up and delete"
+        confirmLabel="Give up on it"
         loadingLabel="Giving up..."
         loading={busy === "abandon"}
       />

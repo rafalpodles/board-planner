@@ -553,7 +553,9 @@ describe("acting on a verdict", () => {
 
       h.settled.length = 0;
       h.settleLands();
-      await settleDecisions(h.deps, [decision()], LATER);
+      // Past the first backoff. The retry is spaced as well as counted, so a second pass in the
+      // same minute is deliberately not one.
+      await settleDecisions(h.deps, [decision()], LATER, () => LATER + 61_000);
 
       expect(h.settled).toEqual([
         { taskId: "t1", state: "delivered", prUrl: "https://github.com/o/r/pull/7" },
@@ -600,10 +602,17 @@ describe("acting on a verdict", () => {
    * failing is retried WHOLE every poll — collectDiff, a push and a `gh pr create` — and the
    * server's state never changes, so nothing ends it.
    */
+  /**
+   * Counted on this machine's own disk rather than read off the record. The record's `attempts`
+   * only advances when a settlement LANDS, so a board that will not take the report leaves it
+   * where it was while every pass goes on spending a push and a `gh pr create` — the runaway, and
+   * the one case that counter could not see.
+   */
   it("stops after five tries rather than spending a settlement every poll for ever", async () => {
     const h = harness();
+    h.markers.write(marker({ commit: "a".repeat(40), attempts: 5 }));
 
-    await settleDecisions(h.deps, [decision({ attempts: 5 })], LATER);
+    await settleDecisions(h.deps, [decision()], LATER);
 
     expect(h.push).not.toHaveBeenCalled();
     expect(h.collectDiff).not.toHaveBeenCalled();
@@ -623,8 +632,9 @@ describe("acting on a verdict", () => {
   // `failed` is unreachable from `declined`, so the ceiling has to settle from the state it is in
   it("discards rather than failing when the exhausted row was a decline", async () => {
     const h = harness();
+    h.markers.write(marker({ commit: "a".repeat(40), attempts: 5 }));
 
-    await settleDecisions(h.deps, [decision({ state: "declined", attempts: 5 })], LATER);
+    await settleDecisions(h.deps, [decision({ state: "declined" })], LATER);
 
     expect(h.settled[0]).toMatchObject({ state: "discarded" });
   });
@@ -708,5 +718,97 @@ describe("the branch a run puts its work on", () => {
   // `git push` is a force-push to the default branch waiting to happen
   it("is derived from the task key, lower case", () => {
     expect(branchFor("CP-158")).toBe("cp-158/worker");
+  });
+});
+
+/**
+ * Five tries against a thirty-second refresh floor is a two-and-a-half-minute budget, which an
+ * ordinary redeploy eats whole — and the record would then say a machine gave up when what
+ * happened is that the board restarted.
+ */
+describe("how the retries are spaced", () => {
+  function harnessWithMarker(over: Partial<DecisionMarker> = {}) {
+    const fs = memoryFs();
+    const markers = createMarkerStore("/state", fs);
+    markers.write(marker({ commit: "a".repeat(40), ...over }));
+    const push = vi.fn().mockResolvedValue(undefined);
+    const settled: DecisionSettlement[] = [];
+    return {
+      markers,
+      push,
+      settled,
+      deps: {
+        markers,
+        contextFor: async () => ({
+          worktreeRoot: "/wt",
+          destroyWorktree: vi.fn().mockResolvedValue(undefined),
+          delivery: { push, openPr: vi.fn().mockResolvedValue("https://x/pull/1") },
+          runner: {
+            run: vi.fn().mockResolvedValue({
+              code: 0,
+              stdout: `${"a".repeat(40)}\n`,
+              stderr: "",
+              timedOut: false,
+            }),
+          } as never,
+          collectDiff: vi.fn().mockResolvedValue(diff()),
+        }),
+        settle: async (settlement: DecisionSettlement) => {
+          settled.push(settlement);
+          return false;
+        },
+        log: vi.fn(),
+      },
+    };
+  }
+
+  const NOW = Date.parse("2026-09-01T12:00:00.000Z");
+
+  function row(): ServerDecision {
+    return {
+      taskId: "t1",
+      projectId: "p1",
+      taskKey: "CP-158",
+      title: "Add a thing",
+      commit: "a".repeat(40),
+      patchSha256: sha256(diff().patch),
+      state: "accepted",
+      attempts: 0,
+    };
+  }
+
+  it("does not try again in the same minute", async () => {
+    const h = harnessWithMarker({ attempts: 1, lastAttemptAt: new Date(NOW - 30_000).toISOString() });
+
+    await settleDecisions(h.deps, [row()], NOW, () => NOW);
+
+    expect(h.push).not.toHaveBeenCalled();
+  });
+
+  it("tries again once the wait has passed", async () => {
+    const h = harnessWithMarker({ attempts: 1, lastAttemptAt: new Date(NOW - 61_000).toISOString() });
+
+    await settleDecisions(h.deps, [row()], NOW, () => NOW);
+
+    expect(h.push).toHaveBeenCalled();
+  });
+
+  // Doubling, so five attempts span half an hour rather than two minutes
+  it("waits longer after each failure", async () => {
+    const h = harnessWithMarker({ attempts: 4, lastAttemptAt: new Date(NOW - 7 * 60_000).toISOString() });
+
+    await settleDecisions(h.deps, [row()], NOW, () => NOW);
+
+    expect(h.push).not.toHaveBeenCalled();
+  });
+
+  // Counted before the spending, so a pass that never reports anything still counts
+  it("counts the attempt before it spends anything", async () => {
+    const h = harnessWithMarker();
+
+    await settleDecisions(h.deps, [row()], NOW, () => NOW);
+
+    expect(h.markers.read("CP-158")?.attempts).toBe(1);
+    expect(h.settled[0]).toMatchObject({ state: "delivered" });
   });
 });

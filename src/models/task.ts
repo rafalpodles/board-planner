@@ -162,6 +162,8 @@ const taskSchema = new Schema<ITask>(
       type: {
         gate: { type: String, required: true },
         files: { type: [String], default: [] },
+        // The true number, beside a list bounded for rendering — see ITaskDecision.files
+        fileCount: { type: Number, default: 0 },
         protectedFiles: { type: [String], default: [] },
         // `select: false` on both, and it is load-bearing rather than tidy. A task document is
         // spread into a response by a dozen readers — the search, My Tasks, the release and claim

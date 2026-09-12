@@ -167,6 +167,7 @@ function record() {
   return {
     gate: "protected-paths",
     files: ["package.json"],
+    fileCount: 1,
     protectedFiles: ["package.json"],
     patch: "diff",
     patchTruncated: false,
