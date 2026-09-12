@@ -30,8 +30,12 @@ const WAITING_POLL_MS = 10_000;
  * `npm ci` without `--ignore-scripts`, so the push alone is the trigger. The decision was to keep
  * the button and make the label honest — including whose name it spends.
  */
-const ACCEPT_WARNING =
-  "Accepting pushes this commit under your own GitHub identity and opens a pull request. The push runs this repository's CI on the change — it does not merge it.";
+function acceptWarning(machine: string): string {
+  // Not "your own": the push carries the token `githubIdentityToken()` resolves, which is the
+  // MACHINE OWNER's pinned account — and an instance admin may answer for a machine that is not
+  // theirs. This is the one sentence whose whole job is to be accurate about what is spent.
+  return `Accepting pushes this commit under ${machine}'s pinned GitHub identity and opens a pull request. The push runs this repository's CI on the change — it does not merge it.`;
+}
 
 /**
  * Giving up is not the quiet option it reads as. `sweepMarkers` treats a decision that has left the
@@ -107,12 +111,25 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
    */
   useEffect(() => {
     if (!waiting) return;
+    let live = true;
     const timer = setInterval(() => {
       setNow(Date.now());
-      onAnswered();
+      // The narrow read, not the whole task: the task-detail route selects the patch, which is up
+      // to 220 KB and never changes. A full reload happens only once the answer actually moves.
+      void api
+        .get(`/api/projects/${projectId}/tasks/${taskId}/decision`)
+        .then((body: { decision?: { state?: string } | null }) => {
+          if (live && body?.decision?.state && body.decision.state !== state) onAnswered();
+        })
+        .catch(() => {
+          // A poll that cannot reach the server says nothing; the next one tries again.
+        });
     }, WAITING_POLL_MS);
-    return () => clearInterval(timer);
-  }, [waiting, onAnswered]);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [waiting, onAnswered, api, projectId, taskId, state]);
 
   // A scroll region is only a reading surface if a keyboard can reach it, and only worth a tab
   // stop when there is something to scroll to.
@@ -325,7 +342,7 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
         onClose={() => setAsking(null)}
         onConfirm={() => answer("accept")}
         title="Accept this change?"
-        message={ACCEPT_WARNING}
+        message={acceptWarning(decision.workerName || "that machine")}
         confirmLabel="Accept and push"
         loadingLabel="Accepting..."
         loading={busy === "accept"}

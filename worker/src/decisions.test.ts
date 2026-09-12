@@ -309,6 +309,9 @@ describe("acting on a verdict", () => {
       settleFails: () => {
         settleLands = false;
       },
+      settleLands: () => {
+        settleLands = true;
+      },
       push,
       openPr,
       destroyWorktree,
@@ -399,15 +402,36 @@ describe("acting on a verdict", () => {
     expect(h.collectDiff).toHaveBeenCalledWith(expect.anything(), "/wt/CP-158", "base1");
   });
 
-  // The panel renders this; a settlement that always reported the first attempt would say a
-  // machine had tried once when it had tried five times
-  it("counts the attempt on every settlement that did not deliver", async () => {
+  /**
+   * The panel renders this; a settlement that always reported the first attempt would say a
+   * machine had tried once when it had tried five times. All three sites that do not deliver,
+   * because pinning one leaves the other two free to report zero.
+   */
+  it("counts the attempt when the push itself broke", async () => {
     const h = harness();
     h.push.mockRejectedValue(new Error("remote hung up"));
 
     await settleDecisions(h.deps, [decision({ attempts: 2 })], LATER);
 
     expect(h.settled[0]).toMatchObject({ state: "failed", attempts: 3 });
+  });
+
+  it("counts the attempt when the worktree no longer matches", async () => {
+    const h = harness();
+    h.run.mockResolvedValue({ code: 0, stdout: `${"b".repeat(40)}\n`, stderr: "", timedOut: false });
+
+    await settleDecisions(h.deps, [decision({ attempts: 2 })], LATER);
+
+    expect(h.settled[0]).toMatchObject({ state: "refused", attempts: 3 });
+  });
+
+  it("counts the attempt when the worktree is gone altogether", async () => {
+    const h = harness();
+    h.markers.remove("CP-158");
+
+    await settleDecisions(h.deps, [decision({ attempts: 2 })], LATER);
+
+    expect(h.settled[0]).toMatchObject({ state: "refused", attempts: 3 });
   });
 
   it("refuses when this machine no longer holds a worktree for the task", async () => {
@@ -512,22 +536,31 @@ describe("acting on a verdict", () => {
       expect(h.markers.read("CP-158")).not.toBeNull();
     });
 
-    // Idempotent by construction: the same commit to the same branch is "Everything up-to-date",
-    // and openPr returns the pull request that already exists
-    it("does the whole settlement again on the next pass, and finishes it", async () => {
+    /**
+     * The same harness for both passes, which is the whole claim: what a failed settlement leaves
+     * on disk has to be enough for the next one to finish. A second, fresh harness would be
+     * asserting that a clean machine works.
+     *
+     * Idempotent by construction — the same commit to the same branch is "Everything up-to-date",
+     * and `openPr` returns the pull request that already exists.
+     */
+    it("does the whole settlement again on the next pass, from what the first one left", async () => {
       const h = harness();
       h.settleFails();
       await settleDecisions(h.deps, [decision()], LATER);
+      expect(h.settled).toHaveLength(1);
 
       h.settled.length = 0;
-      const second = harness();
-      second.markers.write(marker({ commit: "a".repeat(40) }));
-      await settleDecisions(second.deps, [decision()], LATER);
+      h.settleLands();
+      await settleDecisions(h.deps, [decision()], LATER);
 
-      expect(second.settled).toEqual([
+      expect(h.settled).toEqual([
         { taskId: "t1", state: "delivered", prUrl: "https://github.com/o/r/pull/7" },
       ]);
-      expect(second.destroyWorktree).toHaveBeenCalledWith("CP-158");
+      expect(h.destroyWorktree).toHaveBeenCalledWith("CP-158");
+      expect(h.markers.read("CP-158")).toBeNull();
+      // Twice, not once: the second pass redid the push rather than resuming somewhere
+      expect(h.push).toHaveBeenCalledTimes(2);
     });
 
     // The other order deletes the only copy of the work and then finds out the report did not land
@@ -554,8 +587,11 @@ describe("acting on a verdict", () => {
 
     expect(h.push).not.toHaveBeenCalled();
     expect(h.destroyWorktree).not.toHaveBeenCalled();
-    expect(h.settled).toEqual([]);
     expect(h.markers.read("CP-158")).not.toBeNull();
+    // Settled, not skipped: skipping leaves the record live for ever, answered by nothing and
+    // logged on every poll
+    expect(h.settled[0]).toMatchObject({ state: "refused" });
+    expect(h.settled[0].error).toMatch(/another project/);
   });
 
   it("does nothing for a project this machine no longer serves", async () => {

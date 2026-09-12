@@ -17,6 +17,43 @@ const AUDIT: Record<Verdict, InstanceAuditAction> = {
   abandon: "worker_decision_abandoned",
 };
 
+/**
+ * What is waiting, without the change itself.
+ *
+ * The panel polls this while a verdict is with the machine, and the task-detail route it would
+ * otherwise re-read selects `+decision.patch` — up to 220 KB every ten seconds, per open tab, for
+ * exactly as long as the machine never settles. Nothing the poll is watching for lives in the
+ * patch: `state`, `prUrl` and `error` are the whole of what changes.
+ */
+export const GET = withProjectAccess(async (_request, { params, user }) => {
+  const { projectId, taskId } = await params;
+  if (!isValidObjectId(taskId)) {
+    return NextResponse.json({ error: "Invalid task id" }, { status: 400 });
+  }
+
+  await connectDB();
+  // No `+decision.patch`, deliberately — see above. `decidedBy` is populated because the panel
+  // names whoever answered, and that is two words rather than a file.
+  const task = await Task.findOne({ _id: taskId, project: projectId })
+    .select("decision")
+    .populate("decision.decidedBy", "username fullName");
+  if (!task?.decision?.gate) {
+    return NextResponse.json({ decision: null });
+  }
+
+  const worker = await Worker.findById(task.decision.workerId)
+    .select("name lastSeenAt")
+    .lean<{ name?: string; lastSeenAt?: Date | null } | null>();
+
+  return NextResponse.json({
+    decision: toApiDecision(
+      task.decision,
+      worker,
+      await mayDecide(task.decision.workerId, user)
+    ),
+  });
+});
+
 export const POST = withProjectAccess(async (request, { params, user }) => {
   const { projectId, taskId } = await params;
   if (!isValidObjectId(taskId)) {
@@ -45,8 +82,12 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
   }
 
   await connectDB();
+  // Field by field, not `decision`. A parent inclusion is still an inclusion: mongoose sends
+  // `{decision: 1}` and the `select: false` on the subfields is overridden, so this would read up
+  // to 220 KB of patch on every verdict — and quietly contradict the schema's own comment that the
+  // two readers which need it say so.
   const task = await Task.findOne({ _id: taskId, project: projectId }).select(
-    "taskNumber decision"
+    "taskNumber decision.gate decision.workerId decision.commit decision.taskKey decision.files decision.acceptable decision.unacceptableReason decision.state"
   );
   if (!task) {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });

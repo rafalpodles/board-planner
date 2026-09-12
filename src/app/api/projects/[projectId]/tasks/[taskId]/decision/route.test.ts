@@ -36,7 +36,7 @@ vi.mock("@/lib/middleware", () => ({
       }),
 }));
 
-const { POST } = await import("./route");
+const { GET, POST } = await import("./route");
 
 const TASK_ID = "69a52e3b399b27d3cbb2c5b7";
 const WORKER_ID = "69a52e3b399b27d3cbb2c5a5";
@@ -70,8 +70,13 @@ function call(body: unknown, asMachine = false) {
 }
 
 function taskWith(value: unknown) {
+  const answer = value === null ? null : { taskNumber: 158, decision: value };
   taskFindOne.mockReturnValue({
-    select: async () => (value === null ? null : { taskNumber: 158, decision: value }),
+    select: () => ({
+      // The verdict route awaits the select; the GET chains a populate onto it
+      then: (resolve: (v: unknown) => unknown) => Promise.resolve(answer).then(resolve),
+      populate: async () => answer,
+    }),
   });
 }
 
@@ -258,5 +263,56 @@ describe("the audit row", () => {
     await POST(req, ctx);
 
     expect(logInstanceAudit).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The panel polls this while a verdict is with the machine. The task-detail route it would
+ * otherwise re-read selects `+decision.patch` — up to 220 KB every ten seconds, per open tab, for
+ * exactly as long as the machine never settles.
+ */
+describe("reading what is waiting", () => {
+  it("does not read the patch", async () => {
+    const { req, ctx } = call({});
+    await GET(req, ctx);
+
+    const selected = taskFindOne.mock.results[0].value.select.mock?.calls?.[0]?.[0];
+    expect(String(selected ?? "decision")).not.toContain("+decision.patch");
+  });
+
+  it("answers null for a task with nothing waiting on it", async () => {
+    taskWith(undefined);
+    const { req, ctx } = call({});
+
+    const response = await GET(req, ctx);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ decision: null });
+  });
+
+  // Asserted on what the route hands the serialiser rather than on what the mock hands back: the
+  // mock reshapes, so reading its output would be reading the test's own fixture
+  it("serialises the record with the machine and the reader's standing", async () => {
+    const { req, ctx } = call({});
+    await GET(req, ctx);
+
+    const [record, worker, canDecide] = toApiDecision.mock.calls[0];
+    expect(record).toMatchObject({ state: "pending", workerId: WORKER_ID });
+    expect(worker).toMatchObject({ name: "e2e-macbook-pro" });
+    expect(canDecide).toBe(true);
+  });
+
+  it("says the reader may not answer when they may not", async () => {
+    mayDecide.mockResolvedValue(false);
+    const { req, ctx } = call({});
+    await GET(req, ctx);
+
+    expect(toApiDecision.mock.calls[0][2]).toBe(false);
+  });
+
+  it("looks the task up inside the project the path names", async () => {
+    const { req, ctx } = call({});
+    await GET(req, ctx);
+
+    expect(taskFindOne).toHaveBeenCalledWith({ _id: TASK_ID, project: "p1" });
   });
 });

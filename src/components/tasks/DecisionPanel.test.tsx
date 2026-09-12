@@ -4,13 +4,15 @@ import { render, screen, cleanup, waitFor, within, fireEvent } from "@testing-li
 import { ApiTaskDecision } from "@/types";
 
 const post = vi.fn();
+const get = vi.fn();
 const toast = vi.fn();
-vi.mock("@/hooks/use-api", () => ({ useApi: () => ({ post }) }));
+vi.mock("@/hooks/use-api", () => ({ useApi: () => ({ post, get }) }));
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast }) }));
 
 const { DecisionPanel } = await import("./DecisionPanel");
 
 const NOW = Date.parse("2026-09-01T12:00:00.000Z");
+const PRESUMED_GONE_MS = 10 * 60_000;
 
 /**
  * The whole record as the API serialises it. Built from the wire shape rather than from what the
@@ -53,6 +55,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.useFakeTimers({ now: NOW, shouldAdvanceTime: true });
   post.mockResolvedValue({});
+  // The poll's own read. Answering with the state the panel already has is the quiet case.
+  get.mockResolvedValue({ decision: { state: "accepted" } });
 });
 
 afterEach(() => {
@@ -351,51 +355,116 @@ describe("giving up", () => {
  * do.
  */
 describe("while the verdict is with the machine", () => {
-  it.each(["accepted", "declined"] as const)("re-reads the task while it is %s", (state) => {
-    const onAnswered = panel({ state });
+  it.each(["accepted", "declined"] as const)("asks what became of it while it is %s", (state) => {
+    panel({ state });
 
     vi.advanceTimersByTime(10_000);
 
-    expect(onAnswered).toHaveBeenCalled();
+    expect(get).toHaveBeenCalledWith("/api/projects/p1/tasks/t1/decision");
   });
 
   it.each(["pending", "delivered", "discarded"] as const)(
-    "leaves the task alone while it is %s",
+    "asks nothing while it is %s",
     (state) => {
-      const onAnswered = panel({ state });
+      panel({ state });
 
       vi.advanceTimersByTime(60_000);
 
-      expect(onAnswered).not.toHaveBeenCalled();
+      expect(get).not.toHaveBeenCalled();
     }
   );
+
+  /**
+   * The narrow read, not the whole task: the task-detail route selects the patch, which is up to
+   * 220 KB and does not change. A full reload is worth it only once the answer has moved.
+   */
+  it("re-reads the whole task only when the answer has actually moved", async () => {
+    get.mockResolvedValue({ decision: { state: "delivered" } });
+    const onAnswered = panel({ state: "accepted" });
+
+    vi.advanceTimersByTime(10_000);
+
+    await waitFor(() => expect(onAnswered).toHaveBeenCalled());
+  });
+
+  it("leaves the task alone while the answer is where it was", async () => {
+    get.mockResolvedValue({ decision: { state: "accepted" } });
+    const onAnswered = panel({ state: "accepted" });
+
+    vi.advanceTimersByTime(30_000);
+    await Promise.resolve();
+
+    expect(onAnswered).not.toHaveBeenCalled();
+  });
+
+  // A poll that cannot reach the server says nothing rather than toasting once every ten seconds
+  it("says nothing when the poll fails", async () => {
+    get.mockRejectedValue(new Error("offline"));
+    panel({ state: "accepted" });
+
+    vi.advanceTimersByTime(30_000);
+    await Promise.resolve();
+
+    expect(toast).not.toHaveBeenCalled();
+  });
 });
 
+/**
+ * The app hides every scrollbar globally, so a wheel is otherwise the only way into the panel's
+ * primary reading surface.
+ *
+ * happy-dom reports no layout — `scrollHeight` and `clientHeight` are both 0 — so a test that
+ * merely renders can never see the tab stop appear. These define the two properties rather than
+ * waiting for a layout engine that is not there.
+ */
 describe("the change itself", () => {
-  // The app hides every scrollbar globally, so a wheel is otherwise the only way into the panel's
-  // primary reading surface
-  it("is a named region a keyboard can reach once it scrolls", () => {
-    panel({ patch: "diff\n".repeat(500) });
+  function withScrollHeight(height: number, clientHeight: number) {
+    Object.defineProperty(HTMLPreElement.prototype, "scrollHeight", {
+      configurable: true,
+      get: () => height,
+    });
+    Object.defineProperty(HTMLPreElement.prototype, "clientHeight", {
+      configurable: true,
+      get: () => clientHeight,
+    });
+  }
+
+  afterEach(() => {
+    Reflect.deleteProperty(HTMLPreElement.prototype, "scrollHeight");
+    Reflect.deleteProperty(HTMLPreElement.prototype, "clientHeight");
+  });
+
+  it("wraps rather than scrolling sideways, and takes the focus ring", () => {
+    panel();
     const pre = screen.getByTestId("decision-patch");
 
     expect(pre.className).toContain("focus-ring");
-    // Wrapped rather than scrolled sideways: a long diff line is unreachable otherwise
     expect(pre.className).toContain("whitespace-pre-wrap");
   });
 
-  /**
-   * The tab stop and the name are both conditional on there being something to scroll to, and they
-   * go together: a name on a role-less element is ignored by some assistive technology and
-   * suppresses the content in others. happy-dom reports no layout, so this drives the measurement
-   * rather than waiting for one.
-   */
-  it("names itself as a region exactly when it takes a tab stop", () => {
+  it("takes a tab stop and names itself once there is something to scroll to", async () => {
+    withScrollHeight(900, 380);
     panel();
-    const pre = screen.getByTestId("decision-patch");
-    const scrollable = pre.getAttribute("tabindex") === "0";
 
-    expect(pre.getAttribute("role")).toBe(scrollable ? "region" : null);
-    expect(pre.getAttribute("aria-label")).toBe(scrollable ? "The refused change" : null);
+    const pre = screen.getByTestId("decision-patch");
+    await waitFor(() => expect(pre.getAttribute("tabindex")).toBe("0"));
+    expect(pre.getAttribute("role")).toBe("region");
+    expect(pre.getAttribute("aria-label")).toBe("The refused change");
+  });
+
+  /**
+   * A tab stop on something that does not scroll is a stop with nothing to do, and a name on a
+   * role-less element is ignored by some assistive technology and suppresses the content in
+   * others — so the two go together, in both directions.
+   */
+  it("takes neither when the whole change already fits", async () => {
+    withScrollHeight(200, 380);
+    panel();
+
+    const pre = screen.getByTestId("decision-patch");
+    await waitFor(() => expect(pre.getAttribute("tabindex")).toBeNull());
+    expect(pre.getAttribute("role")).toBeNull();
+    expect(pre.getAttribute("aria-label")).toBeNull();
   });
 });
 
@@ -422,15 +491,29 @@ describe("when the verdict is refused", () => {
  * `accepted` for ever. The moment it becomes pointless is the moment the panel already computes.
  */
 describe("when the machine is not coming back", () => {
+  /**
+   * `Date.now()` is lifted into state so the ten-minute mark can arrive while somebody is looking
+   * at the panel. Read at render time it would only ever arrive on a reload — which for a person
+   * waiting on a machine that is never coming back is the one thing they do not know to do.
+   */
+  it("notices the machine going quiet while the panel is open", async () => {
+    panel({ state: "accepted", workerLastSeenAt: new Date(NOW - 60_000).toISOString() });
+    expect(screen.queryByTestId("decision-machine-quiet")).toBeNull();
+
+    vi.advanceTimersByTime(PRESUMED_GONE_MS);
+
+    await waitFor(() => expect(screen.getByTestId("decision-machine-quiet")).toBeTruthy());
+  });
+
   it("stops polling once it has gone quiet", () => {
-    const onAnswered = panel({
+    panel({
       state: "accepted",
       workerLastSeenAt: new Date(NOW - 30 * 60_000).toISOString(),
     });
 
     vi.advanceTimersByTime(120_000);
 
-    expect(onAnswered).not.toHaveBeenCalled();
+    expect(get).not.toHaveBeenCalled();
     // The control: the panel says why, and offers the way out
     expect(screen.getByTestId("decision-machine-quiet")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Give up and delete the work" })).toBeTruthy();

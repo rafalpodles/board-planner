@@ -61,11 +61,24 @@ function matches(filter: unknown, doc: Record<string, unknown>): boolean {
  * `recordVerdict` chains `.select()` and `.populate()` onto its update — the patch is
  * `select: false` on the schema and `decidedBy` is an ObjectId until somebody populates it — so
  * the mock has to be a thenable query rather than a resolved value.
+ *
+ * And it records what it was asked for. A stub that answered the same thing however it was called
+ * would let both chained calls be deleted with every test still green: the panel would then show
+ * an empty patch and never name who accepted, which is the defect the serialisation test below
+ * exists to describe.
  */
+const chainedCalls: { select: string[]; populate: string[] } = { select: [], populate: [] };
+
 function chained(value: unknown) {
   const query = {
-    select: () => query,
-    populate: () => query,
+    select: (fields: string) => {
+      chainedCalls.select.push(fields);
+      return query;
+    },
+    populate: (path: string) => {
+      chainedCalls.populate.push(path);
+      return query;
+    },
     then: (resolve: (v: unknown) => unknown) => Promise.resolve(value).then(resolve),
   };
   return query;
@@ -81,6 +94,8 @@ function lastUpdate(): Record<string, unknown> {
 }
 
 beforeEach(() => {
+  chainedCalls.select.length = 0;
+  chainedCalls.populate.length = 0;
   findOneAndUpdate.mockReset();
   find.mockReset();
   workerFindById.mockReset();
@@ -253,6 +268,17 @@ describe("a person's verdict", () => {
 
     expect(lastUpdate()["decision.error"]).toBe("");
     expect(lastUpdate()["decision.attempts"]).toBe(0);
+  });
+
+  /**
+   * Both chained onto the update, and both load-bearing for the answer it returns: the patch is
+   * `select: false` on the schema, and `decidedBy` is an ObjectId until somebody populates it.
+   */
+  it("asks for the patch and the person, so the answer it returns is whole", async () => {
+    await recordVerdict("t1", "accept", OWNER, PIN);
+
+    expect(chainedCalls.select).toEqual(["+decision.patch"]);
+    expect(chainedCalls.populate).toEqual(["decision.decidedBy"]);
   });
 
   it("says so when the record has already been answered", async () => {

@@ -54,6 +54,16 @@ function text(value: unknown, max: number): string {
 const SHA256 = /^[0-9a-f]{64}$/;
 const OBJECT_ID = /^[0-9a-f]{7,64}$/;
 
+/**
+ * The pull request the settlement opened, as the panel will render it — an `href` a person clicks.
+ *
+ * A worker credential is readable by the agent off its own disk, so this string is as
+ * worker-supplied as the patch is. React refuses a `javascript:` href and browsers block a
+ * top-level `data:` navigation, so the hazard is a plausible link to somewhere else rather than
+ * script execution — which is reason enough to insist it looks like what it claims to be.
+ */
+const PR_URL = /^https:\/\/[A-Za-z0-9.-]+(?::\d+)?\/[^\s]*\/(?:pull|merge_requests)\/\d+$/;
+
 export const POST = withWorker(async (request, { worker }) => {
   if (!worker.enabled || worker.lockedByInstance) {
     return NextResponse.json({ error: "this worker may not run", abort: true }, { status: 403 });
@@ -146,9 +156,14 @@ export const PATCH = withWorker(async (request, { worker }) => {
     );
   }
 
+  const prUrl = text(body.value.prUrl, 500).trim();
+  if (prUrl && !PR_URL.test(prUrl)) {
+    return NextResponse.json({ error: "prUrl must be a pull request url" }, { status: 400 });
+  }
+
   const attempts = body.value.attempts;
   const result = await settleDecision(taskId, String(worker._id), state as TaskDecisionState, {
-    prUrl: text(body.value.prUrl, 500).trim(),
+    prUrl,
     error: text(body.value.error, MAX_REASON_CHARS).trim(),
     attempts: Number.isSafeInteger(attempts) && (attempts as number) >= 0 ? (attempts as number) : 0,
   });

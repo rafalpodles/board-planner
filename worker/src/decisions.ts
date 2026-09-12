@@ -418,9 +418,15 @@ export async function settleDecisions(
     // and `parseDecisions` already treats these rows as something to be checked rather than
     // trusted.
     if (marker && marker.projectId !== decision.projectId) {
-      deps.log(
-        `${decision.taskKey}: the decision names project ${decision.projectId}, the worktree here belongs to ${marker.projectId}`
-      );
+      // Settled rather than skipped. Skipping leaves the record live for ever — `sweepMarkers`
+      // will not take it, nothing ever answers it, and the line below is logged on every poll.
+      // `refused` says so on the task and can be accepted again once somebody has looked.
+      await deps.settle({
+        taskId: decision.taskId,
+        state: "refused",
+        error: `the worktree this machine holds for ${decision.taskKey} belongs to another project`,
+        attempts: (decision.attempts ?? 0) + 1,
+      });
       continue;
     }
 
