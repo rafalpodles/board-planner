@@ -133,20 +133,44 @@ async function fetchPage(url: string, headers: Record<string, string>): Promise<
  * A rate limit is named rather than left as "403", because it is the one refusal where the answer
  * is to wait rather than to check the token.
  */
-async function refusal(res: Response): Promise<Error> {
+async function refusal(res: Response, perCommit = false): Promise<Error> {
   // Bounded, not `res.text()`: a host answering an error with a multi-gigabyte body would exhaust
   // the container while being politely refused, and nothing in the log would look like an attack
   // (BP-317, which is why `readBoundedText` exists).
   const body = await readBoundedText(res, 4096).catch(() => "");
-  console.error(`GitHub API ${res.status}: ${body.slice(0, 500)}`);
-  const rateLimited =
-    res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0";
-  if (rateLimited) {
-    const resets = res.headers.get("x-ratelimit-reset");
-    const at = resets ? new Date(Number(resets) * 1000).toISOString() : "shortly";
-    return new Error(`GitHub rate limit reached for this token; it resets at ${at}`);
-  }
+  // `warn` for a per-commit call: a repository where one of the two check endpoints refuses
+  // systematically produces a line per pull request per tick — up to 240 an hour on one project —
+  // and drowning the log is its own outage. The pull-request listing keeps `error`, because it
+  // fails once per sync and takes the whole sync down with it.
+  (perCommit ? console.warn : console.error)(`GitHub API ${res.status}: ${body.slice(0, 500)}`);
+
+  const limited = rateLimit(res);
+  if (limited) return new Error(`GitHub rate limit reached for this token; ${limited}`);
   return new Error(`GitHub answered ${res.status}`);
+}
+
+/**
+ * Whether this refusal is a rate limit, and when to come back — or `null` if it is something else.
+ *
+ * Three shapes, not one. GitHub answers a **primary** limit with 403 or 429 and
+ * `x-ratelimit-remaining: 0`, and a **secondary** limit with 403 or 429, a `retry-after` in
+ * seconds, and a remaining count that is often **not** zero. Keying on 403-with-zero-remaining
+ * alone — which is what this did — sent the other two into "GitHub answered 403", the message that
+ * tells a reader to go and check their token. Waiting is the answer to all three.
+ */
+function rateLimit(res: Response): string | null {
+  if (res.status !== 403 && res.status !== 429) return null;
+
+  const retryAfter = res.headers.get("retry-after");
+  if (retryAfter) return `wait ${retryAfter}s before retrying`;
+
+  if (res.headers.get("x-ratelimit-remaining") === "0") {
+    const resets = res.headers.get("x-ratelimit-reset");
+    return resets
+      ? `it resets at ${new Date(Number(resets) * 1000).toISOString()}`
+      : "it resets shortly";
+  }
+  return null;
 }
 
 /**
@@ -303,7 +327,7 @@ export async function fetchChecks(
 }
 
 /** Pages a commit can have before this stops reading them. */
-const MAX_CHECK_RUN_PAGES = 3;
+export const MAX_CHECK_RUN_PAGES = 3;
 
 /**
  * Every check run on a commit, not only the first hundred.
@@ -341,7 +365,7 @@ async function fetchJson<T>(url: string, headers: Record<string, string>): Promi
     { headers, signal: AbortSignal.timeout(15000) },
     GITHUB_DESTINATION
   );
-  if (!res.ok) throw await refusal(res);
+  if (!res.ok) throw await refusal(res, true);
   return readBoundedJson(res, MAX_RESPONSE_BYTES);
 }
 
@@ -354,7 +378,7 @@ async function fetchJson<T>(url: string, headers: Record<string, string>): Promi
  * cap drops is the stalest.
  */
 export const MAX_CHECKED_PULL_REQUESTS = 20;
-const CHECK_CONCURRENCY = 5;
+export const CHECK_CONCURRENCY = 5;
 
 /**
  * Attaches CI state to matched pull requests.
@@ -368,12 +392,26 @@ export async function withChecks(
   prs: ParsedPR[],
   owner: string,
   repo: string,
-  token: string
+  token: string,
+  /**
+   * A task number whose pull requests are asked about whatever the cap says.
+   *
+   * The cap starves the same pull requests on every tick, deterministically — and a manual Refresh
+   * runs the same capped sync, so on a board with more than `MAX_CHECKED_PULL_REQUESTS` open pull
+   * requests a person had no way to force a look at the one in front of them. This is that way.
+   * Bounded by construction: one task's links, and a task has a handful at most.
+   */
+  alwaysAsk?: number
 ): Promise<(ParsedPR & PullRequestChecks)[]> {
-  const askable = prs
-    .filter((pr) => pr.state === "open" && pr.headSha)
-    .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
-    .slice(0, MAX_CHECKED_PULL_REQUESTS);
+  const open = prs.filter((pr) => pr.state === "open" && pr.headSha);
+  const insisted = alwaysAsk === undefined ? [] : open.filter((pr) => pr.matchedTaskNumber === alwaysAsk);
+  const askable = [
+    ...insisted,
+    ...open
+      .filter((pr) => !insisted.includes(pr))
+      .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
+      .slice(0, MAX_CHECKED_PULL_REQUESTS),
+  ];
 
   const checks = new Map<ParsedPR, PullRequestChecks>();
   for (let i = 0; i < askable.length; i += CHECK_CONCURRENCY) {

@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import {
+  CHECK_CONCURRENCY,
+  MAX_CHECK_RUN_PAGES,
   MAX_CHECKED_PULL_REQUESTS,
   fetchChecks,
   fetchPullRequests,
@@ -107,8 +109,43 @@ describe("how many pull requests one sync asks about", () => {
 
     await withChecks(many(MAX_CHECKED_PULL_REQUESTS), "o", "r", "t");
 
-    // Two requests per pull request, so a batch of five is ten in flight
-    expect(counting.peak()).toBeLessThanOrEqual(10);
+    // Two assertions, because one was satisfied by doing nothing: `toBeLessThanOrEqual` alone
+    // passes at a peak of zero, so a `withChecks` that stopped asking about anything at all
+    // cleared it. The lower bound is what makes the upper one mean something.
+    //
+    // The ceiling is the batch, not the batch doubled. `fetchChecks` starts two requests per pull
+    // request, but `safeFetch` resolves the destination before either reaches the wire, so the
+    // pair does not overlap itself — measured at 5 with a batch of 5. Unbounded, twenty pull
+    // requests would peak at forty, which is what this catches.
+    expect(counting.peak()).toBeGreaterThan(0);
+    expect(counting.peak()).toBeLessThanOrEqual(CHECK_CONCURRENCY * 2);
+  });
+
+  /**
+   * The cap starves the same pull requests on every tick, deterministically — and a manual Refresh
+   * runs the same capped sync, so on a busy board a person had no way to force a look at the task
+   * in front of them. `alwaysAsk` is that way, and it is what the task detail's Refresh passes.
+   */
+  it("asks about one named task's pull requests however deep they are", async () => {
+    const { asked } = githubCounting();
+    // The stalest of the lot, so the cap would certainly drop it
+    const prs = many(MAX_CHECKED_PULL_REQUESTS + 5);
+    prs[0].matchedTaskNumber = 99;
+
+    await withChecks(prs, "o", "r", "t", 99);
+
+    expect(shasAsked(asked)).toContain(prs[0].headSha);
+  });
+
+  // And it is still the exception, not a way round the cap: everything else stays bounded
+  it("does not let that widen the cap for everybody else", async () => {
+    const { asked } = githubCounting();
+    const prs = many(MAX_CHECKED_PULL_REQUESTS + 5);
+    prs[0].matchedTaskNumber = 99;
+
+    await withChecks(prs, "o", "r", "t", 99);
+
+    expect(shasAsked(asked)).toHaveLength(MAX_CHECKED_PULL_REQUESTS + 1);
   });
 
   it("asks about nothing at all when every pull request has finished", async () => {
@@ -165,16 +202,27 @@ describe("a commit with more check runs than one page holds", () => {
     });
   });
 
-  // The control: a commit that fits in one page is read once, not three times
+  // The control: a commit that fits in one page is read once, not three times. No `total_count`,
+  // so it is the short page alone that ends the loop — with one, both conditions fire and deleting
+  // either leaves this green.
   it("stops as soon as the page is not full", async () => {
-    const { asked } = githubCounting(() => ({
-      total_count: 2,
-      check_runs: page("unit", "success", 2),
-    }));
+    const { asked } = githubCounting(() => ({ check_runs: page("unit", "success", 2) }));
 
     await fetchChecks("o", "r", "sha1", "t");
 
     expect(asked.filter((url) => url.includes("/check-runs"))).toHaveLength(1);
+  });
+
+  // The bound exists because the loop is driven by a body the remote host controls
+  it("stops after three pages however many the host claims", async () => {
+    const { asked } = githubCounting(() => ({
+      total_count: 100_000,
+      check_runs: page("shard", "success", 100),
+    }));
+
+    await fetchChecks("o", "r", "sha1", "t");
+
+    expect(asked.filter((url) => url.includes("/check-runs"))).toHaveLength(MAX_CHECK_RUN_PAGES);
   });
 });
 
@@ -288,6 +336,33 @@ describe("what a refusal says", () => {
   it("names a rate limit rather than reporting a bare 403", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     refusing(403, { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1789000000" }, "{}");
+
+    await expect(fetchPullRequests("o", "r", "t")).rejects.toThrow(/rate limit/i);
+  });
+
+  // The other side of the rate-limit branch: a 403 that is not one must not claim to be
+  it("does not call every 403 a rate limit", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    refusing(403, { "x-ratelimit-remaining": "4999" }, "{}");
+
+    await expect(fetchPullRequests("o", "r", "t")).rejects.toThrow("GitHub answered 403");
+  });
+
+  /**
+   * Three shapes, not one. A **secondary** limit carries `retry-after` and a remaining count that
+   * is often not zero, and either limit may arrive as 429 rather than 403 — all of which used to
+   * read as "GitHub answered 403", the message that sends a reader to check their token.
+   */
+  it("names a secondary limit, which carries retry-after and a non-zero remaining", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    refusing(403, { "retry-after": "60", "x-ratelimit-remaining": "4321" }, "{}");
+
+    await expect(fetchPullRequests("o", "r", "t")).rejects.toThrow(/rate limit.*wait 60s/);
+  });
+
+  it("names a limit that arrives as 429", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    refusing(429, { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1789000000" }, "{}");
 
     await expect(fetchPullRequests("o", "r", "t")).rejects.toThrow(/rate limit/i);
   });

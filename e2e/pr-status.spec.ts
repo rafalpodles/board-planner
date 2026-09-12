@@ -4,9 +4,11 @@ import { ADMIN_AUTH } from "./api";
 import {
   PROJECT_KEY,
   SIBLING_TASK_NUMBER,
+  SIBLING_TASK_ID,
   SIBLING_TASK_TITLE,
   seed,
   seedRepository,
+  storedUpdatedAt,
 } from "./seed";
 import { signIn as arriveSignedIn } from "./session";
 
@@ -368,4 +370,43 @@ test("every request carries the project's own token", async ({ request }) => {
 
   expect(carried.length).toBeGreaterThan(0);
   expect(new Set(carried)).toEqual(new Set([`Bearer ${SEEDED_TOKEN}`]));
+});
+
+/**
+ * The reason `unchanged()` exists, pinned where it can actually be observed.
+ *
+ * `taskSchema` has `timestamps: true` and Mongoose appends `$set: { updatedAt: now }` to a pipeline
+ * update, so a sync that wrote unconditionally moved every linked task to "just now" every five
+ * minutes. The dashboard reads `updatedAt` on a done task as the date it was finished, and My
+ * Tasks, search and suggestions all sort by it.
+ *
+ * Every unit test of this mocks `Task.updateOne`, so none of them can see a timestamp move. This
+ * one runs against the real database and the real schema, which is the only place the claim is
+ * falsifiable.
+ */
+test("syncing twice over the same pull requests does not touch the task", async ({ request }) => {
+  await github(request, { pulls: [pull()], checks: { [HEAD]: passing } });
+  const first = await syncNow(request);
+  expect(first).toMatchObject({ prsLinked: 1, tasksWritten: 1 });
+  const after = await storedUpdatedAt(SIBLING_TASK_ID);
+
+  // A second later, so a moved timestamp is a different number rather than the same millisecond
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  const second = await syncNow(request);
+
+  expect(second).toMatchObject({ prsLinked: 1, tasksWritten: 0 });
+  expect(await storedUpdatedAt(SIBLING_TASK_ID)).toBe(after);
+});
+
+// The control: a sync that genuinely learned something does write, and the timestamp does move
+test("a build going red does touch it", async ({ request }) => {
+  await github(request, { pulls: [pull()], checks: { [HEAD]: passing } });
+  await syncNow(request);
+  const after = await storedUpdatedAt(SIBLING_TASK_ID);
+
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  await github(request, { pulls: [pull()], checks: { [HEAD]: failing } });
+
+  expect(await syncNow(request)).toMatchObject({ tasksWritten: 1 });
+  expect(await storedUpdatedAt(SIBLING_TASK_ID)).toBeGreaterThan(after);
 });

@@ -341,6 +341,15 @@ export async function seedCustomFields(values: Record<string, unknown> = {}) {
   await mongoose.disconnect();
 }
 
+/** When a task was last written, as the database has it — `timestamps: true` maintains this. */
+export async function storedUpdatedAt(taskId: mongoose.Types.ObjectId): Promise<number> {
+  const db = (await connect()).db!;
+  const task = await db.collection("tasks").findOne({ _id: taskId });
+  await mongoose.disconnect();
+  if (!task?.updatedAt) throw new Error(`no task ${String(taskId)} to read updatedAt from`);
+  return new Date(task.updatedAt).getTime();
+}
+
 /** Every history entry on a task, newest first, as the API returns them to the timeline. */
 export async function storedActivity(
   taskId: mongoose.Types.ObjectId

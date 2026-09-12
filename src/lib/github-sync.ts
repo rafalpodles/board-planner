@@ -243,7 +243,9 @@ export async function syncGithubPullRequests(
     matchPRsToTasks(rawPRs, project.key, project.formerKeys || []),
     parsed.owner,
     parsed.repo,
-    token
+    token,
+    // A person looking at one task gets a real look at it, cap or no cap
+    transitionOnly
   );
 
   const prsByTask = new Map<number, typeof matchedPRs>();
