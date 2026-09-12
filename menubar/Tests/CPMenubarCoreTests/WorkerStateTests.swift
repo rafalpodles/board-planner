@@ -41,6 +41,34 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
     #expect(state.health == .idle)
 }
 
+// BP-609. A machine fault and a release are the same thing on the board — the task went back to
+// the queue — so before this they left the same .idle menubar. .idle is what a machine with
+// nothing to do looks like, and this one has work it cannot take.
+@Test func aMachineFaultIsItsOwnHealthAndNotIdle() {
+    var state = WorkerState()
+    state.apply(.outcome(Outcome(outcome: "machineFault", taskKey: "CP-1", detail: "no sandbox")), at: t0)
+
+    #expect(state.health == .faulted)
+}
+
+// The loop claims nothing while paused, so a fault can only be the tail of a run that started
+// before it. Overwriting .paused turns the panel's Resume button back into Pause on a worker that
+// is still paused.
+@Test func aFaultDoesNotUnpauseAPausedWorker() {
+    var state = WorkerState()
+    state.forceHealth(.paused)
+    state.apply(.outcome(Outcome(outcome: "machineFault", taskKey: "CP-1", detail: "no sandbox")), at: t0)
+
+    #expect(state.health == .paused)
+}
+
+@Test func aReleasedOutcomeStillReadsAsIdle() {
+    var state = WorkerState()
+    state.apply(.outcome(Outcome(outcome: "released", taskKey: "CP-1", detail: "usage limit reached")), at: t0)
+
+    #expect(state.health == .idle)
+}
+
 @Test func keepsTheLastFiveToolsNewestFirst() {
     var state = WorkerState()
     for i in 1...7 {
@@ -114,13 +142,16 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
 }
 
 @Test func everyHealthHasItsOwnIcon() {
-    let icons = Set([Health.idle, .working, .paused, .needsHuman, .disconnected].map { health -> String in
+    // allCases, not a literal: a hand-written list is one a new case can be left out of, and the
+    // test's own claim is "every".
+    let every = Health.allCases
+    let icons = Set(every.map { health -> String in
         var state = WorkerState()
         state.forceHealth(health)
         return state.iconName()
     })
 
-    #expect(icons.count == 5)
+    #expect(icons.count == every.count)
 }
 
 @Test func theStepperMarksPassedPhasesDoneAndTheRestPending() {

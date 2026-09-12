@@ -10,9 +10,13 @@ const OUTCOME_LABELS: Record<AgentRunOutcome, string> = {
   failed: "Failed",
   requeued: "Back in the queue",
   released: "Released",
+  machineFault: "Machine fault",
 };
 
-const FAILED_OUTCOMES = new Set<AgentRunOutcome>(["refused", "blocked", "failed"]);
+// `machineFault` is here and `released` is not, and that difference is the point of recording the
+// two apart: a release is the account waiting for a clock and repairs itself, a fault is a machine
+// somebody has to go and look at (BP-609).
+const FAILED_OUTCOMES = new Set<AgentRunOutcome>(["refused", "blocked", "failed", "machineFault"]);
 
 interface Ended {
   outcome: AgentRunOutcome;

@@ -1,7 +1,22 @@
 import Foundation
 
-public enum Health: Equatable, Sendable {
-    case idle, working, needsHuman, disconnected, paused
+/**
+ * What a machine fault is called, wherever it is said.
+ *
+ * One constant because the panel and the notification are one sentence about one state, and as two
+ * literals they had already drifted apart once inside a single review — the notification was
+ * reworded and the panel was not. Past tense on purpose: the worker stops claiming for one pass,
+ * several of these faults are transients, and a present-tense claim about the machine is one
+ * nothing here can withdraw.
+ */
+public let machineFaultHeadline = "This machine couldn't run the last task"
+
+public enum Health: Equatable, Sendable, CaseIterable {
+    // faulted says the last run could not run on this machine at all — not that the task was
+    // rejected, and not that the machine is latched off: the worker stops claiming for one pass
+    // and tries again a poll interval later (worker/src/loop.ts). Its own case rather than
+    // needsHuman so the switches below have to say what it looks like (BP-609).
+    case idle, working, needsHuman, faulted, disconnected, paused
 }
 
 public enum StepState: Equatable, Sendable {
@@ -50,6 +65,19 @@ public struct WorkerState: Equatable, Sendable {
             if outcome.outcome == "merged" { mergedToday += 1 }
             if outcome.outcome == "blocked" {
                 health = .needsHuman
+            } else if outcome.outcome == "machineFault" {
+                // Not .idle, which is what a released run leaves and what a machine with nothing to
+                // do looks like — the last run here could not run at all.
+                //
+                // Sticky, and the panel's wording is past tense because of it: nothing emits while
+                // the queue is empty, so a fault on the last task of the night is still on screen
+                // in the morning. It clears on the next run's first progress event, on a
+                // reconnect's status, or on the next outcome.
+                //
+                // Behind the pause guard, unlike the blocked branch above: the loop claims nothing
+                // while paused, so a fault can only be the tail of a run that started before the
+                // pause, and overwriting .paused turns the panel's Resume button back into Pause.
+                if health != .paused { health = .faulted }
             } else if health != .paused {
                 health = .idle
             }
@@ -76,6 +104,7 @@ public struct WorkerState: Equatable, Sendable {
         case .working: return "circle.fill"
         case .paused: return "pause.circle"
         case .needsHuman: return "exclamationmark.circle.fill"
+        case .faulted: return "wrench.and.screwdriver.fill"
         case .disconnected: return "exclamationmark.triangle"
         }
     }

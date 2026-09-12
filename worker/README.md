@@ -267,7 +267,12 @@ and `SIGINT` both finish the task in flight before the loop exits.
 
   The step-level refusal is still there underneath: it is what stops an unconfined agent running.
   A task it does refuse is released with its attempt refunded rather than failed, so nothing walks
-  the queue into the escalation column.
+  the queue into the escalation column. The run is recorded as **machineFault**, not `released`
+  (**BP-609**): the board action is the same as a usage limit's, and the outcome is the only place
+  the difference survives — a released run repairs itself on a clock, a machine fault is one
+  somebody has to go and look at. The menubar raises its own notification for it — once per project
+  per run of consecutive faults, not once per poll, because the fault repeats every cycle for as
+  long as it lasts — and reads `.faulted` rather than idle.
 
   Preflight answers the question at boot by confining a probe and watching it fail to escape, so a
   machine where `sandbox-exec` is missing or the profile stopped compiling reads red rather than

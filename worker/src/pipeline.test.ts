@@ -1775,3 +1775,343 @@ describe("whether a run merges", () => {
     expect(h.reporter.delivered).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * BP-609. Every one of these paths hands the task back the same way — `reporter.released`, attempt
+ * refunded — and before this they recorded the same word for it. So the runs list, the fleet
+ * history and the menubar could not separate "this machine is broken and is taking no work" from
+ * "this account is waiting for a clock", which is the one fact the operator has to act on.
+ *
+ * Driven through `recordRun` and the telemetry bus together because they are read by different
+ * people: the record is what the board keeps, the emission is what the menubar switches on, and
+ * only the record goes through OUTCOMES.
+ */
+describe("what a machine fault is recorded as", () => {
+  function watchedOutcomes(overrides: Partial<PipelineDeps> = {}) {
+    const telemetry = createTelemetry();
+    const seen: TelemetryUpdate[] = [];
+    telemetry.subscribe((update) => seen.push(update));
+    const h = harness({ telemetry, ...overrides });
+    return { h, outcomes: () => seen.filter(isOutcome) };
+  }
+
+  async function settledBy(overrides: Partial<PipelineDeps> = {}) {
+    const { h, outcomes } = watchedOutcomes(overrides);
+    const disposition = await runTask(h.deps, task);
+    const [, record] = h.recordRun.mock.calls.at(-1)!;
+    return { disposition, record, emitted: outcomes().at(-1), reporter: h.reporter };
+  }
+
+  it("records a step the machine could not run as a machine fault, not a release", async () => {
+    const execute = vi
+      .fn<Executor["execute"]>()
+      .mockResolvedValue({ kind: "machine_fault", message: "this machine has no sandbox" });
+
+    const settled = await settledBy({ executor: { execute } });
+
+    expect(settled.disposition).toBe("machine-fault");
+    expect(settled.record).toMatchObject({
+      outcome: "machineFault",
+      detail: "this machine has no sandbox",
+    });
+    expect(settled.emitted).toMatchObject({ outcome: "machineFault" });
+    // The board action is unchanged: the task goes back to the queue with its attempt refunded
+    expect(settled.reporter.released).toHaveBeenCalled();
+  });
+
+  it("records a gate the machine could not run as a machine fault", async () => {
+    const settled = await settledBy({
+      gateFor: () => ({
+        name: "review",
+        run: async () => ({ ok: false, reason: "this machine has no sandbox", machineFault: true }),
+      }),
+    });
+
+    expect(settled.disposition).toBe("machine-fault");
+    expect(settled.record).toMatchObject({ outcome: "machineFault" });
+    expect(settled.emitted).toMatchObject({ outcome: "machineFault" });
+  });
+
+  /**
+   * The record's detail is the only durable account of a fault: the card's comment is not reachable
+   * from the run history, and the menubar keeps no reason once its notification is gone. Two of the
+   * four paths had the reason in hand and passed a fixed sentence instead, so every DNS outage and
+   * every broken checkout read identically (found in review).
+   */
+  /**
+   * The cap is where the reason was being lost. `settle` cuts the emitted detail at 200 characters,
+   * workspace.ts wraps one BaseUnavailableError in another to keep its kind, and git's stderr — the
+   * half that says what broke — is last. Against this repository's own remote the nested class
+   * names and the URL alone reached 200 before the cause began, so the operator got boilerplate.
+   *
+   * Built from the real message rather than a short stand-in, because a short one fits either way
+   * and proves nothing (found in review).
+   */
+  it("keeps git's own answer inside the cap the menubar reads", async () => {
+    const url = "git@github-rafalpodles:rafalpodles/board-planner.git";
+    const inner = new BaseUnavailableError(
+      `could not read refs/heads/main from ${url} (fatal: Could not read from remote repository.)`
+    );
+    const { h, outcomes } = watchedOutcomes();
+    h.workspace.create.mockRejectedValue(
+      new BaseUnavailableError(`could not resolve base branch main: ${String(inner)}`)
+    );
+
+    await runTask(h.deps, task);
+
+    const emitted = outcomes().at(-1) as { detail: string };
+    expect(emitted.detail).toContain("Could not read from remote repository");
+    expect(emitted.detail).toContain("could not resolve base branch main");
+    // This shape composes to 172, under the cap, so `fitDetail` returns on its first line and the
+    // assertions above pass against the head-only version they were written to reject. Said here
+    // rather than fixed by lengthening it: the point of THIS test is the class-name strip and the
+    // dropped prefix, and the neighbour below is where the cut is exercised (found in review).
+    expect(emitted.detail).not.toContain("…");
+    expect(emitted.detail.length).toBeLessThan(200);
+  });
+
+  /**
+   * The same bug one remote longer, and the test where the cut is actually exercised: this shape
+   * composes to 272. Over https git echoes the remote a second time inside its own stderr, so the
+   * URL is in the sentence twice and a head-only cut loses the cause entirely — see `fitDetail` for
+   * the measured thresholds and the string they were measured against. The first fix moved that
+   * cliff; keeping both ends removes it (found in review, twice, and the figure that used to stand
+   * in this docblock was the third copy of one that never reproduced).
+   */
+  it("keeps the cause even when the remote is long enough to fill the cap twice", async () => {
+    const url = "https://github.com/acme-engineering-platform/deployment-service.git";
+    const inner = new BaseUnavailableError(
+      `could not read refs/heads/main from ${url} (fatal: unable to access '${url}/': ` +
+        `Could not resolve host: github.com)`
+    );
+    const { h, outcomes } = watchedOutcomes();
+    h.workspace.create.mockRejectedValue(
+      new BaseUnavailableError(`could not resolve base branch main: ${String(inner)}`)
+    );
+
+    await runTask(h.deps, task);
+
+    const emitted = outcomes().at(-1) as { detail: string };
+    // Both ends: what was being attempted, and what went wrong. The middle is the part that says
+    // the same thing twice.
+    expect(emitted.detail).toContain("could not resolve base branch main");
+    expect(emitted.detail).toContain("Could not resolve host");
+    expect(emitted.detail.length).toBeLessThanOrEqual(200);
+    // And the head stops at a word boundary. Cut mid-URL the head reads as a real, shorter remote,
+    // which is the one way this can mislead rather than merely shorten — an operator checks the
+    // address first (found in review).
+    expect(emitted.detail).not.toMatch(/https:\/\/\S*…/);
+  });
+
+  // Backing up to a space is only worth it while it leaves a head worth reading: a long unbroken
+  // token after a short prefix would otherwise spend five characters of a two-hundred budget.
+  it("does not throw away the budget backing up to an early space", async () => {
+    const execute = vi.fn<Executor["execute"]>().mockResolvedValue({
+      kind: "machine_fault",
+      message: `abcde fghij${"x".repeat(400)}`,
+    });
+    const { h, outcomes } = watchedOutcomes({ executor: { execute } });
+
+    await runTask(h.deps, task);
+
+    expect((outcomes().at(-1) as { detail: string }).detail.length).toBe(200);
+  });
+
+  // A lone surrogate at either seam renders as a replacement character, and the tail is an offset
+  // so it can land inside a pair. The head cannot, once it has backed up to a space.
+  it("does not cut a character in half at either seam", async () => {
+    const execute = vi.fn<Executor["execute"]>().mockResolvedValue({
+      kind: "machine_fault",
+      // One ASCII character first, so the head's slice lands mid-pair. Without it the head falls
+      // exactly on a pair boundary and only the tail guard is exercised — dropping the head's left
+      // the whole suite green (found in review).
+      message: `x${"𝄞".repeat(200)}`,
+    });
+    const { h, outcomes } = watchedOutcomes({ executor: { execute } });
+
+    await runTask(h.deps, task);
+
+    const { detail } = outcomes().at(-1) as { detail: string };
+    expect(detail).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+    expect(detail).not.toMatch(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+  });
+
+  // The control on the same cut: a 403 and a DNS failure against the same long remote must not
+  // arrive as the same sentence, which is what head-only truncation made them.
+  it("tells two failures of one long remote apart", async () => {
+    const url = "https://github.com/acme-engineering-platform/deployment-service.git";
+    const against = async (stderr: string) => {
+      const { h, outcomes } = watchedOutcomes();
+      h.workspace.create.mockRejectedValue(
+        new BaseUnavailableError(
+          `could not resolve base branch main: BaseUnavailableError: could not read ` +
+            `refs/heads/main from ${url} (fatal: unable to access '${url}/': ${stderr})`
+        )
+      );
+      await runTask(h.deps, task);
+      return (outcomes().at(-1) as { detail: string }).detail;
+    };
+
+    expect(await against("Could not resolve host: github.com")).not.toBe(
+      await against("The requested URL returned error: 403")
+    );
+  });
+
+  /**
+   * `fitDetail(scrub(detail))` and not the other way round, and nothing enforced the order: swapped,
+   * the whole worker suite stayed green while a token straddling a cut point reached the
+   * notification (found in review). The two-ended cut makes this bite harder than the old head-only
+   * slice — two places a redaction can be split rather than one — and every length-bounded shape in
+   * `SECRET` has the same property: neither half still matches, so neither half is redacted.
+   */
+  it("redacts before it cuts, so a secret on a cut point is not published in halves", async () => {
+    const token = `ghp_${"A".repeat(40)}`;
+    // Positioned so the TAIL boundary lands inside it, because the tail is a fixed offset and is
+    // the cut point no detail can avoid. The head can split a token too, and the neighbour below
+    // pins that: its backup only runs when the first half holds a space past 60% of the head, so a
+    // space-free detail and a detail whose only early space is git's own `fatal: ` both take a raw
+    // cut. Swapped, the tail keeps a run of the token with its `ghp_` prefix left behind in the
+    // discarded middle, so `SECRET` matches neither half and a real credential fragment ships.
+    const detail = `${"x".repeat(150)} ${token} ${"y".repeat(70)}`;
+    const execute = vi
+      .fn<Executor["execute"]>()
+      .mockResolvedValue({ kind: "machine_fault", message: detail });
+    const { h, outcomes } = watchedOutcomes({ executor: { execute } });
+
+    await runTask(h.deps, task);
+
+    const emitted = outcomes().at(-1) as { detail: string };
+    expect(emitted.detail).not.toContain("ghp_");
+    expect(emitted.detail).not.toContain("AAAAAAAAAA");
+    expect(emitted.detail).toContain("[redacted]");
+  });
+
+  // `\w+`, not `\w*`: the star matched empty, so a bare `Error: ` in git's own output was stripped
+  // along with the wrapper's class names. A stated behaviour change that nothing pinned (found in
+  // review).
+  it("strips the wrapper's class names and leaves git's own words alone", async () => {
+    const { h, outcomes } = watchedOutcomes();
+    h.workspace.create.mockRejectedValue(
+      new BaseUnavailableError(
+        "could not resolve base branch main: BaseUnavailableError: could not read refs/heads/main " +
+          "(remote: Error: repository not found)"
+      )
+    );
+
+    await runTask(h.deps, task);
+
+    const { detail } = outcomes().at(-1) as { detail: string };
+    expect(detail).not.toContain("BaseUnavailableError");
+    expect(detail).toContain("remote: Error: repository not found");
+  });
+
+  // The other seam, and the shape that has no space to back up to at all: `delivered` carries a
+  // bare URL, and BP-306 records `gh pr create` putting a credential into one.
+  it("redacts a secret straddling the head cut of a detail with no spaces in it", async () => {
+    const token = `ghp_${"A".repeat(40)}`;
+    const execute = vi.fn<Executor["execute"]>().mockResolvedValue({
+      kind: "machine_fault",
+      message: `https://example.invalid/${"a".repeat(60)}/${token}/${"b".repeat(120)}`,
+    });
+    const { h, outcomes } = watchedOutcomes({ executor: { execute } });
+
+    await runTask(h.deps, task);
+
+    const { detail } = outcomes().at(-1) as { detail: string };
+    expect(detail).not.toContain("ghp_");
+    expect(detail).not.toContain("AAAAAAAAAA");
+  });
+
+  it("carries the reason into the record, on the two paths that had it in hand", async () => {
+    const gate = await settledBy({
+      gateFor: () => ({
+        name: "review",
+        run: async () => ({
+          ok: false,
+          reason: "cannot confine the agent to /wt: ENOENT",
+          machineFault: true,
+        }),
+      }),
+    });
+    // The whole sentence, not a substring of it: `stringContaining("ENOENT")` is equally happy with
+    // `settle("machineFault", verdict.reason)`, which keeps the reason and loses which gate it was
+    // (found in review).
+    expect(gate.record).toMatchObject({
+      detail: "the review gate could not run: cannot confine the agent to /wt: ENOENT",
+    });
+
+    const { h } = watchedOutcomes();
+    h.workspace.create.mockRejectedValue(new BaseUnavailableError("no route to host"));
+    await runTask(h.deps, task);
+    expect(h.recordRun.mock.calls.at(-1)![1]).toMatchObject({
+      detail: "no route to host",
+    });
+  });
+
+  it("records an unreachable base branch as a machine fault", async () => {
+    const { h, outcomes } = watchedOutcomes();
+    h.workspace.create.mockRejectedValue(new BaseUnavailableError("no route to host"));
+
+    await runTask(h.deps, task);
+
+    expect(h.recordRun.mock.calls.at(-1)![1]).toMatchObject({ outcome: "machineFault" });
+    expect(outcomes().at(-1)).toMatchObject({ outcome: "machineFault" });
+  });
+
+  it("records a checkout whose git config cannot be trusted as a machine fault", async () => {
+    const { h, outcomes } = watchedOutcomes();
+    h.workspace.create.mockRejectedValue(new PoisonedCheckoutError("core.hooksPath=/tmp/x"));
+
+    await runTask(h.deps, task);
+
+    expect(h.recordRun.mock.calls.at(-1)![1]).toMatchObject({ outcome: "machineFault" });
+    expect(outcomes().at(-1)).toMatchObject({ outcome: "machineFault" });
+  });
+
+  // The controls. These are the two releases the new outcome has to stay distinct from — read as
+  // faulted, an operator would be sent to fix a machine that is working.
+  it("leaves a usage limit recorded as released", async () => {
+    const execute = vi.fn<Executor["execute"]>().mockResolvedValue({ kind: "usage_limit" });
+
+    const settled = await settledBy({ executor: { execute } });
+
+    expect(settled.disposition).toBeUndefined();
+    expect(settled.record).toMatchObject({ outcome: "released", detail: "usage limit reached" });
+  });
+
+  /**
+   * The nearest overshoot, and the one nothing else in this suite can see. A gate that hit the
+   * usage limit settles eight lines below the gate-fault branch and carries the same sentence; the
+   * existing test on that path asserts `reporter.released`, which BOTH branches call, so moving
+   * that `settle` to machineFault passed all 1332 worker tests (found in review).
+   */
+  it("leaves a gate that hit the usage limit recorded as released", async () => {
+    const { h, outcomes } = watchedOutcomes({
+      gateFor: () => ({
+        name: "review",
+        run: async () => ({
+          ok: false,
+          reason:
+            "the review could not be completed: claude exited 1\nClaude AI usage limit reached|1754006400",
+        }),
+      }),
+    });
+
+    const disposition = await runTask(h.deps, running("implement", "review"));
+
+    expect(disposition).toBeUndefined();
+    expect(h.recordRun.mock.calls.at(-1)![1]).toMatchObject({ outcome: "released" });
+    expect(outcomes().at(-1)).toMatchObject({ outcome: "released" });
+  });
+
+  it("leaves a misconfigured base branch recorded as requeued", async () => {
+    const { h } = watchedOutcomes();
+    h.workspace.create.mockRejectedValue(
+      new BaseUnavailableError("did not report refs/heads/main", "configuration")
+    );
+
+    await runTask(h.deps, task);
+
+    expect(h.recordRun.mock.calls.at(-1)![1]).toMatchObject({ outcome: "requeued" });
+  });
+});

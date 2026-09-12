@@ -14,7 +14,17 @@ import { join } from "node:path";
 const APP_SRC = join(import.meta.dirname, "..", "..", "src");
 
 function source(...parts: string[]): string {
-  return readFileSync(join(APP_SRC, ...parts), "utf8");
+  return withoutComments(readFileSync(join(APP_SRC, ...parts), "utf8"));
+}
+
+/**
+ * Both lists are read out of source text, and a comment in either is prose that looks exactly like
+ * the thing being matched. On the server's side a commented-out value still named in quotes read as
+ * one the server accepts, hiding its own removal; on the worker's, a comment naming a superseded
+ * mapping read as an extra outcome and failed the test for nothing. Both measured (found in review).
+ */
+function withoutComments(text: string): string {
+  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
 }
 
 function keysOf(list: string, pattern: RegExp): string[] {
@@ -26,7 +36,9 @@ describe("the gate kinds the catalog offers", () => {
     // `key: "diff-size",` — each GateKind's own key, and nothing else in that file uses the form
     const offered = keysOf(source("lib", "agent-kinds.ts"), /^\s{4}key: "([a-z-]+)",$/gm);
 
-    const factory = readFileSync(join(import.meta.dirname, "gates", "from-entry.ts"), "utf8");
+    const factory = withoutComments(
+      readFileSync(join(import.meta.dirname, "gates", "from-entry.ts"), "utf8")
+    );
     const implemented = keysOf(factory, /^\s*case "([a-z-]+)":$/gm);
 
     expect(offered.length).toBeGreaterThan(0);
@@ -34,17 +46,62 @@ describe("the gate kinds the catalog offers", () => {
   });
 });
 
+describe("the length the server stores a detail at", () => {
+  it("is the length this worker cuts to before sending it", () => {
+    // Hand-copied across the package boundary, like the outcome list below, and worth the same
+    // treatment: the worker's docblock says "the number is the server's own", which was true when
+    // it was written and kept true by nothing (found in review). A worker cutting shorter loses
+    // text silently; cutting longer sends bytes to be thrown away.
+    const route = source("app", "api", "projects", "[projectId]", "runs", "route.ts");
+    const server = route.match(/MAX_DETAIL = (\d+)/);
+
+    // Through the strip, like the server's side: `.match` takes the FIRST hit, so a note above the
+    // constant mentioning the old number would be read as the constant — and the green direction
+    // is the silent one, a worker cutting shorter than the board stores (found in review, and the
+    // commit that added this claimed the opposite).
+    const record = withoutComments(
+      readFileSync(join(import.meta.dirname, "run-record.ts"), "utf8")
+    );
+    const worker = record.match(/MAX_DETAIL_CHARS = (\d+)/);
+
+    expect(server?.[1]).toBeDefined();
+    // The declaration is not the behaviour: leaving `const MAX_DETAIL = 2000` in place and
+    // inlining `slice(0, 500)` at the use site drifts the two while this stays green (found in
+    // review). Pinning the use is as far as reading source as text can go.
+    expect(route).toMatch(/slice\(0, MAX_DETAIL\)/);
+    // Equality, though only one direction is a defect: a worker cutting SHORTER than the server
+    // stores loses text silently, while cutting longer only wastes bytes on a retried outbox entry.
+    // Equal is the simplest thing to keep true, and it ties the numbers rather than the behaviours
+    // — a server that kept the constant and stopped applying it leaves this green.
+    expect(worker?.[1]).toBe(server?.[1]);
+  });
+});
+
 describe("the outcomes the server records", () => {
   it("are exactly the ones the worker maps its own onto", () => {
     const types = source("types", "index.ts");
     const block = types.slice(types.indexOf("AGENT_RUN_OUTCOMES = ["));
-    const accepted = keysOf(block.slice(0, block.indexOf("]")), /"([a-z]+)"/g);
+    // `[a-zA-Z]`, not `[a-z]`: a camelCase outcome on either side was invisible to this test, so
+    // the one shape a drift is most likely to take — a name copied from the worker's own
+    // vocabulary — was the shape it could not see.
+    const accepted = keysOf(block.slice(0, block.indexOf("]")), /"([a-zA-Z]+)"/g);
 
-    const record = readFileSync(join(import.meta.dirname, "run-record.ts"), "utf8");
+    const record = withoutComments(
+      readFileSync(join(import.meta.dirname, "run-record.ts"), "utf8")
+    );
     const mapping = record.slice(record.indexOf("OUTCOMES: Record"));
-    const sent = keysOf(mapping.slice(0, mapping.indexOf("};")), /: "([a-z]+)",/g);
+    const sent = keysOf(mapping.slice(0, mapping.indexOf("};")), /: "([a-zA-Z]+)",/g);
 
-    expect(accepted.length).toBeGreaterThan(0);
+    // Both halves read every entry they are looking at. Containment alone cannot see a regex that
+    // has gone blind on BOTH sides at once — the value vanishes from `accepted` and `sent` together
+    // and the assertion still holds — so each side is counted against its own source first.
+    const body = mapping.slice(mapping.indexOf("{") + 1, mapping.indexOf("};"));
+    const declared = [...body.matchAll(/^\s*\w+:/gm)].length;
+    expect(sent.length).toBe(declared);
+    expect(accepted.length).toBe(
+      [...block.slice(0, block.indexOf("]")).matchAll(/^\s*"/gm)].length
+    );
+
     // Every outcome the worker sends is one the server takes. The server may carry more than the
     // worker ever produces, so this is containment rather than equality.
     expect(accepted).toEqual(expect.arrayContaining(sent));

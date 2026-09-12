@@ -26,6 +26,9 @@ final class AppModel {
         guard !fixedClient else { return }
         client = AppModel.liveClient()
         state = WorkerState()
+        // Beside the state reset, for the same reason: this may well be a different worker, and
+        // the fault streak lives in a static that a reconnect would otherwise carry across.
+        Notifier.shared.workerDisconnected()
         config = nil
         start()
     }
@@ -77,6 +80,7 @@ final class AppModel {
             } catch {}
             if Task.isCancelled { return }
             state.markDisconnected()
+            Notifier.shared.workerDisconnected()
             try? await Task.sleep(for: .seconds(5))
         }
     }

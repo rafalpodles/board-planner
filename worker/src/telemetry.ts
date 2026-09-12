@@ -40,6 +40,7 @@ export type OutcomeKind =
   | "gateRejected"
   | "blocked"
   | "released"
+  | "machineFault"
   | "requeued"
   | "failed";
 

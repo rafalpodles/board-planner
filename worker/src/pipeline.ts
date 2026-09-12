@@ -82,7 +82,73 @@ export interface PipelineDeps {
   telemetry?: Pick<Telemetry, "emit" | "emitEvent">;
 }
 
-const MAX_DETAIL_CHARS = 200;
+// Named for what it bounds. run-record.ts has a cap of its own, ten times this, for the wire
+// rather than for a banner, and a contract test matches that one by name.
+const MAX_NOTIFICATION_CHARS = 200;
+
+/**
+ * The cut that keeps both ends of a detail too long for a notification.
+ *
+ * Head-only was the obvious thing and it was wrong twice in one review. These sentences are built
+ * context-first — "the review gate could not run: ", "could not resolve base branch main: " — and
+ * what actually broke is last, so a plain `slice` keeps the part every one of them shares and drops
+ * the only part that differs. Over https git echoes the remote a second time inside its own stderr,
+ * which doubles the cost of the URL. Measured on the base-branch path against the stderr
+ * `fatal: unable to access '<url>/': Could not resolve host: github.com`, the repository-name
+ * length at which a head-only cut loses the cause entirely: 14 characters behind a one-character
+ * organisation, 11 behind `acme`, 4 behind `rafalpodles`, 1 behind a 24-character one. The input
+ * is named because the quantity depends on it — a reviewer measuring against a stderr ten
+ * characters longer got 24 / 21 / 14 / 1, and a measurement without its input is a recollection
+ * with digits. Either way it is load-bearing at ordinary repository names rather than at unusual
+ * ones. (An earlier version of this comment said "about 25", and a commit message said 26 for a
+ * different quantity; neither reproduced.)
+ *
+ * Tail-only would be the mirror mistake: `UNCONFINED_REASON` deliberately puts the way out first
+ * (sandbox.ts), because whatever is at the end is what an operator never reads. It is 204
+ * characters bare and 235 wrapped by the gate path, so it is genuinely over the cap, and tail-only
+ * would eat the word `set` along with the gate's name.
+ *
+ * The ellipsis is the cut, so nothing reads as a complete sentence it is not, and the head backs up
+ * to a space: cut mid-URL it reads as a real, shorter remote, which is the one way this can mislead
+ * rather than merely shorten. Only as far as most of the way, though — a long unbroken token after
+ * a short prefix would otherwise back up to a five-character head and throw away ninety-five
+ * characters of a budget this whole function exists to spend well.
+ *
+ * Neither seam is safe to split a token at, and the backup does not change that: it runs only when
+ * the first half holds a space past 60% of the head, so both a space-free detail — `delivered`
+ * carries a bare URL — and one whose only early space is git's own `fatal: ` take a raw cut at the
+ * halfway mark. The threshold widened that branch, which is the price of not spending five
+ * characters of the budget. That is why `scrub` runs before this and not after: a credential
+ * straddling either seam survives in halves that match no pattern.
+ *
+ * Both seams also avoid splitting a surrogate pair, which a lone half of renders as a replacement
+ * character.
+ *
+ * `scrub` still runs before this, so no secret is straddled — a redaction cannot be reassembled
+ * from the two halves. What is new is that the last hundred characters leave the worker at all,
+ * where head-only dropped them, so scrub's coverage is now load-bearing over text that never
+ * reached Notification Center before.
+ */
+function fitDetail(text: string): string {
+  if (text.length <= MAX_NOTIFICATION_CHARS) return text;
+  const room = Math.ceil((MAX_NOTIFICATION_CHARS - 1) / 2);
+  const head = text.slice(0, room);
+  const space = head.lastIndexOf(" ");
+  const kept = space > room * 0.6 ? head.slice(0, space) : head;
+  const tail = text.slice(text.length - (MAX_NOTIFICATION_CHARS - 1 - room));
+  return `${withoutHalfAPair(kept)}…${withoutLeadingHalfAPair(tail)}`;
+}
+
+/** A high surrogate at the end is the first half of a character whose second half was cut off. */
+function withoutHalfAPair(text: string): string {
+  const last = text.charCodeAt(text.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? text.slice(0, -1) : text;
+}
+
+function withoutLeadingHalfAPair(text: string): string {
+  const first = text.charCodeAt(0);
+  return first >= 0xdc00 && first <= 0xdfff ? text.slice(1) : text;
+}
 const GIT_TIMEOUT_MS = 60_000;
 const ROLES = ["approved", "review", "done"] as const;
 
@@ -257,6 +323,11 @@ async function releaseIfAborted(
 /**
  * "machine-fault" means the run failed for a reason that has nothing to do with the task and will
  * repeat on the next one — the loop stops claiming for a cycle rather than feeding it the queue.
+ *
+ * Every path that returns it settles `machineFault`, which is what the board records too. The task
+ * is still handed back with `reporter.released`, attempt refunded — what changed in BP-609 is only
+ * what the run is recorded as, because a plain `released` reads the same as a usage limit and it is
+ * the machine, not the task, that an operator has to be told about.
  */
 export type RunDisposition = void | "machine-fault";
 
@@ -287,7 +358,7 @@ export async function runTask(
         : {
             outcome,
             taskKey: task.taskKey,
-            detail: scrub(detail).slice(0, MAX_DETAIL_CHARS),
+            detail: fitDetail(scrub(detail)),
           },
     );
     deps.recordRun(
@@ -365,7 +436,7 @@ export async function runTask(
       // menubar's notification shows, and it outlives the run — so it must not claim a key was
       // found when the finding was that nothing could be read.
       settle(
-        "released",
+        "machineFault",
         error.kind === "planted"
           ? "the checkout's git config carries an executable key"
           : "the checkout's git config could not be read"
@@ -392,7 +463,19 @@ export async function runTask(
       // into the escalation column over one unreachable remote — and nothing ever resets
       // execution.attempts, so a human moving those tasks back gets cards no worker will look at
       // again. Released with the attempt refunded, and the loop is told to stop claiming.
-      settle("released", "the base branch could not be established");
+      // With the error, not without it: the detail is the only durable account of the fault — the
+      // card's comment is not reachable from the run history, and the menubar keeps no reason at
+      // all once its notification is gone. A fixed sentence cannot tell a DNS outage from a
+      // revoked token.
+      //
+      // Unprefixed: the error's text already opens with "could not resolve base branch", so it
+      // needs no sentence of ours in front of it. The class names go because `String(error)` here
+      // is two BaseUnavailableErrors nested (workspace.ts wraps one to keep its kind) and that is
+      // sixty characters of noise in a two-hundred-character notification — readability, not
+      // fitting: what makes the cause survive the cut is fitDetail, and this pattern naming no
+      // class in particular is what keeps a rename from quietly undoing it. `\w+`, not `\w*`,
+      // which matched empty and ate a bare "Error: " out of git's own output too.
+      settle("machineFault", String(error).replace(/\w+Error: /g, ""));
       await reporter.released(task, String(error));
       return "machine-fault";
     }
@@ -491,7 +574,7 @@ export async function runTask(
         // nothing resets execution.attempts. Released with the attempt refunded, and the loop is
         // told to stop claiming so the queue is left for a machine that can run it.
         if (outcome.kind === "machine_fault") {
-          settle("released", outcome.message);
+          settle("machineFault", outcome.message);
           await reporter.released(
             task,
             `${outcome.message}${unpushedWork(state, worktree.path)}`,
@@ -587,7 +670,9 @@ export async function runTask(
           // task again.
           if (verdict.machineFault) {
             keepWorktree = true;
-            settle("released", `the ${gate.name} gate could not run`);
+            // With the reason, for what the base-branch path above says: on this path it is
+            // confine()'s own refusal, which names the path it could not resolve.
+            settle("machineFault", `the ${gate.name} gate could not run: ${verdict.reason}`);
             await reporter.released(
               task,
               `the ${gate.name} gate could not run: ${verdict.reason}${unpushedWork(state, worktree.path)}`,
