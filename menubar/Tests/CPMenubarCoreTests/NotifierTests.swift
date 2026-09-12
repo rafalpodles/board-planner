@@ -286,12 +286,29 @@ private func gateFault(_ taskKey: String) -> TelemetryEvent {
 
 // The operator has to read the consequence before the reason: a banner is cut after a couple of
 // lines and the reason can be 200 characters of git's stderr.
-// The pair drifted apart once already inside this review, so the constant is the invariant and
-// this is the assertion that it is still the one both sides use.
-@Test func theNotificationTitleIsTheSentenceThePanelShows() {
+/**
+ * The pair drifted apart once already inside this review, so the constant is the invariant.
+ *
+ * Both sides asserted, because the first version of this test read only the notification — the
+ * side that was never at risk — while `PanelView.swift` could be put back to a literal with every
+ * test green (found in review). `CPMenubar` has no test target, so the panel is read as text, the
+ * way this file already reads the worker's source.
+ */
+@Test func theNotificationTitleIsTheSentenceThePanelShows() throws {
     let request = notification(for: gateFault("CP-1"))
-
     #expect(request?.title == machineFaultHeadline)
+
+    let panel = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("Sources/CPMenubar/PanelView.swift")
+    let source = try String(contentsOf: panel, encoding: .utf8)
+    let faulted = try #require(
+        source.range(of: #"(?m)^\s*case \.faulted:.*$"#, options: .regularExpression),
+        "PanelView no longer has a .faulted headline")
+
+    #expect(source[faulted].contains("machineFaultHeadline"), "the panel went back to a literal")
 }
 
 @Test func theFaultBodySaysWhatHappenedBeforeItSaysWhy() throws {
@@ -365,7 +382,7 @@ private func gateFault(_ taskKey: String) -> TelemetryEvent {
     }
 
     // `case "delivered":` in the outcome switch, and `outcome.outcome == "blocked"` in apply()
-    let inTheSwitch = matches(notifier, #"(?m)^\s*case "(\w+)":"#)
+    let inTheSwitch = matches(notifier, #"(?m)^\s*case\s+"(\w+)"\s*:"#)
     let inTheState = matches(state, #"outcome\.outcome == "(\w+)""#)
     // Asserted separately because WorkerState's literals are a subset of Notifier's: reformatting
     // that file so the second pattern matched nothing left this test green, so its silence was
@@ -382,9 +399,12 @@ private func gateFault(_ taskKey: String) -> TelemetryEvent {
 
     // Counted against the switch itself rather than a floor written here: `>= 5` could not see a
     // scanner that found four of six, and it is the same number-to-remember the derived list was
-    // written to get rid of (found in review). Counted by splitting rather than by the same regex,
-    // which would only be comparing the scanner with itself.
-    let casesInTheSwitch = notifier.components(separatedBy: "case \"").count - 1
+    // written to get rid of.
+    //
+    // Counted LOOSER than the scanner reads, not merely by a different mechanism: the first version
+    // split on the literal `case "`, which is the scanner's own assumption about spacing, so a
+    // reformat to `case  "delivered":` blinded both at once and stayed green (found in review).
+    let casesInTheSwitch = matches(notifier, #"(case)\s*""#).count
     #expect(casesInTheSwitch > 0)
     #expect(switchedOn.count >= casesInTheSwitch, "the scanner missed a case the switch has")
     #expect(switchedOn.contains("machineFault"), "the fault case is what BP-609 added; it must be here")

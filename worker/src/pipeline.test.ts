@@ -1916,6 +1916,33 @@ describe("what a machine fault is recorded as", () => {
     );
   });
 
+  /**
+   * `fitDetail(scrub(detail))` and not the other way round, and nothing enforced the order: swapped,
+   * the whole worker suite stayed green while a token straddling a cut point reached the
+   * notification (found in review). The two-ended cut makes this bite harder than the old head-only
+   * slice — two places a redaction can be split rather than one — and every length-bounded shape in
+   * `SECRET` has the same property: neither half still matches, so neither half is redacted.
+   */
+  it("redacts before it cuts, so a secret on a cut point is not published in halves", async () => {
+    const token = `ghp_${"A".repeat(40)}`;
+    // Positioned so the TAIL boundary lands inside it. The head backs up to a space, so the head
+    // cannot split a token; the tail is taken at a fixed offset and can. Swapped, the tail keeps a
+    // run of the token with its `ghp_` prefix left behind in the discarded middle, so `SECRET`
+    // matches neither half and a real credential fragment ships.
+    const detail = `${"x".repeat(150)} ${token} ${"y".repeat(70)}`;
+    const execute = vi
+      .fn<Executor["execute"]>()
+      .mockResolvedValue({ kind: "machine_fault", message: detail });
+    const { h, outcomes } = watchedOutcomes({ executor: { execute } });
+
+    await runTask(h.deps, task);
+
+    const emitted = outcomes().at(-1) as { detail: string };
+    expect(emitted.detail).not.toContain("ghp_");
+    expect(emitted.detail).not.toContain("AAAAAAAAAA");
+    expect(emitted.detail).toContain("[redacted]");
+  });
+
   it("carries the reason into the record, on the two paths that had it in hand", async () => {
     const gate = await settledBy({
       gateFor: () => ({
