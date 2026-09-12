@@ -5,11 +5,32 @@ public enum ReposError: Error, Equatable {
 }
 
 public struct ReposFile: Sendable {
-    private let path: String
+    private let locate: @Sendable () -> String
 
+    /// A file at a path the caller already knows — a test, or a directory it chose itself.
     public init(path: String) {
-        self.path = path
+        self.locate = { path }
     }
+
+    /// The allowlist wherever the state directory is **now**, resolved on every use.
+    ///
+    /// BP-600. This used to be spelled `ReposFile(path: .defaultPath())` at every call site, which
+    /// froze whichever directory was current when its holder was built. `ProjectSyncRunner` is a
+    /// singleton, and the screen that offers the state-directory chooser is the screen that
+    /// initialises it — so after a switch the app granted and dropped checkouts in a file the
+    /// worker on the new directory never reads, and reported on screen that both had worked.
+    /// Making the file follow puts that right for every holder at once, including ones not written
+    /// yet; a `let` holding one of these is now safe.
+    /// Takes the **state directory**, not the file path, because the directory is the thing that
+    /// moves — and because a closure labelled with the file invites being handed a directory. I
+    /// wrote that mistake into this type's own test on the first attempt.
+    public init(
+        inStateDirectory resolve: @escaping @Sendable () -> String = { StateDirectory.resolve() }
+    ) {
+        self.locate = { ReposFile.path(in: resolve()) }
+    }
+
+    private var path: String { locate() }
 
     public static func path(in stateDirectory: String) -> String {
         (stateDirectory as NSString).appendingPathComponent("repos.json")

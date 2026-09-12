@@ -71,8 +71,17 @@ private struct ConnectionTab: View {
 // a second account to a machine that has been running fine for months.
 private struct GithubAccountRow: View {
     let accounts: [GithubAccountChoice]
-    @State private var pinned = (try? GithubAccountFile(path: GithubAccountFile.defaultPath()).read()) ?? ""
+    // Read into `@State`, which SwiftUI evaluates once for the life of the row and never again —
+    // so pointing the app at another state directory used to leave the previous machine's account
+    // on screen, and a save then wrote that stale reading into the new directory's file (BP-600).
+    // Re-read when the directory moves rather than lifting it into this row's parents, which are a
+    // different section of the window entirely.
+    @State private var pinned = GithubAccountRow.stored()
     @State private var error = ""
+
+    private static func stored() -> String {
+        (try? GithubAccountFile(path: GithubAccountFile.defaultPath()).read()) ?? ""
+    }
 
     var body: some View {
         Group {
@@ -95,6 +104,10 @@ private struct GithubAccountRow: View {
                     .font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+        .onChange(of: StateDirectory.resolve()) { _, _ in
+            pinned = GithubAccountRow.stored()
+            error = ""
         }
     }
 
@@ -122,7 +135,7 @@ private struct RepositoriesTab: View {
     @State private var note = ""
     @State private var busy = false
 
-    private let file = ReposFile(path: ReposFile.defaultPath())
+    private let file = ReposFile()
     private var sync: ProjectSyncRunner { ProjectSyncRunner.shared }
 
     var body: some View {
@@ -177,6 +190,12 @@ private struct RepositoriesTab: View {
                         .font(.caption2).foregroundStyle(.secondary)
                 case .refused(let project, let reason):
                     Text("Left \(project) alone: \(reason)").font(.caption2).foregroundStyle(.orange)
+                case .declined(let project, let paths):
+                    // Not orange: nothing went wrong and there is nothing to fix. The unticking
+                    // still stands, so say it will ask again rather than leave it reading as a
+                    // wish that was quietly dropped.
+                    Text("Kept \(project) — you chose not to delete \(paths.joined(separator: ", ")). It will ask again.")
+                        .font(.caption2).foregroundStyle(.secondary)
                 case .partiallyRemoved(let project, let removed, let reason):
                     // Named in full: this is the one message that reports destruction the operator
                     // did not ask about and cannot undo.

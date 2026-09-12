@@ -16,15 +16,26 @@ final class ProjectSyncRunner {
     private(set) var steps: [SyncStep] = []
     private(set) var running = false
 
-    private let file = ReposFile(path: ReposFile.defaultPath())
+    /// A catalogue that arrived while a pass was running, kept for when it ends.
+    private var pending: [ProjectCatalogueRow]?
+
+    private let file = ReposFile()
 
     /// `isBusy` answers "is the worker running a task", asked at the moment it is called — what it
     /// asks is the caller's business. A question rather than an answer: the value used to be
     /// sampled before the pass, and a clone takes minutes, so a worker that picked up a task in
     /// between had its checkout deleted underneath it. `SyncPass` asks again before each removal
-    /// (BP-424).
-    func sync(catalogue: [ProjectCatalogueRow], isBusy: @escaping () async -> Bool) async {
-        guard !running else { return }
+    /// (BP-424), and again after the operator has answered the confirmation, which is the longer
+    /// window of the two (BP-378).
+    func sync(catalogue: [ProjectCatalogueRow], isBusy: @escaping SyncPass.IsBusy) async {
+        guard !running else {
+            // A pass already holds the machine, most likely on a confirmation nobody has answered
+            // yet. The catalogue that just arrived is the newer truth, so it waits rather than
+            // being dropped: returning here left a project ticked during a modal uncloned until
+            // the next reconnect, which on a healthy worker is days.
+            pending = catalogue
+            return
+        }
         // Claimed here rather than after the plan is built: reading every checkout's origin awaits,
         // and a second pass entering during that await used to clear this guard as well. Not
         // introduced by BP-424, but its `isBusy` calls put more suspension points inside the pass,
@@ -32,6 +43,18 @@ final class ProjectSyncRunner {
         running = true
         defer { running = false }
 
+        var next: [ProjectCatalogueRow]? = catalogue
+        while let current = next {
+            // Cleared before the pass, so only a catalogue that arrives *during* it re-arms the
+            // loop. `CatalogueQueue` decides whether it is worth one, and carries the reason.
+            pending = nil
+            await pass(catalogue: current, isBusy: isBusy)
+            next = CatalogueQueue.next(after: current, arrived: pending)
+        }
+        pending = nil
+    }
+
+    private func pass(catalogue: [ProjectCatalogueRow], isBusy: @escaping SyncPass.IsBusy) async {
         let state = Onboarding.load()
         guard !state.checkoutsFolder.isEmpty else { return }
 
@@ -65,6 +88,7 @@ final class ProjectSyncRunner {
             isBusy: isBusy,
             deletion: deletion,
             removal: removal,
+            asking: { project, paths in DeletionPrompt.ask(project: project, paths: paths) },
             onStep: { step in self.steps.append(step) })
     }
 

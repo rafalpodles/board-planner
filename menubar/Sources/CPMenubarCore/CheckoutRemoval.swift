@@ -4,7 +4,7 @@ import Foundation
 // thing here nobody can undo, so this answers with a refusal by default: every check that cannot
 // be run counts as a no. A directory that is not a git checkout, or a git that will not answer,
 // is not "clean" — it is unexamined, and the difference matters exactly once.
-public enum RemovalVerdict: Equatable {
+public enum RemovalVerdict: Equatable, Sendable {
     /// Safe to remove. `worktrees` are the linked worktrees to take with it — they live beside the
     /// checkout under a shared `cp-worktrees` root, so deleting that root wholesale would take
     /// another project's worktrees with it.

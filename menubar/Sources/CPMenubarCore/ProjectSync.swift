@@ -21,7 +21,7 @@ public struct PlannedRemoval: Equatable {
     public let path: String
 }
 
-public enum SyncStep: Equatable {
+public enum SyncStep: Equatable, Sendable {
     case added(project: String, path: String)
     case removed(project: String, path: String)
     /// The grant was dropped and the checkout directory was not deleted, because it had already
@@ -35,6 +35,11 @@ public enum SyncStep: Equatable {
     /// A removal a guard said no to. Not a failure: the checkout is intact and the reason is one
     /// the operator can act on.
     case refused(project: String, reason: String)
+    /// A removal the operator said no to when the app asked, on the machine, with the paths in
+    /// front of them. Its own case rather than a `.refused` carrying a sentence: a guard saying no
+    /// is a fact about the checkout, and this is a fact about the person. It also leaves the
+    /// unticking standing — nothing is forgotten — so the next pass puts the same question again.
+    case declined(project: String, paths: [String])
     /// A removal that deleted some of what it meant to and then stopped. Its own case rather than a
     /// `.failed` carrying a longer sentence, for the reason `.forgotten` is its own case: the
     /// difference between "nothing happened" and "some of it is gone" is the whole of what the
