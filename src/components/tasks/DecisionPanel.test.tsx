@@ -195,11 +195,22 @@ describe("once it has been answered", () => {
     panel({ state: "accepted", workerLastSeenAt: new Date(NOW - 30 * 60_000).toISOString() });
 
     expect(screen.getByTestId("decision-machine-quiet")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Give up on it" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Give up/ })).toBeTruthy();
   });
 
   it("says nothing about liveness while the machine is answering promptly", () => {
     panel({ state: "accepted" });
+
+    expect(screen.queryByTestId("decision-machine-quiet")).toBeNull();
+  });
+
+  /**
+   * The guard is `waitingOnAMachine`, not the clock alone. A `pending` record is waiting on a
+   * PERSON, and a machine that has said nothing for an hour is neither surprising nor something
+   * they can act on — the sentence would only be noise over the decision they are there to make.
+   */
+  it("says nothing about liveness while the decision is waiting on a person", () => {
+    panel({ state: "pending", workerLastSeenAt: new Date(NOW - 60 * 60_000).toISOString() });
 
     expect(screen.queryByTestId("decision-machine-quiet")).toBeNull();
   });
@@ -226,6 +237,10 @@ describe("once it has been answered", () => {
       panel({ state });
 
       expect(screen.queryByRole("button")).toBeNull();
+      // The control: a settled record still SAYS what happened. Without this the same assertion
+      // passes on a panel that has vanished, taking the headline and the pull request with it.
+      expect(screen.getByTestId("decision-headline").textContent).toBeTruthy();
+      expect(screen.getByTestId("decision-patch")).toBeTruthy();
     }
   );
 
@@ -237,5 +252,126 @@ describe("once it has been answered", () => {
     });
 
     expect(screen.getByTestId("decision-decided-by").textContent).toContain("Rafal");
+  });
+});
+
+/**
+ * Every one of these was a sentence contradicting the headline a few pixels above it, which reads
+ * as a bug in the product rather than as a caption.
+ */
+describe("what it stops saying once the answer is in", () => {
+  it.each(["delivered", "discarded", "abandoned", "superseded"] as const)(
+    "does not still claim the work is in a worktree when it is %s",
+    (state) => {
+      panel({ state });
+
+      expect(screen.getByTestId("decision-panel").textContent).not.toContain(
+        "The branch was not pushed"
+      );
+    }
+  );
+
+  it("says where the work is while that is still true", () => {
+    panel();
+
+    expect(screen.getByTestId("decision-panel").textContent).toContain("The branch was not pushed");
+  });
+
+  // Worst instance: a pending record nobody may accept, which offers no Accept button either
+  it("does not say what accepting pushes when accepting is not on offer", () => {
+    panel({ acceptable: false, unacceptableReason: "it edits what CI itself does" });
+
+    expect(screen.queryByTestId("decision-file-count")).toBeNull();
+  });
+
+  it.each(["delivered", "declined", "superseded"] as const)(
+    "does not say what accepting pushes once it is %s",
+    (state) => {
+      panel({ state });
+
+      expect(screen.queryByTestId("decision-file-count")).toBeNull();
+    }
+  );
+});
+
+/**
+ * `sweepMarkers` treats a decision that has left the live list exactly as it treats a declined one:
+ * the worktree goes. Giving up was the least emphatic control on the panel, named nothing, and
+ * asked nothing — while doing what the button beside it spells out.
+ */
+describe("giving up", () => {
+  it("says it deletes the work, and asks first", async () => {
+    panel();
+
+    fireEvent.click(screen.getByRole("button", { name: "Give up and delete the work" }));
+
+    expect(screen.getByRole("dialog").textContent).toContain("deletes the worktree");
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("posts only once confirmed", async () => {
+    panel();
+
+    fireEvent.click(screen.getByRole("button", { name: "Give up and delete the work" }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Give up and delete" }));
+
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith("/api/projects/p1/tasks/t1/decision", {
+        verdict: "abandon",
+      })
+    );
+  });
+
+  // Every live state, because the machine can stop answering at any of them
+  it.each(["pending", "accepted", "declined", "refused", "failed"] as const)(
+    "is offered while it is %s",
+    (state) => {
+      panel({ state });
+
+      expect(screen.getByRole("button", { name: "Give up and delete the work" })).toBeTruthy();
+    }
+  );
+});
+
+/**
+ * The task screen does not poll. Without this the panel sits on "waiting for the machine to push
+ * it" for ever: the pull request, the refusal and the error all arrive on a reload nobody knows to
+ * do.
+ */
+describe("while the verdict is with the machine", () => {
+  it.each(["accepted", "declined"] as const)("re-reads the task while it is %s", (state) => {
+    const onAnswered = panel({ state });
+
+    vi.advanceTimersByTime(10_000);
+
+    expect(onAnswered).toHaveBeenCalled();
+  });
+
+  it.each(["pending", "delivered", "discarded"] as const)(
+    "leaves the task alone while it is %s",
+    (state) => {
+      const onAnswered = panel({ state });
+
+      vi.advanceTimersByTime(60_000);
+
+      expect(onAnswered).not.toHaveBeenCalled();
+    }
+  );
+});
+
+describe("the change itself", () => {
+  // The app hides every scrollbar globally, so a wheel is otherwise the only way into the panel's
+  // primary reading surface
+  it("is a named region a keyboard can reach once it scrolls", () => {
+    panel({ patch: "diff\n".repeat(500) });
+    const pre = screen.getByTestId("decision-patch");
+
+    // happy-dom reports no layout, so the tab stop is driven by the measurement rather than
+    // asserted through it; the name is what a screen reader announces either way.
+    expect(pre.getAttribute("aria-label")).toBe("The refused change");
+    expect(pre.className).toContain("focus-ring");
+    // Wrapped rather than scrolled sideways: a long diff line is unreachable otherwise
+    expect(pre.className).toContain("whitespace-pre-wrap");
   });
 });
