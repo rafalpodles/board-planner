@@ -1864,6 +1864,54 @@ describe("what a machine fault is recorded as", () => {
     expect(emitted.detail).toContain("could not resolve base branch main");
   });
 
+  /**
+   * The same bug one remote longer. Over https git echoes the remote a second time inside its own
+   * stderr, so the URL is in the sentence twice and the cause goes back past 200 — measured to bite
+   * at a slug of about 26 characters, which is an ordinary org and repository. The first fix moved
+   * that cliff; keeping both ends removes it (found in review, twice).
+   */
+  it("keeps the cause even when the remote is long enough to fill the cap twice", async () => {
+    const url = "https://github.com/acme-engineering-platform/deployment-service.git";
+    const inner = new BaseUnavailableError(
+      `could not read refs/heads/main from ${url} (fatal: unable to access '${url}/': ` +
+        `Could not resolve host: github.com)`
+    );
+    const { h, outcomes } = watchedOutcomes();
+    h.workspace.create.mockRejectedValue(
+      new BaseUnavailableError(`could not resolve base branch main: ${String(inner)}`)
+    );
+
+    await runTask(h.deps, task);
+
+    const emitted = outcomes().at(-1) as { detail: string };
+    // Both ends: what was being attempted, and what went wrong. The middle is the part that says
+    // the same thing twice.
+    expect(emitted.detail).toContain("could not resolve base branch main");
+    expect(emitted.detail).toContain("Could not resolve host");
+    expect(emitted.detail.length).toBeLessThanOrEqual(200);
+  });
+
+  // The control on the same cut: a 403 and a DNS failure against the same long remote must not
+  // arrive as the same sentence, which is what head-only truncation made them.
+  it("tells two failures of one long remote apart", async () => {
+    const url = "https://github.com/acme-engineering-platform/deployment-service.git";
+    const against = async (stderr: string) => {
+      const { h, outcomes } = watchedOutcomes();
+      h.workspace.create.mockRejectedValue(
+        new BaseUnavailableError(
+          `could not resolve base branch main: BaseUnavailableError: could not read ` +
+            `refs/heads/main from ${url} (fatal: unable to access '${url}/': ${stderr})`
+        )
+      );
+      await runTask(h.deps, task);
+      return (outcomes().at(-1) as { detail: string }).detail;
+    };
+
+    expect(await against("Could not resolve host: github.com")).not.toBe(
+      await against("The requested URL returned error: 403")
+    );
+  });
+
   it("carries the reason into the record, on the two paths that had it in hand", async () => {
     const gate = await settledBy({
       gateFor: () => ({

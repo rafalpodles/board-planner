@@ -98,5 +98,8 @@ unit tests; it is verified by running it.
 
 Six, and only six: merged, pull request open, gate rejected, needs a human, usage limit, machine
 fault. Anything more and the operator turns them off — which is why the machine fault is reported
-once per run of consecutive faults and not once per poll (`FaultStreak`). It is the only one that
-can fire when no work happened, so it is the only one that needs the guard.
+once per run of consecutive faults, per project, and not once per poll (`FaultStreak`).
+
+The property that makes a notification need that guard is not "no work happened", it is "the task
+comes back and the condition holds": the loop claims it again a poll interval later and meets the
+same wall. The usage limit has that property too and has no guard — BP-618.

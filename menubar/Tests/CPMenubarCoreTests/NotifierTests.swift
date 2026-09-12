@@ -135,15 +135,53 @@ private func gateFault(_ taskKey: String) -> TelemetryEvent {
 /**
  * The case that sank the first attempt. A worker serving two projects meets one machine-wide fault
  * as two different sentences, because each names its own remote — and `loop.ts`'s passOrder rotates
- * the projects, so they alternate. Keyed on the detail this notified every thirty seconds forever,
- * which is the bug.
+ * the projects, so they alternate. Keyed on the detail this notified every thirty seconds for ever.
+ *
+ * Bounded by the number of projects, not silent: each one says so once. That is the price of
+ * scoping, and the alternative — one flag for the fleet — is the test below.
  */
-@Test func oneMachineFaultAcrossTwoProjectsIsStillOnePieceOfNews() {
+@Test func oneMachineFaultAcrossTwoProjectsIsAnnouncedOncePerProjectAndThenNotAgain() {
     var streak = FaultStreak()
+    let a = baseBranchFault("AA-1", remote: "https://github.com/acme/api.git")
+    let b = baseBranchFault("BB-7", remote: "https://github.com/acme/web.git")
 
-    #expect(streak.admit(baseBranchFault("AA-1", remote: "https://github.com/acme/api.git")) != nil)
-    #expect(streak.admit(baseBranchFault("BB-7", remote: "https://github.com/acme/web.git")) == nil)
-    #expect(streak.admit(baseBranchFault("AA-1", remote: "https://github.com/acme/api.git")) == nil)
+    #expect(streak.admit(a) != nil)
+    #expect(streak.admit(b) != nil)
+    #expect(streak.admit(a) == nil)
+    #expect(streak.admit(b) == nil)
+    #expect(streak.admit(baseBranchFault("AA-9", remote: "https://github.com/acme/api.git")) == nil)
+}
+
+/**
+ * The one a fleet-wide flag cannot pass, and it is not a race: `loop.ts`'s passOrder moves a
+ * faulting project to the END of the next pass, so the healthy project's outcome lands immediately
+ * before the faulting project's fault on every pass after the first. One flag is cleared and
+ * re-armed for ever — a banner per pass, at the cadence of however healthy the rest of the fleet
+ * is, which is backwards (found in review).
+ */
+@Test func aHealthySiblingProjectDoesNotRearmTheFaultingOne() {
+    var streak = FaultStreak()
+    let broken = baseBranchFault("AA-1", remote: "https://github.com/acme/api.git")
+
+    #expect(streak.admit(broken) != nil)
+    for pass in 1...5 {
+        _ = streak.admit(.outcome(Outcome(outcome: "merged", taskKey: "BB-\(pass)")))
+        #expect(streak.admit(broken) == nil, "pass \(pass) re-announced a fault nothing changed about")
+    }
+}
+
+// The other direction: the project that recovered is the one whose next fault is news again, and
+// only that one.
+@Test func aProjectThatRecoveredIsNewsWhenItFaultsAgain() {
+    var streak = FaultStreak()
+    let a = baseBranchFault("AA-1", remote: "https://github.com/acme/api.git")
+    let b = baseBranchFault("BB-7", remote: "https://github.com/acme/web.git")
+
+    #expect(streak.admit(a) != nil)
+    #expect(streak.admit(b) != nil)
+    _ = streak.admit(.outcome(Outcome(outcome: "merged", taskKey: "AA-2")))
+    #expect(streak.admit(a) != nil)
+    #expect(streak.admit(b) == nil)
 }
 
 // The other half of it: the gate path's reason carries the worktree path, so every task recurring
@@ -165,6 +203,7 @@ private func gateFault(_ taskKey: String) -> TelemetryEvent {
     let recurring = gateFault("CP-1")
 
     #expect(streak.admit(recurring) != nil)
+    // The same project, which is what makes it evidence about this project
     _ = streak.admit(.outcome(Outcome(outcome: "merged", taskKey: "CP-2")))
     #expect(streak.admit(recurring) != nil)
 }
@@ -190,23 +229,23 @@ private func gateFault(_ taskKey: String) -> TelemetryEvent {
 @MainActor
 @Test func theNotifierItselfDedupesRatherThanJustOwningSomethingThatCould() {
     let recurring = gateFault("CP-1")
-    Notifier.shared.forgetTheWorker()
+    Notifier.shared.workerDisconnected()
 
     #expect(Notifier.shared.request(for: recurring) != nil)
     #expect(Notifier.shared.request(for: recurring) == nil)
-    Notifier.shared.forgetTheWorker()
+    Notifier.shared.workerDisconnected()
     #expect(Notifier.shared.request(for: recurring) != nil)
-    Notifier.shared.forgetTheWorker()
+    Notifier.shared.workerDisconnected()
 }
 
 // The operator has to read the consequence before the reason: a banner is cut after a couple of
 // lines and the reason can be 200 characters of git's stderr.
-@Test func theFaultBodySaysWhatHappenedBeforeItSaysWhy() {
+@Test func theFaultBodySaysWhatHappenedBeforeItSaysWhy() throws {
     let request = notification(for: gateFault("CP-1"))
-    let body = try! #require(request?.body)
+    let body = try #require(request?.body)
 
-    let stopped = try! #require(body.range(of: "claiming has stopped"))
-    let why = try! #require(body.range(of: "cannot confine"))
+    let stopped = try #require(body.range(of: "claiming has stopped"))
+    let why = try #require(body.range(of: "cannot confine"))
     #expect(stopped.lowerBound < why.lowerBound)
 }
 
@@ -274,11 +313,20 @@ private func gateFault(_ taskKey: String) -> TelemetryEvent {
         matches(notifier, #"(?m)^\s*case "(\w+)":"#) + matches(state, #"outcome\.outcome == "(\w+)""#))
 
     let telemetry = try read(root.appendingPathComponent("worker/src/telemetry.ts"))
-    let kinds = telemetry[telemetry.range(of: "export type OutcomeKind =")!.upperBound...]
-    let declared = String(kinds[..<kinds.range(of: ";")!.lowerBound])
+    let opening = try #require(
+        telemetry.range(of: "export type OutcomeKind ="), "telemetry.ts no longer declares OutcomeKind")
+    let kinds = telemetry[opening.upperBound...]
+    let closing = try #require(kinds.range(of: ";"), "the OutcomeKind union is unterminated")
+    let declared = String(kinds[..<closing.lowerBound])
 
+    // Counted against the switch itself rather than a floor written here: `>= 5` could not see a
+    // scanner that found four of six, and it is the same number-to-remember the derived list was
+    // written to get rid of (found in review). Counted by splitting rather than by the same regex,
+    // which would only be comparing the scanner with itself.
+    let casesInTheSwitch = notifier.components(separatedBy: "case \"").count - 1
+    #expect(casesInTheSwitch > 0)
+    #expect(switchedOn.count >= casesInTheSwitch, "the scanner missed a case the switch has")
     #expect(switchedOn.contains("machineFault"), "the fault case is what BP-609 added; it must be here")
-    #expect(switchedOn.count >= 5)
     for outcome in switchedOn.sorted() {
         #expect(declared.contains("\"\(outcome)\""), "the worker cannot emit \(outcome)")
     }

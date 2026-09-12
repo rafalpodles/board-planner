@@ -74,38 +74,52 @@ public func notification(for event: TelemetryEvent) -> NotificationRequest? {
  * survive the details this worker actually sends: the base-branch fault names the project's remote,
  * so a machine serving two projects alternates two reasons and every poll is "new" again, and
  * confine()'s refusal names the worktree path, which carries the task key. Both are per-run text
- * inside a 200-character cap that cuts before the part that says what broke.
+ * inside a 200-character cap.
  *
- * So the question is not "is this a new reason" but "have I already said the machine is failing".
- * A second, different fault while it is still failing is not re-announced — the operator has
- * already been told to go and look, and the run history keeps every reason. Cleared by an outcome
- * that is not a fault, which is the machine proving it can work; not by a run merely starting,
- * because a fault emits after a progress event on every recurrence.
+ * So the question is not "is this a new reason" but "have I already said this is failing". A
+ * second, different fault while it is still failing is not re-announced — the operator has already
+ * been told to go and look, and the run history keeps every reason. Cleared by an outcome that is
+ * not a fault, which is the thing proving it can work; not by a run merely starting, because a
+ * fault emits after a progress event on every recurrence.
+ *
+ * Per project, and that is not a refinement — a single flag is the same storm one step along. Two
+ * of the four faults are a project's own (a remote nothing can reach, a checkout git will not
+ * read), and `loop.ts`'s passOrder moves a faulting project to the END of the next pass precisely
+ * so it cannot starve its siblings. So the healthy project's `merged` lands immediately before the
+ * faulting one's fault, on every pass, by construction: a fleet-wide flag is cleared and re-armed
+ * for ever, and the storm comes back at the cadence of the healthy project's runs. The cost of
+ * scoping is that one machine-wide fault announces itself once per project rather than once, which
+ * is bounded by how many projects a machine serves.
+ *
+ * The project is read off the task key's prefix, which is how a key is built (`PROJECT-NUMBER`).
  *
  * Also cleared when the socket drops. Restarting the worker is what an operator does to fix a
  * machine, and it emits no outcome — so without this the first fault after the restart, which is
  * the moment they are most likely to be watching, would be the one they are not told about.
  */
 public struct FaultStreak: Sendable {
-    private var faulting = false
+    private var faulting: Set<String> = []
 
     public init() {}
 
     /// The worker went away. Whatever it does next is news again.
     public mutating func disconnected() {
-        faulting = false
+        faulting.removeAll()
+    }
+
+    private static func project(of taskKey: String) -> String {
+        String(taskKey.prefix(while: { $0 != "-" }))
     }
 
     /// The notification this event deserves, or nil — including nil for a fault already reported.
     public mutating func admit(_ event: TelemetryEvent) -> NotificationRequest? {
         guard case .outcome(let outcome) = event else { return notification(for: event) }
+        let project = Self.project(of: outcome.taskKey)
         guard outcome.outcome == "machineFault" else {
-            faulting = false
+            faulting.remove(project)
             return notification(for: event)
         }
-        let alreadySaid = faulting
-        faulting = true
-        return alreadySaid ? nil : notification(for: event)
+        return faulting.insert(project).inserted ? notification(for: event) : nil
     }
 }
 
@@ -121,8 +135,10 @@ public final class Notifier: Sendable {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
+    /// Named for the event rather than its effect, and to match `state.markDisconnected()` beside
+    /// it at the call site: it clears the fault streak and nothing else.
     @MainActor
-    public func forgetTheWorker() {
+    public func workerDisconnected() {
         Notifier.faults.disconnected()
     }
 

@@ -83,6 +83,28 @@ export interface PipelineDeps {
 }
 
 const MAX_DETAIL_CHARS = 200;
+
+/**
+ * The cut that keeps both ends of a detail too long for a notification.
+ *
+ * Head-only was the obvious thing and it was wrong twice in one review. These sentences are built
+ * context-first — "the review gate could not run: ", "could not resolve base branch main: " — and
+ * what actually broke is last, so a plain `slice` keeps the part every one of them shares and drops
+ * the only part that differs. Over https git echoes the remote a second time inside its own stderr,
+ * which is enough to push the cause past 200 on any repository with a slug over about 25
+ * characters; this one's own origin is already past it.
+ *
+ * Tail-only would be the mirror mistake: `UNCONFINED_REASON` deliberately puts the way out first
+ * (sandbox.ts), because whatever is at the end is what an operator never reads.
+ *
+ * The ellipsis is the cut, so nothing reads as a complete sentence it is not. `scrub` still runs
+ * before this, so no secret is straddled — a redaction cannot be reassembled from the two halves.
+ */
+function fitDetail(text: string): string {
+  if (text.length <= MAX_DETAIL_CHARS) return text;
+  const head = Math.ceil((MAX_DETAIL_CHARS - 1) / 2);
+  return `${text.slice(0, head)}…${text.slice(text.length - (MAX_DETAIL_CHARS - 1 - head))}`;
+}
 const GIT_TIMEOUT_MS = 60_000;
 const ROLES = ["approved", "review", "done"] as const;
 
@@ -292,7 +314,7 @@ export async function runTask(
         : {
             outcome,
             taskKey: task.taskKey,
-            detail: scrub(detail).slice(0, MAX_DETAIL_CHARS),
+            detail: fitDetail(scrub(detail)),
           },
     );
     deps.recordRun(
@@ -402,13 +424,13 @@ export async function runTask(
       // all once its notification is gone. A fixed sentence cannot tell a DNS outage from a
       // revoked token.
       //
-      // Unprefixed, and with the class names dropped, because settle() caps at 200 characters and
-      // git's own stderr — the half that says what broke — is last. `String(error)` here is two
-      // BaseUnavailableErrors nested (workspace.ts wraps to keep the kind), and against this
-      // repository's own remote the boilerplate alone reached 200 before the cause began. The
-      // error's text already opens with "could not resolve base branch", so it needs no sentence
-      // of ours in front of it.
-      settle("machineFault", String(error).replace(/BaseUnavailableError: /g, ""));
+      // Unprefixed: the error's text already opens with "could not resolve base branch", so it
+      // needs no sentence of ours in front of it. The class names go because `String(error)` here
+      // is two BaseUnavailableErrors nested (workspace.ts wraps one to keep its kind) and that is
+      // sixty characters of noise in a two-hundred-character notification — readability, not
+      // fitting: what makes the cause survive the cut is fitDetail, and this pattern naming no
+      // class in particular is what keeps a rename from quietly undoing it.
+      settle("machineFault", String(error).replace(/\b\w*Error: /g, ""));
       await reporter.released(task, String(error));
       return "machine-fault";
     }
