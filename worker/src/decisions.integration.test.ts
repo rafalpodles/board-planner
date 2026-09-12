@@ -452,6 +452,24 @@ describe("a refused change, offered and then accepted, over a real HTTP surface"
     );
   });
 
+  /**
+   * The reaper runs at every rebind, and a worktree somebody is being asked about looks exactly
+   * like an orphan: the run that made it has ended, and nothing on this machine holds it. The
+   * marker is the only thing telling them apart, and it reaches `reapOrphans` through the wiring —
+   * so a pass that forgot to hand it over would destroy the work before the push, with both halves
+   * of the feature unit-tested and green.
+   */
+  it("does not reap the held worktree before the push", () => {
+    const removedAt = settlement.git.findIndex(
+      (call) => call.args.includes("worktree") && call.args.includes("remove")
+    );
+    const pushedAt = settlement.git.findIndex((call) => call.args.includes("push"));
+
+    expect(pushedAt).toBeGreaterThanOrEqual(0);
+    // Removed after the pull request exists, or not at all — never before
+    expect(removedAt === -1 || removedAt > pushedAt).toBe(true);
+  });
+
   it("tells the board what came of it", () => {
     // One settlement, not two: a lost report is retried whole rather than compensated for
     expect(board.settlements).toEqual([
