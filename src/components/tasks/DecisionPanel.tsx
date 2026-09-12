@@ -18,8 +18,17 @@ interface DecisionPanelProps {
 /** A machine quiet for longer than this has probably not heard, and may never. */
 const PRESUMED_GONE_MS = 10 * 60_000;
 
-/** How often the task is re-read while a verdict is with the machine. */
+/** How often the machine is asked what became of the verdict. */
 const WAITING_POLL_MS = 10_000;
+
+/**
+ * And how often once it has gone quiet. Backed off rather than stopped: the poll is the only thing
+ * that refreshes the record, so stopping freezes `workerLastSeenAt` too and the panel can never
+ * learn that the machine came back — leaving "waiting for the machine to push it" over a pull
+ * request that is already open. Ten minutes of silence is also not death: this repository's own
+ * rule is that staleness is not judged by silence, and the execution lease is two hours.
+ */
+const QUIET_POLL_MS = 60_000;
 
 /**
  * What accepting actually consents to, and the panel says it rather than implying otherwise.
@@ -31,10 +40,16 @@ const WAITING_POLL_MS = 10_000;
  * the button and make the label honest — including whose name it spends.
  */
 function acceptWarning(machine: string): string {
-  // Not "your own": the push carries the token `githubIdentityToken()` resolves, which is the
-  // MACHINE OWNER's pinned account — and an instance admin may answer for a machine that is not
-  // theirs. This is the one sentence whose whole job is to be accurate about what is spent.
-  return `Accepting pushes this commit under ${machine}'s pinned GitHub identity and opens a pull request. The push runs this repository's CI on the change — it does not merge it.`;
+  // Three short sentences rather than one long one, and "not necessarily yours" rather than a
+  // name: the push carries the token `githubIdentityToken()` resolves, which is the account pinned
+  // on the MACHINE — its owner's — and an instance admin may be answering for a machine that is
+  // not theirs. A laptop has no GitHub identity, so naming the machine alone answers which token
+  // while hiding whose, which is the half that matters.
+  return [
+    "Accepting pushes this commit and opens a pull request.",
+    `The push goes out under the GitHub identity pinned to ${machine} — its owner's account, not necessarily yours.`,
+    "It runs this repository's CI on the change, and does not merge it.",
+  ].join(" ");
 }
 
 /**
@@ -93,16 +108,12 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
 
   const state = decision?.state;
   const lastSeen = decision?.workerLastSeenAt;
-  /**
-   * Whether anybody else is still expected to act. `loadData` fetches three endpoints, so a poll
-   * that never stops is three requests every ten seconds per open tab, for ever — and a machine
-   * that was re-imaged or switched off stays `accepted` for ever. The moment it becomes pointless
-   * is the moment the panel already computes.
-   */
-  const waiting =
-    state !== undefined &&
-    WITH_THE_MACHINE.includes(state) &&
-    (!lastSeen || Date.now() - Date.parse(lastSeen) <= PRESUMED_GONE_MS);
+  // One clock for both, read from state: `Date.now()` here and `now` below would agree only by
+  // the accident of the tick that happens to precede this render.
+  const quietFor = lastSeen ? now - Date.parse(lastSeen) : Number.POSITIVE_INFINITY;
+  const quiet = quietFor > PRESUMED_GONE_MS;
+  /** Whether anybody else is still expected to act. */
+  const waiting = state !== undefined && WITH_THE_MACHINE.includes(state);
 
   /**
    * The task screen does not poll, so without this the panel stays on "waiting for the machine to
@@ -124,12 +135,12 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
         .catch(() => {
           // A poll that cannot reach the server says nothing; the next one tries again.
         });
-    }, WAITING_POLL_MS);
+    }, quiet ? QUIET_POLL_MS : WAITING_POLL_MS);
     return () => {
       live = false;
       clearInterval(timer);
     };
-  }, [waiting, onAnswered, api, projectId, taskId, state]);
+  }, [waiting, quiet, onAnswered, api, projectId, taskId, state]);
 
   // A scroll region is only a reading surface if a keyboard can reach it, and only worth a tab
   // stop when there is something to scroll to.
@@ -145,9 +156,6 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
 
   if (!decision || !state) return null;
 
-  const quietFor = decision.workerLastSeenAt
-    ? now - Date.parse(decision.workerLastSeenAt)
-    : Number.POSITIVE_INFINITY;
   /**
    * Across every live state, not only the two the machine is acting in.
    *
@@ -157,7 +165,7 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
    * back. Withholding the one fact that answers that made the advice unactionable exactly where
    * the choice is made.
    */
-  const presumedGone = LIVE.includes(state) && quietFor > PRESUMED_GONE_MS;
+  const presumedGone = LIVE.includes(state) && quiet;
   const canAccept = ANSWERABLE.includes(state) && decision.acceptable;
 
   async function answer(verdict: "accept" | "decline" | "abandon") {
@@ -203,6 +211,11 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
               The machine reported: {decision.error}
             </p>
           )}
+
+          {/* Accept and abandon announce themselves through ConfirmDialog's own loading label;
+              decline has no dialog, so its only feedback was a word on a button that had just
+              left the tab order. */}
+          {busy === "decline" && <span className="sr-only">Declining...</span>}
         </div>
 
         {/* Only while it is true. Once the record is settled the headline says what happened, and
@@ -275,13 +288,14 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
 
         {decision.prUrl && (
           <a
-            className="truncate text-sm text-primary underline"
+            className="text-sm text-primary underline"
             href={decision.prUrl}
+            title={decision.prUrl}
             target="_blank"
             rel="noopener noreferrer"
             data-testid="decision-pr"
           >
-            {decision.prUrl}
+            Open the pull request
           </a>
         )}
 

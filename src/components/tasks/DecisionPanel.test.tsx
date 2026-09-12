@@ -110,6 +110,8 @@ describe("what accepting consents to", () => {
     fireEvent.click(screen.getByRole("button", { name: "Accept and push" }));
 
     expect(screen.getByText(/runs this repository's CI/)).toBeTruthy();
+    // Whose account it spends, which is the half a name alone hides
+    expect(screen.getByText(/not necessarily yours/)).toBeTruthy();
     expect(post).not.toHaveBeenCalled();
   });
 
@@ -505,18 +507,37 @@ describe("when the machine is not coming back", () => {
     await waitFor(() => expect(screen.getByTestId("decision-machine-quiet")).toBeTruthy());
   });
 
-  it("stops polling once it has gone quiet", () => {
+  /**
+   * Backed off rather than stopped. The poll is the only thing that refreshes the record, so
+   * stopping freezes `workerLastSeenAt` with it and the panel can never learn that the machine
+   * came back — leaving "waiting for the machine to push it" over a pull request that is already
+   * open. And ten minutes of silence is not death: this repository's own rule is that staleness is
+   * not judged by silence, and the execution lease is two hours.
+   */
+  it("backs off rather than stopping, so a machine that comes back is still noticed", () => {
     panel({
       state: "accepted",
       workerLastSeenAt: new Date(NOW - 30 * 60_000).toISOString(),
     });
 
-    vi.advanceTimersByTime(120_000);
-
+    vi.advanceTimersByTime(10_000);
     expect(get).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(50_000);
+    expect(get).toHaveBeenCalledTimes(1);
+
     // The control: the panel says why, and offers the way out
     expect(screen.getByTestId("decision-machine-quiet")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Give up and delete the work" })).toBeTruthy();
+  });
+
+  // The control for the one above: while the machine is answering, the fast interval is the one
+  it("keeps the fast interval while the machine is alive", () => {
+    panel({ state: "accepted" });
+
+    vi.advanceTimersByTime(10_000);
+
+    expect(get).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -544,5 +565,39 @@ describe("what giving up is warned to cost", () => {
     fireEvent.click(screen.getByRole("button", { name: "Give up and delete the work" }));
 
     expect(screen.getByRole("dialog").textContent).toContain("deleted");
+  });
+});
+
+/**
+ * Decline is the one verdict with no dialog, so its only feedback was a word on a button that had
+ * just left the tab order — outside the live region, announced to nobody.
+ */
+describe("while a verdict is in flight", () => {
+  it("announces declining in the live region", async () => {
+    let resolvePost: (value: unknown) => void = () => {};
+    post.mockReturnValue(new Promise((resolve) => (resolvePost = resolve)));
+    panel();
+
+    fireEvent.click(screen.getByRole("button", { name: "Decline and delete" }));
+
+    // Scoped to the live region: the button says it too, and the button is what is NOT announced
+    const live = screen.getByRole("status");
+    await waitFor(() => expect(within(live).getByText("Declining...")).toBeTruthy());
+    resolvePost({});
+  });
+});
+
+/**
+ * A clipped URL is the worst of both — unreadable, and a poor accessible name. Parsing `#42` out of
+ * it would mean owning GitHub and GitLab url shapes in a panel, for a number.
+ */
+describe("the pull request it opened", () => {
+  it("is a named link rather than a clipped url", () => {
+    panel({ state: "delivered", prUrl: "https://github.com/owner/repo/pull/42" });
+    const link = screen.getByTestId("decision-pr");
+
+    expect(link.textContent).toBe("Open the pull request");
+    expect(link.getAttribute("href")).toBe("https://github.com/owner/repo/pull/42");
+    expect(link.getAttribute("title")).toBe("https://github.com/owner/repo/pull/42");
   });
 });

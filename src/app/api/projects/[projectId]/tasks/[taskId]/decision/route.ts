@@ -32,10 +32,17 @@ export const GET = withProjectAccess(async (_request, { params, user }) => {
   }
 
   await connectDB();
-  // No `+decision.patch`, deliberately — see above. `decidedBy` is populated because the panel
-  // names whoever answered, and that is two words rather than a file.
+  // Field by field. `.select("decision")` is a parent INCLUSION — mongoose sends `{decision: 1}`
+  // and the `select: false` on the subfields is overridden — which is the defect the verdict route
+  // below had, and repeating it here would have made this poll carry the whole patch every ten
+  // seconds while the comment claimed the opposite.
   const task = await Task.findOne({ _id: taskId, project: projectId })
-    .select("decision")
+    .select(
+      "decision.gate decision.workerId decision.commit decision.taskKey decision.title " +
+        "decision.files decision.protectedFiles decision.acceptable decision.unacceptableReason " +
+        "decision.state decision.prUrl decision.error decision.decidedBy decision.decidedAt " +
+        "decision.patchTruncated decision.createdAt"
+    )
     .populate("decision.decidedBy", "username fullName");
   if (!task?.decision?.gate) {
     return NextResponse.json({ decision: null });

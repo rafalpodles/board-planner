@@ -15,9 +15,6 @@ const HEAD_RESOLVED = { code: 0, stdout: `${HEAD_SHA}\n`, stderr: "", timedOut: 
 // BP-509: collectDiff reads `--raw` between the numstat and the patch, for the file modes numstat
 // cannot express. Empty means "this change added no symlink".
 const NO_SYMLINKS = { code: 0, stdout: "", stderr: "", timedOut: false };
-// BP-381: a fifth read, `check-attr diff -z --stdin`, asks which changed files the tree has told
-// git not to show. Empty means "nothing is hidden".
-const NOTHING_HIDDEN = { code: 0, stdout: "", stderr: "", timedOut: false };
 
 function recordingRunner(calls: string[][], responses: Record<string, Partial<CommandResult>> = {}) {
   const run = vi.fn(async (_command: string, args: string[]): Promise<CommandResult> => {
@@ -41,8 +38,7 @@ describe("collectDiff", () => {
         timedOut: false,
       })
       .mockResolvedValueOnce(NO_SYMLINKS)
-      .mockResolvedValueOnce({ code: 0, stdout: "diff --git ...", stderr: "", timedOut: false })
-      .mockResolvedValueOnce(NOTHING_HIDDEN);
+      .mockResolvedValueOnce({ code: 0, stdout: "diff --git ...", stderr: "", timedOut: false });
 
     const diff = await collectDiff({ run }, "/wt", BASE_SHA);
 
@@ -58,75 +54,59 @@ describe("collectDiff", () => {
       .mockResolvedValueOnce(HEAD_RESOLVED)
       .mockResolvedValueOnce({ code: 0, stdout: "-\t-\timage.png\n", stderr: "", timedOut: false })
       .mockResolvedValueOnce(NO_SYMLINKS)
-      .mockResolvedValueOnce({ code: 0, stdout: "", stderr: "", timedOut: false })
-      .mockResolvedValueOnce(NOTHING_HIDDEN);
+      .mockResolvedValueOnce({ code: 0, stdout: "", stderr: "", timedOut: false });
 
     const diff = await collectDiff({ run }, "/wt", BASE_SHA);
 
     expect(diff.changedLines).toBe(0);
     expect(diff.changedFiles).toEqual(["image.png"]);
-    // A real binary and a file the tree has hidden render identically in the patch; only this
-    // tells them apart, and a binary is not hidden
-    expect(diff.suppressedDiffs).toEqual([]);
+    // And listed as one the patch does not show. A real binary and a file something has hidden are
+    // indistinguishable here — deliberately: from the reader's side they are the same thing, a
+    // file listed as changed with its contents missing.
+    expect(diff.suppressedDiffs).toEqual(["image.png"]);
   });
 
   /**
-   * BP-381. `--no-ext-diff --no-textconv` do not reach a bare `-diff` attribute, which needs no
-   * driver and no config: the patch says "Binary files … differ" while `--numstat` goes on listing
-   * the path, so the file list stays honest and only the contents vanish.
+   * BP-381. `-` for both counts is git saying "I am not going to show you this one", and it is the
+   * only signal that catches every way that happens — a bare `-diff` attribute, a `diff=<name>`
+   * whose driver sets `binary = true`, a file git simply calls binary, and a real asset. All four
+   * measured; the first three are reached by neither `--no-ext-diff` nor `--no-textconv`, and the
+   * attribute-based check that stood here first saw only one of them.
    */
-  it("reports the files the tree has told git not to show", async () => {
+  it("reports the files git would not show, beside the ones it would", async () => {
     const run = vi
       .fn()
       .mockResolvedValueOnce(HEAD_RESOLVED)
       .mockResolvedValueOnce({
         code: 0,
-        stdout: "-\t-\tpackage.json\n1\t0\tsrc/a.ts\n",
+        stdout: "-\t-\tpackage.json\n1\t0\tsrc/a.ts\n-\t-\tlogo.png\n",
         stderr: "",
         timedOut: false,
       })
       .mockResolvedValueOnce(NO_SYMLINKS)
-      .mockResolvedValueOnce({ code: 0, stdout: "Binary files differ", stderr: "", timedOut: false })
       .mockResolvedValueOnce({
         code: 0,
-        // <path> NUL <attribute> NUL <value>, repeated — the -z form, because a path is not a line
-        stdout: "package.json\0diff\0unset\0src/a.ts\0diff\0unspecified\0",
+        stdout: "Binary files differ",
         stderr: "",
         timedOut: false,
       });
 
     const diff = await collectDiff({ run }, "/wt", BASE_SHA);
 
-    expect(diff.suppressedDiffs).toEqual(["package.json"]);
+    expect(diff.suppressedDiffs).toEqual(["package.json", "logo.png"]);
+    // The whole change is still listed; only its contents are missing
+    expect(diff.changedFiles).toEqual(["package.json", "src/a.ts", "logo.png"]);
   });
 
-  it("asks about every changed file, over stdin rather than the command line", async () => {
+  // Read off the same line that already decides the line count, so it costs no extra git call
+  it("reads it from numstat rather than asking git a second time", async () => {
     const calls: string[][] = [];
-    const { run } = recordingRunner(calls, {
-      diff: { code: 0, stdout: "1\t0\tsrc/a.ts\n" },
-    });
-    const stdins: (string | undefined)[] = [];
-    const wrapped = vi.fn(async (command: string, args: string[], opts: { stdin?: string }) => {
-      stdins.push(opts.stdin);
-      return run(command, args);
-    });
+    const { run } = recordingRunner(calls, { diff: { code: 0, stdout: "-\t-\tlogo.png\n" } });
 
-    await collectDiff({ run: wrapped as never }, "/wt", BASE_SHA);
+    const diff = await collectDiff({ run }, "/wt", BASE_SHA);
 
-    const attrCall = calls.find((call) => call[0] === "check-attr");
-    expect(attrCall).toEqual(["check-attr", "diff", "-z", "--stdin"]);
-    expect(stdins.filter(Boolean)).toEqual(["src/a.ts\0"]);
-  });
-
-  // A change that touched nothing has nothing to ask about, and `check-attr --stdin` with no input
-  // would answer for nothing anyway
-  it("does not ask at all when the change touched no file", async () => {
-    const calls: string[][] = [];
-    const { run } = recordingRunner(calls);
-
-    await collectDiff({ run }, "/wt", BASE_SHA);
-
-    expect(calls.some((call) => call[0] === "check-attr")).toBe(false);
+    expect(diff.suppressedDiffs).toEqual(["logo.png"]);
+    expect(calls.map((call) => call[0])).toEqual(["rev-parse", "diff", "diff", "diff"]);
   });
 
   it("resolves a renamed file to its post-rename path, in both numstat shorthands", async () => {
@@ -140,8 +120,7 @@ describe("collectDiff", () => {
         timedOut: false,
       })
       .mockResolvedValueOnce(NO_SYMLINKS)
-      .mockResolvedValueOnce({ code: 0, stdout: "diff --git ...", stderr: "", timedOut: false })
-      .mockResolvedValueOnce(NOTHING_HIDDEN);
+      .mockResolvedValueOnce({ code: 0, stdout: "diff --git ...", stderr: "", timedOut: false });
 
     const diff = await collectDiff({ run }, "/wt", BASE_SHA);
 
@@ -184,8 +163,7 @@ describe("collectDiff", () => {
       .mockResolvedValueOnce(HEAD_RESOLVED)
       .mockResolvedValueOnce({ code: 0, stdout: "1\t0\tsrc/a.ts\n", stderr: "", timedOut: false })
       .mockResolvedValueOnce(NO_SYMLINKS)
-      .mockResolvedValueOnce({ code: 0, stdout: patchAtLimit, stderr: "", timedOut: false })
-      .mockResolvedValueOnce(NOTHING_HIDDEN);
+      .mockResolvedValueOnce({ code: 0, stdout: patchAtLimit, stderr: "", timedOut: false });
 
     const diff = await collectDiff({ run }, "/wt", BASE_SHA);
 
@@ -200,8 +178,7 @@ describe("collectDiff", () => {
       .mockResolvedValueOnce(HEAD_RESOLVED)
       .mockResolvedValueOnce({ code: 0, stdout: "1\t0\tsrc/a.ts\n", stderr: "", timedOut: false })
       .mockResolvedValueOnce(NO_SYMLINKS)
-      .mockResolvedValueOnce({ code: 0, stdout: oversizedPatch, stderr: "", timedOut: false })
-      .mockResolvedValueOnce(NOTHING_HIDDEN);
+      .mockResolvedValueOnce({ code: 0, stdout: oversizedPatch, stderr: "", timedOut: false });
 
     const diff = await collectDiff({ run }, "/wt", BASE_SHA);
 

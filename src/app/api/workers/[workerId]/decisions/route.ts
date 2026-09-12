@@ -12,10 +12,11 @@ import { TaskDecisionState } from "@/types";
  * then accept it — which is the whole control, inverted.
  */
 
-// The patch this carries is bounded at 200 000 characters by the worker's own `collectDiff`, which
-// is already past the 64 KB default. Far enough above that, and nowhere near a body worth
-// buffering for its own sake.
-const MAX_BODY_BYTES = 512 * 1024;
+// The patch this carries is bounded at 200 000 characters by the worker's own `collectDiff` — but
+// redaction can lengthen it two and a half times (see MAX_PATCH_CHARS), and the file list alone
+// may be 2000 paths of 512 characters. A cap under the honest maximum is worse than no cap: the
+// refusal is a 413 the worker logs, and the panel never appears at all.
+const MAX_BODY_BYTES = 2 * 1024 * 1024;
 
 /**
  * What the route will store however long the worker's copy is.
@@ -61,8 +62,17 @@ const OBJECT_ID = /^[0-9a-f]{7,64}$/;
  * worker-supplied as the patch is. React refuses a `javascript:` href and browsers block a
  * top-level `data:` navigation, so the hazard is a plausible link to somewhere else rather than
  * script execution — which is reason enough to insist it looks like what it claims to be.
+ *
+ * `https?`, matching `lastPrUrl` in the worker's `delivery.ts`, and that agreement is load-bearing
+ * rather than tidy: a settlement the board refuses is now retried WHOLE on the next poll, so a
+ * self-hosted GitHub or GitLab behind plain http would push, open the pull request, 400 here, and
+ * do it all again every thirty seconds for ever, with the board never told the url.
+ *
+ * The path is a segment class rather than `[^\s]*`, so `https://evil.example.com/#/host/o/r/pull/1`
+ * cannot borrow the shape.
  */
-const PR_URL = /^https:\/\/[A-Za-z0-9.-]+(?::\d+)?\/[^\s]*\/(?:pull|merge_requests)\/\d+$/;
+const PR_URL =
+  /^https?:\/\/[A-Za-z0-9.-]+(?::\d+)?(?:\/[A-Za-z0-9._~-]+)*\/(?:pull|merge_requests)\/\d+$/;
 
 export const POST = withWorker(async (request, { worker }) => {
   if (!worker.enabled || worker.lockedByInstance) {

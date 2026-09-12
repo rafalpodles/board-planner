@@ -182,16 +182,17 @@ export function acceptability(
         "all of it. Nobody can accept a change they have not been shown.",
     };
   }
-  // The same rule as above, arrived at from the tree rather than from the size: something in this
-  // repository says not to show these files, so the patch below has holes in exactly the places a
-  // reader would most want to look.
+  // The same rule as above, arrived at from the patch rather than from its size: git has declined
+  // to show these files, so the diff below has holes in it. Three causes and a genuine binary all
+  // look identical from here, which is the point — what matters is that the file is listed as
+  // changed and its contents are not there.
   if (diff.suppressedDiffs.length > 0) {
     return {
       acceptable: false,
       unacceptableReason:
-        `the repository suppresses the diff for ${diff.suppressedDiffs.join(", ")} (a \`-diff\` ` +
-        "attribute), so the patch below shows that file as changed without showing what changed " +
-        "in it. Nobody can accept a change they have not been shown.",
+        `git does not show what changed in ${diff.suppressedDiffs.join(", ")} — the patch below ` +
+        "lists the file and not its contents, whether because it is binary or because something " +
+        "in the repository says not to show it. Nobody can accept a change they have not been shown.",
     };
   }
   return { acceptable: true, unacceptableReason: "" };

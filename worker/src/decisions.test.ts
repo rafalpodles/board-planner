@@ -135,16 +135,16 @@ describe("whether a refused change may be accepted at all", () => {
    * IS the reading surface, so a change too large to show is one nobody can honestly accept.
    */
   /**
-   * A bare `-diff` attribute needs no driver and no config, so neither `--no-ext-diff` nor
-   * `--no-textconv` reaches it: the patch says `Binary files … differ` while `--numstat` goes on
-   * listing the path. The file list stays honest and only the contents vanish.
+   * Three ways the contents vanish while `--numstat` goes on listing the path, plus a real binary
+   * — indistinguishable from here, and deliberately treated the same: a file listed as changed
+   * with its contents missing is one nobody has been shown.
    */
-  it("refuses a change whose contents the tree hides, naming the file", () => {
+  it("refuses a change whose contents git does not show, naming the file", () => {
     const verdict = acceptability(diff({ suppressedDiffs: ["package.json"] }));
 
     expect(verdict.acceptable).toBe(false);
     expect(verdict.unacceptableReason).toContain("package.json");
-    expect(verdict.unacceptableReason).toContain("-diff");
+    expect(verdict.unacceptableReason).toMatch(/not been shown/);
   });
 
   it("refuses a change whose patch was cut, because that is not what was shown", () => {

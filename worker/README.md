@@ -332,8 +332,11 @@ and `SIGINT` both finish the task in flight before the loop exits.
   parent>/cp-worktrees/<workerId>`) — the repository checkout and any worktree of your own are
   left alone. **One exception:** a worktree holding a change somebody is being asked to accept is
   kept, named by a marker under `<CP_STATE_DIR>/decisions/`. That marker has no expiry, unlike a
-  run's two-hour lease, so an unanswered decision pins a worktree until somebody answers it —
-  accept, decline or give up all release it.
+  run's two-hour lease, so an unanswered decision pins a worktree until somebody answers it.
+  Accepting, declining and giving up all release it — provided this machine still serves that
+  project. Lose the assignment while a decision is open and the marker is kept rather than dropped:
+  the worker can no longer remove the worktree, and dropping the marker would hand it to the reaper
+  and leave the directory behind. Remove both by hand.
 - **Accepting a refused change is the one report that does not go through the outbox.** Everything
   else this worker says is queued and retried until it lands; a decision settlement is not, because
   it can become *permanently* invalid — the decision superseded by a second claim, or given up on —
@@ -365,7 +368,7 @@ or an instance admin, in an interactive session, never a machine credential — 
 |--------|-----------------------|
 | Accept | pushes that commit to `<taskKey>/worker` and opens a pull request. Never merges. |
 | Decline | removes the worktree and says so. |
-| Give up | the same, for a machine that is not coming back. |
+| Give up | the same, for a machine that is not coming back — the worktree goes on the next poll that finds the decision settled. |
 
 Accepting is checked again on this side before anything is pushed: `refs/heads/<branch>` must still
 be the accepted commit, and the patch re-derived from the recorded base must still hash to what the

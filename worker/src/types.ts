@@ -68,12 +68,21 @@ export interface DiffStats {
    */
   symlinks: { path: string; target: string }[];
   /**
-   * The changed files whose contents the patch does NOT carry, because the tree suppressed them.
+   * The changed files whose contents the patch does NOT carry, whatever the reason.
    *
-   * A bare `-diff` attribute needs no driver and no config, so neither `--no-ext-diff` nor
-   * `--no-textconv` reaches it: the patch says `Binary files … differ` while `--numstat` goes on
-   * listing the path. Whoever renders this patch as the change is rendering something with holes
-   * in it, and only they can decide what that is worth (BP-381).
+   * Read off `--numstat`'s `-` for both counts, which is git saying "I am not going to show you
+   * this one" — and that is the only signal that catches every way it happens. Measured on git
+   * 2.50.1, three of them, none reached by `--no-ext-diff` or `--no-textconv`:
+   *
+   * - a bare `-diff` attribute, which needs no driver and no config at all;
+   * - `diff=<name>` plus `[diff "<name>"] binary = true`, where the attribute reads as an ordinary
+   *   driver name and only the config says what it does;
+   * - a file git simply calls binary — a raw NUL inside a JavaScript block comment is enough, and
+   *   nothing is planted anywhere.
+   *
+   * A genuinely binary asset lands here too, which is honest rather than a false positive: the
+   * patch really does not show what changed in it. Whoever renders this patch as "the change" is
+   * rendering something with holes, and only they can decide what that is worth (BP-381).
    */
   suppressedDiffs: string[];
   // The commit the diff was taken against, resolved once to an object id rather than left as the

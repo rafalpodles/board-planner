@@ -280,11 +280,13 @@ describe("PATCH /api/workers/:workerId/decisions", () => {
    * worker-supplied as the patch is — and the panel renders it as an href somebody clicks.
    */
   it.each([
-    "http://github.com/o/r/pull/7",
     "https://evil.example.com/anything",
     "javascript:alert(1)",
     "https://github.com/o/r/pull/notanumber",
     "not a url at all",
+    // The shape that borrows the tail while the host is somewhere else
+    "https://evil.example.com/#/github.com/o/r/pull/1",
+    "https://evil.example.com/?x=/o/r/pull/1",
   ])("refuses a prUrl of %j", async (prUrl) => {
     const { req, ctx } = call("PATCH", { taskId: TASK_ID, state: "delivered", prUrl });
 
@@ -293,9 +295,17 @@ describe("PATCH /api/workers/:workerId/decisions", () => {
   });
 
   // The control: the two shapes a real delivery produces
+  /**
+   * `http` is admitted on purpose, matching `lastPrUrl` in the worker's `delivery.ts`. The two
+   * have to agree: a settlement the board refuses is retried WHOLE on the next poll, so a
+   * self-hosted GitHub or GitLab behind plain http would push, open the pull request, 400 here,
+   * and do it all again every poll for ever, with the board never told the url.
+   */
   it.each([
     "https://github.com/owner/repo/pull/42",
     "https://gitlab.example.com/group/proj/-/merge_requests/7",
+    "http://ghe.internal/owner/repo/pull/7",
+    "https://ghe.internal:8443/owner/repo/pull/7",
   ])("stores a real one: %s", async (prUrl) => {
     const { req, ctx } = call("PATCH", { taskId: TASK_ID, state: "delivered", prUrl });
 
