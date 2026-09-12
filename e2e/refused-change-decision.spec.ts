@@ -145,8 +145,10 @@ test("accepting says what it spends, and the record carries the verdict afterwar
   // The first draft of this design claimed nothing executes until somebody merges. It is false
   // here: CI is `on: push` with no branch filter, so the push alone is the trigger.
   await expect(dialog).toContainText("runs this repository's CI");
-  // And whose name it spends, which is the other half of what accepting costs
-  await expect(dialog).toContainText("your own GitHub identity");
+  // And whose name it spends, which is the other half of what accepting costs — the MACHINE
+  // OWNER's pinned account, not the reader's, because an instance admin may be answering for a
+  // machine that is not theirs
+  await expect(dialog).toContainText(`${WORKER_NAME}'s pinned GitHub identity`);
 
   const answered = page.waitForResponse(
     (response) =>
@@ -188,7 +190,7 @@ test("giving up says it deletes the work, and asks before it does", async ({ pag
 
   await page.getByRole("button", { name: "Give up and delete the work" }).click();
   const dialog = page.getByRole("dialog");
-  await expect(dialog).toContainText("deletes the worktree");
+  await expect(dialog).toContainText("worktree holding this change is deleted");
 
   // Nothing is written until it is confirmed
   expect(await storedDecision().then((d) => d?.state)).toBe("pending");
