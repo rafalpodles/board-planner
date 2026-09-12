@@ -30,8 +30,10 @@ const PIN = { workerId: WORKER, commit: "a".repeat(40) };
 function decision(over: Partial<ITaskDecision> = {}): ITaskDecision {
   return {
     gate: "protected-paths",
-    files: ["package.json"],
+    files: ["package.json", "src/a.ts"],
+    fileCount: 700,
     protectedFiles: ["package.json"],
+    protectedFileCount: 550,
     patch: "diff --git a/package.json b/package.json",
     patchTruncated: false,
     patchSha256: "b".repeat(64),
@@ -375,6 +377,31 @@ describe("who may answer", () => {
 });
 
 describe("what a reader is shown", () => {
+  /**
+   * Both lists are bounded by the route that stores them, so the counts are the only true numbers
+   * — and the panel renders them as "how much am I consenting to" and "how many more tripped the
+   * gate". Reading either off the stored list would under-report by exactly the amount that was cut.
+   */
+  it("publishes the stored counts rather than the length of the bounded lists", () => {
+    const api = toApiDecision(decision())!;
+
+    expect(api.fileCount).toBe(700);
+    expect(api.protectedFileCount).toBe(550);
+  });
+
+  /**
+   * A record written before the counts existed carries neither, and the panel still has to say
+   * something true — the list it does have is the best available answer.
+   */
+  it("falls back to the list for a record that predates the counts", () => {
+    const api = toApiDecision(
+      decision({ fileCount: undefined as never, protectedFileCount: undefined as never })
+    )!;
+
+    expect(api.fileCount).toBe(2);
+    expect(api.protectedFileCount).toBe(1);
+  });
+
   it("withholds the machine's own bookkeeping", () => {
     const api = toApiDecision(decision()) as unknown as Record<string, unknown>;
 
@@ -390,7 +417,7 @@ describe("what a reader is shown", () => {
       commit: "a".repeat(40),
       // The count of the whole change, and the subset that tripped the gate — the full list is
       // deliberately not published: the panel renders neither, and it would travel on the poll
-      fileCount: 1,
+      fileCount: 700,
       protectedFiles: ["package.json"],
       acceptable: true,
     });

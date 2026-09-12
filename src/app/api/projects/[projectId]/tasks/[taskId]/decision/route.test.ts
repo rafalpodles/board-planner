@@ -48,6 +48,7 @@ function decision(over: Record<string, unknown> = {}) {
     commit: "a".repeat(40),
     taskKey: "CP-158",
     files: ["package.json"],
+    fileCount: 1,
     acceptable: true,
     unacceptableReason: "",
     state: "pending",
@@ -228,6 +229,7 @@ describe("answering a refused change", () => {
       "unacceptableReason",
       "gate",
       "files",
+      "fileCount",
       "taskKey",
     ]) {
       expect(named).toContain(`decision.${field}`);
@@ -277,6 +279,35 @@ describe("the audit row", () => {
     await POST(req, ctx);
 
     expect(logInstanceAudit).toHaveBeenCalledWith(expect.objectContaining({ action }));
+  });
+
+  /**
+   * The stored count, not the length of the list the route bounded for rendering. This row is the
+   * durable record of what was consented to, and "500 file(s)" for a 700-file change is the wrong
+   * number in the one place nobody can correct later.
+   */
+  it("audits the true size of the change, not the size of the list it kept", async () => {
+    taskWith(decision({ files: ["a.ts"], fileCount: 700 }));
+    const { req, ctx } = call({ verdict: "accept" });
+
+    await POST(req, ctx);
+
+    expect(logInstanceAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ detail: expect.stringContaining("700 file(s)") })
+    );
+  });
+
+  // A record written before the count existed has only the list, and the row still has to say
+  // something true
+  it("falls back to the list for a record that predates the count", async () => {
+    taskWith(decision({ files: ["a.ts", "b.ts"], fileCount: undefined }));
+    const { req, ctx } = call({ verdict: "accept" });
+
+    await POST(req, ctx);
+
+    expect(logInstanceAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ detail: expect.stringContaining("2 file(s)") })
+    );
   });
 
   it("targets the machine by name, and says which change at which commit", async () => {

@@ -189,16 +189,28 @@ describe("POST /api/workers/:workerId/decisions", () => {
     expect(stored.fileCount).toBe(700);
   });
 
-  // The same for the subset the panel renders as chips: "what tripped the gate" must not be
-  // smaller than what did
-  it("counts every protected file too", async () => {
-    const protectedFiles = Array.from({ length: 600 }, (_, at) => `scripts/s${at}.js`);
-    const { req, ctx } = call("POST", record({ files: protectedFiles, protectedFiles }));
+  /**
+   * The same for the subset the panel renders as chips: "what tripped the gate" must not be
+   * smaller than what did.
+   *
+   * Two different lengths, deliberately. Built from one array, all four numbers are equal and a
+   * copy-paste swap of the two sources — `protectedFileCount: files.total` — stays green.
+   */
+  it("counts each list from its own source, not from the other one", async () => {
+    const { req, ctx } = call(
+      "POST",
+      record({
+        files: Array.from({ length: 700 }, (_, at) => `src/f${at}.ts`),
+        protectedFiles: Array.from({ length: 550 }, (_, at) => `scripts/s${at}.js`),
+      })
+    );
 
     await POST(req, ctx);
     const stored = createDecision.mock.calls[0][3];
+    expect(stored.files).toHaveLength(500);
+    expect(stored.fileCount).toBe(700);
     expect(stored.protectedFiles).toHaveLength(500);
-    expect(stored.protectedFileCount).toBe(600);
+    expect(stored.protectedFileCount).toBe(550);
   });
 
   /**

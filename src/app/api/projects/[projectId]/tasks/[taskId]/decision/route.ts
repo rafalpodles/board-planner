@@ -97,7 +97,8 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
   // to 220 KB of patch on every verdict — and quietly contradict the schema's own comment that the
   // two readers which need it say so.
   const task = await Task.findOne({ _id: taskId, project: projectId }).select(
-    "taskNumber decision.gate decision.workerId decision.commit decision.taskKey decision.files decision.acceptable decision.unacceptableReason decision.state"
+    "taskNumber decision.gate decision.workerId decision.commit decision.taskKey " +
+      "decision.files decision.fileCount decision.acceptable decision.unacceptableReason decision.state"
   );
   if (!task) {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });
@@ -147,9 +148,12 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
     target: worker?.name || decision.workerId,
     user: String(user._id),
     actorUsername: user.username,
+    // The true count, not the length of the list the route bounded for rendering: this row is the
+    // durable record of what somebody consented to, and a 700-file change audited as "500 file(s)"
+    // is the wrong number in the one place it cannot be corrected later.
     detail: `${decision.taskKey || `task ${task.taskNumber}`} at ${decision.commit.slice(0, 12)} — ${
       decision.gate
-    } gate, ${decision.files.length} file(s)`,
+    } gate, ${decision.fileCount || decision.files.length} file(s)`,
   });
 
   return NextResponse.json({ decision: toApiDecision(result.decision, worker, true) });
