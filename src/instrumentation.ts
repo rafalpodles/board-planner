@@ -26,8 +26,23 @@ export async function register() {
     // (BP-282) — but every other path to this module goes through the PM scheduler, inside the
     // try below, whose catch reports it as a MongoDB connection failure and leaves the process
     // serving 500s from every route that touches a secret, with the schedulers never started.
-    const { assertEncryptionConfig } = await import("@/lib/encryption");
-    assertEncryptionConfig();
+    try {
+      // The import is inside the try because the module asserts at evaluation time: in the bad
+      // case it throws here and the explicit call below never runs. Kept anyway — it says what
+      // this block is for, and survives the module-level call being removed.
+      const { assertEncryptionConfig } = await import("@/lib/encryption");
+      assertEncryptionConfig();
+    } catch (err) {
+      // Exiting rather than throwing, and this is not belt-and-braces. `NextServer.prepare()`
+      // awaits the real prepare only when `dev` (next/dist/server/next.js), so under `next start`
+      // — Railway, and the standalone image — the rejection is caught into a memoised promise and
+      // re-thrown per request instead: process up, port bound, every request 500 for ever, which
+      // a container reports as healthy. Measured, not inferred. Exiting makes it a crash-loop an
+      // operator can see, and makes true the sentence the README, .env.example, CLAUDE.md and
+      // docker-compose.yml all carry.
+      console.error(err instanceof Error ? err.message : err);
+      process.exit(1);
+    }
 
     const { connectDB } = await import("@/lib/db");
     try {
