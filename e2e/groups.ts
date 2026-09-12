@@ -77,6 +77,7 @@ export const GROUPS = {
     "agent-picker-scoping.spec.ts",
     "project-default-agent.spec.ts",
     "external-integrations.spec.ts",
+    "pr-status.spec.ts",
     "project-channel-secret.spec.ts",
     "pr-link-replacement.spec.ts",
     "mcp-oauth.spec.ts",

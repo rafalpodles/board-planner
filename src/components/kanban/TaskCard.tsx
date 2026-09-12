@@ -8,7 +8,7 @@ import { categoryColor, categoryTint } from "@/lib/category-colors";
 import { cardBadges } from "@/lib/custom-fields";
 import { taskPath } from "@/lib/urls";
 import { CopyTaskLink } from "@/components/tasks/CopyTaskLink";
-import { PullRequestBadge } from "@/components/tasks/PullRequestBadge";
+import { PullRequestState } from "@/components/tasks/PullRequestBadge";
 
 // A card is a summary; past a few badges it stops being one
 const MAX_CARD_BADGES = 3;
@@ -234,10 +234,14 @@ export function TaskCard({
         </div>
       )}
 
+      {/* The state, not a link to it. This whole card is one anchor, and the comment further
+          down says why nothing interactive goes inside one — so the card opens the task, and the
+          pull request is a click away on the list row and on the task detail, where the badge is
+          a link because nothing encloses it. */}
       {task.linkedPRs && task.linkedPRs.length > 0 && (
         <div className="mb-2 flex flex-wrap items-center gap-1.5">
           {task.linkedPRs.map((pr) => (
-            <PullRequestBadge key={`${pr.provider ?? "github"}-${pr.number}`} pr={pr} />
+            <PullRequestState key={`${pr.provider ?? "github"}-${pr.number}`} pr={pr} />
           ))}
         </div>
       )}

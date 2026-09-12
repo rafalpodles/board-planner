@@ -12,7 +12,7 @@ export const PM_STUB_URL = `http://localhost:${PM_STUB_PORT}`;
 
 // The model behind AI task generation, replaced the same way.
 //
-// A run owns E2E_PORT through E2E_PORT+8, and every stub derives from that one number so setting
+// A run owns E2E_PORT through E2E_PORT+9, and every stub derives from that one number so setting
 // it reserves the whole block. Giving each stub a default of its own is what makes two operators
 // following the same "pick two adjacent numbers" habit collide on a port neither of them typed.
 const AI_STUB_PORT = Number(process.env.AI_STUB_PORT ?? PORT + 2);
@@ -49,6 +49,12 @@ export const MAIL_SERVER = {
   user: "e2e",
   from: "Board Planner <noreply@board-planner.test>",
 };
+
+// GitHub's REST API, replaced the same way the two model stubs are, so a pull-request sync runs
+// end to end for the first time (BP-443). One port: the spec steers it through the same one it
+// serves on, since nothing here is fire-and-forget — the sync answers when it is done.
+const GITHUB_STUB_PORT = Number(process.env.GITHUB_STUB_PORT ?? PORT + 9);
+export const GITHUB_STUB_URL = `http://127.0.0.1:${GITHUB_STUB_PORT}`;
 
 // MongoDB, through a proxy the suite can cut (e2e/mongo-proxy.mjs). The dev server is pointed at
 // the proxy rather than at the database, so a test can take the database away and give it back
@@ -193,6 +199,15 @@ export default defineConfig({
       },
     },
     {
+      command: `node e2e/github-stub.mjs`,
+      url: `${GITHUB_STUB_URL}/health`,
+      reuseExistingServer: false,
+      timeout: 30_000,
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { GITHUB_STUB_PORT: String(GITHUB_STUB_PORT) },
+    },
+    {
       command: `npm run dev -- --port ${PORT}`,
       url: BASE_URL,
       reuseExistingServer: false,
@@ -228,6 +243,12 @@ export default defineConfig({
         OPENAI_API_KEY: "e2e-stub-key",
         OPENAI_BASE_URL: `${AI_STUB_URL}/v1`,
         WEBHOOK_SIGNING_SECRET: WEBHOOK_SECRET,
+        // The stub above. Without it the sync reaches the real api.github.com, which is why no
+        // spec drove one before BP-443.
+        GITHUB_API_BASE_URL: GITHUB_STUB_URL,
+        // Off, so a tick cannot re-sync a project mid-spec and overwrite what the spec set up.
+        // The specs drive the sync themselves, which is the half a person can see.
+        GITHUB_SYNC_TICK_MS: "0",
         // The mail server above. `isEmailConfigured()` wants all three, and without them the whole
         // e-mail column of the notification grid is unreachable from a browser (BP-465).
         SMTP_HOST: MAIL_SERVER.host,
