@@ -1,5 +1,15 @@
-import { describe, it, expect } from "vitest";
-import { maskSecretUrl, sanitizeProjectSecrets } from "./project-secrets";
+import { describe, it, expect, vi, afterEach } from "vitest";
+
+process.env.ENCRYPTION_KEY = "d".repeat(64);
+
+const { maskSecretUrl, sanitizeProjectSecrets } = await import("./project-secrets");
+const { encryptSecret } = await import("./encryption");
+
+// Restored here rather than at the end of a test body: an assertion above that line throws and
+// leaves console.error mocked for the rest of the file
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("maskSecretUrl", () => {
   it("keeps the origin and the last four characters of a Slack webhook", () => {
@@ -81,6 +91,57 @@ describe("sanitizeProjectSecrets", () => {
       webhookUrlMasked: "https://hooks.slack.com/••••3456",
     });
     expect(channel).not.toHaveProperty("webhookUrl");
+  });
+
+  // BP-372: the stored value is an `enc:v2:…` envelope, which `new URL()` parses as a non-special
+  // scheme — masking it without decrypting first prints `null/••••` and a tail of ciphertext
+  it("masks a stored channel URL by its real host, and never leaks the ciphertext", () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const stored = encryptSecret("https://hooks.slack.com/services/T000/B111/abcdef123456");
+    const sanitized = sanitizeProjectSecrets({
+      notificationChannels: [{ _id: "c1", name: "Releases", webhookUrl: stored, enabled: true }],
+    });
+
+    const channel = (sanitized.notificationChannels as Record<string, unknown>[])[0];
+    expect(channel.webhookUrlMasked).toBe("https://hooks.slack.com/••••3456");
+    expect(channel).not.toHaveProperty("webhookUrl");
+    expect(JSON.stringify(channel)).not.toContain(stored.slice(-8));
+
+    // This runs on every project read, list included, so a log outside the catch is production noise
+    expect(logged).not.toHaveBeenCalled();
+  });
+
+  // The bare mask is also what an unparseable URL gets, so the screen cannot tell the two apart.
+  // Naming the row in the log is the only thing that makes a lost key actionable.
+  it("falls back to a bare mask when no configured key can read the stored URL, and says which row", () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const unreadable = (name = "Unreadable row") =>
+      sanitizeProjectSecrets({
+        key: "BP",
+        notificationChannels: [
+          { _id: "c1", name, webhookUrl: "enc:v2:deadbeef:Zm9v", enabled: true },
+        ],
+      });
+
+    const sanitized = unreadable();
+
+    const channel = (sanitized.notificationChannels as Record<string, unknown>[])[0];
+    expect(channel.webhookUrlMasked).toBe("••••");
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining("BP"));
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining("Unreadable row"));
+
+    // The board polls a project every 10 seconds per open tab and the sidebar maps this over the
+    // whole list, so the row is reported once per process rather than once per read — a key that
+    // is never coming back would otherwise bill for a log line for ever.
+    logged.mockClear();
+    unreadable();
+    unreadable();
+    expect(logged).not.toHaveBeenCalled();
+
+    // Still the same row after a rename. Keyed on the name, this would report again — and an owner
+    // trying to fix a broken channel renames it, so that is the worst moment to start repeating.
+    unreadable("Renamed while trying to fix it");
+    expect(logged).not.toHaveBeenCalled();
   });
 
   it("masks an outgoing webhook's URL and removes the original", () => {

@@ -75,7 +75,7 @@ export function assertEncryptionConfig(): void {
       );
     }
     console.warn(
-      "ENCRYPTION_KEY is not configured — integration tokens (GitHub, GitLab, Coda, MCP) cannot be stored. Set it to 32 bytes of hex or base64: openssl rand -hex 32"
+      "ENCRYPTION_KEY is not configured — integration tokens (GitHub, GitLab, Coda, MCP) and chat webhook URLs (a project's team channels, and each person's own) cannot be stored. Set it to 32 bytes of hex or base64: openssl rand -hex 32"
     );
   }
 }
@@ -84,6 +84,10 @@ assertEncryptionConfig();
 
 export function isEncryptionConfigured(): boolean {
   return primaryKey() !== null;
+}
+
+export function isEncryptedSecret(value: string | undefined | null): boolean {
+  return !!value && (value.startsWith(PREFIX_V1) || value.startsWith(PREFIX_V2));
 }
 
 export function encryptSecret(plaintext: string): string {

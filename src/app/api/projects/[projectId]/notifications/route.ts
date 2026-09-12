@@ -6,6 +6,15 @@ import { logProjectAudit } from "@/lib/projectAudit";
 import { NOTIFICATION_CHANNEL_TYPES, WEBHOOK_EVENTS, NotificationChannelType } from "@/types";
 import { sanitizeProjectSecrets } from "@/lib/project-secrets";
 import { parseWebhookUrl, parseWebhookEvents } from "@/lib/webhook-input";
+import { encryptSecret, isEncryptedSecret, isEncryptionConfigured } from "@/lib/encryption";
+
+// Built per call: a Response's body is a one-shot stream, so one shared instance answers the
+// second caller with no body at all and two concurrent ones with a locked stream.
+const noKey = () =>
+  NextResponse.json(
+    { error: "This instance cannot store a webhook URL: ENCRYPTION_KEY is not set" },
+    { status: 503 }
+  );
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function masked(project: any) {
@@ -16,7 +25,7 @@ export const GET = withProjectOwner(async (_request, { params }) => {
   const { projectId } = await params;
   await connectDB();
 
-  const project = await Project.findById(projectId, "notificationChannels");
+  const project = await Project.findById(projectId, "key notificationChannels");
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
@@ -54,6 +63,8 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
     );
   }
 
+  if (!isEncryptionConfigured()) return noKey();
+
   const project = await Project.findById(projectId);
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
@@ -63,7 +74,7 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
   channels.push({
     type: type as NotificationChannelType,
     name: name.trim(),
-    webhookUrl: parsedUrl,
+    webhookUrl: encryptSecret(parsedUrl),
     events: parsedEvents,
     enabled: true,
   } as typeof channels[number]);
@@ -107,7 +118,12 @@ export const PUT = withProjectOwner(async (request, { params }) => {
     if (!parsedUrl) {
       return NextResponse.json({ error: "A valid webhook URL is required" }, { status: 400 });
     }
-    channel.webhookUrl = parsedUrl;
+    if (!isEncryptionConfigured()) return noKey();
+    channel.webhookUrl = encryptSecret(parsedUrl);
+  } else if (!isEncryptedSecret(channel.webhookUrl) && isEncryptionConfigured()) {
+    // Rows written before BP-372 hold the URL in the clear. Any save on the channel carries them
+    // over, so renaming one is enough to migrate it.
+    channel.webhookUrl = encryptSecret(channel.webhookUrl);
   }
   if (updates.events !== undefined) {
     const parsedEvents = parseWebhookEvents(updates.events);

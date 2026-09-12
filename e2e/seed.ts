@@ -1571,8 +1571,8 @@ export async function seedWebhook(
   await mongoose.disconnect();
 }
 
-/** What a project names as its repository. No token: storing one needs ENCRYPTION_KEY, which this
- * run deliberately does not set, and every assertion here is reached before a token is read. */
+/** What a project names as its repository. A token planted here is written in the clear, which
+ * `decryptSecret` passes through unchanged; nothing in these assertions reads one. */
 export async function seedRepository(fields: {
   repositoryUrl?: string;
   githubToken?: string;
