@@ -24,7 +24,8 @@ describe.skipIf(!onMac)("confine against the real sandbox", () => {
   const runner = createRunner();
 
   async function confinedSh(script: string) {
-    const spawn = confine("/bin/sh", ["-c", script], { writable: [worktree] });
+    // env: {} so the operator's own risk acceptance cannot switch off the thing under test
+    const spawn = confine("/bin/sh", ["-c", script], { writable: [worktree], env: {} });
     if (!("command" in spawn)) throw new Error(`refused: ${spawn.refusal}`);
     return runner.run(spawn.command, spawn.args, { cwd: worktree, timeoutMs: 30_000 });
   }
@@ -101,6 +102,7 @@ describe.skipIf(!onMac)("confine against the real sandbox", () => {
 
     const spawn = confine("/bin/sh", ["-c", `echo via-link > ${linked}/through.txt`], {
       writable: [linked],
+      env: {},
     });
     if (!("command" in spawn)) throw new Error(`refused: ${spawn.refusal}`);
     const result = await runner.run(spawn.command, spawn.args, { cwd: dir, timeoutMs: 30_000 });

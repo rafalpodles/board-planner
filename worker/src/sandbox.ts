@@ -25,17 +25,33 @@ import { realpathSync } from "fs";
 
 export const SANDBOX_COMMAND = "sandbox-exec";
 
+/**
+ * The operator's own risk acceptance, and deliberately an environment variable rather than a worker
+ * policy field: policy comes down from the server, and a setting that can turn the sandbox off must
+ * not be reachable by anything the agent can also reach. It means the same thing on every platform
+ * — run the agent unconfined — so there is one sentence to read rather than a matrix.
+ */
+export const UNCONFINED_ESCAPE_HATCH = "CP_ALLOW_UNCONFINED_AGENT";
+
 export const UNCONFINED_REASON =
   "this machine has no sandbox the worker knows how to confine an agent with (seatbelt is macOS only), " +
-  "so the agent would be able to write anywhere its user can — set CP_ALLOW_UNCONFINED_AGENT=1 to accept that and run anyway";
+  `so the agent could write anywhere this user can — set ${UNCONFINED_ESCAPE_HATCH}=1 to accept that and run anyway`;
 
-export type Confinement = { command: string; args: string[] } | { refusal: string };
+export type Confinement =
+  | { command: string; args: string[]; confined: boolean }
+  | { refusal: string };
 
 export interface ConfineOptions {
   /** Absolute paths the child may write to. Everything else is denied, including `$HOME`. */
   writable: string[];
   platform?: NodeJS.Platform;
   realpath?: (path: string) => string;
+  env?: NodeJS.ProcessEnv;
+}
+
+function optedOut(env: NodeJS.ProcessEnv): boolean {
+  const value = env[UNCONFINED_ESCAPE_HATCH]?.trim().toLowerCase();
+  return value === "1" || value === "true" || value === "yes";
 }
 
 // `(allow default)` has to come first: seatbelt reads a later rule as overriding an earlier one, so
@@ -63,6 +79,8 @@ function profileFor(names: string[]): string {
  * containing a quote would otherwise close the string it sits in and append rules of its own.
  */
 export function confine(command: string, args: string[], options: ConfineOptions): Confinement {
+  if (optedOut(options.env ?? process.env)) return { command, args, confined: false };
+
   const platform = options.platform ?? process.platform;
   if (platform !== "darwin") return { refusal: UNCONFINED_REASON };
 
@@ -84,6 +102,7 @@ export function confine(command: string, args: string[], options: ConfineOptions
 
   const names = resolved.map((_, index) => `W${index}`);
   return {
+    confined: true,
     command: SANDBOX_COMMAND,
     args: [
       "-p",

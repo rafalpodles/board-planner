@@ -1,10 +1,17 @@
 import { describe, it, expect } from "vitest";
-import { confine, SANDBOX_COMMAND, UNCONFINED_REASON } from "./sandbox.js";
+import {
+  confine,
+  SANDBOX_COMMAND,
+  UNCONFINED_ESCAPE_HATCH,
+  UNCONFINED_REASON,
+} from "./sandbox.js";
 
 const identity = (path: string) => path;
 
+// Empty rather than process.env: an operator who has accepted the risk in their own shell would
+// otherwise turn the confinement off inside every test below, and each one would still be green.
 function confined(writable: string[], platform: NodeJS.Platform = "darwin") {
-  return confine("claude", ["-p", "hello"], { writable, platform, realpath: identity });
+  return confine("claude", ["-p", "hello"], { writable, platform, realpath: identity, env: {} });
 }
 
 function profileOf(result: ReturnType<typeof confined>): string {
@@ -81,6 +88,7 @@ describe("confine", () => {
     const result = confine("claude", [], {
       writable: ["/tmp/run-7"],
       platform: "darwin",
+      env: {},
       realpath: (path) => (path === "/tmp/run-7" ? "/private/tmp/run-7" : path),
     });
 
@@ -93,6 +101,7 @@ describe("confine", () => {
     const result = confine("claude", [], {
       writable: ["/gone"],
       platform: "darwin",
+      env: {},
       realpath: () => {
         throw new Error("ENOENT");
       },
@@ -122,5 +131,58 @@ describe("confine", () => {
 
     expect(profile).toContain('(allow file-write-data (literal "/dev/null"))');
     expect(profile).not.toContain('(subpath "/dev")');
+  });
+});
+
+describe("the operator's escape hatch", () => {
+  const withHatch = (value: string, platform: NodeJS.Platform = "linux") =>
+    confine("claude", ["-p", "hello"], {
+      writable: ["/work/bp-1"],
+      platform,
+      realpath: identity,
+      env: { [UNCONFINED_ESCAPE_HATCH]: value },
+    });
+
+  it("runs the command bare where the risk has been accepted", () => {
+    const result = withHatch("1");
+    if (!("command" in result)) throw new Error(`expected a spawn, got ${result.refusal}`);
+
+    expect(result.command).toBe("claude");
+    expect(result.args).toEqual(["-p", "hello"]);
+  });
+
+  // The one field that tells a caller which of the two it got. Without it an unconfined spawn is
+  // indistinguishable from a confined one at every call site, which is how a risk acceptance stops
+  // being visible in the log that follows it.
+  it("says that what it returned is not confined", () => {
+    const result = withHatch("1");
+
+    expect("confined" in result && result.confined).toBe(false);
+  });
+
+  it("means the same thing on the platform that does have a sandbox", () => {
+    const result = withHatch("true", "darwin");
+
+    expect("confined" in result && result.confined).toBe(false);
+  });
+
+  // Anything else is not an acceptance. "0" and "false" read as switching it off to anyone who has
+  // met an environment variable before, and the empty string is what an unset variable looks like
+  // once a shell has exported it.
+  it.each(["0", "false", "no", "", "  "])("does not read %o as an acceptance", (value) => {
+    const result = withHatch(value);
+
+    expect("refusal" in result && result.refusal).toBe(UNCONFINED_REASON);
+  });
+
+  it("is off when the variable is absent, so nothing turns the sandbox off by accident", () => {
+    const result = confine("claude", [], {
+      writable: ["/work/bp-1"],
+      platform: "linux",
+      realpath: identity,
+      env: {},
+    });
+
+    expect("refusal" in result).toBe(true);
   });
 });
