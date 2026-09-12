@@ -43,17 +43,21 @@ export function LinkedWork({
   async function refresh() {
     setRefreshing(true);
     try {
-      const result: { prsLinked?: number; autoTransitioned?: number } = await api.post(
+      const result: { tasksWritten?: number; autoTransitioned?: number } = await api.post(
         `/api/projects/${projectId}/github/sync`,
         { taskNumber: task.taskNumber }
       );
       onChanged();
-      // Said rather than left to be inferred: without it a refresh that found nothing looks
-      // exactly like a button that did nothing
+      // Said rather than left to be inferred, and saying which of the three it was: a refresh that
+      // found nothing otherwise looks exactly like a button that did nothing. `tasksWritten` is the
+      // sync's own count of what it actually rewrote, so zero really does mean nothing has changed
+      // anywhere since the last look — not merely nothing on this task.
       toast(
         result?.autoTransitioned
           ? "Pull requests refreshed — this task moved to Ready to Test"
-          : "Pull requests refreshed",
+          : result?.tasksWritten
+            ? "Pull requests refreshed"
+            : "Pull requests refreshed — nothing has changed since the last check",
         "success"
       );
     } catch (err) {

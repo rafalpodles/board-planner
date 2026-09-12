@@ -116,14 +116,27 @@ describe("refreshing", () => {
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
   });
 
-  // A refresh that found nothing is otherwise indistinguishable from a button that did nothing
-  it("says it worked, and says when the task moved", async () => {
-    api.post.mockResolvedValue({ prsLinked: 1, autoTransitioned: 0 });
+  /**
+   * A refresh that found nothing is otherwise indistinguishable from a button that did nothing —
+   * and "it worked" is not the same answer as "nothing has changed". `tasksWritten` is the sync's
+   * own count of what it rewrote, so zero means nothing moved anywhere, not merely nothing here.
+   */
+  it("says which of the three things happened", async () => {
+    api.post.mockResolvedValue({ tasksWritten: 1, autoTransitioned: 0 });
     renderSection();
     await clickRefresh();
     await waitFor(() => expect(toast).toHaveBeenCalledWith("Pull requests refreshed", "success"));
 
-    api.post.mockResolvedValue({ prsLinked: 1, autoTransitioned: 1 });
+    api.post.mockResolvedValue({ tasksWritten: 0, autoTransitioned: 0 });
+    await clickRefresh();
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith(
+        "Pull requests refreshed — nothing has changed since the last check",
+        "success"
+      )
+    );
+
+    api.post.mockResolvedValue({ tasksWritten: 1, autoTransitioned: 1 });
     await clickRefresh();
     await waitFor(() =>
       expect(toast).toHaveBeenCalledWith(
