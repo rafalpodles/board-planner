@@ -53,6 +53,8 @@ export function matchMRsToTasks(
       mergedAt: mr.merged_at ? new Date(mr.merged_at) : null,
       updatedAt: new Date(mr.updated_at),
       matchedTaskNumber: parseInt(match[1], 10),
+      // GitLab pipelines are not read here, so no commit to attach checks to
+      headSha: null,
     });
   }
 

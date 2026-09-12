@@ -6,9 +6,51 @@ interface GitHubPR {
   state: "open" | "closed";
   html_url: string;
   merged_at: string | null;
-  head: { ref: string };
+  head: { ref: string; sha?: string };
   updated_at: string;
 }
+
+// Injectable for the same reason OPENROUTER_BASE_URL is: with api.github.com written into the URL
+// the sync was the one integration no browser test could drive, so `e2e/seed.ts` planted its
+// results by hand instead. Read per call, never per project — an operator sets where GitHub is,
+// and a project naming its own host would be a request forgery with a token attached.
+const API_BASE = () => process.env.GITHUB_API_BASE_URL || "https://api.github.com";
+
+/**
+ * What continuous integration says about a pull request's head commit.
+ *
+ * `unknown` is not a state GitHub reports: it is what this instance says when it could not ask.
+ * Distinct from `none` on purpose — "nothing has run" and "we do not know" send a reader to
+ * different places, and collapsing them is how a broken token reads as a green board.
+ */
+export type CiState = "none" | "running" | "success" | "failure" | "unknown";
+
+export interface PullRequestChecks {
+  ci: CiState;
+  /** The check that decided the state, for the badge's tooltip. */
+  ciLabel: string | null;
+}
+
+interface CheckRun {
+  name: string;
+  status: "queued" | "in_progress" | "completed" | string;
+  conclusion: string | null;
+  completed_at?: string | null;
+}
+
+interface CommitStatus {
+  state: "success" | "pending" | "failure" | "error" | string;
+  statuses: { context: string; state: string }[];
+}
+
+// A conclusion that means the commit did not pass. `cancelled` and `timed_out` belong here rather
+// than with the neutral ones: GitHub's own merge box blocks on them, and a build somebody stopped
+// is not a build that succeeded.
+const FAILING = new Set(["failure", "timed_out", "action_required", "cancelled", "startup_failure"]);
+// Ran, decided nothing, blocks nothing. A workflow whose every job was skipped is the ordinary
+// case here — a path filter that did not match — and reading that as a failure would paint most
+// documentation pull requests red.
+const NEUTRAL = new Set(["neutral", "skipped", "stale"]);
 
 // A key stored before BP-401 constrained the format may still be one like "C(", which must not
 // blow up the matcher
@@ -22,6 +64,8 @@ export interface ParsedPR {
   mergedAt: Date | null;
   updatedAt: Date;
   matchedTaskNumber: number;
+  /** The head commit, which is what checks are attached to. Absent on a pull request GitHub answered without one. */
+  headSha: string | null;
 }
 
 /**
@@ -38,8 +82,11 @@ export async function fetchPullRequests(
   };
 
   const [openPRs, closedPRs] = await Promise.all([
-    fetchPage(`https://api.github.com/repos/${owner}/${repo}/pulls?state=open&per_page=100`, headers),
-    fetchPage(`https://api.github.com/repos/${owner}/${repo}/pulls?state=closed&per_page=30&sort=updated&direction=desc`, headers),
+    fetchPage(`${API_BASE()}/repos/${owner}/${repo}/pulls?state=open&per_page=100`, headers),
+    fetchPage(
+      `${API_BASE()}/repos/${owner}/${repo}/pulls?state=closed&per_page=30&sort=updated&direction=desc`,
+      headers
+    ),
   ]);
 
   return [...openPRs, ...closedPRs];
@@ -88,6 +135,7 @@ export function matchPRsToTasks(
       mergedAt: pr.merged_at ? new Date(pr.merged_at) : null,
       updatedAt: new Date(pr.updated_at),
       matchedTaskNumber: taskNumber,
+      headSha: pr.head.sha ?? null,
     });
   }
 
@@ -102,4 +150,89 @@ export function parseRepoString(githubRepo: string): { owner: string; repo: stri
   const match = githubRepo.match(/(?:github\.com\/)?([^/]+)\/([^/]+?)(?:\.git)?$/);
   if (!match) return null;
   return { owner: match[1], repo: match[2] };
+}
+
+/**
+ * Reduces everything continuous integration has said about one commit to a single state.
+ *
+ * Two mechanisms, because GitHub has two and a repository may use either: check runs (Actions and
+ * most apps) and the older commit statuses (`statuses` API — what a great many external CI services
+ * still post). Ignoring the second would paint a passing build grey on any repository using it.
+ *
+ * Failure outranks running, which is the one ordering choice here worth stating: once a job has
+ * failed the answer is already known, and a badge that keeps spinning until the last unrelated job
+ * finishes is a badge that tells somebody to wait for news that has arrived.
+ */
+export function reduceChecks(
+  runs: CheckRun[],
+  status: CommitStatus | null
+): PullRequestChecks {
+  const failed = runs.find((run) => run.conclusion !== null && FAILING.has(run.conclusion));
+  if (failed) return { ci: "failure", ciLabel: failed.name };
+  if (status && (status.state === "failure" || status.state === "error")) {
+    const context = status.statuses.find((s) => s.state === "failure" || s.state === "error");
+    return { ci: "failure", ciLabel: context?.context ?? null };
+  }
+
+  const pending = runs.find((run) => run.status !== "completed");
+  if (pending) return { ci: "running", ciLabel: pending.name };
+  if (status?.state === "pending") {
+    const context = status.statuses.find((s) => s.state === "pending");
+    // A pending commit status with no contexts is what GitHub answers for a commit nothing has
+    // posted about at all, so there is nothing running and nothing to name.
+    if (context) return { ci: "running", ciLabel: context.context };
+  }
+
+  if (runs.length === 0 && (!status || status.statuses.length === 0)) {
+    return { ci: "none", ciLabel: null };
+  }
+
+  // Everything that ran is finished and none of it failed. The label names the one that finished
+  // last, which is the check a reader is most likely to be waiting on; a run that reports no
+  // `completed_at` sorts to the bottom rather than winning on an empty string.
+  const decided = [...runs]
+    .filter((run) => run.conclusion !== null && !NEUTRAL.has(run.conclusion))
+    .sort((a, b) => (a.completed_at ?? "").localeCompare(b.completed_at ?? ""))
+    .at(-1);
+  // Falling through to the other mechanism rather than leaving the tooltip empty: a repository
+  // posting commit statuses and no check runs has a name for what passed, and it is the only name
+  // it has.
+  const context = status?.statuses.find((s) => s.state === "success");
+  return { ci: "success", ciLabel: decided?.name ?? context?.context ?? null };
+}
+
+/**
+ * What CI says about one commit, or `unknown` when GitHub could not be asked.
+ *
+ * Swallowed rather than thrown: the pull request's own state is worth storing even when the checks
+ * could not be read, and a sync that gave up here would take the link, the title and the merge
+ * state down with it.
+ */
+export async function fetchChecks(
+  owner: string,
+  repo: string,
+  sha: string,
+  token: string
+): Promise<PullRequestChecks> {
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github+json",
+    Authorization: `Bearer ${token}`,
+  };
+  const base = `${API_BASE()}/repos/${owner}/${repo}/commits/${sha}`;
+
+  try {
+    const [runs, status] = await Promise.all([
+      fetchJson<{ check_runs?: CheckRun[] }>(`${base}/check-runs?per_page=100`, headers),
+      fetchJson<CommitStatus>(`${base}/status`, headers),
+    ]);
+    return reduceChecks(runs.check_runs ?? [], status);
+  } catch {
+    return { ci: "unknown", ciLabel: null };
+  }
+}
+
+async function fetchJson<T>(url: string, headers: Record<string, string>): Promise<T> {
+  const res = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
+  if (!res.ok) throw new Error(`GitHub API ${res.status}`);
+  return res.json();
 }
