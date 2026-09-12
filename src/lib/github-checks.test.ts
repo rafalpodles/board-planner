@@ -492,9 +492,13 @@ describe("what a refusal says", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     refusing(403, { "x-ratelimit-remaining": "0" }, "{}");
 
-    const error = await fetchPullRequests("o", "r", "t").catch((e) => e as Error);
-    expect(error.message).toContain("this GitHub account");
-    expect(error.message).not.toContain("this token");
+    const error = await fetchPullRequests("o", "r", "t").then(
+      () => null,
+      (e: Error) => e
+    );
+    expect(error, "it should have rejected").not.toBeNull();
+    expect(error?.message).toContain("this GitHub account");
+    expect(error?.message).not.toContain("this token");
   });
 
   it("names a secondary limit, which carries retry-after and a non-zero remaining", async () => {
