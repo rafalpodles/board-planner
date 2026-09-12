@@ -230,8 +230,10 @@ serve({
   handler: async (req, res) => {
     // Split rather than handed to `new URL`, because `/refuse` carries the address in its query and
     // a constructor that throws here is reported through `CRASH_MARKER` and fails the whole run.
-    // Splitting cannot throw for any target Node's parser let through.
-    const [pathname, query = ""] = (req.url ?? "/").split("?");
+    // Splitting cannot throw for any target Node's parser let through. The query is everything
+    // after the first `?`, further ones included — rejoined rather than dropped by the split.
+    const [pathname, ...rest] = (req.url ?? "/").split("?");
+    const query = rest.join("?");
 
     if (pathname === "/health") {
       res.writeHead(200, { "Content-Type": "text/plain" }).end("ok");
