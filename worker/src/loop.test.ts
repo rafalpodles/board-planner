@@ -582,6 +582,17 @@ describe("a machine that must not take work", () => {
     expect(execute).toHaveBeenCalledTimes(1);
   });
 
+  // The board gets the reason as a comment on the task; the operator watching the worker's own log
+  // got nothing, for a fault that is the machine's rather than the task's.
+  it("says locally that a run hit a machine fault, not only on the board", async () => {
+    const api = apiStub(queue(task));
+    const { loop, log } = loopOver(api, { execute: async () => "machine-fault" });
+
+    await loop.start();
+
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("machine fault on CP-158"));
+  });
+
   it("claims normally when nothing blocks it", async () => {
     const api = apiStub(queue(task));
     const { loop, execute } = loopOver(api, { claimBlocked: () => "" });

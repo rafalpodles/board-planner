@@ -259,16 +259,21 @@ and `SIGINT` both finish the task in flight before the loop exits.
   not by the kernel, so a future capability that yields process execution has to close it in the
   profile. And reads, and the network, neither of which this touches at all.
 
-  **macOS only.** Seatbelt is what this uses. On any other platform such a machine **takes no work
-  at all**: the loop stops claiming, says why once, and keeps heartbeating, so the fleet screen and
-  the menubar still show it and the kill switch still reaches it. Draining what it already owes
-  carries on. The step-level refusal is still there underneath — it is what stops an unconfined
-  agent running if the two ever disagree — and a task it does refuse is released with its attempt
-  refunded rather than failed, so nothing walks the queue into the escalation column. Preflight answers the question at boot for *this machine* by confining a probe and
-  watching it fail to escape — not by reading the platform — so a machine where `sandbox-exec` is
-  missing or the profile stopped compiling reads red rather than green. To run unconfined anyway, set
-  `CP_ALLOW_UNCONFINED_AGENT=1` in the worker's own environment; it is never a worker policy field,
-  because policy comes down from the server and the agent reaches the server.
+  **macOS only.** Seatbelt is what this uses. **A machine that cannot confine takes no work at
+  all**: the loop stops claiming, says why once, and keeps heartbeating, so the fleet screen and the
+  menubar still show it and the kill switch still reaches it. Draining what it already owes carries
+  on. That covers a Mac whose probe failed as much as a Linux box, because the gate reads
+  preflight's answer for this machine rather than the platform.
+
+  The step-level refusal is still there underneath: it is what stops an unconfined agent running.
+  A task it does refuse is released with its attempt refunded rather than failed, so nothing walks
+  the queue into the escalation column.
+
+  Preflight answers the question at boot by confining a probe and watching it fail to escape, so a
+  machine where `sandbox-exec` is missing or the profile stopped compiling reads red rather than
+  green. To run unconfined anyway, set `CP_ALLOW_UNCONFINED_AGENT=1` in the worker's own
+  environment; it is never a worker policy field, because policy comes down from the server and the
+  agent reaches the server.
 
   **What it costs.** The implementer step does not pass `--safe-mode`, so it still loads
   `~/.claude/settings.json` — and every hook there that writes anything now fails. Measured on CLI

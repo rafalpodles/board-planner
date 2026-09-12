@@ -71,9 +71,14 @@ export const UNCONFINED_REASON =
 export const UNCONFINED_ACCEPTED_DETAIL =
   `${UNCONFINED_ESCAPE_HATCH} is set — the agent runs with nothing confining its writes and can reach anything this user can`;
 
-export type Confinement =
-  | { command: string; args: string[]; confined: boolean }
-  | { refusal: string };
+/**
+ * No `confined` flag. Nothing at run time consumes one, and a field that exists so a log line can
+ * mention it is a second source of truth next to the preflight row. The question it would answer —
+ * "was this produced by a confined agent?" — is about a *run*, read weeks later off a merged pull
+ * request, and the fleet row cannot answer that because it is recomputed at boot. If it is ever
+ * asked, it belongs on RunRecord beside `agentName`, which exists for exactly that reason.
+ */
+export type Confinement = { command: string; args: string[] } | { refusal: string };
 
 export interface ConfineOptions {
   /** Absolute paths the child may write to. Everything else is denied, including `$HOME`. */
@@ -116,7 +121,7 @@ function profileFor(names: string[]): string {
  * containing a quote would otherwise close the string it sits in and append rules of its own.
  */
 export function confine(command: string, args: string[], options: ConfineOptions): Confinement {
-  if (unconfinedAgentAllowed(options.env)) return { command, args, confined: false };
+  if (unconfinedAgentAllowed(options.env)) return { command, args };
 
   const platform = options.platform ?? process.platform;
   if (platform !== "darwin") return { refusal: UNCONFINED_REASON };
@@ -139,7 +144,6 @@ export function confine(command: string, args: string[], options: ConfineOptions
 
   const names = resolved.map((_, index) => `W${index}`);
   return {
-    confined: true,
     command: SANDBOX_COMMAND,
     args: [
       "-p",

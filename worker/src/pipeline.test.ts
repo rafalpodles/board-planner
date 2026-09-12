@@ -601,6 +601,25 @@ describe("runTask", () => {
     expect(h.delivery.push).not.toHaveBeenCalled();
   });
 
+  /**
+   * A gate only runs once a commit exists, so on this path there is always committed, unpushed
+   * work — and it is the one path where the work is fine and only the machine is broken. The task
+   * is released and refunded, so destroying the tree means re-doing a whole agent run for nothing.
+   */
+  it("keeps the worktree when a gate could not run, and says where the work is", async () => {
+    const h = harness({
+      gateFor: () => ({
+        name: "review",
+        run: async () => ({ ok: false, reason: "this machine has no sandbox", machineFault: true }),
+      }),
+    });
+
+    await runTask(h.deps, task);
+
+    expect(h.workspace.destroy).not.toHaveBeenCalled();
+    expect(h.reporter.released.mock.calls[0][1]).toMatch(/worktree/i);
+  });
+
   it("requeues a timed-out run and charges it the attempt, so retries terminate", async () => {
     const execute = vi.fn<Executor["execute"]>().mockResolvedValue({ kind: "timeout" });
     const h = harness({ executor: { execute } });

@@ -567,11 +567,20 @@ export async function runTask(
         if (!verdict.ok) {
           // The gate did not judge the change; this machine could not run it. Reported as a
           // refusal it would blame the diff and push its branch (BP-349 review).
+          //
+          // The worktree is kept, for the reason the step path keeps it a hundred lines above: a
+          // gate only runs once a commit exists — it refuses "there is no patch to review"
+          // otherwise — so on this path there is ALWAYS committed, unpushed work, and it is the one
+          // path where that work is fine and only the machine is broken. Destroying it costs a
+          // whole agent run when the task is re-done, silently. The usage-limit branch below does
+          // not keep it, and that asymmetry is deliberate: a usage limit is this account waiting
+          // for a clock, and the same machine will run the task again.
           if (verdict.machineFault) {
+            keepWorktree = true;
             settle("released", `the ${gate.name} gate could not run`);
             await reporter.released(
               task,
-              `the ${gate.name} gate could not run: ${verdict.reason}`,
+              `the ${gate.name} gate could not run: ${verdict.reason}${unpushedWork(state, worktree.path)}`,
             );
             return "machine-fault";
           }

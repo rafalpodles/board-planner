@@ -433,7 +433,37 @@ describe("createExecutor", () => {
 
     expect(await createExecutor(config, runner).execute(options)).toEqual({
       kind: "error",
-      message: "unexpected crash",
+      message: "the agent exited 1\nunexpected crash",
+    });
+  });
+
+  // The reader is a person looking at a failed task on a board, and the three things they might be
+  // looking at are their task, the agent, and this machine. Since BP-349 the exit code can belong
+  // to the sandbox wrapper rather than to the CLI, so the message stops naming `claude` — and
+  // stderr always rides along, because it is what carries `sandbox-exec:` when the wrapper is what
+  // refused. Nothing here classifies; it just stops asserting the wrong one of the three.
+  it("names the agent rather than the CLI, and keeps what the failing process said", async () => {
+    const { runner } = runnerReturning({
+      code: 65,
+      stdout: "",
+      stderr: "sandbox-exec: syntax error: expecting ')'",
+      timedOut: false,
+    });
+
+    const outcome = await createExecutor(config, runner).execute(options);
+
+    expect(outcome).toEqual({
+      kind: "error",
+      message: "the agent exited 65\nsandbox-exec: syntax error: expecting ')'",
+    });
+  });
+
+  it("still says something when the failing process said nothing at all", async () => {
+    const { runner } = runnerReturning({ code: 1, stdout: "", stderr: "", timedOut: false });
+
+    expect(await createExecutor(config, runner).execute(options)).toEqual({
+      kind: "error",
+      message: "the agent exited 1",
     });
   });
 

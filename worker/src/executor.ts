@@ -279,7 +279,15 @@ export function createExecutor(config: WorkerConfig, runner: Runner): Executor {
       }
 
       if (result.code === 0) return parsed;
-      return { kind: "error", message: result.stderr || `claude exited ${result.code}` };
+      // "the agent", not "claude": the exit code now belongs to whichever process died, and since
+      // BP-349 that may be the sandbox wrapper rather than the CLI. stderr rides along whatever
+      // happened, and carries its own `sandbox-exec:` prefix when the wrapper is the one that
+      // refused — which is how a person reading this on the board learns it is the machine and not
+      // their task, without this code having to classify anything.
+      return {
+        kind: "error",
+        message: `the agent exited ${result.code}${result.stderr ? `\n${result.stderr}` : ""}`,
+      };
     },
   };
 }
