@@ -57,6 +57,7 @@ import {
   PreflightDeps,
   PreflightReport,
   runPreflight,
+  SANDBOX_CHECK,
 } from "./preflight.js";
 import { createReporter, ReleaseMemory } from "./reporter.js";
 import { abortableSleep } from "./sleep.js";
@@ -656,6 +657,20 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     }
   }
 
+  /**
+   * Why this machine takes no work at all (BP-349). Machine-wide, unlike the per-project reasons
+   * beside it: a worker that cannot confine the agent cannot run any step of any task.
+   *
+   * Read off the preflight row rather than asking the platform, because the row is the answer for
+   * this machine — it confined a probe and watched it fail to escape. A worker whose preflight
+   * could not run at all reports nothing here and keeps claiming, which is the behaviour every
+   * other check already has.
+   */
+  function sandboxBlocked(): string {
+    const row = preflight?.checks.find((check) => check.name === SANDBOX_CHECK);
+    return row && !row.ok ? row.detail : "";
+  }
+
   const loop = createLoop({
     pollIntervalMs: () => policy.pollIntervalMs,
     // A project whose checkout cannot pass the gates is not claimed from. The refusal would arrive
@@ -668,6 +683,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     execute,
     sleep: deps.sleep,
     drain,
+    claimBlocked: sandboxBlocked,
     log: deps.logError,
   });
 
@@ -735,8 +751,12 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
         // machine, and the only one of the three a rebind does not lift. The board's refusal is
         // still true when it is outranked here — nothing on this machine repairs that board's
         // columns — it is just not the thing to go and do first.
+        // The machine-wide one outranks all three: a worker that cannot confine the agent is not
+        // sitting on this project for a reason this project can fix, and showing a per-project
+        // answer would send the operator to the wrong place.
         blocked:
-          quarantineReasonFor(project) ?? unusable.get(project) ?? loop.unclaimable(project),
+          sandboxBlocked() ||
+          (quarantineReasonFor(project) ?? unusable.get(project) ?? loop.unclaimable(project)),
         baseBranch: repo.config.baseBranch,
         model: repo.config.model,
         reviewModel: repo.config.reviewModel,

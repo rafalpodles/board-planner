@@ -289,8 +289,11 @@ function firstLine(text: string): string {
  * allowed, in a temp tree of its own: if that file exists afterwards, whatever the profile said,
  * this machine does not confine anything (BP-349).
  */
+/** The row wiring.ts reads to decide whether this machine may take work at all (BP-349). */
+export const SANDBOX_CHECK = "sandbox";
+
 async function sandboxCheck(deps: PreflightDeps, env: NodeJS.ProcessEnv): Promise<PreflightCheck> {
-  const name = "sandbox";
+  const name = SANDBOX_CHECK;
 
   if (unconfinedAgentAllowed(deps.env)) {
     return {

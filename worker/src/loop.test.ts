@@ -36,6 +36,8 @@ function loopOver(
     assignments?: string[];
     execute?: (task: ClaimedTask) => Promise<void | "machine-fault">;
     sleep?: (ms: number) => Promise<void>;
+    claimBlocked?: () => string;
+    drain?: () => Promise<void>;
   } = {}
 ): {
   loop: Loop;
@@ -53,6 +55,8 @@ function loopOver(
     api,
     execute,
     sleep,
+    claimBlocked: overrides.claimBlocked,
+    drain: overrides.drain,
     log,
   });
   return { loop, execute, sleep, log };
@@ -509,5 +513,81 @@ describe("draining undelivered reports", () => {
     });
 
     await expect(loop.start()).resolves.toBeUndefined();
+  });
+});
+
+/**
+ * BP-349. A machine that cannot confine the agent cannot run any step of any task. The executor
+ * refuses such a step on its own — that is what stops an unconfined agent running, and it stays
+ * where it is — but a worker that refuses every step and keeps claiming still takes each task off
+ * the queue for a pass, comments on it and writes a run record, for ever. So it stops claiming.
+ */
+describe("a machine that must not take work", () => {
+  const blocked = () => "set CP_ALLOW_UNCONFINED_AGENT=1 on this machine to run anyway";
+
+  it("claims nothing at all", async () => {
+    const api = apiStub(queue(task));
+    const { loop, execute } = loopOver(api, { claimBlocked: blocked });
+
+    await loop.start();
+
+    expect(api.claim).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  // The outbox still has to empty and decisions still have to settle on a machine that is taking no
+  // new work: the reports it owes are from runs that already happened.
+  it("still drains what it owes", async () => {
+    const api = apiStub(queue(task));
+    const drain = vi.fn(async () => {});
+    const { loop } = loopOver(api, { claimBlocked: blocked, drain });
+
+    await loop.start();
+
+    expect(drain).toHaveBeenCalled();
+  });
+
+  it("says why, once, rather than once per poll", async () => {
+    const api = apiStub(queue(task));
+    let passes = 0;
+    const { loop, log } = loopOver(api, {
+      claimBlocked: blocked,
+      sleep: async () => {
+        if (++passes >= 3) loop.stop();
+      },
+    });
+
+    await loop.start();
+
+    expect(passes).toBe(3);
+    const said = log.mock.calls.filter(([line]) => /not claiming any work/.test(String(line)));
+    expect(said).toHaveLength(1);
+    expect(String(said[0][0])).toContain("CP_ALLOW_UNCONFINED_AGENT=1");
+  });
+
+  // The operator sets the variable and restarts, or fixes the machine: nothing latches.
+  it("claims again as soon as it is no longer blocked", async () => {
+    const api = apiStub(queue(task));
+    let reason = "no sandbox here";
+    const { loop, execute } = loopOver(api, {
+      claimBlocked: () => reason,
+      sleep: async () => {
+        if (!reason) return loop.stop();
+        reason = "";
+      },
+    });
+
+    await loop.start();
+
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("claims normally when nothing blocks it", async () => {
+    const api = apiStub(queue(task));
+    const { loop, execute } = loopOver(api, { claimBlocked: () => "" });
+
+    await loop.start();
+
+    expect(execute).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
-import { agentArgs, isAgentSpawn } from "./__fixtures__/agent-spawn.js";
+import { agentArgs, answerSandboxProbe, isAgentSpawn, isSandboxProbe } from "./__fixtures__/agent-spawn.js";
 import { tmpdir } from "os";
 import { join } from "path";
 import { describe, expect, it, vi } from "vitest";
@@ -71,10 +71,16 @@ function harness(overrides: Partial<WorkerDeps> = {}) {
   const heartbeat = fakeHeartbeat();
   const local: LocalServer = { ready: Promise.resolve(), close: vi.fn().mockResolvedValue(undefined) };
 
+  const api = {
+    claim: vi.fn().mockResolvedValue(null),
+    release: vi.fn().mockResolvedValue(undefined),
+  } as unknown as ApiClient;
+
   const seen = {
     heartbeat: undefined as HeartbeatDeps | undefined,
     control: undefined as ControlDeps | undefined,
     local: undefined as LocalServerDeps | undefined,
+    api,
   };
 
   const control = { close: vi.fn() };
@@ -92,11 +98,7 @@ function harness(overrides: Partial<WorkerDeps> = {}) {
     stat: () => ({ uid: 501, mode: 0o40700 }),
     fetchImpl: vi.fn().mockResolvedValue({ ok: false, status: 404 }) as unknown as typeof fetch,
     createStore: (path) => memoryStore(path.endsWith("worker.json") ? IDENTITY : ""),
-    createApi: () =>
-      ({
-        claim: vi.fn().mockResolvedValue(null),
-        release: vi.fn().mockResolvedValue(undefined),
-      }) as unknown as ApiClient,
+    createApi: () => api,
     startHeartbeat: (heartbeatDeps) => {
       seen.heartbeat = heartbeatDeps;
       return heartbeat;
@@ -297,7 +299,8 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     // What `config --list --show-scope` answers. Only that listing: `--local --list` is what
     // bindRepository scans, and a key visible to both would be refused at binding time instead —
     // which is the path BP-346 records as the one an include.path or worktree-scope key evades.
-    scopedConfig: string | Record<string, string> = ""
+    scopedConfig: string | Record<string, string> = "",
+    sandboxBroken = false
   ): Runner {
     const scopedFor = (cwd?: string) =>
       typeof scopedConfig === "string" ? scopedConfig : (scopedConfig[cwd ?? ""] ?? "");
@@ -311,6 +314,14 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         // environment — workspace.ts composes those two calls' env instead of their args.
         if (command === "git" && (args[0] === "ls-remote" || args[0] === "fetch")) {
           remoteCalls.push({ args, env: opts.env ?? {} });
+        }
+        // A machine whose sandbox row is red claims nothing at all since BP-349, so the probe has
+        // to be answered or the loop below never reaches a task.
+        if (isSandboxProbe(command, args)) {
+          // Unanswered means the marker is never written, which is exactly what preflight reads as
+          // "the probe never ran" — a machine with no working sandbox.
+          if (!sandboxBroken) answerSandboxProbe(args);
+          return { code: sandboxBroken ? 65 : 0, stdout: "", stderr: "", timedOut: false };
         }
         // git is stubbed here, so the directory `git worktree add` would have made is made here:
         // the agent cannot be confined to a worktree that does not exist (BP-349).
@@ -394,6 +405,9 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       // throttled by MIN_REFRESH_INTERVAL_MS and would otherwise return without doing anything,
       // which makes "survives a rebind" a claim no test could see.
       clockJumpOnSleepMs?: number;
+      // The probe preflight runs is left unanswered, which is what a machine with no working
+      // sandbox looks like from here (BP-349)
+      sandboxBroken?: boolean;
     } = {}
   ) {
     let seenHeartbeat: HeartbeatDeps | undefined;
@@ -457,7 +471,8 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         opts.onAgentStart,
         everyCall,
         remoteCalls,
-        opts.scopedConfig
+        opts.scopedConfig,
+        opts.sandboxBroken
       ),
       hostname: () => "host-1",
       // the loop only sleeps once it has nothing left to claim, which is one pass after the run
@@ -541,6 +556,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       posted,
       bindingErrors,
       logError,
+      claims,
       claimed: claudeCalls.length > 0,
       everyCall,
       remoteCalls,
@@ -555,6 +571,34 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     };
   }
 
+  /**
+   * BP-349. The executor refuses an unconfinable step, and that refusal stays where it is — it is
+   * what stops an unconfined agent running. This is the other half: a machine that would refuse
+   * every step must not keep taking tasks off the queue to hand them straight back, one per poll,
+   * each with a board comment and a run record behind it.
+   *
+   * Driven through the real preflight rather than a stubbed report: the probe is left unanswered,
+   * which is what a machine with no working sandbox actually looks like from here.
+   */
+  it("claims nothing at all when this machine's sandbox probe never ran", async () => {
+    const { claims, claimed, logError } = await runOneTask(undefined, undefined, {
+      sandboxBroken: true,
+    });
+
+    expect(claims).toBe(0);
+    expect(claimed).toBe(false);
+    expect(logError).toHaveBeenCalledWith(expect.stringContaining("not claiming any work"));
+  });
+
+  // The control, on the same harness: without it a wiring mistake that stops every claim would
+  // satisfy the assertion above and look like the feature working.
+  it("claims as usual on a machine whose sandbox probe answered", async () => {
+    const { claims, claimed } = await runOneTask();
+
+    expect(claims).toBeGreaterThan(0);
+    expect(claimed).toBe(true);
+  });
+
   // Children run in their own session since the process-group change, so a terminal Ctrl-C reaches
   // only the worker. loop.stop() alone is a flag checked between tasks, which would mean waiting out
   // a run that can last the full task timeout with the agent still working.
@@ -568,6 +612,10 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
 
     const hangingRunner: Runner = {
       async run(command, args, opts) {
+        if (isSandboxProbe(command, args)) {
+          answerSandboxProbe(args);
+          return { code: 0, stdout: "", stderr: "", timedOut: false };
+        }
         if (command === "git" && args.includes("worktree") && args.includes("add")) {
           const separator = args.indexOf("--");
           if (separator !== -1 && args[separator + 1]) {
@@ -662,7 +710,14 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
   // fault. Every other call is the content-free catch-all the rest of this file's runners use to
   // satisfy bindRepository/checkRepo.
   const unreachableRemote: Runner = {
-    async run(_command, args) {
+    async run(command, args) {
+      // The machine itself is fine here — it is the remote that is unreachable — so its sandbox
+      // probe has to succeed, or it would stop claiming for a different reason than the one under
+      // test and the counts below would both read zero (BP-349).
+      if (isSandboxProbe(command, args)) {
+        answerSandboxProbe(args);
+        return { code: 0, stdout: "", stderr: "", timedOut: false };
+      }
       if (args[0] === "ls-remote") {
         return { code: 1, stdout: "", stderr: "unreachable", timedOut: false };
       }

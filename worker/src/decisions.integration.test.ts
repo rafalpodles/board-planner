@@ -1,5 +1,5 @@
 import { mkdirSync, mkdtempSync, existsSync, readFileSync, rmSync, writeFileSync } from "fs";
-import { agentArgs, isAgentSpawn } from "./__fixtures__/agent-spawn.js";
+import { agentArgs, answerSandboxProbe, isAgentSpawn, isSandboxProbe } from "./__fixtures__/agent-spawn.js";
 import { createServer, IncomingMessage, Server, ServerResponse } from "http";
 import { AddressInfo } from "net";
 import { tmpdir } from "os";
@@ -288,6 +288,13 @@ function makeRunner(seen: GitCall[], registeredWorktree = ""): Runner {
               })
             : ""
         );
+      }
+      // Before the agent branch: both go through sandbox-exec, and the probe is the one wrapping sh.
+      // A machine whose sandbox row is red claims nothing at all since BP-349, so without this the
+      // worker never reaches the run these tests are about.
+      if (isSandboxProbe(command, args)) {
+        answerSandboxProbe(args);
+        return ok();
       }
       if (isAgentSpawn(command, args)) {
         runOpts.onStdout?.(RESULT_LINE);

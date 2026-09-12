@@ -259,9 +259,12 @@ and `SIGINT` both finish the task in flight before the loop exits.
   not by the kernel, so a future capability that yields process execution has to close it in the
   profile. And reads, and the network, neither of which this touches at all.
 
-  **macOS only.** Seatbelt is what this uses. On any other platform the worker refuses the step
-  rather than running it unconfined, and releases the task with its attempt refunded rather than
-  failing it. Preflight answers the question at boot for *this machine* by confining a probe and
+  **macOS only.** Seatbelt is what this uses. On any other platform such a machine **takes no work
+  at all**: the loop stops claiming, says why once, and keeps heartbeating, so the fleet screen and
+  the menubar still show it and the kill switch still reaches it. Draining what it already owes
+  carries on. The step-level refusal is still there underneath — it is what stops an unconfined
+  agent running if the two ever disagree — and a task it does refuse is released with its attempt
+  refunded rather than failed, so nothing walks the queue into the escalation column. Preflight answers the question at boot for *this machine* by confining a probe and
   watching it fail to escape — not by reading the platform — so a machine where `sandbox-exec` is
   missing or the profile stopped compiling reads red rather than green. To run unconfined anyway, set
   `CP_ALLOW_UNCONFINED_AGENT=1` in the worker's own environment; it is never a worker policy field,

@@ -19,6 +19,17 @@ export interface LoopDeps {
   // Undelivered reports go out before new work is claimed: a stranded task from the last cycle
   // matters more than starting another one
   drain?: () => Promise<void>;
+  /**
+   * Why this machine must not take work at all, or empty when it may (BP-349).
+   *
+   * A machine-wide fact, unlike `unclaimable`, which is the board's answer for one project. The
+   * executor refuses an unconfinable step on its own and that refusal stays where it is — this is
+   * not what stops an agent running unconfined, it is what stops the worker taking tasks it is
+   * going to hand straight back. Without it, such a machine claims one task per poll for ever:
+   * every one released with its attempt refunded, but off the queue for the pass, with a comment
+   * on the board and a run record behind it.
+   */
+  claimBlocked?: () => string;
   log?: (message: string) => void;
 }
 
@@ -37,6 +48,7 @@ export function createLoop(deps: LoopDeps): Loop {
   const stopping = new AbortController();
   let running = true;
   let pausedState = false;
+  let lastBlocked = "";
   // The assignment whose run reported the last machine fault. assignments() is stable in order, so
   // without this a project that faults on every pass keeps the head of the list and no assignment
   // behind it is ever claimed for again — starvation for as long as the fault lasts, not for one
@@ -66,7 +78,13 @@ export function createLoop(deps: LoopDeps): Loop {
           }
         }
 
-        if (!pausedState) {
+        // After drain(), never before it: the outbox still has to empty and decisions still have to
+        // settle on a machine that cannot claim. Said once per reason rather than once per poll.
+        const blocked = deps.claimBlocked?.() ?? "";
+        if (blocked && blocked !== lastBlocked) log(`not claiming any work: ${blocked}`);
+        lastBlocked = blocked;
+
+        if (!pausedState && !blocked) {
           // Every assignment gets its own attempt and its own try/catch: a project that cannot be
           // claimed from, or a task that blows up, must not cost a sibling project its turn in this
           // pass — that would starve whichever assignment comes last in the list. A machine fault
