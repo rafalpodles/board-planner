@@ -700,6 +700,18 @@ describe("reapOrphans", () => {
     expect(await reapOrphans(workspace, "/worktrees", new Set())).toBe(0);
   });
 
+  /**
+   * BP-381. A worktree somebody is being asked to accept is exactly the shape of an orphan: the
+   * run that made it has ended, and nothing on this machine holds it. The marker is the only thing
+   * that tells them apart, and without it the reaper destroys the one copy of the change.
+   */
+  it("leaves a worktree a decision is holding, and reaps its neighbour", async () => {
+    const workspace = workspaceListing(["/worktrees/CP-1", "/worktrees/CP-2"]);
+
+    expect(await reapOrphans(workspace, "/worktrees", new Set(["CP-1"]))).toBe(1);
+    expect(workspace.destroy.mock.calls.map(([key]) => key)).toEqual(["CP-2"]);
+  });
+
   it("keeps reaping after one removal fails", async () => {
     const workspace = workspaceListing(["/worktrees/CP-1", "/worktrees/CP-2"]);
     workspace.destroy.mockRejectedValueOnce(new Error("locked"));

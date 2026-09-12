@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { protectedPathsGate, PROTECTED_PATHS_BRIEF } from "./protected-paths.js";
+import {
+  isWorkflowPath,
+  protectedPathsGate,
+  PROTECTED_PATHS_BRIEF,
+  workflowPaths,
+} from "./protected-paths.js";
 import { DiffStats, GateContext } from "../types.js";
 
 function context(changedFiles: string[], symlinks: DiffStats["symlinks"] = []): GateContext {
@@ -201,6 +206,20 @@ describe("protectedPathsGate", () => {
     expect((await gate.run(context(["services/api/pyproject.toml"]))).ok).toBe(false);
   });
 
+  /**
+   * BP-381. `.gitattributes` runs nothing itself — it decides what git SHOWS. `diff.<driver>
+   * .textconv` and `filter.<name>.smudge` are selected per path by an attribute, so an agent that
+   * adds `package.json -diff` leaves the gate firing on the path exactly as before while the
+   * patch a human is handed reads `Binary files … differ`. The attribute is the half that lives
+   * in the tree, and it was invisible to every pattern here.
+   */
+  it.each([".gitattributes", "src/.gitattributes", ".gitmodules"])(
+    "refuses %s, which decides what a reviewer is shown",
+    async (file) => {
+      expect((await gate.run(context([file]))).ok).toBe(false);
+    }
+  );
+
   // The gate has to stay usable: a repo full of ordinary source and docs must still pass
   it.each([
     "src/lib/slug.ts",
@@ -233,6 +252,8 @@ describe("what the agent is told matches what the gate refuses", () => {
     "pyproject.toml",
     "Cargo.toml",
     "go.mod",
+    ".gitattributes",
+    ".gitmodules",
   ];
 
   it("warns about every family the gate actually refuses", async () => {
@@ -258,5 +279,47 @@ describe("what the agent is told matches what the gate refuses", () => {
 
   it("tells the agent what to do instead, since a rule with no alternative is one it will break", () => {
     expect(PROTECTED_PATHS_BRIEF).toMatch(/blocked/);
+  });
+});
+
+/**
+ * BP-381. Its own predicate rather than another clause in `isProtectedPath`, because these are the
+ * one family a person may not accept through the decision panel — not because they are the line
+ * between "executes" and "does not" (almost everything on the list executes), but because for a
+ * push event GitHub runs the workflow from the pushed ref, so accepting one runs the agent's own
+ * version of CI.
+ */
+describe("the files that decide what CI itself does", () => {
+  it.each([
+    ".github/workflows/ci.yml",
+    ".github/workflows/deploy.yaml",
+    // A local composite action is executed by a workflow and matches none of the three patterns
+    // the gate already had
+    ".github/actions/setup/action.yml",
+    ".github/actions/deep/nested/action.yaml",
+  ])("names %s", (file) => {
+    expect(isWorkflowPath(file)).toBe(true);
+  });
+
+  it.each([
+    ".github/dependabot.yml",
+    ".github/ISSUE_TEMPLATE/bug.yml",
+    "package.json",
+    "src/workflows/ci.yml",
+    ".github/workflows/README.md",
+  ])("leaves %s to the rules above", (file) => {
+    expect(isWorkflowPath(file)).toBe(false);
+  });
+
+  // Every one of them is still protected: this predicate narrows what may be ACCEPTED, and changes
+  // nothing about what the gate refuses
+  it("does not loosen the gate — a workflow file is refused as it always was", async () => {
+    expect((await protectedPathsGate().run(context([".github/workflows/ci.yml"]))).ok).toBe(false);
+  });
+
+  it("lists the offending files, so a refusal can name them", () => {
+    expect(workflowPaths(["src/a.ts", ".github/workflows/ci.yml"])).toEqual([
+      ".github/workflows/ci.yml",
+    ]);
   });
 });
