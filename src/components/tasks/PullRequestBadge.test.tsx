@@ -1,7 +1,13 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
-import { PullRequestBadge, PullRequestState, pullRequestLook, pullRequestSummary } from "./PullRequestBadge";
+import {
+  PullRequestBadge,
+  PullRequestState,
+  pullRequestLook,
+  pullRequestStatusText,
+  pullRequestSummary,
+} from "./PullRequestBadge";
 import type { ApiLinkedPR, CiState } from "@/types";
 
 /**
@@ -120,6 +126,33 @@ describe("the badge on the board", () => {
   });
 });
 
+describe("what each place has room to say", () => {
+  // The card is narrow and the number is all it carries
+  it("wears the number on the board", () => {
+    render(<PullRequestState pr={pr({ ci: "failure", ciLabel: "e2e" })} />);
+
+    expect(screen.getByTestId("pr-state").textContent).toContain("#12");
+  });
+
+  /**
+   * The detail's row prints "#12 Keep the header visible" beside the chip, so a chip repeating the
+   * number leaves the state unsaid — which is what that row said before this ticket touched it.
+   */
+  it("wears the state on the task detail, where the number is already printed", () => {
+    render(<PullRequestState pr={pr({ ci: "failure", ciLabel: "e2e" })} says="status" />);
+    const chip = screen.getByTestId("pr-state");
+
+    expect(chip.textContent).toContain("e2e failed");
+    expect(chip.querySelector("span:not(.sr-only)")?.textContent).not.toContain("#12");
+  });
+
+  it("says merged and open in plain words, as the row did before", () => {
+    expect(pullRequestStatusText(pr({ state: "merged" }))).toBe("merged");
+    expect(pullRequestStatusText(pr({ state: "open" }))).toBe("open");
+    expect(pullRequestStatusText(pr({ state: "closed" }))).toContain("closed");
+  });
+});
+
 describe("the badge inside the task detail's row", () => {
   // That row is already a link to the pull request, and an anchor inside an anchor is markup no
   // two browsers agree on
@@ -134,5 +167,16 @@ describe("the badge inside the task detail's row", () => {
     render(<PullRequestState pr={pr({ ci: "failure", ciLabel: "e2e" })} />);
 
     expect(screen.getByText(/e2e failed/)).toBeTruthy();
+  });
+
+  /**
+   * The row already prints "#12 Keep the header visible". A chip repeating the whole summary makes
+   * a screen reader read the title a second time, which is why only the number form carries one.
+   */
+  it("does not make a screen reader read the title twice", () => {
+    render(<PullRequestState pr={pr({ ci: "failure", ciLabel: "e2e" })} says="status" />);
+
+    expect(screen.getByTestId("pr-state").querySelector(".sr-only")).toBeNull();
+    expect(screen.getByText("e2e failed")).toBeTruthy();
   });
 });

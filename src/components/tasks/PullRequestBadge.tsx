@@ -40,11 +40,12 @@ export function pullRequestLook(pr: Pick<ApiLinkedPR, "state" | "ci">): PullRequ
   return pr.ci && pr.ci !== "none" ? pr.ci : "open";
 }
 
-/** The sentence the badge carries as its tooltip and as its accessible name. */
-export function pullRequestSummary(pr: Pick<ApiLinkedPR, "number" | "title" | "state" | "ci" | "ciLabel">): string {
-  const look = pullRequestLook(pr);
+/** Where the pull request has got to, in words: "open", "merged", "e2e failed". */
+export function pullRequestStatusText(
+  pr: Pick<ApiLinkedPR, "state" | "ci" | "ciLabel">
+): string {
   const what = pr.ciLabel ?? "checks";
-  const suffix: Record<PullRequestLook, string> = {
+  const said: Record<PullRequestLook, string> = {
     merged: "merged",
     closed: "closed without merging",
     open: "open",
@@ -55,7 +56,14 @@ export function pullRequestSummary(pr: Pick<ApiLinkedPR, "number" | "title" | "s
     // "nothing has run" will read a broken token as a quiet board.
     unknown: "checks could not be read",
   };
-  return `#${pr.number} ${pr.title} — ${suffix[look]}`;
+  return said[pullRequestLook(pr)];
+}
+
+/** The sentence the badge carries as its tooltip and as its accessible name. */
+export function pullRequestSummary(
+  pr: Pick<ApiLinkedPR, "number" | "title" | "state" | "ci" | "ciLabel">
+): string {
+  return `#${pr.number} ${pr.title} — ${pullRequestStatusText(pr)}`;
 }
 
 // Shape as well as colour, every time. Red against green on a badge this size is the pair that
@@ -81,22 +89,28 @@ const ACCENT: Record<PullRequestLook, string> = {
   closed: "var(--color-text-muted)",
 };
 
+// `git-merge-16`. What stood here was four detached arcs and a dot that rendered as an
+// unrecognisable speck at 12px — invisible to every test, and obvious the moment the board was
+// looked at. It came from TaskCard, which is why the card had it and the task detail did not.
 const MERGED_PATH =
-  "M5.45 5.154A4.25 4.25 0 004.5 7.5h1.1a3.15 3.15 0 01.65-1.54l-.8-.806zM7.5 10.25a2.25 2.25 0 100-4.5 2.25 2.25 0 000 4.5zM12 7.5a4.25 4.25 0 01-.95 2.346l.8.806A5.35 5.35 0 0013.1 7.5H12zM8.55 10.846A4.25 4.25 0 017.5 11.1v1.1a5.35 5.35 0 001.854-.548l-.804-.806z";
+  "M5.45 5.154A4.25 4.25 0 009.25 7.5h1.378a2.251 2.251 0 110 1.5H9.25A5.734 5.734 0 015 7.123v3.505a2.25 2.25 0 11-1.5 0V5.372a2.25 2.25 0 111.95-.218ZM4.25 13.5a.75.75 0 100-1.5.75.75 0 000 1.5Zm8.5-4.5a.75.75 0 100-1.5.75.75 0 000 1.5ZM5 3.25a.75.75 0 100 .005V3.25Z";
 const PR_PATH =
   "M7.177 3.073L9.573.677A.25.25 0 0110 .854v4.792a.25.25 0 01-.427.177L7.177 3.427a.25.25 0 010-.354zM3.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.25.75a2.25 2.25 0 113 2.122v5.256a2.251 2.251 0 11-1.5 0V5.372A2.25 2.25 0 011.5 3.25zM11 2.5h-1V4h1a1 1 0 011 1v5.628a2.251 2.251 0 101.5 0V5A2.5 2.5 0 0011 2.5zm1 10.25a.75.75 0 111.5 0 .75.75 0 01-1.5 0zM3.75 12a.75.75 0 100 1.5.75.75 0 000-1.5z";
 
 const CHIP = `chip chip-custom inline-flex items-center gap-1 rounded px-1.5 py-0.5
   text-[11px] font-medium`;
 
-function Face({ look, number }: { look: PullRequestLook; number: number }) {
+function Face({ look, label }: { look: PullRequestLook; label: string }) {
   const glyph = GLYPH[look];
   return (
     <>
       <svg className="h-3 w-3 shrink-0" fill="currentColor" viewBox="0 0 16 16" aria-hidden>
         <path d={look === "merged" ? MERGED_PATH : PR_PATH} />
       </svg>
-      <span>#{number}</span>
+      {/* A check run's name is whatever the workflow calls it, and GitHub Actions names them things
+          like "End to end — automation". On a phone the task detail's row is about 300px, so an
+          uncapped one squeezes the title it sits beside down to nothing. */}
+      <span className="truncate">{label}</span>
       {glyph && (
         <span
           aria-hidden
@@ -113,7 +127,20 @@ function Face({ look, number }: { look: PullRequestLook; number: number }) {
  * The badge as plain text, for the one place that is already inside a link — the task detail's
  * row. Nesting an anchor in an anchor is markup no two browsers agree on.
  */
-export function PullRequestState({ pr, className = "" }: { pr: ApiLinkedPR; className?: string }) {
+export function PullRequestState({
+  pr,
+  says = "number",
+  className = "",
+}: {
+  pr: ApiLinkedPR;
+  /**
+   * What the chip has room to say. The card is narrow and the number is the only thing on it, so
+   * it wears `#41`; the task detail's row already prints the number and the title beside it, so
+   * repeating them there would leave the state — the one thing that row did say before — unsaid.
+   */
+  says?: "number" | "status";
+  className?: string;
+}) {
   const look = pullRequestLook(pr);
   const summary = pullRequestSummary(pr);
   return (
@@ -121,11 +148,15 @@ export function PullRequestState({ pr, className = "" }: { pr: ApiLinkedPR; clas
       data-testid="pr-state"
       data-look={look}
       title={summary}
-      className={`${CHIP} ${className}`}
+      className={`${CHIP} ${says === "status" ? "max-w-[45%]" : ""} ${className}`}
       style={{ "--chip": ACCENT[look] } as CSSProperties}
     >
-      <Face look={look} number={pr.number} />
-      <span className="sr-only">{summary}</span>
+      <Face look={look} label={says === "status" ? pullRequestStatusText(pr) : `#${pr.number}`} />
+      {/* Only where the visible text cannot be read aloud: "#41 ✕" is a number and a symbol, and
+          the glyph is `aria-hidden` because it carries no meaning a hue does not. The status form
+          already says it in words, and repeating the summary there makes a screen reader read the
+          title twice — the row beside it has already said it once. */}
+      {says === "number" && <span className="sr-only">{summary}</span>}
     </span>
   );
 }
@@ -152,7 +183,7 @@ export function PullRequestBadge({ pr, className = "" }: { pr: ApiLinkedPR; clas
       className={`${CHIP} focus-ring transition-opacity hover:opacity-80 ${className}`}
       style={{ "--chip": ACCENT[look] } as CSSProperties}
     >
-      <Face look={look} number={pr.number} />
+      <Face look={look} label={`#${pr.number}`} />
     </a>
   );
 }

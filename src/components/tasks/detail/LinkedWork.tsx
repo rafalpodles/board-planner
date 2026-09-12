@@ -90,7 +90,7 @@ export function LinkedWork({
               )}
               {/* The badge is a link of its own, which inside this one would be markup no browser
                   agrees on. It is the same look rendered as plain text, and the row is the link. */}
-              <PullRequestState pr={pr} className="shrink-0" />
+              <PullRequestState pr={pr} says="status" className="shrink-0" />
             </a>
           ))}
         </div>

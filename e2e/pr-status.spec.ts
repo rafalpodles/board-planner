@@ -216,6 +216,7 @@ test("refreshing a task picks up a build that has since gone green", async ({ pa
   await signIn(page);
   await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
   await expect(page.getByTestId("pr-state")).toHaveAttribute("data-look", "failure");
+  await expect(page.getByTestId("pr-state")).toContainText("e2e failed");
 
   await github(request, { pulls: [pull()], checks: { [HEAD]: passing } });
   const refreshed = page.waitForResponse(
@@ -225,6 +226,7 @@ test("refreshing a task picks up a build that has since gone green", async ({ pa
   await refreshed;
 
   await expect(page.getByTestId("pr-state")).toHaveAttribute("data-look", "success");
+  await expect(page.getByTestId("pr-state")).toContainText("e2e passed");
 });
 
 // The refusal a person sees when the project has no token to ask with — the message the route

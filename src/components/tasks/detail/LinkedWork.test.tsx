@@ -75,7 +75,8 @@ describe("the linked pull request", () => {
 
     expect(screen.getByRole("link").getAttribute("href")).toBe("https://github.com/o/r/pull/12");
     expect(screen.getByTestId("pr-state").getAttribute("data-look")).toBe("failure");
-    expect(screen.getByText(/e2e failed/)).toBeTruthy();
+    // In words on the row, not only in a tooltip — and said once, not twice
+    expect(screen.getByText("e2e failed")).toBeTruthy();
   });
 
   // There is nothing to refresh the status of until something is linked
