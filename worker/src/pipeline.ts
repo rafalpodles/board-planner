@@ -429,8 +429,9 @@ export async function runTask(
       // is two BaseUnavailableErrors nested (workspace.ts wraps one to keep its kind) and that is
       // sixty characters of noise in a two-hundred-character notification — readability, not
       // fitting: what makes the cause survive the cut is fitDetail, and this pattern naming no
-      // class in particular is what keeps a rename from quietly undoing it.
-      settle("machineFault", String(error).replace(/\b\w*Error: /g, ""));
+      // class in particular is what keeps a rename from quietly undoing it. `\w+`, not `\w*`,
+      // which matched empty and ate a bare "Error: " out of git's own output too.
+      settle("machineFault", String(error).replace(/\w+Error: /g, ""));
       await reporter.released(task, String(error));
       return "machine-fault";
     }

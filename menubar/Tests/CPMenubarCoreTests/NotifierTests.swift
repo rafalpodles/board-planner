@@ -179,6 +179,35 @@ private func gateFault(_ taskKey: String) -> TelemetryEvent {
     }
 }
 
+/**
+ * A project key may hold hyphens (`PROJECT_KEY_PATTERN`), so `WEB-API-12` and `WEB-APP-7` are two
+ * projects, not one. Split on the first hyphen they shared a bucket, and the collision failed in
+ * both directions at once: one fault silenced the other, and the other's healthy run re-armed it —
+ * the interleave this scoping exists to stop, one family narrower (found in review).
+ */
+@Test func twoProjectsSharingAKeyPrefixAreStillTwoProjects() {
+    var streak = FaultStreak()
+    let api = baseBranchFault("WEB-API-12", remote: "https://github.com/acme/api.git")
+    let app = baseBranchFault("WEB-APP-7", remote: "https://github.com/acme/app.git")
+
+    #expect(streak.admit(api) != nil)
+    #expect(streak.admit(app) != nil, "WEB-APP's fault was swallowed by WEB-API's")
+
+    // And the clearing does not collide either: WEB-APP completing says nothing about WEB-API
+    _ = streak.admit(.outcome(Outcome(outcome: "merged", taskKey: "WEB-APP-8")))
+    #expect(streak.admit(api) == nil, "a sibling's healthy run re-armed WEB-API")
+}
+
+// A task whose project could not be resolved is keyed `#42` — no hyphen, so it buckets as itself
+// rather than as the empty string shared with every other such task.
+@Test func aTaskWithNoProjectKeyGetsABucketOfItsOwn() {
+    var streak = FaultStreak()
+
+    #expect(streak.admit(fault("#42", "no sandbox")) != nil)
+    #expect(streak.admit(fault("#42", "no sandbox")) == nil)
+    #expect(streak.admit(fault("#43", "no sandbox")) != nil)
+}
+
 // The other direction: the project that recovered is the one whose next fault is news again, and
 // only that one.
 @Test func aProjectThatRecoveredIsNewsWhenItFaultsAgain() {
@@ -260,12 +289,14 @@ private func gateFault(_ taskKey: String) -> TelemetryEvent {
 }
 
 @Test func theFaultBodySaysWhatHappenedBeforeItSaysWhy() throws {
-    let request = notification(for: gateFault("CP-1"))
+    let detail = "the review gate could not run: cannot confine the agent to /wt: Error: ENOENT"
+    let request = notification(for: fault("CP-1", detail))
     let body = try #require(request?.body)
 
-    let stopped = try #require(body.range(of: "take no more work until the next poll"))
-    let why = try #require(body.range(of: "cannot confine"))
-    #expect(stopped.lowerBound < why.lowerBound)
+    // The invariant stated directly rather than by looking for a phrase: a reworded consequence
+    // would fail a phrase lookup and report "not found" instead of "wrong order" (found in review).
+    #expect(body.hasSuffix(detail))
+    #expect(body.hasPrefix("CP-1 went back to the queue"))
 }
 
 @Test func progressBetweenTwoFaultsDoesNotMakeTheSecondNews() {

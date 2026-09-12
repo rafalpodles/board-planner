@@ -36,11 +36,30 @@ describe("the gate kinds the catalog offers", () => {
     // `key: "diff-size",` — each GateKind's own key, and nothing else in that file uses the form
     const offered = keysOf(source("lib", "agent-kinds.ts"), /^\s{4}key: "([a-z-]+)",$/gm);
 
-    const factory = readFileSync(join(import.meta.dirname, "gates", "from-entry.ts"), "utf8");
+    const factory = withoutComments(
+      readFileSync(join(import.meta.dirname, "gates", "from-entry.ts"), "utf8")
+    );
     const implemented = keysOf(factory, /^\s*case "([a-z-]+)":$/gm);
 
     expect(offered.length).toBeGreaterThan(0);
     expect(implemented).toEqual(offered);
+  });
+});
+
+describe("the length the server stores a detail at", () => {
+  it("is the length this worker cuts to before sending it", () => {
+    // Hand-copied across the package boundary, like the outcome list below, and worth the same
+    // treatment: the worker's docblock says "the number is the server's own", which was true when
+    // it was written and kept true by nothing (found in review). A worker cutting shorter loses
+    // text silently; cutting longer sends bytes to be thrown away.
+    const route = source("app", "api", "projects", "[projectId]", "runs", "route.ts");
+    const server = route.match(/MAX_DETAIL = (\d+)/);
+
+    const record = readFileSync(join(import.meta.dirname, "run-record.ts"), "utf8");
+    const worker = record.match(/MAX_DETAIL_CHARS = (\d+)/);
+
+    expect(server?.[1]).toBeDefined();
+    expect(worker?.[1]).toBe(server?.[1]);
   });
 });
 

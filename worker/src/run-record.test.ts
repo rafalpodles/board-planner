@@ -86,6 +86,9 @@ describe("recordFor", () => {
     const record = recordFor(task, "machineFault", "x".repeat(5000), 0, 1, 0);
 
     expect(record.detail).toHaveLength(2000);
+    // The same cut on the field a refusal writes instead. Added in the same change and pinned by
+    // nothing, which is how one of two identical lines rots (found in review).
+    expect(recordFor(task, "gateRejected", "x".repeat(5000), 0, 1, 0).refusedBy).toHaveLength(2000);
   });
 
   it("sends the times as instants the server can parse", () => {

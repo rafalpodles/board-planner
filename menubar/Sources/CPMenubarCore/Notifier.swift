@@ -89,11 +89,14 @@ public func notification(for event: TelemetryEvent) -> NotificationRequest? {
  * read), and `loop.ts`'s passOrder moves a faulting project to the END of the next pass precisely
  * so it cannot starve its siblings. So the healthy project's `merged` lands immediately before the
  * faulting one's fault, on every pass, by construction: a fleet-wide flag is cleared and re-armed
- * for ever, and the storm comes back at the cadence of the healthy project's runs. The cost of
- * scoping is that one machine-wide fault announces itself once per project rather than once, which
- * is bounded by how many projects a machine serves.
+ * for ever, and the storm comes back at the cadence of the healthy project's runs.
  *
- * The project is read off the task key's prefix, which is how a key is built (`PROJECT-NUMBER`).
+ * What scoping costs is that one machine-wide fault announces itself once per project. That is a
+ * count, not a rate, which is the whole of the win — the alternative was never "one", it was one
+ * per pass for ever. And a fault ends the pass, so N projects arrive as N notifications over N
+ * polls rather than a burst. N stays small in practice: the two genuinely machine-wide faults are
+ * the confinement refusals, and preflight's `claimBlocked` stops such a machine claiming anything
+ * at all, so what reaches here machine-wide is a sandbox that broke after boot.
  *
  * Also cleared when the socket drops. Restarting the worker is what an operator does to fix a
  * machine, and it emits no outcome — so without this the first fault after the restart, which is
@@ -109,8 +112,18 @@ public struct FaultStreak: Sendable {
         faulting.removeAll()
     }
 
+    /// The project half of `WEB-API-12`, which is `WEB-API` and not `WEB`.
+    ///
+    /// From the LAST hyphen, because the half that cannot contain one is the number
+    /// (`src/lib/task-key.ts`), while a project key may hold hyphens anywhere after its first
+    /// character (`PROJECT_KEY_PATTERN`, `src/lib/urls.ts`). Splitting on the first collapsed
+    /// `WEB-API` and `WEB-APP` into one bucket, which silenced one project's fault and let the
+    /// other's healthy run re-arm it — the same storm this scoping exists to stop, one family
+    /// narrower (found in review). A key with no hyphen at all is the `#42` shape a task whose
+    /// project cannot be resolved gets, and it buckets as itself.
     private static func project(of taskKey: String) -> String {
-        String(taskKey.prefix(while: { $0 != "-" }))
+        guard let cut = taskKey.lastIndex(of: "-") else { return taskKey }
+        return String(taskKey[..<cut])
     }
 
     /// The notification this event deserves, or nil — including nil for a fault already reported.
