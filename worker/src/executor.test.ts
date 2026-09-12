@@ -1,7 +1,7 @@
-import { mkdtempSync, readFileSync, realpathSync } from "fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterAll, afterEach } from "vitest";
 import { createExecutor } from "./executor.js";
 import { SANDBOX_COMMAND } from "./sandbox.js";
 import { UNCONFINED_ESCAPE_HATCH } from "./env.js";
@@ -24,6 +24,7 @@ const task = claimedTask({ description: "Do it well", acceptanceCriteria: ["work
 // resolved path — a name that does not exist cannot be resolved, and `confine` refuses rather than
 // installing a rule matching nothing. Every test below therefore runs through the confinement.
 const worktreePath = mkdtempSync(join(tmpdir(), "bp349-exec-"));
+afterAll(() => rmSync(worktreePath, { recursive: true, force: true }));
 
 const options = {
   task,

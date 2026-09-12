@@ -300,13 +300,17 @@ async function sandboxCheck(deps: PreflightDeps, env: NodeJS.ProcessEnv): Promis
     };
   }
 
-  const root = mkdtempSync(join(tmpdir(), "cp-sandbox-probe-"));
-  const worktree = join(root, "worktree");
-  const beyond = join(root, "beyond.txt");
-  const ran = join(worktree, "ran.txt");
-  mkdirSync(worktree);
-
+  // Inside the try, not before it: under `--preflight` the caller prints this report as JSON for the
+  // menubar app, and a throw out here dies in main().catch as a stack trace — a red row becomes no
+  // output at all.
+  let root = "";
   try {
+    root = mkdtempSync(join(tmpdir(), "cp-sandbox-probe-"));
+    const worktree = join(root, "worktree");
+    const beyond = join(root, "beyond.txt");
+    const ran = join(worktree, "ran.txt");
+    mkdirSync(worktree);
+
     // Paths as $0 and $1 rather than inside the script, so nothing about a temp directory's name
     // can become shell syntax. The allowed write comes first and is the positive control: without
     // it, every way the probe can fail to execute at all — sandbox-exec not on the machine, a
@@ -347,7 +351,7 @@ async function sandboxCheck(deps: PreflightDeps, env: NodeJS.ProcessEnv): Promis
   } catch (error) {
     return { name, ok: false, detail: `the sandbox could not be tested: ${String(error)}` };
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    if (root) rmSync(root, { recursive: true, force: true });
   }
 }
 

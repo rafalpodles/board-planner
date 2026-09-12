@@ -557,6 +557,26 @@ describe("the sandbox check", () => {
     expect(row.detail).toMatch(/nothing confining its writes/);
   });
 
+  // A throw building the probe used to escape sandboxCheck entirely, and under `--preflight` that
+  // is a stack trace on stdout where the menubar app expects a JSON report — a red row becoming no
+  // output. mkdtemp into a directory that cannot be made is the reachable form of it.
+  it("reports a red row rather than throwing when it cannot even set the probe up", async () => {
+    const m = machine();
+    const tmp = process.env.TMPDIR;
+    process.env.TMPDIR = "/cp-349-no-such-directory";
+
+    try {
+      const report = await runPreflight(depsFor(m));
+
+      const row = check(report, "sandbox");
+      expect(row.ok).toBe(false);
+      expect(row.detail).toMatch(/could not be tested/);
+    } finally {
+      if (tmp === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = tmp;
+    }
+  });
+
   // Nothing is left behind on a machine that boots a hundred times
   it("removes the directory it probed in", async () => {
     const m = machine();
