@@ -249,6 +249,27 @@ describe("resolveStatusIds", () => {
     await expect(promise).rejects.toThrow(/shipped/);
   });
 
+  /**
+   * BP-381. Existence was the whole check, and it is not enough: the two reads are separate round
+   * trips, so a board edited between them can answer `review -> "checking"` for a column that is
+   * now an ACTIVE one. A run delivering a refused change into an active column puts it back where
+   * the execution lease sweeps — and the lease would take the worktree somebody is being asked to
+   * accept.
+   */
+  it("refuses a column that still exists under a different meaning", async () => {
+    const promise = resolveStatusIds(
+      { statusIds: vi.fn<ApiClient["statusIds"]>().mockResolvedValue(statuses) },
+      async () =>
+        board.map((column) =>
+          column.id === "checking" ? { ...column, role: "active" } : column
+        ),
+      "CP"
+    );
+
+    await expect(promise).rejects.toThrow(/checking/);
+    await expect(promise).rejects.toThrow(/active now/);
+  });
+
   // An empty id is what api.statusIds now answers for a role no column carries (BP-512). The
   // repair is different from a deleted column's — give a column the role, rather than find where
   // an id went — so the message has to say which it is.
