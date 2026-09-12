@@ -4,7 +4,10 @@
  * Usage:
  *   MONGODB_URI=... ENCRYPTION_KEY=... npx tsx scripts/migrate-channel-webhooks.ts --dry-run
  *   MONGODB_URI=... ENCRYPTION_KEY=... npx tsx scripts/migrate-channel-webhooks.ts
- *   railway run --service MongoDB -- npx tsx scripts/migrate-channel-webhooks.ts --dry-run
+ *   ENCRYPTION_KEY=... railway run --service MongoDB -- npx tsx scripts/migrate-channel-webhooks.ts --dry-run
+ *
+ * The key goes in front even there: `--service MongoDB` injects the database service's variables,
+ * and ENCRYPTION_KEY lives on the app service.
  *
  * RUN IT AFTER THE DEPLOY, never before. Reading plaintext exists only in the new code; the old
  * code hands the stored string straight to `isAllowedWebhookUrl`, which refuses an `enc:v2:…`
