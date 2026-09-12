@@ -100,4 +100,61 @@ describe("the notifications page while its load effect is running twice", () => 
       expect((screen.getByLabelText(ASSIGNED_EMAIL) as HTMLInputElement).checked).toBe(true)
     );
   });
+
+  // The other two halves of the guard, which the tick above cannot reach: it holds the first run,
+  // so that run always answers last. Here the first run answers first, which is the ordinary case.
+  it("does not report the screen unloadable because a superseded read failed", async () => {
+    let call = 0;
+    api.get.mockImplementation((path: string) => {
+      call += 1;
+      // The superseded run fails outright. The surviving one is fine, and is the only one whose
+      // answer describes this screen.
+      return call <= 2
+        ? Promise.reject(new Error("the read that was replaced"))
+        : Promise.resolve(answerFor(path, grid(false)));
+    });
+
+    render(
+      <StrictMode>
+        <NotificationsPage />
+      </StrictMode>
+    );
+
+    await screen.findByLabelText(ASSIGNED_EMAIL);
+    expect(screen.queryByText(/could not be loaded/)).toBeNull();
+  });
+
+  it("does not flash the unloadable panel while the surviving read is still in flight", async () => {
+    let releaseSurviving!: () => void;
+    const held = new Promise<void>((resolve) => {
+      releaseSurviving = resolve;
+    });
+
+    let call = 0;
+    api.get.mockImplementation((path: string) => {
+      call += 1;
+      return call <= 2
+        ? Promise.resolve(answerFor(path, grid(false)))
+        : held.then(() => answerFor(path, grid(false)));
+    });
+
+    render(
+      <StrictMode>
+        <NotificationsPage />
+      </StrictMode>
+    );
+
+    // The superseded run has answered by now; the surviving one has not. Nothing it did may reach
+    // the screen — including flipping `loaded`, which with no matrix renders the failure panel.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.queryByText(/could not be loaded/)).toBeNull();
+
+    await act(async () => {
+      releaseSurviving();
+      await held;
+    });
+    await screen.findByLabelText(ASSIGNED_EMAIL);
+  });
 });
