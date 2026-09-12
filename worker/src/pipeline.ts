@@ -114,8 +114,13 @@ const MAX_NOTIFICATION_CHARS = 200;
  * a short prefix would otherwise back up to a five-character head and throw away ninety-five
  * characters of a budget this whole function exists to spend well.
  *
- * Both seams avoid splitting a surrogate pair. The head cannot by construction once it lands on a
- * space; the tail is an offset and can, and a lone surrogate renders as a replacement character.
+ * Neither seam is safe to split a token at, and the backup does not change that: it only runs when
+ * the first half holds a space far enough in, so a space-free detail — `delivered` carries a bare
+ * URL — takes a raw cut at exactly the halfway mark. That is why `scrub` runs before this and not
+ * after: a credential straddling either seam survives in halves that match no pattern.
+ *
+ * Both seams also avoid splitting a surrogate pair, which a lone half of renders as a replacement
+ * character.
  *
  * `scrub` still runs before this, so no secret is straddled — a redaction cannot be reassembled
  * from the two halves. What is new is that the last hundred characters leave the worker at all,

@@ -1964,10 +1964,12 @@ describe("what a machine fault is recorded as", () => {
    */
   it("redacts before it cuts, so a secret on a cut point is not published in halves", async () => {
     const token = `ghp_${"A".repeat(40)}`;
-    // Positioned so the TAIL boundary lands inside it. The head backs up to a space, so the head
-    // cannot split a token; the tail is taken at a fixed offset and can. Swapped, the tail keeps a
-    // run of the token with its `ghp_` prefix left behind in the discarded middle, so `SECRET`
-    // matches neither half and a real credential fragment ships.
+    // Positioned so the TAIL boundary lands inside it, because the tail is a fixed offset and is
+    // the cut point that is always there. The head can split a token too — its backup only runs
+    // when the first half holds a space far enough in, and in this very fixture it does not — but
+    // the tail is the one shape no detail can avoid. Swapped, the tail keeps a run of the token
+    // with its `ghp_` prefix left behind in the discarded middle, so `SECRET` matches neither half
+    // and a real credential fragment ships (found in review, whose measurement was at the head).
     const detail = `${"x".repeat(150)} ${token} ${"y".repeat(70)}`;
     const execute = vi
       .fn<Executor["execute"]>()
@@ -1999,6 +2001,23 @@ describe("what a machine fault is recorded as", () => {
     const { detail } = outcomes().at(-1) as { detail: string };
     expect(detail).not.toContain("BaseUnavailableError");
     expect(detail).toContain("remote: Error: repository not found");
+  });
+
+  // The other seam, and the shape that has no space to back up to at all: `delivered` carries a
+  // bare URL, and BP-306 records `gh pr create` putting a credential into one.
+  it("redacts a secret straddling the head cut of a detail with no spaces in it", async () => {
+    const token = `ghp_${"A".repeat(40)}`;
+    const execute = vi.fn<Executor["execute"]>().mockResolvedValue({
+      kind: "machine_fault",
+      message: `https://example.invalid/${"a".repeat(60)}/${token}/${"b".repeat(120)}`,
+    });
+    const { h, outcomes } = watchedOutcomes({ executor: { execute } });
+
+    await runTask(h.deps, task);
+
+    const { detail } = outcomes().at(-1) as { detail: string };
+    expect(detail).not.toContain("ghp_");
+    expect(detail).not.toContain("AAAAAAAAAA");
   });
 
   it("carries the reason into the record, on the two paths that had it in hand", async () => {
