@@ -38,18 +38,31 @@ export default function NotificationsPage() {
 
   useEffect(() => {
     if (!user) return;
+    // Everything below is seeded from this read and then held unsaved until Save. React runs a
+    // mount effect twice under Strict Mode, so a second read is already in flight when the first
+    // one paints the screen — and without the flag the slower answer lands on top of whatever has
+    // been ticked or typed since, which `save()` then PUTs back as the reader's grid (BP-465).
+    let ignore = false;
     Promise.all([
       api.get("/api/users/me/notifications"),
       api.get("/api/auth/me"),
     ])
       .then(([prefs, me]: [Loaded, { emailDigest?: boolean }]) => {
+        if (ignore) return;
         setMatrix(prefs.defaults);
         setChatKind(prefs.chat.kind);
         setChatConfigured(prefs.chat.configured);
         setEmailDigest(me.emailDigest ?? false);
       })
-      .catch(() => setLoadFailed(true))
-      .finally(() => setLoaded(true));
+      .catch(() => {
+        if (!ignore) setLoadFailed(true);
+      })
+      .finally(() => {
+        if (!ignore) setLoaded(true);
+      });
+    return () => {
+      ignore = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -1,0 +1,103 @@
+// @vitest-environment happy-dom
+import { StrictMode } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import NotificationsPage from "./page";
+import { NotificationMatrix, NotificationType } from "@/types";
+
+/**
+ * BP-465. The page seeds `matrix`, the chat connection and the digest box from one load effect.
+ * React runs a mount effect twice under Strict Mode — which is what `next dev` serves, and what
+ * the e2e suite drives — so two reads are in flight and the slower one answers last. Without a
+ * race guard that answer is applied on top of whatever has been ticked or typed since the first
+ * one painted the screen, and the save that follows carries the server's grid rather than the
+ * reader's. The same guard is on the project section next door (BP-553).
+ */
+
+const { api } = vi.hoisted(() => ({
+  api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn() },
+}));
+
+vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
+vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
+vi.mock("@/hooks/use-auth", () => ({
+  useAuth: () => ({ user: { _id: "u1", username: "member" }, refreshUser: vi.fn() }),
+}));
+
+const EVENTS: NotificationType[] = [
+  "task_assigned",
+  "status_changed",
+  "comment_added",
+  "mentioned",
+  "task_created",
+];
+
+function grid(on: boolean): NotificationMatrix {
+  return Object.fromEntries(
+    EVENTS.map((event) => [event, { inApp: on, email: on, chat: false }])
+  ) as NotificationMatrix;
+}
+
+const prefs = (matrix: NotificationMatrix) => ({
+  defaults: matrix,
+  projects: [],
+  chat: { kind: "", configured: false },
+});
+
+const answerFor = (path: string, matrix: NotificationMatrix) =>
+  path === "/api/users/me/notifications" ? prefs(matrix) : { emailDigest: false };
+
+const ASSIGNED_EMAIL = "A task is assigned to you — E-mail";
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+afterEach(cleanup);
+
+describe("the notifications page while its load effect is running twice", () => {
+  it("does not paint a superseded read over a cell the reader has just ticked", async () => {
+    // Strict Mode mounts, cleans up, and mounts again, so the effect runs twice and each run reads
+    // both endpoints. The first run's two reads are held; the second run's answer straight away
+    // and are what paints the screen.
+    let releaseSuperseded!: () => void;
+    const held = new Promise<void>((resolve) => {
+      releaseSuperseded = resolve;
+    });
+
+    let call = 0;
+    api.get.mockImplementation((path: string) => {
+      call += 1;
+      // The grid as the server still has it, in both runs: what separates the versions is not the
+      // value but whether a cleaned-up run's answer is allowed to land at all.
+      return call <= 2
+        ? held.then(() => answerFor(path, grid(false)))
+        : Promise.resolve(answerFor(path, grid(false)));
+    });
+
+    render(
+      <StrictMode>
+        <NotificationsPage />
+      </StrictMode>
+    );
+
+    const cell = (await screen.findByLabelText(ASSIGNED_EMAIL)) as HTMLInputElement;
+    expect(cell.checked).toBe(false);
+    expect(call).toBe(4);
+
+    await act(async () => {
+      fireEvent.click(cell);
+    });
+    expect((screen.getByLabelText(ASSIGNED_EMAIL) as HTMLInputElement).checked).toBe(true);
+
+    // The superseded read answers now. It belongs to a run that was cleaned up before the reader
+    // ever saw this screen, so it has nothing to say about what is on it.
+    await act(async () => {
+      releaseSuperseded();
+      await held;
+    });
+
+    await waitFor(() =>
+      expect((screen.getByLabelText(ASSIGNED_EMAIL) as HTMLInputElement).checked).toBe(true)
+    );
+  });
+});
