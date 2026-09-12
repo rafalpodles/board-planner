@@ -26,7 +26,7 @@ import { fatal, fatalOnListenFailure, keepAlive, serve } from "./stub-guard.mjs"
 
 const NAME = "smtp stub";
 const LOOPBACK = "127.0.0.1";
-const SMTP_PORT = Number(process.env.SMTP_STUB_PORT ?? 3993);
+const SMTP_PORT = Number(process.env.SMTP_STUB_PORT ?? 3994);
 const CONTROL_PORT = Number(process.env.SMTP_STUB_CONTROL_PORT ?? SMTP_PORT + 1);
 
 /** `{ from, to, data }` per message, oldest first. */

@@ -6,11 +6,12 @@ import { E2E_MONGODB_URI, MEMBER_ID, MEMBER_PASSWORD, MEMBER_USERNAME, seed } fr
 /**
  * BP-281, slice 3. The reset itself.
  *
- * CI has no mail server, so the link is planted in the database exactly as a delivered email would
- * leave it — a row holding the hash, and the raw token in hand. That is not a shortcut around the
- * thing under test: what has to be proven here is that a link works once, stops working after the
- * hour, and cannot be used twice. Delivery is the previous slice's problem and was driven against
- * a real SMTP server locally.
+ * The link is planted in the database exactly as a delivered email would leave it — a row holding
+ * the hash, and the raw token in hand. That is not a shortcut around the thing under test: what
+ * has to be proven here is that a link works once, stops working after the hour, and cannot be
+ * used twice, none of which is about delivery. The run does have a mail server since BP-465, but
+ * reading the token out of a message would only add a parsing step between the fixture and the
+ * same three assertions.
  */
 
 const HOUR = 60 * 60 * 1000;

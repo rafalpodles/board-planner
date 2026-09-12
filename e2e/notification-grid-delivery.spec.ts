@@ -101,6 +101,25 @@ async function expectMailFor(address: string, title: string) {
 }
 
 /**
+ * Waits until the dispatch for one task has demonstrably run for this reader.
+ *
+ * `createNotifications` is fire-and-forget, so a window opened when `POST /tasks` answers can close
+ * before the dispatch has started — and an absence measured over it says only that the test was
+ * quicker. The bell row is written inside the same pass, *before* the e-mail branch is reached
+ * (`src/lib/in-app-notifications.ts`), so once it is on this reader's screen the mail decision has
+ * already been taken and the window that follows is measuring the decision rather than the delay.
+ *
+ * Every reader here has the bell on for the row in question: it is on in the legacy default, and
+ * none of these tests ever unticks In app.
+ */
+async function dispatchHasRun(page: Page, title: string) {
+  await expect(async () => {
+    await page.goto("/notifications");
+    await expect(page.getByText(title).first()).toBeVisible({ timeout: 3_000 });
+  }).toPass({ timeout: 30_000 });
+}
+
+/**
  * Absence held over a window rather than read once: the mail is sent after the request that caused
  * it has already answered, so a single read proves only that this test was quicker than the send.
  * The control in the same test is what separates "the tick decided" from "this run delivers nothing
@@ -217,6 +236,7 @@ test("a ticked e-mail cell delivers, an unticked one does not, and unticking sto
 
   await test.step("only the one who ticked is written to", async () => {
     await expectMailFor(MEMBER_MAILBOX, wanted);
+    await dispatchHasRun(bystander, unwanted);
     await expectNoMailFor(bystander, BYSTANDER_MAILBOX, unwanted);
   });
 
@@ -229,6 +249,7 @@ test("a ticked e-mail cell delivers, an unticked one does not, and unticking sto
   const afterUnticking = "Nothing after the cell was cleared";
   await test.step("the next assignment writes to nobody", async () => {
     await assignANewTask(admin, afterUnticking, MEMBER_USERNAME);
+    await dispatchHasRun(member, afterUnticking);
     await expectNoMailFor(member, MEMBER_MAILBOX, afterUnticking);
   });
 
@@ -278,19 +299,16 @@ test("the digest holds the immediate message back, and only for the reader who a
     await assignANewTask(admin, sentNow, BYSTANDER_USERNAME);
   });
 
+  // The row is written whatever the mail did — the morning message is assembled from these
+  // documents, which is why the bell hides rows rather than skipping the write. Asserted before
+  // the silence rather than after it, because it is also what proves the dispatch ran at all.
+  await test.step("the event is still recorded for the morning", async () => {
+    await dispatchHasRun(member, heldBack);
+  });
+
   await test.step("the digest subscriber is not written to, the other is", async () => {
     await expectMailFor(BYSTANDER_MAILBOX, sentNow);
     await expectNoMailFor(member, MEMBER_MAILBOX, heldBack);
-  });
-
-  // What the digest will be built from. The row is written whatever the mail did — the morning
-  // message is assembled from these documents, which is why the bell hides rows rather than
-  // skipping the write.
-  await test.step("the event is still recorded for the morning", async () => {
-    await expect(async () => {
-      await member.goto("/notifications");
-      await expect(member.getByText(heldBack).first()).toBeVisible({ timeout: 3_000 });
-    }).toPass({ timeout: 30_000 });
   });
 
   await memberContext.close();
@@ -355,6 +373,7 @@ test("a project override mutes one board, and turning it off gives the global gr
   const muted = "Muted by this board's own grid";
   await test.step("so an assignment here says nothing", async () => {
     await assignANewTask(admin, muted, MEMBER_USERNAME);
+    await dispatchHasRun(member, muted);
     await expectNoMailFor(member, MEMBER_MAILBOX, muted);
   });
 

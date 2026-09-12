@@ -30,9 +30,10 @@ test.beforeEach(async () => {
 // route returning 500 for everything, so four of the five proved only that the server was running.
 const UNAUTHENTICATED = [
   { name: "login", path: "/api/auth/login", honest: { username: "nobody", password: "nope" }, answers: 401 },
-  // 503 because this instance has no SMTP configured, which is the point: the request reached
-  // the route's own logic instead of being turned away by the cap.
-  { name: "password reset request", path: "/api/auth/forgot", honest: { identifier: "nobody" }, answers: 503 },
+  // 200 and the uniform answer, which is the point: the request reached the route's own logic
+  // instead of being turned away by the cap. It was 503 until BP-465 gave the run a mail server —
+  // the number changed, the thing it proves did not.
+  { name: "password reset request", path: "/api/auth/forgot", honest: { identifier: "nobody" }, answers: 200 },
   { name: "password reset", path: "/api/auth/reset", honest: { token: "nope", newPassword: "x" }, answers: 400 },
   { name: "device enrolment", path: "/api/workers/enrolment/device", honest: { name: "laptop" }, answers: 201 },
   {
