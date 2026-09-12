@@ -3,7 +3,7 @@ import { decryptSecret } from "./encryption";
 const MASK = "••••";
 
 /**
- * Which rows have already been reported this process. `sanitizeProjectSecrets` runs on every read
+ * Which rows have already been reported this process, by id. `sanitizeProjectSecrets` runs on every read
  * of a project — the board polls one every 10 seconds per open tab, and the sidebar maps it over
  * the whole list — so an unconditional log for a key that will never come back is not a signal,
  * it is a bill. A restart reports it again, which is what makes a problem that is still there
@@ -37,7 +37,12 @@ export function maskSecretUrl(value: string | undefined): string {
  * non-special scheme — so masking the stored string would print `null/••••` plus a tail of
  * ciphertext instead of the host the owner needs to recognise the channel by.
  */
-function maskStoredUrl(value: string | undefined, project: string, channel: string): string {
+function maskStoredUrl(
+  value: string | undefined,
+  row: string,
+  project: string,
+  channel: string
+): string {
   if (!value) return "";
   try {
     return maskSecretUrl(decryptSecret(value));
@@ -45,7 +50,6 @@ function maskStoredUrl(value: string | undefined, project: string, channel: stri
     // The bare mask is also what an unparseable URL gets, so on screen the two are one state.
     // A rotation that lost the old key is otherwise silent in both directions: the channel stops
     // delivering and the row it happened to just reads as dots.
-    const row = `${project}/${channel}`;
     if (!reportedUnreadable.has(row)) {
       reportedUnreadable.add(row);
       console.error(
@@ -84,6 +88,10 @@ export function sanitizeProjectSecrets<T extends object>(project: T): T {
         ...rest,
         webhookUrlMasked: maskStoredUrl(
           webhookUrl as string | undefined,
+          // Keyed on ids, never on names: a rename is a new key, so the same broken row would
+          // report itself again on every rename — and renaming is exactly what an owner does
+          // while trying to fix it.
+          `${obj._id ?? projectLabel}/${rest._id ?? rest.name ?? ""}`,
           projectLabel,
           String(rest.name ?? "")
         ),

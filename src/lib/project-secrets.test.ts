@@ -113,11 +113,11 @@ describe("sanitizeProjectSecrets", () => {
   // Naming the row in the log is the only thing that makes a lost key actionable.
   it("falls back to a bare mask when no configured key can read the stored URL, and says which row", () => {
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
-    const unreadable = () =>
+    const unreadable = (name = "Unreadable row") =>
       sanitizeProjectSecrets({
         key: "BP",
         notificationChannels: [
-          { _id: "c1", name: "Unreadable row", webhookUrl: "enc:v2:deadbeef:Zm9v", enabled: true },
+          { _id: "c1", name, webhookUrl: "enc:v2:deadbeef:Zm9v", enabled: true },
         ],
       });
 
@@ -134,6 +134,11 @@ describe("sanitizeProjectSecrets", () => {
     logged.mockClear();
     unreadable();
     unreadable();
+    expect(logged).not.toHaveBeenCalled();
+
+    // Still the same row after a rename. Keyed on the name, this would report again — and an owner
+    // trying to fix a broken channel renames it, so that is the worst moment to start repeating.
+    unreadable("Renamed while trying to fix it");
     expect(logged).not.toHaveBeenCalled();
   });
 
