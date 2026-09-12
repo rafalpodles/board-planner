@@ -56,7 +56,11 @@ public func notification(for event: TelemetryEvent) -> NotificationRequest? {
                 // "until the next poll", not "for this cycle": the loop ends one pass and sleeps,
                 // so the claim withdraws itself in thirty seconds and says so. A sticky sentence
                 // with no stated expiry is what BP-616 is about.
-                body: "\(outcome.taskKey) went back to the queue and this machine will take no more work until the next poll. Reason: \(outcome.detail ?? "on the board.")")
+                body: "\(outcome.taskKey) went back to the queue and this machine will take no more "
+                    + "work until the next poll. "
+                    // A label with nothing after it reads as a truncation, so the branch with no
+                    // detail gets a sentence rather than the same label and a shrug.
+                    + (outcome.detail.map { "Reason: \($0)" } ?? "The reason is on the board."))
         default:
             return nil
         }

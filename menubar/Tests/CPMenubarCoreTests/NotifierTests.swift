@@ -72,7 +72,9 @@ import Testing
     let request = notification(for: .outcome(Outcome(outcome: "machineFault", taskKey: "CP-1")))
 
     #expect(request != nil)
-    #expect(request?.body.contains("Reason: on the board") == true)
+    #expect(request?.body.contains("The reason is on the board.") == true)
+    // A bare label with nothing after it is what a truncated banner looks like
+    #expect(request?.body.contains("Reason:") == false)
 }
 
 // With autoMerge off, "delivered" is what a successful run ends as — and the operator has to act
