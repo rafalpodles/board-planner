@@ -25,7 +25,7 @@ const authed = {
   "x-cp-protocol": "1",
 };
 
-function call(method: "POST" | "PATCH", body: unknown, headers = authed) {
+function call(method: "POST" | "PATCH", body: unknown, headers: Record<string, string> = authed) {
   return {
     req: new Request(`http://localhost/api/workers/${WORKER_ID}/decisions`, {
       method,
