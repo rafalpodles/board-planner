@@ -79,7 +79,8 @@ describe("dispatchNotifications", () => {
 
   // Skipping is per channel: an unreadable one must not take the rest of the board's channels
   // down with it, which is what letting decryptSecret throw into the outer catch would do
-  it("skips only the channel whose URL no configured key can read", async () => {
+  it("skips only the channel whose URL no configured key can read, and names it", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     const lost = encryptSecret("https://hooks.slack.com/services/T/B/lost");
     process.env.ENCRYPTION_KEYS_OLD = OTHER_KEY;
     process.env.ENCRYPTION_KEY = OTHER_KEY;
@@ -89,6 +90,14 @@ describe("dispatchNotifications", () => {
 
     expect(safeFetch).toHaveBeenCalledTimes(1);
     expect(safeFetch.mock.calls[0][0]).toBe("https://hooks.slack.com/services/T/B/readable");
+
+    // Which one went quiet, not just that something did: with a dozen boards, a bare
+    // "could not be decrypted" names no row to go and fix
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining("p1"));
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining("Channel 0"));
+    expect(logged).not.toHaveBeenCalledWith(expect.stringContaining("Channel 1"));
+
+    logged.mockRestore();
   });
 
   it("still refuses a decrypted URL the allowlist rejects", async () => {

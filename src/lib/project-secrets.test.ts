@@ -90,6 +90,7 @@ describe("sanitizeProjectSecrets", () => {
   // BP-372: the stored value is an `enc:v2:…` envelope, which `new URL()` parses as a non-special
   // scheme — masking it without decrypting first prints `null/••••` and a tail of ciphertext
   it("masks a stored channel URL by its real host, and never leaks the ciphertext", () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     const stored = encryptSecret("https://hooks.slack.com/services/T000/B111/abcdef123456");
     const sanitized = sanitizeProjectSecrets({
       notificationChannels: [{ _id: "c1", name: "Releases", webhookUrl: stored, enabled: true }],
@@ -99,6 +100,11 @@ describe("sanitizeProjectSecrets", () => {
     expect(channel.webhookUrlMasked).toBe("https://hooks.slack.com/••••3456");
     expect(channel).not.toHaveProperty("webhookUrl");
     expect(JSON.stringify(channel)).not.toContain(stored.slice(-8));
+
+    // This runs on every project read, list included, so a log outside the catch is production noise
+    expect(logged).not.toHaveBeenCalled();
+
+    logged.mockRestore();
   });
 
   // The bare mask is also what an unparseable URL gets, so the screen cannot tell the two apart.

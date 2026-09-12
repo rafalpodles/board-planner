@@ -152,7 +152,15 @@ test.describe("a project's chat webhook URL", () => {
       (r) => r.url().includes("/notifications") && r.request().method() === "PUT"
     );
     await page.getByRole("button", { name: "Save Webhook URL for Releases" }).click();
-    expect((await replaced).status()).toBe(200);
+    const response = await replaced;
+    expect(response.status()).toBe(200);
+
+    // PUT answers with the freshest envelope of all — the URL the client typed a moment ago — so
+    // it is held to the same three assertions the POST answer is
+    const body = JSON.stringify(await response.json());
+    expect(body).not.toContain(REPLACEMENT_URL);
+    expect(body).not.toContain("enc:v2:");
+    expect(body).toContain("webhookUrlMasked");
 
     const stored = await storedChannel("Releases");
     expect(stored.webhookUrl).not.toContain("typedIntoTheRow");
