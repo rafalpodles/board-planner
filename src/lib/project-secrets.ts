@@ -28,11 +28,17 @@ export function maskSecretUrl(value: string | undefined): string {
  * non-special scheme — so masking the stored string would print `null/••••` plus a tail of
  * ciphertext instead of the host the owner needs to recognise the channel by.
  */
-function maskStoredUrl(value: string | undefined): string {
+function maskStoredUrl(value: string | undefined, project: string, channel: string): string {
   if (!value) return "";
   try {
     return maskSecretUrl(decryptSecret(value));
   } catch {
+    // The bare mask is also what an unparseable URL gets, so on screen the two are one state.
+    // A rotation that lost the old key is otherwise silent in both directions: the channel stops
+    // delivering and the row it happened to just reads as dots.
+    console.error(
+      `Project chat webhook could not be decrypted: project ${project}, channel "${channel}"`
+    );
     return MASK;
   }
 }
@@ -58,9 +64,17 @@ export function sanitizeProjectSecrets<T extends object>(project: T): T {
   }
 
   if (Array.isArray(obj.notificationChannels)) {
+    const project = String(obj.key || obj._id || "unknown");
     obj.notificationChannels = obj.notificationChannels.map((channel) => {
       const { webhookUrl, ...rest } = channel as Record<string, unknown>;
-      return { ...rest, webhookUrlMasked: maskStoredUrl(webhookUrl as string | undefined) };
+      return {
+        ...rest,
+        webhookUrlMasked: maskStoredUrl(
+          webhookUrl as string | undefined,
+          project,
+          String(rest.name ?? "")
+        ),
+      };
     });
   }
 

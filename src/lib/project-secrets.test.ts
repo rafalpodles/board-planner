@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 process.env.ENCRYPTION_KEY = "d".repeat(64);
 
@@ -101,8 +101,13 @@ describe("sanitizeProjectSecrets", () => {
     expect(JSON.stringify(channel)).not.toContain(stored.slice(-8));
   });
 
-  it("falls back to a bare mask when no configured key can read the stored URL", () => {
+  // The bare mask is also what an unparseable URL gets, so the screen cannot tell the two apart.
+  // Naming the row in the log is the only thing that makes a lost key actionable.
+  it("falls back to a bare mask when no configured key can read the stored URL, and says which row", () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
     const sanitized = sanitizeProjectSecrets({
+      key: "BP",
       notificationChannels: [
         { _id: "c1", name: "Releases", webhookUrl: "enc:v2:deadbeef:Zm9v", enabled: true },
       ],
@@ -110,6 +115,10 @@ describe("sanitizeProjectSecrets", () => {
 
     const channel = (sanitized.notificationChannels as Record<string, unknown>[])[0];
     expect(channel.webhookUrlMasked).toBe("••••");
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining("BP"));
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining("Releases"));
+
+    logged.mockRestore();
   });
 
   it("masks an outgoing webhook's URL and removes the original", () => {
