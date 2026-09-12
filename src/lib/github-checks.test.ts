@@ -146,6 +146,25 @@ describe("a commit with more check runs than one page holds", () => {
     });
   });
 
+  /**
+   * A host that does not send `total_count` must not silently turn paging off. It did: the
+   * fallback was `runs.length >= runs.length`, always true, so the loop ended after page one — and
+   * this branch's own stub is such a host, so the end-to-end test could never have caught it.
+   * Real GitHub sends the field, GitHub Enterprise and a corporate proxy may not.
+   */
+  it("keeps paging when the host sends no total_count at all", async () => {
+    githubCounting((url) =>
+      pageOf(url) === 1
+        ? { check_runs: page("shard", "success", 100) }
+        : { check_runs: page("the-one-that-failed", "failure", 20) }
+    );
+
+    expect(await fetchChecks("o", "r", "sha1", "t")).toEqual({
+      ci: "failure",
+      ciLabel: "the-one-that-failed",
+    });
+  });
+
   // The control: a commit that fits in one page is read once, not three times
   it("stops as soon as the page is not full", async () => {
     const { asked } = githubCounting(() => ({

@@ -92,11 +92,13 @@ export async function register() {
       // Logged like its three siblings, so an operator can see which answer the instance settled
       // on — a fumbled GITHUB_SYNC_TICK_MS is otherwise silent in both directions
       const { startGithubSyncScheduler } = await import("@/lib/github-sync");
-      const githubTick = startGithubSyncScheduler();
+      const githubSync = startGithubSyncScheduler();
       console.log(
-        githubTick === 0
-          ? "GitHub pull-request sync is off (GITHUB_SYNC_TICK_MS=0)"
-          : `GitHub pull-request sync started — every ${githubTick}ms`
+        githubSync.started
+          ? `GitHub pull-request sync started — every ${githubSync.tickMs}ms`
+          : githubSync.reason === "off"
+            ? "GitHub pull-request sync is off (GITHUB_SYNC_TICK_MS=0)"
+            : "GitHub pull-request sync was already running"
       );
 
       const { startDigestScheduler, digestHour, digestTimezone } = await import("@/lib/digest");

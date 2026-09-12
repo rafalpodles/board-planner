@@ -112,6 +112,22 @@ type Signable = {
   headSha?: string | null;
 };
 
+/**
+ * A date as a comparable value.
+ *
+ * `getTime()` on an Invalid Date is `NaN`, and `JSON.stringify` writes `NaN` as `null` — which is
+ * also how an absent date is written, and how every *other* Invalid Date is written. Two genuinely
+ * different malformed dates would compare equal for ever, and a link that acquired one would look
+ * unchanged against a link that had none. It takes a malformed timestamp from whatever
+ * `GITHUB_API_BASE_URL` names, so it is unlikely; the collapse is silent and permanent, which is
+ * what makes it worth two lines.
+ */
+function stamp(date: Date | null | undefined): number | string | null {
+  if (!date) return null;
+  const time = date.getTime();
+  return Number.isFinite(time) ? time : `invalid:${String(date)}`;
+}
+
 /** A link reduced to what a sync can change about it, for comparing one round against the last. */
 function signature(link: Signable): string {
   return JSON.stringify([
@@ -119,8 +135,8 @@ function signature(link: Signable): string {
     link.title,
     link.state,
     link.url,
-    link.mergedAt?.getTime() ?? null,
-    link.updatedAt?.getTime() ?? null,
+    stamp(link.mergedAt),
+    stamp(link.updatedAt),
     link.ci ?? "none",
     link.ciLabel ?? null,
     link.headSha ?? null,
@@ -139,6 +155,13 @@ function signature(link: Signable): string {
  * search and suggestions all sort by it too. `tasks/reorder` carries the same warning about drags.
  */
 function unchanged(stored: ILinkedPR[] | undefined, fresh: Signable[]): boolean {
+  // The stored side is the **hydrated** document, so Mongoose has already filled `ci: "none"`,
+  // `ciLabel: null` and `headSha: null` from the schema's defaults for a link written before
+  // BP-443 — this half is therefore partly describing defaults rather than stored bytes. What
+  // saves it is `headSha`: GitHub returns `head.sha` for open, closed and merged pull requests
+  // alike, so the fresh side always differs from that `null` and an old link is healed on the
+  // first sync. The margin is one field wide — drop `headSha` from `prDocs` and every pre-BP-443
+  // link becomes permanently "unchanged".
   const before = (stored ?? [])
     .filter((link) => (link.provider ?? "github") === "github")
     .map(signature)
@@ -350,9 +373,17 @@ let started = false;
 // this, ticks stack: the spend doubles and keeps doubling, against somebody else's rate limit.
 let ticking = false;
 
-export function startGithubSyncScheduler(): number {
+/** What `startGithubSyncScheduler` did, so the caller can say which without guessing from a number. */
+export type SchedulerStart =
+  | { started: true; tickMs: number }
+  | { started: false; reason: "off" | "already running" };
+
+export function startGithubSyncScheduler(): SchedulerStart {
   const tick = syncTickMs();
-  if (started || tick === 0) return 0;
+  // Two different noes, told apart: a second `register()` — which `next dev` does on reload — used
+  // to return the same 0 as "switched off", so the log said the sync was off while it was running.
+  if (started) return { started: false, reason: "already running" };
+  if (tick === 0) return { started: false, reason: "off" };
   started = true;
   setInterval(() => {
     if (ticking) {
@@ -366,5 +397,5 @@ export function startGithubSyncScheduler(): number {
         ticking = false;
       });
   }, tick).unref();
-  return tick;
+  return { started: true, tickMs: tick };
 }

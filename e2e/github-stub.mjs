@@ -124,10 +124,13 @@ serve({
         json(res, { message: "Bad credentials" }, 401);
         return;
       }
+      // `total_count` as GitHub sends it: the app reads it to decide whether to ask for another
+      // page, and a stub that omitted it was a host that silently turned paging off
+      const runs = answer.check_runs ?? [];
       json(
         res,
         what === "check-runs"
-          ? { check_runs: answer.check_runs ?? [] }
+          ? { total_count: runs.length, check_runs: runs }
           : (answer.status ?? NOTHING_RAN.status)
       );
       return;

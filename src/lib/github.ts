@@ -311,8 +311,7 @@ const MAX_CHECK_RUN_PAGES = 3;
  * A matrix build puts more than a hundred runs on one commit easily, and a page is not ordered by
  * outcome — so reading only the first would let a failing job on page two be reported as a pass,
  * which is the one answer this whole feature must not get wrong. Bounded at three pages: past
- * three hundred runs the cost of being sure is worse than the imprecision, and `total_count` is
- * what says whether anything was left unread.
+ * three hundred runs the cost of being sure is worse than the imprecision.
  */
 async function fetchCheckRuns(
   base: string,
@@ -326,7 +325,12 @@ async function fetchCheckRuns(
     );
     const batch = answer.check_runs ?? [];
     runs.push(...batch);
-    if (batch.length < 100 || runs.length >= (answer.total_count ?? runs.length)) break;
+    // `?? Infinity`, not `?? runs.length`: the fallback used to make the right-hand side
+    // `runs.length >= runs.length`, always true, so a host that does not send `total_count`
+    // silently turned paging off after page one — and this branch's own stub is such a host, so
+    // no test could reach page two through it. `batch.length < 100` is the sufficient condition;
+    // `total_count` only ever saves a wasted request, it must never end the loop early.
+    if (batch.length < 100 || runs.length >= (answer.total_count ?? Infinity)) break;
   }
   return runs;
 }

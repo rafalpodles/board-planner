@@ -330,6 +330,59 @@ describe("a board with nowhere to move the task to", () => {
  * CLAUDE.md documents `0` as the operator's off switch. A value that is not a number used to read
  * as NaN and silently never start, which is indistinguishable from a sync that is working.
  */
+/**
+ * `getTime()` on an Invalid Date is `NaN`, which `JSON.stringify` writes as `null` — the same as an
+ * absent date and the same as every other Invalid Date, so two different malformed dates would
+ * compare equal for ever.
+ */
+describe("a date that is not a date", () => {
+  /**
+   * Against an **absent** date, not a valid one. `getTime()` on an Invalid Date is `NaN`, which
+   * `JSON.stringify` writes as `null` — exactly how an absent date is written. Comparing it to a
+   * real date differs either way and proves nothing; the first version of this test did that and
+   * stayed green against the collapse it was written for.
+   */
+  it("does not compare equal to an absent one", async () => {
+    // The fetched pull request is open, so its mergedAt is genuinely null
+    fetchPullRequests.mockResolvedValue([openPR]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) =>
+        new Response(
+          JSON.stringify(
+            String(url).includes("/check-runs")
+              ? { total_count: 0, check_runs: [] }
+              : { state: "pending", statuses: [] }
+          ),
+          { status: 200 }
+        )
+      )
+    );
+    taskFindOne.mockResolvedValue({
+      _id: "t1",
+      taskNumber: 5,
+      status: "done",
+      linkedPRs: [
+        {
+          provider: "github",
+          number: 1,
+          title: "Some change",
+          state: "open",
+          url: "https://github.com/o/r/pull/1",
+          // The only difference from what the sync will produce
+          mergedAt: new Date("not a date"),
+          updatedAt: new Date("2026-08-01T00:00:00Z"),
+          ci: "none",
+          ciLabel: null,
+          headSha: "abc123",
+        },
+      ],
+    });
+
+    expect(await syncGithubPullRequests(project(), "u1")).toMatchObject({ tasksWritten: 1 });
+  });
+});
+
 describe("how often the background sync runs", () => {
   it("defaults when unset", () => {
     expect(syncTickMs(undefined)).toBe(300000);
@@ -342,6 +395,27 @@ describe("how often the background sync runs", () => {
 
   it("is off at zero, which is the documented switch", () => {
     expect(syncTickMs("0")).toBe(0);
+  });
+
+  /**
+   * "Off" and "already running" used to be the same `0`, so a second `register()` — which
+   * `next dev` does on reload — logged that the sync was switched off while it was running.
+   */
+  it("tells being off apart from having already started", async () => {
+    vi.resetModules();
+    vi.stubEnv("GITHUB_SYNC_TICK_MS", "0");
+    const off = await import("./github-sync");
+    expect(off.startGithubSyncScheduler()).toEqual({ started: false, reason: "off" });
+
+    vi.resetModules();
+    vi.stubEnv("GITHUB_SYNC_TICK_MS", "600000");
+    const on = await import("./github-sync");
+    expect(on.startGithubSyncScheduler()).toEqual({ started: true, tickMs: 600000 });
+    expect(on.startGithubSyncScheduler()).toEqual({
+      started: false,
+      reason: "already running",
+    });
+    vi.unstubAllEnvs();
   });
 
   it("falls back loudly rather than silently never starting", () => {
