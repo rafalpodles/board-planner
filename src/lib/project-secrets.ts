@@ -82,7 +82,7 @@ export function sanitizeProjectSecrets<T extends object>(project: T): T {
 
   if (Array.isArray(obj.notificationChannels)) {
     const projectLabel = String(obj.key || obj._id || "unknown");
-    obj.notificationChannels = obj.notificationChannels.map((channel) => {
+    obj.notificationChannels = obj.notificationChannels.map((channel, index) => {
       const { webhookUrl, ...rest } = channel as Record<string, unknown>;
       return {
         ...rest,
@@ -91,7 +91,7 @@ export function sanitizeProjectSecrets<T extends object>(project: T): T {
           // Keyed on ids, never on names: a rename is a new key, so the same broken row would
           // report itself again on every rename — and renaming is exactly what an owner does
           // while trying to fix it.
-          `${obj._id ?? projectLabel}/${rest._id ?? rest.name ?? ""}`,
+          `${obj._id ?? projectLabel}/${rest._id ?? rest.name ?? index}`,
           projectLabel,
           String(rest.name ?? "")
         ),
