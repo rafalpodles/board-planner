@@ -18,6 +18,11 @@ import { UNCONFINED_ESCAPE_HATCH, unconfinedAgentAllowed } from "./env.js";
  * enough either — moving `HOME` does not stop `/Users/<operator>/.claude/settings.json` being
  * written by name, and `USER` is on the same allowlist that forwards `HOME`.
  *
+ * What this does not reach: the gates. `npm ci`, `npm run build` and `npm test` run agent-written
+ * code in the worktree and are not inside this profile, so a test the agent wrote can still write
+ * where the agent itself now cannot (BP-608). This closes the agent's own tools, which is the move
+ * that needed no gate and left no trace.
+ *
  * Measured the same day: the CLI needs no write access to `~/.claude` or `~/.claude.json` at all.
  * `claude -p` under the profile below exits 0 with empty stderr and no permission denials, which is
  * what lets the allowance stay a list of directories rather than a denylist of the instruction

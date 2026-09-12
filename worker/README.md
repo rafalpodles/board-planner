@@ -233,12 +233,20 @@ and `SIGINT` both finish the task in flight before the loop exits.
 
   The key is **not** cleared for you. Writing to a config an attacker also writes is a race, and it
   destroys the evidence of what was planted.
-- **The agent cannot write outside its own worktree.** Both calls to the CLI — the step that
+- **The agent's own writes cannot leave its worktree.** Both calls to the CLI — the step that
   writes the change and the review gate — run under `sandbox-exec` with a profile that denies every
   write and then allows back exactly one directory: the worktree for the step, the throwaway
   checkout for the reviewer. It is the kernel refusing, so it holds for `Write`, for `Edit`, for a
   symlink the agent plants inside the worktree and writes through, and for anything the CLI spawns
   underneath itself.
+
+  **What it does not cover, said first rather than last: the gates that run agent-written code.**
+  `npm ci`, `npm run build` and `npm test` run in the worktree and are *not* inside this profile,
+  so a step that writes a test which writes to your home, followed by a Test gate that executes it,
+  reaches outside — and a later step in the same sequence then loads what it planted, because only
+  the reviewer passes `--safe-mode`. That is the same chain this bullet closes for the agent's own
+  tools, still open through a different door, and **BP-608** is where it is written down. What
+  changes here is that the agent can no longer do it directly, in one move, with no gate involved.
 
   The escape it closes: a step runs with `--permission-mode bypassPermissions`, so `Write` used to
   take any absolute path this user can reach. `$HOME/.claude/settings.json` is the shortest one —
@@ -269,10 +277,8 @@ and `SIGINT` both finish the task in flight before the loop exits.
   turns the sandbox off must not be reachable by anything the agent can also reach. It is left out
   of the child allowlist too, so the agent is never told whether it is confined.
 
-  What this does **not** claim: reads are untouched, the network is untouched, and the gates that
-  run agent-written code — `npm test`, `npm run build` — are not inside this profile. An agent that
-  writes a test which writes to your home, and a composition that then runs the tests, is a
-  different hole with a different fix.
+  What this does **not** claim: reads are untouched, and the network is untouched. The gates are
+  the other half, and they are above rather than here.
 - **No subprocess inherits the worker's secrets through its environment.** The child environment is
   an allowlist, so the worker's credential reaches neither the agent nor any dependency's install
   script. Only delivery carries what `git` and `gh` need for the remote — and it runs inside the
