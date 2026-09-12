@@ -7,7 +7,9 @@ const { encryptSecret } = await import("./encryption");
 
 // Restored here rather than at the end of a test body: an assertion above that line throws and
 // leaves console.error mocked for the rest of the file
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("maskSecretUrl", () => {
   it("keeps the origin and the last four characters of a Slack webhook", () => {
