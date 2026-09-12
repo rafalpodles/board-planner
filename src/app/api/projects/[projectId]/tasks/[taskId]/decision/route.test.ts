@@ -217,7 +217,19 @@ describe("answering a refused change", () => {
     const named = String(selectedBy(taskFindOne)).split(/\s+/).filter(Boolean);
 
     expect(named).not.toContain("decision");
-    for (const field of ["workerId", "commit", "acceptable", "gate", "files"]) {
+    // Every field the handler reads: the pin, the acceptable check, and what the audit row is
+    // built from — which a fabricated fixture cannot notice is missing, because the projection is
+    // not what builds it
+    expect(named).toContain("taskNumber");
+    for (const field of [
+      "workerId",
+      "commit",
+      "acceptable",
+      "unacceptableReason",
+      "gate",
+      "files",
+      "taskKey",
+    ]) {
       expect(named).toContain(`decision.${field}`);
     }
   });
