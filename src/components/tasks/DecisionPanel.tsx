@@ -146,6 +146,29 @@ function hostOf(url: string): string {
   }
 }
 
+/**
+ * What the quiet-machine warning may add, named for the buttons that are actually on screen.
+ *
+ * The sentence used to be one string on every answerable state, and matched only one of them:
+ * Decline is gated to `pending` (so on `refused`/`failed` it named a button that is not there),
+ * Accept is gated on `acceptable` (so on an unacceptable record it named a button that is not
+ * there), and where Accept IS there outside `pending` it reads "Try again", so "accepting" named
+ * a verb nothing offers.
+ */
+function waitsForTheMachine(state: TaskDecisionState, acceptable: boolean): string {
+  if (!ANSWERABLE.includes(state)) return "";
+  if (state === "pending") {
+    return acceptable
+      ? " Accepting and declining both wait for it; giving up does not."
+      : " Declining waits for it; giving up does not.";
+  }
+  // `refused`/`failed` with `acceptable: false` is unreachable — a record only leaves `pending`
+  // through a verdict, and both the route and `recordVerdict`'s pin refuse one on an unacceptable
+  // record. The branch is here so the four cases are exhaustive; it deliberately has no test,
+  // because nothing can produce the state it answers.
+  return acceptable ? " Trying again waits for it; giving up does not." : "";
+}
+
 type Asking = "accept" | "abandon" | null;
 
 export function DecisionPanel({ projectId, taskId, decision, onAnswered }: DecisionPanelProps) {
@@ -320,18 +343,33 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
 
         {presumedGone && (
           <p className="text-sm text-warning" data-testid="decision-machine-quiet">
-            {decision.workerName || "That machine"} has not been heard from since{" "}
-            {new Date(decision.workerLastSeenAt!).toLocaleString()}. It may never see this.
-            {ANSWERABLE.includes(state) &&
-              " Accepting and declining both wait for it; giving up does not."}
+            {/* A worker document with no `lastSeenAt` is a machine that has never checked in, and
+                it reached here as `new Date(null)` — "has not been heard from since 01/01/1970",
+                on the panel whose whole subject is whether anybody is coming back. */}
+            {decision.workerName || "That machine"}{" "}
+            {decision.workerLastSeenAt
+              ? `has not been heard from since ${new Date(decision.workerLastSeenAt).toLocaleString()}`
+              : "has never been heard from"}
+            . It may never see this.
+            {waitsForTheMachine(state, decision.acceptable)}
           </p>
         )}
 
-        {decision.protectedFiles.length > 0 && (
+        {/* Keyed on the COUNT, not the list. An empty list is indistinguishable from a list that
+            was never fetched, and that is not hypothetical: the read that serves this panel stopped
+            asking for the paths, and the section did not degrade — it vanished, silently, for seven
+            review rounds. A count with nothing to show it against is loud. */}
+        {decision.protectedFileCount > 0 && (
           <div className="text-sm">
             <div className="text-text-muted" id="decision-protected-label">
               What tripped the gate:
             </div>
+            {decision.protectedFiles.length === 0 ? (
+              <div className="mt-1 text-text-muted" data-testid="decision-protected-unlisted">
+                {decision.protectedFileCount} protected{" "}
+                {decision.protectedFileCount === 1 ? "file" : "files"}, not listed on this record.
+              </div>
+            ) : (
             <ul
               className="mt-1 flex flex-wrap gap-1.5"
               aria-labelledby="decision-protected-label"
@@ -350,6 +388,7 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
                 </li>
               )}
             </ul>
+            )}
           </div>
         )}
 
@@ -362,6 +401,17 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
             {state === "pending" ? "Accepting" : "Trying again"} pushes the whole commit —{" "}
             {decision.fileCount} {decision.fileCount === 1 ? "file" : "files"}.
           </div>
+        )}
+
+        {/* Same reasoning as the list above, on the surface the feature exists for: a record whose
+            patch was not selected renders with a headline, a file count, the gate's hits and an
+            "Accept and push" button, and no diff — and nothing on the page says the diff is
+            missing rather than empty. Somebody would be consenting to a change the page never
+            showed them. Accept is not suppressed: `acceptable` is the server's word on that. */}
+        {!decision.patch && (
+          <p className="text-sm text-warning" data-testid="decision-patch-missing">
+            The change itself is not on this record.
+          </p>
         )}
 
         {decision.patch && (

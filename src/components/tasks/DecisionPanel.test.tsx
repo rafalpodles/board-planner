@@ -925,3 +925,112 @@ describe("states the panel has to stay coherent in", () => {
     expect(screen.getByTestId("decision-panel").textContent).not.toContain("w1");
   });
 });
+
+/**
+ * BP-381 review round 9. Three things the panel rendered that were not true of what was on the
+ * screen beside them, all found by a reviewer reading the states against the button gates rather
+ * than by anything that could be measured.
+ */
+describe("what the warning may claim", () => {
+  const QUIET = new Date(NOW - 30 * 60_000).toISOString();
+
+  it("names both buttons where both are on screen", () => {
+    panel({ workerLastSeenAt: QUIET });
+
+    expect(screen.getByTestId("decision-machine-quiet").textContent).toContain(
+      "Accepting and declining both wait for it"
+    );
+    expect(screen.getByRole("button", { name: "Accept and push" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Decline" })).toBeTruthy();
+  });
+
+  /**
+   * Accept is gated on `acceptable`, so on a change the gate refuses outright the sentence named a
+   * button that is not there — and named it first.
+   */
+  it("names only declining where the change cannot be accepted", () => {
+    panel({ workerLastSeenAt: QUIET, acceptable: false, unacceptableReason: "it edits CI" });
+
+    const said = screen.getByTestId("decision-machine-quiet").textContent ?? "";
+    expect(said).toContain("Declining waits for it");
+    expect(said).not.toContain("Accepting");
+    expect(screen.queryByRole("button", { name: "Accept and push" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Decline" })).toBeTruthy();
+  });
+
+  /**
+   * Decline is gated to `pending`, and the accept button reads "Try again" everywhere else — so
+   * the old sentence named one button that had gone and called the other by a verb it no longer
+   * uses.
+   */
+  it.each(["refused", "failed"] as const)(
+    "names trying again, not accepting and declining, while it is %s",
+    (state) => {
+      panel({ state, workerLastSeenAt: QUIET, error: "the push was rejected" });
+
+      const said = screen.getByTestId("decision-machine-quiet").textContent ?? "";
+      expect(said).toContain("Trying again waits for it");
+      expect(said).not.toContain("declining");
+      expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Decline" })).toBeNull();
+    }
+  );
+
+  /**
+   * A worker document that has never checked in serialises `workerLastSeenAt: null`, and the
+   * warning read it as a date: "has not been heard from since 01/01/1970, 01:00:00", on the one
+   * paragraph whose subject is whether anybody is coming back.
+   */
+  it("does not date a machine that has never been heard from", () => {
+    panel({ workerLastSeenAt: null });
+
+    const said = screen.getByTestId("decision-machine-quiet").textContent ?? "";
+    expect(said).toContain("has never been heard from");
+    expect(said).not.toContain("1970");
+  });
+});
+
+/**
+ * Both of these are the same defect in two places: a field the schema withholds arrives empty, and
+ * the panel renders "empty" and "never fetched" identically — as nothing. That is how the gate's
+ * hits left the product for seven rounds without a single suite noticing.
+ */
+describe("a record that arrived incomplete", () => {
+  it("says how many files tripped the gate even when the paths did not arrive", () => {
+    panel({ protectedFiles: [], protectedFileCount: 2 });
+
+    expect(screen.getByTestId("decision-protected-unlisted").textContent).toContain(
+      "2 protected files, not listed on this record"
+    );
+    expect(screen.queryByTestId("decision-protected-files")).toBeNull();
+  });
+
+  // The control: with the paths present the chips render and the fallback is not on screen
+  it("shows the paths when they are there", () => {
+    panel();
+
+    expect(screen.getByTestId("decision-protected-files").textContent).toContain("package.json");
+    expect(screen.queryByTestId("decision-protected-unlisted")).toBeNull();
+  });
+
+  /**
+   * The worse half: with no diff on screen the panel still renders a headline, a file count, the
+   * gate's hits and an Accept button, so it looks complete — and somebody consents to a change the
+   * page never showed them.
+   */
+  it("says the change itself is missing rather than showing an empty panel", () => {
+    panel({ patch: "" });
+
+    expect(screen.getByTestId("decision-patch-missing").textContent).toContain(
+      "The change itself is not on this record"
+    );
+    // Not suppressed: whether this may be accepted is the server's word, not the component's
+    expect(screen.getByRole("button", { name: "Accept and push" })).toBeTruthy();
+  });
+
+  it("says nothing of the sort when the diff is there", () => {
+    panel();
+
+    expect(screen.queryByTestId("decision-patch-missing")).toBeNull();
+  });
+});
