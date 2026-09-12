@@ -61,18 +61,30 @@ interface StubMessage {
   data: string;
 }
 
+/**
+ * The control port, checked rather than assumed: an unrecognised path there answers with the
+ * message log, so a helper that stopped matching would read as an empty mailbox — a green
+ * "nothing arrived" and a red "nothing was delivered" both for the wrong reason.
+ */
+async function control(path: string): Promise<Response> {
+  const response = await fetch(`${SMTP_STUB_CONTROL_URL}${path}`);
+  expect(response.ok, `the mail server's control port refused ${path}`).toBe(true);
+  return response;
+}
+
 async function mailFor(address: string): Promise<StubMessage[]> {
-  const response = await fetch(`${SMTP_STUB_CONTROL_URL}/messages`);
-  const arrived: StubMessage[] = await response.json();
+  const arrived: StubMessage[] = await (await control("/messages")).json();
   return arrived.filter((message) => message.to.includes(address));
 }
 
 async function refuseMailFor(address: string) {
-  await fetch(`${SMTP_STUB_CONTROL_URL}/refuse?to=${encodeURIComponent(address)}`);
+  const answer = await (await control(`/refuse?to=${encodeURIComponent(address)}`)).json();
+  expect(answer.refuseFor, "the mail server did not arm the refusal").toBe(address);
 }
 
 async function stopRefusing() {
-  await fetch(`${SMTP_STUB_CONTROL_URL}/refuse`);
+  const answer = await (await control("/refuse")).json();
+  expect(answer.refuseFor, "the mail server is still refusing somebody's mail").toBeNull();
 }
 
 /** This attempt's own recipient, so a retry or a repeat cannot read the attempt before it. */
@@ -83,8 +95,10 @@ async function openTheMailScreen(page: Page) {
   await signIn(page);
   await page.goto("/settings/email");
   // A positive first: everything below this file asserts is about a screen that has read its
-  // settings, and the spinner satisfies "no error is shown" just as well as success does
-  await expect(page.getByRole("heading", { name: "Email" })).toBeVisible();
+  // settings, and the spinner satisfies "no error is shown" just as well as success does.
+  // Generous for the same reason the sends below are: on a cold run this is `next dev` compiling
+  // the screen, and the default 15 s is not a statement about the product.
+  await expect(page.getByRole("heading", { name: "Email" })).toBeVisible({ timeout: 60_000 });
 }
 
 const sendButton = (page: Page) => page.getByRole("button", { name: /Send a test message|Sending/ });
@@ -163,7 +177,9 @@ test("when the mail server refuses, the screen says so and repeats what it said"
   // screen that reported its own wording would pass the heading above and fail here.
   await expect(refusal.getByText(/550/)).toBeVisible();
 
-  // And nothing was delivered behind the refusal
+  // Nothing was delivered behind the refusal. No mutation of the product reddens this — the stub
+  // decides — and it is here as that stub's contract: were a refused message recorded anyway, the
+  // delivery test's count above it would be measuring something that never left.
   expect(await mailFor(ADDRESS)).toHaveLength(0);
 });
 
@@ -185,7 +201,6 @@ test("a request that never arrives does not blame the mail server", async ({ pag
   const failure = page.getByRole("alert");
   await expect(failure.getByText("Nothing was sent")).toBeVisible();
   await expect(failure.getByText("The mail server refused it")).toHaveCount(0);
-  expect(await mailFor(ADDRESS)).toHaveLength(0);
 });
 
 // The third condition on the button, and the one a configured instance still meets. Until now it

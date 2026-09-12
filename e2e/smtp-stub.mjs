@@ -15,10 +15,11 @@ import { fatal, fatalOnListenFailure, keepAlive, serve } from "./stub-guard.mjs"
  * own request has resolved.
  *
  * Two ports. The SMTP one is what `nodemailer` talks to; the HTTP one is what a spec reads and
- * steers: `/reset` clears what has arrived and cancels any refusal, `/refuse?to=<address>` makes
- * the server answer 550 to mail for that one recipient (and `/refuse` with no address stops), and
- * any other path returns what has arrived. Routed on the path; the method is not checked, which is
- * the same looseness every other stub's control port here has.
+ * steers: `/health` answers the readiness probe, `/reset` clears what has arrived and cancels any
+ * refusal, `/refuse?to=<address>` makes the server answer 550 to mail for that one recipient (and
+ * `/refuse` with no address stops), and any other path returns what has arrived. Routed on the
+ * path; the method is not checked, which is the same looseness every other stub's control port
+ * here has.
  *
  * STARTTLS is not optional here. `src/lib/email.ts` sets `requireTLS` on every port but 465
  * (BP-306, so a stripped advertisement cannot get the AUTH exchange in cleartext), and nodemailer
@@ -227,9 +228,10 @@ serve({
   port: CONTROL_PORT,
   host: LOOPBACK,
   handler: async (req, res) => {
-    // Parsed rather than compared whole, because `/refuse` carries the address in its query. The
-    // other paths gain nothing from it and lose the looseness they had, which nothing relied on.
-    const { pathname, searchParams } = new URL(req.url ?? "/", "http://localhost");
+    // Split rather than handed to `new URL`, because `/refuse` carries the address in its query and
+    // a constructor that throws here is reported through `CRASH_MARKER` and fails the whole run.
+    // Splitting cannot throw for any target Node's parser let through.
+    const [pathname, query = ""] = (req.url ?? "/").split("?");
 
     if (pathname === "/health") {
       res.writeHead(200, { "Content-Type": "text/plain" }).end("ok");
@@ -241,9 +243,11 @@ serve({
       // server that quietly drops its mail
       refuseFor = null;
     }
-    // `/refuse?to=a@b` starts refusing that recipient; `/refuse` with no address stops.
+    // `/refuse?to=a@b` starts refusing that recipient; `/refuse` with no address stops. `|| null`
+    // rather than the bare value: `?to=` would otherwise arm a refusal on the empty string, which
+    // is what `address()` returns for a RCPT it could not parse — a stop that silently is not one.
     if (pathname === "/refuse") {
-      refuseFor = searchParams.get("to");
+      refuseFor = new URLSearchParams(query).get("to") || null;
     }
     const acknowledged = pathname === "/reset" || pathname === "/refuse";
     const payload = JSON.stringify(acknowledged ? { ok: true, refuseFor } : messages);

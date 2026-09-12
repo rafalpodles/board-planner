@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { APP_NAME, APP_DOMAIN } from "@/lib/brand";
 
 const sendMail = vi.fn();
 vi.mock("nodemailer", () => ({
@@ -87,17 +88,20 @@ describe("emailSettingsSummary", () => {
     vi.stubEnv("SMTP_PASS", "secret");
   });
 
-  // The two fields a deployment is allowed not to set. The mail screen prints both, so a default
-  // that stopped applying would put an empty port and an empty sender in front of an admin — and
-  // `sendMail` would hand the mail server a message from nobody.
-  it("supplies the port and the sender a deployment did not set", async () => {
+  // The two fields a deployment is allowed to leave alone. The mail screen prints both, so a
+  // default that stopped applying would put an empty port and an empty sender in front of an admin
+  // — and `sendMail` would hand the mail server a message from nobody. Stubbed empty rather than
+  // deleted: `||` treats the two the same, and the empty string is the one a `??` would get wrong.
+  it("supplies the port and the sender a deployment left empty", async () => {
     vi.resetModules();
     vi.stubEnv("SMTP_PORT", "");
     vi.stubEnv("SMTP_FROM", "");
     const fresh = await import("./email");
 
     expect(fresh.emailSettingsSummary().port).toBe(587);
-    expect(fresh.emailSettingsSummary().from).toMatch(/^.+ <.+@.+>$/);
+    // Against the brand constants the default is built from: `/^.+ <.+@.+>$/` would be satisfied
+    // by any name and any domain, including somebody else's
+    expect(fresh.emailSettingsSummary().from).toBe(`${APP_NAME} <noreply@${APP_DOMAIN}>`);
 
     vi.stubEnv("SMTP_PORT", "2525");
     vi.stubEnv("SMTP_FROM", "Someone <someone@example.com>");

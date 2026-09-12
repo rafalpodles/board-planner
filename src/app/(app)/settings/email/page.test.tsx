@@ -116,50 +116,38 @@ describe("the mail screen, once it has a mail server", () => {
     expect(panel.textContent).toContain("550 5.7.1 Rejected");
   });
 
-  // Nothing was contacted. "The mail server refused it" above "No mail server is configured" is
-  // nonsense, and this is the status the route uses to say exactly that.
-  it("does not blame a mail server the request never reached, on a 409", async () => {
-    api.post.mockRejectedValue(refusalWith(409, "No mail server is configured"));
+  /**
+   * Everything that is not a 502, on the one branch they share. Listed rather than written out
+   * once, because each of the four is a real answer with a different reason to be here — and
+   * because only the 503 separates `status === 502` from a `status >= 500` reading of it. A
+   * failure names the case, so the list costs nothing a single test would have saved.
+   */
+  const notTheMailServer = [
+    // The route's own answer for "no mail server configured". "The mail server refused it" above
+    // "No mail server is configured" is nonsense, and this status exists to prevent it.
+    [409, "No mail server is configured"],
+    // The route's own refusal: the caller has no address to send to
+    [400, "Add an address to your own profile first"],
+    // A proxy or a restarting instance, with no mail server anywhere near it
+    [503, "Service Unavailable"],
+    // A request that never arrived carries no status at all
+    [undefined, "Failed to fetch"],
+  ] as const;
 
-    await openTheScreen();
-    await pressSend();
+  for (const [status, message] of notTheMailServer) {
+    it(`does not blame a mail server for ${status ?? "a failure with no status"}`, async () => {
+      api.post.mockRejectedValue(refusalWith(status, message));
 
-    const panel = screen.getByRole("alert");
-    expect(panel.textContent).toContain("Nothing was sent");
-    expect(panel.textContent).not.toContain("The mail server refused it");
-    expect(panel.textContent).toContain("No mail server is configured");
-  });
+      await openTheScreen();
+      await pressSend();
 
-  it("does not blame a mail server for a refusal of our own, on a 400", async () => {
-    api.post.mockRejectedValue(refusalWith(400, "Add an address to your own profile first"));
-
-    await openTheScreen();
-    await pressSend();
-
-    expect(screen.getByRole("alert").textContent).toContain("Nothing was sent");
-  });
-
-  // A request that never arrived carries no status at all
-  it("does not blame a mail server for a failure with no status", async () => {
-    api.post.mockRejectedValue(refusalWith(undefined, "Failed to fetch"));
-
-    await openTheScreen();
-    await pressSend();
-
-    expect(screen.getByRole("alert").textContent).toContain("Nothing was sent");
-  });
-
-  // The case that separates `status === 502` from a `status >= 500` reading of the same condition,
-  // which every other refusal here would satisfy either way: a proxy or a restarting instance
-  // answers 503, and no mail server has been near it
-  it("does not blame a mail server for a 503 from in front of the instance", async () => {
-    api.post.mockRejectedValue(refusalWith(503, "Service Unavailable"));
-
-    await openTheScreen();
-    await pressSend();
-
-    expect(screen.getByRole("alert").textContent).toContain("Nothing was sent");
-  });
+      const panel = screen.getByRole("alert");
+      expect(panel.textContent).toContain("Nothing was sent");
+      expect(panel.textContent).not.toContain("The mail server refused it");
+      // The reason travels too, or the panel says only that something went wrong
+      expect(panel.textContent).toContain(message);
+    });
+  }
 
   /**
    * Measured while the second attempt is still in flight, which is the only window in which the
