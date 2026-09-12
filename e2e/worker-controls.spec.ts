@@ -1074,6 +1074,12 @@ test("a machine that quarantined a checkout says so on the fleet screen, not `re
  *
  * Driven through the real heartbeat for the same reason the quarantine test above is: the check has
  * to survive the route's own parsing to reach the row.
+ *
+ * What this does NOT show is whether an operator can read any of it. Measured at 1280×720: the
+ * preflight cell starts 3px from the right edge of the viewport and runs 197px past it, inside a
+ * table that scrolls horizontally — so every assertion below is about the DOM, and the text it
+ * finds is off screen until somebody scrolls the table sideways. That is true of every preflight
+ * row, not just this one, and BP-606 is where it is being decided.
  */
 test("the fleet screen says whether a machine confines the agent it runs", async ({
   page,
