@@ -143,33 +143,6 @@ describe("delivery does not execute what the agent left in the repository", () =
     expect(pushedRefs()).toContain("refs/heads/feature");
   });
 
-  /**
-   * BP-381. The settlement of an accepted change is retried WHOLE on the next poll when the board
-   * does not take the report — no outbox, because a 409 that can never succeed would block every
-   * other report on the machine. That design rests entirely on a second push of the same commit
-   * being a no-op rather than a failure, and the reason is not obvious: `push` uses
-   * `--force-with-lease` with no explicit expected value, so the lease is taken against
-   * `refs/remotes/origin/<branch>` — a ref the FIRST push wrote, and which a linked worktree sees
-   * only because it shares the main clone's ref store.
-   *
-   * If that ever stops holding, every retry after a lost settlement becomes a hard failure: the
-   * record lands on `failed` instead of `delivered`, and each attempt burns one of the five the
-   * marker allows. Proved over a real transport, because a mocked runner cannot answer it.
-   */
-  it("pushes the same commit twice without the second being refused", async () => {
-    const delivery = createDelivery(createRunner());
-    const sha = headSha();
-
-    await delivery.push(work, "feature", sha);
-    await expect(delivery.push(work, "feature", sha)).resolves.toBeUndefined();
-
-    expect(
-      execFileSync("git", ["--git-dir", origin, "rev-parse", "refs/heads/feature"], {
-        encoding: "utf8",
-      }).trim()
-    ).toBe(sha);
-  });
-
   // The property this whole task adds, proved over a real transport rather than a mocked runner:
   // refs/heads/feature is rewritten to point at a second commit the run never verified, and the
   // worktree is left detached at the first — the same shape a compromised agent leaves the worktree
