@@ -332,8 +332,8 @@ test.describe("choosing an MCP server's tools", () => {
         ...(server("linked", "/wide") as object),
         authType: "oauth",
         // Not a state the app produces — the callback always writes a token alongside
-        // status:"connected". Forced here because e2e runs without ENCRYPTION_KEY, and safe
-        // because both consumers read `oauth.status` and `!server.oauth`, never the token.
+        // status:"connected". Safe because both consumers read `oauth.status` and
+        // `!server.oauth`, never the token.
         oauth: { status: "connected", clientId: "e2e-client", accessToken: "", refreshToken: "" },
       },
     ]);
