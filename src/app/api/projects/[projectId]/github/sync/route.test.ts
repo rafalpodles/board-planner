@@ -278,7 +278,11 @@ describe("POST .../github/sync", () => {
     // The control: the round did its own work, so the silence above is a decision rather than a
     // sync that stopped early.
     expect(body.prsLinked).toBe(1);
-    expect(taskUpdateOne).not.toHaveBeenCalledWith("t9", expect.anything(), expect.anything());
+    expect(taskUpdateOne).not.toHaveBeenCalledWith(
+      { _id: "t9" },
+      expect.anything(),
+      expect.anything()
+    );
   });
 
   it("does not reach the second pass when the fetch itself failed", async () => {

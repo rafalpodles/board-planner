@@ -115,6 +115,11 @@ export interface StoredProviderLink {
  * would be removed on a guess, and a guess here deletes correct data permanently — the links are
  * outside the window for ever, so no later sync puts them back.
  *
+ * The rule is only ever as accurate as the matcher it defers to: where `matchPRsToTasks` gives a
+ * pull request to the wrong task, this deletes the right task's link rather than leaving a
+ * duplicate on the wrong card. `src/lib/github.ts:70` has no word boundary before the key, which
+ * is BP-611.
+ *
  * `?? "github"`, as everywhere else here: a link stored before the provider field existed is
  * GitHub's, and the schema default is applied on hydration rather than stored.
  */

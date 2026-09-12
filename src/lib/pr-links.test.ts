@@ -161,6 +161,37 @@ describe("pruneContradictedLinks", () => {
     expect(taskUpdateOne).not.toHaveBeenCalled();
   });
 
+  /**
+   * The count is now on the operator's screen, so it has to be a count of links rather than of
+   * tasks. Every other test here has one holder holding one contradicted number, where "count the
+   * links", "count the tasks", "stop after the first" and "set it to 1" all agree.
+   */
+  it("counts the links it removed, across holders and within one", async () => {
+    taskFind.mockReturnValue({
+      lean: async () => [
+        { _id: "t1", taskNumber: 5, linkedPRs: [link({ number: 7 }), link({ number: 8 })] },
+        { _id: "t2", taskNumber: 6, linkedPRs: [link({ number: 9 })] },
+      ],
+    });
+
+    const removed = await prune({ seenNumbers: new Set([7, 8, 9]) });
+
+    expect(removed).toBe(3);
+    expect(taskUpdateOne).toHaveBeenCalledTimes(2);
+    // Both numbers of the first holder go in one write, not one write each
+    expect(taskUpdateOne.mock.calls[0][1]).toEqual(removeProviderLinks("github", [7, 8]));
+  });
+
+  /**
+   * Without the project key the sweep reaches every board on the instance, and syncing one
+   * project would take links off another's cards.
+   */
+  it("asks only about this project's tasks", async () => {
+    await prune();
+
+    expect(taskFind.mock.calls[0][0].project).toBe("p1");
+  });
+
   it("survives a holder whose linkedPRs field is absent", async () => {
     taskFind.mockReturnValue({ lean: async () => [{ _id: "t1", taskNumber: 5 }] });
 

@@ -158,11 +158,13 @@ test("a task the round rewrote wholesale is left to that write", async () => {
 });
 
 /**
- * BP-559's rule, on this write too: the surviving array is computed from the document at write
- * time, so a sync of the other provider landing in the same moment is not dropped by a copy read
- * earlier.
+ * A removal and the other provider's write compose, whichever order the database applies them in
+ * — which is the property BP-559's pipelines buy, and all this can honestly claim. MongoDB
+ * serialises updates to one document, so `Promise.all` observes no interleaving and this would
+ * pass under a serial run too; what it would catch is either write reading the array into JS and
+ * putting back a copy.
  */
-test("a GitLab sync landing mid-prune keeps what it wrote", async () => {
+test("a removal and the other provider's write compose in either order", async () => {
   const { _id } = await taskWith([link("github", 7012)]);
   await db();
 
