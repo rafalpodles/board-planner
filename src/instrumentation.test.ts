@@ -2,6 +2,16 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { onRequestError } from "./instrumentation";
 
 /**
+ * `register()` does not stop at the encryption block: below it sit two `updateMany` backfills, the
+ * agent-catalogue seed and two `setInterval`s. The keyless test runs all of that, and nothing in
+ * the vitest config pins `MONGODB_URI` — so on a machine where one is exported, `npm test` wrote
+ * to a real database. Measured: it set `categories` on a live project and created `agents`.
+ */
+vi.mock("@/lib/db", () => ({
+  connectDB: vi.fn(() => Promise.reject(new Error("unit test: no database"))),
+}));
+
+/**
  * Our half of Next's contract. The other half — that Next calls this at all — is not testable from
  * here and was verified by hand against both `next dev` and `next start`, which is the one Railway
  * runs: with the BP-444 fix reverted, `next start` logged the stack with no path (exactly what the
