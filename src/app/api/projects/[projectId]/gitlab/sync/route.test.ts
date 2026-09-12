@@ -316,6 +316,7 @@ describe("POST .../gitlab/sync — links this round contradicted", () => {
     expect(body.prsUnlinked).toBe(1);
     expect(taskUpdateOne).toHaveBeenCalledWith({ _id: "t5" }, removeProviderLinks("gitlab", [1]), {
       updatePipeline: true,
+      timestamps: false,
     });
   });
 

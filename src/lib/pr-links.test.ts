@@ -136,7 +136,7 @@ describe("pruneContradictedLinks", () => {
     expect(update).toEqual(removeProviderLinks("github", [7]));
     // Mongoose refuses a pipeline update without it, and a pipeline is the point: the surviving
     // array is computed from the document at write time, so an overlapping sync is not dropped.
-    expect(options).toEqual({ updatePipeline: true });
+    expect(options).toEqual({ updatePipeline: true, timestamps: false });
   });
 
   it("writes nothing when a holder has nothing contradicted", async () => {

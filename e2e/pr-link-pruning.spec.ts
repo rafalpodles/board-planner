@@ -145,6 +145,29 @@ test("a link this round never saw survives the sweep", async () => {
   expect((await linksOf(_id)).map((l) => l.number)).toEqual([7007]);
 });
 
+/**
+ * The dashboard reads a done task's `updatedAt` as the date it was finished
+ * (`src/app/api/projects/[projectId]/stats/route.ts`), and taking a stale link off a task that was
+ * finished last quarter is not that task being finished today — it would move on the chart, and
+ * `$gte: since` would pull it into a window it does not belong to. Mongoose stamps `updatedAt` on
+ * an update unless told not to, including a pipeline one, so only a real write can show it obeyed.
+ */
+test("cleaning up a link is not the task being touched", async () => {
+  const finished = new Date("2026-01-05T09:00:00.000Z");
+  const { _id } = await taskWith([link("github", 7016)], {
+    status: "done",
+    updatedAt: finished,
+  });
+
+  const removed = await prune({ seenNumbers: new Set([7016]) });
+
+  expect(removed).toBe(1);
+  expect(await linksOf(_id)).toEqual([]);
+  const handle = await db();
+  const after = await handle.collection("tasks").findOne({ _id });
+  expect(after?.updatedAt).toEqual(finished);
+});
+
 test("a task the round rewrote wholesale is left to that write", async () => {
   const { _id, taskNumber } = await taskWith([link("github", 7011)]);
 

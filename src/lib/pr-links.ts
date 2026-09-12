@@ -108,12 +108,17 @@ export interface StoredProviderLink {
  * this round's fetch and the matcher did not give it to this task. It was retitled onto another
  * task, lost its key, or the key left `formerKeys`.
  *
- * Two of the ways BP-610 lists are deliberately **not** covered, because nothing here can tell
- * them apart from a link that is simply old: a pull request deleted at the provider is absent from
- * a bounded response exactly like one that did not fit, and a repository renamed at the provider
- * leaves its links looking exactly like a repository the project was repointed away from. Both
- * would be removed on a guess, and a guess here deletes correct data permanently — the links are
- * outside the window for ever, so no later sync puts them back.
+ * A pull request **deleted** at the provider is therefore not covered at all: it is absent from a
+ * bounded response exactly like one that did not fit. Neither is a repository **renamed** there,
+ * whose links look exactly like those of a repository the project was repointed away from — the
+ * URL rule that tried to catch the repoint was removed for that reason, because guessing deletes
+ * correct data permanently and the links are outside the window for ever.
+ *
+ * **Repointing** is not "uncovered" so much as swept by coincidence, which is worth saying out
+ * loud: the new repository's numbering starts again, so each time it mints a number a task from
+ * the old repository already holds, that task's link is contradicted and goes. They are stale by
+ * this ticket's own definition, so the removals are right — but which ones go, and when, is
+ * decided by how far an unrelated counter has run.
  *
  * The rule is only ever as accurate as the matcher it defers to: where `matchPRsToTasks` gives a
  * pull request to the wrong task, this deletes the right task's link rather than leaving a
@@ -145,6 +150,19 @@ export function contradictedLinkNumbers(
  * a task in it has had its links of this provider replaced wholesale already — and removes the
  * ones `contradictedLinkNumbers` can show are no longer this task's. A task with nothing
  * contradicted is not written at all.
+ *
+ * `linkedThisRound` is the set of task numbers the round **matched**, not the set it wrote. The
+ * two look interchangeable and are not: a task whose links the round left alone because they were
+ * already right still holds numbers the fetch returned, so sourcing this from what was written
+ * would sweep exactly the links that are correct, on every run.
+ *
+ * The read is one query per sync over every task in the project that holds a link of this
+ * provider — `project_1_taskNumber_1` bounds it to the project, and nothing indexes `linkedPRs`,
+ * so the array test is applied after the fetch. That is sized for a button somebody presses.
+ *
+ * `timestamps: false`, which the first pass does not pass and should: the dashboard reads a done
+ * task's `updatedAt` as the date it was finished (`src/app/api/projects/[projectId]/stats/route.ts`),
+ * and taking a stale link off a task finished last quarter is not that task being finished today.
  */
 export async function pruneContradictedLinks(opts: {
   projectId: string;
@@ -175,6 +193,7 @@ export async function pruneContradictedLinks(opts: {
 
     await Task.updateOne({ _id: holder._id }, removeProviderLinks(provider, numbers), {
       updatePipeline: true,
+      timestamps: false,
     });
     removed += numbers.length;
   }

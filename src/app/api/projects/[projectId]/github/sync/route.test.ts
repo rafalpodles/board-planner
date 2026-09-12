@@ -254,7 +254,7 @@ describe("POST .../github/sync", () => {
     expect(taskUpdateOne).toHaveBeenCalledWith(
       { _id: "t5" },
       removeProviderLinks("github", [1]),
-      { updatePipeline: true }
+      { updatePipeline: true, timestamps: false }
     );
   });
 
