@@ -36,9 +36,21 @@ describe("column definitions", () => {
   });
 
   // Column ids double as sort fields, so a typo would silently break sorting
-  it("names every column after a real sort field", () => {
+  it("names every sortable column after a real sort field", () => {
     const fields = new Set(SORT_OPTIONS.map((o) => o.value));
-    for (const column of listColumns()) expect(fields).toContain(column.id);
+    for (const column of listColumns()) {
+      if (column.sortable === false) continue;
+      expect(fields, column.id).toContain(column.id);
+    }
+  });
+
+  // The other direction, so the opt-out cannot be used to quietly un-sort a column that works:
+  // a column marked unsortable must have no sort field behind it to lose.
+  it("gives an unsortable column no sort field it could have used", () => {
+    const fields = new Set(SORT_OPTIONS.map((o) => o.value));
+    const optedOut = listColumns().filter((c) => c.sortable === false);
+    expect(optedOut.map((c) => c.id)).toEqual(["pr"]);
+    for (const column of optedOut) expect(fields, column.id).not.toContain(column.id);
   });
 });
 

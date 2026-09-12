@@ -26,6 +26,11 @@ const SORTABLE_COLUMNS = [
   "Due",
   "Updated",
 ];
+/**
+ * The one column that is not a sort field, so it has a plain header rather than a Sort by button
+ * (BP-443). It is on by default, like the rest of the first group.
+ */
+const UNSORTABLE_COLUMN = "PR";
 /** Off unless the picker turns them on — see DEFAULT_HIDDEN_BUILT_INS */
 const HIDDEN_BY_DEFAULT = ["Category", "Due", "Updated"];
 const PROJECT_FIELD = "Component";
@@ -126,8 +131,14 @@ test.describe("on a phone", () => {
     for (const label of [...SORTABLE_COLUMNS, PROJECT_FIELD]) {
       await expect(header(page, label), `${label} was ticked`).toBeVisible();
     }
-    // The count the ticket caught lying: eight built-ins plus the project field, all rendered
-    await expect(page.getByRole("button", { name: "Choose columns" })).toContainText("10/10");
+    // Not a Sort by button, so it is read as a column header instead — the picker still has to
+    // render it, which is what this test is about
+    await expect(
+      page.getByRole("columnheader", { name: UNSORTABLE_COLUMN, exact: true }),
+      `${UNSORTABLE_COLUMN} was ticked`
+    ).toBeVisible();
+    // The count the ticket caught lying: nine built-ins plus the project field, all rendered
+    await expect(page.getByRole("button", { name: "Choose columns" })).toContainText("11/11");
 
     const panned = await page.locator("table").evaluate((table) => {
       const wrapper = table.parentElement as HTMLElement;
@@ -147,7 +158,7 @@ test.describe("on a phone", () => {
 
     await page.getByRole("checkbox", { name: "Updated", exact: true }).uncheck();
     await expect(header(page, "Updated")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Choose columns" })).toContainText("9/10");
+    await expect(page.getByRole("button", { name: "Choose columns" })).toContainText("10/11");
   });
 });
 

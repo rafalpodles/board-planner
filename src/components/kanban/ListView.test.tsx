@@ -41,6 +41,7 @@ describe("ListView columns", () => {
       "Key",
       "Title",
       "Status",
+      "PR",
       "Assignee",
       "Priority",
       "Sprint",

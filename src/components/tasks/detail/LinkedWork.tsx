@@ -1,8 +1,11 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
+import { useApi } from "@/hooks/use-api";
+import { useToast } from "@/components/ui/Toast";
 import { ApiTask } from "@/types";
 import { TaskLinks } from "@/components/tasks/TaskLinks";
+import { PullRequestState } from "@/components/tasks/PullRequestBadge";
 import { SectionLabel } from "./atoms";
 
 interface LinkedWorkProps {
@@ -22,11 +25,67 @@ export function LinkedWork({
   onChanged,
   onAddChild,
 }: LinkedWorkProps) {
+  const api = useApi();
+  const { toast } = useToast();
+  const [refreshing, setRefreshing] = useState(false);
   const prs = task.linkedPRs || [];
+  // GitLab has its own sync, in project settings. Without this the button appears on a GitLab-only
+  // task and the GitHub endpoint answers "…is not a GitHub repository" every time — a correct
+  // sentence under a wrong label.
+  const refreshable = prs.some((pr) => (pr.provider ?? "github") === "github");
+
+  /**
+   * Asks GitHub again. One request answers for every open branch, so the links this brings back
+   * are the project's — but `taskNumber` keeps the merged-to-ready_to_test move to this task, the
+   * one the person is looking at. A button called "Refresh PR status" must not move somebody
+   * else's task, least of all under the clicking user's name.
+   */
+  async function refresh() {
+    setRefreshing(true);
+    try {
+      const result: { tasksWritten?: number; autoTransitioned?: number } = await api.post(
+        `/api/projects/${projectId}/github/sync`,
+        { taskNumber: task.taskNumber }
+      );
+      onChanged();
+      // Said rather than left to be inferred, and saying which of the three it was: a refresh that
+      // found nothing otherwise looks exactly like a button that did nothing. `tasksWritten` is the
+      // sync's own count of what it actually rewrote, so zero really does mean nothing has changed
+      // anywhere since the last look — not merely nothing on this task.
+      toast(
+        result?.autoTransitioned
+          ? "Pull requests refreshed — this task moved to Ready to Test"
+          : result?.tasksWritten
+            ? "Pull requests refreshed"
+            : "Pull requests refreshed — nothing has changed since the last check",
+        "success"
+      );
+    } catch (err) {
+      // The message the route gave, which says which of the several refusals it was — an
+      // unconfigured token and an unreachable GitHub send somebody to different places
+      toast(err instanceof Error ? err.message : "Could not refresh the pull requests", "error");
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   return (
     <section className="flex flex-col gap-2.5">
-      <SectionLabel>Linked work</SectionLabel>
+      <div className="flex items-center justify-between gap-3">
+        <SectionLabel>Linked work</SectionLabel>
+        {refreshable && (
+          <button
+            type="button"
+            onClick={refresh}
+            disabled={refreshing}
+            aria-busy={refreshing}
+            className="focus-ring rounded text-xs text-text-muted transition-colors
+              hover:text-text disabled:opacity-60"
+          >
+            {refreshing ? "Refreshing…" : "Refresh PR status"}
+          </button>
+        )}
+      </div>
 
       {prs.length > 0 && (
         <div className="flex flex-col gap-1.5">
@@ -36,23 +95,9 @@ export function LinkedWork({
               href={pr.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-3 rounded-lg border border-border bg-bg-input/40 px-3 py-2.5
-                text-sm transition-colors hover:bg-bg-hover"
+              className="focus-ring flex items-center gap-3 rounded-lg border border-border bg-bg-input/40
+                px-3 py-2.5 text-sm transition-colors hover:bg-bg-hover"
             >
-              <svg
-                className={`h-4 w-4 shrink-0 ${
-                  pr.state === "merged"
-                    ? "text-[#8b5cf6]"
-                    : pr.state === "open"
-                      ? "text-success"
-                      : "text-danger"
-                }`}
-                fill="currentColor"
-                viewBox="0 0 16 16"
-                aria-hidden
-              >
-                <path d="M7.177 3.073L9.573.677A.25.25 0 0110 .854v4.792a.25.25 0 01-.427.177L7.177 3.427a.25.25 0 010-.354zM3.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.25.75a2.25 2.25 0 113 2.122v5.256a2.251 2.251 0 11-1.5 0V5.372A2.25 2.25 0 011.5 3.25zM11 2.5h-1V4h1a1 1 0 011 1v5.628a2.251 2.251 0 101.5 0V5A2.5 2.5 0 0011 2.5zm1 10.25a.75.75 0 111.5 0 .75.75 0 01-1.5 0zM3.75 12a.75.75 0 100 1.5.75.75 0 000-1.5z" />
-              </svg>
               <span className="min-w-0 flex-1 truncate">
                 #{pr.number} {pr.title}
               </span>
@@ -64,21 +109,9 @@ export function LinkedWork({
                   GitLab
                 </span>
               )}
-              <span
-                className="chip chip-custom shrink-0 rounded px-2 py-0.5 text-[11px] font-medium"
-                style={
-                  {
-                    "--chip":
-                      pr.state === "merged"
-                        ? "#8b5cf6"
-                        : pr.state === "open"
-                          ? "var(--color-success)"
-                          : "var(--color-danger)",
-                  } as CSSProperties
-                }
-              >
-                {pr.state}
-              </span>
+              {/* The badge is a link of its own, which inside this one would be markup no browser
+                  agrees on. It is the same look rendered as plain text, and the row is the link. */}
+              <PullRequestState pr={pr} says="status" className="shrink-0" />
             </a>
           ))}
         </div>

@@ -74,6 +74,15 @@ const taskSchema = new Schema<ITask>(
         url: { type: String, required: true },
         mergedAt: { type: Date, default: null },
         updatedAt: { type: Date, default: Date.now },
+        // What CI said about `headSha`. Absent on every link stored before BP-443, which reads as
+        // "nothing has run" until the next sync — the one state that claims nothing.
+        ci: {
+          type: String,
+          enum: ["none", "running", "success", "failure", "unknown"],
+          default: "none",
+        },
+        ciLabel: { type: String, default: null },
+        headSha: { type: String, default: null },
       }],
       default: [],
     },

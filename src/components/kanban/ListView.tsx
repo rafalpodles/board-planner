@@ -42,6 +42,7 @@ import { Combobox, ComboboxOption } from "@/components/ui/Combobox";
 import { categoryColor, categoryTint } from "@/lib/category-colors";
 import { timeAgo } from "@/lib/time";
 import { RunDot } from "@/components/kanban/RunDot";
+import { PullRequestBadge } from "@/components/tasks/PullRequestBadge";
 
 interface ListViewProps {
   tasks: ApiTask[];
@@ -362,6 +363,11 @@ export function ListView({
                   className="min-w-28"
                 />
               )}
+              {show("pr") && (
+                <th scope="col" className="px-2 py-2 text-left font-medium">
+                  PR
+                </th>
+              )}
               {show("assignee") && (
                 <SortHeader
                   label="Assignee"
@@ -582,6 +588,24 @@ export function ListView({
                           </span>
                         </Badge>
                       )}
+                    </td>
+                  )}
+                  {show("pr") && (
+                    // Capped like every other data cell. Under auto table layout an uncapped one
+                    // lets a single task with three pull requests widen the column for the whole
+                    // table, and on lg+ the title cell (max-w-0) is what gives up the room.
+                    <td className="px-2 py-2 max-w-32">
+                      <span className="flex flex-wrap items-center gap-1">
+                        {(task.linkedPRs ?? []).map((pr) => (
+                          <PullRequestBadge
+                            key={`${pr.provider ?? "github"}-${pr.number}`}
+                            pr={pr}
+                          />
+                        ))}
+                        {(task.linkedPRs ?? []).length === 0 && (
+                          <span className="text-text-muted">—</span>
+                        )}
+                      </span>
                     </td>
                   )}
                   {show("assignee") && (

@@ -8,6 +8,7 @@ import { categoryColor, categoryTint } from "@/lib/category-colors";
 import { cardBadges } from "@/lib/custom-fields";
 import { taskPath } from "@/lib/urls";
 import { CopyTaskLink } from "@/components/tasks/CopyTaskLink";
+import { PullRequestState } from "@/components/tasks/PullRequestBadge";
 
 // A card is a summary; past a few badges it stops being one
 const MAX_CARD_BADGES = 3;
@@ -233,34 +234,32 @@ export function TaskCard({
         </div>
       )}
 
+      {/* The state, not a link to it. This whole card is one anchor, and the comment further
+          down says why nothing interactive goes inside one — so the card opens the task, and the
+          pull request is a click away on the list row and on the task detail, where the badge is
+          a link because nothing encloses it. */}
       {task.linkedPRs && task.linkedPRs.length > 0 && (
-        <div className="mb-2 flex items-center gap-1.5">
-          {task.linkedPRs.map((pr) => (
-            <span
-              key={`${pr.provider ?? "github"}-${pr.number}`}
-              className="chip chip-custom text-[11px] px-1.5 py-0.5 rounded font-medium inline-flex items-center gap-1"
-              style={
-                {
-                  "--chip":
-                    pr.state === "merged"
-                      ? "#8b5cf6"
-                      : pr.state === "open"
-                        ? "var(--color-success)"
-                        : "var(--color-danger)",
-                } as CSSProperties
-              }
-              title={pr.title}
-            >
-              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 16 16">
-                {pr.state === "merged" ? (
-                  <path d="M5.45 5.154A4.25 4.25 0 004.5 7.5h1.1a3.15 3.15 0 01.65-1.54l-.8-.806zM7.5 10.25a2.25 2.25 0 100-4.5 2.25 2.25 0 000 4.5zM12 7.5a4.25 4.25 0 01-.95 2.346l.8.806A5.35 5.35 0 0013.1 7.5H12zM8.55 10.846A4.25 4.25 0 017.5 11.1v1.1a5.35 5.35 0 001.854-.548l-.804-.806z" />
-                ) : (
-                  <path d="M7.177 3.073L9.573.677A.25.25 0 0110 .854v4.792a.25.25 0 01-.427.177L7.177 3.427a.25.25 0 010-.354zM3.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.25.75a2.25 2.25 0 113 2.122v5.256a2.251 2.251 0 11-1.5 0V5.372A2.25 2.25 0 011.5 3.25zM11 2.5h-1V4h1a1 1 0 011 1v5.628a2.251 2.251 0 101.5 0V5A2.5 2.5 0 0011 2.5zm1 10.25a.75.75 0 111.5 0 .75.75 0 01-1.5 0zM3.75 12a.75.75 0 100 1.5.75.75 0 000-1.5z" />
-                )}
-              </svg>
-              #{pr.number}
-            </span>
+        <div className="mb-2 flex flex-wrap items-center gap-1.5">
+          {/* Capped like the custom-field chips above, and for the same reason: a card is a glance,
+              and a task with six branches would otherwise be twice the height of its neighbours. */}
+          {task.linkedPRs.slice(0, MAX_CARD_BADGES).map((pr) => (
+            <PullRequestState key={`${pr.provider ?? "github"}-${pr.number}`} pr={pr} />
           ))}
+          {task.linkedPRs.length > MAX_CARD_BADGES && (
+            <span
+              title={task.linkedPRs
+                .slice(MAX_CARD_BADGES)
+                .map((pr) => `#${pr.number} ${pr.title}`)
+                .join(", ")}
+              className="text-[11px] px-1.5 py-0.5 text-text-muted"
+            >
+              <span aria-hidden>+{task.linkedPRs.length - MAX_CARD_BADGES}</span>
+              {/* "+2" alone is a number to a screen reader; the tooltip beside it is not read */}
+              <span className="sr-only">
+                and {task.linkedPRs.length - MAX_CARD_BADGES} more pull requests
+              </span>
+            </span>
+          )}
         </div>
       )}
 
