@@ -106,8 +106,13 @@ const sendButton = (page: Page) => page.getByRole("button", { name: /Send a test
 test.beforeEach(seed);
 
 test.afterEach(async () => {
-  await stopRefusing();
-  if (mongoose.connection.readyState !== 0) await mongoose.disconnect();
+  // The disconnect in a `finally`: `stopRefusing` asserts what the stub reports back, so it can
+  // throw, and a connection left open outlives the worker
+  try {
+    await stopRefusing();
+  } finally {
+    if (mongoose.connection.readyState !== 0) await mongoose.disconnect();
+  }
 });
 
 test("the screen reports the mail server it was given, and offers to use it", async ({
@@ -155,7 +160,9 @@ test("a test message reaches the mail server, and the screen names where it went
   // The row, not the bare username: the footer this template also carries reads "Sent because an
   // administrator ran the delivery test", so a body containing "admin" says nothing at all. Up to
   // the space and no further — the `·` after it is not ASCII, so the line travels
-  // quoted-printable and the separator on the wire is not the one in the source.
+  // quoted-printable and the separator on the wire is not the one in the source. The space itself
+  // survives at this length; a longer label or value would earn a soft break and redden this for
+  // the encoding rather than for the product, which is a loud failure and not a quiet pass.
   expect(arrived[0].data).toContain("Your mail server accepted this message");
   expect(arrived[0].data).toContain(`Requested by: ${ADMIN_USERNAME} `);
   expect(arrived[0].from).toBe(MAIL_SERVER.from.replace(/^.*<|>$/g, ""));
