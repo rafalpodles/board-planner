@@ -358,10 +358,17 @@ export interface SettleDecisionsDeps {
    * worktree"), which landed first and made the real `delivered` a permanent 409. The result was
    * an open pull request the board never named.
    *
-   * Retrying the whole settlement next pass is what replaces it. The push is idempotent — the same
-   * commit to the same branch is "Everything up-to-date", and `openPr` returns the pull request
-   * that already exists — and the retry stops on its own, because a settled decision leaves the
-   * list the server sends.
+   * Retrying the whole settlement next pass is what replaces it, and it is safe because both
+   * halves are idempotent:
+   *
+   * - the push sends the SAME commit to the same branch, which git answers "Everything
+   *   up-to-date" before it evaluates the lease at all. Measured, and it is why no test here can
+   *   fail on it: neither dropping `--force-with-lease` nor leasing against a sha the remote never
+   *   had changes the answer, because there is nothing to update.
+   * - `openPr` returns the pull request that already exists, which `delivery.test.ts` pins against
+   *   GitHub's own "already exists" wording.
+   *
+   * And the retry stops on its own, because a settled decision leaves the list the server sends.
    */
   settle: (settlement: DecisionSettlement) => Promise<boolean>;
   log: (message: string) => void;
