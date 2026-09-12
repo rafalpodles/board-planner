@@ -642,6 +642,8 @@ describe("acting on a verdict", () => {
 
     expect(h.settled[0]).toEqual({ taskId: "t1", state: "discarded" });
     expect(h.destroyWorktree).not.toHaveBeenCalled();
+    // `discarded` has no error field, so the reason lives only in the log
+    expect(h.deps.log).toHaveBeenCalledWith(expect.stringContaining("another-project"));
   });
 
   // The fourth site, and the one D6 left out when it pinned the other three
@@ -656,6 +658,11 @@ describe("acting on a verdict", () => {
     expect(h.settled[0]).toMatchObject({ attempts: 5 });
   });
 
+  /**
+   * Nothing is acted on, and nothing is reported: without a binding there is no worktree to push
+   * from and no remote to push to. The marker stays because `sweepMarkers` only reaches a decision
+   * that has LEFT the live list — this one has not.
+   */
   it("does nothing for a project this machine no longer serves", async () => {
     const h = harness();
     await settleDecisions(
@@ -666,8 +673,6 @@ describe("acting on a verdict", () => {
 
     expect(h.push).not.toHaveBeenCalled();
     expect(h.settled).toEqual([]);
-    // The marker is the only thing holding that worktree back from the reaper. Dropping it here
-    // would hand the work to a reaper equally unable to run, and exempt nothing from anything.
     expect(h.markers.read("CP-158")).not.toBeNull();
   });
 

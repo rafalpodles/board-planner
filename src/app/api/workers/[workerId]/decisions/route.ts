@@ -72,16 +72,21 @@ const OBJECT_ID = /^[0-9a-f]{7,64}$/;
  * top-level `data:` navigation, so the hazard is a plausible link to somewhere else rather than
  * script execution — which is reason enough to insist it looks like what it claims to be.
  *
- * `https?`, matching `lastPrUrl` in the worker's `delivery.ts`, and that agreement is load-bearing
- * rather than tidy: a settlement the board refuses is now retried WHOLE on the next poll, so a
- * self-hosted GitHub or GitLab behind plain http would push, open the pull request, 400 here, and
- * do it all again every thirty seconds for ever, with the board never told the url.
+ * Exactly what `lastPrUrl` in the worker's `delivery.ts` can produce, and no wider. That agreement
+ * is load-bearing rather than tidy: a settlement the board refuses is retried whole on the next
+ * poll, so a shape the worker emits and this refuses would be a push, a `gh pr create`, and a 400,
+ * every poll until the attempt ceiling stops it — with the board never told the url.
  *
- * The path is a segment class rather than `[^\s]*`, so `https://evil.example.com/#/host/o/r/pull/1`
- * cannot borrow the shape.
+ * Which is why `merge_requests` is not here, although an earlier draft admitted it and a comment
+ * claimed the two regexes agreed. `lastPrUrl` matches `/pull/\d+` alone, `openPr` shells out to
+ * `gh`, and a GitLab merge request is a url this worker cannot make. Admitting it would be
+ * tolerance for a caller that does not exist; whoever adds GitLab delivery adds it to both.
+ *
+ * `https?` because `lastPrUrl` has it, and a self-hosted GitHub behind plain http is a real
+ * deployment. The path is a segment class rather than `[^\s]*`, so
+ * `https://evil.example.com/#/host/o/r/pull/1` cannot borrow the shape.
  */
-const PR_URL =
-  /^https?:\/\/[A-Za-z0-9.-]+(?::\d+)?(?:\/[A-Za-z0-9._~-]+)*\/(?:pull|merge_requests)\/\d+$/;
+const PR_URL = /^https?:\/\/[A-Za-z0-9.-]+(?::\d+)?(?:\/[A-Za-z0-9._~-]+)*\/pull\/\d+$/;
 
 export const POST = withWorker(async (request, { worker }) => {
   if (!worker.enabled || worker.lockedByInstance) {

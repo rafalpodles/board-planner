@@ -53,7 +53,7 @@ function acceptWarning(machine: string): string {
    */
   return [
     "Accepting pushes this commit and opens a pull request.",
-    `The push goes out as whichever GitHub account ${machine} pushes as — not as you.`,
+    `The push goes out as whichever GitHub account ${machine} pushes as — not necessarily yours.`,
     "It runs this repository's CI on the change, and does not merge it.",
   ].join(" ");
 }
@@ -77,7 +77,10 @@ function abandonWarning(state: TaskDecisionState, machine: string): string {
    * button is named for — a machine that is not coming back never polls, and its checkout stays
    * where it is.
    */
-  const after = `The task stops waiting. ${machine} removes the worktree on its next poll, so if it is really gone the checkout stays on it until somebody clears it by hand.`;
+  // Capitalised only where it starts a sentence. The fallback used to be "That machine" for every
+  // position, which read as "…and That machine may be pushing it right now."
+  const Machine = machine[0].toUpperCase() + machine.slice(1);
+  const after = `The task stops waiting. ${Machine} removes the worktree on its next poll, so if it is really gone the worktree stays on that machine until somebody removes it.`;
   if (state === "accepted") {
     return `This change was accepted and ${machine} may be pushing it right now. Giving up does not undo a push that has already landed — check for a pull request before you do. ${after}`;
   }
@@ -429,7 +432,7 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
         onClose={() => setAsking(null)}
         onConfirm={() => answer("abandon")}
         title="Give up on this change?"
-        message={abandonWarning(state, decision.workerName || "That machine")}
+        message={abandonWarning(state, decision.workerName || "that machine")}
         confirmLabel="Give up and delete"
         loadingLabel="Giving up..."
         loading={busy === "abandon"}

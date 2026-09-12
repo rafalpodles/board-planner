@@ -113,7 +113,7 @@ describe("what accepting consents to", () => {
     // Whose account it spends, which is the half a machine name alone hides — and it is not
     // "the owner's" either: a machine with nothing pinned pushes as whatever gh has active
     expect(screen.getByText(/whichever GitHub account/)).toBeTruthy();
-    expect(screen.getByText(/not as you/)).toBeTruthy();
+    expect(screen.getByText(/not necessarily yours/)).toBeTruthy();
     expect(post).not.toHaveBeenCalled();
   });
 
@@ -591,7 +591,9 @@ describe("what giving up is warned to cost", () => {
 
       const said = screen.getByRole("dialog").textContent ?? "";
       expect(said).toContain("removes the worktree on its next poll");
-      expect(said).toContain("until somebody clears it by hand");
+      // "worktree", not "checkout": what is left behind is the linked worktree under the worker's
+      // own root, and this product uses "checkout" for the clone the operator approved
+      expect(said).toContain("worktree stays on that machine until somebody removes it");
     }
   );
 });
@@ -701,5 +703,41 @@ describe("what the file count is named for", () => {
     panel({ state });
 
     expect(screen.getByTestId("decision-file-count").textContent).toContain(said);
+  });
+});
+
+/**
+ * `workerName` is absent whenever the machine has been deleted from the fleet, and every fixture
+ * in this file sets it — so the fallback rendered in production and in no test. It was capitalised
+ * for the one sentence that starts with it, and read as "…and That machine may be pushing it right
+ * now" in the two that do not.
+ */
+describe("a machine the fleet no longer names", () => {
+  it("reads as a sentence wherever it lands", () => {
+    panel({ state: "accepted", workerName: undefined });
+
+    fireEvent.click(screen.getByRole("button", { name: "Give up and delete the work" }));
+    const said = screen.getByRole("dialog").textContent ?? "";
+
+    expect(said).toContain("accepted and that machine may be pushing it");
+    expect(said).toContain("That machine removes the worktree");
+    expect(said).not.toContain("and That machine");
+  });
+
+  it("still says whose account the push spends", () => {
+    panel({ workerName: undefined });
+
+    fireEvent.click(screen.getByRole("button", { name: "Accept and push" }));
+
+    expect(screen.getByRole("dialog").textContent).toContain(
+      "whichever GitHub account that machine pushes as"
+    );
+  });
+
+  // The panel falls back for the byline too, rather than saying nothing about who can answer
+  it("still says who may answer", () => {
+    panel({ canDecide: false, workerName: undefined });
+
+    expect(screen.getByTestId("decision-not-yours").textContent).toContain("that machine");
   });
 });

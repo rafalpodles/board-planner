@@ -149,7 +149,7 @@ test("accepting says what it spends, and the record carries the verdict afterwar
   // alone answers WHICH token while hiding WHOSE — an instance admin may be answering for a
   // machine that is not theirs.
   await expect(dialog).toContainText(`as whichever GitHub account ${WORKER_NAME} pushes as`);
-  await expect(dialog).toContainText("not as you");
+  await expect(dialog).toContainText("not necessarily yours");
 
   const answered = page.waitForResponse(
     (response) =>

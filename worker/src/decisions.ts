@@ -469,6 +469,12 @@ export async function settleDecisions(
       // And settled from the state it is IN: `refused` is reachable only from `accepted`, so
       // reporting it for a declined row is a 409 on every pass — the same never-ending loop with
       // a write attached. A decline that cannot be carried out is still a decline.
+      // Logged as well as settled. The sentence travels in `error`, and a `discarded` settlement
+      // has no error field to carry it — so without this the operator's only trace of WHY is
+      // whatever the settle call happens to log.
+      deps.log(
+        `${decision.taskKey}: the decision names project ${decision.projectId}, the worktree here belongs to ${marker.projectId}`
+      );
       const stopped =
         decision.state === "declined"
           ? ({ taskId: decision.taskId, state: "discarded" } as const)
