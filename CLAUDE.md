@@ -118,7 +118,10 @@ mcp-server/           # Standalone MCP server (stdio transport)
   with the diff limits and the models, which now belong to the blocks that use them. A project
   keeps only `baseBranch` and the two timeouts, and the worker keeps `pollIntervalMs` and the kill
   switch. A task naming **no** agent is never claimed at all — there is no falling back to the
-  project's default, which only pre-selects the picker. See `worker/README.md` and
+  project's default, which only pre-selects the picker. Since BP-349 execution is effectively
+  **macOS-only**: both calls to the CLI run under `sandbox-exec`, confined to one directory, and a
+  machine with no seatbelt claims nothing until its operator sets `CP_ALLOW_UNCONFINED_AGENT=1`.
+  The worker's own test suite therefore runs on macOS in CI. See `worker/README.md` and
   https://board-planner.com/docs/ai/agents/.
 - **A held task refuses to move**: while a run holds a task (`execution.runId` set), a status change
   that would leave the column is refused with **409**, naming the worker and its phase — through
