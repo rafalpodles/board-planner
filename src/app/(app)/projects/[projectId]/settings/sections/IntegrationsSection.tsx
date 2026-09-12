@@ -525,6 +525,8 @@ export function IntegrationsSection({
                             );
                             toast(
                               `Synced: ${result.prsLinked} PRs linked to ${result.tasksLinked} tasks${
+                                result.prsUnlinked > 0 ? `, ${result.prsUnlinked} unlinked` : ""
+                              }${
                                 result.autoTransitioned > 0
                                   ? `, ${result.autoTransitioned} auto-transitioned`
                                   : ""
@@ -604,6 +606,8 @@ export function IntegrationsSection({
                               );
                               toast(
                                 `Synced: ${result.prsLinked} MRs linked to ${result.tasksLinked} tasks${
+                                  result.prsUnlinked > 0 ? `, ${result.prsUnlinked} unlinked` : ""
+                                }${
                                   result.autoTransitioned > 0
                                     ? `, ${result.autoTransitioned} auto-transitioned`
                                     : ""

@@ -244,7 +244,7 @@ describe("POST .../github/sync", () => {
     taskFindOne.mockResolvedValue(task({ _id: "t7", taskNumber: 7 }));
     taskFind.mockReturnValue({
       lean: async () => [
-        { _id: "t5", taskNumber: 5, linkedPRs: [{ provider: "github", number: 1, url: "https://github.com/o/r/pull/1" }] },
+        { _id: "t5", taskNumber: 5, linkedPRs: [{ provider: "github", number: 1 }] },
       ],
     });
 
@@ -268,7 +268,7 @@ describe("POST .../github/sync", () => {
     fetchPullRequests.mockResolvedValue([pr({ number: 1 })]);
     taskFind.mockReturnValue({
       lean: async () => [
-        { _id: "t9", taskNumber: 9, linkedPRs: [{ provider: "github", number: 4321, url: "https://github.com/o/r/pull/4321" }] },
+        { _id: "t9", taskNumber: 9, linkedPRs: [{ provider: "github", number: 4321 }] },
       ],
     });
 
@@ -279,24 +279,6 @@ describe("POST .../github/sync", () => {
     // sync that stopped early.
     expect(body.prsLinked).toBe(1);
     expect(taskUpdateOne).not.toHaveBeenCalledWith("t9", expect.anything(), expect.anything());
-  });
-
-  it("takes off a link left behind by a repository the project no longer points at", async () => {
-    fetchPullRequests.mockResolvedValue([]);
-    taskFind.mockReturnValue({
-      lean: async () => [
-        { _id: "t5", taskNumber: 5, linkedPRs: [{ provider: "github", number: 3, url: "https://github.com/old/repo/pull/3" }] },
-      ],
-    });
-
-    const body = await (await POST(request(), ctx())).json();
-
-    expect(body.prsUnlinked).toBe(1);
-    expect(taskUpdateOne).toHaveBeenCalledWith(
-      { _id: "t5" },
-      removeProviderLinks("github", [3]),
-      { updatePipeline: true }
-    );
   });
 
   it("does not reach the second pass when the fetch itself failed", async () => {

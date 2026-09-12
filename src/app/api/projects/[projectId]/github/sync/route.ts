@@ -3,12 +3,7 @@ import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { Task } from "@/models/task";
-import {
-  fetchPullRequests,
-  matchPRsToTasks,
-  parseRepoString,
-  pullRequestIsElsewhere,
-} from "@/lib/github";
+import { fetchPullRequests, matchPRsToTasks, parseRepoString } from "@/lib/github";
 import { logActivity } from "@/lib/activity";
 import { decryptSecret } from "@/lib/encryption";
 import { getProjectColumns } from "@/lib/columns";
@@ -122,7 +117,6 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
     provider: "github",
     linkedThisRound: new Set(prsByTask.keys()),
     seenNumbers: new Set(rawPRs.map((raw) => raw.number)),
-    namesAnotherRepository: (url) => pullRequestIsElsewhere(url, parsed.owner, parsed.repo),
   });
 
   return NextResponse.json({

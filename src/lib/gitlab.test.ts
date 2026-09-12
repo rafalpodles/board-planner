@@ -1,10 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  matchMRsToTasks,
-  mergeRequestIsElsewhere,
-  mergeRequestProject,
-  parseGitlabRepo,
-} from "./gitlab";
+import { matchMRsToTasks, parseGitlabRepo } from "./gitlab";
 
 /**
  * BP-429. `matchPRsToTasks` took `formerKeys` and this did not: the GitLab half was written from the
@@ -124,62 +119,5 @@ describe("parseGitlabRepo", () => {
   it("refuses what is not a path", () => {
     expect(parseGitlabRepo("  ")).toBeNull();
     expect(parseGitlabRepo("project")).toBeNull();
-  });
-});
-
-/**
- * BP-610, GitHub's twin. A self-hosted instance means the host is part of the answer, and the two
- * URL shapes GitLab has used mean the path has to be found rather than assumed.
- */
-describe("mergeRequestProject", () => {
-  it("reads the host and project path out of a merge request URL", () => {
-    expect(mergeRequestProject("https://gitlab.com/g/p/-/merge_requests/12")).toEqual({
-      host: "https://gitlab.com",
-      path: "g/p",
-    });
-  });
-
-  it("reads a nested group on a self-hosted instance", () => {
-    expect(mergeRequestProject("https://git.example.test/a/b/c/-/merge_requests/3")).toEqual({
-      host: "https://git.example.test",
-      path: "a/b/c",
-    });
-  });
-
-  // GitLab older than 11.11 wrote the path without `/-/`, and a link stored then is still there.
-  it("reads the shape instances older than 11.11 wrote", () => {
-    expect(mergeRequestProject("https://gitlab.com/g/p/merge_requests/12")).toEqual({
-      host: "https://gitlab.com",
-      path: "g/p",
-    });
-  });
-
-  it("refuses anything that is not a merge request URL", () => {
-    expect(mergeRequestProject("https://github.com/o/r/pull/12")).toBeNull();
-    expect(mergeRequestProject("not-a-url")).toBeNull();
-  });
-});
-
-describe("mergeRequestIsElsewhere", () => {
-  it("says so when the link names a different project on the same host", () => {
-    expect(
-      mergeRequestIsElsewhere("https://gitlab.com/other/p/-/merge_requests/12", "https://gitlab.com", "g/p")
-    ).toBe(true);
-  });
-
-  it("says so when the link names the same path on a different host", () => {
-    expect(
-      mergeRequestIsElsewhere("https://gitlab.com/g/p/-/merge_requests/12", "https://git.example.test", "g/p")
-    ).toBe(true);
-  });
-
-  it("keeps a link from the project the sync is pointed at, however the host was configured", () => {
-    expect(
-      mergeRequestIsElsewhere("https://gitlab.com/g/p/-/merge_requests/12", "https://gitlab.com/", "g/p")
-    ).toBe(false);
-  });
-
-  it("keeps a link whose URL it cannot read", () => {
-    expect(mergeRequestIsElsewhere("not-a-url", "https://gitlab.com", "g/p")).toBe(false);
   });
 });

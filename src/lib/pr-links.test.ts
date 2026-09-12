@@ -22,13 +22,10 @@ const { contradictedLinkNumbers, pruneContradictedLinks, removeProviderLinks } =
   "./pr-links"
 );
 
-const nothingIsElsewhere = () => false;
-
-function link(over: Partial<{ provider: "github" | "gitlab" | null; number: number; url: string }>) {
+function link(over: Partial<{ provider: "github" | "gitlab" | null; number: number }>) {
   return {
     provider: over.provider === undefined ? ("github" as const) : over.provider,
     number: over.number ?? 1,
-    url: over.url ?? "https://github.com/o/r/pull/1",
   };
 }
 
@@ -37,8 +34,7 @@ describe("contradictedLinkNumbers", () => {
     const numbers = contradictedLinkNumbers(
       [link({ number: 7 })],
       "github",
-      new Set([7]),
-      nothingIsElsewhere
+      new Set([7])
     );
 
     expect(numbers).toEqual([7]);
@@ -54,32 +50,7 @@ describe("contradictedLinkNumbers", () => {
     const numbers = contradictedLinkNumbers(
       [link({ number: 7 })],
       "github",
-      new Set([8, 9]),
-      nothingIsElsewhere
-    );
-
-    expect(numbers).toEqual([]);
-  });
-
-  it("removes a link naming another repository even though this round never saw it", () => {
-    const numbers = contradictedLinkNumbers(
-      [link({ number: 7, url: "https://github.com/other/repo/pull/7" })],
-      "github",
-      new Set(),
-      (url) => url.includes("/other/")
-    );
-
-    expect(numbers).toEqual([7]);
-  });
-
-  it("keeps a link whose URL cannot be read as naming any repository", () => {
-    // The predicate answers false for anything it cannot parse, and only a positive reading of a
-    // different repository may remove a link — a shape nobody anticipated must not delete data.
-    const numbers = contradictedLinkNumbers(
-      [link({ number: 7, url: "not-a-url" })],
-      "github",
-      new Set(),
-      (url) => url.includes("/other/")
+      new Set([8, 9])
     );
 
     expect(numbers).toEqual([]);
@@ -88,16 +59,15 @@ describe("contradictedLinkNumbers", () => {
   it("treats a link stored before the provider field existed as GitHub's", () => {
     const legacy = [link({ provider: null, number: 7 })];
 
-    expect(contradictedLinkNumbers(legacy, "github", new Set([7]), nothingIsElsewhere)).toEqual([7]);
-    expect(contradictedLinkNumbers(legacy, "gitlab", new Set([7]), nothingIsElsewhere)).toEqual([]);
+    expect(contradictedLinkNumbers(legacy, "github", new Set([7]))).toEqual([7]);
+    expect(contradictedLinkNumbers(legacy, "gitlab", new Set([7]))).toEqual([]);
   });
 
   it("leaves the other provider's links alone even when the numbers collide", () => {
     const numbers = contradictedLinkNumbers(
       [link({ provider: "gitlab", number: 7 })],
       "github",
-      new Set([7]),
-      nothingIsElsewhere
+      new Set([7])
     );
 
     expect(numbers).toEqual([]);
@@ -107,8 +77,7 @@ describe("contradictedLinkNumbers", () => {
     const numbers = contradictedLinkNumbers(
       [link({ number: 7 }), link({ number: 7 })],
       "github",
-      new Set([7]),
-      nothingIsElsewhere
+      new Set([7])
     );
 
     expect(numbers).toEqual([7]);
@@ -128,7 +97,6 @@ describe("pruneContradictedLinks", () => {
       provider: "github",
       linkedThisRound: new Set<number>(),
       seenNumbers: new Set<number>(),
-      namesAnotherRepository: nothingIsElsewhere,
       ...over,
     });
 

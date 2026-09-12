@@ -93,7 +93,6 @@ export function removeProviderLinks(
 export interface StoredProviderLink {
   provider?: "github" | "gitlab" | null;
   number: number;
-  url?: string | null;
 }
 
 /**
@@ -103,15 +102,18 @@ export interface StoredProviderLink {
  * GitHub returns the open pull requests plus the thirty most recently updated closed ones, GitLab
  * the first hundred by `updated_at`. A task whose pull request merged last quarter falls out of
  * that window on every sync while remaining perfectly correct, so treating absence as removal
- * would delete good links from healthy projects. Absent is unknown, not gone — which is also why
- * a pull request deleted at the provider is not covered here: nothing in a bounded response tells
- * it apart from one that simply did not fit.
+ * would delete good links from healthy projects. Absent is unknown, not gone.
  *
- * What is left is decidable:
- * - the number came back in this round's fetch and did not match this task — it was retitled onto
- *   another task, lost its key, or the key left `formerKeys`;
- * - the link's URL parses and names a repository the project is no longer pointed at. A URL that
- *   does not parse is kept.
+ * So one rule, and every removal carries the round's own evidence for it: the number came back in
+ * this round's fetch and the matcher did not give it to this task. It was retitled onto another
+ * task, lost its key, or the key left `formerKeys`.
+ *
+ * Two of the ways BP-610 lists are deliberately **not** covered, because nothing here can tell
+ * them apart from a link that is simply old: a pull request deleted at the provider is absent from
+ * a bounded response exactly like one that did not fit, and a repository renamed at the provider
+ * leaves its links looking exactly like a repository the project was repointed away from. Both
+ * would be removed on a guess, and a guess here deletes correct data permanently — the links are
+ * outside the window for ever, so no later sync puts them back.
  *
  * `?? "github"`, as everywhere else here: a link stored before the provider field existed is
  * GitHub's, and the schema default is applied on hydration rather than stored.
@@ -119,15 +121,12 @@ export interface StoredProviderLink {
 export function contradictedLinkNumbers(
   links: StoredProviderLink[],
   provider: "github" | "gitlab",
-  seenNumbers: ReadonlySet<number>,
-  namesAnotherRepository: (url: string) => boolean
+  seenNumbers: ReadonlySet<number>
 ): number[] {
   const numbers = new Set<number>();
   for (const link of links) {
     if ((link.provider ?? "github") !== provider) continue;
-    if (seenNumbers.has(link.number) || (link.url ? namesAnotherRepository(link.url) : false)) {
-      numbers.add(link.number);
-    }
+    if (seenNumbers.has(link.number)) numbers.add(link.number);
   }
   return [...numbers];
 }
@@ -147,9 +146,8 @@ export async function pruneContradictedLinks(opts: {
   provider: "github" | "gitlab";
   linkedThisRound: ReadonlySet<number>;
   seenNumbers: ReadonlySet<number>;
-  namesAnotherRepository: (url: string) => boolean;
 }): Promise<number> {
-  const { projectId, provider, linkedThisRound, seenNumbers, namesAnotherRepository } = opts;
+  const { projectId, provider, linkedThisRound, seenNumbers } = opts;
 
   // An unmarked link is GitHub's, and a stored document has no `provider` field for the query to
   // match — the schema's default only appears on hydration, which a query does not do.
@@ -167,12 +165,7 @@ export async function pruneContradictedLinks(opts: {
   for (const holder of holders) {
     if (linkedThisRound.has(holder.taskNumber)) continue;
 
-    const numbers = contradictedLinkNumbers(
-      holder.linkedPRs ?? [],
-      provider,
-      seenNumbers,
-      namesAnotherRepository
-    );
+    const numbers = contradictedLinkNumbers(holder.linkedPRs ?? [], provider, seenNumbers);
     if (numbers.length === 0) continue;
 
     await Task.updateOne({ _id: holder._id }, removeProviderLinks(provider, numbers), {

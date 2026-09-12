@@ -3,12 +3,7 @@ import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { Task } from "@/models/task";
-import {
-  fetchMergeRequests,
-  matchMRsToTasks,
-  mergeRequestIsElsewhere,
-  parseGitlabRepo,
-} from "@/lib/gitlab";
+import { fetchMergeRequests, matchMRsToTasks, parseGitlabRepo } from "@/lib/gitlab";
 import { logActivity } from "@/lib/activity";
 import { decryptSecret } from "@/lib/encryption";
 import { mergedReviewDestination } from "@/lib/columns";
@@ -114,7 +109,6 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
     provider: "gitlab",
     linkedThisRound: new Set(mrsByTask.keys()),
     seenNumbers: new Set(rawMRs.map((raw) => raw.iid)),
-    namesAnotherRepository: (url) => mergeRequestIsElsewhere(url, host, projectPath),
   });
 
   return NextResponse.json({

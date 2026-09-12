@@ -305,7 +305,7 @@ describe("POST .../gitlab/sync — links this round contradicted", () => {
           _id: "t5",
           taskNumber: 5,
           linkedPRs: [
-            { provider: "gitlab", number: 1, url: "https://gitlab.com/g/p/-/merge_requests/1" },
+            { provider: "gitlab", number: 1 },
           ],
         },
       ],
@@ -329,7 +329,7 @@ describe("POST .../gitlab/sync — links this round contradicted", () => {
           _id: "t9",
           taskNumber: 9,
           linkedPRs: [
-            { provider: "gitlab", number: 4321, url: "https://gitlab.com/g/p/-/merge_requests/4321" },
+            { provider: "gitlab", number: 4321 },
           ],
         },
       ],
@@ -348,7 +348,7 @@ describe("POST .../gitlab/sync — links this round contradicted", () => {
         {
           _id: "t9",
           taskNumber: 9,
-          linkedPRs: [{ provider: "github", number: 4321, url: "https://github.com/o/r/pull/4321" }],
+          linkedPRs: [{ provider: "github", number: 4321 }],
         },
       ],
     });

@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import mongoose from "mongoose";
 import { pruneContradictedLinks, removeProviderLinks, writeProviderLinks } from "@/lib/pr-links";
 import { Task } from "@/models/task";
-import { E2E_MONGODB_URI, PROJECT_ID, PROJECT_KEY, seed, taskFactory } from "./seed";
+import { E2E_MONGODB_URI, PROJECT_ID, PROJECT_KEY, seed, seedRepository, taskFactory } from "./seed";
 import { signIn } from "./session";
 
 /**
@@ -66,15 +66,12 @@ async function linksOf(_id: mongoose.Types.ObjectId) {
   return (found?.linkedPRs ?? []) as Record<string, unknown>[];
 }
 
-const nothingIsElsewhere = () => false;
-
 const prune = (over: Record<string, unknown> = {}) =>
   pruneContradictedLinks({
     projectId: String(PROJECT_ID),
     provider: "github",
     linkedThisRound: new Set<number>(),
     seenNumbers: new Set<number>(),
-    namesAnotherRepository: nothingIsElsewhere,
     ...over,
   });
 
@@ -148,16 +145,6 @@ test("a link this round never saw survives the sweep", async () => {
   expect((await linksOf(_id)).map((l) => l.number)).toEqual([7007]);
 });
 
-test("a link left behind by a repository the project no longer points at is swept", async () => {
-  const { _id } = await taskWith([
-    link("github", 7010, "https://github.com/former/board/pull/7010"),
-  ]);
-
-  await prune({ namesAnotherRepository: (url: string) => url.includes("/former/") });
-
-  expect(await linksOf(_id)).toEqual([]);
-});
-
 test("a task the round rewrote wholesale is left to that write", async () => {
   const { _id, taskNumber } = await taskWith([link("github", 7011)]);
 
@@ -219,4 +206,52 @@ test("the badge goes with the link", async ({ page }) => {
   await expect(page.getByRole("link", { name: /#7015/ })).toBeVisible();
   await expect(page.getByRole("link", { name: /#7014/ })).toHaveCount(0);
   expect((await linksOf(_id)).map((l) => l.number)).toEqual([7015]);
+});
+
+/**
+ * Removal is the one destructive thing a sync does, and until BP-610 it was also the only one the
+ * operator was never told about — the toast counted what was linked and what moved, and said
+ * nothing about links that went. A wrong deletion has to be discoverable at the moment it happens.
+ *
+ * The response is stubbed rather than fetched: `fetchPullRequests` names api.github.com in the
+ * code and cannot be reached from here (the note at the top of external-integrations.spec.ts), and
+ * the subject of this test is what the settings screen does with the number, not where it comes
+ * from.
+ */
+test("the sync toast says how many links it took away", async ({ page }) => {
+  await seedRepository({
+    repositoryUrl: "https://github.com/example/board",
+    githubToken: "e2e-token-never-called",
+  });
+  await page.route(`**/api/projects/*/github/sync`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        synced: true,
+        prsFound: 2,
+        tasksLinked: 1,
+        prsLinked: 2,
+        prsUnlinked: 3,
+        autoTransitioned: 0,
+      }),
+    })
+  );
+
+  await signIn(page);
+  await page.goto(`/projects/${PROJECT_KEY}/settings`);
+  await page.getByRole("button", { name: "Integrations", exact: true }).first().click();
+
+  const cardBody = page.getByText("Links pull requests to tasks by task key", { exact: false });
+  const picker = page.getByRole("button", { name: /Add integration/ });
+  const githubRow = page.getByRole("button", { name: /GitHub/ });
+  await expect(picker.or(githubRow).or(cardBody).first()).toBeVisible();
+  if (await picker.isVisible()) await picker.click();
+  if (!(await cardBody.isVisible())) await githubRow.first().click();
+  await expect(cardBody).toBeVisible();
+
+  await page.getByRole("button", { name: "Sync pull requests now" }).click();
+
+  // The whole sentence: the counts it already reported have to survive the one that was added.
+  await expect(page.getByText(/Synced: 2 PRs linked to 1 tasks, 3 unlinked/)).toBeVisible();
 });
