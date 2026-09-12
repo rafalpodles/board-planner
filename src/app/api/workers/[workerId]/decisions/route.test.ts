@@ -275,6 +275,41 @@ describe("PATCH /api/workers/:workerId/decisions", () => {
     expect(settleDecision.mock.calls[0][3]).toMatchObject({ attempts: 0 });
   });
 
+  /**
+   * A worker credential is readable by the agent off its own disk, so this string is as
+   * worker-supplied as the patch is — and the panel renders it as an href somebody clicks.
+   */
+  it.each([
+    "http://github.com/o/r/pull/7",
+    "https://evil.example.com/anything",
+    "javascript:alert(1)",
+    "https://github.com/o/r/pull/notanumber",
+    "not a url at all",
+  ])("refuses a prUrl of %j", async (prUrl) => {
+    const { req, ctx } = call("PATCH", { taskId: TASK_ID, state: "delivered", prUrl });
+
+    expect((await PATCH(req, ctx)).status).toBe(400);
+    expect(settleDecision).not.toHaveBeenCalled();
+  });
+
+  // The control: the two shapes a real delivery produces
+  it.each([
+    "https://github.com/owner/repo/pull/42",
+    "https://gitlab.example.com/group/proj/-/merge_requests/7",
+  ])("stores a real one: %s", async (prUrl) => {
+    const { req, ctx } = call("PATCH", { taskId: TASK_ID, state: "delivered", prUrl });
+
+    expect((await PATCH(req, ctx)).status).toBe(200);
+    expect(settleDecision.mock.calls[0][3]).toMatchObject({ prUrl });
+  });
+
+  // Every settlement but `delivered` carries none, and an empty one is not a wrong one
+  it("takes a settlement with no pull request at all", async () => {
+    const { req, ctx } = call("PATCH", { taskId: TASK_ID, state: "refused", error: "moved" });
+
+    expect((await PATCH(req, ctx)).status).toBe(200);
+  });
+
   it("refuses a killed machine here too", async () => {
     verifyWorkerCredential.mockResolvedValue(workerDoc({ enabled: false }));
     const { req, ctx } = call("PATCH", { taskId: TASK_ID, state: "delivered" });
