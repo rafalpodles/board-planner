@@ -476,6 +476,27 @@ describe("what a refusal says", () => {
    * is often not zero, and either limit may arrive as 429 rather than 403 — all of which used to
    * read as "GitHub answered 403", the message that sends a reader to check their token.
    */
+  // `retry-after` is seconds or an HTTP date (RFC 9110). GitHub sends seconds; a proxy named by
+  // GITHUB_API_BASE_URL may not, and "wait <date>s" is not a sentence
+  it("does not append a unit to a retry-after that is a date", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    refusing(429, { "retry-after": "Wed, 21 Oct 2015 07:28:00 GMT" }, "{}");
+
+    await expect(fetchPullRequests("o", "r", "t")).rejects.toThrow(
+      /retry after Wed, 21 Oct 2015 07:28:00 GMT$/
+    );
+  });
+
+  // The limit is counted per account, so naming the token sends a reader to check the wrong thing
+  it("blames the account rather than the token in front of the reader", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    refusing(403, { "x-ratelimit-remaining": "0" }, "{}");
+
+    const error = await fetchPullRequests("o", "r", "t").catch((e) => e as Error);
+    expect(error.message).toContain("this GitHub account");
+    expect(error.message).not.toContain("this token");
+  });
+
   it("names a secondary limit, which carries retry-after and a non-zero remaining", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     refusing(403, { "retry-after": "60", "x-ratelimit-remaining": "4321" }, "{}");

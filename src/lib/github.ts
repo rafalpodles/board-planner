@@ -145,7 +145,10 @@ async function refusal(res: Response, perCommit = false): Promise<Error> {
   (perCommit ? console.warn : console.error)(`GitHub API ${res.status}: ${body.slice(0, 500)}`);
 
   const limited = rateLimit(res);
-  if (limited) return new Error(`GitHub rate limit reached for this token; ${limited}`);
+  // "account", not "token": the limit is counted per GitHub account, so the branch that burnt it
+  // is often a different board using the same person's credential. Saying "this token" sends the
+  // reader to check the one in front of them, which is the mistake CLAUDE.md was corrected for.
+  if (limited) return new Error(`GitHub rate limit reached for this GitHub account; ${limited}`);
   return new Error(`GitHub answered ${res.status}`);
 }
 
@@ -161,8 +164,15 @@ async function refusal(res: Response, perCommit = false): Promise<Error> {
 function rateLimit(res: Response): string | null {
   if (res.status !== 403 && res.status !== 429) return null;
 
+  // `retry-after` is seconds **or** an HTTP date (RFC 9110). GitHub sends seconds, but
+  // GITHUB_API_BASE_URL may name a corporate proxy that does not — and "wait Wed, 21 Oct 2015
+  // 07:28:00 GMTs" is not a sentence.
   const retryAfter = res.headers.get("retry-after");
-  if (retryAfter) return `wait ${retryAfter}s before retrying`;
+  if (retryAfter) {
+    return /^\d+$/.test(retryAfter.trim())
+      ? `wait ${retryAfter.trim()}s before retrying`
+      : `retry after ${retryAfter}`;
+  }
 
   if (res.headers.get("x-ratelimit-remaining") === "0") {
     const resets = res.headers.get("x-ratelimit-reset");

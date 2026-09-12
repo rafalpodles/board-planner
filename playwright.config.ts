@@ -33,7 +33,8 @@ export const WEBHOOK_RECEIVER_URL = `http://127.0.0.1:${WEBHOOK_RECEIVER_PORT}`;
 // A mail server on this machine, in its own process for the same reason as the webhook receiver:
 // the notification mail is handed over after the request that caused it has already answered. Two
 // ports — SMTP for nodemailer, HTTP for the spec that reads what arrived. They end a run's block
-// at E2E_PORT+8; the "keep concurrent runs ten apart" rule still covers it, but only just.
+// at E2E_PORT+8, and the GitHub stub below takes +9 — so a run now uses the whole block the
+// `30000 + N * 10` spacing allows, with nothing spare. Ten apart is still correct and is now exact.
 const SMTP_STUB_PORT = Number(process.env.SMTP_STUB_PORT ?? PORT + 7);
 const SMTP_STUB_CONTROL_PORT = Number(process.env.SMTP_STUB_CONTROL_PORT ?? PORT + 8);
 export const SMTP_STUB_CONTROL_URL = `http://127.0.0.1:${SMTP_STUB_CONTROL_PORT}`;
