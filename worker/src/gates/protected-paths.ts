@@ -16,8 +16,9 @@ export const PROTECTED_PATHS_BRIEF = [
   "You may not create, edit or delete files that a later step executes or loads as instructions:",
   "package manifests and lockfiles (package.json, package-lock.json, pnpm-lock.yaml, yarn.lock, .npmrc),",
   "build and test tool configs (vite, vitest, next, webpack, jest, babel, playwright, tailwind and the like),",
-  "anything under scripts/, .husky/, .github/workflows/ or .claude/,",
+  "anything under scripts/, .husky/, .github/workflows/, .github/actions/ or .claude/,",
   "agent instruction files (CLAUDE.md, AGENTS.md, .mcp.json),",
+  "the repository's own git metadata (.gitattributes, .gitmodules),",
   "container and CI manifests (Dockerfile, docker-compose.yml, .gitlab-ci.yml, Jenkinsfile),",
   "and the build manifests of other ecosystems (pyproject.toml, Cargo.toml, go.mod, pom.xml, Gemfile and their lockfiles).",
   "If the task cannot be finished without touching one of those, do not touch it: return status 'blocked' naming the file and what you would have changed in it.",
@@ -36,8 +37,21 @@ export const AGENT_INSTRUCTION_FILE =
 // check the change (BP-333). The same holds for every bundler and test-runner config a build or
 // test script loads, and for scripts/, because a package.json script pointing at scripts/build.js
 // means editing that file is code execution without touching package.json at all.
+// `.gitattributes` earns its place here for a reason the rest of the list does not share: it does
+// not run anything itself, it decides what git SHOWS. `filter.<name>.smudge` and
+// `diff.<driver>.textconv` are selected per path by an attribute; a bare `-diff` needs no driver
+// and no config at all, and makes a patch read `Binary files … differ`.
+//
+// Two things this does NOT achieve, said here because two drafts of this comment have claimed one
+// or the other. It does not stop the attack — the untracked `.git/info/attributes` is the same
+// attribute with nothing tracked to refuse, and neither is the only way; what closes it is
+// `DiffStats.suppressedDiffs`, read off `--numstat` where every cause converges. And tripping this
+// gate is what OPENS the decision panel, so refusing the path is not by itself a reason the change
+// cannot be accepted.
+//
+// `.gitmodules` is its neighbour: it names other repositories a checkout pulls in.
 export const EXECUTABLE_CONFIG_FILE =
-  /(^|\/)(package(-lock)?\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.ya?ml|\.npmrc|\.yarnrc(\.yml)?|binding\.gyp)$|(^|\/)(next|vite|vitest|webpack|rollup|jest|babel|astro|svelte|nuxt|tailwind|postcss|playwright|esbuild|metro|remix|gatsby)\.config\.[cm]?[jt]sx?$|(^|\/)(\.babelrc(\.[cm]?js(on)?)?|Makefile|CMakeLists\.txt)$|(^|\/)(\.husky|\.git\/hooks|\.github\/workflows|scripts)\//i;
+  /(^|\/)(package(-lock)?\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.ya?ml|\.npmrc|\.yarnrc(\.yml)?|binding\.gyp)$|(^|\/)(next|vite|vitest|webpack|rollup|jest|babel|astro|svelte|nuxt|tailwind|postcss|playwright|esbuild|metro|remix|gatsby)\.config\.[cm]?[jt]sx?$|(^|\/)(\.babelrc(\.[cm]?js(on)?)?|Makefile|CMakeLists\.txt|\.gitattributes|\.gitmodules)$|(^|\/)(\.husky|\.git\/hooks|\.github\/workflows|\.github\/actions|scripts)\//i;
 
 // Manifests that decide what runs *after* this change lands, in a repository this worker's gates
 // cannot execute at all. A non-JS repo fails the build gate on `npm ci` before reading anything, so
@@ -53,6 +67,36 @@ export const EXECUTABLE_CONFIG_FILE =
 // one editing the root — so anchoring to the root would protect the least interesting one.
 export const BUILD_MANIFEST_FILE =
   /(^|\/)(pyproject\.toml|poetry\.lock|Pipfile(\.lock)?|requirements[^/]*\.txt|setup\.(py|cfg)|tox\.ini|pom\.xml|build\.gradle(\.kts)?|settings\.gradle(\.kts)?|gradle\.properties|Gemfile(\.lock)?|Rakefile|Cargo\.(toml|lock)|go\.(mod|sum)|composer\.(json|lock)|mix\.exs|pubspec\.yaml|Dockerfile|docker-compose\.ya?ml|\.gitlab-ci\.ya?ml|Jenkinsfile)$/i;
+
+/**
+ * A file that decides what CI itself does.
+ *
+ * Its own predicate rather than another clause in `isProtectedPath`, because these are the one
+ * family a person may not accept through the decision panel. The reason is narrower than the first
+ * draft of that design gave: workflow files are not the line between "executes" and "does not" —
+ * almost everything on the list above executes, and on this repository `npm ci` runs on every
+ * push. What excluding them buys is that the agent cannot change *what CI does*: for a `push`
+ * event GitHub runs the workflow from the pushed ref, and a workflow diff is the hardest thing on
+ * the list to read for safety.
+ *
+ * Everything under `.github/actions` is here for the same reason, and the WHOLE directory rather
+ * than its `action.yml`: a composite or JavaScript action's manifest is a few lines naming an
+ * implementation beside it, and replacing `index.js` changes what every workflow referencing that
+ * action does on push just as surely as editing the manifest would.
+ * It is also on the protected list above — this predicate narrows what may be ACCEPTED and never
+ * widens what the gate refuses, so a family that is unacceptable here has to be refused there too,
+ * or a change touching only a composite action would sail past the gate with nothing to accept.
+ */
+export const WORKFLOW_FILE =
+  /(^|\/)\.github\/workflows\/[^/]+\.ya?ml$|(^|\/)\.github\/actions\//i;
+
+export function isWorkflowPath(file: string): boolean {
+  return WORKFLOW_FILE.test(file);
+}
+
+export function workflowPaths(files: string[]): string[] {
+  return files.filter(isWorkflowPath);
+}
 
 /** Every file this gate treats as deciding what gets executed, here or after the change lands. */
 export function isProtectedPath(file: string): boolean {

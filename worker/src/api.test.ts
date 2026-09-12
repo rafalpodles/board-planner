@@ -356,7 +356,7 @@ describe("createApiClient", () => {
     expect(init.headers["X-Worker-Id"]).toBe("6a7c686f70ed274cf658b1b3");
   });
 
-  it("lists the ids of every column the board carries", async () => {
+  it("lists every column the board carries, with the role automation keys on", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -370,7 +370,10 @@ describe("createApiClient", () => {
     });
     const api = createApiClient(config, fetchMock as never, identityStore);
 
-    expect(await api.columnIds("CP")).toEqual(["ready", "doing"]);
+    expect(await api.boardColumns("CP")).toEqual([
+      { id: "ready", role: "approved" },
+      { id: "doing", role: "active" },
+    ]);
   });
 
   // A project stored before the seeding migration carries no columns of its own, and the server
@@ -380,14 +383,14 @@ describe("createApiClient", () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ columns: [] }) });
     const api = createApiClient(config, fetchMock as never, identityStore);
 
-    expect(await api.columnIds("CP")).toEqual([
-      "planned",
-      "todo",
-      "in_progress",
-      "in_review",
-      "needs_human_review",
-      "ready_to_test",
-      "done",
+    expect(await api.boardColumns("CP")).toEqual([
+      { id: "planned", role: "backlog" },
+      { id: "todo", role: "approved" },
+      { id: "in_progress", role: "active" },
+      { id: "in_review", role: "review" },
+      { id: "needs_human_review", role: "review" },
+      { id: "ready_to_test", role: "review" },
+      { id: "done", role: "done" },
     ]);
   });
 
@@ -636,7 +639,7 @@ describe("createApiClient", () => {
     expect(init.headers["X-CP-Protocol"]).toBe("1");
   });
 
-  it("reads columns for columnIds on the worker credential too", async () => {
+  it("reads columns for boardColumns on the worker credential too", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -644,11 +647,93 @@ describe("createApiClient", () => {
     });
     const api = createApiClient(config, fetchMock as never, identityStore);
 
-    await api.columnIds("CP");
+    await api.boardColumns("CP");
 
     const [, init] = fetchMock.mock.calls[0];
     expect(init.headers.Authorization).toBe("Bearer cpw_secret");
     expect(init.headers["X-Worker-Id"]).toBe("6a7c686f70ed274cf658b1b3");
+  });
+
+  /**
+   * BP-381. Not on a project path, deliberately: `withProjectAccessOrWorker` falls through to
+   * project access when no worker header is present, so a project route would let any member post
+   * a record marked acceptable and then accept it.
+   *
+   * POST and PATCH share one URL, so the method is the only thing telling "a change was refused"
+   * from "here is what came of the verdict" — swapping them would turn every settlement into a
+   * fresh refusal record.
+   */
+  it("opens a decision on the worker's own decisions endpoint, with POST", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 201 });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+
+    await api.createDecision({
+      taskId: "t1",
+      runId: "run-1",
+      gate: "protected-paths",
+      files: ["package.json"],
+      protectedFiles: ["package.json"],
+      patch: "diff",
+      patchTruncated: false,
+      patchSha256: "b".repeat(64),
+      commit: "a".repeat(40),
+      taskKey: "CP-158",
+      title: "Add a thing",
+      acceptable: true,
+      unacceptableReason: "",
+    });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(
+      "https://app.example.com/api/workers/6a7c686f70ed274cf658b1b3/decisions"
+    );
+    expect(init.method).toBe("POST");
+    expect(init.headers.Authorization).toBe("Bearer cpw_secret");
+    expect(init.headers["X-Worker-Id"]).toBe("6a7c686f70ed274cf658b1b3");
+    expect(JSON.parse(init.body)).toMatchObject({ taskId: "t1", commit: "a".repeat(40) });
+  });
+
+  it("settles a decision on the same endpoint, with PATCH", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+
+    await api.settleDecision({ taskId: "t1", state: "delivered", prUrl: "https://x/pull/7" });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(
+      "https://app.example.com/api/workers/6a7c686f70ed274cf658b1b3/decisions"
+    );
+    expect(init.method).toBe("PATCH");
+    expect(JSON.parse(init.body)).toEqual({
+      taskId: "t1",
+      state: "delivered",
+      prUrl: "https://x/pull/7",
+    });
+  });
+
+  // The caller reads a throw as "the board did not take it" and keeps the worktree; a swallowed
+  // failure would destroy the only copy of the work
+  it("throws when the server refuses a settlement", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      text: async () => '{"error":"no longer waiting"}',
+    });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+
+    await expect(
+      api.settleDecision({ taskId: "t1", state: "delivered" })
+    ).rejects.toThrow(/409/);
+  });
+
+  it("refuses to open a decision, without a network call, when no identity is stored", async () => {
+    const fetchMock = vi.fn();
+    const api = createApiClient(config, fetchMock as never, { read: () => "" });
+
+    await expect(
+      api.createDecision({ taskId: "t1" } as never)
+    ).rejects.toThrow(/not registered/);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("posts a phase event to the worker's own events endpoint, not a project one", async () => {

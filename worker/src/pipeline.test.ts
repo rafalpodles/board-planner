@@ -69,9 +69,14 @@ const completed: ExecutionResult = {
 
 // Deliberately none of the seeded ids, so any surviving literal fails
 const statuses: StatusIds = { approved: "ready", review: "checking", done: "shipped" };
-const board = ["ready", "doing", "checking", "shipped"];
+const board = [
+  { id: "ready", role: "approved" },
+  { id: "doing", role: "active" },
+  { id: "checking", role: "review" },
+  { id: "shipped", role: "done" },
+];
 
-const diff: DiffStats = { changedLines: 10, changedFiles: ["a.ts"], patch: "d", truncated: false, headSha: "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c" , symlinks: []};
+const diff: DiffStats = { changedLines: 10, changedFiles: ["a.ts"], patch: "d", truncated: false, headSha: "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c" , symlinks: [], suppressedDiffs: []};
 
 const config: WorkerConfig = {
   apiBaseUrl: "http://localhost:3000",
@@ -137,11 +142,13 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
     comment: vi.fn<ApiClient["comment"]>().mockResolvedValue(undefined),
     release: vi.fn<ApiClient["release"]>().mockResolvedValue(undefined),
     statusIds: vi.fn<ApiClient["statusIds"]>().mockResolvedValue(statuses),
-    columnIds: vi.fn<ApiClient["columnIds"]>().mockResolvedValue(board),
     postEvent: vi.fn<ApiClient["postEvent"]>().mockResolvedValue({ applied: true }),
     postRun: vi.fn<ApiClient["postRun"]>().mockResolvedValue(undefined),
+    boardColumns: vi.fn<ApiClient["boardColumns"]>().mockResolvedValue(board),
+    createDecision: vi.fn<ApiClient["createDecision"]>().mockResolvedValue(undefined),
+    settleDecision: vi.fn<ApiClient["settleDecision"]>().mockResolvedValue(undefined),
   };
-  const columnIds = vi.fn<PipelineDeps["columnIds"]>().mockResolvedValue(board);
+  const boardColumns = vi.fn<PipelineDeps["boardColumns"]>().mockResolvedValue(board);
   const reporter = {
     blocked: vi.fn<Reporter["blocked"]>().mockResolvedValue(undefined),
     gateRejected: vi.fn<Reporter["gateRejected"]>().mockResolvedValue(undefined),
@@ -175,7 +182,7 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
   const deps: PipelineDeps = {
     config,
     api,
-    columnIds,
+    boardColumns,
     createReporter,
     createDelivery,
     workspace,
@@ -191,7 +198,7 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
   return {
     deps,
     api,
-    columnIds,
+    boardColumns,
     reporter,
     createReporter,
     delivery,
@@ -234,12 +241,33 @@ describe("resolveStatusIds", () => {
   it("names every role the board cannot route", async () => {
     const promise = resolveStatusIds(
       { statusIds: vi.fn<ApiClient["statusIds"]>().mockResolvedValue(statuses) },
-      async () => ["ready", "doing"],
+      async () => board.filter((column) => ["ready", "doing"].includes(column.id)),
       "CP"
     );
 
     await expect(promise).rejects.toThrow(/checking/);
     await expect(promise).rejects.toThrow(/shipped/);
+  });
+
+  /**
+   * BP-381. Existence was the whole check, and it is not enough: the two reads are separate round
+   * trips, so a board edited between them can answer `review -> "checking"` for a column that is
+   * now an ACTIVE one. A run delivering a refused change into an active column puts it back where
+   * the execution lease sweeps — and the lease would take the worktree somebody is being asked to
+   * accept.
+   */
+  it("refuses a column that still exists under a different meaning", async () => {
+    const promise = resolveStatusIds(
+      { statusIds: vi.fn<ApiClient["statusIds"]>().mockResolvedValue(statuses) },
+      async () =>
+        board.map((column) =>
+          column.id === "checking" ? { ...column, role: "active" } : column
+        ),
+      "CP"
+    );
+
+    await expect(promise).rejects.toThrow(/checking/);
+    await expect(promise).rejects.toThrow(/active now/);
   });
 
   // An empty id is what api.statusIds now answers for a role no column carries (BP-512). The
@@ -252,7 +280,7 @@ describe("resolveStatusIds", () => {
           .fn<ApiClient["statusIds"]>()
           .mockResolvedValue({ ...statuses, done: "" }),
       },
-      async () => ["ready", "doing", "checking"],
+      async () => board.filter((column) => column.id !== "shipped"),
       "CP"
     );
 
@@ -459,16 +487,16 @@ describe("runTask", () => {
     await runTask(h.deps, task);
 
     expect(h.api.statusIds).toHaveBeenCalledTimes(2);
-    expect(h.columnIds).toHaveBeenCalledTimes(2);
+    expect(h.boardColumns).toHaveBeenCalledTimes(2);
     expect(h.createReporter).toHaveBeenCalledTimes(2);
     expect(h.createReporter).toHaveBeenCalledWith(h.api, statuses);
   });
 
   it("does no work on a board that cannot route the outcome and hands the task back", async () => {
-    const columnIds = vi
-      .fn<PipelineDeps["columnIds"]>()
-      .mockResolvedValue(["ready", "doing", "checking"]);
-    const h = harness({ columnIds });
+    const boardColumns = vi
+      .fn<PipelineDeps["boardColumns"]>()
+      .mockResolvedValue(board.filter((column) => column.id !== "shipped"));
+    const h = harness({ boardColumns });
     await runTask(h.deps, task);
 
     expect(h.workspace.create).not.toHaveBeenCalled();
@@ -483,10 +511,13 @@ describe("runTask", () => {
   // still on the board while no column carries the role. statusIds answers "" for it now, and the
   // run has to hand the task back — charged — rather than deliver into the column that is left
   it("hands back a task whose board still has a column called done but none meaning it", async () => {
-    const columnIds = vi
-      .fn<PipelineDeps["columnIds"]>()
-      .mockResolvedValue(["ready", "doing", "checking", "done"]);
-    const h = harness({ columnIds });
+    const boardColumns = vi
+      .fn<PipelineDeps["boardColumns"]>()
+      .mockResolvedValue([
+        ...board.filter((column) => column.id !== "shipped"),
+        { id: "done", role: "review" },
+      ]);
+    const h = harness({ boardColumns });
     h.api.statusIds.mockResolvedValue({ ...statuses, done: "" });
 
     await runTask(h.deps, task);
@@ -1126,6 +1157,91 @@ describe("runTask", () => {
     expect(h.workspace.destroy).not.toHaveBeenCalled();
   });
 
+  /**
+   * BP-381. The work exists only as a commit in a worktree on whichever machine claimed the task,
+   * and twice in one afternoon good work went to sit on a laptop. This is the reply: the change is
+   * offered to a person, from the one branch that already decides `withholdsPush`.
+   */
+  describe("offering the refused change to a person", () => {
+    it("opens a decision, naming the gate and the change it judged", async () => {
+      const openDecision = vi.fn<NonNullable<PipelineDeps["openDecision"]>>().mockResolvedValue(undefined);
+      const h = harness({
+        openDecision,
+        gateFor: () => rejectingGate("protected-paths", "it edits package.json"),
+      });
+
+      await runTask(h.deps, running("implement", "protected-paths"));
+
+      expect(openDecision).toHaveBeenCalledTimes(1);
+      expect(openDecision.mock.calls[0][0]).toMatchObject({
+        gate: "protected-paths",
+        diff,
+        worktreePath: "/wt",
+        worktreeRoot: config.worktreeRoot,
+        baseSha: "base1",
+      });
+    });
+
+    /**
+     * The comment moves the task out of the active column, and a person who follows it there has
+     * to find the panel already offering the reply. Ordering is the entitlement, not a nicety.
+     */
+    it("writes the record before the report that sends somebody to look at it", async () => {
+      const order: string[] = [];
+      const h = harness({
+        openDecision: vi.fn(async () => {
+          order.push("decision");
+        }),
+        gateFor: () => rejectingGate("protected-paths", "it edits package.json"),
+      });
+      h.reporter.gateRejected.mockImplementation(async () => {
+        order.push("report");
+      });
+
+      await runTask(h.deps, running("implement", "protected-paths"));
+
+      expect(order).toEqual(["decision", "report"]);
+    });
+
+    // The single condition that keeps this out of every other gate's rejection
+    it("offers nothing for a gate whose branch is pushed anyway", async () => {
+      const openDecision = vi.fn<NonNullable<PipelineDeps["openDecision"]>>().mockResolvedValue(undefined);
+      const h = harness({
+        openDecision,
+        gateFor: () => rejectingGate("diff-size", "1200 lines"),
+      });
+
+      await runTask(h.deps, running("implement", "diff-size"));
+
+      expect(openDecision).not.toHaveBeenCalled();
+      expect(h.delivery.push).toHaveBeenCalled();
+    });
+
+    it("offers nothing for a run that passes its gates", async () => {
+      const openDecision = vi.fn<NonNullable<PipelineDeps["openDecision"]>>().mockResolvedValue(undefined);
+      const h = harness({ openDecision });
+
+      await runTask(h.deps, running("implement", "protected-paths", "push"));
+
+      expect(openDecision).not.toHaveBeenCalled();
+    });
+
+    // The board had the patch in the comment before any of this existed, and still does
+    it("still reports the refusal when the offer cannot be made", async () => {
+      const h = harness({
+        openDecision: vi.fn().mockRejectedValue(new Error("state directory is read-only")),
+        gateFor: () => rejectingGate("protected-paths", "it edits package.json"),
+        logError: vi.fn(),
+      });
+
+      await runTask(h.deps, running("implement", "protected-paths"));
+
+      expect(h.reporter.gateRejected).toHaveBeenCalled();
+      expect(h.workspace.destroy).not.toHaveBeenCalled();
+      expect(h.deps.logError).toHaveBeenCalledWith(expect.stringMatching(/read-only/));
+    });
+  });
+
   // Nothing read the timeout a step or a gate was handed, so folding both onto the gate's cap cut
   // every model step from thirty minutes to ten without a single test noticing
   it("bounds a model step by the project's step timeout, and a gate by the gate cap", async () => {
@@ -1199,10 +1315,10 @@ describe("runTask", () => {
   // Every other exit settles; this one returned bare, so the menubar showed the run parked in
   // "claiming" for ever and no record was written for a task that was claimed and handed back
   it("leaves a record when the board cannot route the outcome", async () => {
-    const columnIds = vi
-      .fn<PipelineDeps["columnIds"]>()
-      .mockResolvedValue(["ready", "doing", "checking"]);
-    const h = harness({ columnIds });
+    const boardColumns = vi
+      .fn<PipelineDeps["boardColumns"]>()
+      .mockResolvedValue(board.filter((column) => column.id !== "shipped"));
+    const h = harness({ boardColumns });
 
     await runTask(h.deps, task);
 

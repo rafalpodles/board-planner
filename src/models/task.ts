@@ -1,5 +1,5 @@
 import mongoose, { Schema, Model } from "mongoose";
-import { ITask, PRIORITIES, DEFAULT_PRIORITY, RECURRENCE_FREQUENCIES } from "@/types";
+import { ITask, PRIORITIES, DEFAULT_PRIORITY, RECURRENCE_FREQUENCIES, TASK_DECISION_STATES } from "@/types";
 
 const taskSchema = new Schema<ITask>(
   {
@@ -151,6 +151,57 @@ const taskSchema = new Schema<ITask>(
       phaseAt: { type: Date },
       phaseSeq: { type: Number },
     },
+    // A change the protected-paths gate refused, waiting on a person. `default: null` and nothing
+    // else: unlike `execution` above, whose defaults make it serialise as a truthy object on every
+    // task ever written, this must be absent until a gate actually refuses something — the panel
+    // reads a truthy `decision` as "there is something to answer".
+    //
+    // Written only by POST /api/workers/:workerId/decisions, and deliberately not reachable from
+    // `updateTask`'s field list, which is what keeps MCP, the edit form and the PM agent out of it.
+    decision: {
+      type: {
+        gate: { type: String, required: true },
+        // `select: false` like the patch, and for the same reason: nothing publishes this list any
+        // more — the panel renders the COUNT and the subset that tripped the gate — so its only
+        // remaining reader is the audit detail's fallback for records written before `fileCount`
+        // existed, which asks for it by name. Up to five hundred paths otherwise ride along on any
+        // future reader that takes the parent.
+        files: { type: [String], default: [], select: false },
+        // The true number, beside a list bounded for rendering — see ITaskDecision.files
+        fileCount: { type: Number, default: 0 },
+        // `select: false` alongside `files`, so the schema is the whole protection rather than a
+        // list of the three call sites that currently remember to blank `decision`. Both readers
+        // that render these name them explicitly, and an explicit inclusion overrides this.
+        protectedFiles: { type: [String], default: [], select: false },
+        protectedFileCount: { type: Number, default: 0 },
+        // `select: false` on both, and it is load-bearing rather than tidy. A task document is
+        // spread into a response by a dozen readers — the search, My Tasks, the release and claim
+        // routes, every writer that echoes a task back — and each one would otherwise carry up to
+        // 220 KB of patch and the machine's own digest to whoever asked. Stripping it reader by
+        // reader is a list that goes stale the first time somebody adds a thirteenth; not sending
+        // it unless asked is the same decision made once. The two places that need it say so:
+        // the task-detail GET selects `+decision.patch`, and `decisionsForWorker` names
+        // `decision.patchSha256` in its own projection.
+        patch: { type: String, default: "", select: false },
+        patchTruncated: { type: Boolean, default: false },
+        patchSha256: { type: String, default: "", select: false },
+        commit: { type: String, required: true },
+        workerId: { type: String, required: true },
+        taskKey: { type: String, default: "" },
+        title: { type: String, default: "" },
+        acceptable: { type: Boolean, default: false },
+        unacceptableReason: { type: String, default: "" },
+        state: { type: String, enum: TASK_DECISION_STATES, default: "pending" },
+        decidedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+        decidedAt: { type: Date, default: null },
+        prUrl: { type: String, default: "" },
+        error: { type: String, default: "" },
+        // Bookkeeping, like the digest above: how many times the machine has tried to settle this.
+        attempts: { type: Number, default: 0, select: false },
+        createdAt: { type: Date, default: Date.now },
+      },
+      default: null,
+    },
     createdBy: {
       type: Schema.Types.ObjectId,
       ref: "User",
@@ -171,6 +222,9 @@ taskSchema.index({ sprint: 1 });
 taskSchema.index({ agent: 1 });
 // The fleet console polls the worker join every 5s; unindexed, each poll scans the collection
 taskSchema.index({ "execution.workerId": 1 });
+// The worker asks "what is waiting on me" on every refresh, and the answer is nearly always
+// nothing — unindexed, that question is a scan of every task in every project on each poll
+taskSchema.index({ "decision.workerId": 1 });
 // Closing a recurring task asks whether it already has a successor; unindexed that is a scan of
 // every task in every project, and the usual answer — no — is the one that scans to the end
 taskSchema.index({ recurringParentId: 1 });

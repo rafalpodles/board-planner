@@ -37,24 +37,47 @@ function resolveRenamedPath(rawPath: string): string {
     : rawPath.slice(arrowIndex + " => ".length);
 }
 
+/**
+ * `core.quotePath=false` stops git quoting a non-ASCII path, which is the common case. It does not
+ * stop it quoting one that carries a quote, a backslash, a tab or a newline — and a quoted name is
+ * one every rule in `protected-paths` reads as something other than the file it is.
+ *
+ * So a name this worker cannot read back is refused rather than judged. Nothing downstream has to
+ * ask whether its input was really the path: the run ends and a person looks (BP-381).
+ */
+function refuseQuotedPath(path: string): string {
+  if (path.startsWith('"')) {
+    throw new Error(
+      `refusing the change: git quoted the path ${path}, and a quoted name is not the one the gates would read`,
+    );
+  }
+  return path;
+}
+
 function parseNumstat(
   output: string,
-): Pick<DiffStats, "changedLines" | "changedFiles"> {
+): Pick<DiffStats, "changedLines" | "changedFiles" | "suppressedDiffs"> {
   let changedLines = 0;
   const changedFiles: string[] = [];
+  const suppressedDiffs: string[] = [];
 
   for (const line of output.split("\n")) {
     if (!line.trim()) continue;
     const [added, removed, rawPath] = line.split("\t");
     if (!rawPath) continue;
 
-    changedFiles.push(resolveRenamedPath(rawPath.trim()));
+    const path = refuseQuotedPath(resolveRenamedPath(rawPath.trim()));
+    changedFiles.push(path);
     if (added !== "-" && removed !== "-") {
       changedLines += Number(added) + Number(removed);
+    } else {
+      // `-` on both sides is git saying "I am not going to show you this one", and it is the ONE
+      // signal that catches every way that happens. See DiffStats.suppressedDiffs.
+      suppressedDiffs.push(path);
     }
   }
 
-  return { changedLines, changedFiles };
+  return { changedLines, changedFiles, suppressedDiffs };
 }
 
 function boundPatch(patch: string): Pick<DiffStats, "patch" | "truncated"> {
@@ -114,7 +137,7 @@ export async function collectDiff(
     ],
     opts,
   );
-  const { changedLines, changedFiles } = parseNumstat(numstatOutput);
+  const { changedLines, changedFiles, suppressedDiffs } = parseNumstat(numstatOutput);
 
   // --no-ext-diff: a repo-local diff.external replaces the patch git prints with a program's
   // output, so the review gate would read attacker-chosen text while the commit held something
@@ -142,8 +165,25 @@ export async function collectDiff(
     if (!line.startsWith(":")) continue;
     const [meta, ...paths] = line.split("\t");
     const fields = meta.slice(1).split(/\s+/);
+    const path = refuseQuotedPath(paths[paths.length - 1]);
+
+    /*
+     * The one place `--numstat`'s `-` for both counts is NOT equivalent to "the patch does not
+     * show it". A gitlink — a submodule pointer — measures `1  1` and prints two object ids:
+     *
+     *     -Subproject commit a45e9ae…
+     *     +Subproject commit 97c1dd2…
+     *
+     * Which is the whole of what a reader is shown for a change that can carry anything at all.
+     * Bumping one needs no `.gitmodules` edit either, so the protected path does not fire. Read
+     * from the mode here because the mode is the only place it is expressed.
+     */
+    if (fields[1] === "160000") {
+      suppressedDiffs.push(path);
+      continue;
+    }
+
     if (fields[1] !== "120000") continue;
-    const path = paths[paths.length - 1];
     const target = await git(runner, ["cat-file", "blob", fields[3]], opts);
     symlinks.push({ path, target: target.trim() });
   }
@@ -155,5 +195,7 @@ export async function collectDiff(
   );
   const { patch, truncated } = boundPatch(patchOutput);
 
-  return { changedLines, changedFiles, patch, truncated, headSha, symlinks };
+  return { changedLines, changedFiles, patch, truncated, headSha, symlinks, suppressedDiffs };
 }
+
+

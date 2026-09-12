@@ -27,6 +27,12 @@ const LABELS: Partial<Record<InstanceAuditAction, string>> = {
   user_deleted: "Account deleted",
   // The direction is in `detail`, the way the address change carries old → new
   user_role_changed: "Role changed",
+  // Three verbs rather than one row with a footnote, the same rule the command trio follows below.
+  // "Refused change" names what was answered, because the row is about a change a gate stopped —
+  // not about a decision in the abstract.
+  worker_decision_accepted: "Refused change accepted",
+  worker_decision_declined: "Refused change declined",
+  worker_decision_abandoned: "Refused change given up on",
 };
 
 // The one action whose verb lives in `detail` rather than in its name, because a single endpoint
@@ -60,6 +66,9 @@ const NOTABLE = new Set<InstanceAuditAction>([
   // these two are the ones somebody scanning the log is looking for.
   "user_role_changed",
   "user_deleted",
+  // Accepting pushes an agent's change under the machine owner's pinned GitHub identity, and the
+  // push runs that repository's CI on it. Declining and giving up spend nothing, so they stay quiet.
+  "worker_decision_accepted",
 ]);
 
 type Entry = Pick<ApiInstanceAuditLog, "action" | "detail">;

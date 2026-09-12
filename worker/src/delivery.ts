@@ -22,7 +22,9 @@ export interface Delivery {
   ): Promise<void>;
   openPr(
     worktreePath: string,
-    task: ClaimedTask,
+    // Only what the title is built from. A run hands over the whole claimed task; a settlement two
+    // hours later has the record the refusal left behind and nothing else (BP-381).
+    task: PrSubject,
     summary: string,
   ): Promise<string>;
   merge(worktreePath: string, prUrl: string): Promise<void>;
@@ -55,7 +57,9 @@ function lastPrUrl(text: string): string {
   return matches ? matches[matches.length - 1] : "";
 }
 
-function prTitle(task: ClaimedTask): string {
+export type PrSubject = Pick<ClaimedTask, "taskKey" | "title">;
+
+function prTitle(task: PrSubject): string {
   const title = scrub(`${task.taskKey}: ${task.title}`)
     .replace(/\s+/g, " ")
     .trim();

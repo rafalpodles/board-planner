@@ -60,6 +60,53 @@ describe("collectDiff", () => {
 
     expect(diff.changedLines).toBe(0);
     expect(diff.changedFiles).toEqual(["image.png"]);
+    // And listed as one the patch does not show. A real binary and a file something has hidden are
+    // indistinguishable here — deliberately: from the reader's side they are the same thing, a
+    // file listed as changed with its contents missing.
+    expect(diff.suppressedDiffs).toEqual(["image.png"]);
+  });
+
+  /**
+   * BP-381. `-` for both counts is git saying "I am not going to show you this one", and it is the
+   * only signal that catches every way that happens — a bare `-diff` attribute, a `diff=<name>`
+   * whose driver sets `binary = true`, a file git simply calls binary, and a real asset. All four
+   * measured; the first three are reached by neither `--no-ext-diff` nor `--no-textconv`, and the
+   * attribute-based check that stood here first saw only one of them.
+   */
+  it("reports the files git would not show, beside the ones it would", async () => {
+    const run = vi
+      .fn()
+      .mockResolvedValueOnce(HEAD_RESOLVED)
+      .mockResolvedValueOnce({
+        code: 0,
+        stdout: "-\t-\tpackage.json\n1\t0\tsrc/a.ts\n-\t-\tlogo.png\n",
+        stderr: "",
+        timedOut: false,
+      })
+      .mockResolvedValueOnce(NO_SYMLINKS)
+      .mockResolvedValueOnce({
+        code: 0,
+        stdout: "Binary files differ",
+        stderr: "",
+        timedOut: false,
+      });
+
+    const diff = await collectDiff({ run }, "/wt", BASE_SHA);
+
+    expect(diff.suppressedDiffs).toEqual(["package.json", "logo.png"]);
+    // The whole change is still listed; only its contents are missing
+    expect(diff.changedFiles).toEqual(["package.json", "src/a.ts", "logo.png"]);
+  });
+
+  // Read off the same line that already decides the line count, so it costs no extra git call
+  it("reads it from numstat rather than asking git a second time", async () => {
+    const calls: string[][] = [];
+    const { run } = recordingRunner(calls, { diff: { code: 0, stdout: "-\t-\tlogo.png\n" } });
+
+    const diff = await collectDiff({ run }, "/wt", BASE_SHA);
+
+    expect(diff.suppressedDiffs).toEqual(["logo.png"]);
+    expect(calls.map((call) => call[0])).toEqual(["rev-parse", "diff", "diff", "diff"]);
   });
 
   it("resolves a renamed file to its post-rename path, in both numstat shorthands", async () => {

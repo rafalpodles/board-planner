@@ -31,6 +31,15 @@ import {
 } from "./config.js";
 import { connectControl, ControlDeps } from "./control.js";
 import { createDelivery, hardenedGitConfig } from "./delivery.js";
+import {
+  createMarkerStore,
+  DecisionContext,
+  heldTaskKeys,
+  openDecision,
+  parseDecisions,
+  ServerDecision,
+  settleDecisions,
+} from "./decisions.js";
 import { collectDiff } from "./diff.js";
 import { pinnedAccount, resolveGhToken } from "./github-account.js";
 import { gateFromEntry } from "./gates/from-entry.js";
@@ -62,6 +71,7 @@ import {
   Telemetry,
   TelemetryUpdate,
 } from "./telemetry.js";
+import { scrub } from "./scrub.js";
 import { ClaimedTask } from "./types.js";
 import { createWorkspace, reapOrphans } from "./workspace.js";
 
@@ -170,6 +180,14 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
 
   const identityStore = deps.createStore(join(bootstrap.stateDir, "worker.json"));
   const outbox = createOutbox(deps.createStore(join(bootstrap.stateDir, "outbox.jsonl")));
+  // Beside the outbox and for the same reason: what a refused change is waiting on has to outlive
+  // the process. This one is on disk rather than in memory because the reaper reads it on a pass
+  // that may be the first thing a restarted worker does.
+  const markers = createMarkerStore(bootstrap.stateDir);
+  // What the server last said is waiting on this machine, with when it said it — a marker written
+  // since is not yet in the list, and must not be mistaken for one nothing answers to.
+  let decisions: ServerDecision[] = [];
+  let decisionsAsOf = 0;
   // Outlives the run, unlike the reporter it is handed to — see ReleaseMemory. Same lesson as the
   // once-per-binding log below: a machine parked next to a repository it cannot resolve a base in
   // would otherwise write the same board comment, and fire the same notification, every poll.
@@ -407,7 +425,10 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       // stay absent here, same as Ruling 2 intends for any caller that has no use for them.
       const reaped = await reapOrphans(
         createWorkspace(taskConfig, deps.runner),
-        taskConfig.worktreeRoot
+        taskConfig.worktreeRoot,
+        // The one exception: a worktree somebody is being asked about. Keyed on the root rather
+        // than on the project, because rebind resolves several projects onto one checkout.
+        heldTaskKeys(markers, taskConfig.worktreeRoot)
       ).catch(() => 0);
       if (reaped > 0) {
         deps.log(`reaped ${reaped} worktree(s) left by an earlier run for project ${projectId}`);
@@ -434,17 +455,27 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
           "X-CP-Protocol": String(PROTOCOL_VERSION),
         },
       });
-      if (!response.ok) return;
+      // A locked or disabled machine is refused here with 403, and the previous list must not
+      // survive that: `drain()` runs while paused, so a stale `accepted` would go on being pushed
+      // every poll with the kill switch on — the badge true and the machine still working.
+      if (!response.ok) {
+        decisions = [];
+        decisionsAsOf = 0;
+        return;
+      }
       const body = (await response.json()) as {
         policy?: unknown;
         assignments?: unknown;
         offers?: unknown;
         catalogue?: unknown;
+        decisions?: unknown;
       };
       policy = applyPolicy(policy, body.policy);
       assignments = parseAssignments(body.assignments);
       offers = parseOffers(body.offers);
       catalogue = parseCatalogue(body.catalogue);
+      decisions = parseDecisions(body.decisions);
+      decisionsAsOf = Date.now();
     } catch (error) {
       deps.logError(`could not refresh worker policy: ${String(error)}`);
       return;
@@ -551,7 +582,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
         const pipeline: PipelineDeps = {
           config: taskConfig,
           api,
-          columnIds: (projectId) => api.columnIds(projectId),
+          boardColumns: (projectId) => api.boardColumns(projectId),
           createReporter: (client, statusIds) =>
             createReporter(client, statusIds, (message) => deps.logError(message), outbox, releaseComments),
           createDelivery: (runner, baseBranch) => createDelivery(runner, baseBranch, githubToken),
@@ -561,6 +592,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
           gateFor: gateFromEntry,
           recordRun: (project, record) => outbox.add({ kind: "run", projectId: project, record }),
           logError: deps.logError,
+          openDecision: (input) => openDecision({ markers, api, scrub }, input),
           quarantineProject,
           runner: deps.runner,
           signal,
@@ -573,8 +605,51 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     }
   }
 
+  /**
+   * Everything a decision needs that only exists relative to a bound checkout. Null when the
+   * project is no longer bound here, which is what a lost assignment looks like from this side.
+   */
+  async function decisionContext(projectId: string): Promise<DecisionContext | null> {
+    const taskConfig = configFor(projectId);
+    if (!taskConfig) return null;
+    const githubToken = await githubIdentityToken();
+    const workspace = createWorkspace(taskConfig, deps.runner);
+    return {
+      worktreeRoot: taskConfig.worktreeRoot,
+      destroyWorktree: (taskKey) => workspace.destroy(taskKey),
+      delivery: createDelivery(deps.runner, taskConfig.baseBranch, githubToken),
+      runner: deps.runner,
+      collectDiff,
+    };
+  }
+
   async function drain(): Promise<void> {
     await refreshServerState();
+    // Before the flush, so a settlement this pass produces goes out with it rather than waiting a
+    // whole poll interval. Drained here rather than in the claim loop because `drain` runs even
+    // while the worker is paused: pause stops a machine taking NEW work, and has never stopped it
+    // finishing work it already holds.
+    await settleDecisions(
+      {
+        markers,
+        contextFor: decisionContext,
+        // Not queued on failure — see SettleDecisionsDeps.settle for why this one report is the
+        // exception. The caller keeps the worktree and the marker, and the next pass does the
+        // whole settlement again.
+        settle: async (settlement) => {
+          try {
+            await api.settleDecision(settlement);
+            return true;
+          } catch (error) {
+            deps.logError(`could not settle a decision: ${String(error)}`);
+            return false;
+          }
+        },
+        log: deps.logError,
+      },
+      decisions,
+      decisionsAsOf
+    ).catch((error) => deps.logError(`settling decisions failed: ${String(error)}`));
     const { delivered, pending, dropped } = await outbox.flush(api);
     if (delivered || pending || dropped) {
       deps.log(`outbox: delivered ${delivered}, still pending ${pending}, dropped ${dropped}`);

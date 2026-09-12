@@ -67,6 +67,31 @@ export interface DiffStats {
    * door out of the checkout (BP-509).
    */
   symlinks: { path: string; target: string }[];
+  /**
+   * The changed files whose contents the patch does NOT carry, whatever the reason.
+   *
+   * Read off `--numstat`'s `-` for both counts, which is git saying "I am not going to show you
+   * this one" — and that is the only signal that catches every way it happens. Measured on git
+   * 2.50.1, three of them, none reached by `--no-ext-diff` or `--no-textconv`:
+   *
+   * - a bare `-diff` attribute, which needs no driver and no config at all;
+   * - `diff=<name>` plus `[diff "<name>"] binary = true`, where the attribute reads as an ordinary
+   *   driver name and only the config says what it does;
+   * - a file git simply calls binary — a raw NUL inside a JavaScript block comment is enough, and
+   *   nothing is planted anywhere.
+   *
+   * A genuinely binary asset lands here too, which is honest rather than a false positive: the
+   * patch really does not show what changed in it.
+   *
+   * And one that `--numstat` does NOT catch, read from the file mode instead: a gitlink. Bumping a
+   * submodule pointer measures `1  1` and prints two object ids, which is the whole of what a
+   * reader is shown for a change that can carry anything at all — and it needs no `.gitmodules`
+   * edit, so the protected path does not fire either.
+   *
+   * Whoever renders this patch as "the change" is rendering something with holes, and only they
+   * can decide what that is worth (BP-381).
+   */
+  suppressedDiffs: string[];
   // The commit the diff was taken against, resolved once to an object id rather than left as the
   // ref `HEAD`. The review gate checks this out to read the change, so "what the reviewer saw" and
   // "what the gates judged" are the same commit by construction (BP-404).

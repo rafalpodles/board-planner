@@ -1,4 +1,4 @@
-import { ApiClient, StatusIds } from "./api.js";
+import { ApiClient, BoardColumnRole, StatusIds } from "./api.js";
 import { createBudget } from "./budget.js";
 import { commitAll } from "./commit.js";
 import { WorkerConfig } from "./config.js";
@@ -7,6 +7,7 @@ import { unexpectedHistory } from "./provenance.js";
 import { RunState, runStep } from "./steps.js";
 import { recordFor, RunRecord } from "./run-record.js";
 import { isResultEvent, StreamEvent } from "./stream.js";
+import { branchFor, OpenDecisionInput, WORKER_BRANCH_SLUG } from "./decisions.js";
 import { Delivery } from "./delivery.js";
 import { childEnv } from "./env.js";
 import { Runner } from "./exec.js";
@@ -34,7 +35,7 @@ import {
 export interface PipelineDeps {
   config: WorkerConfig;
   api: ApiClient;
-  columnIds: (projectId: string) => Promise<string[]>;
+  boardColumns: (projectId: string) => Promise<BoardColumnRole[]>;
   createReporter: (api: ApiClient, statusIds: StatusIds) => Reporter;
   createDelivery: (runner: Runner, baseBranch?: string) => Delivery;
   workspace: Workspace;
@@ -60,6 +61,12 @@ export interface PipelineDeps {
   /** Worker-side stderr for faults an operator has to see without opening the board. */
   logError?: (message: string) => void;
   /**
+   * Offer a refused change to a person, instead of leaving it to sit in a worktree on this
+   * machine. Supplied only where a decision can actually be answered; a pipeline without it
+   * behaves exactly as it did before there was anything to answer.
+   */
+  openDecision?: (input: OpenDecisionInput) => Promise<void>;
+  /**
    * Stop offering this project until an operator has been. Called when the checkout itself is the
    * problem, so that refusing a run does not simply hand the same clone to the next one (BP-504).
    *
@@ -75,33 +82,38 @@ export interface PipelineDeps {
   telemetry?: Pick<Telemetry, "emit" | "emitEvent">;
 }
 
-const SLUG = "worker";
-
 const MAX_DETAIL_CHARS = 200;
 const GIT_TIMEOUT_MS = 60_000;
 const ROLES = ["approved", "review", "done"] as const;
 
 export async function resolveStatusIds(
   api: Pick<ApiClient, "statusIds">,
-  columnIds: (projectId: string) => Promise<string[]>,
+  boardColumns: (projectId: string) => Promise<BoardColumnRole[]>,
   projectId: string,
 ): Promise<StatusIds> {
-  const [statusIds, ids] = await Promise.all([
+  const [statusIds, columns] = await Promise.all([
     api.statusIds(projectId),
-    columnIds(projectId),
+    boardColumns(projectId),
   ]);
-  const columns = new Set(ids);
-  const unroutable = ROLES.filter((role) => !columns.has(statusIds[role]));
+  // Existence was the whole check, and it is not enough. The two reads above are separate round
+  // trips, so a board edited between them can answer `review -> "in_review"` for a column that is
+  // now an active one — and the run would deliver a refused change into a column the execution
+  // lease still sweeps, taking away the worktree a person is being asked about (BP-381). What a
+  // role means is the thing automation keys on, so the role is what has to still be true.
+  const byId = new Map(columns.map((column) => [column.id, column.role]));
+  const unroutable = ROLES.filter((role) => byId.get(statusIds[role]) !== role);
   if (unroutable.length === 0) return statusIds;
 
-  // An empty id is a role no column carries at all, which is a different repair from a column that
-  // was deleted from under an id the board once had
+  // Three repairs, not one: a role no column carries at all, an id the board no longer has, and an
+  // id it still has under a different meaning. Naming which one saves a person reading the columns.
   const detail = unroutable
-    .map((role) =>
-      statusIds[role]
+    .map((role) => {
+      if (!statusIds[role]) return `${role} (no column carries that role)`;
+      const carries = byId.get(statusIds[role]);
+      return carries === undefined
         ? `${role} -> "${statusIds[role]}"`
-        : `${role} (no column carries that role)`,
-    )
+        : `${role} -> "${statusIds[role]}" (that column is ${carries} now)`;
+    })
     .join(", ");
   throw new Error(
     `the board has no column for ${detail}, so a run could not be routed out of it`,
@@ -254,7 +266,7 @@ export async function runTask(
 ): Promise<RunDisposition> {
   const { config, workspace, executor, runner, telemetry } = deps;
   const now = deps.now ?? Date.now;
-  const branch = `${task.taskKey.toLowerCase()}/${SLUG}`;
+  const branch = branchFor(task.taskKey);
 
   // Coarse on purpose: a phase names the stage a run is in, and every stage below either finishes
   // or ends the run, so the last one emitted is always where the run actually is.
@@ -300,7 +312,7 @@ export async function runTask(
   try {
     statusIds = await resolveStatusIds(
       deps.api,
-      deps.columnIds,
+      deps.boardColumns,
       task.projectId,
     );
   } catch (error) {
@@ -331,7 +343,7 @@ export async function runTask(
   let worktree: Worktree;
   try {
     enter("worktree");
-    worktree = await workspace.create(task.taskKey, SLUG);
+    worktree = await workspace.create(task.taskKey, WORKER_BRANCH_SLUG);
   } catch (error) {
     await quietly(() => workspace.destroy(task.taskKey));
     // The checkout carries a key git runs on checkout, so it was refused before it ran. The task
@@ -552,6 +564,31 @@ export async function runTask(
           // The one refusal that must not push: a pushed branch carrying .github/workflows/*.yml
           // runs in Actions with the repository's secrets, whatever this verdict said.
           const withholdsPush = entry.gateKind === "protected-paths";
+
+          // Before the report, and that ordering is the entitlement rather than a nicety: the
+          // comment below moves the task out of the active column, and a person reading it there
+          // has to find the panel already offering the reply. Written from this one branch — the
+          // single condition that keeps every other gate's rejection out of it.
+          //
+          // A failure here is logged and nothing else: the comment still carries the patch, which
+          // is what the board had before any of this existed.
+          if (withholdsPush && deps.openDecision) {
+            try {
+              await deps.openDecision({
+                task,
+                gate: gate.name,
+                diff,
+                worktreePath: worktree.path,
+                worktreeRoot: config.worktreeRoot,
+                baseSha: worktree.baseSha,
+              });
+            } catch (error) {
+              deps.logError?.(
+                `${task.taskKey}: the refused change could not be offered for a decision: ${String(error)}`,
+              );
+            }
+          }
+
           // Otherwise the worktree goes next, so the pushed branch is the only copy a human reaches
           const pushFailed = withholdsPush
             ? null

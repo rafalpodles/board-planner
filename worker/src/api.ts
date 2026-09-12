@@ -30,12 +30,52 @@ export interface ApiClient {
   comment(projectId: string, taskId: string, body: string): Promise<void>;
   release(projectId: string, taskId: string, options?: { refund?: boolean }): Promise<void>;
   statusIds(projectId: string): Promise<StatusIds>;
-  columnIds(projectId: string): Promise<string[]>;
+  /**
+   * The board's columns, each with the role automation keys on. The ids alone were enough while
+   * the only question was "does this id still exist"; a run also has to know that the column it
+   * will deliver INTO still carries the role it was resolved for (BP-381).
+   */
+  boardColumns(projectId: string): Promise<BoardColumnRole[]>;
   // `applied` is the server's answer to "did this land": false when it wrote nothing, because the
   // run no longer holds the task or a newer event got there first
   postEvent(event: PhaseEvent): Promise<{ applied: boolean }>;
   /** What a run leaves behind once execution.runId is cleared and nothing else remembers it. */
   postRun(projectId: string, record: RunRecord): Promise<void>;
+  /**
+   * The refused change, offered to a person. Not on a project path, deliberately:
+   * `withProjectAccessOrWorker` falls through to project access when no worker header is present,
+   * so a project route would let any member post a record marked acceptable and then accept it.
+   */
+  createDecision(record: DecisionRequest): Promise<void>;
+  /** What came of the verdict. Only the machine holding the record may say. */
+  settleDecision(settlement: DecisionSettlement): Promise<void>;
+}
+
+export interface DecisionRequest {
+  taskId: string;
+  runId: string;
+  gate: string;
+  // No counts: the route derives them from the lists it actually stores, after discarding the
+  // entries that are not paths. A count sent alongside would be a second source for one fact, and
+  // the one the panel renders as "how much am I consenting to".
+  files: string[];
+  protectedFiles: string[];
+  patch: string;
+  patchTruncated: boolean;
+  patchSha256: string;
+  commit: string;
+  taskKey: string;
+  title: string;
+  acceptable: boolean;
+  unacceptableReason: string;
+}
+
+export interface DecisionSettlement {
+  taskId: string;
+  state: "delivered" | "refused" | "failed" | "discarded";
+  prUrl?: string;
+  error?: string;
+  attempts?: number;
 }
 
 // A task key is server-controlled text that the worker turns into a directory name under its own
@@ -103,9 +143,13 @@ function parseAgent(value: unknown): AgentSnapshot | null {
   };
 }
 
-interface BoardColumn {
+/** What a caller outside this module needs of a column: which one it is, and what it means. */
+export interface BoardColumnRole {
   id: string;
   role: string;
+}
+
+interface BoardColumn extends BoardColumnRole {
   order: number;
   triggersPmReview: boolean;
 }
@@ -402,8 +446,8 @@ export function createApiClient(
       );
     },
 
-    async columnIds(projectId) {
-      return (await readColumns(projectId)).map((column) => column.id);
+    async boardColumns(projectId) {
+      return (await readColumns(projectId)).map(({ id, role }) => ({ id, role }));
     },
 
     // A role no column carries resolves to "", which resolveStatusIds refuses at run start. It used
@@ -413,6 +457,16 @@ export function createApiClient(
     // project with no columns of its own, which readColumns already handles.
     async statusIds(projectId) {
       return statusIdsFrom(await readColumns(projectId));
+    },
+
+    async createDecision(record) {
+      const { workerId } = identityOrThrow();
+      await request(`/api/workers/${workerId}/decisions`, "POST", record);
+    },
+
+    async settleDecision(settlement) {
+      const { workerId } = identityOrThrow();
+      await request(`/api/workers/${workerId}/decisions`, "PATCH", settlement);
     },
 
     // The worker id in the path comes from the same identity that signs the request, so the two
