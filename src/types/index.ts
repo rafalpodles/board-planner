@@ -908,6 +908,20 @@ export interface ApiLinkedPR {
   updatedAt: string;
 }
 
+/**
+ * What both repository sync routes answer with. Shared rather than written twice because the
+ * settings screen reads these names off the wire: a field renamed on one side and not the other
+ * is a clause that silently stops printing, which no test can see (BP-610 review).
+ */
+export interface ApiRepositorySyncResult {
+  synced: true;
+  prsFound: number;
+  tasksLinked: number;
+  prsLinked: number;
+  prsUnlinked: number;
+  autoTransitioned: number;
+}
+
 export interface IChecklistItem {
   _id: Types.ObjectId;
   text: string;

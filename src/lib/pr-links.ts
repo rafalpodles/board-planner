@@ -54,3 +54,180 @@ export async function writeProviderLinks(
     updatePipeline: true,
   });
 }
+
+/**
+ * The update that removes named links of one provider and leaves every other link alone.
+ *
+ * A pipeline for the same reason `replaceProviderLinks` is one: the surviving array is computed
+ * from the document as it is at write time, so an overlapping sync of either provider cannot be
+ * dropped by a copy read a moment earlier (BP-559). Only the numbers decided about are removed —
+ * anything a concurrent sync added in between is not in the list and survives.
+ */
+export function removeProviderLinks(
+  provider: "github" | "gitlab",
+  numbers: number[]
+): PipelineStage.Set[] {
+  return [
+    {
+      $set: {
+        linkedPRs: {
+          $filter: {
+            input: { $ifNull: ["$linkedPRs", []] },
+            cond: {
+              $not: [
+                {
+                  $and: [
+                    { $eq: [{ $ifNull: ["$$this.provider", "github"] }, provider] },
+                    { $in: ["$$this.number", { $literal: numbers }] },
+                  ],
+                },
+              ],
+            },
+          },
+        },
+      },
+    },
+  ];
+}
+
+export interface StoredProviderLink {
+  provider?: "github" | "gitlab" | null;
+  number: number;
+}
+
+/**
+ * Which of a task's stored links this round of the sync has **positively contradicted** (BP-610).
+ *
+ * Not "everything the round did not confirm". Neither provider is asked for its whole history:
+ * GitHub returns up to a hundred open pull requests plus the thirty most recently updated closed
+ * ones, GitLab the first hundred by `updated_at`. A task whose only pull request merged last
+ * quarter falls out of that window on every sync while remaining perfectly correct, so treating
+ * absence as removal would delete good links from healthy projects. Absent is unknown, not gone.
+ *
+ * Only the tasks this pass reaches, mind. A task that *does* have a pull request in the window is
+ * written by the first loop instead, and `replaceProviderLinks` there replaces this provider's
+ * links wholesale — so an older link of its own, outside the window, is already dropped today on
+ * `origin/main`, before any of this runs. That is a separate defect, named rather than implied
+ * away: the file argues for a conservatism its first half does not practise. BP-617.
+ *
+ * So one rule, and every removal carries the round's own evidence for it: the number came back in
+ * this round's fetch and the matcher did not give it to this task. It was retitled onto another
+ * task, lost its key, or the key left `formerKeys`.
+ *
+ * A pull request **deleted** at the provider is therefore not covered at all: it is absent from a
+ * bounded response exactly like one that did not fit. Neither is a repository **renamed** there,
+ * whose links look exactly like those of a repository the project was repointed away from — the
+ * URL rule that tried to catch the repoint was removed for that reason, because guessing deletes
+ * correct data permanently and the links are outside the window for ever.
+ *
+ * **Repointing** is not "uncovered" so much as swept by coincidence, which is worth saying out
+ * loud. The two repositories have two counters, and a link goes only where they overlap *inside
+ * the window*: the new repository has to mint a number a task from the old one already holds, and
+ * somebody has to sync while that number is still among the hundred-odd the fetch returns. Point
+ * a project at a busy repository whose counter is already in the thousands and the old
+ * repository's low numbers are never reached at all. So it is not only which links go and when,
+ * but whether. The ones that do go are stale by this ticket's own definition, so those removals
+ * are right.
+ *
+ * Expect, then, a count with nothing behind it: weeks after a repoint, with nothing touched at
+ * the provider, a sync reports links removed. That is this, not a bug to chase.
+ *
+ * And it is why a number is safe to compare where a URL was not. Two numbers can only collide
+ * across two counters, which means two repositories, which means a repoint — and a repository
+ * **renamed or transferred keeps its pull request numbers**, so a rename stays inside one counter.
+ * The fetch returns the same pull request under the same number, and it either still matches its
+ * task or genuinely does not. A URL compares across identity instead, which is exactly what a
+ * rename breaks.
+ *
+ * That numbers survive a rename is a fact about GitHub and GitLab, not one this repository can
+ * defend — no test here can reach either provider. It is the premise the whole design rests on,
+ * so it is worth naming as borrowed: were it ever false, a rename would read as a repoint and its
+ * links would be swept, which is the removed URL rule's defect returning by another door.
+ *
+ * The rule is only ever as accurate as the matcher it defers to: where `matchPRsToTasks` gives a
+ * pull request to the wrong task, this deletes the right task's link rather than leaving a
+ * duplicate on the wrong card. The pattern `matchPRsToTasks` builds has no word boundary before
+ * the key, which is BP-611.
+ *
+ * `?? "github"`, as everywhere else here: a link stored before the provider field existed is
+ * GitHub's, and the schema default is applied on hydration rather than stored.
+ *
+ * A number is named once however many link documents carry it, because what the count in the
+ * toast means is pull requests that stopped being this task's — the same unit as the `prsLinked`
+ * standing beside it. A task holding one pull request twice therefore reports one and loses two.
+ */
+export function contradictedLinkNumbers(
+  links: StoredProviderLink[],
+  provider: "github" | "gitlab",
+  seenNumbers: ReadonlySet<number>
+): number[] {
+  const numbers = new Set<number>();
+  for (const link of links) {
+    if ((link.provider ?? "github") !== provider) continue;
+    if (seenNumbers.has(link.number)) numbers.add(link.number);
+  }
+  return [...numbers];
+}
+
+/**
+ * The second pass a sync owes the tasks it did not visit.
+ *
+ * The first pass writes only the tasks in this round's grouping, so a pull request that stops
+ * matching a task takes its task out of the loop and leaves the stale link behind for ever
+ * (BP-610). This walks the tasks that hold links of this provider and are not in the grouping —
+ * a task in it has had its links of this provider replaced wholesale already — and removes the
+ * ones `contradictedLinkNumbers` can show are no longer this task's. A task with nothing
+ * contradicted is not written at all.
+ *
+ * `linkedThisRound` is the set of task numbers the round **matched**, not the set it wrote. Today
+ * the two differ only by `if (!task) continue` — a task number with no document, which cannot be
+ * swept because it cannot be a holder — so either would do. It is sourced from the matched set so
+ * that it stays right if the loop ever grows a skip: a short-circuit for links that are already
+ * correct, or a `continue` past a task whose write failed. Either hands the prune a task whose own
+ * numbers are in `seenNumbers`, and it would then remove exactly the links that are correct. The
+ * skip does not exist yet; this is the warning for whoever adds it, not a guard against one.
+ *
+ * The read is one query per sync over every task in the project that holds a link of this
+ * provider — `project_1_taskNumber_1` bounds it to the project, and nothing indexes `linkedPRs`,
+ * so the array test is applied after the fetch. That is sized for a button somebody presses.
+ *
+ * `timestamps: false`, which the first pass does not pass and should: the dashboard reads a done
+ * task's `updatedAt` as the date it was finished (`src/app/api/projects/[projectId]/stats/route.ts`),
+ * and taking a stale link off a task finished last quarter is not that task being finished today.
+ */
+export async function pruneContradictedLinks(opts: {
+  projectId: string;
+  provider: "github" | "gitlab";
+  linkedThisRound: ReadonlySet<number>;
+  seenNumbers: ReadonlySet<number>;
+}): Promise<number> {
+  const { projectId, provider, linkedThisRound, seenNumbers } = opts;
+
+  // An unmarked link is GitHub's, and a stored document has no `provider` field for the query to
+  // match — the schema's default only appears on hydration, which a query does not do.
+  const owned =
+    provider === "github"
+      ? { $or: [{ provider: "github" }, { provider: { $exists: false } }, { provider: null }] }
+      : { provider: "gitlab" };
+
+  const holders = await Task.find(
+    { project: projectId, linkedPRs: { $elemMatch: owned } },
+    { taskNumber: 1, linkedPRs: 1 }
+  ).lean<{ _id: mongoose.Types.ObjectId; taskNumber: number; linkedPRs?: StoredProviderLink[] }[]>();
+
+  let removed = 0;
+  for (const holder of holders) {
+    if (linkedThisRound.has(holder.taskNumber)) continue;
+
+    const numbers = contradictedLinkNumbers(holder.linkedPRs ?? [], provider, seenNumbers);
+    if (numbers.length === 0) continue;
+
+    await Task.updateOne({ _id: holder._id }, removeProviderLinks(provider, numbers), {
+      updatePipeline: true,
+      timestamps: false,
+    });
+    removed += numbers.length;
+  }
+
+  return removed;
+}

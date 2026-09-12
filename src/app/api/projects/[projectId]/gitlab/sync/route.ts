@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { ApiRepositorySyncResult } from "@/types";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { Project } from "@/models/project";
@@ -8,7 +9,7 @@ import { logActivity } from "@/lib/activity";
 import { decryptSecret } from "@/lib/encryption";
 import { mergedReviewDestination } from "@/lib/columns";
 import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
-import { writeProviderLinks } from "@/lib/pr-links";
+import { pruneContradictedLinks, writeProviderLinks } from "@/lib/pr-links";
 
 export const POST = withProjectAccess(async (_request, { params, user }) => {
   const { projectId } = await params;
@@ -101,11 +102,23 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
     }
   }
 
-  return NextResponse.json({
+  // Its GitHub twin's second pass, for the same defect: the loop visits only this round's
+  // grouping, so a merge request retitled onto another task leaves the old one linked for ever
+  // (BP-610).
+  const prsUnlinked = await pruneContradictedLinks({
+    projectId,
+    provider: "gitlab",
+    linkedThisRound: new Set(mrsByTask.keys()),
+    seenNumbers: new Set(rawMRs.map((raw) => raw.iid)),
+  });
+
+  const result: ApiRepositorySyncResult = {
     synced: true,
     prsFound: matchedMRs.length,
     tasksLinked: mrsByTask.size,
     prsLinked: linked,
+    prsUnlinked,
     autoTransitioned,
-  });
+  };
+  return NextResponse.json(result);
 });

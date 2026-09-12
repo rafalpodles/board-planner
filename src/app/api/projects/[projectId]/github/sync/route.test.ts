@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { replaceProviderLinks } from "@/lib/pr-links";
+import { removeProviderLinks, replaceProviderLinks } from "@/lib/pr-links";
 
 /**
  * BP-429. This route is unchanged by that ticket; the tests are what it was missing. Its
@@ -11,21 +11,29 @@ import { replaceProviderLinks } from "@/lib/pr-links";
 
 // Hoisted: `@/lib/pr-links` above reaches `@/models/task`, so the factory below runs before a
 // plain `const` in this scope is initialised (BP-559).
-const { fetchPullRequests, projectFindById, taskFindOne, taskUpdateOne, logActivity } = vi.hoisted(
-  () => ({
-    fetchPullRequests: vi.fn(),
-    projectFindById: vi.fn(),
-    taskFindOne: vi.fn(),
-    taskUpdateOne: vi.fn(),
-    logActivity: vi.fn(),
-  })
-);
+const {
+  fetchPullRequests,
+  projectFindById,
+  taskFind,
+  taskFindOne,
+  taskUpdateOne,
+  logActivity,
+} = vi.hoisted(() => ({
+  fetchPullRequests: vi.fn(),
+  projectFindById: vi.fn(),
+  taskFind: vi.fn(),
+  taskFindOne: vi.fn(),
+  taskUpdateOne: vi.fn(),
+  logActivity: vi.fn(),
+}));
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/encryption", () => ({ decryptSecret: (v: string) => `plain:${v}` }));
 vi.mock("@/lib/activity", () => ({ logActivity }));
 vi.mock("@/models/project", () => ({ Project: { findById: projectFindById } }));
-vi.mock("@/models/task", () => ({ Task: { findOne: taskFindOne, updateOne: taskUpdateOne } }));
+vi.mock("@/models/task", () => ({
+  Task: { find: taskFind, findOne: taskFindOne, updateOne: taskUpdateOne },
+}));
 vi.mock("@/lib/github", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/github")>()),
   fetchPullRequests,
@@ -83,6 +91,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   projectFindById.mockReturnValue({ lean: () => project() });
   taskFindOne.mockResolvedValue(task());
+  // BP-610's second pass. The default is a project where no other task holds a GitHub link, so
+  // every test above is about the round's own writes, as it was before.
+  taskFind.mockReturnValue({ lean: async () => [] });
   fetchPullRequests.mockResolvedValue([]);
 });
 
@@ -219,5 +230,67 @@ describe("POST .../github/sync", () => {
       "in_review",
       "ready_to_test"
     );
+  });
+
+  /**
+   * BP-610. Somebody retitles a pull request from `BP-5 …` to `BP-7 …` on a branch that carries no
+   * key. It leaves BP-5's group entirely, so the loop above never visits BP-5, and before the
+   * second pass its link survived every later sync — the same pull request on two cards for ever.
+   */
+  it("takes a retitled pull request off the task it no longer belongs to", async () => {
+    fetchPullRequests.mockResolvedValue([
+      { ...pr({ number: 1 }), title: "BP-7 moved here", head: { ref: "no-key-here" } },
+    ]);
+    taskFindOne.mockResolvedValue(task({ _id: "t7", taskNumber: 7 }));
+    taskFind.mockReturnValue({
+      lean: async () => [
+        { _id: "t5", taskNumber: 5, linkedPRs: [{ provider: "github", number: 1 }] },
+      ],
+    });
+
+    const body = await (await POST(request(), ctx())).json();
+
+    expect(body.prsUnlinked).toBe(1);
+    expect(taskUpdateOne).toHaveBeenCalledWith(
+      { _id: "t5" },
+      removeProviderLinks("github", [1]),
+      { updatePipeline: true, timestamps: false }
+    );
+  });
+
+  /**
+   * The half that matters more. GitHub is asked for the open pull requests plus the thirty most
+   * recently updated closed ones, so a task whose pull request merged last quarter is outside
+   * every fetch while being perfectly correct. "Clear every task not in this round's grouping"
+   * would delete it.
+   */
+  it("leaves a link alone when this round's fetch never mentioned it", async () => {
+    fetchPullRequests.mockResolvedValue([pr({ number: 1 })]);
+    taskFind.mockReturnValue({
+      lean: async () => [
+        { _id: "t9", taskNumber: 9, linkedPRs: [{ provider: "github", number: 4321 }] },
+      ],
+    });
+
+    const body = await (await POST(request(), ctx())).json();
+
+    expect(body.prsUnlinked).toBe(0);
+    // The control: the round did its own work, so the silence above is a decision rather than a
+    // sync that stopped early.
+    expect(body.prsLinked).toBe(1);
+    expect(taskUpdateOne).not.toHaveBeenCalledWith(
+      { _id: "t9" },
+      expect.anything(),
+      expect.anything()
+    );
+  });
+
+  it("does not reach the second pass when the fetch itself failed", async () => {
+    // Nothing may be removed on the strength of a round that never happened: the throw leaves the
+    // route before any write, and `taskFind` is the proof the sweep was not reached.
+    fetchPullRequests.mockRejectedValue(new Error("GitHub API 502"));
+
+    await expect(POST(request(), ctx())).rejects.toThrow("GitHub API 502");
+    expect(taskFind).not.toHaveBeenCalled();
   });
 });

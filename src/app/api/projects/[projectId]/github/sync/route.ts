@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { ApiRepositorySyncResult } from "@/types";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { Project } from "@/models/project";
@@ -8,7 +9,7 @@ import { logActivity } from "@/lib/activity";
 import { decryptSecret } from "@/lib/encryption";
 import { getProjectColumns } from "@/lib/columns";
 import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
-import { writeProviderLinks } from "@/lib/pr-links";
+import { pruneContradictedLinks, writeProviderLinks } from "@/lib/pr-links";
 
 export const POST = withProjectAccess(async (_request, { params, user }) => {
   const { projectId } = await params;
@@ -108,11 +109,24 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
     }
   }
 
-  return NextResponse.json({
+  // The loop above only ever visits the tasks this round matched, so a pull request that stops
+  // matching a task leaves that task out of the grouping and its link behind (BP-610). The numbers
+  // this round actually saw are the evidence for removing one — see `contradictedLinkNumbers` for
+  // why absence from them is not.
+  const prsUnlinked = await pruneContradictedLinks({
+    projectId,
+    provider: "github",
+    linkedThisRound: new Set(prsByTask.keys()),
+    seenNumbers: new Set(rawPRs.map((raw) => raw.number)),
+  });
+
+  const result: ApiRepositorySyncResult = {
     synced: true,
     prsFound: matchedPRs.length,
     tasksLinked: prsByTask.size,
     prsLinked: linked,
+    prsUnlinked,
     autoTransitioned,
-  });
+  };
+  return NextResponse.json(result);
 });
