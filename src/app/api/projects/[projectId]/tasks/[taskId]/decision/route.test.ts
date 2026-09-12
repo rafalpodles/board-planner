@@ -69,14 +69,19 @@ function call(body: unknown, asMachine = false) {
   };
 }
 
+/** What a route asked mongoose to project, off the query the mock handed it. */
+function selectedBy(find: typeof taskFindOne): unknown {
+  return find.mock.results[0].value.select.mock.calls[0][0];
+}
+
 function taskWith(value: unknown) {
   const answer = value === null ? null : { taskNumber: 158, decision: value };
   taskFindOne.mockReturnValue({
-    select: () => ({
+    select: vi.fn(() => ({
       // The verdict route awaits the select; the GET chains a populate onto it
       then: (resolve: (v: unknown) => unknown) => Promise.resolve(answer).then(resolve),
       populate: async () => answer,
-    }),
+    })),
   });
 }
 
@@ -272,12 +277,25 @@ describe("the audit row", () => {
  * exactly as long as the machine never settles.
  */
 describe("reading what is waiting", () => {
-  it("does not read the patch", async () => {
+  /**
+   * Named field by field, and `not.toContain("+decision.patch")` is NOT enough to pin that: a bare
+   * `.select("decision")` is a parent INCLUSION — mongoose sends `{decision: 1}`, which overrides
+   * the `select: false` on the subfields and brings the whole patch with it — and it contains no
+   * `+decision.patch` either. So the projection is read for what it names.
+   */
+  it("names the fields it wants, rather than the subdocument that holds them", async () => {
     const { req, ctx } = call({});
     await GET(req, ctx);
 
-    const selected = taskFindOne.mock.results[0].value.select.mock?.calls?.[0]?.[0];
-    expect(String(selected ?? "decision")).not.toContain("+decision.patch");
+    const selected = String(selectedBy(taskFindOne));
+    const named = selected.split(/\s+/).filter(Boolean);
+
+    expect(named).not.toContain("decision");
+    expect(named).not.toContain("+decision.patch");
+    // The fields the panel actually renders, so the projection cannot be narrowed into uselessness
+    for (const field of ["state", "gate", "commit", "prUrl", "error", "acceptable", "files"]) {
+      expect(named).toContain(`decision.${field}`);
+    }
   });
 
   it("answers null for a task with nothing waiting on it", async () => {
