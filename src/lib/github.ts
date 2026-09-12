@@ -7,7 +7,7 @@ import { MAX_RESPONSE_BYTES, readBoundedJson, readBoundedText, safeFetch } from 
  *
  * It was not needed while the host was the literal `api.github.com`, and making that injectable is
  * what removed the reason: an operator with a typo, or a corporate proxy, now decides where a
- * project's token is sent. The loopback carve-out is the one `mcp-client.ts` already makes, on the
+ * project's token is sent. The loopback carve-out is the one `pm/mcp-client.ts` already makes, on the
  * same condition — it is what lets `e2e/github-stub.mjs` be reachable at all, and production
  * refuses it.
  */
@@ -424,8 +424,9 @@ export async function withChecks(
 
   // An open pull request nobody asked about — past the cap, or with no head commit to ask about —
   // is `unknown` rather than `none`: nobody looked, which is not the same as nothing having run.
-  // `carryForward` in github-sync.ts keeps a previous answer where there is one, so this reaches
-  // the screen only for a pull request that has never been asked about.
+  // `carryForward` in github-sync.ts keeps a previous outcome where there is one, so this reaches
+  // the screen for a pull request nobody has asked about yet — and for one whose head has moved
+  // since, because an answer about the old commit is not an answer about this one.
   return prs.map((pr) => ({
     ...pr,
     ...(checks.get(pr) ?? {

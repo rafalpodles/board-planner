@@ -73,7 +73,7 @@ describe("where a project's token may be sent", () => {
   });
 
   /**
-   * The carve-out `mcp-client.ts` already makes on the same condition, and the reason the suite's
+   * The carve-out `pm/mcp-client.ts` already makes on the same condition, and the reason the suite's
    * own GitHub is reachable at all: a stub on this machine is a private address by definition.
    *
    * Two assertions, because one was a mirror. The version that stood here compared the constant to

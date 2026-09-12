@@ -79,16 +79,26 @@ function carryForward(
 }
 
 /**
- * The states worth keeping when this sync could not ask: the ones that were finished when we last
- * looked.
+ * The states worth keeping when this sync could not ask: the outcomes that were **finished** when we
+ * last looked.
  *
- * `running` is deliberately not among them. A pull request past the cap is never asked about again,
- * and GitHub does not touch a pull request's `updated_at` when a check run finishes — checks hang
- * off the commit — so a carried `running` would pulse "e2e running" for ever on a branch whose
- * build ended an hour ago. Degrading it to `unknown` says the true thing: we looked once, it was
- * running, and we have not looked since.
+ * What a carried `success` or `failure` means, precisely, because a badge otherwise reads as a
+ * claim about now: it is the **last observed outcome**, not the current one. A re-run, a required
+ * check added later, or an external service posting a status after the fact all change the truth at
+ * an unmoved commit, and none of them bump a pull request's `updated_at` — so a cap-starved link
+ * can hold one of these past its date. They are kept anyway because they were observed to
+ * completion and `unknown` is strictly less informative, and because `failure` is stale in the safe
+ * direction: it never invents a pass.
+ *
+ * Neither `running` nor `none` is among them, for one argument twice over. A pull request past the
+ * cap is never asked about again, and GitHub does not touch `updated_at` when a check run finishes,
+ * so a carried `running` would pulse "e2e running" for ever on a branch whose build ended an hour
+ * ago. A carried `none` is worse in the way that matters for triage: it is byte-identical to a pull
+ * request that genuinely has no CI, so the badge reads a plain "open" and nothing on screen
+ * suggests anybody should look again — a build that started after the first sync and failed would
+ * be invisible for ever. `none` is a claim; `unknown` is an absence, and an absence is all we have.
  */
-const CARRYABLE = new Set<CiState>(["success", "failure", "none"]);
+const CARRYABLE = new Set<CiState>(["success", "failure"]);
 
 /**
  * Everything a sync can change about one link.

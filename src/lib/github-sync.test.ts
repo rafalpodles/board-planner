@@ -220,9 +220,9 @@ describe("an answer this sync could not get", () => {
     expect(linkWritten()[0]).toMatchObject({ ci: "unknown", ciLabel: null });
   });
 
-  // The finished ones are kept, which is the whole point of carrying anything forward
-  it("keeps the states that were finished when we last looked", async () => {
-    for (const ci of ["success", "failure", "none"]) {
+  // The observed outcomes are kept, which is the whole point of carrying anything forward
+  it("keeps the outcomes that had finished when we last looked", async () => {
+    for (const ci of ["success", "failure"]) {
       vi.clearAllMocks();
       taskUpdateOne.mockResolvedValue({ modifiedCount: 1 });
       githubRefusesChecks();
@@ -237,6 +237,26 @@ describe("an answer this sync could not get", () => {
 
       expect(linkWritten()[0], ci).toMatchObject({ ci });
     }
+  });
+
+  /**
+   * `none` is not an outcome, it is the absence of one — and carried, it is byte-identical to a
+   * pull request that genuinely has no CI. A build that started after the first sync and then
+   * failed would read as a plain "open" badge for ever, with nothing on screen to suggest looking
+   * again, and `unchanged` would make that stable as well as wrong. The docstring above the set
+   * said "finished" while the set said otherwise.
+   */
+  it("does not carry 'nothing had started yet' forward as if it were news", async () => {
+    taskFindOne.mockResolvedValue({
+      _id: "t1",
+      taskNumber: 5,
+      status: "todo",
+      linkedPRs: [{ provider: "github", number: 1, ci: "none", ciLabel: null, headSha: "abc123" }],
+    });
+
+    await syncGithubPullRequests(project(), "u1");
+
+    expect(linkWritten()[0]).toMatchObject({ ci: "unknown" });
   });
 
   it("says unknown when there was never an answer to keep", async () => {

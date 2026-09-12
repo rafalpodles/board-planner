@@ -253,7 +253,11 @@ export function TaskCard({
                 .join(", ")}
               className="text-[11px] px-1.5 py-0.5 text-text-muted"
             >
-              +{task.linkedPRs.length - MAX_CARD_BADGES}
+              <span aria-hidden>+{task.linkedPRs.length - MAX_CARD_BADGES}</span>
+              {/* "+2" alone is a number to a screen reader; the tooltip beside it is not read */}
+              <span className="sr-only">
+                and {task.linkedPRs.length - MAX_CARD_BADGES} more pull requests
+              </span>
             </span>
           )}
         </div>
