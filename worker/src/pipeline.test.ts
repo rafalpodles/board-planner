@@ -1802,7 +1802,7 @@ describe("what a machine fault is recorded as", () => {
     return { disposition, record, emitted: outcomes().at(-1), reporter: h.reporter };
   }
 
-  it("records a step the machine could not run as faulted, not released", async () => {
+  it("records a step the machine could not run as a machine fault, not a release", async () => {
     const execute = vi
       .fn<Executor["execute"]>()
       .mockResolvedValue({ kind: "machine_fault", message: "this machine has no sandbox" });
@@ -1819,7 +1819,7 @@ describe("what a machine fault is recorded as", () => {
     expect(settled.reporter.released).toHaveBeenCalled();
   });
 
-  it("records a gate the machine could not run as faulted", async () => {
+  it("records a gate the machine could not run as a machine fault", async () => {
     const settled = await settledBy({
       gateFor: () => ({
         name: "review",
@@ -1875,17 +1875,22 @@ describe("what a machine fault is recorded as", () => {
         }),
       }),
     });
-    expect(gate.record).toMatchObject({ detail: expect.stringContaining("ENOENT") });
+    // The whole sentence, not a substring of it: `stringContaining("ENOENT")` is equally happy with
+    // `settle("machineFault", verdict.reason)`, which keeps the reason and loses which gate it was
+    // (found in review).
+    expect(gate.record).toMatchObject({
+      detail: "the review gate could not run: cannot confine the agent to /wt: ENOENT",
+    });
 
     const { h } = watchedOutcomes();
     h.workspace.create.mockRejectedValue(new BaseUnavailableError("no route to host"));
     await runTask(h.deps, task);
     expect(h.recordRun.mock.calls.at(-1)![1]).toMatchObject({
-      detail: expect.stringContaining("no route to host"),
+      detail: "no route to host",
     });
   });
 
-  it("records an unreachable base branch as faulted", async () => {
+  it("records an unreachable base branch as a machine fault", async () => {
     const { h, outcomes } = watchedOutcomes();
     h.workspace.create.mockRejectedValue(new BaseUnavailableError("no route to host"));
 
@@ -1895,7 +1900,7 @@ describe("what a machine fault is recorded as", () => {
     expect(outcomes().at(-1)).toMatchObject({ outcome: "machineFault" });
   });
 
-  it("records a checkout whose git config cannot be trusted as faulted", async () => {
+  it("records a checkout whose git config cannot be trusted as a machine fault", async () => {
     const { h, outcomes } = watchedOutcomes();
     h.workspace.create.mockRejectedValue(new PoisonedCheckoutError("core.hooksPath=/tmp/x"));
 

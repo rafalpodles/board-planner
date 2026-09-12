@@ -62,7 +62,7 @@ import Testing
     let request = notification(
         for: .outcome(Outcome(outcome: "machineFault", taskKey: "CP-1", detail: "no sandbox here")))
 
-    #expect(request?.title == "This machine couldn't run the work")
+    #expect(request?.title == "This machine couldn't run the last task")
     #expect(request?.body.contains("CP-1") == true)
     #expect(request?.body.contains("no sandbox here") == true)
 }
@@ -72,7 +72,7 @@ import Testing
     let request = notification(for: .outcome(Outcome(outcome: "machineFault", taskKey: "CP-1")))
 
     #expect(request != nil)
-    #expect(request?.body.contains("the reason is on the board") == true)
+    #expect(request?.body.contains("The reason is on the board") == true)
 }
 
 // With autoMerge off, "delivered" is what a successful run ends as — and the operator has to act
@@ -181,6 +181,35 @@ private func gateFault(_ taskKey: String) -> TelemetryEvent {
     #expect(streak.admit(recurring) != nil)
 }
 
+/**
+ * The six tests above drive `FaultStreak` as a value; nothing drove the object the app holds, so
+ * reverting the Notifier to ask `notification(for:)` instead left every one of them green (found in
+ * review). This closes that for the decision. It does not close `handle`'s own call to it — that
+ * line ends at UNUserNotificationCenter and no test here reaches it.
+ */
+@MainActor
+@Test func theNotifierItselfDedupesRatherThanJustOwningSomethingThatCould() {
+    let recurring = gateFault("CP-1")
+    Notifier.shared.forgetTheWorker()
+
+    #expect(Notifier.shared.request(for: recurring) != nil)
+    #expect(Notifier.shared.request(for: recurring) == nil)
+    Notifier.shared.forgetTheWorker()
+    #expect(Notifier.shared.request(for: recurring) != nil)
+    Notifier.shared.forgetTheWorker()
+}
+
+// The operator has to read the consequence before the reason: a banner is cut after a couple of
+// lines and the reason can be 200 characters of git's stderr.
+@Test func theFaultBodySaysWhatHappenedBeforeItSaysWhy() {
+    let request = notification(for: gateFault("CP-1"))
+    let body = try! #require(request?.body)
+
+    let stopped = try! #require(body.range(of: "claiming has stopped"))
+    let why = try! #require(body.range(of: "cannot confine"))
+    #expect(stopped.lowerBound < why.lowerBound)
+}
+
 @Test func progressBetweenTwoFaultsDoesNotMakeTheSecondNews() {
     var streak = FaultStreak()
     let recurring = gateFault("CP-1")
@@ -219,7 +248,15 @@ private func gateFault(_ taskKey: String) -> TelemetryEvent {
         .deletingLastPathComponent()
     let root = menubar.deletingLastPathComponent()
 
-    func read(_ url: URL) throws -> String { try String(contentsOf: url, encoding: .utf8) }
+    // Comments stripped, on both sides. Without it this test was fooled by the one edit it exists
+    // to catch: a rename arrives with `// was "machineFault", now:` above it, the old word is still
+    // in the window, and `contains` is satisfied by the explanation for its own removal (found in
+    // review — the same hole catalog-contract.test.ts had one package over).
+    func read(_ url: URL) throws -> String {
+        try String(contentsOf: url, encoding: .utf8)
+            .replacingOccurrences(of: #"/\*[\s\S]*?\*/"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"(?m)//.*$"#, with: "", options: .regularExpression)
+    }
 
     let notifier = try read(menubar.appendingPathComponent("Sources/CPMenubarCore/Notifier.swift"))
     let state = try read(menubar.appendingPathComponent("Sources/CPMenubarCore/WorkerState.swift"))

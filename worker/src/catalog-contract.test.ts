@@ -14,7 +14,17 @@ import { join } from "node:path";
 const APP_SRC = join(import.meta.dirname, "..", "..", "src");
 
 function source(...parts: string[]): string {
-  return readFileSync(join(APP_SRC, ...parts), "utf8");
+  return withoutComments(readFileSync(join(APP_SRC, ...parts), "utf8"));
+}
+
+/**
+ * Both lists are read out of source text, and a comment in either is prose that looks exactly like
+ * the thing being matched. On the server's side a commented-out value still named in quotes read as
+ * one the server accepts, hiding its own removal; on the worker's, a comment naming a superseded
+ * mapping read as an extra outcome and failed the test for nothing. Both measured (found in review).
+ */
+function withoutComments(text: string): string {
+  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
 }
 
 function keysOf(list: string, pattern: RegExp): string[] {
@@ -36,20 +46,16 @@ describe("the gate kinds the catalog offers", () => {
 
 describe("the outcomes the server records", () => {
   it("are exactly the ones the worker maps its own onto", () => {
-    // Comments stripped first, both shapes: the assertion is containment, so any double-quoted
-    // word inside a comment in the array would silently become an outcome the server "accepts" —
-    // and the value dropped beside it would still pass. The array carries a comment as of BP-609
-    // (found in review).
-    const types = source("types", "index.ts")
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .replace(/\/\/.*$/gm, "");
+    const types = source("types", "index.ts");
     const block = types.slice(types.indexOf("AGENT_RUN_OUTCOMES = ["));
     // `[a-zA-Z]`, not `[a-z]`: a camelCase outcome on either side was invisible to this test, so
     // the one shape a drift is most likely to take — a name copied from the worker's own
     // vocabulary — was the shape it could not see.
     const accepted = keysOf(block.slice(0, block.indexOf("]")), /"([a-zA-Z]+)"/g);
 
-    const record = readFileSync(join(import.meta.dirname, "run-record.ts"), "utf8");
+    const record = withoutComments(
+      readFileSync(join(import.meta.dirname, "run-record.ts"), "utf8")
+    );
     const mapping = record.slice(record.indexOf("OUTCOMES: Record"));
     const sent = keysOf(mapping.slice(0, mapping.indexOf("};")), /: "([a-zA-Z]+)",/g);
 

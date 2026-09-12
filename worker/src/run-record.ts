@@ -14,6 +14,14 @@ const OUTCOMES: Record<OutcomeKind, string> = {
   machineFault: "machineFault",
 };
 
+/**
+ * What the server stores. Cut here as well as there, because it cuts after reading the body: a
+ * failed fetch puts the whole of git's stderr in the detail, and this record goes to the outbox,
+ * which retries it. The number is the server's own (`runs/route.ts`), so nothing is lost that the
+ * board would have kept.
+ */
+const MAX_DETAIL_CHARS = 2000;
+
 export interface RunRecord {
   taskId: string;
   taskKey: string;
@@ -48,8 +56,8 @@ export function recordFor(
     agentId: task.agent.agentId,
     agentName: task.agent.name,
     outcome: OUTCOMES[kind] ?? "failed",
-    refusedBy: refused ? detail : "",
-    detail: refused ? "" : detail,
+    refusedBy: refused ? detail.slice(0, MAX_DETAIL_CHARS) : "",
+    detail: refused ? "" : detail.slice(0, MAX_DETAIL_CHARS),
     startedAt: new Date(startedAt).toISOString(),
     finishedAt: new Date(finishedAt).toISOString(),
     costUsd,

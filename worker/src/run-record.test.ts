@@ -79,6 +79,15 @@ describe("recordFor", () => {
     expect(recordFor(task, "released", "usage limit reached", 0, 1, 0).outcome).toBe("released");
   });
 
+  // A failed fetch puts the whole of git's stderr in the detail, and this record is retried from
+  // the outbox. The server cuts at the same number after reading the body, so the only thing this
+  // changes is how many bytes cross the wire to be thrown away (found in review).
+  it("cuts the detail where the server would, rather than sending it all to be cut there", () => {
+    const record = recordFor(task, "machineFault", "x".repeat(5000), 0, 1, 0);
+
+    expect(record.detail).toHaveLength(2000);
+  });
+
   it("sends the times as instants the server can parse", () => {
     const record = recordFor(task, "merged", "", 1_700_000_000_000, 1_700_000_060_000, 0.25);
 

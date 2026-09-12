@@ -48,8 +48,13 @@ public func notification(for event: TelemetryEvent) -> NotificationRequest? {
         // withdraw.
         case "machineFault":
             return NotificationRequest(
-                title: "This machine couldn't run the work",
-                body: "\(outcome.taskKey) went back to the queue: \(outcome.detail ?? "the reason is on the board"). Claiming has stopped for this cycle.")
+                // The same sentence the panel shows for .faulted — two wordings for one state is
+                // two states as far as the operator is concerned.
+                title: "This machine couldn't run the last task",
+                // What happened first, the reason last. sandbox.ts:59 keeps the same rule and says
+                // why: a banner is cut after a couple of lines, so whatever is at the end is what
+                // nobody reads — and the reason here can be 200 characters of git's own stderr.
+                body: "\(outcome.taskKey) went back to the queue and claiming has stopped for this cycle. \(outcome.detail ?? "The reason is on the board.")")
         default:
             return nil
         }
@@ -121,9 +126,18 @@ public final class Notifier: Sendable {
         Notifier.faults.disconnected()
     }
 
+    /// What this event would raise, dedupe applied — the whole decision, on the object the app
+    /// holds, so a test can drive it without a signed bundle. `handle` below is then one line of
+    /// delivery and one call to this; the call is not covered by anything, because reaching it
+    /// means reaching UNUserNotificationCenter.
+    @MainActor
+    public func request(for event: TelemetryEvent) -> NotificationRequest? {
+        Notifier.faults.admit(event)
+    }
+
     @MainActor
     public func handle(_ event: TelemetryEvent) {
-        guard let request = Notifier.faults.admit(event) else { return }
+        guard let request = request(for: event) else { return }
         let content = UNMutableNotificationContent()
         content.title = request.title
         content.body = request.body
