@@ -8,10 +8,13 @@ import { sanitizeProjectSecrets } from "@/lib/project-secrets";
 import { parseWebhookUrl, parseWebhookEvents } from "@/lib/webhook-input";
 import { encryptSecret, isEncryptedSecret, isEncryptionConfigured } from "@/lib/encryption";
 
-const NO_KEY = NextResponse.json(
-  { error: "This instance cannot store a webhook URL: ENCRYPTION_KEY is not set" },
-  { status: 503 }
-);
+// Built per call: a Response's body is a one-shot stream, so one shared instance answers the
+// second caller with no body at all and two concurrent ones with a locked stream.
+const noKey = () =>
+  NextResponse.json(
+    { error: "This instance cannot store a webhook URL: ENCRYPTION_KEY is not set" },
+    { status: 503 }
+  );
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function masked(project: any) {
@@ -60,7 +63,7 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
     );
   }
 
-  if (!isEncryptionConfigured()) return NO_KEY;
+  if (!isEncryptionConfigured()) return noKey();
 
   const project = await Project.findById(projectId);
   if (!project) {
@@ -115,7 +118,7 @@ export const PUT = withProjectOwner(async (request, { params }) => {
     if (!parsedUrl) {
       return NextResponse.json({ error: "A valid webhook URL is required" }, { status: 400 });
     }
-    if (!isEncryptionConfigured()) return NO_KEY;
+    if (!isEncryptionConfigured()) return noKey();
     channel.webhookUrl = encryptSecret(parsedUrl);
   } else if (!isEncryptedSecret(channel.webhookUrl) && isEncryptionConfigured()) {
     // Rows written before BP-372 hold the URL in the clear. Any save on the channel carries them

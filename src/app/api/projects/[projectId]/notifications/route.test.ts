@@ -111,6 +111,23 @@ describe("PUT /api/projects/:projectId/notifications", () => {
     expect(save).not.toHaveBeenCalled();
   });
 
+  // A single module-level NextResponse carries a one-shot ReadableStream: returning it twice
+  // leaves the second caller a 503 with no body, and two at once lock the stream into a 500
+  it("says why it refused on every request, not only the first", async () => {
+    delete process.env.ENCRYPTION_KEY;
+    const ask = () =>
+      PUT(request("PUT", { channelId: "c1", webhookUrl: "https://hooks.slack.com/b" }), ctx());
+
+    const first = await ask();
+    const second = await ask();
+    const [third, fourth] = await Promise.all([ask(), ask()]);
+
+    for (const res of [first, second, third, fourth]) {
+      expect(res.status).toBe(503);
+      await expect(res.json()).resolves.toMatchObject({ error: expect.stringContaining("ENCRYPTION_KEY") });
+    }
+  });
+
   // A row written before BP-372 holds the URL in the clear; any save carries it over
   it("upgrades a plaintext URL when some other field is edited", async () => {
     const res = await PUT(request("PUT", { channelId: "c1", name: "Ops" }), ctx());

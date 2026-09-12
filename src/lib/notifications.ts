@@ -219,8 +219,11 @@ export async function dispatchNotifications(
         webhookUrl = decryptSecret(channel.webhookUrl);
       } catch {
         // A rotation that lost the old key leaves an unreadable value; posting the ciphertext at
-        // some URL is the only worse answer than saying nothing.
-        console.error("Project chat webhook could not be decrypted");
+        // some URL is the only worse answer than saying nothing. Named, because a channel that
+        // silently stops delivering is otherwise indistinguishable from a board with nothing to say.
+        console.error(
+          `Project chat webhook could not be decrypted: project ${projectId}, channel "${channel.name}"`
+        );
         continue;
       }
       if (!isAllowedWebhookUrl(webhookUrl)) continue;
