@@ -145,10 +145,11 @@ test("accepting says what it spends, and the record carries the verdict afterwar
   // The first draft of this design claimed nothing executes until somebody merges. It is false
   // here: CI is `on: push` with no branch filter, so the push alone is the trigger.
   await expect(dialog).toContainText("runs this repository's CI");
-  // And whose name it spends, which is the other half of what accepting costs — the MACHINE
-  // OWNER's pinned account, not the reader's, because an instance admin may be answering for a
-  // machine that is not theirs
-  await expect(dialog).toContainText(`${WORKER_NAME}'s pinned GitHub identity`);
+  // And whose account it spends, which is the other half of what accepting costs. A machine name
+  // alone answers WHICH token while hiding WHOSE — an instance admin may be answering for a
+  // machine that is not theirs.
+  await expect(dialog).toContainText(`pinned to ${WORKER_NAME}`);
+  await expect(dialog).toContainText("not necessarily yours");
 
   const answered = page.waitForResponse(
     (response) =>
