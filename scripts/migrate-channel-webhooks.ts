@@ -61,7 +61,10 @@ async function main() {
   let migrated = 0;
   let alreadyEncrypted = 0;
   const projectsTouched = new Set<string>();
-  const missed: string[] = [];
+  // Two lists, because they ask different things of the reader: one wants a decision, the other
+  // is a note. Under one heading an operator reading forty lines cannot tell which is which.
+  const needsAttention: string[] = [];
+  const nothingToDo: string[] = [];
 
   for (const project of projects) {
     const name = project.key || String(project._id);
@@ -69,7 +72,7 @@ async function main() {
     for (const channel of project.notificationChannels || []) {
       const url = channel.webhookUrl;
       if (!url) {
-        missed.push(`${name}: ${label(channel)} stores no URL`);
+        nothingToDo.push(`${name}: ${label(channel)} stores no URL`);
         continue;
       }
       if (isEncryptedSecret(url)) {
@@ -77,7 +80,7 @@ async function main() {
         continue;
       }
       if (!channel._id) {
-        missed.push(`${name}: ${label(channel)} has no _id, so it cannot be addressed`);
+        needsAttention.push(`${name}: ${label(channel)} has no _id, so it cannot be addressed`);
         continue;
       }
 
@@ -92,7 +95,9 @@ async function main() {
           { arrayFilters: [{ "c._id": channel._id, "c.webhookUrl": url }] }
         );
         if (result.modifiedCount === 0) {
-          missed.push(`${name}: ${label(channel)} changed underneath this run — re-run to catch it`);
+          needsAttention.push(
+            `${name}: ${label(channel)} changed underneath this run — re-run to catch it`
+          );
           continue;
         }
       }
@@ -105,9 +110,13 @@ async function main() {
     `\n${dryRun ? "Would encrypt" : "Encrypted"} ${migrated} channel URL(s) across ` +
       `${projectsTouched.size} project(s); ${alreadyEncrypted} were already encrypted.`
   );
-  if (missed.length) {
-    console.log(`\n${missed.length} channel(s) were left alone:`);
-    for (const line of missed) console.log(`  ${line}`);
+  if (needsAttention.length) {
+    console.log(`\n${needsAttention.length} channel(s) still hold a plaintext URL — act on these:`);
+    for (const line of needsAttention) console.log(`  ${line}`);
+  }
+  if (nothingToDo.length) {
+    console.log(`\n${nothingToDo.length} channel(s) had nothing to encrypt:`);
+    for (const line of nothingToDo) console.log(`  ${line}`);
   }
   if (migrated > 0) {
     console.log("Rotate these webhooks in Slack or Discord: the old URLs are still in your backups.");
