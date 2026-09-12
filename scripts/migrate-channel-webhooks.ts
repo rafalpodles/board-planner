@@ -5,9 +5,13 @@
  *   MONGODB_URI=... ENCRYPTION_KEY=... npx tsx scripts/migrate-channel-webhooks.ts --dry-run
  *   MONGODB_URI=... ENCRYPTION_KEY=... npx tsx scripts/migrate-channel-webhooks.ts
  *
- * Safe to re-run: a channel whose URL already carries an `enc:` envelope is left alone. The app
- * reads an unprefixed value as plaintext, so an unmigrated database keeps delivering and this is a
- * cleanup rather than a prerequisite — the deploy and this script can happen in either order.
+ * RUN IT AFTER THE DEPLOY, never before. Reading plaintext exists only in the new code; the old
+ * code hands the stored string straight to `isAllowedWebhookUrl`, which refuses an `enc:v2:…`
+ * envelope for having no `https:` scheme — silently, and for every channel at once. An unmigrated
+ * database on the new code keeps delivering, so the deploy does not wait for this. The reverse
+ * is not true.
+ *
+ * Safe to re-run: a channel whose URL already carries an `enc:` envelope is left alone.
  *
  * It does not un-leak anything. A URL that was stored in cleartext is in the oplog and in every
  * backup taken since, so rotating the webhook in Slack or Discord is the only thing that ends its
@@ -20,7 +24,10 @@ import { resolveUri, dbName } from "./mongo-uri";
 
 const dryRun = process.argv.includes("--dry-run");
 
+const label = (channel: { name?: string }) => channel.name || "(unnamed)";
+
 interface StoredChannel {
+  _id?: mongoose.Types.ObjectId;
   name?: string;
   webhookUrl?: string;
 }
@@ -49,38 +56,55 @@ async function main() {
 
   let migrated = 0;
   let alreadyEncrypted = 0;
-  const projectsTouched: string[] = [];
+  const projectsTouched = new Set<string>();
+  const missed: string[] = [];
 
   for (const project of projects) {
     const name = project.key || String(project._id);
-    const channels = project.notificationChannels || [];
-    let changedHere = 0;
 
-    const rewritten = channels.map((channel) => {
+    for (const channel of project.notificationChannels || []) {
       const url = channel.webhookUrl;
-      if (!url || isEncryptedSecret(url)) {
-        if (url) alreadyEncrypted++;
-        return channel;
+      if (!url) {
+        missed.push(`${name}: ${label(channel)} stores no URL`);
+        continue;
       }
-      changedHere++;
-      console.log(`${name}: ${channel.name || "(unnamed)"}${dryRun ? " (dry run)" : ""}`);
-      return { ...channel, webhookUrl: encryptSecret(url) };
-    });
+      if (isEncryptedSecret(url)) {
+        alreadyEncrypted++;
+        continue;
+      }
+      if (!channel._id) {
+        missed.push(`${name}: ${label(channel)} has no _id, so it cannot be addressed`);
+        continue;
+      }
 
-    if (changedHere === 0) continue;
-    migrated += changedHere;
-    projectsTouched.push(name);
-    if (!dryRun) {
-      await db
-        .collection("projects")
-        .updateOne({ _id: project._id }, { $set: { notificationChannels: rewritten } });
+      console.log(`${name}: ${label(channel)}${dryRun ? " (dry run)" : ""}`);
+      if (!dryRun) {
+        // One channel at a time, addressed by its own _id. Rewriting the whole array from a
+        // snapshot taken at startup would undo anything an operator changed while this ran —
+        // including a webhook rotated in response to this script's own closing advice.
+        const result = await db.collection("projects").updateOne(
+          { _id: project._id },
+          { $set: { "notificationChannels.$[c].webhookUrl": encryptSecret(url) } },
+          { arrayFilters: [{ "c._id": channel._id, "c.webhookUrl": url }] }
+        );
+        if (result.modifiedCount === 0) {
+          missed.push(`${name}: ${label(channel)} changed underneath this run — re-run to catch it`);
+          continue;
+        }
+      }
+      migrated++;
+      projectsTouched.add(name);
     }
   }
 
   console.log(
     `\n${dryRun ? "Would encrypt" : "Encrypted"} ${migrated} channel URL(s) across ` +
-      `${projectsTouched.length} project(s); ${alreadyEncrypted} were already encrypted.`
+      `${projectsTouched.size} project(s); ${alreadyEncrypted} were already encrypted.`
   );
+  if (missed.length) {
+    console.log(`\n${missed.length} channel(s) were left alone:`);
+    for (const line of missed) console.log(`  ${line}`);
+  }
   if (migrated > 0) {
     console.log("Rotate these webhooks in Slack or Discord: the old URLs are still in your backups.");
   }
