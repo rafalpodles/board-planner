@@ -121,12 +121,16 @@ export interface StoredProviderLink {
  * correct data permanently and the links are outside the window for ever.
  *
  * **Repointing** is not "uncovered" so much as swept by coincidence, which is worth saying out
- * loud: the new repository's numbering starts again, so each time it mints a number a task from
- * the old repository already holds, that task's link is contradicted and goes. They are stale by
- * this ticket's own definition, so the removals are right — but which ones go, and when, is
- * decided by how far an unrelated counter has run. Expect a count with nothing behind it: weeks
- * after a repoint, with nothing touched at the provider, a sync reports links removed. That is
- * this, not a bug to chase.
+ * loud. The two repositories have two counters, and a link goes only where they overlap *inside
+ * the window*: the new repository has to mint a number a task from the old one already holds, and
+ * somebody has to sync while that number is still among the hundred-odd the fetch returns. Point
+ * a project at a busy repository whose counter is already in the thousands and the old
+ * repository's low numbers are never reached at all. So it is not only which links go and when,
+ * but whether. The ones that do go are stale by this ticket's own definition, so those removals
+ * are right.
+ *
+ * Expect, then, a count with nothing behind it: weeks after a repoint, with nothing touched at
+ * the provider, a sync reports links removed. That is this, not a bug to chase.
  *
  * And it is why a number is safe to compare where a URL was not. A number is only ever compared
  * inside one counter, and a repository renamed or transferred keeps its pull request numbers — so
@@ -170,10 +174,13 @@ export function contradictedLinkNumbers(
  * ones `contradictedLinkNumbers` can show are no longer this task's. A task with nothing
  * contradicted is not written at all.
  *
- * `linkedThisRound` is the set of task numbers the round **matched**, not the set it wrote. The
- * two look interchangeable and are not: a task whose links the round left alone because they were
- * already right still holds numbers the fetch returned, so sourcing this from what was written
- * would sweep exactly the links that are correct, on every run.
+ * `linkedThisRound` is the set of task numbers the round **matched**, not the set it wrote. Today
+ * the two differ only by `if (!task) continue` — a task number with no document, which cannot be
+ * swept because it cannot be a holder — so either would do. It is sourced from the matched set so
+ * that it stays right if the loop ever grows a skip: a short-circuit for links that are already
+ * correct, or a `continue` past a task whose write failed. Either hands the prune a task whose own
+ * numbers are in `seenNumbers`, and it would then remove exactly the links that are correct. The
+ * skip does not exist yet; this is the warning for whoever adds it, not a guard against one.
  *
  * The read is one query per sync over every task in the project that holds a link of this
  * provider — `project_1_taskNumber_1` bounds it to the project, and nothing indexes `linkedPRs`,
