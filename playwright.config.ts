@@ -37,6 +37,10 @@ export const WEBHOOK_RECEIVER_URL = `http://127.0.0.1:${WEBHOOK_RECEIVER_PORT}`;
 const SMTP_STUB_PORT = Number(process.env.SMTP_STUB_PORT ?? PORT + 7);
 const SMTP_STUB_CONTROL_PORT = Number(process.env.SMTP_STUB_CONTROL_PORT ?? PORT + 8);
 export const SMTP_STUB_CONTROL_URL = `http://127.0.0.1:${SMTP_STUB_CONTROL_PORT}`;
+// What the app is told its mail server is. Exported so a spec can assert the configured
+// branch of the mail screen against it, rather than reading an env var the runner
+// process does not have — the value is set on the dev server below, not on this one.
+export const SMTP_STUB_HOST = "127.0.0.1";
 
 // MongoDB, through a proxy the suite can cut (e2e/mongo-proxy.mjs). The dev server is pointed at
 // the proxy rather than at the database, so a test can take the database away and give it back
@@ -218,7 +222,7 @@ export default defineConfig({
         WEBHOOK_SIGNING_SECRET: WEBHOOK_SECRET,
         // The mail server above. `isEmailConfigured()` wants all three, and without them the whole
         // e-mail column of the notification grid is unreachable from a browser (BP-465).
-        SMTP_HOST: "127.0.0.1",
+        SMTP_HOST: SMTP_STUB_HOST,
         SMTP_PORT: String(SMTP_STUB_PORT),
         SMTP_USER: "e2e",
         SMTP_PASS: "e2e",
