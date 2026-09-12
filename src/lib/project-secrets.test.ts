@@ -111,18 +111,28 @@ describe("sanitizeProjectSecrets", () => {
   // Naming the row in the log is the only thing that makes a lost key actionable.
   it("falls back to a bare mask when no configured key can read the stored URL, and says which row", () => {
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const unreadable = () =>
+      sanitizeProjectSecrets({
+        key: "BP",
+        notificationChannels: [
+          { _id: "c1", name: "Unreadable row", webhookUrl: "enc:v2:deadbeef:Zm9v", enabled: true },
+        ],
+      });
 
-    const sanitized = sanitizeProjectSecrets({
-      key: "BP",
-      notificationChannels: [
-        { _id: "c1", name: "Releases", webhookUrl: "enc:v2:deadbeef:Zm9v", enabled: true },
-      ],
-    });
+    const sanitized = unreadable();
 
     const channel = (sanitized.notificationChannels as Record<string, unknown>[])[0];
     expect(channel.webhookUrlMasked).toBe("••••");
     expect(logged).toHaveBeenCalledWith(expect.stringContaining("BP"));
-    expect(logged).toHaveBeenCalledWith(expect.stringContaining("Releases"));
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining("Unreadable row"));
+
+    // The board polls a project every 10 seconds per open tab and the sidebar maps this over the
+    // whole list, so the row is reported once per process rather than once per read — a key that
+    // is never coming back would otherwise bill for a log line for ever.
+    logged.mockClear();
+    unreadable();
+    unreadable();
+    expect(logged).not.toHaveBeenCalled();
 
     logged.mockRestore();
   });

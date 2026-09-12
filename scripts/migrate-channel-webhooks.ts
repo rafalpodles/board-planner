@@ -4,6 +4,7 @@
  * Usage:
  *   MONGODB_URI=... ENCRYPTION_KEY=... npx tsx scripts/migrate-channel-webhooks.ts --dry-run
  *   MONGODB_URI=... ENCRYPTION_KEY=... npx tsx scripts/migrate-channel-webhooks.ts
+ *   railway run --service MongoDB -- npx tsx scripts/migrate-channel-webhooks.ts --dry-run
  *
  * RUN IT AFTER THE DEPLOY, never before. Reading plaintext exists only in the new code; the old
  * code hands the stored string straight to `isAllowedWebhookUrl`, which refuses an `enc:v2:…`
@@ -11,7 +12,10 @@
  * database on the new code keeps delivering, so the deploy does not wait for this. The reverse
  * is not true.
  *
- * Safe to re-run: a channel whose URL already carries an `enc:` envelope is left alone.
+ * Safe to re-run: a channel whose URL already carries an `enc:` envelope is left alone. Which is
+ * also what it will not do — a value written by a key since retired to ENCRYPTION_KEYS_OLD stays
+ * on that key. Re-keying is a separate job, and one every encrypted field in this product needs,
+ * not only these.
  *
  * It does not un-leak anything. A URL that was stored in cleartext is in the oplog and in every
  * backup taken since, so rotating the webhook in Slack or Discord is the only thing that ends its

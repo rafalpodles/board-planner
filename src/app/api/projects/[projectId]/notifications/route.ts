@@ -25,7 +25,7 @@ export const GET = withProjectOwner(async (_request, { params }) => {
   const { projectId } = await params;
   await connectDB();
 
-  const project = await Project.findById(projectId, "notificationChannels");
+  const project = await Project.findById(projectId, "key notificationChannels");
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }

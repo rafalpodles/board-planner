@@ -2,6 +2,15 @@ import { decryptSecret } from "./encryption";
 
 const MASK = "••••";
 
+/**
+ * Which rows have already been reported this process. `sanitizeProjectSecrets` runs on every read
+ * of a project — the board polls one every 10 seconds per open tab, and the sidebar maps it over
+ * the whole list — so an unconditional log for a key that will never come back is not a signal,
+ * it is a bill. A restart reports it again, which is what makes a problem that is still there
+ * visible again.
+ */
+const reportedUnreadable = new Set<string>();
+
 const TOKEN_FIELDS = ["githubToken", "gitlabToken", "codaToken"] as const;
 
 // CP-246 dropped these paths from the schema without a backfill, so every project older than that
@@ -36,9 +45,13 @@ function maskStoredUrl(value: string | undefined, project: string, channel: stri
     // The bare mask is also what an unparseable URL gets, so on screen the two are one state.
     // A rotation that lost the old key is otherwise silent in both directions: the channel stops
     // delivering and the row it happened to just reads as dots.
-    console.error(
-      `Project chat webhook could not be decrypted: project ${project}, channel "${channel}"`
-    );
+    const row = `${project}/${channel}`;
+    if (!reportedUnreadable.has(row)) {
+      reportedUnreadable.add(row);
+      console.error(
+        `Project chat webhook could not be decrypted: project ${project}, channel "${channel}"`
+      );
+    }
     return MASK;
   }
 }
@@ -64,14 +77,14 @@ export function sanitizeProjectSecrets<T extends object>(project: T): T {
   }
 
   if (Array.isArray(obj.notificationChannels)) {
-    const project = String(obj.key || obj._id || "unknown");
+    const projectLabel = String(obj.key || obj._id || "unknown");
     obj.notificationChannels = obj.notificationChannels.map((channel) => {
       const { webhookUrl, ...rest } = channel as Record<string, unknown>;
       return {
         ...rest,
         webhookUrlMasked: maskStoredUrl(
           webhookUrl as string | undefined,
-          project,
+          projectLabel,
           String(rest.name ?? "")
         ),
       };
