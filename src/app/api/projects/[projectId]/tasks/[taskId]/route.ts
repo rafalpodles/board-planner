@@ -23,9 +23,12 @@ export const GET = withProjectAccess(async (_request, { params, user }) => {
   await connectDB();
 
   const task = await Task.findOne({ _id: taskId, project: projectId })
-    // The patch is `select: false` on the schema so that no other reader ships it by accident.
-    // This is the screen it exists for, so this is the one read that asks for it.
-    .select("+decision.patch")
+    // The patch and the gate's hits are `select: false` on the schema so that no other reader
+    // ships them by accident. This is the screen they exist for, so this is the one read that asks
+    // for them — and the panel is the whole of the second one's audience, so leaving it out does
+    // not save a byte anywhere, it deletes "what tripped the gate" from the only page that shows
+    // it.
+    .select("+decision.patch +decision.protectedFiles")
     .populate(taskPopulateFields)
     // Without this `decidedBy` is an ObjectId, `toApiDecision` answers null for it, and the panel
     // never says who accepted the change — the one fact the audit row exists to preserve.

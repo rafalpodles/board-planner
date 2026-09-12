@@ -3,6 +3,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const updateTask = vi.fn();
 const heldRunRefusal = vi.fn();
 const taskFindOne = vi.fn();
+const taskFind = vi.fn(() => Promise.resolve([]));
+const workerFindById = vi.fn();
+const mayDecide = vi.fn(async () => true);
 const taskDeleteOne = vi.fn();
 const projectFindById = vi.fn();
 const commentDeleteMany = vi.fn();
@@ -18,13 +21,17 @@ vi.mock("@/lib/task-service", () => ({
   taskPopulateFields: [],
 }));
 vi.mock("@/models/task", () => ({
-  Task: { findOne: taskFindOne, find: vi.fn(), updateMany: taskUpdateMany, deleteOne: taskDeleteOne, findOneAndDelete: vi.fn() },
+  Task: { findOne: taskFindOne, find: taskFind, updateMany: taskUpdateMany, deleteOne: taskDeleteOne, findOneAndDelete: vi.fn() },
 }));
 vi.mock("@/models/project", () => ({ Project: { findById: projectFindById } }));
 vi.mock("@/models/comment", () => ({ Comment: { deleteMany: commentDeleteMany } }));
 vi.mock("@/models/activityLog", () => ({ ActivityLog: { deleteMany: activityDeleteMany } }));
 vi.mock("@/models/notification", () => ({ Notification: { deleteMany: notificationDeleteMany } }));
-vi.mock("@/models/worker", () => ({ Worker: { find: vi.fn() } }));
+vi.mock("@/models/worker", () => ({ Worker: { find: vi.fn(), findById: workerFindById } }));
+vi.mock("@/lib/task-decisions", () => ({
+  mayDecide,
+  toApiDecision: (decision: unknown) => decision,
+}));
 vi.mock("@/lib/middleware", () => ({
   withProjectAccess:
     (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
@@ -41,7 +48,7 @@ vi.mock("@/lib/middleware", () => ({
       }),
 }));
 
-const { PUT, DELETE } = await import("./route");
+const { GET, PUT, DELETE } = await import("./route");
 
 const TASK = "507f1f77bcf86cd799439011";
 
@@ -235,5 +242,47 @@ describe("DELETE .../tasks/:taskId and the run hold", () => {
 
     expect(res.status).toBe(404);
     expect(taskDeleteOne).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * BP-381. `decision.patch` and `decision.protectedFiles` are both `select: false` on the schema, so
+ * that no other reader ships them by accident — and this is the read the panel is served by. The
+ * day the gate's hits were given the same protection as the patch, this route kept asking for the
+ * patch alone: the panel's "What tripped the gate" is rendered from a list that arrived empty, so
+ * it rendered nothing at all, and every unit suite stayed green because none of them reads a real
+ * document. The e2e catches it on the screen; this catches it in a second.
+ */
+describe("GET: what the decision panel is served", () => {
+  function taskServed() {
+    const task = {
+      execution: undefined,
+      decision: { workerId: "507f1f77bcf86cd799439099", gate: "protected-paths" },
+      relations: [],
+      toObject: () => ({ taskNumber: 1 }),
+    };
+    const select = vi.fn(() => ({
+      populate: vi.fn(() => ({ populate: () => Promise.resolve(task) })),
+    }));
+    taskFindOne.mockReturnValue({ select });
+    workerFindById.mockReturnValue({ select: () => ({ lean: async () => null }) });
+    return select;
+  }
+
+  it("asks for the patch AND the gate's hits, the two fields it is the only reader of", async () => {
+    const select = taskServed();
+
+    const res = await GET(
+      new Request(`https://app.example.com/api/projects/p1/tasks/${TASK}`),
+      ctx()
+    );
+
+    expect(res.status).toBe(200);
+    const named = String(select.mock.calls[0][0]).split(/\s+/).filter(Boolean);
+    expect(named).toContain("+decision.patch");
+    expect(named).toContain("+decision.protectedFiles");
+    // Not the subdocument: `.select("decision")` is a parent INCLUSION, which overrides every
+    // `select: false` under it and would bring `files` and `patchSha256` along unasked.
+    expect(named).not.toContain("decision");
   });
 });
