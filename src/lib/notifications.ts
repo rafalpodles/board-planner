@@ -2,6 +2,7 @@ import { Project } from "@/models/project";
 import { WebhookEvent, NotificationChannelType, STATUS_LABELS } from "@/types";
 import { isAllowedWebhookUrl } from "./url-validation";
 import { safeFetch } from "./safe-fetch";
+import { decryptSecret } from "./encryption";
 
 interface NotificationPayload {
   project: { key: string; name: string };
@@ -213,10 +214,19 @@ export async function dispatchNotifications(
       || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : "http://localhost:3000");
 
     for (const channel of active) {
-      if (!isAllowedWebhookUrl(channel.webhookUrl)) continue;
+      let webhookUrl: string;
+      try {
+        webhookUrl = decryptSecret(channel.webhookUrl);
+      } catch {
+        // A rotation that lost the old key leaves an unreadable value; posting the ciphertext at
+        // some URL is the only worse answer than saying nothing.
+        console.error("Project chat webhook could not be decrypted");
+        continue;
+      }
+      if (!isAllowedWebhookUrl(webhookUrl)) continue;
       const body = JSON.stringify(formatPayload(channel.type, event, payload, appUrl));
 
-      safeFetch(channel.webhookUrl, {
+      safeFetch(webhookUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body,

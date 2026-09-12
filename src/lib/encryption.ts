@@ -86,6 +86,10 @@ export function isEncryptionConfigured(): boolean {
   return primaryKey() !== null;
 }
 
+export function isEncryptedSecret(value: string | undefined | null): boolean {
+  return !!value && (value.startsWith(PREFIX_V1) || value.startsWith(PREFIX_V2));
+}
+
 export function encryptSecret(plaintext: string): string {
   if (!plaintext) return plaintext;
   const key = primaryKey();

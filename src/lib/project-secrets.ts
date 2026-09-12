@@ -1,3 +1,5 @@
+import { decryptSecret } from "./encryption";
+
 const MASK = "••••";
 
 const TOKEN_FIELDS = ["githubToken", "gitlabToken", "codaToken"] as const;
@@ -19,6 +21,20 @@ export function maskSecretUrl(value: string | undefined): string {
 
   const tail = value.length - origin.length > 4 ? value.slice(-4) : "";
   return `${origin}/${MASK}${tail}`;
+}
+
+/**
+ * A channel's URL is stored encrypted, and an `enc:v2:…` envelope is a parseable URL with a
+ * non-special scheme — so masking the stored string would print `null/••••` plus a tail of
+ * ciphertext instead of the host the owner needs to recognise the channel by.
+ */
+function maskStoredUrl(value: string | undefined): string {
+  if (!value) return "";
+  try {
+    return maskSecretUrl(decryptSecret(value));
+  } catch {
+    return MASK;
+  }
 }
 
 /**
@@ -44,7 +60,7 @@ export function sanitizeProjectSecrets<T extends object>(project: T): T {
   if (Array.isArray(obj.notificationChannels)) {
     obj.notificationChannels = obj.notificationChannels.map((channel) => {
       const { webhookUrl, ...rest } = channel as Record<string, unknown>;
-      return { ...rest, webhookUrlMasked: maskSecretUrl(webhookUrl as string | undefined) };
+      return { ...rest, webhookUrlMasked: maskStoredUrl(webhookUrl as string | undefined) };
     });
   }
 

@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { maskSecretUrl, sanitizeProjectSecrets } from "./project-secrets";
+
+process.env.ENCRYPTION_KEY = "d".repeat(64);
+
+const { maskSecretUrl, sanitizeProjectSecrets } = await import("./project-secrets");
+const { encryptSecret } = await import("./encryption");
 
 describe("maskSecretUrl", () => {
   it("keeps the origin and the last four characters of a Slack webhook", () => {
@@ -81,6 +85,31 @@ describe("sanitizeProjectSecrets", () => {
       webhookUrlMasked: "https://hooks.slack.com/••••3456",
     });
     expect(channel).not.toHaveProperty("webhookUrl");
+  });
+
+  // BP-372: the stored value is an `enc:v2:…` envelope, which `new URL()` parses as a non-special
+  // scheme — masking it without decrypting first prints `null/••••` and a tail of ciphertext
+  it("masks a stored channel URL by its real host, and never leaks the ciphertext", () => {
+    const stored = encryptSecret("https://hooks.slack.com/services/T000/B111/abcdef123456");
+    const sanitized = sanitizeProjectSecrets({
+      notificationChannels: [{ _id: "c1", name: "Releases", webhookUrl: stored, enabled: true }],
+    });
+
+    const channel = (sanitized.notificationChannels as Record<string, unknown>[])[0];
+    expect(channel.webhookUrlMasked).toBe("https://hooks.slack.com/••••3456");
+    expect(channel).not.toHaveProperty("webhookUrl");
+    expect(JSON.stringify(channel)).not.toContain(stored.slice(-8));
+  });
+
+  it("falls back to a bare mask when no configured key can read the stored URL", () => {
+    const sanitized = sanitizeProjectSecrets({
+      notificationChannels: [
+        { _id: "c1", name: "Releases", webhookUrl: "enc:v2:deadbeef:Zm9v", enabled: true },
+      ],
+    });
+
+    const channel = (sanitized.notificationChannels as Record<string, unknown>[])[0];
+    expect(channel.webhookUrlMasked).toBe("••••");
   });
 
   it("masks an outgoing webhook's URL and removes the original", () => {

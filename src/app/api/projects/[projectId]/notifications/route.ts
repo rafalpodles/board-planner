@@ -6,6 +6,12 @@ import { logProjectAudit } from "@/lib/projectAudit";
 import { NOTIFICATION_CHANNEL_TYPES, WEBHOOK_EVENTS, NotificationChannelType } from "@/types";
 import { sanitizeProjectSecrets } from "@/lib/project-secrets";
 import { parseWebhookUrl, parseWebhookEvents } from "@/lib/webhook-input";
+import { encryptSecret, isEncryptedSecret, isEncryptionConfigured } from "@/lib/encryption";
+
+const NO_KEY = NextResponse.json(
+  { error: "This instance cannot store a webhook URL: ENCRYPTION_KEY is not set" },
+  { status: 503 }
+);
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function masked(project: any) {
@@ -54,6 +60,8 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
     );
   }
 
+  if (!isEncryptionConfigured()) return NO_KEY;
+
   const project = await Project.findById(projectId);
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
@@ -63,7 +71,7 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
   channels.push({
     type: type as NotificationChannelType,
     name: name.trim(),
-    webhookUrl: parsedUrl,
+    webhookUrl: encryptSecret(parsedUrl),
     events: parsedEvents,
     enabled: true,
   } as typeof channels[number]);
@@ -107,7 +115,12 @@ export const PUT = withProjectOwner(async (request, { params }) => {
     if (!parsedUrl) {
       return NextResponse.json({ error: "A valid webhook URL is required" }, { status: 400 });
     }
-    channel.webhookUrl = parsedUrl;
+    if (!isEncryptionConfigured()) return NO_KEY;
+    channel.webhookUrl = encryptSecret(parsedUrl);
+  } else if (!isEncryptedSecret(channel.webhookUrl) && isEncryptionConfigured()) {
+    // Rows written before BP-372 hold the URL in the clear. Any save on the channel carries them
+    // over, so renaming one is enough to migrate it.
+    channel.webhookUrl = encryptSecret(channel.webhookUrl);
   }
   if (updates.events !== undefined) {
     const parsedEvents = parseWebhookEvents(updates.events);
