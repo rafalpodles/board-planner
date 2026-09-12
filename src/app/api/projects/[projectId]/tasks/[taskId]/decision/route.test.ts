@@ -204,6 +204,24 @@ describe("answering a refused change", () => {
     expect(taskFindOne).toHaveBeenCalledWith({ _id: TASK_ID, project: "p1" });
   });
 
+  /**
+   * The same trap as the GET below: `.select("taskNumber decision")` is a parent INCLUSION, so
+   * mongoose sends `{decision: 1}`, the `select: false` on the subfields is overridden, and up to
+   * 220 KB of patch is read on every verdict — while the schema's comment says the two readers
+   * that want it say so.
+   */
+  it("reads only the fields the verdict rests on, not the whole subdocument", async () => {
+    const { req, ctx } = call({ verdict: "accept" });
+    await POST(req, ctx);
+
+    const named = String(selectedBy(taskFindOne)).split(/\s+/).filter(Boolean);
+
+    expect(named).not.toContain("decision");
+    for (const field of ["workerId", "commit", "acceptable", "gate", "files"]) {
+      expect(named).toContain(`decision.${field}`);
+    }
+  });
+
   it("refuses a verdict that is not one", async () => {
     const { req, ctx } = call({ verdict: "merge" });
 
