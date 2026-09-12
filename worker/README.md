@@ -236,80 +236,58 @@ and `SIGINT` both finish the task in flight before the loop exits.
   destroys the evidence of what was planted.
 - **The agent's own writes cannot leave its worktree.** Both calls to the CLI — the step that
   writes the change and the review gate — run under `sandbox-exec` with a profile that denies every
-  write and then allows back exactly one directory: the worktree for the step, the throwaway
-  checkout for the reviewer. It is the kernel refusing, so it holds for `Write`, for `Edit`, for a
-  symlink the agent plants inside the worktree and writes through, and for a process the CLI spawns
-  writing a file itself — measured against the real kernel in `sandbox.integration.test.ts`.
+  write and allows back exactly one directory: the worktree for the step, the throwaway checkout for
+  the reviewer. The kernel refuses, so it holds for `Write`, for `Edit`, for a symlink planted inside
+  the worktree and written through, and for a process the CLI spawns writing a file itself.
 
-  It does **not** hold for a write a system daemon performs on a spawned process's behalf.
-  `(allow default)` leaves `process-exec` and `mach-lookup` open, and measured under this exact
-  profile, `defaults write <domain> <key> <value>` exits 0 and `cfprefsd` writes the plist under
-  `~/Library/Preferences`, outside the worktree. The agent this worker runs cannot reach it — it is
-  given no shell, so it spawns nothing — which means that gap is closed by the tool list in
-  `executor.ts`, not by the kernel. Any future capability that yields process execution has to close
-  it in the profile instead.
-
-  **What it does not cover, said first rather than last: the gates that run agent-written code.**
-  `npm ci`, `npm run build` and `npm test` run in the worktree and are *not* inside this profile,
-  so a step that writes a test which writes to your home, followed by a Test gate that executes it,
-  reaches outside — and a later step in the same sequence then loads what it planted, because only
-  the reviewer passes `--safe-mode`. That is the same chain this bullet closes for the agent's own
-  tools, still open through a different door, and **BP-608** is where it is written down. What
-  changes here is that the agent can no longer do it directly, in one move, with no gate involved.
-
-  The escape it closes: a step runs with `--permission-mode bypassPermissions`, so `Write` used to
-  take any absolute path this user can reach. `$HOME/.claude/settings.json` is the shortest one —
-  a hook entry there runs a shell command on the **next** `claude` invocation — a later step in the
-  same run, and, with a larger blast radius than anything the worker does, **the operator's own
-  interactive `claude`**, the next time they open one. Not the review gate: that passes
-  `--safe-mode`, which disables hooks along with every other customisation.
-
-  Nothing downstream could see it either: the file is outside the repository, so it never reaches
-  the diff, and `protected-paths` cannot match a path it is never given. `~/.zshrc`,
+  **What it closes.** A step runs with `--permission-mode bypassPermissions`, so `Write` used to take
+  any absolute path this user can reach. `$HOME/.claude/settings.json` is the shortest one: a hook
+  there runs a shell command on the next `claude` — a later step in the same run, and, with a much
+  larger blast radius, **your own interactive `claude`**, the next time you open one. Measured: a
+  `SessionStart` hook fires even on a run that never authenticates, so planting one does not need a
+  successful run to arm it. Not the review gate, which passes `--safe-mode`. Nothing downstream could
+  see any of it: the file is outside the repository, so it never reaches the diff and
+  `protected-paths` cannot match a path it is never given. `~/.zshrc`,
   `~/Library/LaunchAgents/*.plist` and `~/.gitconfig` were the same escape with different timing.
 
-  **Not a per-run `HOME`**, which is the cheaper thing this looks like. Measured: a fresh home
-  answers `Not logged in · Please run /login`, with or without a `hasCompletedOnboarding` file, and
-  there is no credential file under `~/.claude` to copy into one. It would not have been enough
-  either — moving `HOME` does not stop `/Users/<you>/.claude/settings.json` being written by name,
-  and `USER` is on the same allowlist that forwards `HOME`.
+  **What it does not close.** The gates: `npm ci`, `npm run build` and `npm test` run in the worktree
+  and outside this profile, so a step that writes a test which writes to your home, followed by a
+  Test gate that runs it, still reaches outside — the same chain in two moves instead of one
+  (**BP-608**). Writes a *daemon* performs on a spawned process's behalf: `(allow default)` leaves
+  `process-exec` and `mach-lookup` open, and `defaults write` makes cfprefsd write a plist outside
+  the worktree, measured. Today that one is closed by the `--tools` list giving the agent no shell,
+  not by the kernel, so a future capability that yields process execution has to close it in the
+  profile. And reads, and the network, neither of which this touches at all.
 
-  The allowance is one directory rather than a list of the instruction channels inside your home,
-  because measured, the CLI needs no write access to `~/.claude` or `~/.claude.json` at all: it
-  runs under the profile with exit 0, empty stderr and no permission denials.
-
-  That measurement holds **for the tool lists the two spawns pass**, and cannot see further. Exit
-  code, stderr and `permission_denials` are all blind to a single tool failing — the model routes
-  around one and still reports success. Measured with Bash added to the list: its scratch root
-  `/tmp/claude-<uid>/…` is outside the worktree and is not derived from `TMPDIR`, so every Bash
-  call fails `EPERM` while the run still exits 0. `git add` inside the worktree fails the same way,
-  because a linked worktree's `index.lock` lives in the parent clone. Neither agent is given Bash,
-  so neither is a live break — but a capability that adds one has to be re-measured at the tool
-  level, and no test in this package runs the real CLI.
-
-  **macOS only.** Seatbelt is what this uses, and there is no equivalent wired up elsewhere. On any
-  other platform the worker **refuses the step** rather than running it unconfined, and says so.
-  Preflight asks the question at boot by confining a probe and watching it fail to escape, so the
-  row on Settings → Workers is the answer for this machine rather than for this platform.
-
-  To run unconfined anyway — a Linux machine, or a macOS one where the profile gets in the way —
-  set `CP_ALLOW_UNCONFINED_AGENT=1` in the worker's own environment. It is an environment variable
-  and never a worker policy field, because policy comes down from the server and a setting that
-  turns the sandbox off must not be reachable by anything the agent can also reach. It is left out
-  of the child allowlist too, so the agent is never told whether it is confined.
-
-  What this does **not** claim: reads are untouched, and the network is untouched. The gates are
-  the other half, and they are above rather than here.
+  **macOS only.** Seatbelt is what this uses. On any other platform the worker refuses the step
+  rather than running it unconfined, and releases the task with its attempt refunded rather than
+  failing it. Preflight answers the question at boot for *this machine* by confining a probe and
+  watching it fail to escape — not by reading the platform — so a machine where `sandbox-exec` is
+  missing or the profile stopped compiling reads red rather than green. To run unconfined anyway, set
+  `CP_ALLOW_UNCONFINED_AGENT=1` in the worker's own environment; it is never a worker policy field,
+  because policy comes down from the server and the agent reaches the server.
 
   **What it costs.** The implementer step does not pass `--safe-mode`, so it still loads
-  `~/.claude/settings.json` — and every hook there that writes anything now fails under the profile.
-  Measured on CLI 2.1.269: two `SessionStart` hooks came back
-  `Failed to run: EPERM … mkdir '~/.claude/session-env/<session>'`. They exit 1, which is
-  non-blocking, and the run completed with a schema-valid result; a `PreToolUse` hook that exits 2
-  when its own write fails would instead block every tool call of every run on that machine, and
-  reach the board as the agent failing. A run also leaves no `~/.claude/projects/**.jsonl`
-  transcript any more — the worker keeps its own stream-json, so nothing is lost that the run needs,
-  but a debugging surface is gone.
+  `~/.claude/settings.json` — and every hook there that writes anything now fails. Measured on CLI
+  2.1.269: `SessionStart` hooks returning `Failed to run: EPERM … mkdir
+  '~/.claude/session-env/<session>'`. They exit 1, which is non-blocking, and the run completed
+  normally; a `PreToolUse` hook that exits 2 when its own write fails would instead block every tool
+  call of every run on that machine. A run also leaves no `~/.claude/projects/**.jsonl` transcript
+  any more — the worker keeps its own stream-json, so nothing the run needs is lost, but a debugging
+  surface is gone.
+
+  A note on the evidence, because the method has a blind spot: the measurements above read the CLI's
+  exit code, stderr and `permission_denials`, and all three are blind to a single *tool* failing —
+  the model routes around one and still reports success. With Bash in the list, every Bash call fails
+  `EPERM` under the profile (its scratch root is outside the worktree and not derived from `TMPDIR`)
+  while the run still exits 0. Neither spawn gives the agent Bash, so nothing is broken; a capability
+  that adds one has to be re-measured at the tool level, and no test in this package runs the real
+  CLI.
+
+  **Not a per-run `HOME`**, which is the cheaper thing this looks like: measured, a fresh home
+  answers `Not logged in`, there is no credential file under `~/.claude` to copy into one, and moving
+  `HOME` would not stop `/Users/<you>/.claude/settings.json` being written by name anyway.
+
 - **No subprocess inherits the worker's secrets through its environment.** The child environment is
   an allowlist, so the worker's credential reaches neither the agent nor any dependency's install
   script. Only delivery carries what `git` and `gh` need for the remote — and it runs inside the

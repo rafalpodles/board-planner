@@ -1103,7 +1103,7 @@ test("the fleet screen says whether a machine confines the agent it runs", async
           name: "sandbox",
           ok: false,
           detail:
-            "this machine has no sandbox the worker knows how to confine an agent with (seatbelt is macOS only), so the agent could write anywhere this user can — set CP_ALLOW_UNCONFINED_AGENT=1 to accept that and run anyway",
+            "set CP_ALLOW_UNCONFINED_AGENT=1 on this machine to run anyway, accepting that the agent could then write anywhere this user can: there is no sandbox here to confine it with, because seatbelt is macOS only",
         },
       ],
     },
@@ -1113,8 +1113,11 @@ test("the fleet screen says whether a machine confines the agent it runs", async
   const row = fleetRow(page, WORKER_NAME);
   await expect(row.getByText("sandbox")).toBeVisible();
   // What an operator needs off this screen: that it is the sandbox, why, and the way out.
-  await expect(row).toContainText("seatbelt is macOS only");
   await expect(row).toContainText("CP_ALLOW_UNCONFINED_AGENT=1");
+  await expect(row).toContainText("seatbelt is macOS only");
+  // The cell is one truncated line, so the order is the readable part: what to do has to come
+  // before the explanation, or the operator reads only the explanation (BP-606).
+  await expect(row).toContainText("sandbox — set CP_ALLOW_UNCONFINED_AGENT=1");
   await expect(row.getByText(/^ready/), "the machine still reads ready").toHaveCount(0);
 
   // And the accepted state, where this screen puts a chosen cost: green in the cell, spelled out in

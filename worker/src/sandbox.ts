@@ -31,6 +31,9 @@ import { UNCONFINED_ESCAPE_HATCH, unconfinedAgentAllowed } from "./env.js";
  * where the agent itself now cannot (BP-608). This closes the agent's own tools, which is the move
  * that needed no gate and left no trace.
  *
+ * Children inherit it: `sandbox(7)` states that new processes inherit the sandbox of their parent,
+ * and `sandbox.integration.test.ts` drives a grandchild to confirm it here.
+ *
  * Measured the same day, and the limits of the measurement matter: under the profile below, and
  * with the `--tools` lists executor.ts actually passes, `claude -p` exits 0 with empty stderr and
  * no permission denials, and needs no write access to `~/.claude` or `~/.claude.json`. That is what
@@ -54,9 +57,11 @@ export const SANDBOX_COMMAND = "/usr/bin/sandbox-exec";
 // The operator's own risk acceptance lives in env.ts, which owns reading this process's
 // environment. It means the same thing on every platform — run the agent unconfined — so there is
 // one sentence to read rather than a matrix.
+// The way out comes first. The fleet screen renders this row on one truncated line (BP-606), so
+// whatever is at the end is what an operator never reads — and what they need is the thing to do.
 export const UNCONFINED_REASON =
-  "this machine has no sandbox the worker knows how to confine an agent with (seatbelt is macOS only), " +
-  `so the agent could write anywhere this user can — set ${UNCONFINED_ESCAPE_HATCH}=1 to accept that and run anyway`;
+  `set ${UNCONFINED_ESCAPE_HATCH}=1 on this machine to run anyway, accepting that the agent could ` +
+  "then write anywhere this user can: there is no sandbox here to confine it with, because seatbelt is macOS only";
 
 export type Confinement =
   | { command: string; args: string[]; confined: boolean }
@@ -70,12 +75,16 @@ export interface ConfineOptions {
   env?: NodeJS.ProcessEnv;
 }
 
-// The order is the conventional one and not load-bearing here: measured on macOS 26.6.2, this
-// profile denies the outside write with `(allow default)` moved last AND with the deny placed after
-// the allow-back, so seatbelt on this system resolves by specificity rather than by last-match. It
-// is kept in this order because that is also correct under last-match semantics, which is what SBPL
-// has historically documented. What IS load-bearing is that the deny exists at all: the same
-// profile without it lets the outside write through, measured in the same run.
+// `(allow default)` sets the default decision for operations the profile has no filter for. It is
+// not a rule competing by position, and the order below is conventional rather than load-bearing:
+// measured on macOS 26.6.2, this profile denies the outside write with `(allow default)` moved last
+// AND with the deny placed after the allow-back. What IS load-bearing is that the deny exists at
+// all — the same profile without it lets the write through, measured in the same run.
+//
+// No claim here about which rule "wins", in either direction: Apple has never published SBPL's
+// semantics (`sandbox-exec(1)` documents only `-p`, and both it and `sandbox_init(3)` are marked
+// deprecated), and the third-party accounts say first-match, which does not match the measurement
+// above either. The measurement is the only thing this comment is willing to assert.
 //
 // Reads are deliberately untouched. The agent has `Read` over the disk already — scrub.ts is built
 // on that being true — and confining reads would take the CLI's own session with it.
