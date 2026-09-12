@@ -51,6 +51,17 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
     #expect(state.health == .faulted)
 }
 
+// The loop claims nothing while paused, so a fault can only be the tail of a run that started
+// before it. Overwriting .paused turns the panel's Resume button back into Pause on a worker that
+// is still paused.
+@Test func aFaultDoesNotUnpauseAPausedWorker() {
+    var state = WorkerState()
+    state.forceHealth(.paused)
+    state.apply(.outcome(Outcome(outcome: "machineFault", taskKey: "CP-1", detail: "no sandbox")), at: t0)
+
+    #expect(state.health == .paused)
+}
+
 @Test func aReleasedOutcomeStillReadsAsIdle() {
     var state = WorkerState()
     state.apply(.outcome(Outcome(outcome: "released", taskKey: "CP-1", detail: "usage limit reached")), at: t0)
@@ -131,7 +142,9 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
 }
 
 @Test func everyHealthHasItsOwnIcon() {
-    let every: [Health] = [.idle, .working, .paused, .needsHuman, .faulted, .disconnected]
+    // allCases, not a literal: a hand-written list is one a new case can be left out of, and the
+    // test's own claim is "every".
+    let every = Health.allCases
     let icons = Set(every.map { health -> String in
         var state = WorkerState()
         state.forceHealth(health)

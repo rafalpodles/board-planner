@@ -47,7 +47,7 @@ describe("recordFor", () => {
       "failed",
       "requeued",
       "released",
-      "faulted",
+      "machineFault",
     ];
     // A Record, not an array: a new OutcomeKind is a type error here rather than an outcome this
     // loop silently never visits.
@@ -72,7 +72,7 @@ describe("recordFor", () => {
   // as `released`, the runs list cannot tell an operator which of their machines is broken.
   it("records a machine fault apart from a release", () => {
     expect(recordFor(task, "machineFault", "this machine has no sandbox", 0, 1, 0)).toMatchObject({
-      outcome: "faulted",
+      outcome: "machineFault",
       refusedBy: "",
       detail: "this machine has no sandbox",
     });

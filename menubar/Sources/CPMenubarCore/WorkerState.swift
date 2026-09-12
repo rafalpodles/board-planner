@@ -1,10 +1,10 @@
 import Foundation
 
-public enum Health: Equatable, Sendable {
-    // faulted is the machine's own state, not a task's: the worker released the task it was on and
-    // stopped claiming, and it will do the same to the next one until somebody fixes the machine.
-    // Its own case rather than needsHuman so the switches below have to say what it looks like
-    // (BP-609).
+public enum Health: Equatable, Sendable, CaseIterable {
+    // faulted says the last run could not run on this machine at all — not that the task was
+    // rejected, and not that the machine is latched off: the worker stops claiming for one pass
+    // and tries again a poll interval later (worker/src/loop.ts). Its own case rather than
+    // needsHuman so the switches below have to say what it looks like (BP-609).
     case idle, working, needsHuman, faulted, disconnected, paused
 }
 
@@ -56,9 +56,17 @@ public struct WorkerState: Equatable, Sendable {
                 health = .needsHuman
             } else if outcome.outcome == "machineFault" {
                 // Not .idle, which is what a released run leaves and what a machine with nothing to
-                // do looks like. This machine has work it cannot take. It clears the way
-                // needsHuman does — the next run's first progress event, or a reconnect's status.
-                health = .faulted
+                // do looks like — the last run here could not run at all.
+                //
+                // Sticky, and the panel's wording is past tense because of it: nothing emits while
+                // the queue is empty, so a fault on the last task of the night is still on screen
+                // in the morning. It clears on the next run's first progress event, on a
+                // reconnect's status, or on the next outcome.
+                //
+                // Behind the pause guard, unlike the blocked branch above: the loop claims nothing
+                // while paused, so a fault can only be the tail of a run that started before the
+                // pause, and overwriting .paused turns the panel's Resume button back into Pause.
+                if health != .paused { health = .faulted }
             } else if health != .paused {
                 health = .idle
             }

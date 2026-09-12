@@ -258,10 +258,10 @@ async function releaseIfAborted(
  * "machine-fault" means the run failed for a reason that has nothing to do with the task and will
  * repeat on the next one — the loop stops claiming for a cycle rather than feeding it the queue.
  *
- * Every path that returns it settles `machineFault`, and the board records `faulted`. The task is
- * still handed back with `reporter.released`, attempt refunded — what changed in BP-609 is only
- * what the run is recorded as, because a plain `released` reads the same as a usage limit and it
- * is the broken machine that an operator has to be told about.
+ * Every path that returns it settles `machineFault`, which is what the board records too. The task
+ * is still handed back with `reporter.released`, attempt refunded — what changed in BP-609 is only
+ * what the run is recorded as, because a plain `released` reads the same as a usage limit and it is
+ * the machine, not the task, that an operator has to be told about.
  */
 export type RunDisposition = void | "machine-fault";
 
@@ -397,7 +397,11 @@ export async function runTask(
       // into the escalation column over one unreachable remote — and nothing ever resets
       // execution.attempts, so a human moving those tasks back gets cards no worker will look at
       // again. Released with the attempt refunded, and the loop is told to stop claiming.
-      settle("machineFault", "the base branch could not be established");
+      // With the error, not without it: the detail is the only durable account of the fault — the
+      // card's comment is not reachable from the run history, and the menubar keeps no reason at
+      // all once its notification is gone. "could not be established" alone cannot tell a DNS
+      // outage from a revoked token. settle() scrubs and caps it.
+      settle("machineFault", `the base branch could not be established: ${String(error)}`);
       await reporter.released(task, String(error));
       return "machine-fault";
     }
@@ -592,7 +596,9 @@ export async function runTask(
           // task again.
           if (verdict.machineFault) {
             keepWorktree = true;
-            settle("machineFault", `the ${gate.name} gate could not run`);
+            // With the reason, for what the base-branch path above says: on this path it is
+            // confine()'s own refusal, which names the path it could not resolve.
+            settle("machineFault", `the ${gate.name} gate could not run: ${verdict.reason}`);
             await reporter.released(
               task,
               `the ${gate.name} gate could not run: ${verdict.reason}${unpushedWork(state, worktree.path)}`,

@@ -19,9 +19,9 @@ describe("how a finished run reads", () => {
    * Read as "Released", an operator is never told which of their machines has stopped working.
    */
   it("says a machine fault apart from a release, and colours it as a bad end", () => {
-    expect(endState(ended("faulted"))).toBe("Machine fault");
+    expect(endState(ended("machineFault"))).toBe("Machine fault");
     expect(endState(ended("released"))).toBe("Released");
-    expect(endedBadly(ended("faulted"))).toBe(true);
+    expect(endedBadly(ended("machineFault"))).toBe(true);
     expect(endedBadly(ended("released"))).toBe(false);
   });
 

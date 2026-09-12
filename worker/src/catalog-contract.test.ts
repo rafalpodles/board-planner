@@ -36,7 +36,11 @@ describe("the gate kinds the catalog offers", () => {
 
 describe("the outcomes the server records", () => {
   it("are exactly the ones the worker maps its own onto", () => {
-    const types = source("types", "index.ts");
+    // Comments stripped first: the assertion is containment, so any double-quoted word inside a
+    // comment in the array would silently become an outcome the server "accepts" — and the value
+    // dropped beside it would still pass. The array carries a comment as of BP-609 (found in
+    // review).
+    const types = source("types", "index.ts").replace(/^[ \t]*\/\/.*$/gm, "");
     const block = types.slice(types.indexOf("AGENT_RUN_OUTCOMES = ["));
     // `[a-zA-Z]`, not `[a-z]`: a camelCase outcome on either side was invisible to this test, so
     // the one shape a drift is most likely to take — a name copied from the worker's own

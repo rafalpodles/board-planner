@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import CPMenubarCore
 
@@ -32,7 +33,7 @@ import Testing
     #expect(notification(for: .quota(Quota(status: "rejected")))?.title == "Usage limit reached")
 }
 
-// Five notifications, and only five. Anything else and the operator turns them off.
+// Six notifications, and only six. Anything else and the operator turns them off.
 @Test func staysSilentOnAWarningThatIsNotYetALimit() {
     #expect(notification(for: .quota(Quota(status: "allowed_warning", utilization: 0.9))) == nil)
 }
@@ -61,7 +62,7 @@ import Testing
     let request = notification(
         for: .outcome(Outcome(outcome: "machineFault", taskKey: "CP-1", detail: "no sandbox here")))
 
-    #expect(request?.title == "This machine can't run the work")
+    #expect(request?.title == "This machine couldn't run the work")
     #expect(request?.body.contains("CP-1") == true)
     #expect(request?.body.contains("no sandbox here") == true)
 }
@@ -88,4 +89,91 @@ import Testing
     let request = notification(for: .outcome(Outcome(outcome: "delivered", taskKey: "CP-3")))
 
     #expect(request?.body.contains("did not merge") == true)
+}
+
+
+/**
+ * BP-609 review. The fault recurs on every poll — refunded attempt, same task, same broken machine
+ * thirty seconds later — so an unguarded notification stacks one banner per poll all night. This is
+ * the menubar's half of the worker's own ReleaseMemory.
+ */
+@Test func reportsARecurringFaultOnceRatherThanOncePerPoll() {
+    var memory = FaultMemory()
+    let fault = TelemetryEvent.outcome(
+        Outcome(outcome: "machineFault", taskKey: "CP-1", detail: "no route to host"))
+
+    #expect(memory.admit(fault) != nil)
+    #expect(memory.admit(fault) == nil)
+    #expect(memory.admit(fault) == nil)
+}
+
+// The recurrence claims a different task each pass on a busy board; the news is the machine, so the
+// task key must not be what makes it new.
+@Test func theSameFaultOnAnotherTaskIsStillTheSameNews() {
+    var memory = FaultMemory()
+
+    #expect(memory.admit(.outcome(Outcome(outcome: "machineFault", taskKey: "CP-1", detail: "no route to host"))) != nil)
+    #expect(memory.admit(.outcome(Outcome(outcome: "machineFault", taskKey: "CP-2", detail: "no route to host"))) == nil)
+}
+
+// The control, without which the dedupe would be silence: a genuinely different fault is news.
+@Test func aDifferentFaultIsReportedAgain() {
+    var memory = FaultMemory()
+
+    #expect(memory.admit(.outcome(Outcome(outcome: "machineFault", taskKey: "CP-1", detail: "no route to host"))) != nil)
+    #expect(memory.admit(.outcome(Outcome(outcome: "machineFault", taskKey: "CP-1", detail: "no sandbox here"))) != nil)
+}
+
+// A run that ended some other way means the machine worked, so the same fault afterwards is new.
+// A run merely STARTING is not that — a fault emits after a progress event on every recurrence.
+@Test func aFaultAfterAHealthyRunIsReportedAgain() {
+    var memory = FaultMemory()
+    let fault = TelemetryEvent.outcome(
+        Outcome(outcome: "machineFault", taskKey: "CP-1", detail: "no route to host"))
+
+    #expect(memory.admit(fault) != nil)
+    _ = memory.admit(.outcome(Outcome(outcome: "merged", taskKey: "CP-2")))
+    #expect(memory.admit(fault) != nil)
+}
+
+@Test func progressBetweenTwoIdenticalFaultsDoesNotMakeTheSecondNews() {
+    var memory = FaultMemory()
+    let fault = TelemetryEvent.outcome(
+        Outcome(outcome: "machineFault", taskKey: "CP-1", detail: "no route to host"))
+
+    #expect(memory.admit(fault) != nil)
+    _ = memory.admit(.progress(Progress(phase: "claiming")))
+    #expect(memory.admit(fault) == nil)
+}
+
+// Everything that is not a fault still reaches the same decision it always did.
+@Test func theMemoryPassesEveryOtherEventStraightThrough() {
+    var memory = FaultMemory()
+
+    #expect(memory.admit(.outcome(Outcome(outcome: "merged", taskKey: "CP-1"))) != nil)
+    #expect(memory.admit(.outcome(Outcome(outcome: "merged", taskKey: "CP-1"))) != nil)
+    #expect(memory.admit(.quota(Quota(status: "rejected"))) != nil)
+    #expect(memory.admit(.progress(Progress(phase: "agent"))) == nil)
+}
+
+/**
+ * Nothing but this ties the literal above to the worker that emits it. Both sides are strings, the
+ * Swift tests use the same literal as the Swift source, so a rename in `OutcomeKind` would leave
+ * the menubar silent and idle — the exact state BP-609 exists to fix — with every test green.
+ * Same shape as the worker's own catalog-contract test: read the source as text and compare.
+ */
+@Test func theOutcomeThisSwitchesOnIsOneTheWorkerCanEmit() throws {
+    let telemetry = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("worker/src/telemetry.ts")
+    let source = try String(contentsOf: telemetry, encoding: .utf8)
+    let kinds = source[source.range(of: "export type OutcomeKind =")!.upperBound...]
+    let declared = String(kinds[..<kinds.range(of: ";")!.lowerBound])
+
+    for outcome in ["machineFault", "merged", "delivered", "gateRejected", "blocked"] {
+        #expect(declared.contains("\"\(outcome)\""), "worker cannot emit \(outcome)")
+    }
 }

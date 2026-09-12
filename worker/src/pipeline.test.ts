@@ -1811,7 +1811,7 @@ describe("what a machine fault is recorded as", () => {
 
     expect(settled.disposition).toBe("machine-fault");
     expect(settled.record).toMatchObject({
-      outcome: "faulted",
+      outcome: "machineFault",
       detail: "this machine has no sandbox",
     });
     expect(settled.emitted).toMatchObject({ outcome: "machineFault" });
@@ -1828,8 +1828,35 @@ describe("what a machine fault is recorded as", () => {
     });
 
     expect(settled.disposition).toBe("machine-fault");
-    expect(settled.record).toMatchObject({ outcome: "faulted" });
+    expect(settled.record).toMatchObject({ outcome: "machineFault" });
     expect(settled.emitted).toMatchObject({ outcome: "machineFault" });
+  });
+
+  /**
+   * The record's detail is the only durable account of a fault: the card's comment is not reachable
+   * from the run history, and the menubar keeps no reason once its notification is gone. Two of the
+   * four paths had the reason in hand and passed a fixed sentence instead, so every DNS outage and
+   * every broken checkout read identically (found in review).
+   */
+  it("carries the reason into the record, on the two paths that had it in hand", async () => {
+    const gate = await settledBy({
+      gateFor: () => ({
+        name: "review",
+        run: async () => ({
+          ok: false,
+          reason: "cannot confine the agent to /wt: ENOENT",
+          machineFault: true,
+        }),
+      }),
+    });
+    expect(gate.record).toMatchObject({ detail: expect.stringContaining("ENOENT") });
+
+    const { h } = watchedOutcomes();
+    h.workspace.create.mockRejectedValue(new BaseUnavailableError("no route to host"));
+    await runTask(h.deps, task);
+    expect(h.recordRun.mock.calls.at(-1)![1]).toMatchObject({
+      detail: expect.stringContaining("no route to host"),
+    });
   });
 
   it("records an unreachable base branch as faulted", async () => {
@@ -1838,7 +1865,7 @@ describe("what a machine fault is recorded as", () => {
 
     await runTask(h.deps, task);
 
-    expect(h.recordRun.mock.calls.at(-1)![1]).toMatchObject({ outcome: "faulted" });
+    expect(h.recordRun.mock.calls.at(-1)![1]).toMatchObject({ outcome: "machineFault" });
     expect(outcomes().at(-1)).toMatchObject({ outcome: "machineFault" });
   });
 
@@ -1848,7 +1875,7 @@ describe("what a machine fault is recorded as", () => {
 
     await runTask(h.deps, task);
 
-    expect(h.recordRun.mock.calls.at(-1)![1]).toMatchObject({ outcome: "faulted" });
+    expect(h.recordRun.mock.calls.at(-1)![1]).toMatchObject({ outcome: "machineFault" });
     expect(outcomes().at(-1)).toMatchObject({ outcome: "machineFault" });
   });
 
@@ -1861,6 +1888,31 @@ describe("what a machine fault is recorded as", () => {
 
     expect(settled.disposition).toBeUndefined();
     expect(settled.record).toMatchObject({ outcome: "released", detail: "usage limit reached" });
+  });
+
+  /**
+   * The nearest overshoot, and the one nothing else in this suite can see. A gate that hit the
+   * usage limit settles eight lines below the gate-fault branch and carries the same sentence; the
+   * existing test on that path asserts `reporter.released`, which BOTH branches call, so moving
+   * that `settle` to machineFault passed all 1332 worker tests (found in review).
+   */
+  it("leaves a gate that hit the usage limit recorded as released", async () => {
+    const { h, outcomes } = watchedOutcomes({
+      gateFor: () => ({
+        name: "review",
+        run: async () => ({
+          ok: false,
+          reason:
+            "the review could not be completed: claude exited 1\nClaude AI usage limit reached|1754006400",
+        }),
+      }),
+    });
+
+    const disposition = await runTask(h.deps, running("implement", "review"));
+
+    expect(disposition).toBeUndefined();
+    expect(h.recordRun.mock.calls.at(-1)![1]).toMatchObject({ outcome: "released" });
+    expect(outcomes().at(-1)).toMatchObject({ outcome: "released" });
   });
 
   it("leaves a misconfigured base branch recorded as requeued", async () => {

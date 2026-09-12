@@ -96,5 +96,6 @@ unit tests; it is verified by running it.
 
 ## Notifications
 
-Four, and only four: merged, gate rejected, needs a human, usage limit. Anything more and the
-operator turns them off.
+Six, and only six: merged, pull request open, gate rejected, needs a human, usage limit, machine
+fault. Anything more and the operator turns them off — which is why the machine fault is reported
+once per distinct reason and not once per poll (`FaultMemory`).

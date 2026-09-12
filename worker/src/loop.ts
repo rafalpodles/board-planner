@@ -38,8 +38,8 @@ export interface LoopDeps {
    * What holds it up is that preflight asks `confine()` itself rather than re-deciding: its
    * sandbox probe builds a real spawn and returns the refusal verbatim, so a machine-wide refusal
    * cannot exist in one and not the other. `preflight.test.ts` pins the platform case. The refusals
-   * left over are the ones naming a path the run supplies — a worktree `realpathSync` cannot
-   * resolve — and those are per-task by construction, not machine-wide.
+   * left over are the ones naming a path the caller supplies — a worktree `realpathSync` cannot
+   * resolve, or an empty writable list — and those are per-call by construction, not machine-wide.
    *
    * A run-time fault is deliberately **not** latched into this gate (BP-609). The faults that reach
    * it include transients — an unreachable remote, git under load — and latching one would turn a

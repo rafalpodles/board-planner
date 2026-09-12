@@ -90,7 +90,7 @@ test.beforeEach(async () => {
 test("the server records a machine fault under its own outcome", async ({ request }) => {
   const posted = await postRun(
     request,
-    "faulted",
+    "machineFault",
     HELD_TASK_ID,
     HELD_TASK_KEY,
     "this machine has no sandbox"
@@ -101,7 +101,7 @@ test("the server records a machine fault under its own outcome", async ({ reques
   const stored = await (await db())
     .collection("agentruns")
     .findOne({ taskKey: HELD_TASK_KEY }, { sort: { finishedAt: -1 } });
-  expect(stored?.outcome).toBe("faulted");
+  expect(stored?.outcome).toBe("machineFault");
 });
 
 test("the run history shows a machine fault apart from a release, and marks only the fault badly", async ({
@@ -110,7 +110,7 @@ test("the run history shows a machine fault apart from a release, and marks only
 }) => {
   const faulted = await postRun(
     request,
-    "faulted",
+    "machineFault",
     HELD_TASK_ID,
     HELD_TASK_KEY,
     "this machine has no sandbox"
