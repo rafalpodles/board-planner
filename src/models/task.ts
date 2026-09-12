@@ -169,7 +169,10 @@ const taskSchema = new Schema<ITask>(
         files: { type: [String], default: [], select: false },
         // The true number, beside a list bounded for rendering — see ITaskDecision.files
         fileCount: { type: Number, default: 0 },
-        protectedFiles: { type: [String], default: [] },
+        // `select: false` alongside `files`, so the schema is the whole protection rather than a
+        // list of the three call sites that currently remember to blank `decision`. Both readers
+        // that render these name them explicitly, and an explicit inclusion overrides this.
+        protectedFiles: { type: [String], default: [], select: false },
         protectedFileCount: { type: Number, default: 0 },
         // `select: false` on both, and it is load-bearing rather than tidy. A task document is
         // spread into a response by a dozen readers — the search, My Tasks, the release and claim

@@ -74,14 +74,14 @@ describe("a recurrence stored before the interval had a bound", () => {
  * `select: false` is the same decision made once: a reader that forgets gets nothing.
  */
 describe("what a refused change publishes by default", () => {
-  const deselected = ["patch", "patchSha256", "attempts", "files"];
+  const deselected = ["patch", "patchSha256", "attempts", "files", "protectedFiles"];
 
   it.each(deselected)("withholds decision.%s unless a reader asks for it", (field) => {
     expect(Task.schema.path(`decision.${field}`).options.select).toBe(false);
   });
 
   // The control: the fields the panel renders must still travel, or the record is unreadable
-  it.each(["gate", "commit", "state", "fileCount", "protectedFiles", "acceptable", "unacceptableReason"])(
+  it.each(["gate", "commit", "state", "fileCount", "protectedFileCount", "acceptable", "unacceptableReason"])(
     "still carries decision.%s",
     (field) => {
       expect(Task.schema.path(`decision.${field}`).options.select).not.toBe(false);
