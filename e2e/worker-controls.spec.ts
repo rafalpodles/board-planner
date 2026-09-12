@@ -1067,6 +1067,85 @@ test("a machine that quarantined a checkout says so on the fleet screen, not `re
 });
 
 /**
+ * BP-349. Whether a machine confines the agent it runs is the operator's to know, and the fleet
+ * screen is the only place they can learn it without a terminal. Two states reach this row and they
+ * say opposite things: a machine that cannot confine anything, and one whose owner has accepted
+ * that and said so.
+ *
+ * Driven through the real heartbeat for the same reason the quarantine test above is: the check has
+ * to survive the route's own parsing to reach the row.
+ */
+test("the fleet screen says whether a machine confines the agent it runs", async ({
+  page,
+  request,
+}) => {
+  // The control: a machine whose sandbox works reads ready, and says so in as many words.
+  await heartbeat(request, {
+    preflight: {
+      ok: true,
+      account: "owner",
+      checks: [{ name: "sandbox", ok: true, detail: "the agent can only write inside its own worktree" }],
+    },
+  });
+
+  await signIn(page);
+  await page.goto("/settings/workers");
+  await expect(fleetRow(page, WORKER_NAME).getByText(/^ready/)).toBeVisible();
+
+  // A machine with no sandbox to confine with. Red, because every run on it would be one the agent
+  // could walk out of — the worker refuses the step, and this is where that is legible.
+  await heartbeat(request, {
+    preflight: {
+      ok: false,
+      account: "owner",
+      checks: [
+        {
+          name: "sandbox",
+          ok: false,
+          detail:
+            "this machine has no sandbox the worker knows how to confine an agent with (seatbelt is macOS only), so the agent could write anywhere this user can — set CP_ALLOW_UNCONFINED_AGENT=1 to accept that and run anyway",
+        },
+      ],
+    },
+  });
+
+  await page.reload();
+  const row = fleetRow(page, WORKER_NAME);
+  await expect(row.getByText("sandbox")).toBeVisible();
+  // What an operator needs off this screen: that it is the sandbox, why, and the way out.
+  await expect(row).toContainText("seatbelt is macOS only");
+  await expect(row).toContainText("CP_ALLOW_UNCONFINED_AGENT=1");
+  await expect(row.getByText(/^ready/), "the machine still reads ready").toHaveCount(0);
+
+  // And the accepted state, where this screen puts a chosen cost: green in the cell, spelled out in
+  // its tooltip — the same place "signed in with an API key — every run bills per token" lands.
+  // That it is only a tooltip is a real gap and BP-606 asks whether it should be louder; this
+  // asserts today's answer rather than pretending it is the other one.
+  await heartbeat(request, {
+    preflight: {
+      ok: true,
+      account: "owner",
+      checks: [
+        {
+          name: "sandbox",
+          ok: true,
+          detail:
+            "CP_ALLOW_UNCONFINED_AGENT is set — the agent runs with nothing confining its writes and can reach anything this user can",
+        },
+      ],
+    },
+  });
+
+  await page.reload();
+  const accepted = fleetRow(page, WORKER_NAME);
+  await expect(accepted.getByText(/^ready/)).toBeVisible();
+  await expect(accepted.getByText(/^ready/)).toHaveAttribute(
+    "title",
+    /nothing confining its writes/
+  );
+});
+
+/**
  * BP-585. The catalogue was re-read under the same `try` as the PUT that saved it, so a failed
  * re-read painted "Could not save" beside the "Saved." the same handler had just set. The save
  * landing and the list going stale are different facts and the screen has to say both.
