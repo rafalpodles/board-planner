@@ -125,6 +125,22 @@ describe("the badge on the board", () => {
   });
 
   /**
+   * The list renders every linked pull request through this one, GitLab's included, so a name that
+   * said "Opens on GitHub" told a screen-reader user the wrong host — the same mislabelling the
+   * refresh button had. The new tab is also the part `target="_blank"` leaves unannounced.
+   */
+  it("does not name a host it may not be going to", () => {
+    for (const provider of ["github", "gitlab"] as const) {
+      cleanup();
+      render(<PullRequestBadge pr={pr({ provider })} />);
+      const name = screen.getByRole("link").getAttribute("aria-label") ?? "";
+
+      expect(name, provider).toContain("Opens in a new tab");
+      expect(name, provider).not.toMatch(/Opens on/);
+    }
+  });
+
+  /**
    * Shape, not hue: red against green on a badge this size is the pair colour blindness separates
    * worst, and the pulse is dropped under prefers-reduced-motion.
    *

@@ -81,6 +81,13 @@ const GLYPH: Record<PullRequestLook, string> = {
   // Closed shares the pull-request icon with open, so without this the two are the same picture in
   // the same grey and a rejected branch reads as a live one. `origin/main` told them apart by
   // painting closed red; this keeps them apart by shape as well.
+  //
+  // A text glyph rather than a third icon path, knowingly: GitHub ships `git-pull-request-closed`
+  // and it would be the better mark, but the merged icon this file inherited was four detached arcs
+  // that rendered as a speck — a path written from memory is how that happened, and this is not the
+  // ticket to do it again from memory twice. The cost is that ⊘ is font-dependent; looked at on
+  // this platform at 11px in both themes, it renders as a circle and a slash, distinct from the
+  // filled dot `running` wears.
   closed: "⊘",
 };
 
@@ -91,9 +98,12 @@ const ACCENT: Record<PullRequestLook, string> = {
   failure: "var(--color-danger)",
   unknown: "var(--color-text-muted)",
   merged: "#8b5cf6",
-  // The ticket's "dark", and a step away from open's muted grey. Not danger red: a pull request
-  // somebody decided against is not a failure, and red is what a failed build wears two rows up.
-  closed: "var(--color-text)",
+  // Quieter than open, not louder. The first attempt at "dark" used `var(--color-text)`, which
+  // through `.chip-custom` degenerates to pure foreground — it made an abandoned pull request the
+  // most prominent chip on the board, ahead of a failed build and a merge, for the one state that
+  // means "nothing here". The step that separates it from open is the ⊘, which is shape rather
+  // than volume; the accent recedes.
+  closed: "color-mix(in srgb, var(--color-text-muted) 60%, var(--color-bg))",
 };
 
 // `git-merge-16`. What stood here was four detached arcs and a dot that rendered as an
@@ -187,11 +197,16 @@ export function PullRequestBadge({ pr, className = "" }: { pr: ApiLinkedPR; clas
       draggable={false}
       data-testid="pr-badge"
       data-look={look}
-      // The tooltip is the sentence; the accessible name adds where the link goes, which "#41 ✕"
-      // does not say and which a sighted user reads from the cursor. Identical strings would be
-      // announced twice — once as the name, once as the description.
+      // "a new tab" rather than "on GitHub": `ListView` renders every linked pull request through
+      // this, GitLab's included, so naming the host told a screen-reader user the wrong one — the
+      // same mislabelling the refresh button had. The new tab is also the part that is otherwise
+      // unannounced, `target="_blank"` being invisible to assistive technology.
+      //
+      // `title` stays, and is deliberately a prefix of the name: a reader that announces the
+      // description after the name hears the sentence twice, which is the price of the tooltip the
+      // ticket asks for — and the list row has nowhere else to put it.
       title={summary}
-      aria-label={`${summary}. Opens on GitHub`}
+      aria-label={`${summary}. Opens in a new tab`}
       className={`${CHIP} focus-ring transition-opacity hover:opacity-80 ${className}`}
       style={{ "--chip": ACCENT[look] } as CSSProperties}
     >
