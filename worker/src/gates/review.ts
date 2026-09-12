@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { DEFAULT_REVIEW_MODEL, modelOr } from "../config.js";
 import { childEnv } from "../env.js";
 import { CommandResult, Runner } from "../exec.js";
+import { confine } from "../sandbox.js";
 import { gitArgs, GIT_SAFE_ENV } from "../git-safety.js";
 import { plantedConfig } from "../repos.js";
 import { Gate, GateContext } from "../types.js";
@@ -129,11 +130,15 @@ const CHECKOUT_TIMEOUT_MS = 60_000;
  * present on disk (BP-404).
  *
  * Under `os.tmpdir()` rather than beside the worktree so the reviewer is not standing in the run's
- * own tree. That is all it buys: `os.tmpdir()` is itself agent-writable — `TMPDIR` is on
- * `childEnv`'s allowlist and the agent writes unsandboxed — so a plant in the checkout's *parent*
- * reaches the reviewer just as well. What closes the instruction channel is `--safe-mode` on the
- * CLI, above; what this closes is the reviewer reading, as data, files no gate ever saw, and it is
- * what makes the reviewer's tree the artefact the pipeline verified rather than a neighbouring one.
+ * own tree. What closes the instruction channel is `--safe-mode` on the CLI, below; what this
+ * closes is the reviewer reading, as data, files no gate ever saw, and it is what makes the
+ * reviewer's tree the artefact the pipeline verified rather than a neighbouring one.
+ *
+ * This paragraph used to end by saying `os.tmpdir()` is agent-writable, so a plant in the
+ * checkout's *parent* reaches the reviewer just as well. Since BP-349 the step that would plant it
+ * is confined to its worktree, so `TMPDIR` being on `childEnv`'s allowlist no longer implies the
+ * agent can write there — on a machine where the operator has not switched the confinement off.
+ * Nothing below leans on either half.
  */
 async function reviewCheckout(
   runner: Runner,
@@ -262,9 +267,7 @@ export function reviewGate(
       if ("refusal" in checkout) return { ok: false, reason: checkout.refusal };
 
       try {
-        const result = await runner.run(
-          "claude",
-          [
+        const reviewArgs = [
             "-p",
             buildPrompt(context),
             "--output-format",
@@ -281,8 +284,11 @@ export function reviewGate(
             // AND from every directory above it, ~/.claude/CLAUDE.md, settings hooks, skills,
             // plugins, custom agents. The clean checkout below cannot close those on its own —
             // measured on 2.1.248, a CLAUDE.md planted in the checkout's PARENT was obeyed, and
-            // the agent is handed TMPDIR and writes with no filesystem sandbox, so choosing a
-            // directory was never going to be enough (BP-404 review).
+            // at the time the agent was handed TMPDIR and wrote with no filesystem sandbox, so
+            // choosing a directory was never going to be enough (BP-404 review). BP-349 confines
+            // the writer now; this flag stays, because it is what closes the channel by name
+            // rather than by reach — including on a machine where the operator turned the sandbox
+            // off.
             //
             // --safe-mode rather than --bare: --bare closes the same channels and also makes auth
             // "strictly ANTHROPIC_API_KEY or apiKeyHelper", which this gate deliberately withholds.
@@ -290,7 +296,19 @@ export function reviewGate(
             "--safe-mode",
             "--model",
             model,
-          ],
+        ];
+
+        // `--safe-mode` above closes the instruction channels the CLI would read; this closes the
+        // ones it could write. The reviewer holds no write tool, so the only writer left is a hook
+        // — and a hook is exactly what the escape BP-349 describes plants. Confined to the clean
+        // checkout it was given, which is a throwaway directory, so nothing it leaves survives the
+        // gate that made it.
+        const spawn = confine("claude", reviewArgs, { writable: [checkout.path] });
+        if ("refusal" in spawn) return { ok: false, reason: spawn.refusal };
+
+        const result = await runner.run(
+          spawn.command,
+          spawn.args,
           { cwd: checkout.path, timeoutMs, env, signal: context.signal },
         );
 

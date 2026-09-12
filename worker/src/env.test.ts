@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { childEnv } from "./env.js";
+import { childEnv, UNCONFINED_ESCAPE_HATCH, unconfinedAgentAllowed } from "./env.js";
 
 const parent = {
   PATH: "/usr/bin",
@@ -47,5 +47,29 @@ describe("childEnv", () => {
 
     expect(env).toEqual({ PATH: "/usr/bin" });
     expect("HOME" in env).toBe(false);
+  });
+
+  // BP-349. Whether the operator switched the sandbox off is the worker's business and not the
+  // agent's: an agent that can read it knows whether an escape is worth attempting.
+  it("does not tell the agent whether it is confined", () => {
+    const env = childEnv([], { ...parent, [UNCONFINED_ESCAPE_HATCH]: "1" });
+
+    expect(env[UNCONFINED_ESCAPE_HATCH]).toBeUndefined();
+  });
+});
+
+describe("unconfinedAgentAllowed", () => {
+  it("is false when the operator has said nothing", () => {
+    expect(unconfinedAgentAllowed({})).toBe(false);
+  });
+
+  it.each(["1", "true", "TRUE", "yes", " 1 "])("reads %o as the risk accepted", (value) => {
+    expect(unconfinedAgentAllowed({ [UNCONFINED_ESCAPE_HATCH]: value })).toBe(true);
+  });
+
+  // "0" and "false" read as switching it off to anyone who has met an environment variable before,
+  // and "" is what an unset variable looks like once a shell has exported it.
+  it.each(["0", "false", "no", "", "  ", "maybe"])("does not read %o as an acceptance", (value) => {
+    expect(unconfinedAgentAllowed({ [UNCONFINED_ESCAPE_HATCH]: value })).toBe(false);
   });
 });

@@ -1,10 +1,6 @@
 import { describe, it, expect } from "vitest";
-import {
-  confine,
-  SANDBOX_COMMAND,
-  UNCONFINED_ESCAPE_HATCH,
-  UNCONFINED_REASON,
-} from "./sandbox.js";
+import { confine, SANDBOX_COMMAND, UNCONFINED_REASON } from "./sandbox.js";
+import { UNCONFINED_ESCAPE_HATCH } from "./env.js";
 
 const identity = (path: string) => path;
 

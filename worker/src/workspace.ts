@@ -76,8 +76,9 @@ export interface Worktree {
   baseSha: string;
   /**
    * What the effective git config said before the agent ran, held in this process for the same
-   * reason `baseSha` is. A baseline on disk is one the agent can edit — it runs as this uid with
-   * no filesystem sandbox — and this is what lets a scan tell `~/.gitconfig`'s ordinary credential
+   * reason `baseSha` is. A baseline on disk is one the agent can edit — it runs as this uid, and
+   * the sandbox that confines it to the worktree since BP-349 is the operator's to switch off — and
+   * this is what lets a scan tell `~/.gitconfig`'s ordinary credential
    * helper from one that appeared during the run (BP-346). `null` when git would not answer, which
    * leaves the machine scopes unjudged rather than refusing the machine.
    */
@@ -253,8 +254,10 @@ export function createWorkspace(
   }
 
   // FETCH_HEAD, refs/remotes/origin/<branch> — whatever `git fetch` leaves behind to say what it
-  // got — lives in the same shared, agent-writable ref store this module stopped trusting names
-  // in. ls-remote's answer is read straight off this process's own stdout, in memory, before
+  // got — lives in the same shared ref store this module stopped trusting names in. BP-349's
+  // confinement keeps the agent out of it, and none of what follows leans on that: the store is
+  // shared with every other worktree of this clone, and the confinement is the operator's to
+  // switch off. ls-remote's answer is read straight off this process's own stdout, in memory, before
   // anything is written to disk; rev-parse is then asked about that exact object id, a
   // content-addressed lookup no planted ref can redirect. The fetch itself may still be
   // redirected — it has to run inside the clone to write objects there — but that is harmless:

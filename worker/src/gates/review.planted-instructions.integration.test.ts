@@ -140,12 +140,14 @@ describe("the review gate against an ignored instruction file", () => {
    *
    * The first version of this file asserted only about the checkout's own directory — and the
    * review of this branch showed the attack keeps that property while moving the plant one level
-   * up: `$TMPDIR` is the checkout's parent, `TMPDIR` is on childEnv's allowlist, the agent writes
+   * up: `$TMPDIR` is the checkout's parent, `TMPDIR` is on childEnv's allowlist, the agent wrote
    * unsandboxed, and the CLI reads CLAUDE.md from every directory above the cwd. Measured with the
    * real CLI, the plant was obeyed and both tests here stayed green.
    *
    * So this asserts the honest shape: the ancestor really is reachable — isolation by directory
-   * does not and cannot close it — and what closes it is the flag.
+   * does not and cannot close it — and what closes it is the flag. BP-349 has since taken the
+   * writer's reach away as well, but that is a second lock on the same door, not this one: it is
+   * the operator's to switch off, and this file is about what the flag does without it.
    */
   it("does not pretend the checkout's ancestors are out of the agent's reach", async () => {
     const seen: Seen = {};
