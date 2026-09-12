@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page, type TestInfo } from "@playwright/test";
 import mongoose from "mongoose";
 import { MAIL_SERVER, SMTP_STUB_CONTROL_URL } from "../playwright.config";
 import { ADMIN_ID, ADMIN_USERNAME, E2E_MONGODB_URI, seed } from "./seed";
@@ -26,6 +26,12 @@ import { signIn } from "./session";
  * it. The run's other mail is fire-and-forget and can still be in flight when this file starts, so
  * a count of what has arrived, or a refusal aimed at whatever comes next, would be measuring the
  * neighbours.
+ *
+ * The attempt is part of the address for the same reason. The stub is a `webServer`, so it outlives
+ * a test: on CI's one retry — or under `--repeat-each` — the earlier attempt's message is still in
+ * its log, and a second `toHaveLength(1)` would fail on the leftover rather than on anything this
+ * attempt did. Owning an address per attempt rather than clearing the log keeps the spec from
+ * throwing away mail it did not send.
  */
 
 async function db() {
@@ -69,6 +75,10 @@ async function stopRefusing() {
   await fetch(`${SMTP_STUB_CONTROL_URL}/refuse`);
 }
 
+/** This attempt's own recipient, so a retry or a repeat cannot read the attempt before it. */
+const mailbox = (name: string, attempt: TestInfo) =>
+  `${name}-${attempt.repeatEachIndex}-${attempt.retry}@e2e.invalid`;
+
 async function openTheMailScreen(page: Page) {
   await signIn(page);
   await page.goto("/settings/email");
@@ -86,8 +96,11 @@ test.afterEach(async () => {
   if (mongoose.connection.readyState !== 0) await mongoose.disconnect();
 });
 
-test("the screen reports the mail server it was given, and offers to use it", async ({ page }) => {
-  await giveTheAdminTheAddress("reports-the-server@e2e.invalid");
+test("the screen reports the mail server it was given, and offers to use it", async ({
+  page,
+}, testInfo) => {
+  const ADDRESS = mailbox("reports-the-server", testInfo);
+  await giveTheAdminTheAddress(ADDRESS);
   await openTheMailScreen(page);
 
   // The three rows come off one object the dev server was configured from, so a screen printing
@@ -99,15 +112,15 @@ test("the screen reports the mail server it was given, and offers to use it", as
 
   await expect(sendButton(page)).toBeEnabled();
   await expect(
-    page.getByText("It goes to reports-the-server@e2e.invalid, the address on your profile.")
+    page.getByText(`It goes to ${ADDRESS}, the address on your profile.`)
   ).toBeVisible();
 });
 
 // The whole question the screen exists to answer: does mail leave this deployment
 test("a test message reaches the mail server, and the screen names where it went", async ({
   page,
-}) => {
-  const ADDRESS = "delivery-works@e2e.invalid";
+}, testInfo) => {
+  const ADDRESS = mailbox("delivery-works", testInfo);
   await giveTheAdminTheAddress(ADDRESS);
   await openTheMailScreen(page);
 
@@ -123,16 +136,21 @@ test("a test message reaches the mail server, and the screen names where it went
   const arrived = await mailFor(ADDRESS);
   expect(arrived).toHaveLength(1);
   // What the production template wrote, not what the screen echoed: the heading and the account
-  // that asked for it are in the body, and the envelope sender is the configured From
+  // that asked for it are in the body, and the envelope sender is the configured From.
+  //
+  // The row, not the bare username: the footer this template also carries reads "Sent because an
+  // administrator ran the delivery test", so a body containing "admin" says nothing at all. The
+  // character class after it takes the separator either as typed or quoted-printable — the `·`
+  // that follows is not ASCII, which is what puts that line in the encoding in the first place.
   expect(arrived[0].data).toContain("Your mail server accepted this message");
-  expect(arrived[0].data).toContain(ADMIN_USERNAME);
+  expect(arrived[0].data).toMatch(new RegExp(`Requested by: ${ADMIN_USERNAME}[ =]`));
   expect(arrived[0].from).toBe(MAIL_SERVER.from.replace(/^.*<|>$/g, ""));
 });
 
 test("when the mail server refuses, the screen says so and repeats what it said", async ({
   page,
-}) => {
-  const ADDRESS = "server-says-no@e2e.invalid";
+}, testInfo) => {
+  const ADDRESS = mailbox("server-says-no", testInfo);
   await giveTheAdminTheAddress(ADDRESS);
   await refuseMailFor(ADDRESS);
   await openTheMailScreen(page);
@@ -151,8 +169,8 @@ test("when the mail server refuses, the screen says so and repeats what it said"
 
 // The other half of that distinction. Nothing was handed to a mail server, so blaming one sends
 // the admin to read logs that have nothing in them.
-test("a request that never arrives does not blame the mail server", async ({ page }) => {
-  const ADDRESS = "never-left-the-browser@e2e.invalid";
+test("a request that never arrives does not blame the mail server", async ({ page }, testInfo) => {
+  const ADDRESS = mailbox("never-left-the-browser", testInfo);
   await giveTheAdminTheAddress(ADDRESS);
   await openTheMailScreen(page);
 

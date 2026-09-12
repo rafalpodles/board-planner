@@ -5,18 +5,24 @@ import EmailSettingsPage from "./page";
 
 /**
  * BP-469. What the screen says after a test message failed, and why the two wordings are not
- * interchangeable: the route answers 502 only when a mail server was reached and refused, and every
- * other refusal — no server configured, no address, a request that never arrived — never got that
- * far. "The mail server refused it" over any of those sends an admin to read logs that have nothing
- * in them.
+ * interchangeable. The route spends 502 on whatever `sendEmailOrThrow` threw once a transport was
+ * built — a refusal at DATA, but a connection timeout or a failed STARTTLS upgrade too
+ * (`route.test.ts` pins that last one) — and answers 409, 400 or 403 for the refusals it made
+ * itself, before anything was contacted. The screen reads 502 as "ask the mail server" and
+ * everything else as "ask us", and sending an admin to read a mail log that has nothing in it is
+ * what the distinction exists to prevent.
  *
  * The e2e (`e2e/mail-test-send.spec.ts`) drives the two states a run can arrange for real. The
  * states in between are here, where a status is a number rather than something to provoke.
  */
 
-const { api, toast } = vi.hoisted(() => ({
+const { api, toast, router } = vi.hoisted(() => ({
   api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn() },
   toast: vi.fn(),
+  // One object for the whole file. `useRouter()`'s result is in the load effect's dependency
+  // array, so a mock minting a fresh one per render re-runs the read after every state change —
+  // an endless loop that `await act(async () => …)` waits out rather than returns from.
+  router: { replace: vi.fn(), push: vi.fn() },
 }));
 
 const auth = {
@@ -32,7 +38,7 @@ const auth = {
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast }) }));
 vi.mock("@/hooks/use-auth", () => ({ useAuth: () => auth }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn(), push: vi.fn() }) }));
+vi.mock("next/navigation", () => ({ useRouter: () => router }));
 
 const CONFIGURED = {
   configured: true,
@@ -46,12 +52,7 @@ function refusalWith(status: number | undefined, message: string) {
   return Object.assign(new Error(message), status === undefined ? {} : { status });
 }
 
-/**
- * Rendered and then waited on with `findBy`, rather than inside `await act(async () => …)`: the
- * load effect's promise is awaited by act, and a rejected one — the failed-read case below — never
- * lets it return. `findBy` wraps its own polling in act, so the warnings that would otherwise
- * follow do not appear either.
- */
+/** `findBy` rather than a bare render: the heading appears only once the load effect has answered. */
 async function openTheScreen() {
   render(<EmailSettingsPage />);
   await screen.findByRole("heading", { name: "Email" });
@@ -138,10 +139,21 @@ describe("the mail screen, once it has a mail server", () => {
     expect(screen.getByRole("alert").textContent).toContain("Nothing was sent");
   });
 
-  // A request that never arrived carries no status at all, which is the case a `status >= 500`
-  // reading of the same condition would get wrong
+  // A request that never arrived carries no status at all
   it("does not blame a mail server for a failure with no status", async () => {
     api.post.mockRejectedValue(refusalWith(undefined, "Failed to fetch"));
+
+    await openTheScreen();
+    await pressSend();
+
+    expect(screen.getByRole("alert").textContent).toContain("Nothing was sent");
+  });
+
+  // The case that separates `status === 502` from a `status >= 500` reading of the same condition,
+  // which every other refusal here would satisfy either way: a proxy or a restarting instance
+  // answers 503, and no mail server has been near it
+  it("does not blame a mail server for a 503 from in front of the instance", async () => {
+    api.post.mockRejectedValue(refusalWith(503, "Service Unavailable"));
 
     await openTheScreen();
     await pressSend();
