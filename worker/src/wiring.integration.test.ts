@@ -1,5 +1,5 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
-import { agentArgs, isAgentSpawn } from "./__fixtures__/agent-spawn.js";
+import { agentArgs, answerSandboxProbe, isAgentSpawn, isSandboxProbe } from "./__fixtures__/agent-spawn.js";
 import { createServer, IncomingMessage, request as httpRequest, Server, ServerResponse } from "http";
 import { AddressInfo } from "net";
 import { tmpdir } from "os";
@@ -432,6 +432,11 @@ async function runWorkerAgainstTheBoard(opts: { takeTheTask: boolean }): Promise
       if (command === "git" && args.includes("worktree") && args.includes("add")) {
         const separator = args.indexOf("--");
         if (separator !== -1 && args[separator + 1]) mkdirSync(args[separator + 1], { recursive: true });
+      }
+      // Before the agent branch: both go through sandbox-exec, and the probe is the one wrapping sh
+      if (isSandboxProbe(command, args)) {
+        answerSandboxProbe(args);
+        return ok();
       }
       if (isAgentSpawn(command, args)) return agent(runOpts);
       if (args[0] === "ls-remote") return ok(`${BASE_SHA}\t${args[args.length - 1]}\n`);

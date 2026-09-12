@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { dirname, join } from "path";
 import { childEnv, UNCONFINED_ESCAPE_HATCH, unconfinedAgentAllowed } from "./env.js";
-import { confine } from "./sandbox.js";
+import { confine, SANDBOX_COMMAND } from "./sandbox.js";
 import { Runner } from "./exec.js";
 import { GhAccount, parseGhAccounts, resolveGhToken, usableAccount } from "./github-account.js";
 
@@ -275,6 +275,11 @@ async function ghSession(
 
 const SANDBOX_PROBE_TIMEOUT_MS = 10_000;
 
+/** Enough of a spawn failure to diagnose it from the fleet screen, without pasting a stack there. */
+function firstLine(text: string): string {
+  return text.split("\n")[0].trim().slice(0, 200) || "no output";
+}
+
 /**
  * Whether this machine can actually confine the agent — asked by confining something and watching
  * it fail to escape, not by reading `process.platform`.
@@ -298,28 +303,43 @@ async function sandboxCheck(deps: PreflightDeps, env: NodeJS.ProcessEnv): Promis
   const root = mkdtempSync(join(tmpdir(), "cp-sandbox-probe-"));
   const worktree = join(root, "worktree");
   const beyond = join(root, "beyond.txt");
+  const ran = join(worktree, "ran.txt");
   mkdirSync(worktree);
 
   try {
-    // The path as $0 rather than inside the script, so nothing about a temp directory's name can
-    // become shell syntax.
-    const spawn = confine("/bin/sh", ["-c", 'printf escaped > "$0"', beyond], {
+    // Paths as $0 and $1 rather than inside the script, so nothing about a temp directory's name
+    // can become shell syntax. The allowed write comes first and is the positive control: without
+    // it, every way the probe can fail to execute at all — sandbox-exec not on the machine, a
+    // profile that stopped compiling, the timeout — leaves `beyond` absent and reads exactly like
+    // a sandbox that worked.
+    const spawn = confine("/bin/sh", ["-c", 'printf ran > "$1"; printf escaped > "$0"', beyond, ran], {
       writable: [worktree],
       env: deps.env,
     });
     if ("refusal" in spawn) return { name, ok: false, detail: spawn.refusal };
 
-    await deps.runner.run(spawn.command, spawn.args, {
+    const result = await deps.runner.run(spawn.command, spawn.args, {
       cwd: worktree,
       timeoutMs: SANDBOX_PROBE_TIMEOUT_MS,
       env,
     });
 
+    if (!existsSync(ran)) {
+      const why = result.timedOut
+        ? `it timed out after ${SANDBOX_PROBE_TIMEOUT_MS}ms`
+        : `${SANDBOX_COMMAND} exited ${result.code}: ${firstLine(result.stderr)}`;
+      return {
+        name,
+        ok: false,
+        detail: `the sandbox could not be tested because the probe never ran — ${why}`,
+      };
+    }
+
     if (existsSync(beyond)) {
       return {
         name,
         ok: false,
-        detail: "sandbox-exec ran but did not stop a write outside the directory it was given — the agent would not be confined to its worktree",
+        detail: "the sandbox ran but did not stop a write outside the directory it was given — the agent would not be confined to its worktree",
       };
     }
 

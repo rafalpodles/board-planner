@@ -3,6 +3,7 @@ import { existsSync, writeFileSync } from "node:fs";
 import { CommandResult, createRunner, Runner } from "./exec.js";
 import { SANDBOX_COMMAND, UNCONFINED_REASON } from "./sandbox.js";
 import { UNCONFINED_ESCAPE_HATCH } from "./env.js";
+import { answerSandboxProbe, isSandboxProbe } from "./__fixtures__/agent-spawn.js";
 import { checkRepo, pathWithTools, runPreflight } from "./preflight.js";
 
 const LOGGED_IN = JSON.stringify({
@@ -51,6 +52,11 @@ function machine(spec: Machine = {}): {
   const runner: Runner = {
     run: vi.fn(async (command: string, args: string[], opts) => {
       calls.push([command, ...args]);
+
+      if (isSandboxProbe(command, args)) {
+        answerSandboxProbe(args);
+        return ok();
+      }
 
       const lookup = /^command -v (\S+)$/.exec(args[args.length - 1] ?? "");
       if (lookup) {
@@ -467,8 +473,10 @@ describe("the sandbox check", () => {
     const runner: Runner = {
       run: async (command, args, opts) => {
         if (command !== SANDBOX_COMMAND) return m.runner.run(command, args, opts);
-        const beyond = args[args.length - 1];
-        writeFileSync(beyond, "escaped");
+        // Both writes land: the probe really ran — so this is not the "never ran" row below — and
+        // the sandbox let it out.
+        writeFileSync(args[args.length - 1], "ran");
+        writeFileSync(args[args.length - 2], "escaped");
         return { code: 0, stdout: "", stderr: "", timedOut: false };
       },
     };
@@ -479,6 +487,44 @@ describe("the sandbox check", () => {
     expect(row.ok).toBe(false);
     expect(row.detail).toMatch(/did not stop a write outside/);
     expect(report.ok).toBe(false);
+  });
+
+  // The hole this row was opened with: `createRunner` settles a spawn that never happened as
+  // `{code:-1}` rather than throwing, so every way the probe can fail to execute leaves the file it
+  // was told not to write absent — which read exactly like a sandbox that worked.
+  it("fails when the probe never ran at all, rather than reading as confined", async () => {
+    const m = machine();
+    const runner: Runner = {
+      run: async (command, args, opts) =>
+        command === SANDBOX_COMMAND
+          ? { code: -1, stdout: "", stderr: "Error: spawn sandbox-exec ENOENT", timedOut: false }
+          : m.runner.run(command, args, opts),
+    };
+
+    const report = await runPreflight({ ...depsFor(m), runner });
+
+    const row = check(report, "sandbox");
+    expect(row.ok).toBe(false);
+    expect(row.detail).toMatch(/never ran/);
+    // and enough to diagnose it without opening a terminal on that machine
+    expect(row.detail).toContain("ENOENT");
+    expect(report.ok).toBe(false);
+  });
+
+  it("fails when the probe times out, and says that is what happened", async () => {
+    const m = machine();
+    const runner: Runner = {
+      run: async (command, args, opts) =>
+        command === SANDBOX_COMMAND
+          ? { code: -1, stdout: "", stderr: "", timedOut: true }
+          : m.runner.run(command, args, opts),
+    };
+
+    const report = await runPreflight({ ...depsFor(m), runner });
+
+    const row = check(report, "sandbox");
+    expect(row.ok).toBe(false);
+    expect(row.detail).toMatch(/timed out/);
   });
 
   it("fails on a machine there is no sandbox for, rather than reporting nothing", async () => {

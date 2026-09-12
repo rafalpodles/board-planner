@@ -28,6 +28,13 @@ function paramsOf(result: ReturnType<typeof confined>): Record<string, string> {
 }
 
 describe("confine", () => {
+  // A wrapper whose job is to constrain a hostile process must not be findable at a name: the
+  // worker extends its own PATH with directories preflight resolved, and anything earlier on that
+  // PATH would otherwise become the sandbox.
+  it("names the sandbox by absolute path, never by a name the PATH resolves", () => {
+    expect(SANDBOX_COMMAND.startsWith("/")).toBe(true);
+  });
+
   it("spawns the command through sandbox-exec, with the command itself still last", () => {
     const result = confined(["/work/bp-1"]);
     if (!("command" in result)) throw new Error("expected a confined spawn");

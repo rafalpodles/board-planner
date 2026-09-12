@@ -24,7 +24,11 @@ import { UNCONFINED_ESCAPE_HATCH, unconfinedAgentAllowed } from "./env.js";
  * channels inside the operator's home.
  */
 
-export const SANDBOX_COMMAND = "sandbox-exec";
+// Absolute, not `sandbox-exec` on the PATH. The worker extends its own PATH with directories
+// preflight resolved, and a wrapper whose job is to constrain a hostile process must not be
+// findable at a name: anything earlier on that PATH would silently become the sandbox. macOS keeps
+// it here; a machine where it is not gets a refusal from preflight rather than a green row.
+export const SANDBOX_COMMAND = "/usr/bin/sandbox-exec";
 
 // The operator's own risk acceptance lives in env.ts, which owns reading this process's
 // environment. It means the same thing on every platform — run the agent unconfined — so there is
