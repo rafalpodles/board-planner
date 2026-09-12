@@ -914,18 +914,31 @@ describe("telling one verdict from a retry of it", () => {
    * nothing, so the record still says `attempts: 0` on the fifth pass as on the first.
    */
   /**
-   * An empty `decidedAt` is "the server did not say", not "answered at no time". A server that
-   * predates the field sends nothing, and treating that as a value made `decidedFor` and the row
-   * agree at `""` on every row — the reset would silently never fire again, which is round 6's
-   * double-accept back with no sign of it.
+   * A server that says when it was answered, against a marker written before it did — skew, and
+   * the count belongs to a verdict this machine can no longer identify. Reset.
    */
-  it("still resets when the server says nothing about when it was answered", async () => {
+  it("resets when the marker cannot say which verdict its count belongs to", async () => {
     const markers = store();
-    markers.write(marker({ attempts: 5, decidedFor: "2026-09-01T09:00:00.000Z" }));
+    markers.write(marker({ attempts: 5, decidedFor: undefined }));
+
+    await settleDecisions(deps(markers), [row({ decidedAt: "2026-09-01T11:00:00.000Z" })], NOW, () => NOW);
+
+    expect(markers.read("CP-158")?.attempts).toBe(1);
+  });
+
+  /**
+   * And the mirror: a server that does not send the field at all. "" is "it did not say", not "it
+   * was answered at no time" — treating it as a value makes every row differ from a marker that
+   * also has nothing, so the count is wiped on every pass and the ceiling never fires. Which is
+   * the same blindness the ceiling had before it moved off the record.
+   */
+  it("keeps counting against a server that never says when it was answered", async () => {
+    const markers = store();
+    markers.write(marker({ attempts: 3, decidedFor: undefined }));
 
     await settleDecisions(deps(markers), [row({ decidedAt: "" })], NOW, () => NOW);
 
-    expect(markers.read("CP-158")?.attempts).toBe(1);
+    expect(markers.read("CP-158")?.attempts).toBe(4);
   });
 
   it("keeps counting a retry of the same verdict, even while the record still reads zero", async () => {
