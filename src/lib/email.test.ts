@@ -58,6 +58,34 @@ describe("emailSettingsSummary", () => {
   it("carries no password", () => {
     expect(JSON.stringify(emailSettingsSummary())).not.toContain("secret");
   });
+
+  // The screen has two branches and this decides which one an admin gets. Since BP-465 the e2e run
+  // has a mail server, so the unconfigured branch is reachable there only through a stubbed route —
+  // this is the one place left that asserts the mapping against the environment itself.
+  it("reports configured only when the host, the user and the password are all present", async () => {
+    const cases = [
+      [{ host: "smtp.example.com", user: "mailer", pass: "secret" }, true],
+      [{ host: "", user: "mailer", pass: "secret" }, false],
+      [{ host: "smtp.example.com", user: "", pass: "secret" }, false],
+      [{ host: "smtp.example.com", user: "mailer", pass: "" }, false],
+    ] as const;
+
+    for (const [env, expected] of cases) {
+      vi.resetModules();
+      vi.stubEnv("SMTP_HOST", env.host);
+      vi.stubEnv("SMTP_USER", env.user);
+      vi.stubEnv("SMTP_PASS", env.pass);
+      const fresh = await import("./email");
+      const label = JSON.stringify(env);
+      expect(fresh.emailSettingsSummary().configured, label).toBe(expected);
+      expect(fresh.isEmailConfigured(), label).toBe(expected);
+    }
+
+    // Put back what the rest of this file was imported against
+    vi.stubEnv("SMTP_HOST", "smtp.example.com");
+    vi.stubEnv("SMTP_USER", "mailer");
+    vi.stubEnv("SMTP_PASS", "secret");
+  });
 });
 
 describe("addresses", () => {

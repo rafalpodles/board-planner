@@ -110,7 +110,14 @@ async function expectMailFor(address: string, title: string) {
  * already been taken and the window that follows is measuring the decision rather than the delay.
  *
  * Every reader here has the bell on for the row in question: it is on in the legacy default, and
- * none of these tests ever unticks In app.
+ * none of these tests ever unticks In app. That is a precondition of the gate, not a detail — the
+ * row is written with `inApp: shown(recipientId)` and `/notifications` hides the hidden ones, so
+ * wiring this into a test that unticks In app turns it into a 30 s hang rather than a failure.
+ *
+ * It orders the window after the channel *decision*, which is not the same as after a delivery.
+ * Every silence below is also preceded by a mail that did arrive, in its own test, which is what
+ * covers the rest: the first send of a run pays for the transport, the certificate and the
+ * handshake, and no gate on the bell can stand in for that.
  */
 async function dispatchHasRun(page: Page, title: string) {
   await expect(async () => {
@@ -335,6 +342,17 @@ test("a project override mutes one board, and turning it off gives the global gr
     await member.goto(`/projects/${PROJECT_KEY}/settings`);
     await member.getByRole("button", { name: "Notifications", exact: true }).first().click();
   };
+
+  // Before the mute, so the silence after it is a change rather than a state — and so the transport
+  // has demonstrably delivered to this mailbox before anything is measured by its absence. Without
+  // it the test's only delivered mail is the one at the very end, and running this test on its own
+  // (`-g`, `--last-failed`, or any future reordering) leaves the `muted` negative measured against
+  // a transport that has never sent anything: it then passes with the `uncheck()` below deleted.
+  const beforeTheMute = "Delivered here until the board is muted";
+  await test.step("an assignment on this board writes, while the global grid is in force", async () => {
+    await assignANewTask(admin, beforeTheMute, MEMBER_USERNAME);
+    await expectMailFor(MEMBER_MAILBOX, beforeTheMute);
+  });
 
   await test.step("but not on this board", async () => {
     await projectNotifications();

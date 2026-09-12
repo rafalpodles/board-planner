@@ -78,7 +78,13 @@ function converse(socket, session) {
       if (session.readingData) {
         const end = buffer.indexOf("\r\n.\r\n");
         if (end === -1) return;
-        session.data += buffer.subarray(0, end).toString("utf8");
+        // Un-stuffed: a client doubles a leading dot so it cannot end the message early, and a
+        // reader that keeps both sees a body its sender never wrote. A spec here matches on the
+        // task title, so a title starting with a dot would silently stop matching.
+        session.data += buffer
+          .subarray(0, end)
+          .toString("utf8")
+          .replace(/^\.\./gm, ".");
         buffer = buffer.subarray(end + 5);
         session.readingData = false;
         messages.push({ from: session.from, to: session.to, data: session.data });
@@ -123,7 +129,9 @@ function command(socket, session, line) {
       socket.write("220 2.0.0 Ready to start TLS\r\n");
       socket.removeAllListeners("data");
       const secured = new TLSSocket(socket, { isServer: true, secureContext: context });
-      converse(secured, { ...session, secure: true, to: [], data: "", readingData: false });
+      // `from` is discarded with the rest: RFC 3207 §4.2 says the server must forget the whole
+      // session state on upgrade, and the client repeats EHLO and MAIL over the new socket.
+      converse(secured, { ...session, secure: true, from: "", to: [], data: "", readingData: false });
       return "upgraded";
     }
     case "AUTH":
