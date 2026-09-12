@@ -62,6 +62,15 @@ export interface DecisionMarker {
    * every verdict and nothing else moves it.
    */
   decidedFor?: string;
+  /**
+   * A pull request this machine opened but could not report.
+   *
+   * `openPr` succeeds, the settlement does not land, and before the next poll the decision leaves
+   * the live list — abandoned by a person, or superseded by a second claim. The retry never
+   * happens and the pull request is open on the remote with nothing on the board naming it. One
+   * poll wide, and the evidence is on the remote either way; this is so the sweep can say where.
+   */
+  openedPr?: string;
 }
 
 export interface MarkerStore {
@@ -668,7 +677,12 @@ export async function settleDecisions(
       );
       // Only once the board holds the url. Until then this worktree and this marker are the only
       // things that say where the work is, and a settlement that did not land is retried whole.
-      if (!(await deps.settle({ taskId: decision.taskId, state: "delivered", prUrl }))) continue;
+      if (!(await deps.settle({ taskId: decision.taskId, state: "delivered", prUrl }))) {
+        // Recorded before the retry, so that if this decision is abandoned or superseded before
+        // the next poll the sweep can still name what was opened.
+        writeMarker(deps, { ...deps.markers.read(decision.taskKey)!, openedPr: prUrl });
+        continue;
+      }
       await context.destroyWorktree(decision.taskKey).catch((error) => {
         // Left for the sweep: the decision has left the live list, so the next pass takes it.
         deps.log(`${decision.taskKey}: could not remove the delivered worktree: ${String(error)}`);
@@ -729,6 +743,15 @@ async function sweepMarkers(
         deps.markers.remove(marker.taskKey);
       }
       continue;
+    }
+
+    // A pull request this machine opened and never managed to report, on a decision that has since
+    // been answered some other way. The board will never name it, so the log is the only place it
+    // is written down at all.
+    if (marker.openedPr) {
+      deps.log(
+        `${marker.taskKey}: ${marker.openedPr} was opened for a decision that ended before the machine could report it`
+      );
     }
 
     await context.destroyWorktree(marker.taskKey).catch((error) => {

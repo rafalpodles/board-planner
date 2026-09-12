@@ -496,6 +496,34 @@ describe("acting on a verdict", () => {
     expect(h.markers.read("CP-158")).not.toBeNull();
   });
 
+  /**
+   * The one-poll window: `openPr` succeeded, the settlement did not land, and the decision was
+   * answered some other way before the retry. The pull request is open on the remote and the board
+   * will never name it, so the sweep is the only place it is written down at all.
+   */
+  it("says which pull request it opened and never managed to report", async () => {
+    const h = harness();
+    h.settleFails();
+    await settleDecisions(h.deps, [decision()], LATER);
+    expect(h.markers.read("CP-158")?.openedPr).toBe("https://github.com/o/r/pull/7");
+
+    // …and the person gives up before the next poll, so the row is gone from the live list
+    await settleDecisions(h.deps, [], LATER + 1);
+
+    expect(h.deps.log).toHaveBeenCalledWith(
+      expect.stringContaining("https://github.com/o/r/pull/7")
+    );
+  });
+
+  // Nothing to say where nothing was opened
+  it("says nothing about a pull request for a decision that never got that far", async () => {
+    const h = harness();
+
+    await settleDecisions(h.deps, [], LATER + 1);
+
+    expect(h.deps.log).not.toHaveBeenCalledWith(expect.stringContaining("pull"));
+  });
+
   // Abandoned by a person, or superseded by a second claim: the record has left the live list, and
   // the worktree it was holding back goes with it
   it("sweeps a marker whose decision is no longer live, and the worktree with it", async () => {
