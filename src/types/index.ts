@@ -886,6 +886,9 @@ export interface IPmTrigger {
   updatedAt: Date;
 }
 
+/** What CI says about a linked pull request's head commit. `unknown` means this instance could not ask. */
+export type CiState = "none" | "running" | "success" | "failure" | "unknown";
+
 export interface ILinkedPR {
   _id: Types.ObjectId;
   provider?: "github" | "gitlab";
@@ -895,6 +898,10 @@ export interface ILinkedPR {
   url: string;
   mergedAt: Date | null;
   updatedAt: Date;
+  // Optional across the wire and in the database: a link stored before BP-443 has none of the three
+  ci?: CiState;
+  ciLabel?: string | null;
+  headSha?: string | null;
 }
 
 export interface ApiLinkedPR {
@@ -906,6 +913,9 @@ export interface ApiLinkedPR {
   url: string;
   mergedAt: string | null;
   updatedAt: string;
+  ci?: CiState;
+  ciLabel?: string | null;
+  headSha?: string | null;
 }
 
 export interface IChecklistItem {

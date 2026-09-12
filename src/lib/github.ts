@@ -236,3 +236,53 @@ async function fetchJson<T>(url: string, headers: Record<string, string>): Promi
   if (!res.ok) throw new Error(`GitHub API ${res.status}`);
   return res.json();
 }
+
+/**
+ * How many open pull requests one sync will ask GitHub about.
+ *
+ * Each one costs two requests against a 5,000/hour token, and a busy board syncing every five
+ * minutes would otherwise scale its bill with the number of open branches. The most recently
+ * updated are asked about first, so what the cap drops is the stalest.
+ */
+export const MAX_CHECKED_PULL_REQUESTS = 20;
+const CHECK_CONCURRENCY = 5;
+
+/**
+ * Attaches CI state to matched pull requests.
+ *
+ * A pull request that is merged or closed is never asked about: its build is history, the badge
+ * shows the merge rather than the checks, and not asking is both the rate-limit answer and the
+ * "stop polling what has finished" one. Anything past the cap is `unknown` for the honest reason —
+ * nobody asked.
+ */
+export async function withChecks(
+  prs: ParsedPR[],
+  owner: string,
+  repo: string,
+  token: string
+): Promise<(ParsedPR & PullRequestChecks)[]> {
+  const askable = prs
+    .filter((pr) => pr.state === "open" && pr.headSha)
+    .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
+    .slice(0, MAX_CHECKED_PULL_REQUESTS);
+
+  const checks = new Map<ParsedPR, PullRequestChecks>();
+  for (let i = 0; i < askable.length; i += CHECK_CONCURRENCY) {
+    const batch = askable.slice(i, i + CHECK_CONCURRENCY);
+    const answers = await Promise.all(
+      batch.map((pr) => fetchChecks(owner, repo, pr.headSha as string, token))
+    );
+    batch.forEach((pr, index) => checks.set(pr, answers[index]));
+  }
+
+  // An open pull request nobody asked about — past the cap, or with no head commit to ask about —
+  // is `unknown` rather than `none`, which is the literal truth and keeps a capped sync from
+  // reporting a board full of builds that never ran.
+  return prs.map((pr) => ({
+    ...pr,
+    ...(checks.get(pr) ?? {
+      ci: pr.state === "open" ? ("unknown" as const) : ("none" as const),
+      ciLabel: null,
+    }),
+  }));
+}

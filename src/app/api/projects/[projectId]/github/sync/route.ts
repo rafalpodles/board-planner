@@ -3,7 +3,7 @@ import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { Task } from "@/models/task";
-import { fetchPullRequests, matchPRsToTasks, parseRepoString } from "@/lib/github";
+import { fetchPullRequests, matchPRsToTasks, parseRepoString, withChecks } from "@/lib/github";
 import { logActivity } from "@/lib/activity";
 import { decryptSecret } from "@/lib/encryption";
 import { getProjectColumns } from "@/lib/columns";
@@ -43,8 +43,14 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
   }
 
   // Fetch PRs from GitHub (token is encrypted at rest)
-  const rawPRs = await fetchPullRequests(parsed.owner, parsed.repo, decryptSecret(project.githubToken));
-  const matchedPRs = matchPRsToTasks(rawPRs, project.key, project.formerKeys || []);
+  const token = decryptSecret(project.githubToken);
+  const rawPRs = await fetchPullRequests(parsed.owner, parsed.repo, token);
+  const matchedPRs = await withChecks(
+    matchPRsToTasks(rawPRs, project.key, project.formerKeys || []),
+    parsed.owner,
+    parsed.repo,
+    token
+  );
 
   // Group by task number
   const prsByTask = new Map<number, typeof matchedPRs>();
@@ -71,6 +77,9 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
       url: pr.url,
       mergedAt: pr.mergedAt,
       updatedAt: pr.updatedAt,
+      ci: pr.ci,
+      ciLabel: pr.ciLabel,
+      headSha: pr.headSha,
     }));
 
     // Replaced in the database rather than in JS, because two syncs of the same task overlap

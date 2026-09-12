@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { replaceProviderLinks } from "@/lib/pr-links";
 
 /**
@@ -39,14 +39,20 @@ vi.mock("@/lib/middleware", () => ({
 const { POST } = await import("./route");
 
 const pr = (
-  over: Partial<{ number: number; ref: string; state: "open" | "closed"; merged_at: string }> = {}
+  over: Partial<{
+    number: number;
+    ref: string;
+    state: "open" | "closed";
+    merged_at: string;
+    sha: string;
+  }> = {}
 ) => ({
   number: over.number ?? 1,
   title: "Some change",
   state: over.state ?? ("open" as const),
   html_url: `https://github.com/o/r/pull/${over.number ?? 1}`,
   merged_at: over.merged_at ?? null,
-  head: { ref: over.ref ?? "bp-5/x" },
+  head: { ref: over.ref ?? "bp-5/x", ...("sha" in over ? { sha: over.sha } : {}) },
   updated_at: "2026-08-01T00:00:00Z",
 });
 
@@ -219,5 +225,113 @@ describe("POST .../github/sync", () => {
       "in_review",
       "ready_to_test"
     );
+  });
+
+  /**
+   * BP-443. The state a badge shows comes from here, and `withChecks` runs for real in this file —
+   * only `fetchPullRequests` is replaced — so what is stubbed below is the network itself.
+   */
+  describe("what CI said", () => {
+    // `clearAllMocks` does not put a global back, and the tests above this block reach no network
+    // only because their fixtures carry no head commit — a leaked `fetch` would make that luck
+    afterEach(() => vi.unstubAllGlobals());
+
+    const checkRuns = (runs: unknown[]) => ({ check_runs: runs });
+    const noStatuses = { state: "pending", statuses: [] };
+
+    /** Answers the two commit endpoints and records every URL asked for. */
+    function githubAnswers(answer: (url: string) => unknown | undefined) {
+      const asked: string[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string) => {
+          asked.push(String(url));
+          const body = answer(String(url));
+          if (body === undefined) return new Response("no", { status: 500 });
+          return new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        })
+      );
+      return asked;
+    }
+
+    /** The documents the pipeline update appends — `replaceProviderLinks`'s `$literal` half. */
+    const linkWritten = (): Record<string, unknown>[] => {
+      const [stage] = taskUpdateOne.mock.calls[0][1] as {
+        $set: { linkedPRs: { $concatArrays: [unknown, { $literal: Record<string, unknown>[] }] } };
+      }[];
+      return stage.$set.linkedPRs.$concatArrays[1].$literal;
+    };
+
+    it("stores the state the checks reduce to, and the check that decided it", async () => {
+      githubAnswers((url) =>
+        url.includes("/check-runs")
+          ? checkRuns([{ name: "e2e", status: "completed", conclusion: "failure" }])
+          : noStatuses
+      );
+      fetchPullRequests.mockResolvedValue([pr({ sha: "abc123" })]);
+
+      await POST(request(), ctx());
+
+      expect(linkWritten()[0]).toMatchObject({ ci: "failure", ciLabel: "e2e" });
+    });
+
+    // The head commit is what checks hang off, so losing it loses every future refresh
+    it("stores the head commit it asked about", async () => {
+      githubAnswers((url) => (url.includes("/check-runs") ? checkRuns([]) : noStatuses));
+      fetchPullRequests.mockResolvedValue([pr({ sha: "abc123" })]);
+
+      await POST(request(), ctx());
+
+      expect(linkWritten()[0]).toMatchObject({ headSha: "abc123" });
+    });
+
+    // Both halves of the rate-limit answer in one assertion: a finished pull request is not asked
+    // about, which is also what "stop polling merged/closed" means here
+    it("never asks about a pull request that is already merged", async () => {
+      const asked = githubAnswers(() => noStatuses);
+      fetchPullRequests.mockResolvedValue([
+        pr({ number: 1, sha: "abc123", merged_at: "2026-08-02T00:00:00Z" }),
+      ]);
+
+      await POST(request(), ctx());
+
+      expect(asked.filter((url) => url.includes("/commits/"))).toEqual([]);
+      expect(linkWritten()[0]).toMatchObject({ state: "merged", ci: "none" });
+    });
+
+    /**
+     * The graceful fallback. A pull request whose checks could not be read still has a number, a
+     * title and a merge state worth showing, so the sync must not take those down with it — and
+     * `unknown` rather than `none`, because "we could not ask" and "nothing ran" send a reader to
+     * different places.
+     */
+    it("stores the pull request anyway when GitHub will not answer about its checks", async () => {
+      githubAnswers(() => undefined);
+      fetchPullRequests.mockResolvedValue([pr({ sha: "abc123" })]);
+
+      const body = await (await POST(request(), ctx())).json();
+
+      expect(body.prsLinked).toBe(1);
+      expect(linkWritten()[0]).toMatchObject({
+        number: 1,
+        title: "Some change",
+        ci: "unknown",
+        ciLabel: null,
+      });
+    });
+
+    // An open pull request GitHub answered without a head commit cannot be asked about either
+    it("says unknown rather than none when there is no commit to ask about", async () => {
+      const asked = githubAnswers(() => noStatuses);
+      fetchPullRequests.mockResolvedValue([pr({})]);
+
+      await POST(request(), ctx());
+
+      expect(asked.filter((url) => url.includes("/commits/"))).toEqual([]);
+      expect(linkWritten()[0]).toMatchObject({ ci: "unknown", headSha: null });
+    });
   });
 });
