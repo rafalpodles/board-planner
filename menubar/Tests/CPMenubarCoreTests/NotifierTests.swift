@@ -32,7 +32,7 @@ import Testing
     #expect(notification(for: .quota(Quota(status: "rejected")))?.title == "Usage limit reached")
 }
 
-// Four notifications, and only four. Anything else and the operator turns them off.
+// Five notifications, and only five. Anything else and the operator turns them off.
 @Test func staysSilentOnAWarningThatIsNotYetALimit() {
     #expect(notification(for: .quota(Quota(status: "allowed_warning", utilization: 0.9))) == nil)
 }
@@ -52,6 +52,26 @@ import Testing
 @Test func staysSilentOnAReleaseAndAFailure() {
     #expect(notification(for: .outcome(Outcome(outcome: "released", taskKey: "CP-1"))) == nil)
     #expect(notification(for: .outcome(Outcome(outcome: "failed", taskKey: "CP-1"))) == nil)
+}
+
+/// BP-609. The fifth. A machine fault hands the task back with its attempt refunded and says
+/// nothing on the board that asks for the operator — so without this the machine goes on failing
+/// every task it claims and the first they hear of it is an empty column.
+@Test func notifiesWhenTheMachineItselfCannotRunTheWork() {
+    let request = notification(
+        for: .outcome(Outcome(outcome: "machineFault", taskKey: "CP-1", detail: "no sandbox here")))
+
+    #expect(request?.title == "This machine can't run the work")
+    #expect(request?.body.contains("CP-1") == true)
+    #expect(request?.body.contains("no sandbox here") == true)
+}
+
+// It is not the task's fault, so the notification must not read like one when the reason is missing
+@Test func stillNotifiesWhenTheFaultCameWithNoReason() {
+    let request = notification(for: .outcome(Outcome(outcome: "machineFault", taskKey: "CP-1")))
+
+    #expect(request != nil)
+    #expect(request?.body.contains("the reason is on the board") == true)
 }
 
 // With autoMerge off, "delivered" is what a successful run ends as — and the operator has to act

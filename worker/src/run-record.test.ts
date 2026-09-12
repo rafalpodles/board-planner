@@ -39,20 +39,44 @@ describe("recordFor", () => {
   // The list the server accepts is asserted against its source in catalog-contract.test.ts — the
   // worker is a separate package, and importing the app's types here would drag its whole graph in
   it("maps every worker outcome onto one the server accepts", () => {
-    const accepted = ["delivered", "merged", "refused", "blocked", "failed", "requeued", "released"];
-    const kinds: OutcomeKind[] = [
+    const accepted = [
       "delivered",
       "merged",
-      "gateRejected",
+      "refused",
       "blocked",
       "failed",
       "requeued",
       "released",
+      "faulted",
     ];
+    // A Record, not an array: a new OutcomeKind is a type error here rather than an outcome this
+    // loop silently never visits.
+    const kinds = Object.keys({
+      delivered: true,
+      merged: true,
+      gateRejected: true,
+      blocked: true,
+      failed: true,
+      requeued: true,
+      released: true,
+      machineFault: true,
+    } satisfies Record<OutcomeKind, true>) as OutcomeKind[];
 
     for (const kind of kinds) {
       expect(accepted).toContain(recordFor(task, kind, "", 0, 1, 0).outcome);
     }
+  });
+
+  // A machine fault is released on the board — attempt refunded, task back in the queue — and it
+  // is only the recorded outcome that separates it from a usage limit or an operator's stop. Read
+  // as `released`, the runs list cannot tell an operator which of their machines is broken.
+  it("records a machine fault apart from a release", () => {
+    expect(recordFor(task, "machineFault", "this machine has no sandbox", 0, 1, 0)).toMatchObject({
+      outcome: "faulted",
+      refusedBy: "",
+      detail: "this machine has no sandbox",
+    });
+    expect(recordFor(task, "released", "usage limit reached", 0, 1, 0).outcome).toBe("released");
   });
 
   it("sends the times as instants the server can parse", () => {

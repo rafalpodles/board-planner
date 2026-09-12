@@ -106,6 +106,7 @@ export const GROUPS = {
     "worker-enrolment-name.spec.ts",
     "run-conflict.spec.ts",
     "run-completion.spec.ts",
+    "machine-fault-outcome.spec.ts",
     "refused-change-decision.spec.ts",
     "claim-ownership.spec.ts",
     "in-app-notifications.spec.ts",

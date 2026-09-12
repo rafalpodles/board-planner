@@ -1775,3 +1775,102 @@ describe("whether a run merges", () => {
     expect(h.reporter.delivered).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * BP-609. Every one of these paths hands the task back the same way — `reporter.released`, attempt
+ * refunded — and before this they recorded the same word for it. So the runs list, the fleet
+ * history and the menubar could not separate "this machine is broken and is taking no work" from
+ * "this account is waiting for a clock", which is the one fact the operator has to act on.
+ *
+ * Driven through `recordRun` and the telemetry bus together because they are read by different
+ * people: the record is what the board keeps, the emission is what the menubar switches on, and
+ * only the record goes through OUTCOMES.
+ */
+describe("what a machine fault is recorded as", () => {
+  function watchedOutcomes(overrides: Partial<PipelineDeps> = {}) {
+    const telemetry = createTelemetry();
+    const seen: TelemetryUpdate[] = [];
+    telemetry.subscribe((update) => seen.push(update));
+    const h = harness({ telemetry, ...overrides });
+    return { h, outcomes: () => seen.filter(isOutcome) };
+  }
+
+  async function settledBy(overrides: Partial<PipelineDeps> = {}) {
+    const { h, outcomes } = watchedOutcomes(overrides);
+    const disposition = await runTask(h.deps, task);
+    const [, record] = h.recordRun.mock.calls.at(-1)!;
+    return { disposition, record, emitted: outcomes().at(-1), reporter: h.reporter };
+  }
+
+  it("records a step the machine could not run as faulted, not released", async () => {
+    const execute = vi
+      .fn<Executor["execute"]>()
+      .mockResolvedValue({ kind: "machine_fault", message: "this machine has no sandbox" });
+
+    const settled = await settledBy({ executor: { execute } });
+
+    expect(settled.disposition).toBe("machine-fault");
+    expect(settled.record).toMatchObject({
+      outcome: "faulted",
+      detail: "this machine has no sandbox",
+    });
+    expect(settled.emitted).toMatchObject({ outcome: "machineFault" });
+    // The board action is unchanged: the task goes back to the queue with its attempt refunded
+    expect(settled.reporter.released).toHaveBeenCalled();
+  });
+
+  it("records a gate the machine could not run as faulted", async () => {
+    const settled = await settledBy({
+      gateFor: () => ({
+        name: "review",
+        run: async () => ({ ok: false, reason: "this machine has no sandbox", machineFault: true }),
+      }),
+    });
+
+    expect(settled.disposition).toBe("machine-fault");
+    expect(settled.record).toMatchObject({ outcome: "faulted" });
+    expect(settled.emitted).toMatchObject({ outcome: "machineFault" });
+  });
+
+  it("records an unreachable base branch as faulted", async () => {
+    const { h, outcomes } = watchedOutcomes();
+    h.workspace.create.mockRejectedValue(new BaseUnavailableError("no route to host"));
+
+    await runTask(h.deps, task);
+
+    expect(h.recordRun.mock.calls.at(-1)![1]).toMatchObject({ outcome: "faulted" });
+    expect(outcomes().at(-1)).toMatchObject({ outcome: "machineFault" });
+  });
+
+  it("records a checkout whose git config cannot be trusted as faulted", async () => {
+    const { h, outcomes } = watchedOutcomes();
+    h.workspace.create.mockRejectedValue(new PoisonedCheckoutError("core.hooksPath=/tmp/x"));
+
+    await runTask(h.deps, task);
+
+    expect(h.recordRun.mock.calls.at(-1)![1]).toMatchObject({ outcome: "faulted" });
+    expect(outcomes().at(-1)).toMatchObject({ outcome: "machineFault" });
+  });
+
+  // The controls. These are the two releases the new outcome has to stay distinct from — read as
+  // faulted, an operator would be sent to fix a machine that is working.
+  it("leaves a usage limit recorded as released", async () => {
+    const execute = vi.fn<Executor["execute"]>().mockResolvedValue({ kind: "usage_limit" });
+
+    const settled = await settledBy({ executor: { execute } });
+
+    expect(settled.disposition).toBeUndefined();
+    expect(settled.record).toMatchObject({ outcome: "released", detail: "usage limit reached" });
+  });
+
+  it("leaves a misconfigured base branch recorded as requeued", async () => {
+    const { h } = watchedOutcomes();
+    h.workspace.create.mockRejectedValue(
+      new BaseUnavailableError("did not report refs/heads/main", "configuration")
+    );
+
+    await runTask(h.deps, task);
+
+    expect(h.recordRun.mock.calls.at(-1)![1]).toMatchObject({ outcome: "requeued" });
+  });
+});

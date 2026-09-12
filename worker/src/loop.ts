@@ -29,12 +29,23 @@ export interface LoopDeps {
    * every one released with its attempt refunded, but off the queue for the pass, with a comment
    * on the board and a run record behind it.
    *
-   * **The invariant this rests on, which nothing enforces:** every machine-wide reason a step can
-   * be refused is also one preflight can see at boot. This reads a boot-time answer, and a fault
-   * raised during a run never feeds back into it — so a refusal that is machine-wide *and* only
-   * discoverable at run time would leave the per-pass `break` below as the only brake, which is
-   * the exact behaviour this exists to prevent. Add such a refusal and preflight has to learn it
-   * in the same change.
+   * **The invariant this rests on:** every machine-wide reason a step can be refused is also one
+   * preflight can see at boot. This reads a boot-time answer, and a fault raised during a run never
+   * feeds back into it — so a refusal that is machine-wide *and* only discoverable at run time
+   * would leave the per-pass `break` below as the only brake, which is the exact behaviour this
+   * exists to prevent. Add such a refusal and preflight has to learn it in the same change.
+   *
+   * What holds it up is that preflight asks `confine()` itself rather than re-deciding: its
+   * sandbox probe builds a real spawn and returns the refusal verbatim, so a machine-wide refusal
+   * cannot exist in one and not the other. `preflight.test.ts` pins the platform case. The refusals
+   * left over are the ones naming a path the run supplies — a worktree `realpathSync` cannot
+   * resolve — and those are per-task by construction, not machine-wide.
+   *
+   * A run-time fault is deliberately **not** latched into this gate (BP-609). The faults that reach
+   * it include transients — an unreachable remote, git under load — and latching one would turn a
+   * network blip into an outage nothing on the machine can lift, which is the reasoning pipeline.ts
+   * already carries for an unreadable git config. The per-pass `break` is the brake for those; this
+   * gate is for what a machine is, not for what one run met.
    */
   claimBlocked?: () => string;
   log?: (message: string) => void;

@@ -1667,6 +1667,9 @@ export const AGENT_RUN_OUTCOMES = [
   "failed",
   "requeued",
   "released",
+  // The machine could not do the work and the next task would fail the same way — distinct from
+  // `released`, which is this account waiting for a clock or an operator's stop (BP-609)
+  "faulted",
 ] as const;
 export type AgentRunOutcome = (typeof AGENT_RUN_OUTCOMES)[number];
 

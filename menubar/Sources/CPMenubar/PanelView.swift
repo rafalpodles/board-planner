@@ -95,6 +95,7 @@ struct PanelView: View {
         case .working: return model.state.title(now: now) ?? "Working"
         case .paused: return "Paused"
         case .needsHuman: return "Needs a human"
+        case .faulted: return "This machine can't run the work"
         // Only the socket is visible from here, so this cannot claim to know about the network.
         case .disconnected: return "Can't reach the worker · retrying"
         }

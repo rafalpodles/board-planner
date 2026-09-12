@@ -39,6 +39,13 @@ public func notification(for event: TelemetryEvent) -> NotificationRequest? {
             return NotificationRequest(
                 title: "\(outcome.taskKey) needs a human",
                 body: outcome.detail ?? "The worker stopped and is waiting.")
+        // The one outcome that is about the machine rather than the task, and the only way an
+        // operator learns of it: the task went quietly back to the queue with its attempt
+        // refunded, so nothing on the board asks for them (BP-609).
+        case "machineFault":
+            return NotificationRequest(
+                title: "This machine can't run the work",
+                body: "\(outcome.taskKey) went back to the queue: \(outcome.detail ?? "the reason is on the board"). Claiming has stopped for this cycle.")
         default:
             return nil
         }

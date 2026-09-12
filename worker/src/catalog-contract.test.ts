@@ -38,11 +38,14 @@ describe("the outcomes the server records", () => {
   it("are exactly the ones the worker maps its own onto", () => {
     const types = source("types", "index.ts");
     const block = types.slice(types.indexOf("AGENT_RUN_OUTCOMES = ["));
-    const accepted = keysOf(block.slice(0, block.indexOf("]")), /"([a-z]+)"/g);
+    // `[a-zA-Z]`, not `[a-z]`: a camelCase outcome on either side was invisible to this test, so
+    // the one shape a drift is most likely to take — a name copied from the worker's own
+    // vocabulary — was the shape it could not see.
+    const accepted = keysOf(block.slice(0, block.indexOf("]")), /"([a-zA-Z]+)"/g);
 
     const record = readFileSync(join(import.meta.dirname, "run-record.ts"), "utf8");
     const mapping = record.slice(record.indexOf("OUTCOMES: Record"));
-    const sent = keysOf(mapping.slice(0, mapping.indexOf("};")), /: "([a-z]+)",/g);
+    const sent = keysOf(mapping.slice(0, mapping.indexOf("};")), /: "([a-zA-Z]+)",/g);
 
     expect(accepted.length).toBeGreaterThan(0);
     // Every outcome the worker sends is one the server takes. The server may carry more than the

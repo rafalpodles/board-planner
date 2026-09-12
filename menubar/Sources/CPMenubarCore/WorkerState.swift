@@ -1,7 +1,11 @@
 import Foundation
 
 public enum Health: Equatable, Sendable {
-    case idle, working, needsHuman, disconnected, paused
+    // faulted is the machine's own state, not a task's: the worker released the task it was on and
+    // stopped claiming, and it will do the same to the next one until somebody fixes the machine.
+    // Its own case rather than needsHuman so the switches below have to say what it looks like
+    // (BP-609).
+    case idle, working, needsHuman, faulted, disconnected, paused
 }
 
 public enum StepState: Equatable, Sendable {
@@ -50,6 +54,11 @@ public struct WorkerState: Equatable, Sendable {
             if outcome.outcome == "merged" { mergedToday += 1 }
             if outcome.outcome == "blocked" {
                 health = .needsHuman
+            } else if outcome.outcome == "machineFault" {
+                // Not .idle, which is what a released run leaves and what a machine with nothing to
+                // do looks like. This machine has work it cannot take. It clears the way
+                // needsHuman does — the next run's first progress event, or a reconnect's status.
+                health = .faulted
             } else if health != .paused {
                 health = .idle
             }
@@ -76,6 +85,7 @@ public struct WorkerState: Equatable, Sendable {
         case .working: return "circle.fill"
         case .paused: return "pause.circle"
         case .needsHuman: return "exclamationmark.circle.fill"
+        case .faulted: return "wrench.and.screwdriver.fill"
         case .disconnected: return "exclamationmark.triangle"
         }
     }

@@ -257,6 +257,11 @@ async function releaseIfAborted(
 /**
  * "machine-fault" means the run failed for a reason that has nothing to do with the task and will
  * repeat on the next one — the loop stops claiming for a cycle rather than feeding it the queue.
+ *
+ * Every path that returns it settles `machineFault`, and the board records `faulted`. The task is
+ * still handed back with `reporter.released`, attempt refunded — what changed in BP-609 is only
+ * what the run is recorded as, because a plain `released` reads the same as a usage limit and it
+ * is the broken machine that an operator has to be told about.
  */
 export type RunDisposition = void | "machine-fault";
 
@@ -365,7 +370,7 @@ export async function runTask(
       // menubar's notification shows, and it outlives the run — so it must not claim a key was
       // found when the finding was that nothing could be read.
       settle(
-        "released",
+        "machineFault",
         error.kind === "planted"
           ? "the checkout's git config carries an executable key"
           : "the checkout's git config could not be read"
@@ -392,7 +397,7 @@ export async function runTask(
       // into the escalation column over one unreachable remote — and nothing ever resets
       // execution.attempts, so a human moving those tasks back gets cards no worker will look at
       // again. Released with the attempt refunded, and the loop is told to stop claiming.
-      settle("released", "the base branch could not be established");
+      settle("machineFault", "the base branch could not be established");
       await reporter.released(task, String(error));
       return "machine-fault";
     }
@@ -491,7 +496,7 @@ export async function runTask(
         // nothing resets execution.attempts. Released with the attempt refunded, and the loop is
         // told to stop claiming so the queue is left for a machine that can run it.
         if (outcome.kind === "machine_fault") {
-          settle("released", outcome.message);
+          settle("machineFault", outcome.message);
           await reporter.released(
             task,
             `${outcome.message}${unpushedWork(state, worktree.path)}`,
@@ -587,7 +592,7 @@ export async function runTask(
           // task again.
           if (verdict.machineFault) {
             keepWorktree = true;
-            settle("released", `the ${gate.name} gate could not run`);
+            settle("machineFault", `the ${gate.name} gate could not run`);
             await reporter.released(
               task,
               `the ${gate.name} gate could not run: ${verdict.reason}${unpushedWork(state, worktree.path)}`,

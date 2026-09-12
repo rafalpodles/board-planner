@@ -2,7 +2,8 @@ import { OutcomeKind } from "./telemetry.js";
 import { ClaimedTask } from "./types.js";
 
 // The worker's own vocabulary is about what it did; the board's is about what came of it. Only
-// gateRejected differs, and it differs because "refused" is the word a report groups by.
+// gateRejected and machineFault differ, and they differ because "refused" and "faulted" are the
+// words a report groups by.
 const OUTCOMES: Record<OutcomeKind, string> = {
   delivered: "delivered",
   merged: "merged",
@@ -11,6 +12,7 @@ const OUTCOMES: Record<OutcomeKind, string> = {
   failed: "failed",
   requeued: "requeued",
   released: "released",
+  machineFault: "faulted",
 };
 
 export interface RunRecord {
