@@ -243,12 +243,31 @@ test("the badge goes with the link", async ({ page }) => {
  * the subject of this test is what the settings screen does with the number, not where it comes
  * from.
  */
-test("the sync toast says how many links it took away", async ({ page }) => {
-  await seedRepository({
-    repositoryUrl: "https://github.com/example/board",
-    githubToken: "e2e-token-never-called",
-  });
-  await page.route(`**/api/projects/*/github/sync`, (route) =>
+async function openSyncCard(page: import("@playwright/test").Page, provider: "github" | "gitlab") {
+  const body =
+    provider === "github"
+      ? "Links pull requests to tasks by task key"
+      : "Same matching as GitHub, for merge requests";
+  const cardBody = page.getByText(body, { exact: false });
+  const picker = page.getByRole("button", { name: /Add integration/ });
+  const row = page.getByRole("button", { name: provider === "github" ? /GitHub/ : /GitLab/ });
+
+  await page.goto(`/projects/${PROJECT_KEY}/settings`);
+  await page.getByRole("button", { name: "Integrations", exact: true }).first().click();
+  // Three shapes, as external-integrations.spec.ts found: the picker on a board with nothing
+  // connected, the provider's row beside the connected ones, and the opened card's own body.
+  await expect(picker.or(row).or(cardBody).first()).toBeVisible();
+  if (await picker.isVisible()) await picker.click();
+  if (!(await cardBody.isVisible())) await row.first().click();
+  await expect(cardBody).toBeVisible();
+}
+
+function stubSync(
+  page: import("@playwright/test").Page,
+  provider: "github" | "gitlab",
+  prsUnlinked: number
+) {
+  return page.route(`**/api/projects/*/${provider}/sync`, (route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -257,26 +276,73 @@ test("the sync toast says how many links it took away", async ({ page }) => {
         prsFound: 2,
         tasksLinked: 1,
         prsLinked: 2,
-        prsUnlinked: 3,
+        prsUnlinked,
         autoTransitioned: 0,
       }),
     })
   );
+}
 
-  await signIn(page);
-  await page.goto(`/projects/${PROJECT_KEY}/settings`);
-  await page.getByRole("button", { name: "Integrations", exact: true }).first().click();
+/**
+ * Removal is the one destructive thing a sync does, and until BP-610 it was also the only one the
+ * operator was never told about — the toast counted what was linked and what moved, and said
+ * nothing about links that went. A wrong deletion has to be discoverable at the moment it happens.
+ *
+ * The response is stubbed rather than fetched: `fetchPullRequests` names api.github.com in the
+ * code and cannot be reached from here (the note at the top of external-integrations.spec.ts), and
+ * the subject is what the settings screen does with the number. What the stub cannot check — that
+ * the route really calls the field `prsUnlinked` — is checked by the compiler instead: both routes
+ * and this screen are typed against `ApiRepositorySyncResult`, so renaming it on one side alone
+ * does not build.
+ */
+for (const provider of ["github", "gitlab"] as const) {
+  const noun = provider === "github" ? "PRs" : "MRs";
+  const button = provider === "github" ? "Sync pull requests now" : "Sync merge requests now";
 
-  const cardBody = page.getByText("Links pull requests to tasks by task key", { exact: false });
-  const picker = page.getByRole("button", { name: /Add integration/ });
-  const githubRow = page.getByRole("button", { name: /GitHub/ });
-  await expect(picker.or(githubRow).or(cardBody).first()).toBeVisible();
-  if (await picker.isVisible()) await picker.click();
-  if (!(await cardBody.isVisible())) await githubRow.first().click();
-  await expect(cardBody).toBeVisible();
+  test(`the ${provider} sync toast says how many links it took away`, async ({ page }) => {
+    await seedRepository(
+      provider === "github"
+        ? { repositoryUrl: "https://github.com/example/board", githubToken: "e2e-token-never-called" }
+        : {
+            repositoryUrl: "https://gitlab.com/example/board",
+            gitlabToken: "e2e-token-never-called",
+            gitlabHost: "https://gitlab.com",
+          }
+    );
+    await stubSync(page, provider, 3);
+    await signIn(page);
+    await openSyncCard(page, provider);
 
-  await page.getByRole("button", { name: "Sync pull requests now" }).click();
+    await page.getByRole("button", { name: button }).click();
 
-  // The whole sentence: the counts it already reported have to survive the one that was added.
-  await expect(page.getByText(/Synced: 2 PRs linked to 1 tasks, 3 unlinked/)).toBeVisible();
-});
+    // The whole sentence: the counts it already reported have to survive the one that was added.
+    await expect(page.getByText(`Synced: 2 ${noun} linked to 1 tasks, 3 unlinked`)).toBeVisible();
+  });
+
+  /**
+   * The branch that runs on every ordinary sync. Without the guard the toast would end ", 0
+   * unlinked" every time, which is the noise the ternary exists to prevent — and nothing else in
+   * the suite ever passes a zero.
+   */
+  test(`the ${provider} sync toast stays quiet when it took nothing away`, async ({ page }) => {
+    await seedRepository(
+      provider === "github"
+        ? { repositoryUrl: "https://github.com/example/board", githubToken: "e2e-token-never-called" }
+        : {
+            repositoryUrl: "https://gitlab.com/example/board",
+            gitlabToken: "e2e-token-never-called",
+            gitlabHost: "https://gitlab.com",
+          }
+    );
+    await stubSync(page, provider, 0);
+    await signIn(page);
+    await openSyncCard(page, provider);
+
+    await page.getByRole("button", { name: button }).click();
+
+    // Read once and whole, rather than asserting the absence of a substring: a retrying negative
+    // on a toast outlives the toast and cannot fail.
+    const toast = page.getByText(new RegExp(`^Synced: 2 ${noun} linked to 1 tasks$`));
+    await expect(toast).toBeVisible();
+  });
+}

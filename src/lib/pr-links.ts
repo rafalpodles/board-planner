@@ -104,6 +104,12 @@ export interface StoredProviderLink {
  * that window on every sync while remaining perfectly correct, so treating absence as removal
  * would delete good links from healthy projects. Absent is unknown, not gone.
  *
+ * Only the tasks this pass reaches, mind. A task that *does* have a pull request in the window is
+ * written by the first loop instead, and `replaceProviderLinks` there replaces this provider's
+ * links wholesale — so an older link of its own, outside the window, is already dropped today on
+ * `origin/main`, before any of this runs. That is a separate defect, named rather than implied
+ * away: the file argues for a conservatism its first half does not yet practise.
+ *
  * So one rule, and every removal carries the round's own evidence for it: the number came back in
  * this round's fetch and the matcher did not give it to this task. It was retitled onto another
  * task, lost its key, or the key left `formerKeys`.
@@ -118,15 +124,28 @@ export interface StoredProviderLink {
  * loud: the new repository's numbering starts again, so each time it mints a number a task from
  * the old repository already holds, that task's link is contradicted and goes. They are stale by
  * this ticket's own definition, so the removals are right — but which ones go, and when, is
- * decided by how far an unrelated counter has run.
+ * decided by how far an unrelated counter has run. Expect a count with nothing behind it: weeks
+ * after a repoint, with nothing touched at the provider, a sync reports links removed. That is
+ * this, not a bug to chase.
+ *
+ * And it is why a number is safe to compare where a URL was not. A number is only ever compared
+ * inside one counter, and a repository renamed or transferred keeps its pull request numbers — so
+ * the fetch returns the same pull request under the same number, and it either still matches its
+ * task or genuinely does not. A URL compares across identity instead, which is exactly what a
+ * rename breaks. The two collide only across two counters, which means two repositories, which
+ * means a repoint.
  *
  * The rule is only ever as accurate as the matcher it defers to: where `matchPRsToTasks` gives a
  * pull request to the wrong task, this deletes the right task's link rather than leaving a
- * duplicate on the wrong card. `src/lib/github.ts:70` has no word boundary before the key, which
- * is BP-611.
+ * duplicate on the wrong card. The pattern `matchPRsToTasks` builds has no word boundary before
+ * the key, which is BP-611.
  *
  * `?? "github"`, as everywhere else here: a link stored before the provider field existed is
  * GitHub's, and the schema default is applied on hydration rather than stored.
+ *
+ * A number is named once however many link documents carry it, because what the count in the
+ * toast means is pull requests that stopped being this task's — the same unit as the `prsLinked`
+ * standing beside it. A task holding one pull request twice therefore reports one and loses two.
  */
 export function contradictedLinkNumbers(
   links: StoredProviderLink[],

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { ApiRepositorySyncResult } from "@/types";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { Project } from "@/models/project";
@@ -119,12 +120,13 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
     seenNumbers: new Set(rawPRs.map((raw) => raw.number)),
   });
 
-  return NextResponse.json({
+  const result: ApiRepositorySyncResult = {
     synced: true,
     prsFound: matchedPRs.length,
     tasksLinked: prsByTask.size,
     prsLinked: linked,
     prsUnlinked,
     autoTransitioned,
-  });
+  };
+  return NextResponse.json(result);
 });

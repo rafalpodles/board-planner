@@ -8,6 +8,7 @@ import { CODA_COLUMNS, CODA_KEY_COLUMN } from "@/lib/coda";
 import { clearsStoredToken } from "@/lib/host-bound-secrets";
 import { useToast } from "@/components/ui/Toast";
 import {
+  ApiRepositorySyncResult,
   ApiWebhook,
   ApiNotificationChannel,
   WEBHOOK_EVENTS,
@@ -519,7 +520,7 @@ export function IntegrationsSection({
                         onClick={async () => {
                           setGithubSyncing(true);
                           try {
-                            const result = await api.post(
+                            const result: ApiRepositorySyncResult = await api.post(
                               `/api/projects/${projectId}/github/sync`,
                               {},
                             );
@@ -600,7 +601,7 @@ export function IntegrationsSection({
                           onClick={async () => {
                             setGitlabSyncing(true);
                             try {
-                              const result = await api.post(
+                              const result: ApiRepositorySyncResult = await api.post(
                                 `/api/projects/${projectId}/gitlab/sync`,
                                 {},
                               );
