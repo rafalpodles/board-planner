@@ -15,13 +15,17 @@ const { encryptSecret } = await import("./encryption");
 
 const PAYLOAD = { project: { key: "BP", name: "Board" }, task: { taskKey: "BP-1", title: "T", status: "todo" } };
 
-function projectWith(webhookUrl: string) {
+function projectWith(...urls: string[]) {
   findById.mockReturnValue({
     lean: () =>
       Promise.resolve({
-        notificationChannels: [
-          { type: "slack", name: "Releases", webhookUrl, events: ["task_created"], enabled: true },
-        ],
+        notificationChannels: urls.map((webhookUrl, i) => ({
+          type: "slack",
+          name: `Channel ${i}`,
+          webhookUrl,
+          events: ["task_created"],
+          enabled: true,
+        })),
       }),
   });
 }
@@ -69,14 +73,18 @@ describe("dispatchNotifications", () => {
     expect(safeFetch.mock.calls[0][0]).toBe("https://hooks.slack.com/services/T/B/rotated");
   });
 
-  it("skips a channel whose URL no configured key can read, rather than posting the ciphertext", async () => {
-    const written = encryptSecret("https://hooks.slack.com/services/T/B/lost");
+  // Skipping is per channel: an unreadable one must not take the rest of the board's channels
+  // down with it, which is what letting decryptSecret throw into the outer catch would do
+  it("skips only the channel whose URL no configured key can read", async () => {
+    const lost = encryptSecret("https://hooks.slack.com/services/T/B/lost");
+    process.env.ENCRYPTION_KEYS_OLD = OTHER_KEY;
     process.env.ENCRYPTION_KEY = OTHER_KEY;
-    projectWith(written);
+    projectWith(lost, encryptSecret("https://hooks.slack.com/services/T/B/readable"));
 
     await dispatchNotifications("p1", "task_created", PAYLOAD);
 
-    expect(safeFetch).not.toHaveBeenCalled();
+    expect(safeFetch).toHaveBeenCalledTimes(1);
+    expect(safeFetch.mock.calls[0][0]).toBe("https://hooks.slack.com/services/T/B/readable");
   });
 
   it("still refuses a decrypted URL the allowlist rejects", async () => {
