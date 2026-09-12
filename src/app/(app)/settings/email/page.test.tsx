@@ -19,9 +19,11 @@ import EmailSettingsPage from "./page";
 const { api, toast, router } = vi.hoisted(() => ({
   api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn() },
   toast: vi.fn(),
-  // One object for the whole file. `useRouter()`'s result is in the load effect's dependency
-  // array, so a mock minting a fresh one per render re-runs the read after every state change —
-  // an endless loop that `await act(async () => …)` waits out rather than returns from.
+  // One object for the whole file. `useRouter()`'s result is in the load effect's dependency array
+  // (`page.tsx:55`), so a mock minting a fresh one per render re-reads after every state change.
+  // That settles wherever the read lands on the state already held — and does not in the
+  // failed-read case below, where `load()` opens with `setFailed(false)` against the
+  // `setFailed(true)` in its own catch, flipping a value every round.
   router: { replace: vi.fn(), push: vi.fn() },
 }));
 

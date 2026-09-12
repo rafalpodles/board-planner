@@ -153,11 +153,11 @@ test("a test message reaches the mail server, and the screen names where it went
   // that asked for it are in the body, and the envelope sender is the configured From.
   //
   // The row, not the bare username: the footer this template also carries reads "Sent because an
-  // administrator ran the delivery test", so a body containing "admin" says nothing at all. The
-  // character class after it takes the separator either as typed or quoted-printable — the `·`
-  // that follows is not ASCII, which is what puts that line in the encoding in the first place.
+  // administrator ran the delivery test", so a body containing "admin" says nothing at all. Up to
+  // the space and no further — the `·` after it is not ASCII, so the line travels
+  // quoted-printable and the separator on the wire is not the one in the source.
   expect(arrived[0].data).toContain("Your mail server accepted this message");
-  expect(arrived[0].data).toMatch(new RegExp(`Requested by: ${ADMIN_USERNAME}[ =]`));
+  expect(arrived[0].data).toContain(`Requested by: ${ADMIN_USERNAME} `);
   expect(arrived[0].from).toBe(MAIL_SERVER.from.replace(/^.*<|>$/g, ""));
 });
 
