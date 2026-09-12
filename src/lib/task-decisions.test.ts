@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import sift from "sift";
-import { ITaskDecision } from "@/types";
+import { ITaskDecision, TASK_DECISION_STATES, TaskDecisionState } from "@/types";
 
 const findOneAndUpdate = vi.fn();
 const find = vi.fn();
@@ -464,4 +464,27 @@ describe("what a second claim sweeps away", () => {
       "failed",
     ]);
   });
+
+  /**
+   * The invariant, rather than a second copy of the literal: the list above and the settled states
+   * have to PARTITION the state machine. Restating the literal would go on passing while a tenth
+   * state added to `TASK_DECISION_STATES` belonged to neither — and a claim would then leave a
+   * live decision standing over a worktree it is about to rebuild.
+   */
+  it("together with the settled states, accounts for every state there is", async () => {
+    const settled = (
+      await decisionsForWorkerFilter()
+    )["decision.state"] as { $nin: TaskDecisionState[] };
+
+    expect([...supersedableStates(), ...settled.$nin].sort()).toEqual(
+      [...TASK_DECISION_STATES].sort()
+    );
+  });
 });
+
+/** The `$nin` the worker's own list is built from — the only place the settled states are named. */
+async function decisionsForWorkerFilter(): Promise<Record<string, unknown>> {
+  find.mockReturnValue({ select: () => ({ lean: async () => [] }) });
+  await decisionsForWorker(WORKER);
+  return find.mock.calls[find.mock.calls.length - 1][0] as Record<string, unknown>;
+}

@@ -63,6 +63,16 @@ describe("auditIsNotable", () => {
     expect(auditIsNotable(entry("worker_command_sent", "resume"))).toBe(false);
   });
 
+  /**
+   * BP-381. Accepting pushes an agent's change under the machine owner's pinned GitHub identity,
+   * and the push runs that repository's CI on it. Declining and giving up spend nothing.
+   */
+  it("marks a refused change being accepted, and leaves the other two verdicts quiet", () => {
+    expect(auditIsNotable(entry("worker_decision_accepted"))).toBe(true);
+    expect(auditIsNotable(entry("worker_decision_declined"))).toBe(false);
+    expect(auditIsNotable(entry("worker_decision_abandoned"))).toBe(false);
+  });
+
   it("leaves the ordinary rows quiet", () => {
     expect(auditIsNotable(entry("worker_renamed"))).toBe(false);
     expect(auditIsNotable(entry("worker_poll_interval_changed"))).toBe(false);

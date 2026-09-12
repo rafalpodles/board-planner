@@ -8,11 +8,15 @@ const workerFindById = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
-vi.mock("@/lib/task-decisions", () => ({
-  mayDecide,
-  recordVerdict,
-  toApiDecision: (decision: unknown) => decision,
+// Every argument kept, not just the record: `canDecide` is the third, and the panel hides every
+// button when it is false — so a mock that drops it cannot see the route answering `false` right
+// after a verdict.
+const toApiDecision = vi.fn((decision: unknown, worker: unknown, canDecide: unknown) => ({
+  decision,
+  worker,
+  canDecide,
 }));
+vi.mock("@/lib/task-decisions", () => ({ mayDecide, recordVerdict, toApiDecision }));
 vi.mock("@/models/task", () => ({ Task: { findOne: taskFindOne } }));
 vi.mock("@/models/worker", () => ({ Worker: { findById: workerFindById } }));
 // The same shape the status route's mock models: a Bearer is a machine credential, a cookie
@@ -151,6 +155,43 @@ describe("answering a refused change", () => {
       workerId: "another-machine",
       commit: "f".repeat(40),
     });
+  });
+
+  /**
+   * The caller just answered it, so they may obviously answer it — and the panel reads `canDecide`
+   * to decide whether to render a button at all. Answering false here hides every control on the
+   * record the person is looking at until they reload.
+   */
+  it("tells the answer it returns that this reader may decide", async () => {
+    const { req, ctx } = call({ verdict: "accept" });
+    await POST(req, ctx);
+
+    expect(toApiDecision.mock.calls[0][2]).toBe(true);
+  });
+
+  /**
+   * The bar is the machine that holds the work, not the task and not the caller. The e2e cannot
+   * see this — the fixture has one worker, so "the machine's owner" and "any worker id" are the
+   * same answer there.
+   */
+  it("asks about the machine named on the record, not about anything else", async () => {
+    taskWith(decision({ workerId: "6a70afff45d39cd9bc8bb601" }));
+    const { req, ctx } = call({ verdict: "accept" });
+
+    await POST(req, ctx);
+
+    expect(mayDecide).toHaveBeenCalledWith(
+      "6a70afff45d39cd9bc8bb601",
+      expect.objectContaining({ _id: "u1" })
+    );
+  });
+
+  // A task in another project must not be answerable through this one's path
+  it("looks the task up inside the project the path names", async () => {
+    const { req, ctx } = call({ verdict: "accept" });
+    await POST(req, ctx);
+
+    expect(taskFindOne).toHaveBeenCalledWith({ _id: TASK_ID, project: "p1" });
   });
 
   it("refuses a verdict that is not one", async () => {

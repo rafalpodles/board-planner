@@ -84,6 +84,14 @@ async function storedDecision() {
   return (task?.decision ?? null) as Record<string, unknown> | null;
 }
 
+/** What the machine reports once it has acted on the verdict. */
+async function settleAs(state: string, prUrl = "") {
+  const handle = await db();
+  await handle
+    .collection("tasks")
+    .updateOne({ _id: HELD_TASK_ID }, { $set: { "decision.state": state, "decision.prUrl": prUrl } });
+}
+
 async function openTheTask(page: Page) {
   await page.goto(taskHref);
   // A positive assertion only a loaded task screen can satisfy, before anything below asks whether
@@ -137,6 +145,8 @@ test("accepting says what it spends, and the record carries the verdict afterwar
   // The first draft of this design claimed nothing executes until somebody merges. It is false
   // here: CI is `on: push` with no branch filter, so the push alone is the trigger.
   await expect(dialog).toContainText("runs this repository's CI");
+  // And whose name it spends, which is the other half of what accepting costs
+  await expect(dialog).toContainText("your own GitHub identity");
 
   const answered = page.waitForResponse(
     (response) =>
@@ -162,6 +172,37 @@ test("accepting says what it spends, and the record carries the verdict afterwar
   expect(String(audited?.detail)).toContain(HELD_TASK_KEY);
 });
 
+/**
+ * `sweepMarkers` treats a decision that has left the live list exactly as it treats a declined one:
+ * the worktree goes. So giving up destroys the work, and the panel has to say so and ask — it was
+ * the least emphatic control on the screen, named nothing, and asked nothing.
+ */
+test("giving up says it deletes the work, and asks before it does", async ({ page, request }) => {
+  await request.post(`/api/workers/${WORKER_ID}/decisions`, {
+    headers: workerHeaders(),
+    data: record(),
+  });
+
+  await signIn(page, "owner");
+  await openTheTask(page);
+
+  await page.getByRole("button", { name: "Give up and delete the work" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("deletes the worktree");
+
+  // Nothing is written until it is confirmed
+  expect(await storedDecision().then((d) => d?.state)).toBe("pending");
+
+  const answered = page.waitForResponse(
+    (response) =>
+      response.url().includes(`/tasks/${HELD_TASK_ID}/decision`) && response.request().method() === "POST"
+  );
+  await dialog.getByRole("button", { name: "Give up and delete" }).click();
+  expect((await answered).status()).toBe(200);
+
+  await expect.poll(async () => (await storedDecision())?.state).toBe("abandoned");
+});
+
 test("declining says so without a dialog, and is recorded", async ({ page, request }) => {
   await request.post(`/api/workers/${WORKER_ID}/decisions`, {
     headers: workerHeaders(),
@@ -179,6 +220,33 @@ test("declining says so without a dialog, and is recorded", async ({ page, reque
   expect((await answered).status()).toBe(200);
 
   await expect.poll(async () => (await storedDecision())?.state).toBe("declined");
+});
+
+/**
+ * The panel used to carry one unconditional paragraph — "The branch was not pushed, on purpose…
+ * The work is in a worktree on X" — under a headline that by then said "Pushed, and a pull request
+ * is open". A sentence contradicting the line above it reads as a bug in the product.
+ */
+test("a settled record stops claiming the work is still in a worktree", async ({ page, request }) => {
+  await request.post(`/api/workers/${WORKER_ID}/decisions`, {
+    headers: workerHeaders(),
+    data: record(),
+  });
+  await settleAs("delivered", "https://github.com/owner/repo/pull/42");
+
+  await signIn(page, "owner");
+  await openTheTask(page);
+
+  await expect(page.getByTestId("decision-headline")).toContainText("pull request is open");
+  await expect(page.getByTestId("decision-pr")).toHaveAttribute(
+    "href",
+    "https://github.com/owner/repo/pull/42"
+  );
+  // The control: the record is on screen, so the absence below is about this sentence and not
+  // about a panel that failed to render
+  await expect(page.getByTestId("decision-patch")).toBeVisible();
+  await expect(page.getByTestId("decision-where-the-work-is")).toHaveCount(0);
+  await expect(page.getByTestId("decision-file-count")).toHaveCount(0);
 });
 
 /**
