@@ -108,6 +108,7 @@ export const GROUPS = {
     "claim-ownership.spec.ts",
     "in-app-notifications.spec.ts",
     "board-feed-notifications.spec.ts",
+    "notification-grid-delivery.spec.ts",
     "pm-chat.spec.ts",
     "pm-trust-boundary.spec.ts",
     "pm-assignment-is-a-handover.spec.ts",

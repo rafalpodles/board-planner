@@ -1,5 +1,6 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import { SAME_ORIGIN } from "./api";
+import { SMTP_STUB_HOST } from "../playwright.config";
 import {
   ADMIN_PASSWORD,
   ADMIN_USERNAME,
@@ -13,6 +14,7 @@ import {
   seedSecondProject,
 } from "./seed";
 import { signIn as arriveSignedIn, signInThroughForm } from "./session";
+import { answerNoMailServer } from "./mail-screen";
 
 /**
  * BP-394. The settings a person changes about the instance and about themselves: the model the
@@ -29,10 +31,9 @@ import { signIn as arriveSignedIn, signInThroughForm } from "./session";
  * as what was asked for:
  *
  * - **Configuring SMTP.** The screen says so itself: "Configured in the environment, not here."
- *   Its configured branch needs `SMTP_HOST` for the whole run, which would turn
- *   `email-on-account.spec.ts`'s unconfigured-state assertion red. So that branch sits behind the
- *   same guard inverted, and what runs everywhere is the part needing no mail server: who the test
- *   message would go to, and the profile round trip that decides it.
+ *   Both branches of it run now: BP-465 gives the run a mail server, so the configured branch is
+ *   asserted against it, and the three tests about the *unconfigured* branch stub the read rather
+ *   than skip themselves — which is what they were always about.
  *
  * Every assertion here was watched failing against a deliberately broken copy of the code it
  * covers, in three flavours, because they ask different questions. Removing a clause: the model
@@ -506,6 +507,9 @@ test("the profile: the name lands in the shell, the address is guarded by the pa
   await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
 
   await test.step("the mail screen has nowhere to send until there is an address", async () => {
+    // Stubbed, not arranged: since BP-465 this run boots a mail server, and what this step is
+    // about is the *answer*, not the environment behind it.
+    await answerNoMailServer(page);
     await page.goto("/settings/email");
     await expect(page.getByText("No mail server is configured.")).toBeVisible();
     await expect(page.getByRole("button", { name: "Send a test message" })).toBeDisabled();
@@ -616,17 +620,17 @@ test("the profile: the name lands in the shell, the address is guarded by the pa
 });
 
 /**
- * The configured branch of the mail screen. Skipped where there is no mail server, which is CI and
- * every developer machine here — and stated rather than silently passed, because the alternative
- * is setting SMTP_HOST for the whole run, which turns `email-on-account.spec.ts`'s
- * unconfigured-state assertion red.
+ * The configured branch of the mail screen. This skipped itself on every machine and on CI, because
+ * neither had a mail server; BP-465 gives the run one, so it runs now. The three specs that assert
+ * the *unconfigured* branch stub the read instead, which is what they were always about.
+ *
+ * `SMTP_STUB_HOST` rather than `process.env.SMTP_HOST`: the variable is set on the dev server the
+ * config boots, not on this process, so reading it here skipped the test even with a server up.
  */
 test("the mail screen reports the server it was given", async ({ page }) => {
-  test.skip(!process.env.SMTP_HOST, "needs a mail server; this run has none");
-
   await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
   await page.goto("/settings/email");
 
-  await expect(page.getByText(String(process.env.SMTP_HOST), { exact: false })).toBeVisible();
+  await expect(page.getByText(SMTP_STUB_HOST, { exact: false })).toBeVisible();
   await expect(page.getByText("No mail server is configured.")).toHaveCount(0);
 });

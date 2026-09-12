@@ -32,7 +32,8 @@ import {
  *   the state the clock would produce. What is *not* faked is the reading of them: the browser
  *   then makes an ordinary request and the server decides.
  * - **The reset link**, planted as a delivered email would leave it — the same fixture
- *   reset-by-email.spec.ts uses, and for the same reason: CI has no mail server.
+ *   reset-by-email.spec.ts uses, and for the same reason: what is under test here is what the
+ *   link does, not how it arrived.
  *
  * **This file needs a database of its own** — `E2E_MONGODB_URI`, and its own `E2E_PORT` /
  * `PM_STUB_PORT` with it. Almost every other spec asserts on named rows; this one counts them, in

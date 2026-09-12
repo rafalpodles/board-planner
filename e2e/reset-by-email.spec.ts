@@ -6,11 +6,12 @@ import { E2E_MONGODB_URI, MEMBER_ID, MEMBER_PASSWORD, MEMBER_USERNAME, seed } fr
 /**
  * BP-281, slice 3. The reset itself.
  *
- * CI has no mail server, so the link is planted in the database exactly as a delivered email would
- * leave it — a row holding the hash, and the raw token in hand. That is not a shortcut around the
- * thing under test: what has to be proven here is that a link works once, stops working after the
- * hour, and cannot be used twice. Delivery is the previous slice's problem and was driven against
- * a real SMTP server locally.
+ * The link is planted in the database exactly as a delivered email would leave it — a row holding
+ * the hash, and the raw token in hand. That is not a shortcut around the thing under test: what
+ * has to be proven here is that a link works once, stops working after the hour, and cannot be
+ * used twice, none of which is about delivery. The run does have a mail server since BP-465, but
+ * reading the token out of a message would only add a parsing step between the fixture and the
+ * same three assertions.
  */
 
 const HOUR = 60 * 60 * 1000;
@@ -150,12 +151,23 @@ test("the sign-in screen offers the way in when a password is forgotten", async 
   await expect(page.getByRole("heading", { name: "Forgot your password?" })).toBeVisible();
 });
 
-// CI has no mail server, which is the state a self-hosted instance starts in. Somebody left
-// waiting for a message that was never coming is the failure this wording exists to prevent.
+// No mail server is the state a self-hosted instance starts in. Somebody left waiting for a message
+// that was never coming is the failure this wording exists to prevent.
+//
+// The refusal is the one `/api/auth/forgot` sends when `isEmailConfigured()` is false, word for
+// word and status for status, replayed here: since BP-465 this run has a mail server, so the state
+// cannot be arranged from outside any more. What is under test is the screen either way — that it
+// shows the refusal rather than the promise.
 test("an instance with no mail server says so instead of promising a link", async ({ page }) => {
-  // Stated rather than assumed: a developer with SMTP_HOST in their shell would otherwise see this
-  // fail for a reason that has nothing to do with the code
-  test.skip(!!process.env.SMTP_HOST, "this asserts the unconfigured state");
+  await page.route("**/api/auth/forgot", (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: "This instance cannot send email. Ask an administrator to set a password for you.",
+      }),
+    })
+  );
 
   await page.goto("/forgot");
   await page.getByLabel("Username or email").fill(MEMBER_USERNAME);
