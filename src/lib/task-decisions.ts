@@ -292,6 +292,22 @@ function decidedBy(value: ITaskDecision["decidedBy"]): ApiTaskDecision["decidedB
 export const DECISION_FIELDS_A_READER_NEEDS = "+decision.patch +decision.protectedFiles";
 
 /**
+ * The same appetite as an inclusion, for the one reader that wants nothing else off the task.
+ *
+ * Every field `toApiDecision` reads, and the patch is the single, deliberate omission: this is the
+ * poll a panel makes every ten seconds while a verdict is with the machine, and 220 KB of diff per
+ * tab per tick is the cost it exists to avoid. Stated here as an exception with a reason rather
+ * than left as an absence — and named field by field, because `.select("decision")` is a parent
+ * INCLUSION that overrides every `select: false` beneath it and would ship the patch after all.
+ */
+export const DECISION_FIELDS_FOR_THE_POLL =
+  "decision.gate decision.workerId decision.commit decision.taskKey decision.title " +
+  "decision.fileCount decision.protectedFiles decision.protectedFileCount " +
+  "decision.acceptable decision.unacceptableReason " +
+  "decision.state decision.prUrl decision.error decision.decidedBy decision.decidedAt " +
+  "decision.patchTruncated decision.createdAt";
+
+/**
  * What a reader may see. `patchSha256` and `attempts` are withheld for the reason
  * `toApiExecution` withholds `runId` and `phaseSeq`: they are the machine's own bookkeeping, and
  * publishing the hash invites somebody to think matching it is what accepting checks.

@@ -4,7 +4,13 @@ import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { readJsonBody } from "@/lib/request-body";
 import { logInstanceAudit } from "@/lib/instanceAudit";
-import { mayDecide, recordVerdict, toApiDecision, Verdict } from "@/lib/task-decisions";
+import {
+  mayDecide,
+  recordVerdict,
+  toApiDecision,
+  Verdict,
+  DECISION_FIELDS_FOR_THE_POLL,
+} from "@/lib/task-decisions";
 import { Task } from "@/models/task";
 import { Worker } from "@/models/worker";
 import { InstanceAuditAction } from "@/types";
@@ -32,20 +38,11 @@ export const GET = withProjectAccess(async (_request, { params, user }) => {
   }
 
   await connectDB();
-  // Field by field, and NOT `DECISION_FIELDS_A_READER_NEEDS`: withholding the patch is the whole
-  // reason this route exists, and that constant re-includes it.
-  // `.select("decision")` is a parent INCLUSION — mongoose sends `{decision: 1}`
-  // and the `select: false` on the subfields is overridden — which is the defect the verdict route
-  // below had, and repeating it here would have made this poll carry the whole patch every ten
-  // seconds while the comment claimed the opposite.
+  // Its own projection, and NOT `DECISION_FIELDS_A_READER_NEEDS`: withholding the patch is the
+  // whole reason this route exists, and that constant re-includes it. Both are named beside
+  // `toApiDecision`, and one derived test says what each of them must contain.
   const task = await Task.findOne({ _id: taskId, project: projectId })
-    .select(
-      "decision.gate decision.workerId decision.commit decision.taskKey decision.title " +
-        "decision.fileCount decision.protectedFiles decision.protectedFileCount " +
-        "decision.acceptable decision.unacceptableReason " +
-        "decision.state decision.prUrl decision.error decision.decidedBy decision.decidedAt " +
-        "decision.patchTruncated decision.createdAt"
-    )
+    .select(DECISION_FIELDS_FOR_THE_POLL)
     .populate("decision.decidedBy", "username fullName");
   if (!task?.decision?.gate) {
     return NextResponse.json({ decision: null });

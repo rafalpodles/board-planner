@@ -16,7 +16,14 @@ const toApiDecision = vi.fn((decision: unknown, worker: unknown, canDecide: unkn
   worker,
   canDecide,
 }));
-vi.mock("@/lib/task-decisions", () => ({ mayDecide, recordVerdict, toApiDecision }));
+// `importOriginal`, so the projection this route selects with is the real constant and the test
+// below reads what the module exports rather than a copy of it kept here.
+vi.mock("@/lib/task-decisions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/task-decisions")>()),
+  mayDecide,
+  recordVerdict,
+  toApiDecision,
+}));
 vi.mock("@/models/task", () => ({ Task: { findOne: taskFindOne } }));
 vi.mock("@/models/worker", () => ({ Worker: { findById: workerFindById } }));
 // The same shape the status route's mock models: a Bearer is a machine credential, a cookie

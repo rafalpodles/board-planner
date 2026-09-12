@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { Task } from "./task";
-import { toApiDecision, DECISION_FIELDS_A_READER_NEEDS } from "@/lib/task-decisions";
+import {
+  toApiDecision,
+  DECISION_FIELDS_A_READER_NEEDS,
+  DECISION_FIELDS_FOR_THE_POLL,
+} from "@/lib/task-decisions";
 
 // customFieldValues is a Map. JSON.stringify(new Map([["a", 1]])) is "{}", so
 // without flattenMaps every custom field value is absent from every API response
@@ -178,5 +182,15 @@ describe("what a reader has to ask for", () => {
     for (const field of withheld) {
       expect(named).toContain(`+decision.${field}`);
     }
+
+    // The poll is the third reader and the only one whose projection is written out in full, so
+    // without this line a sixth deselected field would redden the loop above and leave the route
+    // that must carry it green — the original bug, in the one place the constant does not reach.
+    // Its omission of the patch is deliberate and is the single exception.
+    const poll = DECISION_FIELDS_FOR_THE_POLL.split(/\s+/).filter(Boolean);
+    for (const field of withheld.filter((name) => name !== "patch")) {
+      expect(poll).toContain(`decision.${field}`);
+    }
+    expect(poll).not.toContain("decision.patch");
   });
 });

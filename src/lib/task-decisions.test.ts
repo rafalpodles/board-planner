@@ -280,9 +280,11 @@ describe("a person's verdict", () => {
    * `select: false` on the schema, and `decidedBy` is an ObjectId until somebody populates it.
    */
   /**
-   * The constant, not a copy of its text: what it should CONTAIN is derived from what
-   * `toApiDecision` reads, in `models/task.serialization.test.ts`. Between them, a reader that
-   * hand-rolls a projection and a projection that has fallen behind the schema are both caught.
+   * Compared against the constant rather than against a copy of its text — value equality, so a
+   * longhand string with the same fields would pass this too. What it buys is that this test
+   * FOLLOWS the constant when it changes, not that the route is forced to use it; what the
+   * constant must contain is derived from what `toApiDecision` reads, in
+   * `models/task.serialization.test.ts`.
    *
    * A test phrased as the consequence — push this return through `toApiDecision` and require a
    * patch and a non-empty list — was written here and removed: `findOneAndUpdate` is mocked, so
