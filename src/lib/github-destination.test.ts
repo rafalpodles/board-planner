@@ -28,7 +28,8 @@ vi.stubGlobal("fetch", () => {
   throw new Error("a unit test reached the network");
 });
 
-const { fetchPullRequests, fetchChecks } = await import("./github");
+const { fetchPullRequests, fetchChecks, allowLoopbackIn, GITHUB_DESTINATION } =
+  await import("./github");
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -74,13 +75,32 @@ describe("where a project's token may be sent", () => {
   /**
    * The carve-out `mcp-client.ts` already makes on the same condition, and the reason the suite's
    * own GitHub is reachable at all: a stub on this machine is a private address by definition.
-   * Production refuses one.
+   *
+   * Two assertions, because one was a mirror. The version that stood here compared the constant to
+   * `process.env.NODE_ENV !== "production"` — character for character the expression it was
+   * checking — and vitest always runs with NODE_ENV "test", so both sides read `true` and the
+   * production branch was never observed. `allowLoopback: true` hardcoded would have shipped an
+   * SSRF carve-out to production with the test still green.
    */
-  it("allows a loopback destination only outside production", async () => {
+  it("refuses a loopback destination in production, and allows one outside it", () => {
+    expect(allowLoopbackIn("production")).toBe(false);
+    expect(allowLoopbackIn("development")).toBe(true);
+    expect(allowLoopbackIn("test")).toBe(true);
+  });
+
+  /**
+   * By identity, not by value. Vitest runs with NODE_ENV "test", where the rule is `true` — so an
+   * assertion comparing the *value* passes just as happily against a hardcoded
+   * `{ allowLoopback: true }` at the call site, which is an SSRF carve-out shipped to production.
+   * Comparing the reference ties the call site to the constant whose value the test above pins,
+   * and an inline literal is a different object.
+   */
+  it("hands safeFetch that very constant, not a literal of its own", async () => {
     await fetchPullRequests("o", "r", "t");
 
-    const [, , destination] = safeFetch.mock.calls[0];
-    expect(destination.allowLoopback).toBe(process.env.NODE_ENV !== "production");
+    for (const [, , destination] of safeFetch.mock.calls) {
+      expect(destination).toBe(GITHUB_DESTINATION);
+    }
   });
 
   // A body is read bounded, so a host answering an error with a gigabyte cannot exhaust the

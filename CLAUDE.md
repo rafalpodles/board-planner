@@ -159,10 +159,11 @@ GITHUB_SYNC_TICK_MS=      # Optional — how often every project with a GitHub t
                           # the default and says so). 0 turns the background sync off; the button
                           # in project settings and the one on a task still work. A tick refreshes
                           # links only — it never moves a task between columns, because that write
-                          # needs an author and a tick has none. Costs at most 42 GitHub requests
-                          # per project per tick against a 5,000/hour limit that is **per GitHub
-                          # account**, not per project — so raise this, or use a token per board,
-                          # if one account's token is pasted into several projects (BP-443)
+                          # needs an author and a tick has none. Costs up to 82 GitHub requests per
+                          # project per tick (42 in the ordinary case) against a 5,000/hour limit
+                          # that is **per GitHub account**, not per project — so raise this, or use
+                          # a token per board, if one account's token is pasted into several
+                          # projects (BP-443)
 GITHUB_API_BASE_URL=      # Optional — where GitHub's API is (default https://api.github.com).
                           # An operator's setting, never a project's: a board naming its own
                           # host would be a request forgery with that project's token attached

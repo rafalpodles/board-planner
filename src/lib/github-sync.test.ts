@@ -201,6 +201,44 @@ describe("an answer this sync could not get", () => {
     expect(linkWritten()[0]).toMatchObject({ ci: "unknown", ciLabel: null });
   });
 
+  /**
+   * `running` is not a state worth keeping. A pull request past the cap is never asked about again,
+   * and GitHub does not touch a pull request's `updated_at` when a check run finishes — checks hang
+   * off the commit — so a carried `running` would pulse "e2e running" for ever on a branch whose
+   * build ended an hour ago.
+   */
+  it("does not pin a build that was merely running when we last looked", async () => {
+    taskFindOne.mockResolvedValue({
+      _id: "t1",
+      taskNumber: 5,
+      status: "todo",
+      linkedPRs: [{ provider: "github", number: 1, ci: "running", ciLabel: "e2e", headSha: "abc123" }],
+    });
+
+    await syncGithubPullRequests(project(), "u1");
+
+    expect(linkWritten()[0]).toMatchObject({ ci: "unknown", ciLabel: null });
+  });
+
+  // The finished ones are kept, which is the whole point of carrying anything forward
+  it("keeps the states that were finished when we last looked", async () => {
+    for (const ci of ["success", "failure", "none"]) {
+      vi.clearAllMocks();
+      taskUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+      githubRefusesChecks();
+      taskFindOne.mockResolvedValue({
+        _id: "t1",
+        taskNumber: 5,
+        status: "todo",
+        linkedPRs: [{ provider: "github", number: 1, ci, ciLabel: "e2e", headSha: "abc123" }],
+      });
+
+      await syncGithubPullRequests(project(), "u1");
+
+      expect(linkWritten()[0], ci).toMatchObject({ ci });
+    }
+  });
+
   it("says unknown when there was never an answer to keep", async () => {
     taskFindOne.mockResolvedValue({ _id: "t1", taskNumber: 5, status: "todo", linkedPRs: [] });
 
@@ -367,7 +405,10 @@ describe("a sync that learned nothing", () => {
   // The control, and the half that must not be broken by the one above
   it("writes when anything about the pull request has changed", async () => {
     for (const change of [
+      { number: 7 },
       { title: "Renamed on GitHub" },
+      // On its own, not alongside `state`: the loop only ever moved the two together before
+      { mergedAt: new Date("2020-01-01T00:00:00Z") },
       { state: "open", mergedAt: null },
       { ci: "failure" },
       { ciLabel: "e2e" },
@@ -394,6 +435,34 @@ describe("a sync that learned nothing", () => {
     taskFindOne.mockResolvedValue({ _id: "t1", taskNumber: 5, status: "done", linkedPRs: [] });
 
     expect(await syncGithubPullRequests(project(), "u1")).toMatchObject({ tasksWritten: 1 });
+  });
+
+  /**
+   * `fetchPullRequests` concatenates the open page and the recently-closed page, which are ordered
+   * differently, so a task with two linked pull requests genuinely does see them arrive in either
+   * order between ticks. Without the sort on both sides that reads as a change, writes, and brings
+   * back the `updatedAt` corruption this function exists to prevent — on exactly the tasks with the
+   * most pull-request activity.
+   *
+   * Every other test here has one link, where `.sort()` is the identity and this is unfalsifiable.
+   */
+  it("is not fooled by the same two pull requests arriving the other way round", async () => {
+    fetchPullRequests.mockResolvedValue([
+      { ...mergedPR, number: 1 },
+      { ...mergedPR, number: 2, html_url: "https://github.com/o/r/pull/2" },
+    ]);
+    taskFindOne.mockResolvedValue({
+      _id: "t1",
+      taskNumber: 5,
+      status: "done",
+      // Stored in the opposite order to the one the fetch returns
+      linkedPRs: [
+        storedFrom({ number: 2, url: "https://github.com/o/r/pull/2" }),
+        storedFrom({ number: 1 }),
+      ],
+    });
+
+    expect(await syncGithubPullRequests(project(), "u1")).toMatchObject({ tasksWritten: 0 });
   });
 
   // A GitLab link beside it is not this sync's business and must not make it look changed

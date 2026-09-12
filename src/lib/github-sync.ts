@@ -71,15 +71,36 @@ function carryForward(
   const previous = stored?.find(
     (link) => (link.provider ?? "github") === "github" && link.number === fresh.number
   );
-  if (!previous?.ci || previous.ci === "unknown") return { ci: fresh.ci, ciLabel: fresh.ciLabel };
+  if (!previous?.ci || !CARRYABLE.has(previous.ci)) return { ci: fresh.ci, ciLabel: fresh.ciLabel };
   if (!fresh.headSha || previous.headSha !== fresh.headSha) {
     return { ci: fresh.ci, ciLabel: fresh.ciLabel };
   }
   return { ci: previous.ci, ciLabel: previous.ciLabel ?? null };
 }
 
-/** A link reduced to what a sync can change about it, for comparing one round against the last. */
-function signature(link: {
+/**
+ * The states worth keeping when this sync could not ask: the ones that were finished when we last
+ * looked.
+ *
+ * `running` is deliberately not among them. A pull request past the cap is never asked about again,
+ * and GitHub does not touch a pull request's `updated_at` when a check run finishes — checks hang
+ * off the commit — so a carried `running` would pulse "e2e running" for ever on a branch whose
+ * build ended an hour ago. Degrading it to `unknown` says the true thing: we looked once, it was
+ * running, and we have not looked since.
+ */
+const CARRYABLE = new Set<CiState>(["success", "failure", "none"]);
+
+/**
+ * Everything a sync can change about one link.
+ *
+ * Named, and `prDocs` below is typed as an array of it, so the two sides are checked against each
+ * other by the compiler. `unchanged` used to take a four-field shape with a cast to silence the
+ * mismatch — which meant a tenth field added to `prDocs` and forgotten here would compile, pass
+ * every test, and silently freeze that field's badge for ever.
+ */
+// A type alias rather than an interface: `writeProviderLinks` takes `Record<string, unknown>`, and
+// only an alias gets the implicit index signature that satisfies it.
+type Signable = {
   number: number;
   title: string;
   state: string;
@@ -89,7 +110,10 @@ function signature(link: {
   ci?: CiState;
   ciLabel?: string | null;
   headSha?: string | null;
-}): string {
+};
+
+/** A link reduced to what a sync can change about it, for comparing one round against the last. */
+function signature(link: Signable): string {
   return JSON.stringify([
     link.number,
     link.title,
@@ -114,15 +138,20 @@ function signature(link: {
  * for as long as their merged pull request stayed in GitHub's recently-closed window; My Tasks,
  * search and suggestions all sort by it too. `tasks/reorder` carries the same warning about drags.
  */
-function unchanged(
-  stored: ILinkedPR[] | undefined,
-  fresh: { number: number; title: string; state: string; url: string }[]
-): boolean {
+function unchanged(stored: ILinkedPR[] | undefined, fresh: Signable[]): boolean {
   const before = (stored ?? [])
     .filter((link) => (link.provider ?? "github") === "github")
     .map(signature)
     .sort();
-  const after = fresh.map(signature as (link: (typeof fresh)[number]) => string).sort();
+  const after = fresh.map(signature).sort();
+  // Sorted on both sides, so this is multiset equality: the same links in a different order are
+  // unchanged. `fetchPullRequests` concatenates two differently-ordered pages, so a task with two
+  // pull requests genuinely does see them arrive in either order between ticks — and without the
+  // sort that reads as a change, writes, and brings back the `updatedAt` corruption this exists to
+  // prevent, on exactly the tasks with the most pull-request activity.
+  //
+  // The flip side, stated because it is what "unchanged" means here rather than an oversight: a
+  // permutation of field values *across* two links in one task is invisible to it.
   return before.length === after.length && before.every((line, i) => line === after[i]);
 }
 
@@ -210,7 +239,7 @@ export async function syncGithubPullRequests(
     const task = await Task.findOne({ project: project._id, taskNumber });
     if (!task) continue;
 
-    const prDocs = prs.map((pr) => ({
+    const prDocs: (Signable & { provider: "github" })[] = prs.map((pr) => ({
       provider: "github" as const,
       number: pr.number,
       title: pr.title,
@@ -279,9 +308,12 @@ export async function syncGithubPullRequests(
 /**
  * Refreshes every project that has a GitHub repository and a token.
  *
- * The rate-limit arithmetic. One tick costs two requests for the pull requests plus two per open
- * pull request up to `MAX_CHECKED_PULL_REQUESTS`, so at most 42 per project — about 500 an hour at
- * the default interval.
+ * The rate-limit arithmetic. One tick costs two requests for the pull-request listing, plus **two
+ * to four** per open pull request up to `MAX_CHECKED_PULL_REQUESTS` — one commit-status call and up
+ * to `MAX_CHECK_RUN_PAGES` pages of check runs. So at most 2 + 20 × 4 = **82** per project, about
+ * 1,000 an hour at the default interval; the ordinary case, one page of check runs, is 42 and about
+ * 500. The first version of this comment said 42 was the worst case, which was true until check
+ * runs were paged and then quietly was not.
  *
  * What that is a tenth of is worth stating precisely, because the first version of this comment got
  * it wrong: GitHub's 5,000 an hour is **per account**, not per token and not per project. Ten

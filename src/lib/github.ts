@@ -11,7 +11,8 @@ import { MAX_RESPONSE_BYTES, readBoundedJson, readBoundedText, safeFetch } from 
  * same condition — it is what lets `e2e/github-stub.mjs` be reachable at all, and production
  * refuses it.
  */
-const GITHUB_DESTINATION = { allowLoopback: process.env.NODE_ENV !== "production" };
+export const allowLoopbackIn = (env = process.env.NODE_ENV) => env !== "production";
+export const GITHUB_DESTINATION = { allowLoopback: allowLoopbackIn() };
 
 interface GitHubPR {
   number: number;
@@ -268,9 +269,16 @@ export async function fetchChecks(
   };
   const base = `${API_BASE()}/repos/${owner}/${repo}/commits/${sha}`;
 
-  // Settled, not all: the two mechanisms are independent, and a repository using only one of them
-  // gets a 404 or an error from the other. `Promise.all` threw the good half away with the bad and
-  // answered `unknown` for a commit whose checks had been read perfectly well.
+  // Settled, not all: the two mechanisms are independent, and `Promise.all` threw the good half
+  // away with the bad — a commit whose check runs had been read perfectly well answered `unknown`
+  // because the commit-status call, which its repository does not even use, returned an error.
+  //
+  // The premise the first version of this comment gave for that was wrong, and it is worth
+  // correcting rather than deleting: a repository using only one mechanism does **not** get an
+  // error from the other. Both answer 200 and empty — `/status` with `{state: "pending", statuses:
+  // []}` and `/check-runs` with `{total_count: 0, check_runs: []}`, which is what this branch's own
+  // stub encodes as NOTHING_RAN. So a rejection almost always means auth, a rate limit or the
+  // network, and that is exactly when half an answer must not be read as a whole one.
   const [runs, status] = await Promise.allSettled([
     fetchCheckRuns(base, headers),
     fetchJson<CommitStatus>(`${base}/status`, headers),
@@ -279,10 +287,19 @@ export async function fetchChecks(
   if (runs.status === "rejected" && status.status === "rejected") {
     return { ci: "unknown", ciLabel: null };
   }
-  return reduceChecks(
+
+  const reduced = reduceChecks(
     runs.status === "fulfilled" ? runs.value : [],
     status.status === "fulfilled" ? status.value : null
   );
+
+  // The half that answered had nothing in it, and the half that did not is the one that might
+  // have. `none` is a claim — "nothing has run" — and there is no evidence for it here; only
+  // `unknown` is true. Without this the fix above re-opened the bug it was fixing by a new door,
+  // and worse: a green tick became a plain "open" badge that reads as fact.
+  const halfFailed = runs.status === "rejected" || status.status === "rejected";
+  if (halfFailed && reduced.ci === "none") return { ci: "unknown", ciLabel: null };
+  return reduced;
 }
 
 /** Pages a commit can have before this stops reading them. */
@@ -327,9 +344,10 @@ async function fetchJson<T>(url: string, headers: Record<string, string>): Promi
 /**
  * How many open pull requests one sync will ask GitHub about.
  *
- * Each one costs two requests against a 5,000/hour token, and a busy board syncing every five
- * minutes would otherwise scale its bill with the number of open branches. The most recently
- * updated are asked about first, so what the cap drops is the stalest.
+ * Each one costs two to four requests — one commit-status call plus up to `MAX_CHECK_RUN_PAGES`
+ * pages of check runs — and a busy board syncing every five minutes would otherwise scale its bill
+ * with the number of open branches. The most recently updated are asked about first, so what the
+ * cap drops is the stalest.
  */
 export const MAX_CHECKED_PULL_REQUESTS = 20;
 const CHECK_CONCURRENCY = 5;

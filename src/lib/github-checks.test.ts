@@ -204,6 +204,52 @@ describe("when only one of the two answers", () => {
 
     expect(await fetchChecks("o", "r", "sha1", "t")).toEqual({ ci: "unknown", ciLabel: null });
   });
+
+  /**
+   * The door `allSettled` opened while closing another. When the half that answered is **empty**
+   * and the half that failed is the one that might have had something, `none` is a claim with no
+   * evidence — and a worse one than `unknown`, because "nothing has run" reads as a fact. A green
+   * tick became a plain open badge, and the sync reported success.
+   *
+   * Not a hypothetical: a repository on external CI posts commit statuses and no check runs, so the
+   * empty survivor is the ordinary shape for exactly the repositories the second mechanism exists
+   * for.
+   */
+  it("does not call it 'nothing has run' when it only asked half the question", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) =>
+        String(url).includes("/check-runs")
+          ? new Response(JSON.stringify({ total_count: 0, check_runs: [] }), { status: 200 })
+          : new Response("no", { status: 500 })
+      )
+    );
+
+    expect(await fetchChecks("o", "r", "sha1", "t")).toEqual({ ci: "unknown", ciLabel: null });
+  });
+
+  // The mirror: check runs refused, and the commit status answers what GitHub returns for a commit
+  // nothing has posted about at all
+  it("does not read an empty pending status as proof when check runs failed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) =>
+        String(url).includes("/check-runs")
+          ? new Response("no", { status: 500 })
+          : new Response(JSON.stringify({ state: "pending", statuses: [] }), { status: 200 })
+      )
+    );
+
+    expect(await fetchChecks("o", "r", "sha1", "t")).toEqual({ ci: "unknown", ciLabel: null });
+  });
+
+  // The control, and the reason this is not simply "any rejection means unknown": a survivor that
+  // actually said something is still worth reading
+  it("still trusts a survivor that had an answer", async () => {
+    answering("ok", "fail");
+
+    expect(await fetchChecks("o", "r", "sha1", "t")).toEqual({ ci: "failure", ciLabel: "unit" });
+  });
 });
 
 /**
