@@ -21,6 +21,14 @@ export async function register() {
         : `TRUSTED_PROXY_HOPS=${hops} — the client address is taken ${hops} entries from the right of X-Forwarded-For`
     );
 
+    // Above the try for the same reason the hops are: a fumbled value has to be one startup
+    // failure naming the variable. `assertEncryptionConfig` throws on a malformed key on purpose
+    // (BP-282) — but every other path to this module goes through the PM scheduler, inside the
+    // try below, whose catch reports it as a MongoDB connection failure and leaves the process
+    // serving 500s from every route that touches a secret, with the schedulers never started.
+    const { assertEncryptionConfig } = await import("@/lib/encryption");
+    assertEncryptionConfig();
+
     const { connectDB } = await import("@/lib/db");
     try {
       await connectDB();
