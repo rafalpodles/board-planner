@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, type Mock } from "vitest";
 import { DecisionSettlement } from "./api.js";
 import {
   acceptability,
@@ -513,6 +513,75 @@ describe("acting on a verdict", () => {
     expect(h.deps.log).toHaveBeenCalledWith(
       expect.stringContaining("https://github.com/o/r/pull/7")
     );
+  });
+
+  /**
+   * `openPr` returns whatever `gh` printed, and a push against a credential-bearing remote puts
+   * the credential straight into that url — which is why `reporter.ts` scrubs it at both board
+   * sinks. This log is a third sink, added later, and it went to the operator's stderr raw.
+   */
+  it("does not put a credential in the log along with the pull request", async () => {
+    const h = harness({
+      delivery: {
+        push: vi.fn().mockResolvedValue(undefined),
+        openPr: vi.fn().mockResolvedValue("https://x-access-token:ghp_0123456789abcdefghijklmnopqrstuvwxyz@github.com/o/r/pull/7"),
+      },
+    } as Partial<DecisionContext>);
+    h.settleFails();
+
+    await settleDecisions(h.deps, [decision()], LATER);
+    await settleDecisions(h.deps, [], LATER + 1);
+
+    const said = (h.deps.log as Mock).mock.calls.flat().join("\n");
+    // The host and the number stay: they are the diagnostic part, and without them the line says
+    // nothing at all
+    expect(said).toContain("github.com/o/r/pull/7");
+    expect(said).not.toContain("ghp_0123456789abcdefghijklmnopqrstuvwxyz");
+  });
+
+  /**
+   * The other end of a marker's life. A worktree on a project this machine no longer serves never
+   * reaches the sweep — it is released on the TTL instead — so without a word there, the orphan
+   * goes with the marker and is written down nowhere.
+   */
+  it("names the orphan when it releases the hold on a project it no longer serves", async () => {
+    const h = harness();
+    h.markers.write({
+      ...h.markers.read("CP-158")!,
+      openedPr: "https://github.com/o/r/pull/7",
+      createdAt: new Date(LATER - 8 * 24 * 60 * 60_000).toISOString(),
+    });
+    const log = vi.fn();
+
+    await settleDecisions({ ...h.deps, contextFor: async () => null, log }, [], LATER);
+
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("https://github.com/o/r/pull/7"));
+    expect(h.markers.read("CP-158")).toBeNull();
+  });
+
+  /**
+   * The url is written from the marker this pass already holds. Re-reading it here looked
+   * equivalent and is not: `parse()` answers null for the truncated file a half-written marker
+   * leaves behind, spreading null yields a marker with no `taskKey`, and `writeMarker` then
+   * refuses it and swallows the error — losing the url in the one circumstance this line exists
+   * for.
+   */
+  it("keeps the url when the marker file cannot be read back", async () => {
+    const h = harness();
+    h.settleFails();
+    let reads = 0;
+    const markers = {
+      ...h.markers,
+      // The first read is the pass picking the marker up; anything after it is the re-read.
+      read: (taskKey: string) => (reads++ === 0 ? h.markers.read(taskKey) : null),
+    };
+
+    await settleDecisions({ ...h.deps, markers }, [decision()], LATER);
+
+    const written = h.markers.read("CP-158");
+    expect(written?.openedPr).toBe("https://github.com/o/r/pull/7");
+    // And it is still a whole marker: the worktree it names is what the sweep needs to remove
+    expect(written?.worktreePath).toBeTruthy();
   });
 
   // Nothing to say where nothing was opened

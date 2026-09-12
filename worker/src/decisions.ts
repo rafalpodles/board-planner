@@ -15,6 +15,7 @@ import { Runner } from "./exec.js";
 import { gitArgs, GIT_SAFE_ENV } from "./git-safety.js";
 import { protectedPaths, workflowPaths } from "./gates/protected-paths.js";
 import { ClaimedTask, DiffStats } from "./types.js";
+import { scrub } from "./scrub.js";
 
 /**
  * What this machine has to remember about a refused change while a person reads it.
@@ -652,7 +653,8 @@ export async function settleDecisions(
      * so with the board refusing settlements the branch below ran that work every poll, unspaced
      * and uncounted: the same runaway, one branch earlier in the same function.
      */
-    writeMarker(deps, spent(marker, tried, now, answeredAt));
+    marker = spent(marker, tried, now, answeredAt);
+    writeMarker(deps, marker);
 
     const why = await whyNotPushable(context, marker, decision).catch((error) => String(error));
     if (why) {
@@ -679,8 +681,11 @@ export async function settleDecisions(
       // things that say where the work is, and a settlement that did not land is retried whole.
       if (!(await deps.settle({ taskId: decision.taskId, state: "delivered", prUrl }))) {
         // Recorded before the retry, so that if this decision is abandoned or superseded before
-        // the next poll the sweep can still name what was opened.
-        writeMarker(deps, { ...deps.markers.read(decision.taskKey)!, openedPr: prUrl });
+        // the next poll the sweep can still name what was opened. The marker in hand rather than a
+        // re-read: `parse()` answers null for the truncated file a half-written `spent()` leaves
+        // behind, and spreading null yields a marker with no `taskKey` — which `writeMarker`
+        // refuses and swallows, losing the url in the one case this line exists for.
+        writeMarker(deps, { ...marker, openedPr: prUrl });
         continue;
       }
       await context.destroyWorktree(decision.taskKey).catch((error) => {
@@ -738,7 +743,11 @@ async function sweepMarkers(
        */
       if (Date.now() - Date.parse(marker.createdAt) > UNBOUND_MARKER_TTL_MS) {
         deps.log(
-          `${marker.taskKey}: project ${marker.projectId} has not been served for ${UNBOUND_MARKER_TTL_DAYS} days; releasing the hold on ${marker.worktreePath}, which is yours to remove`
+          `${marker.taskKey}: project ${marker.projectId} has not been served for ${UNBOUND_MARKER_TTL_DAYS} days; releasing the hold on ${marker.worktreePath}, which is yours to remove` +
+            // The other end of this marker's life, and the only other place the url can be said.
+            // A worktree on an unbound project never reaches the sweep below, so without this the
+            // orphan goes with the marker and is written down nowhere.
+            (marker.openedPr ? `. ${scrub(marker.openedPr)} was opened for it and never reported` : "")
         );
         deps.markers.remove(marker.taskKey);
       }
@@ -750,7 +759,7 @@ async function sweepMarkers(
     // is written down at all.
     if (marker.openedPr) {
       deps.log(
-        `${marker.taskKey}: ${marker.openedPr} was opened for a decision that ended before the machine could report it`
+        `${marker.taskKey}: ${scrub(marker.openedPr)} was opened for a decision that ended before the machine could report it`
       );
     }
 
