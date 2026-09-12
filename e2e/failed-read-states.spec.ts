@@ -9,6 +9,7 @@ import {
   seedAgents,
 } from "./seed";
 import { signIn as arriveSignedIn } from "./session";
+import { answerNoMailServer } from "./mail-screen";
 
 /**
  * BP-577. Six screens swallowed a failed read into an empty result and then made a positive claim
@@ -106,13 +107,7 @@ for (const { name, url, api, testId, claim } of screens) {
  * they were ever about, not the environment behind it.
  */
 async function answerUnconfigured(page: Page) {
-  await page.route("**/api/admin/email", (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ configured: false, host: "", port: 587, user: "", from: "" }),
-    })
-  );
+  await answerNoMailServer(page);
 }
 
 test("the email settings screen never tells an admin to set SMTP_HOST after a failed read", async ({

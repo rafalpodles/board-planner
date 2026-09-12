@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer as createTcpServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,8 +13,10 @@ import { fatal, fatalOnListenFailure, keepAlive, serve } from "./stub-guard.mjs"
  * fire-and-forget, so the message is handed over after the route has answered and after the test's
  * own request has resolved.
  *
- * Two ports. The SMTP one is what `nodemailer` talks to; the HTTP one is what a spec reads —
- * `GET /messages` returns what has arrived, `POST /reset` clears it.
+ * Two ports. The SMTP one is what `nodemailer` talks to; the HTTP one is what a spec reads:
+ * `/reset` clears what has arrived, any other path returns it. Routed on the exact path and
+ * nothing else — the method is not checked, and neither is a query string, which is the same
+ * looseness every other stub's control port here has.
  *
  * STARTTLS is not optional here. `src/lib/email.ts` sets `requireTLS` on every port but 465
  * (BP-306, so a stripped advertisement cannot get the AUTH exchange in cleartext), and nodemailer
@@ -50,7 +52,11 @@ function selfSignedCertificate() {
   } catch (error) {
     fatal(NAME, `openssl could not make a certificate: ${error}`);
   }
-  return { key: readFileSync(key), cert: readFileSync(cert) };
+  const material = { key: readFileSync(key), cert: readFileSync(cert) };
+  // Dozens of runs a day would otherwise leave dozens of directories holding a private key. The
+  // handler runs on `fatal`'s exit too, which is how this process ends when a port is taken.
+  process.on("exit", () => rmSync(dir, { recursive: true, force: true }));
+  return material;
 }
 
 const context = createSecureContext(selfSignedCertificate());
@@ -78,13 +84,7 @@ function converse(socket, session) {
       if (session.readingData) {
         const end = buffer.indexOf("\r\n.\r\n");
         if (end === -1) return;
-        // Un-stuffed: a client doubles a leading dot so it cannot end the message early, and a
-        // reader that keeps both sees a body its sender never wrote. A spec here matches on the
-        // task title, so a title starting with a dot would silently stop matching.
-        session.data += buffer
-          .subarray(0, end)
-          .toString("utf8")
-          .replace(/^\.\./gm, ".");
+        session.data += unstuff(buffer.subarray(0, end).toString("utf8"));
         buffer = buffer.subarray(end + 5);
         session.readingData = false;
         messages.push({ from: session.from, to: session.to, data: session.data });
@@ -126,12 +126,18 @@ function command(socket, session, line) {
       );
       return;
     case "STARTTLS": {
-      socket.write("220 2.0.0 Ready to start TLS\r\n");
+      // Upgraded inside the write callback, not alongside it: `TLSSocket` takes the handle
+      // immediately, so constructing it next to the write races the greeting out of a socket TLS
+      // has already claimed. On loopback those 30 bytes go out synchronously every time, which is
+      // what would make the failure a rare handshake into nowhere rather than an obvious one.
+      //
+      // `from` is discarded with the rest: RFC 3207 §4.2 has the server forget the session state
+      // on upgrade, and the client repeats EHLO and MAIL over the new socket.
+      socket.write("220 2.0.0 Ready to start TLS\r\n", () => {
+        const secured = new TLSSocket(socket, { isServer: true, secureContext: context });
+        converse(secured, { ...session, secure: true, from: "", to: [], data: "", readingData: false });
+      });
       socket.removeAllListeners("data");
-      const secured = new TLSSocket(socket, { isServer: true, secureContext: context });
-      // `from` is discarded with the rest: RFC 3207 §4.2 says the server must forget the whole
-      // session state on upgrade, and the client repeats EHLO and MAIL over the new socket.
-      converse(secured, { ...session, secure: true, from: "", to: [], data: "", readingData: false });
       return "upgraded";
     }
     case "AUTH":
@@ -158,8 +164,12 @@ function command(socket, session, line) {
       socket.write("354 End data with <CR><LF>.<CR><LF>\r\n");
       return;
     case "RSET":
+      // The whole transaction, not half of it. Unreachable through nodemailer without a pool, but
+      // a reset that left `readingData` set would strand the next command in data mode.
+      session.from = "";
       session.to = [];
       session.data = "";
+      session.readingData = false;
       socket.write("250 2.0.0 Ok\r\n");
       return;
     case "QUIT":
@@ -169,6 +179,19 @@ function command(socket, session, line) {
     default:
       socket.write("250 2.0.0 Ok\r\n");
   }
+}
+
+/**
+ * Undoes the dot-stuffing RFC 5321 §4.5.2 requires of the client: a body line beginning with a dot
+ * is sent doubled so it cannot be mistaken for the terminator, and a reader that keeps both sees a
+ * body its sender never wrote. The specs here match on a task title, so a title starting with a
+ * dot would silently stop matching.
+ *
+ * Exported for `smtp-stub.test.ts`: no message nodemailer sends in this suite is dot-stuffed, so
+ * nothing else here would notice this being wrong.
+ */
+export function unstuff(body) {
+  return body.replace(/^\.\./gm, ".");
 }
 
 function address(line) {

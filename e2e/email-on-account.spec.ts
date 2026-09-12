@@ -10,6 +10,7 @@ import {
   seed,
 } from "./seed";
 import { signIn as arriveSignedIn } from "./session";
+import { answerNoMailServer } from "./mail-screen";
 
 /**
  * BP-281, slice 2. A password reset by email needs an address to send to, and an account had no
@@ -186,13 +187,7 @@ test("an admin API token cannot change an address", async ({ request }) => {
 // The answer is stubbed rather than arranged: since BP-465 the suite boots a mail server, and a
 // test that skipped itself whenever one existed would now never run at all.
 test("the email screen says plainly when no mail server is configured", async ({ page }) => {
-  await page.route("**/api/admin/email", (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ configured: false, host: "", port: 587, user: "", from: "" }),
-    })
-  );
+  await answerNoMailServer(page);
 
   await signInAsAdmin(page);
   await page.goto("/settings/email");

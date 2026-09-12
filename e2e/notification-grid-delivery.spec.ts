@@ -55,12 +55,18 @@ async function db() {
  */
 async function giveEveryoneAMailbox() {
   const handle = await db();
-  await handle
-    .collection("users")
-    .updateOne({ username: MEMBER_USERNAME }, { $set: { email: MEMBER_MAILBOX } });
-  await handle
-    .collection("users")
-    .updateOne({ username: BYSTANDER_USERNAME }, { $set: { email: BYSTANDER_MAILBOX } });
+  for (const [username, mailbox] of [
+    [MEMBER_USERNAME, MEMBER_MAILBOX],
+    [BYSTANDER_USERNAME, BYSTANDER_MAILBOX],
+  ]) {
+    const result = await handle
+      .collection("users")
+      .updateOne({ username }, { $set: { email: mailbox } });
+    // Asserted, because a silence cannot tell the three clauses of the mail filter apart. Without
+    // an address the dispatch drops the recipient before the grid is consulted, and a negative
+    // here would then be measuring a renamed constant or a changed seed order rather than a tick.
+    expect(result.matchedCount, `no account named ${username} to give an address to`).toBe(1);
+  }
 }
 
 interface StubMessage {
@@ -113,6 +119,13 @@ async function expectMailFor(address: string, title: string) {
  * none of these tests ever unticks In app. That is a precondition of the gate, not a detail — the
  * row is written with `inApp: shown(recipientId)` and `/notifications` hides the hidden ones, so
  * wiring this into a test that unticks In app turns it into a 30 s hang rather than a failure.
+ *
+ * It matches the row's **body**, which is the task title — and a freshly created assigned task can
+ * produce two rows carrying it: the board feed's `task_created` is dispatched before the
+ * `task_assigned` one (`task-service.ts`). Nobody in this file has a `task_created` tick, so no
+ * feed row is written and the gate can only resolve on the assigned one. Give a reader that tick
+ * and the gate would resolve on a row written *before* the dispatch it is supposed to be waiting
+ * for, and quietly stop gating anything.
  *
  * It orders the window after the channel *decision*, which is not the same as after a delivery.
  * Every silence below is also preceded by a mail that did arrive, in its own test, which is what

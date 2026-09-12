@@ -14,6 +14,7 @@ import {
   seedSecondProject,
 } from "./seed";
 import { signIn as arriveSignedIn, signInThroughForm } from "./session";
+import { answerNoMailServer } from "./mail-screen";
 
 /**
  * BP-394. The settings a person changes about the instance and about themselves: the model the
@@ -508,13 +509,7 @@ test("the profile: the name lands in the shell, the address is guarded by the pa
   await test.step("the mail screen has nowhere to send until there is an address", async () => {
     // Stubbed, not arranged: since BP-465 this run boots a mail server, and what this step is
     // about is the *answer*, not the environment behind it.
-    await page.route("**/api/admin/email", (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ configured: false, host: "", port: 587, user: "", from: "" }),
-      })
-    );
+    await answerNoMailServer(page);
     await page.goto("/settings/email");
     await expect(page.getByText("No mail server is configured.")).toBeVisible();
     await expect(page.getByRole("button", { name: "Send a test message" })).toBeDisabled();
