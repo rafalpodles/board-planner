@@ -75,8 +75,12 @@ const GLYPH: Record<PullRequestLook, string> = {
   success: "✓",
   failure: "✕",
   unknown: "?",
+  // The merge icon is its own shape, so the chip needs no second mark
   merged: "",
-  closed: "",
+  // Closed shares the pull-request icon with open, so without this the two are the same picture in
+  // the same grey and a rejected branch reads as a live one. `origin/main` told them apart by
+  // painting closed red; this keeps them apart by shape as well.
+  closed: "⊘",
 };
 
 const ACCENT: Record<PullRequestLook, string> = {
@@ -86,7 +90,9 @@ const ACCENT: Record<PullRequestLook, string> = {
   failure: "var(--color-danger)",
   unknown: "var(--color-text-muted)",
   merged: "#8b5cf6",
-  closed: "var(--color-text-muted)",
+  // The ticket's "dark", and a step away from open's muted grey. Not danger red: a pull request
+  // somebody decided against is not a failure, and red is what a failed build wears two rows up.
+  closed: "var(--color-text)",
 };
 
 // `git-merge-16`. What stood here was four detached arcs and a dot that rendered as an
@@ -151,11 +157,13 @@ export function PullRequestState({
       className={`${CHIP} ${says === "status" ? "max-w-[45%]" : ""} ${className}`}
       style={{ "--chip": ACCENT[look] } as CSSProperties}
     >
-      <Face look={look} label={says === "status" ? pullRequestStatusText(pr) : `#${pr.number}`} />
-      {/* Only where the visible text cannot be read aloud: "#41 ✕" is a number and a symbol, and
-          the glyph is `aria-hidden` because it carries no meaning a hue does not. The status form
-          already says it in words, and repeating the summary there makes a screen reader read the
-          title twice — the row beside it has already said it once. */}
+      {/* On the number form the visible label is hidden from assistive technology and the sentence
+          below replaces it. Left readable, the card's own `<a>` concatenates the two into
+          "#41 #41 Keep the header visible — e2e failed": the summary already opens with the
+          number. The status form needs neither — it says the state in words. */}
+      <span aria-hidden={says === "number"} className="contents">
+        <Face look={look} label={says === "status" ? pullRequestStatusText(pr) : `#${pr.number}`} />
+      </span>
       {says === "number" && <span className="sr-only">{summary}</span>}
     </span>
   );
@@ -178,8 +186,11 @@ export function PullRequestBadge({ pr, className = "" }: { pr: ApiLinkedPR; clas
       draggable={false}
       data-testid="pr-badge"
       data-look={look}
+      // The tooltip is the sentence; the accessible name adds where the link goes, which "#41 ✕"
+      // does not say and which a sighted user reads from the cursor. Identical strings would be
+      // announced twice — once as the name, once as the description.
       title={summary}
-      aria-label={summary}
+      aria-label={`${summary}. Opens on GitHub`}
       className={`${CHIP} focus-ring transition-opacity hover:opacity-80 ${className}`}
       style={{ "--chip": ACCENT[look] } as CSSProperties}
     >

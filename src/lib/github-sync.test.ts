@@ -26,7 +26,7 @@ vi.mock("@/lib/github", async (importOriginal) => ({
   fetchPullRequests,
 }));
 
-const { syncGithubPullRequests, githubSyncTick } = await import("./github-sync");
+const { syncGithubPullRequests, githubSyncTick, syncTickMs } = await import("./github-sync");
 
 const project = (over: Record<string, unknown> = {}) => ({
   _id: "p1",
@@ -37,6 +37,16 @@ const project = (over: Record<string, unknown> = {}) => ({
   columns: null,
   ...over,
 });
+
+const openPR = {
+  number: 1,
+  title: "Some change",
+  state: "open" as const,
+  html_url: "https://github.com/o/r/pull/1",
+  merged_at: null,
+  head: { ref: "bp-5/x", sha: "abc123" },
+  updated_at: "2026-08-01T00:00:00Z",
+};
 
 const mergedPR = {
   number: 1,
@@ -129,5 +139,185 @@ describe("the background tick", () => {
     await githubSyncTick();
 
     expect(fetchPullRequests).toHaveBeenCalledTimes(2);
+  });
+});
+
+/**
+ * `withChecks` answers `unknown` for an open pull request it did not ask about — past the cap, or
+ * because the request failed — and `writeProviderLinks` replaces the whole array. Without carrying
+ * the stored answer forward, a board with more than twenty open pull requests starves the same
+ * ones on every tick and their badges read "?" for ever; one transient 502 does it to a single
+ * badge.
+ */
+describe("an answer this sync could not get", () => {
+  const linkWritten = (): Record<string, unknown>[] => {
+    const [stage] = taskUpdateOne.mock.calls[0][1] as {
+      $set: { linkedPRs: { $concatArrays: [unknown, { $literal: Record<string, unknown>[] }] } };
+    }[];
+    return stage.$set.linkedPRs.$concatArrays[1].$literal;
+  };
+
+  /** The checks call fails, so `fetchChecks` answers `unknown`. */
+  function githubRefusesChecks() {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) =>
+        String(url).includes("/commits/")
+          ? new Response("no", { status: 500 })
+          : new Response(JSON.stringify({ state: "pending", statuses: [] }), { status: 200 })
+      )
+    );
+  }
+
+  beforeEach(() => {
+    fetchPullRequests.mockResolvedValue([openPR]);
+    githubRefusesChecks();
+  });
+
+  it("keeps what the last sync learned about the same commit", async () => {
+    taskFindOne.mockResolvedValue({
+      _id: "t1",
+      taskNumber: 5,
+      status: "todo",
+      linkedPRs: [{ provider: "github", number: 1, ci: "success", ciLabel: "e2e", headSha: "abc123" }],
+    });
+
+    await syncGithubPullRequests(project(), "u1");
+
+    expect(linkWritten()[0]).toMatchObject({ ci: "success", ciLabel: "e2e", headSha: "abc123" });
+  });
+
+  // A different commit makes the old answer an answer about something else
+  it("does not carry an answer forward onto a new commit", async () => {
+    taskFindOne.mockResolvedValue({
+      _id: "t1",
+      taskNumber: 5,
+      status: "todo",
+      linkedPRs: [{ provider: "github", number: 1, ci: "success", ciLabel: "e2e", headSha: "older" }],
+    });
+
+    await syncGithubPullRequests(project(), "u1");
+
+    expect(linkWritten()[0]).toMatchObject({ ci: "unknown", ciLabel: null });
+  });
+
+  it("says unknown when there was never an answer to keep", async () => {
+    taskFindOne.mockResolvedValue({ _id: "t1", taskNumber: 5, status: "todo", linkedPRs: [] });
+
+    await syncGithubPullRequests(project(), "u1");
+
+    expect(linkWritten()[0]).toMatchObject({ ci: "unknown" });
+  });
+
+  // The control: a sync that CAN ask overwrites the stored answer, which is the whole point of it
+  it("still replaces a stored answer when GitHub does answer", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) =>
+        new Response(
+          JSON.stringify(
+            String(url).includes("/check-runs")
+              ? { check_runs: [{ name: "unit", status: "completed", conclusion: "failure" }] }
+              : { state: "pending", statuses: [] }
+          ),
+          { status: 200 }
+        )
+      )
+    );
+    taskFindOne.mockResolvedValue({
+      _id: "t1",
+      taskNumber: 5,
+      status: "todo",
+      linkedPRs: [{ provider: "github", number: 1, ci: "success", ciLabel: "e2e", headSha: "abc123" }],
+    });
+
+    await syncGithubPullRequests(project(), "u1");
+
+    expect(linkWritten()[0]).toMatchObject({ ci: "failure", ciLabel: "unit" });
+  });
+});
+
+describe("which task a refresh may move", () => {
+  beforeEach(() => {
+    fetchPullRequests.mockResolvedValue([mergedPR]);
+    taskFindOne.mockResolvedValue({ _id: "t1", taskNumber: 5, status: "in_review", linkedPRs: [] });
+  });
+
+  it("moves the task the person is looking at", async () => {
+    expect(await syncGithubPullRequests(project(), "u1", 5)).toMatchObject({ autoTransitioned: 1 });
+  });
+
+  // The button says "Refresh PR status"; moving somebody else's task under your name is not that
+  it("leaves every other task where it is", async () => {
+    const result = await syncGithubPullRequests(project(), "u1", 999);
+
+    expect(result).toMatchObject({ autoTransitioned: 0, prsLinked: 1 });
+    expect(logActivity).not.toHaveBeenCalled();
+  });
+
+  // Project settings' own Sync sends no task number and keeps the behaviour it always had
+  it("moves every eligible task when no task is named", async () => {
+    expect(await syncGithubPullRequests(project(), "u1")).toMatchObject({ autoTransitioned: 1 });
+  });
+});
+
+/**
+ * A board that renamed its columns opts out of the transition, which BP-429 pinned — except the
+ * fixture it used sat in a renamed column, so `task.status === "in_review"` refused first and the
+ * destination guard was never reached. This is the same task IN review on a board with no
+ * `ready_to_test`, which is the only shape that reaches it.
+ */
+describe("a board with nowhere to move the task to", () => {
+  it("transitions nothing when the destination column does not exist", async () => {
+    fetchPullRequests.mockResolvedValue([mergedPR]);
+    projectFind.mockReturnValue({ lean: () => Promise.resolve([project()]) });
+    taskFindOne.mockResolvedValue({ _id: "t1", taskNumber: 5, status: "in_review", linkedPRs: [] });
+
+    const withoutTheColumn = project({
+      columns: [
+        { id: "todo", label: "To do", color: "#000", role: "backlog", order: 0 },
+        { id: "in_review", label: "In review", color: "#000", role: "review", order: 1 },
+        { id: "shipped", label: "Shipped", color: "#000", role: "done", order: 2 },
+      ],
+    });
+
+    const result = await syncGithubPullRequests(withoutTheColumn, "u1");
+
+    expect(result).toMatchObject({ autoTransitioned: 0, prsLinked: 1 });
+    expect(logActivity).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * CLAUDE.md documents `0` as the operator's off switch. A value that is not a number used to read
+ * as NaN and silently never start, which is indistinguishable from a sync that is working.
+ */
+describe("how often the background sync runs", () => {
+  it("defaults when unset", () => {
+    expect(syncTickMs(undefined)).toBe(300000);
+    expect(syncTickMs("")).toBe(300000);
+  });
+
+  it("takes a number of milliseconds", () => {
+    expect(syncTickMs("600000")).toBe(600000);
+  });
+
+  it("is off at zero, which is the documented switch", () => {
+    expect(syncTickMs("0")).toBe(0);
+  });
+
+  it("falls back loudly rather than silently never starting", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    expect(syncTickMs("5m")).toBe(300000);
+    expect(syncTickMs("-1")).toBe(300000);
+    expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  // This spends somebody else's rate limit; a fumbled 50 would burn a token's hour in an afternoon
+  it("will not go below a minute", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    expect(syncTickMs("50")).toBe(60000);
   });
 });

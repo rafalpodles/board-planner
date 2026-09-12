@@ -85,16 +85,52 @@ describe("the linked pull request", () => {
 
     expect(screen.queryByRole("button", { name: /Refresh/ })).toBeNull();
   });
+
+  /**
+   * GitLab has its own sync, in project settings. The button used to appear here and POST to the
+   * GitHub endpoint, which answered "…is not a GitHub repository" every time — a correct sentence
+   * under a wrong label.
+   */
+  it("offers no refresh when every link is GitLab's", () => {
+    const merge = { ...(task().linkedPRs ?? [])[0], provider: "gitlab" };
+    renderSection({ task: task({ linkedPRs: [merge] } as never) });
+
+    expect(screen.getByTestId("pr-state")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Refresh/ })).toBeNull();
+  });
 });
 
 describe("refreshing", () => {
-  it("asks the project's sync, and re-reads the task with what came back", async () => {
+  /**
+   * One GitHub request answers for every open branch, so the links that come back are the
+   * project's — but `taskNumber` is what keeps the merged-to-ready_to_test move to this task.
+   * Without it a button called "Refresh PR status" moved other people's tasks between columns,
+   * under the clicking user's name.
+   */
+  it("asks the project's sync, but names the task it is allowed to move", async () => {
     const { onChanged } = renderSection();
 
     await clickRefresh();
 
-    expect(api.post).toHaveBeenCalledWith("/api/projects/p1/github/sync", {});
+    expect(api.post).toHaveBeenCalledWith("/api/projects/p1/github/sync", { taskNumber: 5 });
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
+  });
+
+  // A refresh that found nothing is otherwise indistinguishable from a button that did nothing
+  it("says it worked, and says when the task moved", async () => {
+    api.post.mockResolvedValue({ prsLinked: 1, autoTransitioned: 0 });
+    renderSection();
+    await clickRefresh();
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("Pull requests refreshed", "success"));
+
+    api.post.mockResolvedValue({ prsLinked: 1, autoTransitioned: 1 });
+    await clickRefresh();
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith(
+        "Pull requests refreshed — this task moved to Ready to Test",
+        "success"
+      )
+    );
   });
 
   /**

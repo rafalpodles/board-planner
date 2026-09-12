@@ -29,17 +29,33 @@ export function LinkedWork({
   const { toast } = useToast();
   const [refreshing, setRefreshing] = useState(false);
   const prs = task.linkedPRs || [];
+  // GitLab has its own sync, in project settings. Without this the button appears on a GitLab-only
+  // task and the GitHub endpoint answers "…is not a GitHub repository" every time — a correct
+  // sentence under a wrong label.
+  const refreshable = prs.some((pr) => (pr.provider ?? "github") === "github");
 
   /**
-   * Asks GitHub again. The sync is the project's, not this task's — there is no per-pull-request
-   * endpoint and one request to GitHub answers for every open branch anyway — so what comes back
-   * refreshes the whole board and this row with it.
+   * Asks GitHub again. One request answers for every open branch, so the links this brings back
+   * are the project's — but `taskNumber` keeps the merged-to-ready_to_test move to this task, the
+   * one the person is looking at. A button called "Refresh PR status" must not move somebody
+   * else's task, least of all under the clicking user's name.
    */
   async function refresh() {
     setRefreshing(true);
     try {
-      await api.post(`/api/projects/${projectId}/github/sync`, {});
+      const result: { prsLinked?: number; autoTransitioned?: number } = await api.post(
+        `/api/projects/${projectId}/github/sync`,
+        { taskNumber: task.taskNumber }
+      );
       onChanged();
+      // Said rather than left to be inferred: without it a refresh that found nothing looks
+      // exactly like a button that did nothing
+      toast(
+        result?.autoTransitioned
+          ? "Pull requests refreshed — this task moved to Ready to Test"
+          : "Pull requests refreshed",
+        "success"
+      );
     } catch (err) {
       // The message the route gave, which says which of the several refusals it was — an
       // unconfigured token and an unreachable GitHub send somebody to different places
@@ -53,11 +69,12 @@ export function LinkedWork({
     <section className="flex flex-col gap-2.5">
       <div className="flex items-center justify-between gap-3">
         <SectionLabel>Linked work</SectionLabel>
-        {prs.length > 0 && (
+        {refreshable && (
           <button
             type="button"
             onClick={refresh}
             disabled={refreshing}
+            aria-busy={refreshing}
             className="focus-ring rounded text-xs text-text-muted transition-colors
               hover:text-text disabled:opacity-60"
           >

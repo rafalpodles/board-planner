@@ -240,9 +240,22 @@ export function TaskCard({
           a link because nothing encloses it. */}
       {task.linkedPRs && task.linkedPRs.length > 0 && (
         <div className="mb-2 flex flex-wrap items-center gap-1.5">
-          {task.linkedPRs.map((pr) => (
+          {/* Capped like the custom-field chips above, and for the same reason: a card is a glance,
+              and a task with six branches would otherwise be twice the height of its neighbours. */}
+          {task.linkedPRs.slice(0, MAX_CARD_BADGES).map((pr) => (
             <PullRequestState key={`${pr.provider ?? "github"}-${pr.number}`} pr={pr} />
           ))}
+          {task.linkedPRs.length > MAX_CARD_BADGES && (
+            <span
+              title={task.linkedPRs
+                .slice(MAX_CARD_BADGES)
+                .map((pr) => `#${pr.number} ${pr.title}`)
+                .join(", ")}
+              className="text-[11px] px-1.5 py-0.5 text-text-muted"
+            >
+              +{task.linkedPRs.length - MAX_CARD_BADGES}
+            </span>
+          )}
         </div>
       )}
 

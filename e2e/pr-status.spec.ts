@@ -28,6 +28,8 @@ import { signIn as arriveSignedIn } from "./session";
 const signIn = arriveSignedIn;
 
 const REPO = "https://github.com/example/board";
+/** Planted in the clear; `decryptSecret` passes such a value through unchanged. */
+const SEEDED_TOKEN = "e2e-token-passed-through";
 const HEAD = "c0ffee1";
 
 /** A pull request in GitHub's own shape, matched to the seeded sibling task by its branch. */
@@ -64,6 +66,11 @@ async function askedFor(request: APIRequestContext): Promise<string[]> {
   return (await request.get(`${GITHUB_STUB_URL}/asked`)).json();
 }
 
+/** The credentials those requests carried. */
+async function bearers(request: APIRequestContext): Promise<(string | null)[]> {
+  return (await request.get(`${GITHUB_STUB_URL}/bearers`)).json();
+}
+
 async function syncNow(request: APIRequestContext) {
   const response = await request.post(`/api/projects/${PROJECT_KEY}/github/sync`, {
     headers: ADMIN_AUTH,
@@ -86,7 +93,7 @@ async function openTheList(page: Page) {
 
 test.beforeEach(async () => {
   await seed();
-  await seedRepository({ repositoryUrl: REPO, githubToken: "e2e-token-passed-through" });
+  await seedRepository({ repositoryUrl: REPO, githubToken: SEEDED_TOKEN });
 });
 
 test.describe("the badge on the board", () => {
@@ -105,14 +112,12 @@ test.describe("the badge on the board", () => {
     await expect(page.getByText("#41 Keep the header visible — e2e failed")).toBeAttached();
   });
 
-  test("says passing, running and unknown apart", async ({ page, request }) => {
+  test("says passing and running apart", async ({ page, request }) => {
     await signIn(page);
 
     for (const [checks, look, sentence] of [
       [passing, "success", /e2e passed/],
       [running, "running", /e2e running/],
-      // The one state GitHub never reports: the app's own answer for a question it could not ask
-      ["refuse", "unknown", /could not be read/],
     ] as const) {
       await github(request, { pulls: [pull()], checks: { [HEAD]: checks } });
       await syncNow(request);
@@ -121,6 +126,63 @@ test.describe("the badge on the board", () => {
       await expect(state(page), look).toHaveAttribute("data-look", look);
       await expect(state(page).getByText(sentence), look).toBeAttached();
     }
+  });
+
+  /**
+   * `unknown` is the one state GitHub never reports — it is this instance's answer for a question
+   * it could not ask. It has to be reached from a board that has never had an answer, which is why
+   * it is not a third turn of the loop above: since the review, a sync that cannot ask keeps what
+   * the last one learned, and the loop would hand it `running` to keep.
+   */
+  test("says so when the checks could not be read at all", async ({ page, request }) => {
+    await github(request, { pulls: [pull()], checks: { [HEAD]: "refuse" } });
+    await syncNow(request);
+
+    await signIn(page);
+    await page.goto(`/projects/${PROJECT_KEY}`);
+
+    await expect(state(page)).toHaveAttribute("data-look", "unknown");
+    await expect(state(page).getByText(/could not be read/)).toBeAttached();
+  });
+
+  /**
+   * The severest thing the review found. `withChecks` answers `unknown` for any open pull request
+   * it did not ask about — past the cap, or because the request failed — and the sync replaces the
+   * whole link array, so a stored answer was destroyed. With more than twenty open pull requests
+   * the ordering is deterministic, so the same ones starve on every tick and read "?" for ever.
+   */
+  test("keeps a green badge green when GitHub stops answering", async ({ page, request }) => {
+    await github(request, { pulls: [pull()], checks: { [HEAD]: passing } });
+    await syncNow(request);
+    await signIn(page);
+    await page.goto(`/projects/${PROJECT_KEY}`);
+    await expect(state(page)).toHaveAttribute("data-look", "success");
+
+    // Same commit, and now GitHub will not answer about it
+    await github(request, { pulls: [pull()], checks: { [HEAD]: "refuse" } });
+    await syncNow(request);
+    await page.reload();
+
+    await expect(state(page)).toHaveAttribute("data-look", "success");
+    await expect(state(page).getByText(/e2e passed/)).toBeAttached();
+  });
+
+  // The other half of the rule: a different commit makes the old answer an answer about something
+  // else, so it is not kept
+  test("does not keep it once the branch has moved on", async ({ page, request }) => {
+    await github(request, { pulls: [pull()], checks: { [HEAD]: passing } });
+    await syncNow(request);
+
+    await github(request, {
+      pulls: [pull({ head: { ref: `${PROJECT_KEY}-${SIBLING_TASK_NUMBER}/keep-the-header`, sha: "newer1" } })],
+      checks: { newer1: "refuse" },
+    });
+    await syncNow(request);
+
+    await signIn(page);
+    await page.goto(`/projects/${PROJECT_KEY}`);
+
+    await expect(state(page)).toHaveAttribute("data-look", "unknown");
   });
 
   /**
@@ -133,6 +195,24 @@ test.describe("the badge on the board", () => {
    * which is what proved it. The rule is defensive, and `PullRequestBadge.test.tsx` pins it where
    * the state can be constructed.
    */
+  /**
+   * Closed without merging. It shared open's grey and open's icon until the review caught it, so a
+   * branch somebody decided against read as a live one — and no spec built the state: both of the
+   * ones sending `state: "closed"` also send `merged_at`, which is a merge.
+   */
+  test("tells a closed pull request from an open one", async ({ page, request }) => {
+    await github(request, { pulls: [pull({ state: "closed" })], checks: { [HEAD]: failing } });
+    await syncNow(request);
+
+    await signIn(page);
+    await page.goto(`/projects/${PROJECT_KEY}`);
+
+    await expect(state(page)).toHaveAttribute("data-look", "closed");
+    await expect(state(page).getByText(/closed without merging/)).toBeAttached();
+    // Not merely a different word in a tooltip: the mark on the chip differs too
+    await expect(state(page)).toContainText("⊘");
+  });
+
   test("shows a merged pull request as merged", async ({ page, request }) => {
     await github(request, {
       pulls: [pull({ state: "closed", merged_at: "2026-09-02T00:00:00Z" })],
@@ -201,7 +281,7 @@ test("a finished pull request is never asked about", async ({ request }) => {
 
   // The control, first: the open one was asked about, so the silence below is a rule and not a
   // sync that never reached GitHub at all
-  expect(asked.filter((path) => path.includes("/commits/beef2/"))).toHaveLength(2);
+  expect(asked.filter((path) => path.startsWith("/repos/example/board/commits/beef2/"))).toHaveLength(2);
   expect(asked.filter((path) => path.includes(`/commits/${HEAD}/`))).toEqual([]);
 });
 
@@ -245,9 +325,15 @@ test("a refused refresh says which refusal it was", async ({ page, request }) =>
   ).toBeVisible();
 });
 
-// Nothing above reads the badge for a project whose links predate BP-443, so this is the control
-// for every one of them: a link with no `ci` recorded is simply open, not unknown and not green
-test("a link stored before any of this reads as open", async ({ page, request }) => {
+/**
+ * An open pull request nothing has run against reads as open — not as unknown, and not as green.
+ *
+ * Narrower than it first looks, and the comment that stood here overclaimed it: a sync writes
+ * `ci: "none"`, so what this drives is the `!== "none"` half of `pullRequestLook`. The absent-`ci`
+ * half — every link stored before BP-443, and every GitLab link — cannot be produced by a spec
+ * that runs a real sync, and is pinned in `PullRequestBadge.test.tsx` instead.
+ */
+test("a pull request nothing has run against reads as open", async ({ page, request }) => {
   await github(request, { pulls: [pull()], checks: { [HEAD]: { check_runs: [] } } });
   await syncNow(request);
 
@@ -265,4 +351,19 @@ test("the sync reaches the stub and not the real GitHub", async ({ request }) =>
 
   expect(body).toMatchObject({ synced: true, prsFound: 1, tasksLinked: 1, prsLinked: 1 });
   expect(await askedFor(request)).toContain("/repos/example/board/pulls");
+});
+
+/**
+ * The project's token has to reach GitHub, and nothing in the repository saw it before: the stub
+ * ignored the header, and against real GitHub a missing one is a 401 that `fetchChecks` swallows
+ * into `unknown` — a silently grey board, which is the failure `unknown` exists to make visible.
+ */
+test("every request carries the project's own token", async ({ request }) => {
+  await github(request, { pulls: [pull()], checks: { [HEAD]: passing } });
+  await syncNow(request);
+
+  const carried = await bearers(request);
+
+  expect(carried.length).toBeGreaterThan(0);
+  expect(new Set(carried)).toEqual(new Set([`Bearer ${SEEDED_TOKEN}`]));
 });

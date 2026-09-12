@@ -222,13 +222,42 @@ export async function fetchChecks(
 
   try {
     const [runs, status] = await Promise.all([
-      fetchJson<{ check_runs?: CheckRun[] }>(`${base}/check-runs?per_page=100`, headers),
+      fetchCheckRuns(base, headers),
       fetchJson<CommitStatus>(`${base}/status`, headers),
     ]);
-    return reduceChecks(runs.check_runs ?? [], status);
+    return reduceChecks(runs, status);
   } catch {
     return { ci: "unknown", ciLabel: null };
   }
+}
+
+/** Pages a commit can have before this stops reading them. */
+const MAX_CHECK_RUN_PAGES = 3;
+
+/**
+ * Every check run on a commit, not only the first hundred.
+ *
+ * A matrix build puts more than a hundred runs on one commit easily, and a page is not ordered by
+ * outcome — so reading only the first would let a failing job on page two be reported as a pass,
+ * which is the one answer this whole feature must not get wrong. Bounded at three pages: past
+ * three hundred runs the cost of being sure is worse than the imprecision, and `total_count` is
+ * what says whether anything was left unread.
+ */
+async function fetchCheckRuns(
+  base: string,
+  headers: Record<string, string>
+): Promise<CheckRun[]> {
+  const runs: CheckRun[] = [];
+  for (let page = 1; page <= MAX_CHECK_RUN_PAGES; page++) {
+    const answer = await fetchJson<{ total_count?: number; check_runs?: CheckRun[] }>(
+      `${base}/check-runs?per_page=100&page=${page}`,
+      headers
+    );
+    const batch = answer.check_runs ?? [];
+    runs.push(...batch);
+    if (batch.length < 100 || runs.length >= (answer.total_count ?? runs.length)) break;
+  }
+  return runs;
 }
 
 async function fetchJson<T>(url: string, headers: Record<string, string>): Promise<T> {

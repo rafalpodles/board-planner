@@ -16,6 +16,12 @@ import { readBody, serve } from "./stub-guard.mjs";
  *
  * `GET /asked` returns every path the app has requested since the last reset, which is how a spec
  * asserts what was *not* asked about — the rate-limit rule, and the one about finished work.
+ * `GET /bearers` returns the credentials those requests carried, so a spec can prove the project's
+ * token reaches GitHub — dropping the header is otherwise a change no test in the repository sees,
+ * and against real GitHub it is a 401 that `fetchChecks` swallows into a silently grey board.
+ *
+ * An owner or repository other than the one a spec named is a 404, not an answer. Serving every
+ * path alike let an assertion pass against a request for `/repos/undefined/undefined/…`.
  */
 
 // Loopback only. This serves a project's pull requests and takes a bearer token; on a machine
@@ -27,6 +33,9 @@ const PORT = Number(process.env.GITHUB_STUB_PORT ?? 3995);
 let pulls = [];
 let checks = {};
 let asked = [];
+let bearers = [];
+/** The one repository this stub is GitHub for, as `owner/repo`. */
+let repository = "example/board";
 
 function json(res, body, status = 200) {
   const payload = JSON.stringify(body);
@@ -56,7 +65,9 @@ serve({
       const body = JSON.parse((await readBody(req)) || "{}");
       pulls = body.pulls ?? [];
       checks = body.checks ?? {};
+      repository = body.repository ?? "example/board";
       asked = [];
+      bearers = [];
       json(res, { ok: true });
       return;
     }
@@ -66,15 +77,30 @@ serve({
       return;
     }
 
+    if (pathname === "/bearers") {
+      json(res, bearers);
+      return;
+    }
+
     if (pathname === "/reset") {
       pulls = [];
       checks = {};
       asked = [];
+      bearers = [];
       json(res, { ok: true });
       return;
     }
 
     asked.push(pathname);
+    bearers.push(req.headers.authorization ?? null);
+
+    // Anything not addressed to the repository the spec named is a mis-parsed owner or repo, and
+    // answering it would let a spec matching on a commit sha pass against `/repos/undefined/...`
+    const addressed = /^\/repos\/([^/]+\/[^/]+)\//.exec(`${pathname}/`);
+    if (addressed && addressed[1] !== repository) {
+      json(res, { message: `github stub is not ${addressed[1]}` }, 404);
+      return;
+    }
 
     // GET /repos/:owner/:repo/pulls — answered for either state, because the app asks twice and
     // filters by what it got rather than by which request it came from

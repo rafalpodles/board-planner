@@ -591,7 +591,10 @@ export function ListView({
                     </td>
                   )}
                   {show("pr") && (
-                    <td className="px-2 py-2">
+                    // Capped like every other data cell. Under auto table layout an uncapped one
+                    // lets a single task with three pull requests widen the column for the whole
+                    // table, and on lg+ the title cell (max-w-0) is what gives up the room.
+                    <td className="px-2 py-2 max-w-32">
                       <span className="flex flex-wrap items-center gap-1">
                         {(task.linkedPRs ?? []).map((pr) => (
                           <PullRequestBadge
@@ -599,6 +602,9 @@ export function ListView({
                             pr={pr}
                           />
                         ))}
+                        {(task.linkedPRs ?? []).length === 0 && (
+                          <span className="text-text-muted">—</span>
+                        )}
                       </span>
                     </td>
                   )}

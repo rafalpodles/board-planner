@@ -4,9 +4,17 @@ import { syncGithubPullRequests } from "@/lib/github-sync";
 import { withProjectAccess } from "@/lib/middleware";
 import { Project } from "@/models/project";
 
-export const POST = withProjectAccess(async (_request, { params, user }) => {
+export const POST = withProjectAccess(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
+
+  // Optional, and the task detail's Refresh is the only caller that sends it: the sync still reads
+  // every pull request, but only the named task may be moved out of review by it.
+  const body = await request.json().catch(() => ({}));
+  const transitionOnly =
+    typeof body?.taskNumber === "number" && Number.isInteger(body.taskNumber)
+      ? body.taskNumber
+      : undefined;
 
   const project = await Project.findById(projectId).lean();
   if (!project) {
@@ -15,7 +23,7 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
 
   // The person asking is what earns the auto-transition: a background tick passes null and moves
   // nothing, because a column change with an invented author is a history row nobody can explain.
-  const result = await syncGithubPullRequests(project, String(user._id));
+  const result = await syncGithubPullRequests(project, String(user._id), transitionOnly);
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: result.status });
   }
