@@ -571,10 +571,16 @@ export async function runTask(
           // The worktree is kept, for the reason the step path keeps it a hundred lines above: a
           // gate only runs once a commit exists — it refuses "there is no patch to review"
           // otherwise — so on this path there is ALWAYS committed, unpushed work, and it is the one
-          // path where that work is fine and only the machine is broken. Destroying it costs a
-          // whole agent run when the task is re-done, silently. The usage-limit branch below does
-          // not keep it, and that asymmetry is deliberate: a usage limit is this account waiting
-          // for a clock, and the same machine will run the task again.
+          // path where that work is fine and only the machine is broken.
+          //
+          // Kept until the next attempt claims this task, not kept for good: workspace.create()
+          // calls removeIfRegistered() before `worktree add -B`. So this buys a person a window to
+          // look at what the run produced, and the comment above carries the path to look at — it
+          // does not make the work durable, and the run is repeated either way.
+          //
+          // The usage-limit branch below does not keep it, and that asymmetry is deliberate: a
+          // usage limit is this account waiting for a clock, and the same machine will run the
+          // task again.
           if (verdict.machineFault) {
             keepWorktree = true;
             settle("released", `the ${gate.name} gate could not run`);
