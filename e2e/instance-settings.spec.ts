@@ -30,10 +30,9 @@ import { signIn as arriveSignedIn, signInThroughForm } from "./session";
  * as what was asked for:
  *
  * - **Configuring SMTP.** The screen says so itself: "Configured in the environment, not here."
- *   Its configured branch needs `SMTP_HOST` for the whole run, which would turn
- *   `email-on-account.spec.ts`'s unconfigured-state assertion red. So that branch sits behind the
- *   same guard inverted, and what runs everywhere is the part needing no mail server: who the test
- *   message would go to, and the profile round trip that decides it.
+ *   Both branches of it run now: BP-465 gives the run a mail server, so the configured branch is
+ *   asserted against it, and the three tests about the *unconfigured* branch stub the read rather
+ *   than skip themselves — which is what they were always about.
  *
  * Every assertion here was watched failing against a deliberately broken copy of the code it
  * covers, in three flavours, because they ask different questions. Removing a clause: the model
