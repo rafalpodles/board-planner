@@ -93,11 +93,15 @@ const MAX_NOTIFICATION_CHARS = 200;
  * context-first — "the review gate could not run: ", "could not resolve base branch main: " — and
  * what actually broke is last, so a plain `slice` keeps the part every one of them shares and drops
  * the only part that differs. Over https git echoes the remote a second time inside its own stderr,
- * which doubles the cost of the URL. Measured on the base-branch path, the slug length at which a
- * head-only cut loses the cause entirely: 14 characters behind a one-character organisation, 11
- * behind `acme`, 4 behind `rafalpodles`, 1 behind a 24-character one. So this is load-bearing at
- * ordinary repository names rather than at unusual ones. (An earlier version of this comment said
- * "about 25", and a commit message said 26 for a different quantity; neither is reproducible.)
+ * which doubles the cost of the URL. Measured on the base-branch path against the stderr
+ * `fatal: unable to access '<url>/': Could not resolve host: github.com`, the repository-name
+ * length at which a head-only cut loses the cause entirely: 14 characters behind a one-character
+ * organisation, 11 behind `acme`, 4 behind `rafalpodles`, 1 behind a 24-character one. The input
+ * is named because the quantity depends on it — a reviewer measuring against a stderr ten
+ * characters longer got 24 / 21 / 14 / 1, and a measurement without its input is a recollection
+ * with digits. Either way it is load-bearing at ordinary repository names rather than at unusual
+ * ones. (An earlier version of this comment said "about 25", and a commit message said 26 for a
+ * different quantity; neither reproduced.)
  *
  * Tail-only would be the mirror mistake: `UNCONFINED_REASON` deliberately puts the way out first
  * (sandbox.ts), because whatever is at the end is what an operator never reads. It is 204
@@ -106,7 +110,12 @@ const MAX_NOTIFICATION_CHARS = 200;
  *
  * The ellipsis is the cut, so nothing reads as a complete sentence it is not, and the head backs up
  * to a space: cut mid-URL it reads as a real, shorter remote, which is the one way this can mislead
- * rather than merely shorten.
+ * rather than merely shorten. Only as far as most of the way, though — a long unbroken token after
+ * a short prefix would otherwise back up to a five-character head and throw away ninety-five
+ * characters of a budget this whole function exists to spend well.
+ *
+ * Both seams avoid splitting a surrogate pair. The head cannot by construction once it lands on a
+ * space; the tail is an offset and can, and a lone surrogate renders as a replacement character.
  *
  * `scrub` still runs before this, so no secret is straddled — a redaction cannot be reassembled
  * from the two halves. What is new is that the last hundred characters leave the worker at all,
@@ -118,7 +127,20 @@ function fitDetail(text: string): string {
   const room = Math.ceil((MAX_NOTIFICATION_CHARS - 1) / 2);
   const head = text.slice(0, room);
   const space = head.lastIndexOf(" ");
-  return `${space > 0 ? head.slice(0, space) : head}…${text.slice(text.length - (MAX_NOTIFICATION_CHARS - 1 - room))}`;
+  const kept = space > room * 0.6 ? head.slice(0, space) : head;
+  const tail = text.slice(text.length - (MAX_NOTIFICATION_CHARS - 1 - room));
+  return `${withoutHalfAPair(kept)}…${withoutLeadingHalfAPair(tail)}`;
+}
+
+/** A high surrogate at the end is the first half of a character whose second half was cut off. */
+function withoutHalfAPair(text: string): string {
+  const last = text.charCodeAt(text.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? text.slice(0, -1) : text;
+}
+
+function withoutLeadingHalfAPair(text: string): string {
+  const first = text.charCodeAt(0);
+  return first >= 0xdc00 && first <= 0xdfff ? text.slice(1) : text;
 }
 const GIT_TIMEOUT_MS = 60_000;
 const ROLES = ["approved", "review", "done"] as const;

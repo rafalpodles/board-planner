@@ -204,8 +204,9 @@ private func gateFault(_ taskKey: String) -> TelemetryEvent {
 
 // A task whose project could not be resolved is keyed `#42` — no hyphen, so it buckets as itself
 // rather than as the empty string shared with every other such task.
-// Defensive: a worker builds the key from the project it claimed against, so this shape does not
-// reach it. Pinned because the split has to be total, not because the state is reachable.
+// Defensive, and measurably so: `worker/src/api.ts` refuses a task key that is not
+// `<project>-<number>` and releases the task without running it, so this shape never reaches the
+// wire. Pinned because the split has to be total, not because the state is reachable.
 @Test func aTaskWithNoProjectKeyGetsABucketOfItsOwn() {
     var streak = FaultStreak()
 

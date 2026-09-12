@@ -1862,13 +1862,21 @@ describe("what a machine fault is recorded as", () => {
     const emitted = outcomes().at(-1) as { detail: string };
     expect(emitted.detail).toContain("Could not read from remote repository");
     expect(emitted.detail).toContain("could not resolve base branch main");
+    // This shape composes to 172, under the cap, so `fitDetail` returns on its first line and the
+    // assertions above pass against the head-only version they were written to reject. Said here
+    // rather than fixed by lengthening it: the point of THIS test is the class-name strip and the
+    // dropped prefix, and the neighbour below is where the cut is exercised (found in review).
+    expect(emitted.detail).not.toContain("…");
+    expect(emitted.detail.length).toBeLessThan(200);
   });
 
   /**
-   * The same bug one remote longer. Over https git echoes the remote a second time inside its own
-   * stderr, so the URL is in the sentence twice and the cause goes back past 200 — measured to bite
-   * at a slug of about 26 characters, which is an ordinary org and repository. The first fix moved
-   * that cliff; keeping both ends removes it (found in review, twice).
+   * The same bug one remote longer, and the test where the cut is actually exercised: this shape
+   * composes to 272. Over https git echoes the remote a second time inside its own stderr, so the
+   * URL is in the sentence twice and a head-only cut loses the cause entirely — see `fitDetail` for
+   * the measured thresholds and the string they were measured against. The first fix moved that
+   * cliff; keeping both ends removes it (found in review, twice, and the figure that used to stand
+   * in this docblock was the third copy of one that never reproduced).
    */
   it("keeps the cause even when the remote is long enough to fill the cap twice", async () => {
     const url = "https://github.com/acme-engineering-platform/deployment-service.git";
@@ -1893,6 +1901,37 @@ describe("what a machine fault is recorded as", () => {
     // which is the one way this can mislead rather than merely shorten — an operator checks the
     // address first (found in review).
     expect(emitted.detail).not.toMatch(/https:\/\/\S*…/);
+  });
+
+  // Backing up to a space is only worth it while it leaves a head worth reading: a long unbroken
+  // token after a short prefix would otherwise spend five characters of a two-hundred budget.
+  it("does not throw away the budget backing up to an early space", async () => {
+    const execute = vi.fn<Executor["execute"]>().mockResolvedValue({
+      kind: "machine_fault",
+      message: `abcde fghij${"x".repeat(400)}`,
+    });
+    const { h, outcomes } = watchedOutcomes({ executor: { execute } });
+
+    await runTask(h.deps, task);
+
+    expect((outcomes().at(-1) as { detail: string }).detail.length).toBe(200);
+  });
+
+  // A lone surrogate at either seam renders as a replacement character, and the tail is an offset
+  // so it can land inside a pair. The head cannot, once it has backed up to a space.
+  it("does not cut a character in half at either seam", async () => {
+    const execute = vi.fn<Executor["execute"]>().mockResolvedValue({
+      kind: "machine_fault",
+      // Every character is a surrogate pair, so every possible cut point is inside one
+      message: "𝄞".repeat(200),
+    });
+    const { h, outcomes } = watchedOutcomes({ executor: { execute } });
+
+    await runTask(h.deps, task);
+
+    const { detail } = outcomes().at(-1) as { detail: string };
+    expect(detail).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+    expect(detail).not.toMatch(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
   });
 
   // The control on the same cut: a 403 and a DNS failure against the same long remote must not
@@ -1941,6 +1980,25 @@ describe("what a machine fault is recorded as", () => {
     expect(emitted.detail).not.toContain("ghp_");
     expect(emitted.detail).not.toContain("AAAAAAAAAA");
     expect(emitted.detail).toContain("[redacted]");
+  });
+
+  // `\w+`, not `\w*`: the star matched empty, so a bare `Error: ` in git's own output was stripped
+  // along with the wrapper's class names. A stated behaviour change that nothing pinned (found in
+  // review).
+  it("strips the wrapper's class names and leaves git's own words alone", async () => {
+    const { h, outcomes } = watchedOutcomes();
+    h.workspace.create.mockRejectedValue(
+      new BaseUnavailableError(
+        "could not resolve base branch main: BaseUnavailableError: could not read refs/heads/main " +
+          "(remote: Error: repository not found)"
+      )
+    );
+
+    await runTask(h.deps, task);
+
+    const { detail } = outcomes().at(-1) as { detail: string };
+    expect(detail).not.toContain("BaseUnavailableError");
+    expect(detail).toContain("remote: Error: repository not found");
   });
 
   it("carries the reason into the record, on the two paths that had it in hand", async () => {

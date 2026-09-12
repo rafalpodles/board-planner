@@ -65,6 +65,10 @@ describe("the length the server stores a detail at", () => {
     const worker = record.match(/MAX_DETAIL_CHARS = (\d+)/);
 
     expect(server?.[1]).toBeDefined();
+    // The declaration is not the behaviour: leaving `const MAX_DETAIL = 2000` in place and
+    // inlining `slice(0, 500)` at the use site drifts the two while this stays green (found in
+    // review). Pinning the use is as far as reading source as text can go.
+    expect(route).toMatch(/slice\(0, MAX_DETAIL\)/);
     // Equality, though only one direction is a defect: a worker cutting SHORTER than the server
     // stores loses text silently, while cutting longer only wastes bytes on a retried outbox entry.
     // Equal is the simplest thing to keep true, and it ties the numbers rather than the behaviours

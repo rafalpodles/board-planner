@@ -85,9 +85,16 @@ public func notification(for event: TelemetryEvent) -> NotificationRequest? {
  *
  * So the question is not "is this a new reason" but "have I already said this is failing". A
  * second, different fault while it is still failing is not re-announced — the operator has already
- * been told to go and look, and the run history keeps every reason. Cleared by an outcome that is
- * not a fault, which is the thing proving it can work; not by a run merely starting, because a
- * fault emits after a progress event on every recurrence.
+ * been told to go and look, and the run history keeps every reason. Not cleared by a run merely
+ * starting, because a fault emits after a progress event on every recurrence.
+ *
+ * Cleared by ANY outcome that is not a fault, which is wider than "the machine proved it works":
+ * `merged` and `delivered` prove it, `failed` and `blocked` prove only that the run reached the
+ * task's own merits, and `requeued` covers a generic worktree failure that proves nothing. The
+ * width is deliberate and bounded rather than principled — a project flapping between a fault and
+ * a requeue re-announces per flap, but `requeued` charges the attempt, so three of them park the
+ * task for a person. Narrowing it to the two proving outcomes would be defensible; what is not
+ * defensible is a sentence claiming the narrow rule while the code keeps the wide one.
  *
  * Per project, and that is not a refinement — a single flag is the same storm one step along. Two
  * of the four faults are a project's own (a remote nothing can reach, a checkout git will not
@@ -124,9 +131,9 @@ public struct FaultStreak: Sendable {
     /// character (`PROJECT_KEY_PATTERN`, `src/lib/urls.ts`). Splitting on the first collapsed
     /// `WEB-API` and `WEB-APP` into one bucket, which silenced one project's fault and let the
     /// other's healthy run re-arm it — the same storm this scoping exists to stop, one family
-    /// narrower (found in review). A key with no hyphen at all would be the `#42` shape a task
-    /// whose project cannot be resolved gets — which cannot reach a worker, since it builds the key
-    /// from the project it claimed against; it buckets as itself regardless.
+    /// narrower (found in review). A key with no hyphen at all cannot arrive: `api.ts` refuses any
+    /// key that is not `<project>-<number>` and releases the task without running it, so the board's
+    /// `#42` shape never reaches this wire. The guard is for totality, and buckets it as itself.
     private static func project(of taskKey: String) -> String {
         guard let cut = taskKey.lastIndex(of: "-") else { return taskKey }
         return String(taskKey[..<cut])
