@@ -15,10 +15,10 @@ import { fatal, fatalOnListenFailure, keepAlive, serve } from "./stub-guard.mjs"
  * own request has resolved.
  *
  * Two ports. The SMTP one is what `nodemailer` talks to; the HTTP one is what a spec reads and
- * steers: `/health` answers the readiness probe, `/reset` clears what has arrived and cancels any
- * refusal, `/refuse?to=<address>` makes the server answer 550 to mail for that one recipient (and
- * `/refuse` with no address stops), and any other path returns what has arrived. Routed on the
- * path; the method is not checked, which is the same looseness every other stub's control port
+ * steers: `/health` answers the readiness probe, `/messages` returns what has arrived, `/reset`
+ * clears it and cancels any refusal, and `/refuse?to=<address>` makes the server answer 550 to
+ * mail for that one recipient (`/refuse` with no address stops). Anything else is a 404. Routed on
+ * the path; the method is not checked, which is the same looseness every other stub's control port
  * here has.
  *
  * STARTTLS is not optional here. `src/lib/email.ts` sets `requireTLS` on every port but 465
@@ -249,7 +249,14 @@ serve({
     if (pathname === "/refuse") {
       refuseFor = new URLSearchParams(query).get("to") || null;
     }
+    // Named, so a spec asking for a path this does not have is told. It used to answer any path
+    // at all with the message log, which made a mistyped `/messages` an empty mailbox — a green
+    // "nothing arrived" that no assertion could tell from the real thing.
     const acknowledged = pathname === "/reset" || pathname === "/refuse";
+    if (!acknowledged && pathname !== "/messages") {
+      res.writeHead(404, { "Content-Type": "text/plain" }).end(`no such path: ${pathname}`);
+      return;
+    }
     const payload = JSON.stringify(acknowledged ? { ok: true, refuseFor } : messages);
     res.writeHead(200, {
       "Content-Type": "application/json",
