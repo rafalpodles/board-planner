@@ -163,9 +163,17 @@ const taskSchema = new Schema<ITask>(
         gate: { type: String, required: true },
         files: { type: [String], default: [] },
         protectedFiles: { type: [String], default: [] },
-        patch: { type: String, default: "" },
+        // `select: false` on both, and it is load-bearing rather than tidy. A task document is
+        // spread into a response by a dozen readers — the search, My Tasks, the release and claim
+        // routes, every writer that echoes a task back — and each one would otherwise carry up to
+        // 220 KB of patch and the machine's own digest to whoever asked. Stripping it reader by
+        // reader is a list that goes stale the first time somebody adds a thirteenth; not sending
+        // it unless asked is the same decision made once. The two places that need it say so:
+        // the task-detail GET selects `+decision.patch`, and `decisionsForWorker` names
+        // `decision.patchSha256` in its own projection.
+        patch: { type: String, default: "", select: false },
         patchTruncated: { type: Boolean, default: false },
-        patchSha256: { type: String, default: "" },
+        patchSha256: { type: String, default: "", select: false },
         commit: { type: String, required: true },
         workerId: { type: String, required: true },
         taskKey: { type: String, default: "" },
@@ -177,7 +185,8 @@ const taskSchema = new Schema<ITask>(
         decidedAt: { type: Date, default: null },
         prUrl: { type: String, default: "" },
         error: { type: String, default: "" },
-        attempts: { type: Number, default: 0 },
+        // Bookkeeping, like the digest above: how many times the machine has tried to settle this.
+        attempts: { type: Number, default: 0, select: false },
         createdAt: { type: Date, default: Date.now },
       },
       default: null,

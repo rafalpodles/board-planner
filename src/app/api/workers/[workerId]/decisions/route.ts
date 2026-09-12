@@ -17,8 +17,20 @@ import { TaskDecisionState } from "@/types";
 // buffering for its own sake.
 const MAX_BODY_BYTES = 512 * 1024;
 
-// What the route will store however long the worker's copy is. Redaction can only lengthen a
-// patch — every match becomes `[redacted]` — so the worker's bound is not quite this side's.
+/**
+ * What the route will store however long the worker's copy is.
+ *
+ * Redaction can lengthen a patch a long way, not a little: `URL_USERINFO` in the worker's
+ * `scrub.ts` rewrites `<scheme>://<userinfo>@` to `<scheme>://[redacted]@`, and a patch of
+ * `a://b@` repeated measures 198 002 characters in and 495 002 out — two and a half times. So the
+ * worker's own 200 000-character bound says nothing about what arrives here, and this cap is
+ * reached by ordinary redaction rather than only by something exotic.
+ *
+ * Which makes it load-bearing: a patch cut here and stored with `patchTruncated: false` is a
+ * change the panel offers to accept while showing only part of it — exactly what `acceptability()`
+ * refuses on the worker's side, reintroduced on this one. `truncatedPatch` below keeps the flag
+ * honest, and `acceptability`'s answer is recomputed from it.
+ */
 const MAX_PATCH_CHARS = 220_000;
 
 // A change touching more paths than this is not one anybody reads file by file, and the list is
@@ -71,22 +83,34 @@ export const POST = withWorker(async (request, { worker }) => {
     return NextResponse.json({ error: "gate is required" }, { status: 400 });
   }
 
-  const acceptable = body.value.acceptable === true;
-  const unacceptableReason = text(body.value.unacceptableReason, MAX_REASON_CHARS).trim();
+  const claimedAcceptable = body.value.acceptable === true;
+  const claimedReason = text(body.value.unacceptableReason, MAX_REASON_CHARS).trim();
   // A record nobody may accept has to say why, or the panel offers no button and no explanation
-  if (!acceptable && !unacceptableReason) {
+  if (!claimedAcceptable && !claimedReason) {
     return NextResponse.json(
       { error: "unacceptableReason is required when acceptable is false" },
       { status: 400 }
     );
   }
 
+  const sent = text(body.value.patch, Number.MAX_SAFE_INTEGER);
+  const patch = sent.slice(0, MAX_PATCH_CHARS);
+  // Not the worker's flag alone: the slice above is a second, independent way for the patch to
+  // stop being the whole change, and the person is owed the same answer either way.
+  const patchTruncated = body.value.patchTruncated === true || patch.length < sent.length;
+  const acceptable = claimedAcceptable && !patchTruncated;
+  const unacceptableReason =
+    claimedReason ||
+    (acceptable
+      ? ""
+      : "the change is larger than the patch this record can carry, so what is shown below is not all of it. Nobody can accept a change they have not been shown.");
+
   const result = await createDecision(taskId, String(worker._id), runId, {
     gate,
     files: strings(body.value.files),
     protectedFiles: strings(body.value.protectedFiles),
-    patch: text(body.value.patch, MAX_PATCH_CHARS),
-    patchTruncated: body.value.patchTruncated === true,
+    patch,
+    patchTruncated,
     patchSha256,
     commit,
     taskKey: text(body.value.taskKey, 64).trim(),

@@ -17,16 +17,6 @@ const AUDIT: Record<Verdict, InstanceAuditAction> = {
   abandon: "worker_decision_abandoned",
 };
 
-/**
- * What accepting actually consents to, said once so the route and the panel cannot drift: the push
- * runs this repository's CI on this change. `.github/workflows/ci.yml` is `on: push` with no
- * branch filter and runs `npm ci` without `--ignore-scripts`, so a lockfile or a build config is
- * executed on the runner the moment the branch is there. Withholding the pull request would not
- * help — the push alone is the trigger.
- */
-export const ACCEPT_RUNS_CI =
-  "Accepting pushes this commit, which runs this repository's CI on it.";
-
 export const POST = withProjectAccess(async (request, { params, user }) => {
   const { projectId, taskId } = await params;
   if (!isValidObjectId(taskId)) {
@@ -86,7 +76,11 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
     );
   }
 
-  const result = await recordVerdict(taskId, verdict as Verdict, String(user._id));
+  // Pinned to the record this request read and judged — see DecisionPin.
+  const result = await recordVerdict(taskId, verdict as Verdict, String(user._id), {
+    workerId: decision.workerId,
+    commit: decision.commit,
+  });
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: result.status });
   }

@@ -138,11 +138,82 @@ describe("POST /api/workers/:workerId/decisions", () => {
   it("bounds the file list and each path in it", async () => {
     const { req, ctx } = call(
       "POST",
-      record({ files: Array.from({ length: 3000 }, (_, at) => `src/f${at}.ts`) })
+      record({
+        files: [
+          ...Array.from({ length: 3000 }, (_, at) => `src/f${at}.ts`),
+          `src/${"d".repeat(900)}.ts`,
+          "  src/padded.ts  ",
+        ],
+      })
     );
 
     await POST(req, ctx);
-    expect(createDecision.mock.calls[0][3].files).toHaveLength(2000);
+    const files = createDecision.mock.calls[0][3].files as string[];
+    expect(files).toHaveLength(2000);
+    expect(Math.max(...files.map((file) => file.length))).toBeLessThanOrEqual(512);
+  });
+
+  // A list carrying anything that is not a path is rebuilt, not trusted: it is rendered as the
+  // whole change a person is consenting to
+  it("drops entries that are not paths at all", async () => {
+    const { req, ctx } = call(
+      "POST",
+      record({ files: ["src/a.ts", "", "   ", 7, null, { path: "x" }] })
+    );
+
+    await POST(req, ctx);
+    expect(createDecision.mock.calls[0][3].files).toEqual(["src/a.ts"]);
+  });
+
+  it("trims a padded path rather than storing the padding", async () => {
+    const { req, ctx } = call("POST", record({ files: ["  src/padded.ts  "] }));
+
+    await POST(req, ctx);
+    expect(createDecision.mock.calls[0][3].files).toEqual(["src/padded.ts"]);
+  });
+
+  /**
+   * BP-381 review. Redaction can lengthen a patch two and a half times (`URL_USERINFO` rewrites
+   * `a://b@` to `a://[redacted]@`), so the worker's own 200 000-character bound says nothing about
+   * what arrives here — this cap is reached by ordinary redaction. A patch cut here and stored
+   * with the worker's `patchTruncated: false` is a change the panel offers to accept while showing
+   * only part of it: `acceptability()`'s refusal, reintroduced on the server side.
+   */
+  it("says the patch was cut when it cuts it, and withdraws the offer", async () => {
+    const { req, ctx } = call("POST", record({ patch: "x".repeat(300_000) }));
+
+    expect((await POST(req, ctx)).status).toBe(201);
+    const stored = createDecision.mock.calls[0][3];
+    expect(stored.patch).toHaveLength(220_000);
+    expect(stored.patchTruncated).toBe(true);
+    expect(stored.acceptable).toBe(false);
+    expect(stored.unacceptableReason).toMatch(/not all of it/);
+  });
+
+  // The control: a patch that fits is stored whole and stays acceptable
+  it("leaves a patch that fits alone", async () => {
+    const { req, ctx } = call("POST", record({ patch: "x".repeat(1000) }));
+
+    await POST(req, ctx);
+    const stored = createDecision.mock.calls[0][3];
+    expect(stored.patch).toHaveLength(1000);
+    expect(stored.patchTruncated).toBe(false);
+    expect(stored.acceptable).toBe(true);
+  });
+
+  // The worker's own verdict still stands on its own: a truncated diff it already knew about
+  it("keeps the worker's truncation flag when the patch itself fits", async () => {
+    const { req, ctx } = call(
+      "POST",
+      record({ patch: "x", patchTruncated: true, acceptable: false, unacceptableReason: "too big" })
+    );
+
+    await POST(req, ctx);
+    expect(createDecision.mock.calls[0][3]).toMatchObject({
+      patchTruncated: true,
+      acceptable: false,
+      unacceptableReason: "too big",
+    });
   });
 
   it("answers the service's own refusal rather than a 500", async () => {
@@ -187,6 +258,21 @@ describe("PATCH /api/workers/:workerId/decisions", () => {
     const { req, ctx } = call("PATCH", { taskId: "nope", state: "delivered" });
 
     expect((await PATCH(req, ctx)).status).toBe(400);
+  });
+
+  it("carries a real attempt count through", async () => {
+    const { req, ctx } = call("PATCH", { taskId: TASK_ID, state: "failed", attempts: 3 });
+
+    await PATCH(req, ctx);
+    expect(settleDecision.mock.calls[0][3]).toMatchObject({ attempts: 3 });
+  });
+
+  // The panel renders this; a negative or fractional count is not one
+  it.each([-1, 1.5, "3", null])("reads %j as no attempts rather than storing it", async (attempts) => {
+    const { req, ctx } = call("PATCH", { taskId: TASK_ID, state: "failed", attempts });
+
+    await PATCH(req, ctx);
+    expect(settleDecision.mock.calls[0][3]).toMatchObject({ attempts: 0 });
   });
 
   it("refuses a killed machine here too", async () => {

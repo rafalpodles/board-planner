@@ -173,6 +173,21 @@ export async function settleDecision(
 }
 
 /**
+ * The record the caller was actually shown and authorised against.
+ *
+ * The route reads the document, resolves the machine's owner, and checks `acceptable` — three
+ * round trips — and only then writes. `createDecision` replaces any record whose state is settled,
+ * so a second run finishing inside that window puts a DIFFERENT change under the same task. Filtered
+ * on the state alone, the verdict would land on it: a record this person never read, possibly one
+ * belonging to another machine and marked unacceptable. Every field the decision rested on is
+ * therefore part of the filter.
+ */
+export interface DecisionPin {
+  workerId: string;
+  commit: string;
+}
+
+/**
  * A person's verdict.
  *
  * One conditional `findOneAndUpdate` filtered on the states the verdict may come from. Reading the
@@ -182,12 +197,21 @@ export async function settleDecision(
 export async function recordVerdict(
   taskId: string,
   verdict: Verdict,
-  userId: string
+  userId: string,
+  pin: DecisionPin
 ): Promise<DecisionResult> {
   await connectDB();
 
   const updated = await Task.findOneAndUpdate(
-    { _id: taskId, "decision.state": { $in: VERDICT_FROM[verdict] } },
+    {
+      _id: taskId,
+      "decision.state": { $in: VERDICT_FROM[verdict] },
+      "decision.workerId": pin.workerId,
+      "decision.commit": pin.commit,
+      // Read off the record by the route as well, and restated here because that read is a
+      // separate round trip: a change that may not be accepted must not become one between them.
+      ...(verdict === "accept" ? { "decision.acceptable": true } : {}),
+    },
     {
       $set: {
         "decision.state": VERDICT_STATE[verdict],
@@ -201,10 +225,18 @@ export async function recordVerdict(
       },
     },
     { new: true }
-  );
+  )
+    // Both for the answer this returns: the patch is `select: false` on the schema, and
+    // `decidedBy` is an ObjectId until somebody populates it.
+    .select("+decision.patch")
+    .populate("decision.decidedBy", "username fullName");
 
   if (!updated?.decision) {
-    return { ok: false, error: "that decision has already been answered", status: 409 };
+    return {
+      ok: false,
+      error: "that decision has already been answered, or it is no longer the one you read",
+      status: 409,
+    };
   }
   return { ok: true, decision: updated.decision };
 }

@@ -86,7 +86,10 @@ describe("answering a refused change", () => {
     const { req, ctx } = call({ verdict });
 
     expect((await POST(req, ctx)).status).toBe(200);
-    expect(recordVerdict).toHaveBeenCalledWith(TASK_ID, verdict, "u1");
+    expect(recordVerdict).toHaveBeenCalledWith(TASK_ID, verdict, "u1", {
+      workerId: WORKER_ID,
+      commit: "a".repeat(40),
+    });
   });
 
   /**
@@ -131,6 +134,23 @@ describe("answering a refused change", () => {
 
     expect((await POST(req, ctx)).status).toBe(200);
     expect(recordVerdict).toHaveBeenCalled();
+  });
+
+  /**
+   * The route reads the record, resolves the owner and checks `acceptable` before it writes. A
+   * second run finishing inside that window replaces a settled record with a different change, so
+   * the write has to name the one this request judged rather than "whatever is there now".
+   */
+  it("names the record it judged, so a replacement cannot inherit the verdict", async () => {
+    taskWith(decision({ workerId: "another-machine", commit: "f".repeat(40) }));
+    const { req, ctx } = call({ verdict: "accept" });
+
+    await POST(req, ctx);
+
+    expect(recordVerdict).toHaveBeenCalledWith(TASK_ID, "accept", "u1", {
+      workerId: "another-machine",
+      commit: "f".repeat(40),
+    });
   });
 
   it("refuses a verdict that is not one", async () => {

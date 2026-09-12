@@ -23,7 +23,13 @@ export const GET = withProjectAccess(async (_request, { params, user }) => {
   await connectDB();
 
   const task = await Task.findOne({ _id: taskId, project: projectId })
-    .populate(taskPopulateFields);
+    // The patch is `select: false` on the schema so that no other reader ships it by accident.
+    // This is the screen it exists for, so this is the one read that asks for it.
+    .select("+decision.patch")
+    .populate(taskPopulateFields)
+    // Without this `decidedBy` is an ObjectId, `toApiDecision` answers null for it, and the panel
+    // never says who accepted the change — the one fact the audit row exists to preserve.
+    .populate("decision.decidedBy", "username fullName");
 
   if (!task) {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });

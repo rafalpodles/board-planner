@@ -63,3 +63,49 @@ describe("a recurrence stored before the interval had a bound", () => {
     expect(legacy(0)?.errors["recurrence.interval"]).toBeTruthy();
   });
 });
+
+/**
+ * BP-381. A task document is spread into a response by a dozen readers — the search, My Tasks, the
+ * release and claim routes, and every writer that echoes the task back. The refused change's patch
+ * is up to 220 KB, and `patchSha256` and `attempts` are the machine's own bookkeeping. Stripping
+ * them reader by reader is a list that goes stale the first time somebody adds a thirteenth, and it
+ * had already gone stale twice before this test existed.
+ *
+ * `select: false` is the same decision made once: a reader that forgets gets nothing.
+ */
+describe("what a refused change publishes by default", () => {
+  const deselected = ["patch", "patchSha256", "attempts"];
+
+  it.each(deselected)("withholds decision.%s unless a reader asks for it", (field) => {
+    expect(Task.schema.path(`decision.${field}`).options.select).toBe(false);
+  });
+
+  // The control: the fields the panel renders must still travel, or the record is unreadable
+  it.each(["gate", "commit", "state", "files", "acceptable", "unacceptableReason"])(
+    "still carries decision.%s",
+    (field) => {
+      expect(Task.schema.path(`decision.${field}`).options.select).not.toBe(false);
+    }
+  );
+
+  /**
+   * Nearly every task on the board has never had a change refused, and the board reads a truthy
+   * `decision` as "there is something to answer". `execution` above is the cautionary tale: its
+   * per-field defaults make it serialise as a truthy object on every task ever written.
+   */
+  it("is absent, not an empty object, on a task nothing has refused", () => {
+    const doc = new Task({
+      project: "6a69903ec4c79d7d07a5eda8",
+      taskNumber: 1,
+      title: "t",
+      createdBy: "69a52cb3399b27d3cbb2c59b",
+    });
+
+    expect(doc.toObject().decision).toBeNull();
+  });
+
+  it("keeps decidedBy a User reference, so a reader can populate it", () => {
+    expect(Task.schema.path("decision.decidedBy").instance).toBe("ObjectId");
+    expect(Task.schema.path("decision.decidedBy").options.ref).toBe("User");
+  });
+});

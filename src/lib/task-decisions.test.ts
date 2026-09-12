@@ -24,6 +24,9 @@ const WORKER = "6a7c686f70ed274cf658b1b3";
 const OWNER = "69a52b0b903d41d473ae02f6";
 const OTHER = "6a70afff45d39cd9bc8bb600";
 
+// What the route read and judged; every verdict is pinned to it.
+const PIN = { workerId: WORKER, commit: "a".repeat(40) };
+
 function decision(over: Partial<ITaskDecision> = {}): ITaskDecision {
   return {
     gate: "protected-paths",
@@ -54,6 +57,20 @@ function matches(filter: unknown, doc: Record<string, unknown>): boolean {
   return [doc].filter(sift(filter as never)).length === 1;
 }
 
+/**
+ * `recordVerdict` chains `.select()` and `.populate()` onto its update — the patch is
+ * `select: false` on the schema and `decidedBy` is an ObjectId until somebody populates it — so
+ * the mock has to be a thenable query rather than a resolved value.
+ */
+function chained(value: unknown) {
+  const query = {
+    select: () => query,
+    populate: () => query,
+    then: (resolve: (v: unknown) => unknown) => Promise.resolve(value).then(resolve),
+  };
+  return query;
+}
+
 function lastFilter(): unknown {
   return findOneAndUpdate.mock.calls[findOneAndUpdate.mock.calls.length - 1][0];
 }
@@ -67,7 +84,7 @@ beforeEach(() => {
   findOneAndUpdate.mockReset();
   find.mockReset();
   workerFindById.mockReset();
-  findOneAndUpdate.mockResolvedValue({ decision: decision() });
+  findOneAndUpdate.mockReturnValue(chained({ decision: decision() }));
 });
 
 describe("the machine writing a refusal", () => {
@@ -161,7 +178,7 @@ describe("a person's verdict", () => {
    * Accept and Decline both through, and the two then race each other on the machine.
    */
   it("is one conditional update filtered on the state it may come from", async () => {
-    await recordVerdict("t1", "accept", OWNER);
+    await recordVerdict("t1", "accept", OWNER, PIN);
 
     const filter = lastFilter() as Record<string, unknown>;
     expect(filter["decision.state"]).toEqual({ $in: ["pending", "refused", "failed"] });
@@ -170,7 +187,7 @@ describe("a person's verdict", () => {
 
   // Declining is a reply to the question, and the question is only asked once
   it("declines only from pending", async () => {
-    await recordVerdict("t1", "decline", OWNER);
+    await recordVerdict("t1", "decline", OWNER, PIN);
 
     expect((lastFilter() as Record<string, unknown>)["decision.state"]).toEqual({
       $in: ["pending"],
@@ -182,15 +199,48 @@ describe("a person's verdict", () => {
    * what makes every stranded case recoverable — including the ones nobody anticipated.
    */
   it("gives up on anything still waiting, including one the machine already answered", async () => {
-    await recordVerdict("t1", "abandon", OWNER);
+    await recordVerdict("t1", "abandon", OWNER, PIN);
 
     expect((lastFilter() as Record<string, unknown>)["decision.state"]).toEqual({
       $in: ["pending", "accepted", "declined", "refused", "failed"],
     });
   });
 
+  /**
+   * The route reads the document, resolves the machine's owner and checks `acceptable` — three
+   * round trips — and only then writes. `createDecision` replaces any settled record, so a second
+   * run finishing inside that window puts a DIFFERENT change under the same task. On the state
+   * alone the verdict would land on it: a record this person never read, belonging to another
+   * machine, possibly marked unacceptable.
+   */
+  it.each(["accept", "decline", "abandon"] as const)(
+    "pins a %s to the record the caller was shown",
+    async (verdict) => {
+      await recordVerdict("t1", verdict, OWNER, PIN);
+
+      const filter = lastFilter() as Record<string, unknown>;
+      expect(filter["decision.workerId"]).toBe(WORKER);
+      expect(filter["decision.commit"]).toBe("a".repeat(40));
+    }
+  );
+
+  // Restated here because the route's own read of it is a separate round trip
+  it("refuses to accept anything the record does not itself mark acceptable", async () => {
+    await recordVerdict("t1", "accept", OWNER, PIN);
+
+    expect((lastFilter() as Record<string, unknown>)["decision.acceptable"]).toBe(true);
+  });
+
+  // Declining or giving up on a change nobody may accept is exactly what a person should be able
+  // to do, so that clause belongs to accept alone
+  it.each(["decline", "abandon"] as const)("does not require acceptable to %s", async (verdict) => {
+    await recordVerdict("t1", verdict, OWNER, PIN);
+
+    expect(lastFilter()).not.toHaveProperty("decision.acceptable");
+  });
+
   it("records who answered and when", async () => {
-    await recordVerdict("t1", "accept", OWNER);
+    await recordVerdict("t1", "accept", OWNER, PIN);
 
     expect(String(lastUpdate()["decision.decidedBy"])).toBe(OWNER);
     expect(lastUpdate()["decision.decidedAt"]).toBeInstanceOf(Date);
@@ -199,16 +249,16 @@ describe("a person's verdict", () => {
   // The last attempt's message describes a settlement this verdict has not reached yet; leaving it
   // would have the panel explain a failure that is no longer what is happening
   it("clears the previous settlement's message when it is accepted again", async () => {
-    await recordVerdict("t1", "accept", OWNER);
+    await recordVerdict("t1", "accept", OWNER, PIN);
 
     expect(lastUpdate()["decision.error"]).toBe("");
     expect(lastUpdate()["decision.attempts"]).toBe(0);
   });
 
   it("says so when the record has already been answered", async () => {
-    findOneAndUpdate.mockResolvedValue(null);
+    findOneAndUpdate.mockReturnValue(chained(null));
 
-    expect(await recordVerdict("t1", "accept", OWNER)).toMatchObject({ ok: false, status: 409 });
+    expect(await recordVerdict("t1", "accept", OWNER, PIN)).toMatchObject({ ok: false, status: 409 });
   });
 });
 
@@ -331,6 +381,22 @@ describe("what a reader is shown", () => {
   it("says the reader may not answer unless it is told otherwise", () => {
     expect(toApiDecision(decision())!.canDecide).toBe(false);
     expect(toApiDecision(decision(), null, true)!.canDecide).toBe(true);
+  });
+
+  /**
+   * `decidedBy` is stored as an ObjectId and `decidedBy()` answers null for anything without a
+   * username, so without a populate the panel can never name the person who accepted — the one
+   * fact the audit row exists to preserve. The fixtures here hand it an already-populated user,
+   * which is exactly why nothing caught that the readers did not populate it.
+   */
+  it("names the person only when the caller populated the reference", () => {
+    const raw = toApiDecision(decision({ decidedBy: "69a52b0b903d41d473ae02f6" as never }))!;
+    expect(raw.decidedBy).toBeNull();
+
+    const populated = toApiDecision(
+      decision({ decidedBy: { _id: OWNER, username: "rafal", fullName: "Rafal" } as never })
+    )!;
+    expect(populated.decidedBy).toEqual({ _id: OWNER, username: "rafal", fullName: "Rafal" });
   });
 
   it("answers nothing for a task that has never had a change refused", () => {
