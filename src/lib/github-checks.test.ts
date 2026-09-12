@@ -52,6 +52,10 @@ function githubCounting(answer: (url: string) => unknown = () => ({ check_runs: 
 /** The `page` parameter, parsed — `includes("page=1")` also matches `per_page=100&page=2`. */
 const pageOf = (url: string) => Number(new URL(url).searchParams.get("page") ?? 1);
 
+/** `count` identical completed check runs. Module scope: two describes build pages from it. */
+const page = (name: string, conclusion: string, count: number) =>
+  Array.from({ length: count }, () => ({ name, status: "completed", conclusion }));
+
 const shasAsked = (asked: string[]) =>
   asked
     .filter((url) => url.includes("/check-runs"))
@@ -137,6 +141,23 @@ describe("how many pull requests one sync asks about", () => {
     expect(shasAsked(asked)).toContain(prs[0].headSha);
   });
 
+  /**
+   * Capped itself. The comment here once claimed it was "bounded by construction: a task has a
+   * handful at most" — an expectation about data GitHub supplies, not a bound. A hundred branches
+   * all titled `BP-5 …` would have made one Refresh click four hundred requests.
+   */
+  it("caps the named task's pull requests too", async () => {
+    const { asked } = githubCounting();
+    const prs = many(MAX_CHECKED_PULL_REQUESTS * 3);
+    for (const pr of prs) pr.matchedTaskNumber = 99;
+
+    await withChecks(prs, "o", "r", "t", 99);
+
+    // Twice the ordinary cap is the ceiling and the comment says so: the named task's own slice,
+    // plus the ordinary twenty for everybody else
+    expect(shasAsked(asked)).toHaveLength(MAX_CHECKED_PULL_REQUESTS * 2);
+  });
+
   // And it is still the exception, not a way round the cap: everything else stays bounded
   it("does not let that widen the cap for everybody else", async () => {
     const { asked } = githubCounting();
@@ -167,9 +188,6 @@ describe("how many pull requests one sync asks about", () => {
  * outcome — so reading only the first would report a pass while the failure sat on page two.
  */
 describe("a commit with more check runs than one page holds", () => {
-  const page = (name: string, conclusion: string, count: number) =>
-    Array.from({ length: count }, () => ({ name, status: "completed", conclusion }));
-
   it("reads past the first page to find the failure", async () => {
     githubCounting((url) =>
       pageOf(url) === 1
@@ -211,6 +229,27 @@ describe("a commit with more check runs than one page holds", () => {
     await fetchChecks("o", "r", "sha1", "t");
 
     expect(asked.filter((url) => url.includes("/check-runs"))).toHaveLength(1);
+  });
+
+  /**
+   * Running out of pages is not the same as having read them all, and the difference decides
+   * whether a green answer may be given. A commit whose pages never end is a commit we have not
+   * finished reading, so `success` is not established — only `unknown` is.
+   */
+  it("does not call a commit green when it ran out of pages before the runs ran out", async () => {
+    githubCounting(() => ({ check_runs: page("shard", "success", 100) }));
+
+    expect(await fetchChecks("o", "r", "sha1", "t")).toEqual({ ci: "unknown", ciLabel: null });
+  });
+
+  // The control: the same shape, but the host says how many there are and we read them all
+  it("does call it green when total_count says the last page was the last", async () => {
+    githubCounting((url) => ({
+      total_count: 300,
+      check_runs: page(`shard-${pageOf(url)}`, "success", 100),
+    }));
+
+    expect(await fetchChecks("o", "r", "sha1", "t")).toMatchObject({ ci: "success" });
   });
 
   // The bound exists because the loop is driven by a body the remote host controls
@@ -256,13 +295,97 @@ describe("when only one of the two answers", () => {
     expect(await fetchChecks("o", "r", "sha1", "t")).toEqual({ ci: "failure", ciLabel: "unit" });
   });
 
-  it("still reports the commit status when the check-runs call fails", async () => {
+  /**
+   * A green commit status is **not** enough when the check runs could not be read: the failure
+   * that would refute it is exactly what the unread half might hold. This test asserted `success`
+   * until the rule was made one rule instead of two special cases — the version that guarded only
+   * `none` would report a green tick on a commit whose failing check run had been read and then
+   * thrown away by a mid-pagination refusal.
+   */
+  it("does not call it green when the check runs could not be read", async () => {
     answering("fail", "ok");
 
+    expect(await fetchChecks("o", "r", "sha1", "t")).toEqual({ ci: "unknown", ciLabel: null });
+  });
+
+  // A failure seen is a failure, however much went unread: nothing on an unread page un-fails a
+  // job we watched fail, so this is the one conclusion a partial read may still draw
+  it("trusts a failure it did read, even though the rest is missing", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) =>
+        String(url).includes("/check-runs")
+          ? new Response(
+              JSON.stringify({
+                check_runs: page("the-one-that-failed", "failure", 100),
+              }),
+              { status: 200 }
+            )
+          : new Response("no", { status: 500 })
+      )
+    );
+
     expect(await fetchChecks("o", "r", "sha1", "t")).toEqual({
-      ci: "success",
-      ciLabel: "ci/other",
+      ci: "failure",
+      ciLabel: "the-one-that-failed",
     });
+  });
+
+  /**
+   * The defect this rule was written for. A commit with more runs than one page holds, a failure
+   * on page one, and page two refused part-way through — the earlier page used to be discarded
+   * with the later one, and a green commit status then reported a pass.
+   */
+  it("does not lose a failure from page one when page two is refused", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (!String(url).includes("/check-runs")) {
+          return new Response(
+            JSON.stringify({ state: "success", statuses: [{ context: "ci/deploy", state: "success" }] }),
+            { status: 200 }
+          );
+        }
+        return pageOf(String(url)) === 1
+          ? new Response(
+              JSON.stringify({
+                check_runs: [
+                  ...page("shard", "success", 99),
+                  ...page("the-one-that-failed", "failure", 1),
+                ],
+              }),
+              { status: 200 }
+            )
+          : new Response("no", { status: 403 });
+      })
+    );
+
+    expect(await fetchChecks("o", "r", "sha1", "t")).toEqual({
+      ci: "failure",
+      ciLabel: "the-one-that-failed",
+    });
+  });
+
+  // And the same shape without the failure: a short read establishes nothing green
+  it("does not call a half-read commit green", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (!String(url).includes("/check-runs")) {
+          return new Response(
+            JSON.stringify({ state: "success", statuses: [{ context: "ci/deploy", state: "success" }] }),
+            { status: 200 }
+          );
+        }
+        return pageOf(String(url)) === 1
+          ? new Response(JSON.stringify({ check_runs: page("shard", "success", 100) }), {
+              status: 200,
+            })
+          : new Response("no", { status: 403 });
+      })
+    );
+
+    expect(await fetchChecks("o", "r", "sha1", "t")).toEqual({ ci: "unknown", ciLabel: null });
   });
 
   // Only when neither answered is there genuinely nothing to say

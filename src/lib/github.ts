@@ -308,22 +308,28 @@ export async function fetchChecks(
     fetchJson<CommitStatus>(`${base}/status`, headers),
   ]);
 
-  if (runs.status === "rejected" && status.status === "rejected") {
-    return { ci: "unknown", ciLabel: null };
-  }
-
+  const checks = runs.status === "fulfilled" ? runs.value : { runs: [], complete: false };
+  const wholeStory = checks.complete && status.status === "fulfilled";
   const reduced = reduceChecks(
-    runs.status === "fulfilled" ? runs.value : [],
+    checks.runs,
     status.status === "fulfilled" ? status.value : null
   );
 
-  // The half that answered had nothing in it, and the half that did not is the one that might
-  // have. `none` is a claim — "nothing has run" — and there is no evidence for it here; only
-  // `unknown` is true. Without this the fix above re-opened the bug it was fixing by a new door,
-  // and worse: a green tick became a plain "open" badge that reads as fact.
-  const halfFailed = runs.status === "rejected" || status.status === "rejected";
-  if (halfFailed && reduced.ci === "none") return { ci: "unknown", ciLabel: null };
-  return reduced;
+  // One rule where there were two special cases, and it is the only one that survives thinking
+  // about what a partial read can and cannot establish.
+  //
+  // **A failure seen is a failure**, however much went unread: nothing on an unread page can
+  // un-fail a job we watched fail, so this is trusted even from half the evidence.
+  //
+  // **Anything else needs the whole story.** `none` is the claim "nothing has run" and `success`
+  // the claim "nothing failed" — and the failure that would refute either is exactly what an
+  // unread page or an unanswered endpoint might hold. The version of this that guarded only
+  // `none` reported a **green tick on a commit whose failing check run it had already read and
+  // then discarded**, when a mid-pagination refusal threw page one away with page two and the
+  // commit-status endpoint happened to be green. That is the mirror of the bug paging was added
+  // for, and worse, because the evidence had been collected before being dropped.
+  if (reduced.ci === "failure") return reduced;
+  return wholeStory ? reduced : { ci: "unknown", ciLabel: null };
 }
 
 /** Pages a commit can have before this stops reading them. */
@@ -336,17 +342,28 @@ export const MAX_CHECK_RUN_PAGES = 3;
  * outcome — so reading only the first would let a failing job on page two be reported as a pass,
  * which is the one answer this whole feature must not get wrong. Bounded at three pages: past
  * three hundred runs the cost of being sure is worse than the imprecision.
+ *
+ * `complete` says whether the whole story was read — every page, and none of them refused. A short
+ * read is not an error and not nothing: what was read is kept, because a failure in it is still a
+ * failure, and `fetchChecks` refuses to draw any *other* conclusion from it.
  */
 async function fetchCheckRuns(
   base: string,
   headers: Record<string, string>
-): Promise<CheckRun[]> {
+): Promise<{ runs: CheckRun[]; complete: boolean }> {
   const runs: CheckRun[] = [];
   for (let page = 1; page <= MAX_CHECK_RUN_PAGES; page++) {
-    const answer = await fetchJson<{ total_count?: number; check_runs?: CheckRun[] }>(
-      `${base}/check-runs?per_page=100&page=${page}`,
-      headers
-    );
+    let answer: { total_count?: number; check_runs?: CheckRun[] };
+    try {
+      answer = await fetchJson<{ total_count?: number; check_runs?: CheckRun[] }>(
+        `${base}/check-runs?per_page=100&page=${page}`,
+        headers
+      );
+    } catch {
+      // What was read is kept and flagged short. Letting this reject threw away pages already in
+      // hand — including, in the case that matters, a page carrying the failure.
+      return { runs, complete: false };
+    }
     const batch = answer.check_runs ?? [];
     runs.push(...batch);
     // `?? Infinity`, not `?? runs.length`: the fallback used to make the right-hand side
@@ -354,9 +371,13 @@ async function fetchCheckRuns(
     // silently turned paging off after page one — and this branch's own stub is such a host, so
     // no test could reach page two through it. `batch.length < 100` is the sufficient condition;
     // `total_count` only ever saves a wasted request, it must never end the loop early.
-    if (batch.length < 100 || runs.length >= (answer.total_count ?? Infinity)) break;
+    if (batch.length < 100 || runs.length >= (answer.total_count ?? Infinity)) {
+      return { runs, complete: true };
+    }
   }
-  return runs;
+  // Out of pages with a full one behind us: there may be more, and saying so is what stops a
+  // three-hundred-run commit reporting a pass it has not earned.
+  return { runs, complete: false };
 }
 
 async function fetchJson<T>(url: string, headers: Record<string, string>): Promise<T> {
@@ -399,12 +420,20 @@ export async function withChecks(
    * The cap starves the same pull requests on every tick, deterministically — and a manual Refresh
    * runs the same capped sync, so on a board with more than `MAX_CHECKED_PULL_REQUESTS` open pull
    * requests a person had no way to force a look at the one in front of them. This is that way.
-   * Bounded by construction: one task's links, and a task has a handful at most.
+   * It is itself capped, so the worst a Refresh can cost is twice an ordinary sync.
    */
   alwaysAsk?: number
 ): Promise<(ParsedPR & PullRequestChecks)[]> {
   const open = prs.filter((pr) => pr.state === "open" && pr.headSha);
-  const insisted = alwaysAsk === undefined ? [] : open.filter((pr) => pr.matchedTaskNumber === alwaysAsk);
+  // Capped like everything else. The comment here used to say "bounded by construction: a task has
+  // a handful at most" — which is not a bound, it is an expectation about data GitHub supplies. A
+  // hundred branches all titled `BP-5 …` would have made one Refresh click four hundred requests.
+  const insisted =
+    alwaysAsk === undefined
+      ? []
+      : open
+          .filter((pr) => pr.matchedTaskNumber === alwaysAsk)
+          .slice(0, MAX_CHECKED_PULL_REQUESTS);
   const askable = [
     ...insisted,
     ...open
