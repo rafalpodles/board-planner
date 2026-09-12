@@ -42,6 +42,8 @@ services:
       PM_DAILY_TURN_CAP: ${PM_DAILY_TURN_CAP:-}
       PM_DAILY_TOKEN_CAP: ${PM_DAILY_TOKEN_CAP:-}
       PM_SCHEDULER_TICK_MS: ${PM_SCHEDULER_TICK_MS:-}
+      # The exception to the line above: left empty, this one does not leave a feature off, it
+      # refuses to store any secret — integration tokens, and a project's Slack/Discord channels
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
       ENCRYPTION_KEYS_OLD: ${ENCRYPTION_KEYS_OLD:-}
       WEBHOOK_SIGNING_SECRET: ${WEBHOOK_SIGNING_SECRET:-}
