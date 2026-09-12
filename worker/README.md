@@ -29,14 +29,17 @@ repository's own scripts. The first rejection stops the run:
 | Gate | Rejects when |
 |---|---|
 | `diff-size` | the diff is larger than the limit on the Size gate that rejected it, or the worker's `maxDiffLines`/`maxDiffFiles` where that gate names none |
-| `protected-paths` | the change touches files a later step executes or loads as instructions |
+| `protected-paths` | the change touches files a later step executes or loads as instructions — manifests and lockfiles, build and test configs, anything under `scripts/`, `.husky/`, `.github/workflows/`, `.github/actions/` or `.claude/`, agent instruction files, container and CI manifests, the build manifests of other ecosystems, and `.gitattributes`/`.gitmodules` |
 | `test-presence` | the change touches code without touching a test |
 | `build` | `npm run build` fails |
 | `test-run` | the test suite fails |
 | `review` | a second Claude, with a clean context, rejects the diff — present because the agent carries a Reviewed gate |
 
 A rejection pushes the branch — unless the run committed nothing, the provenance check refuses the
-history, or `protected-paths` is what refused, which withholds the push deliberately — comments which gate said no, and routes the task to the review column. A usage limit returns the task to the queue with its attempt refunded — it is not the
+history, or `protected-paths` is what refused, which withholds the push deliberately — comments which gate said no, and routes the task to the review column.
+A `protected-paths` rejection also records the change on the task, so that a person can read it
+there and **accept** it: the machine then pushes that exact commit and opens a pull request. See
+[Accepting a refused change](#accepting-a-refused-change). A usage limit returns the task to the queue with its attempt refunded — it is not the
 task's failure. A crash or timeout also returns it to the queue, but spends the attempt, so a
 repeating failure runs out of retries and lands in front of a human instead of cycling forever.
 
@@ -327,7 +330,18 @@ and `SIGINT` both finish the task in flight before the loop exits.
 - **Worktrees left by a killed worker are reaped**, the first time this process binds each
   project's repository, but only under that project's own derived worktree root (`<repo
   parent>/cp-worktrees/<workerId>`) — the repository checkout and any worktree of your own are
-  left alone.
+  left alone. **One exception:** a worktree holding a change somebody is being asked to accept is
+  kept, named by a marker under `<CP_STATE_DIR>/decisions/`. That marker has no expiry, unlike a
+  run's two-hour lease, so an unanswered decision pins a worktree until somebody answers it —
+  accept, decline or give up all release it.
+- **Accepting a refused change is the one report that does not go through the outbox.** Everything
+  else this worker says is queued and retried until it lands; a decision settlement is not, because
+  it can become *permanently* invalid — the decision superseded by a second claim, or given up on —
+  and a 409 that can never succeed would hold every comment, status move and run record behind it
+  for twenty polls. Instead, a settlement the board did not take leaves the worktree, the marker
+  and the record exactly as they were, and the whole thing is done again on the next poll. That is
+  safe because it is idempotent: the same commit to the same branch is already there, and the pull
+  request that exists is the one reported.
 - **A report that cannot be delivered is not lost.** Merging to `main` redeploys the app, so the
   report right after a merge is the one most likely to fail — and a lost one would leave the task
   sitting in the active column where nothing can claim it again. Undelivered reports persist to
@@ -335,6 +349,38 @@ and `SIGINT` both finish the task in flight before the loop exits.
 - **A task abandoned by a dead worker comes back.** The claim endpoint frees anything whose lease
   has outlived it, without refunding the attempt, so a task that repeatedly outlives its worker
   runs out of attempts and reaches a human.
+
+## Accepting a refused change
+
+The `protected-paths` gate says a human has to read the change, and the pipeline deliberately does
+not push it — what the branch carries is exactly what the gate refused. Before BP-381 that left the
+work as a commit in a worktree on whichever machine claimed the task, reachable only from a shell
+on that machine.
+
+Now the run also writes a record on the task: the gate, every file the change touches, the commit
+it was judged at, and the patch itself. The task screen renders it, and the machine's **owner** —
+or an instance admin, in an interactive session, never a machine credential — can answer.
+
+| Answer | What the machine does |
+|--------|-----------------------|
+| Accept | pushes that commit to `<taskKey>/worker` and opens a pull request. Never merges. |
+| Decline | removes the worktree and says so. |
+| Give up | the same, for a machine that is not coming back. |
+
+Accepting is checked again on this side before anything is pushed: `refs/heads/<branch>` must still
+be the accepted commit, and the patch re-derived from the recorded base must still hash to what the
+person was shown. Either failing reports `refused` with the reason, and a refused or failed
+decision can be accepted again — a network fault does not cost a second reading.
+
+**Two families can never be accepted here.** A change touching `.github/workflows/**` or a composite
+action under `.github/actions/**`, because for a `push` event GitHub runs the workflow from the
+pushed ref — accepting one would run the agent's own version of CI. And a change whose patch was
+too large to carry, because the record is the reading surface and nobody can accept what they were
+not shown.
+
+Be clear about what accepting spends: on a repository whose CI is `on: push`, the push itself runs
+the change's own build configuration on a runner, under the pinned GitHub identity of whoever
+accepted. The panel says so before the button does anything.
 
 ## Tests
 
