@@ -43,6 +43,9 @@ beforeEach(() => {
 afterEach(() => {
   process.env.ENCRYPTION_KEY = KEY;
   delete process.env.ENCRYPTION_KEYS_OLD;
+  // Restored here rather than at the end of a test body: an assertion above that line throws and
+  // leaves console.error mocked for the rest of the file
+  vi.restoreAllMocks();
 });
 
 describe("dispatchNotifications", () => {
@@ -96,8 +99,7 @@ describe("dispatchNotifications", () => {
     expect(logged).toHaveBeenCalledWith(expect.stringContaining("p1"));
     expect(logged).toHaveBeenCalledWith(expect.stringContaining("Channel 0"));
     expect(logged).not.toHaveBeenCalledWith(expect.stringContaining("Channel 1"));
-
-    logged.mockRestore();
+    expect(logged).toHaveBeenCalledTimes(1);
   });
 
   it("still refuses a decrypted URL the allowlist rejects", async () => {

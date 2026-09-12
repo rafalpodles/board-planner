@@ -1,9 +1,13 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 
 process.env.ENCRYPTION_KEY = "d".repeat(64);
 
 const { maskSecretUrl, sanitizeProjectSecrets } = await import("./project-secrets");
 const { encryptSecret } = await import("./encryption");
+
+// Restored here rather than at the end of a test body: an assertion above that line throws and
+// leaves console.error mocked for the rest of the file
+afterEach(() => vi.restoreAllMocks());
 
 describe("maskSecretUrl", () => {
   it("keeps the origin and the last four characters of a Slack webhook", () => {
@@ -103,8 +107,6 @@ describe("sanitizeProjectSecrets", () => {
 
     // This runs on every project read, list included, so a log outside the catch is production noise
     expect(logged).not.toHaveBeenCalled();
-
-    logged.mockRestore();
   });
 
   // The bare mask is also what an unparseable URL gets, so the screen cannot tell the two apart.
@@ -133,8 +135,6 @@ describe("sanitizeProjectSecrets", () => {
     unreadable();
     unreadable();
     expect(logged).not.toHaveBeenCalled();
-
-    logged.mockRestore();
   });
 
   it("masks an outgoing webhook's URL and removes the original", () => {
