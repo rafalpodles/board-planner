@@ -289,8 +289,7 @@ export function toApiDecision(
   if (!decision?.gate) return undefined;
   return {
     gate: decision.gate,
-    files: decision.files ?? [],
-    // The list may have been bounded; the count never is
+    // The count, not the list — see ApiTaskDecision.fileCount
     fileCount: decision.fileCount || (decision.files ?? []).length,
     protectedFiles: decision.protectedFiles ?? [],
     protectedFileCount:
@@ -327,6 +326,12 @@ export interface WorkerDecision {
   patchSha256: string;
   state: TaskDecisionState;
   attempts: number;
+  /**
+   * When a person answered. The machine keeps its own count of what it has spent on a verdict, and
+   * this is how it tells one verdict from a retry of the last: every `recordVerdict` stamps a new
+   * instant, and nothing else moves it.
+   */
+  decidedAt: string;
 }
 
 /**
@@ -344,7 +349,7 @@ export async function decisionsForWorker(workerId: string): Promise<WorkerDecisi
     "decision.state": { $nin: SETTLED },
   })
     .select(
-      "project decision.taskKey decision.title decision.commit decision.patchSha256 decision.state decision.attempts"
+      "project decision.taskKey decision.title decision.commit decision.patchSha256 decision.state decision.attempts decision.decidedAt"
     )
     .lean<
       {
@@ -357,6 +362,7 @@ export async function decisionsForWorker(workerId: string): Promise<WorkerDecisi
           patchSha256?: string;
           state?: TaskDecisionState;
           attempts?: number;
+          decidedAt?: Date | null;
         };
       }[]
     >();
@@ -373,6 +379,9 @@ export async function decisionsForWorker(workerId: string): Promise<WorkerDecisi
             patchSha256: task.decision.patchSha256 ?? "",
             state: task.decision.state,
             attempts: task.decision.attempts ?? 0,
+            decidedAt: task.decision.decidedAt
+              ? new Date(task.decision.decidedAt).toISOString()
+              : "",
           },
         ]
       : []

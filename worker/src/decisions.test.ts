@@ -255,6 +255,7 @@ describe("what the server says is waiting on this machine", () => {
     patchSha256: "b".repeat(64),
     state: "accepted",
     attempts: 1,
+    decidedAt: "2026-09-01T12:00:00.000Z",
   };
 
   it("reads a well-formed row", () => {
@@ -339,6 +340,7 @@ describe("acting on a verdict", () => {
       patchSha256: sha256(diff().patch),
       state: "accepted",
       attempts: 0,
+      decidedAt: "2026-09-01T12:00:00.000Z",
       ...over,
     };
   }
@@ -610,7 +612,9 @@ describe("acting on a verdict", () => {
    */
   it("stops after five tries rather than spending a settlement every poll for ever", async () => {
     const h = harness();
-    h.markers.write(marker({ commit: "a".repeat(40), attempts: 5 }));
+    h.markers.write(
+      marker({ commit: "a".repeat(40), attempts: 5, decidedFor: "2026-09-01T12:00:00.000Z" })
+    );
 
     await settleDecisions(h.deps, [decision()], LATER);
 
@@ -632,7 +636,9 @@ describe("acting on a verdict", () => {
   // `failed` is unreachable from `declined`, so the ceiling has to settle from the state it is in
   it("discards rather than failing when the exhausted row was a decline", async () => {
     const h = harness();
-    h.markers.write(marker({ commit: "a".repeat(40), attempts: 5 }));
+    h.markers.write(
+      marker({ commit: "a".repeat(40), attempts: 5, decidedFor: "2026-09-01T12:00:00.000Z" })
+    );
 
     await settleDecisions(h.deps, [decision({ state: "declined" })], LATER);
 
@@ -733,7 +739,7 @@ describe("how the retries are spaced", () => {
   function harnessWithMarker(over: Partial<DecisionMarker> = {}) {
     const fs = memoryFs();
     const markers = createMarkerStore("/state", fs);
-    markers.write(marker({ commit: "a".repeat(40), ...over }));
+    markers.write(marker({ commit: "a".repeat(40), decidedFor: DECIDED_AT, ...over }));
     const push = vi.fn().mockResolvedValue(undefined);
     const settled: DecisionSettlement[] = [];
     return {
@@ -766,6 +772,7 @@ describe("how the retries are spaced", () => {
   }
 
   const NOW = Date.parse("2026-09-01T12:00:00.000Z");
+  const DECIDED_AT = "2026-09-01T11:00:00.000Z";
 
   function row(): ServerDecision {
     return {
@@ -777,6 +784,7 @@ describe("how the retries are spaced", () => {
       patchSha256: sha256(diff().patch),
       state: "accepted",
       attempts: 0,
+      decidedAt: DECIDED_AT,
     };
   }
 
@@ -834,5 +842,84 @@ describe("how the retries are spaced", () => {
       attempts: 1,
       lastAttemptAt: new Date(NOW).toISOString(),
     });
+  });
+});
+
+/**
+ * What tells a fresh acceptance from a retry of the last one.
+ *
+ * The obvious signal — a record arriving with `attempts: 0` — is wrong in precisely the case the
+ * count exists for: when the board will not take a settlement nothing is written server-side, so
+ * the record reads 0 on every pass while this machine's own count climbs. `recordVerdict` stamps
+ * `decidedAt` afresh on every verdict, and nothing else moves it.
+ */
+describe("telling one verdict from a retry of it", () => {
+  const NOW = Date.parse("2026-09-01T12:00:00.000Z");
+
+  function store() {
+    return createMarkerStore("/state", memoryFs());
+  }
+
+  // A bound project, because `contextFor` is consulted before the marker is read — an unbound one
+  // never reaches the counting at all
+  function deps(markers: ReturnType<typeof store>) {
+    return {
+      markers,
+      contextFor: async () => ({
+        worktreeRoot: "/wt",
+        destroyWorktree: vi.fn().mockResolvedValue(undefined),
+        delivery: { push: vi.fn().mockResolvedValue(undefined), openPr: vi.fn().mockResolvedValue("https://x/pull/1") },
+        runner: {
+          run: vi.fn().mockResolvedValue({
+            code: 0,
+            stdout: `${"a".repeat(40)}\n`,
+            stderr: "",
+            timedOut: false,
+          }),
+        } as never,
+        collectDiff: vi.fn().mockResolvedValue(diff()),
+      }),
+      settle: async () => false,
+      log: vi.fn(),
+    };
+  }
+
+  function row(over: Partial<ServerDecision> = {}): ServerDecision {
+    return {
+      taskId: "t1",
+      projectId: "p1",
+      taskKey: "CP-158",
+      title: "t",
+      commit: "a".repeat(40),
+      patchSha256: "b".repeat(64),
+      state: "accepted",
+      attempts: 0,
+      decidedAt: "2026-09-01T11:00:00.000Z",
+      ...over,
+    };
+  }
+
+  it("starts a new verdict from nothing, however much the last one spent", async () => {
+    const markers = store();
+    markers.write(marker({ attempts: 5, decidedFor: "2026-09-01T09:00:00.000Z" }));
+
+    await settleDecisions(deps(markers), [row()], NOW, () => NOW);
+
+    // Reset to nothing, then this pass's own single attempt counted on top
+    expect(markers.read("CP-158")?.attempts).toBe(1);
+  });
+
+  /**
+   * The case the count exists for, and the one the obvious signal gets wrong: the board is taking
+   * nothing, so the record still says `attempts: 0` on the fifth pass as on the first.
+   */
+  it("keeps counting a retry of the same verdict, even while the record still reads zero", async () => {
+    const markers = store();
+    markers.write(marker({ attempts: 3, decidedFor: "2026-09-01T11:00:00.000Z" }));
+
+    await settleDecisions(deps(markers), [row({ attempts: 0 })], NOW, () => NOW);
+
+    // Carried on from three rather than restarted, so the fourth pass is the fourth
+    expect(markers.read("CP-158")?.attempts).toBe(4);
   });
 });

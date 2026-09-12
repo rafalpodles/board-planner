@@ -21,7 +21,6 @@ const PRESUMED_GONE_MS = 10 * 60_000;
 function decision(over: Partial<ApiTaskDecision> = {}): ApiTaskDecision {
   return {
     gate: "protected-paths",
-    files: ["package.json", "src/a.ts", "src/b.ts"],
     fileCount: 3,
     protectedFiles: ["package.json"],
     protectedFileCount: 1,
@@ -104,7 +103,7 @@ describe("what the panel shows", () => {
    * sentence whose job is to say how much is being consented to.
    */
   it("says how many files there really are, not how many it was given", () => {
-    panel({ files: ["a.ts"], fileCount: 700 });
+    panel({ fileCount: 700 });
 
     expect(screen.getByTestId("decision-file-count").textContent).toContain("700 files");
   });
@@ -795,6 +794,26 @@ describe("a pull request url the panel cannot read", () => {
     panel({ state: "delivered", prUrl: "not a url" });
 
     expect(screen.queryByTestId("decision-pr")).toBeNull();
+  });
+
+  /**
+   * Shown, though — dropping the address as well as the link leaves a record headlined "Pushed,
+   * and a pull request is open" with nothing to reach or even read.
+   */
+  it("is still shown, as text, with the reason it is not a link", () => {
+    panel({ state: "delivered", prUrl: "not a url" });
+    const said = screen.getByTestId("decision-pr-unreadable");
+
+    expect(said.textContent).toContain("not a url");
+    expect(said.textContent).toContain("not offered as a link");
+    expect(said.querySelector("a")).toBeNull();
+  });
+
+  // The control: a readable one gets the link and no explanation
+  it("says nothing about recognising an address it does recognise", () => {
+    panel({ state: "delivered", prUrl: "https://github.com/o/r/pull/1" });
+
+    expect(screen.queryByTestId("decision-pr-unreadable")).toBeNull();
   });
 
   // The control: a real one still is

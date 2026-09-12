@@ -754,7 +754,11 @@ export interface ITaskDecision {
 
 export interface ApiTaskDecision {
   gate: string;
-  files: string[];
+  /**
+   * The whole change is a COUNT here and not a list. The panel renders only the count and the
+   * subset that tripped the gate, and the full list — up to five hundred paths — would otherwise
+   * travel on every task-detail read and on the poll that exists to be narrow.
+   */
   fileCount: number;
   protectedFiles: string[];
   protectedFileCount: number;

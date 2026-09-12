@@ -388,10 +388,13 @@ describe("what a reader is shown", () => {
     expect(api).toMatchObject({
       gate: "protected-paths",
       commit: "a".repeat(40),
-      files: ["package.json"],
+      // The count of the whole change, and the subset that tripped the gate — the full list is
+      // deliberately not published: the panel renders neither, and it would travel on the poll
+      fileCount: 1,
       protectedFiles: ["package.json"],
       acceptable: true,
     });
+    expect(api).not.toHaveProperty("files");
   });
 
   // The panel says whether anybody is coming back for this
@@ -466,6 +469,8 @@ describe("what the machine is told is waiting on it", () => {
         patchSha256: "b".repeat(64),
         state: "accepted",
         attempts: 0,
+        // What tells the machine one verdict from a retry of the last
+        decidedAt: "",
       },
     ]);
   });

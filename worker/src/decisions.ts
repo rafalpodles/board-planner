@@ -52,6 +52,16 @@ export interface DecisionMarker {
   attempts?: number;
   /** When the last of those was, so the retries can be spaced rather than merely counted. */
   lastAttemptAt?: string;
+  /**
+   * The verdict those attempts were spent on, by the instant it was given.
+   *
+   * What tells a fresh acceptance from a retry of the last one. The obvious signal — a record
+   * arriving with `attempts: 0` — is wrong in exactly the case the count exists for: when the
+   * board will not take a settlement, nothing is written server-side, so the record reads 0 on
+   * every pass while this machine's own count climbs. `recordVerdict` stamps `decidedAt` afresh on
+   * every verdict and nothing else moves it.
+   */
+  decidedFor?: string;
 }
 
 export interface MarkerStore {
@@ -214,9 +224,7 @@ export function acceptability(
       // that explains the missing button with it.
       unacceptableReason:
         `git does not show what changed in ${nameAFew(diff.suppressedDiffs)} — the patch below ` +
-        "lists it and not its contents, whether because it is binary, because something in the " +
-        "repository says not to show it, or because it is a submodule whose whole diff is two " +
-        "object ids. Nobody can accept a change they have not been shown.",
+        "lists it and not its contents. Nobody can accept a change they have not been shown.",
     };
   }
   return { acceptable: true, unacceptableReason: "" };
@@ -277,9 +285,7 @@ export async function openDecision(
       // The whole change, not the gate's hits: accepting pushes the commit, all of it. The hits
       // travel separately so the panel can say which of them is the reason this is here.
       files: input.diff.changedFiles,
-      fileCount: input.diff.changedFiles.length,
       protectedFiles: protectedPaths(input.diff.changedFiles),
-      protectedFileCount: protectedPaths(input.diff.changedFiles).length,
       patch: deps.scrub(input.diff.patch),
       patchTruncated: input.diff.truncated,
       patchSha256: sha256(input.diff.patch),
@@ -318,6 +324,8 @@ export interface ServerDecision {
   /** The task's own title, so the pull request this opens is named like any other. */
   title: string;
   attempts?: number;
+  /** When a person answered — see DecisionMarker.decidedFor. */
+  decidedAt?: string;
 }
 
 /** Everything that only exists relative to a bound checkout, resolved per project. */
@@ -387,9 +395,35 @@ const MAX_SETTLEMENT_ATTEMPTS = 5;
 const SETTLE_BACKOFF_MS = 60_000;
 const MAX_SETTLE_BACKOFF_MS = 15 * 60_000;
 
+/**
+ * A marker write that cannot end the pass.
+ *
+ * `settleDecisions` walks every decision this machine holds, and a full disk throwing out of one
+ * of these would abandon the rest of them — including verdicts that have nothing wrong with them.
+ * The cost of a lost count is one uncounted retry; the cost of a thrown pass is every other
+ * decision on the machine.
+ */
+function writeMarker(deps: Pick<SettleDecisionsDeps, "markers" | "log">, marker: DecisionMarker): void {
+  try {
+    deps.markers.write(marker);
+  } catch (error) {
+    deps.log(`${marker.taskKey}: could not record the settlement attempt: ${String(error)}`);
+  }
+}
+
 /** One more try, at this machine's clock — the same clock `readyToRetry` measures the wait on. */
-function spent(marker: DecisionMarker, tried: number, now: () => number): DecisionMarker {
-  return { ...marker, attempts: tried + 1, lastAttemptAt: new Date(now()).toISOString() };
+function spent(
+  marker: DecisionMarker,
+  tried: number,
+  now: () => number,
+  decidedFor: string | undefined
+): DecisionMarker {
+  return {
+    ...marker,
+    attempts: tried + 1,
+    lastAttemptAt: new Date(now()).toISOString(),
+    decidedFor,
+  };
 }
 
 function readyToRetry(marker: DecisionMarker | null, now: number): boolean {
@@ -478,7 +512,27 @@ export async function settleDecisions(
     const context = await deps.contextFor(decision.projectId);
     if (!context) continue;
 
-    const marker = deps.markers.read(decision.taskKey);
+    let marker = deps.markers.read(decision.taskKey);
+
+    /*
+     * A verdict this machine has not acted on yet, told apart from a retry of one it has.
+     *
+     * `recordVerdict` zeroes the RECORD's count when a person answers, but it is a server function
+     * and cannot touch a file on this machine's disk. Without a reset here, somebody accepting
+     * after five failures is told "this machine has tried 5 times and stopped" before anything is
+     * tried — they would have to accept twice.
+     *
+     * Keyed on `decidedAt` rather than on the record's `attempts` being 0. That was the obvious
+     * signal and it is wrong precisely where this matters: when the board will not take a
+     * settlement nothing is written server-side, so the record reads 0 on every pass while this
+     * machine's count climbs — and resetting on it would wipe the counter in the one case it
+     * exists for.
+     */
+    if (marker && (marker.attempts ?? 0) > 0 && marker.decidedFor !== decision.decidedAt) {
+      marker = { ...marker, attempts: 0, lastAttemptAt: undefined, decidedFor: decision.decidedAt };
+      writeMarker(deps, marker);
+    }
+
     const tried = marker?.attempts ?? 0;
 
     /*
@@ -492,8 +546,8 @@ export async function settleDecisions(
      * and exactly the case the counter could not see.
      *
      * Reported as `failed` rather than `refused`: nothing is known to be wrong with the change. A
-     * person accepting it again resets the record's count and `recordVerdict` is what clears this
-     * marker's, so the pause is theirs to lift.
+     * person accepting it again arrives here as a row carrying `attempts: 0`, which is what clears
+     * this marker's count a few lines above — so the pause is theirs to lift.
      */
     if (tried >= MAX_SETTLEMENT_ATTEMPTS) {
       const stopped = await deps.settle({
@@ -504,7 +558,7 @@ export async function settleDecisions(
       });
       // Only once the board has been told. Otherwise a machine whose board is down stops trying
       // AND stops saying so, which is the silence this ceiling exists to make legible.
-      if (stopped && marker) deps.markers.write({ ...marker, attempts: 0, lastAttemptAt: undefined });
+      if (stopped && marker) writeMarker(deps, { ...marker, attempts: 0, lastAttemptAt: undefined });
       continue;
     }
 
@@ -547,7 +601,7 @@ export async function settleDecisions(
       // Counted here as well, cheap though this path is: without it the ceiling's `discarded` arm
       // is unreachable, and the code reads as though a decline stops after five tries when it
       // never would.
-      if (marker) deps.markers.write(spent(marker, tried, now));
+      if (marker) writeMarker(deps, spent(marker, tried, now, decision.decidedAt));
       // Reported first, and the worktree removed only once the board has taken the answer: the
       // other order deletes the only copy of the work and then finds out the report did not land,
       // leaving a record that still says `declined` with nothing left to decline.
@@ -570,6 +624,16 @@ export async function settleDecisions(
       continue;
     }
 
+    /*
+     * Counted before `whyNotPushable`, not before the push.
+     *
+     * That call is a `rev-parse` plus a whole `collectDiff` — four git invocations across two
+     * trees — and its refusal `continue`s. A genuinely stale worktree makes it refuse every time,
+     * so with the board refusing settlements the branch below ran that work every poll, unspaced
+     * and uncounted: the same runaway, one branch earlier in the same function.
+     */
+    writeMarker(deps, spent(marker, tried, now, decision.decidedAt));
+
     const why = await whyNotPushable(context, marker, decision).catch((error) => String(error));
     if (why) {
       // `refused` and not `failed`: nothing went wrong with the machine, the answer is simply no.
@@ -582,10 +646,6 @@ export async function settleDecisions(
       });
       continue;
     }
-
-    // Before the spending, not after it: the whole point is to count a pass that never gets as far
-    // as reporting anything.
-    deps.markers.write(spent(marker, tried, now));
 
     try {
       const branch = branchFor(decision.taskKey);
@@ -700,6 +760,7 @@ export function parseDecisions(value: unknown): ServerDecision[] {
         patchSha256: text("patchSha256"),
         state,
         attempts: typeof row.attempts === "number" && row.attempts >= 0 ? row.attempts : 0,
+        decidedAt: text("decidedAt"),
       },
     ];
   });

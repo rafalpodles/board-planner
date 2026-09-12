@@ -323,7 +323,21 @@ describe("reading what is waiting", () => {
     expect(named).not.toContain("decision");
     expect(named).not.toContain("+decision.patch");
     // The fields the panel actually renders, so the projection cannot be narrowed into uselessness
-    for (const field of ["state", "gate", "commit", "prUrl", "error", "acceptable", "files"]) {
+    // `fileCount`, not `files`: the panel renders the number and the gate's hits, never the whole
+    // list, and up to five hundred paths on a ten-second poll is the cost this route exists to
+    // avoid
+    expect(named).not.toContain("decision.files");
+    for (const field of [
+      "state",
+      "gate",
+      "commit",
+      "prUrl",
+      "error",
+      "acceptable",
+      "fileCount",
+      "protectedFiles",
+      "protectedFileCount",
+    ]) {
       expect(named).toContain(`decision.${field}`);
     }
   });

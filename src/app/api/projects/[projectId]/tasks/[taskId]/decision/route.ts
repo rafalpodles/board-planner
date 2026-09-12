@@ -39,7 +39,8 @@ export const GET = withProjectAccess(async (_request, { params, user }) => {
   const task = await Task.findOne({ _id: taskId, project: projectId })
     .select(
       "decision.gate decision.workerId decision.commit decision.taskKey decision.title " +
-        "decision.files decision.protectedFiles decision.acceptable decision.unacceptableReason " +
+        "decision.fileCount decision.protectedFiles decision.protectedFileCount " +
+        "decision.acceptable decision.unacceptableReason " +
         "decision.state decision.prUrl decision.error decision.decidedBy decision.decidedAt " +
         "decision.patchTruncated decision.createdAt"
     )

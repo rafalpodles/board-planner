@@ -361,6 +361,9 @@ test("the machine is told what is waiting on it, on the refresh it already makes
       patchSha256: DIGEST,
       state: "pending",
       attempts: 0,
+      // Empty until somebody answers. It is what lets the machine tell one verdict from a retry
+      // of the last, and nothing has been decided yet.
+      decidedAt: "",
     },
   ]);
 });

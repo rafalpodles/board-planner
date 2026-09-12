@@ -43,8 +43,8 @@ const MAX_PATCH_CHARS = 220_000;
 // A change touching more paths than this is not one anybody reads file by file, and the list is
 // rendered in a browser. Kept small enough that `MAX_FILES × MAX_PATH_CHARS`, twice — `files` and
 // `protectedFiles` — plus MAX_PATCH_CHARS still clears MAX_BODY_BYTES with room for JSON escaping:
-// 2 × 500 × 256 is 256 KB against a 220 KB patch, against the 4 MB cap above.
-// escapes to six bytes.
+// 2 × 500 × 256 is 256 KB against a 220 KB patch, inside the 4 MB cap above even if every
+// character escapes to six bytes.
 const MAX_FILES = 500;
 const MAX_PATH_CHARS = 256;
 const MAX_REASON_CHARS = 500;

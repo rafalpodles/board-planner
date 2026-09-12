@@ -369,6 +369,18 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
           </p>
         )}
 
+        {/* A url the panel cannot read is shown and not offered. Dropping the anchor is right —
+            nobody should be asked to click an unknown host — but dropping the FACT leaves a record
+            headlined "Pushed, and a pull request is open" with no address and no explanation, and
+            the person cannot reach or even read the thing the headline names. */}
+        {decision.prUrl && !hostOf(decision.prUrl) && (
+          <p className="text-sm text-text-muted" data-testid="decision-pr-unreadable">
+            The machine reported this pull request, and its address was not one this page
+            recognises, so it is not offered as a link:{" "}
+            <code className="break-all text-xs">{decision.prUrl}</code>
+          </p>
+        )}
+
         {decision.prUrl && hostOf(decision.prUrl) && (
           <a
             className="text-sm text-primary underline"

@@ -55,10 +55,11 @@ export interface DecisionRequest {
   taskId: string;
   runId: string;
   gate: string;
+  // No counts: the route derives them from the lists it actually stores, after discarding the
+  // entries that are not paths. A count sent alongside would be a second source for one fact, and
+  // the one the panel renders as "how much am I consenting to".
   files: string[];
-  fileCount: number;
   protectedFiles: string[];
-  protectedFileCount: number;
   patch: string;
   patchTruncated: boolean;
   patchSha256: string;
