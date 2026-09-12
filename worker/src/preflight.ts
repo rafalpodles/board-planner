@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { dirname, join } from "path";
-import { childEnv, UNCONFINED_ESCAPE_HATCH, unconfinedAgentAllowed } from "./env.js";
-import { confine, SANDBOX_COMMAND } from "./sandbox.js";
+import { childEnv, unconfinedAgentAllowed } from "./env.js";
+import { confine, SANDBOX_COMMAND, UNCONFINED_ACCEPTED_DETAIL } from "./sandbox.js";
 import { Runner } from "./exec.js";
 import { GhAccount, parseGhAccounts, resolveGhToken, usableAccount } from "./github-account.js";
 
@@ -299,7 +299,7 @@ async function sandboxCheck(deps: PreflightDeps, env: NodeJS.ProcessEnv): Promis
     return {
       name,
       ok: true,
-      detail: `${UNCONFINED_ESCAPE_HATCH} is set — the agent runs with nothing confining its writes and can reach anything this user can`,
+      detail: UNCONFINED_ACCEPTED_DETAIL,
     };
   }
 

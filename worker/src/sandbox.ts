@@ -63,6 +63,14 @@ export const UNCONFINED_REASON =
   `set ${UNCONFINED_ESCAPE_HATCH}=1 on this machine to run anyway, accepting that the agent could ` +
   "then write anywhere this user can: there is no sandbox here to confine it with, because seatbelt is macOS only";
 
+/**
+ * What a machine whose operator has accepted the risk says on the fleet screen. Here rather than
+ * inside preflight.ts so both operator-facing sentences sit together, and so both can be held
+ * against the e2e that asserts them (unconfined-reason.contract.test.ts).
+ */
+export const UNCONFINED_ACCEPTED_DETAIL =
+  `${UNCONFINED_ESCAPE_HATCH} is set — the agent runs with nothing confining its writes and can reach anything this user can`;
+
 export type Confinement =
   | { command: string; args: string[]; confined: boolean }
   | { refusal: string };

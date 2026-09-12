@@ -433,7 +433,8 @@ async function runWorkerAgainstTheBoard(opts: { takeTheTask: boolean }): Promise
         const separator = args.indexOf("--");
         if (separator !== -1 && args[separator + 1]) mkdirSync(args[separator + 1], { recursive: true });
       }
-      // Before the agent branch: both go through sandbox-exec, and the probe is the one wrapping sh
+      // Order is not load-bearing — the probe's argv carries no "claude" element, so isAgentSpawn
+      // cannot match it either way round. It sits here because that is the order they happen in.
       if (isSandboxProbe(command, args)) {
         answerSandboxProbe(args);
         return ok();

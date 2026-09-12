@@ -4,7 +4,7 @@ import { createServer, IncomingMessage, Server, ServerResponse } from "http";
 import { AddressInfo } from "net";
 import { tmpdir } from "os";
 import { join } from "path";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CommandResult, Runner, RunOpts } from "./exec.js";
 import { createWorker } from "./wiring.js";
 
@@ -406,9 +406,12 @@ describe("a refused change, offered and then accepted, over a real HTTP surface"
   afterAllCleanup();
 
   function afterAllCleanup() {
-    // rmSync in an afterAll would race the beforeAll above on a failure; this runs once the suite
-    // has finished reading everything it captured.
-    process.once("exit", () => {
+    // `afterAll`, not `process.once("exit")`. The exit handler was written to avoid racing the
+    // beforeAll above, and it does — by never running at all: vitest runs this file in a pooled
+    // worker that does not exit between files, so nothing fired it. Measured: 82 `bp381-int-`
+    // directories had collected here, one per run. afterAll runs after every test in the file has
+    // read what it captured, which is what the original comment actually wanted.
+    afterAll(() => {
       try {
         rmSync(stateDir, { recursive: true, force: true });
         rmSync(REPO_ROOT, { recursive: true, force: true });

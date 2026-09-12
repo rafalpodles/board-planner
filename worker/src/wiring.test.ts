@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { agentArgs, answerSandboxProbe, isAgentSpawn, isSandboxProbe } from "./__fixtures__/agent-spawn.js";
 import { tmpdir } from "os";
 import { join } from "path";
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { ApiClient, ClaimRefused, PhaseEvent } from "./api.js";
 import { ControlDeps } from "./control.js";
 import { Runner } from "./exec.js";
@@ -204,6 +204,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
   // confined to — every run below would fail for that rather than for what the test is about. The
   // worktree root the worker derives sits beside these, so one temp root covers all of it.
   const REPO_ROOT = mkdtempSync(join(tmpdir(), "cp-wiring-repos-"));
+  afterAll(() => rmSync(REPO_ROOT, { recursive: true, force: true }));
   const REPO = join(REPO_ROOT, "demo");
   const REMOTE = "git@github.com:owner/repo.git";
   // A second checkout on the same machine, for the tests about what a quarantine covers

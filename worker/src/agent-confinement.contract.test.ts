@@ -39,6 +39,18 @@ describe("every spawn of the agent is confined", () => {
     expect(filesMatching(/\.run\(\s*"claude"/)).toEqual([]);
   });
 
+  // The control for the assertion above, which is "nothing matches" and would stay green for ever
+  // if the pattern stopped matching anything at all — a typo, or `runner.run` renamed. Everything
+  // that spawns through `confine` hands the runner what it gave back, and these are all of them:
+  // the two agent calls plus preflight's own probe, which confines a shell rather than the CLI.
+  it("is looking for a spawn shape this package still uses", () => {
+    expect(filesMatching(/\.run\(\s*spawn\.command/)).toEqual([
+      "executor.ts",
+      "gates/review.ts",
+      "preflight.ts",
+    ]);
+  });
+
   it("only the implementer step and the review gate run the agent at all", () => {
     expect(filesMatching(/confine\(\s*"claude"/)).toEqual(MAY_SPAWN_THE_AGENT);
   });
