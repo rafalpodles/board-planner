@@ -67,6 +67,15 @@ export interface DiffStats {
    * door out of the checkout (BP-509).
    */
   symlinks: { path: string; target: string }[];
+  /**
+   * The changed files whose contents the patch does NOT carry, because the tree suppressed them.
+   *
+   * A bare `-diff` attribute needs no driver and no config, so neither `--no-ext-diff` nor
+   * `--no-textconv` reaches it: the patch says `Binary files … differ` while `--numstat` goes on
+   * listing the path. Whoever renders this patch as the change is rendering something with holes
+   * in it, and only they can decide what that is worth (BP-381).
+   */
+  suppressedDiffs: string[];
   // The commit the diff was taken against, resolved once to an object id rather than left as the
   // ref `HEAD`. The review gate checks this out to read the change, so "what the reviewer saw" and
   // "what the gates judged" are the same commit by construction (BP-404).

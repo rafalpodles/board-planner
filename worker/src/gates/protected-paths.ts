@@ -78,13 +78,16 @@ export const BUILD_MANIFEST_FILE =
  * event GitHub runs the workflow from the pushed ref, and a workflow diff is the hardest thing on
  * the list to read for safety.
  *
- * A composite action under `.github/actions` is here for the same reason: a workflow executes it.
+ * Everything under `.github/actions` is here for the same reason, and the WHOLE directory rather
+ * than its `action.yml`: a composite or JavaScript action's manifest is a few lines naming an
+ * implementation beside it, and replacing `index.js` changes what every workflow referencing that
+ * action does on push just as surely as editing the manifest would.
  * It is also on the protected list above — this predicate narrows what may be ACCEPTED and never
  * widens what the gate refuses, so a family that is unacceptable here has to be refused there too,
  * or a change touching only a composite action would sail past the gate with nothing to accept.
  */
 export const WORKFLOW_FILE =
-  /(^|\/)\.github\/workflows\/[^/]+\.ya?ml$|(^|\/)\.github\/actions\/.+\/action\.ya?ml$/i;
+  /(^|\/)\.github\/workflows\/[^/]+\.ya?ml$|(^|\/)\.github\/actions\//i;
 
 export function isWorkflowPath(file: string): boolean {
   return WORKFLOW_FILE.test(file);

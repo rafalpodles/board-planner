@@ -298,6 +298,10 @@ describe("the files that decide what CI itself does", () => {
     // the gate already had
     ".github/actions/setup/action.yml",
     ".github/actions/deep/nested/action.yaml",
+    // The whole directory, not the manifest: a composite action's manifest names an implementation
+    // beside it, and replacing that is what actually changes what CI does
+    ".github/actions/setup/index.js",
+    ".github/actions/setup/run.sh",
   ])("names %s", (file) => {
     expect(isWorkflowPath(file)).toBe(true);
   });

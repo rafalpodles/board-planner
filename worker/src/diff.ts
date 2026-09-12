@@ -165,22 +165,66 @@ export async function collectDiff(
     symlinks.push({ path, target: target.trim() });
   }
 
-  // --text is the third leaf of the same family, and the one `--no-ext-diff --no-textconv` misses:
-  // the `-diff` ATTRIBUTE needs no driver and no config at all. A committed `.gitattributes`
-  // carrying `package.json -diff` — or an untracked `.git/info/attributes`, which no gate can see
-  // — makes this read print `Binary files a/package.json and b/package.json differ` while
-  // `--numstat` still lists the path, so the file list stays honest and only the contents vanish.
-  // Measured on git 2.50.1, in a plain clone and in a linked worktree.
-  //
-  // That matters most here rather than at the gates: this patch is what a person is shown and asked
-  // to accept, and the settle-time re-derivation reads it the same way, so its digest agrees with
-  // the blanked version (BP-381).
   const patchOutput = await git(
     runner,
-    ["diff", "--no-ext-diff", "--no-textconv", "--text", baseSha, headSha, "--"],
+    ["diff", "--no-ext-diff", "--no-textconv", baseSha, headSha, "--"],
     opts,
   );
   const { patch, truncated } = boundPatch(patchOutput);
 
-  return { changedLines, changedFiles, patch, truncated, headSha, symlinks };
+  return {
+    changedLines,
+    changedFiles,
+    patch,
+    truncated,
+    headSha,
+    symlinks,
+    suppressedDiffs: await suppressedDiffs(runner, changedFiles, opts),
+  };
+}
+
+/**
+ * The files whose contents this patch does not contain, because something in the tree said not to.
+ *
+ * The third leaf of the family `--no-ext-diff --no-textconv` closes, and the one neither flag
+ * reaches: a bare `-diff` ATTRIBUTE needs no driver and no config entry at all. A committed
+ * `.gitattributes` carrying `package.json -diff` — or an untracked `.git/info/attributes`, which
+ * is shared with the main clone and invisible to every rule that reads a path — makes the read
+ * above print `Binary files a/package.json and b/package.json differ`, while `--numstat` goes on
+ * listing the path. The file list stays honest and only the contents vanish. Measured on git
+ * 2.50.1, in a plain clone and in a linked worktree.
+ *
+ * Reported rather than refused, and the patch is NOT re-read with `--text`. Both were tried:
+ *
+ * - Refusing the run punishes a repository that legitimately marks generated files `-diff`, which
+ *   is an ordinary convention and lands most often on exactly the lockfiles this gate protects.
+ * - `--text` renders a real binary as its bytes: measured, a 30 KB blob becomes 30 KB of patch, so
+ *   any change adding an image larger than the record can carry would be permanently unacceptable
+ *   and every board comment would carry a screenful of U+FFFD.
+ *
+ * So the change is judged exactly as before, and what this decides is whether a PERSON may accept
+ * it — the same answer a truncated patch already gets, for the same reason (BP-381).
+ */
+async function suppressedDiffs(
+  runner: Runner,
+  files: string[],
+  opts: RunOpts,
+): Promise<string[]> {
+  if (files.length === 0) return [];
+
+  // -z because a path is not a line: the NUL form is the only one that survives a name carrying a
+  // newline, and --stdin keeps a change touching thousands of files off the command line.
+  const output = await git(
+    runner,
+    ["check-attr", "diff", "-z", "--stdin"],
+    { ...opts, stdin: `${files.join("\0")}\0` },
+  );
+
+  const fields = output.split("\0");
+  const suppressed: string[] = [];
+  // <path> NUL <attribute> NUL <value>, repeated
+  for (let at = 0; at + 2 < fields.length; at += 3) {
+    if (fields[at + 1] === "diff" && fields[at + 2] === "unset") suppressed.push(fields[at]);
+  }
+  return suppressed;
 }

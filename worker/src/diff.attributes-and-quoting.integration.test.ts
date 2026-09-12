@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { collectDiff } from "./diff.js";
 import { createRunner } from "./exec.js";
+import { acceptability } from "./decisions.js";
 import { isProtectedPath, workflowPaths } from "./gates/protected-paths.js";
 
 /**
@@ -49,10 +50,10 @@ describe("what the patch shows when the tree decides how git renders it", () => 
   /**
    * `-diff` is an attribute, not a driver: it needs no `diff.<name>.textconv` and no config entry
    * at all, so the two flags BP-382 added do not touch it. `--numstat` still lists the path, which
-   * is what makes it worse than hiding the file — the record's file list stays honest and only the
-   * contents vanish.
+   * is what makes it worse than hiding the file — the file list stays honest and only the contents
+   * vanish, so nothing downstream has any sign that the patch has a hole in it.
    */
-  it("shows the change even when a committed .gitattributes marks the file binary", async () => {
+  it("reports the file whose contents a committed .gitattributes hides", async () => {
     writeFileSync(join(work, ".gitattributes"), "package.json -diff\n");
     writeFileSync(join(work, "package.json"), SECRET);
     git(work, "add", "-A");
@@ -60,15 +61,18 @@ describe("what the patch shows when the tree decides how git renders it", () => 
 
     const diff = await collectDiff(createRunner(), work, baseSha);
 
-    expect(diff.patch).toContain("preinstall");
-    expect(diff.patch).not.toContain("Binary files");
+    // The hole itself, measured rather than assumed: this is what a person would be shown
+    expect(diff.patch).toContain("Binary files");
+    expect(diff.patch).not.toContain("preinstall");
     expect(diff.changedFiles).toContain("package.json");
+    // …and the one thing that says so
+    expect(diff.suppressedDiffs).toEqual(["package.json"]);
   });
 
   // The same attribute with nothing tracked to refuse: `.git/info/attributes` is untracked, shared
   // with the main clone, and invisible to every rule that reads a path — the primitive this
   // repository already defends against for filters.
-  it("shows the change when the attribute is planted untracked under .git", async () => {
+  it("reports it when the attribute is planted untracked under .git", async () => {
     mkdirSync(join(work, ".git", "info"), { recursive: true });
     writeFileSync(join(work, ".git", "info", "attributes"), "package.json -diff\n");
     writeFileSync(join(work, "package.json"), SECRET);
@@ -77,12 +81,17 @@ describe("what the patch shows when the tree decides how git renders it", () => 
 
     const diff = await collectDiff(createRunner(), work, baseSha);
 
-    expect(diff.patch).toContain("preinstall");
-    expect(diff.patch).not.toContain("Binary files");
+    expect(diff.patch).not.toContain("preinstall");
+    expect(diff.suppressedDiffs).toEqual(["package.json"]);
   });
 
-  // The control: a genuinely binary file is still reported, and the run is not broken by --text
-  it("still handles a real binary file without failing the run", async () => {
+  /**
+   * The control, and the reason this is reported rather than refused or re-read with `--text`. A
+   * real binary renders as `Binary files … differ` too — identically, from the patch's side — and
+   * `--text` would have turned a 30 KB image into 30 KB of patch, making any change that adds one
+   * permanently unacceptable. Nothing in the tree said to hide this, so nothing here is hidden.
+   */
+  it("says nothing is suppressed for a genuinely binary file", async () => {
     writeFileSync(join(work, "logo.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01, 0x02]));
     git(work, "add", "-A");
     git(work, "commit", "--quiet", "-m", "add an image");
@@ -90,6 +99,74 @@ describe("what the patch shows when the tree decides how git renders it", () => 
     const diff = await collectDiff(createRunner(), work, baseSha);
 
     expect(diff.changedFiles).toContain("logo.png");
+    expect(diff.patch).toContain("Binary files");
+    expect(diff.suppressedDiffs).toEqual([]);
+    // The patch carries the fact of the change, not the bytes of it
+    expect(diff.patch.length).toBeLessThan(500);
+  });
+
+  // An ordinary text change, so the check cannot be passing by refusing to answer
+  it("says nothing is suppressed for an ordinary change", async () => {
+    writeFileSync(join(work, "package.json"), '{"a":2}\n');
+    git(work, "add", "-A");
+    git(work, "commit", "--quiet", "-m", "edit");
+
+    const diff = await collectDiff(createRunner(), work, baseSha);
+
+    expect(diff.patch).toContain('"a":2');
+    expect(diff.suppressedDiffs).toEqual([]);
+  });
+});
+
+/**
+ * What the hole above is actually worth: the run is judged exactly as it was, and the one thing
+ * that changes is whether a PERSON may accept it — the same answer a truncated patch gets.
+ */
+describe("what a hidden file does to the offer", () => {
+  let dir: string;
+  let work: string;
+  let baseSha: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "bp381-offer-"));
+    work = join(dir, "work");
+    execFileSync("git", ["init", "--quiet", "-b", "main", work], { stdio: "pipe" });
+    git(work, "config", "user.email", "worker@example.com");
+    git(work, "config", "user.name", "worker");
+    writeFileSync(join(work, "package.json"), '{"name":"x"}\n');
+    git(work, "add", "package.json");
+    git(work, "commit", "--quiet", "-m", "base");
+    baseSha = git(work, "rev-parse", "HEAD").trim();
+  });
+
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("cannot be accepted, and says which file was hidden", async () => {
+    writeFileSync(join(work, ".gitattributes"), "package.json -diff\n");
+    writeFileSync(join(work, "package.json"), SECRET);
+    git(work, "add", "-A");
+    git(work, "commit", "--quiet", "-m", "plant");
+
+    const verdict = acceptability(await collectDiff(createRunner(), work, baseSha));
+
+    expect(verdict.acceptable).toBe(false);
+    expect(verdict.unacceptableReason).toContain("package.json");
+  });
+
+  /**
+   * The control, and the false positive this shape exists to avoid: marking generated files
+   * `-diff` is an ordinary convention, and it lands most often on exactly the lockfiles this gate
+   * protects. A change that does not touch one is unaffected by the repository's having said so.
+   */
+  it("leaves a change that touches no hidden file acceptable", async () => {
+    writeFileSync(join(work, ".gitattributes"), "package-lock.json -diff\n");
+    writeFileSync(join(work, "package.json"), '{"name":"x","scripts":{}}\n');
+    git(work, "add", "-A");
+    git(work, "commit", "--quiet", "-m", "ordinary");
+
+    const verdict = acceptability(await collectDiff(createRunner(), work, baseSha));
+
+    expect(verdict).toEqual({ acceptable: true, unacceptableReason: "" });
   });
 });
 

@@ -157,7 +157,9 @@ export function worktreePathFor(worktreeRoot: string, taskKey: string): string {
  * surface: `collectDiff` bounds the patch, and a change too large to show is one nobody can
  * honestly accept. The first draft of this design never consulted `truncated` at all.
  */
-export function acceptability(diff: Pick<DiffStats, "changedFiles" | "truncated">): {
+export function acceptability(
+  diff: Pick<DiffStats, "changedFiles" | "truncated" | "suppressedDiffs">
+): {
   acceptable: boolean;
   unacceptableReason: string;
 } {
@@ -178,6 +180,18 @@ export function acceptability(diff: Pick<DiffStats, "changedFiles" | "truncated"
       unacceptableReason:
         "the change is larger than the patch this record can carry, so what is shown below is not " +
         "all of it. Nobody can accept a change they have not been shown.",
+    };
+  }
+  // The same rule as above, arrived at from the tree rather than from the size: something in this
+  // repository says not to show these files, so the patch below has holes in exactly the places a
+  // reader would most want to look.
+  if (diff.suppressedDiffs.length > 0) {
+    return {
+      acceptable: false,
+      unacceptableReason:
+        `the repository suppresses the diff for ${diff.suppressedDiffs.join(", ")} (a \`-diff\` ` +
+        "attribute), so the patch below shows that file as changed without showing what changed " +
+        "in it. Nobody can accept a change they have not been shown.",
     };
   }
   return { acceptable: true, unacceptableReason: "" };

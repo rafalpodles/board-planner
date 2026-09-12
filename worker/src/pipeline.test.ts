@@ -76,7 +76,7 @@ const board = [
   { id: "shipped", role: "done" },
 ];
 
-const diff: DiffStats = { changedLines: 10, changedFiles: ["a.ts"], patch: "d", truncated: false, headSha: "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c" , symlinks: []};
+const diff: DiffStats = { changedLines: 10, changedFiles: ["a.ts"], patch: "d", truncated: false, headSha: "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c" , symlinks: [], suppressedDiffs: []};
 
 const config: WorkerConfig = {
   apiBaseUrl: "http://localhost:3000",

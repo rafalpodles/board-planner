@@ -44,6 +44,7 @@ function diff(over: Partial<DiffStats> = {}): DiffStats {
     truncated: false,
     headSha: "a".repeat(40),
     symlinks: [],
+    suppressedDiffs: [],
     ...over,
   };
 }
@@ -133,6 +134,19 @@ describe("whether a refused change may be accepted at all", () => {
    * `DiffStats.truncated` exists and the first draft of this design never consulted it. The record
    * IS the reading surface, so a change too large to show is one nobody can honestly accept.
    */
+  /**
+   * A bare `-diff` attribute needs no driver and no config, so neither `--no-ext-diff` nor
+   * `--no-textconv` reaches it: the patch says `Binary files … differ` while `--numstat` goes on
+   * listing the path. The file list stays honest and only the contents vanish.
+   */
+  it("refuses a change whose contents the tree hides, naming the file", () => {
+    const verdict = acceptability(diff({ suppressedDiffs: ["package.json"] }));
+
+    expect(verdict.acceptable).toBe(false);
+    expect(verdict.unacceptableReason).toContain("package.json");
+    expect(verdict.unacceptableReason).toContain("-diff");
+  });
+
   it("refuses a change whose patch was cut, because that is not what was shown", () => {
     const verdict = acceptability(diff({ truncated: true }));
 
