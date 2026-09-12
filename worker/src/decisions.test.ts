@@ -595,6 +595,55 @@ describe("acting on a verdict", () => {
     expect(h.settled[0].error).toMatch(/another project/);
   });
 
+  /**
+   * Dropping the outbox took away a ceiling as well as a hazard: an accepted decision that keeps
+   * failing is retried WHOLE every poll — collectDiff, a push and a `gh pr create` — and the
+   * server's state never changes, so nothing ends it.
+   */
+  it("stops after five tries rather than spending a settlement every poll for ever", async () => {
+    const h = harness();
+
+    await settleDecisions(h.deps, [decision({ attempts: 5 })], LATER);
+
+    expect(h.push).not.toHaveBeenCalled();
+    expect(h.collectDiff).not.toHaveBeenCalled();
+    expect(h.settled[0]).toMatchObject({ state: "failed" });
+    expect(h.settled[0].error).toMatch(/tried 5 times/);
+  });
+
+  // A pause, not a verdict: accepting again resets the count, and the count is what this reads
+  it("has another go once somebody has accepted it again", async () => {
+    const h = harness();
+
+    await settleDecisions(h.deps, [decision({ attempts: 0 })], LATER);
+
+    expect(h.push).toHaveBeenCalled();
+  });
+
+  // `failed` is unreachable from `declined`, so the ceiling has to settle from the state it is in
+  it("discards rather than failing when the exhausted row was a decline", async () => {
+    const h = harness();
+
+    await settleDecisions(h.deps, [decision({ state: "declined", attempts: 5 })], LATER);
+
+    expect(h.settled[0]).toMatchObject({ state: "discarded" });
+  });
+
+  // `refused` is reachable only from `accepted`, so reporting it for a declined row is a 409 on
+  // every pass — the same never-ending loop, with a write attached
+  it("discards a declined row whose marker belongs to another project", async () => {
+    const h = harness();
+
+    await settleDecisions(
+      h.deps,
+      [decision({ state: "declined", projectId: "another-project" })],
+      LATER
+    );
+
+    expect(h.settled[0]).toEqual({ taskId: "t1", state: "discarded" });
+    expect(h.destroyWorktree).not.toHaveBeenCalled();
+  });
+
   // The fourth site, and the one D6 left out when it pinned the other three
   it("counts the attempt on a project mismatch too", async () => {
     const h = harness();

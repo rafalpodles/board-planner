@@ -165,8 +165,25 @@ export async function collectDiff(
     if (!line.startsWith(":")) continue;
     const [meta, ...paths] = line.split("\t");
     const fields = meta.slice(1).split(/\s+/);
+    const path = refuseQuotedPath(paths[paths.length - 1]);
+
+    /*
+     * The one place `--numstat`'s `-` for both counts is NOT equivalent to "the patch does not
+     * show it". A gitlink — a submodule pointer — measures `1  1` and prints two object ids:
+     *
+     *     -Subproject commit a45e9ae…
+     *     +Subproject commit 97c1dd2…
+     *
+     * Which is the whole of what a reader is shown for a change that can carry anything at all.
+     * Bumping one needs no `.gitmodules` edit either, so the protected path does not fire. Read
+     * from the mode here because the mode is the only place it is expressed.
+     */
+    if (fields[1] === "160000") {
+      suppressedDiffs.push(path);
+      continue;
+    }
+
     if (fields[1] !== "120000") continue;
-    const path = paths[paths.length - 1];
     const target = await git(runner, ["cat-file", "blob", fields[3]], opts);
     symlinks.push({ path, target: target.trim() });
   }

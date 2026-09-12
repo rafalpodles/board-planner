@@ -263,14 +263,25 @@ describe("once it has been answered", () => {
     }
   );
 
-  it("names who answered it", () => {
+  /**
+   * With the verb. A bare name and date directly above the buttons reads as the reporter or the
+   * assignee; it means somebody ANSWERED this, and the answer differs per state.
+   */
+  it.each([
+    ["accepted", "Accepted by Rafal"],
+    ["delivered", "Accepted by Rafal"],
+    ["failed", "Accepted by Rafal"],
+    ["declined", "Declined by Rafal"],
+    ["discarded", "Declined by Rafal"],
+    ["abandoned", "Given up by Rafal"],
+  ] as const)("says what %s means the person did", (state, said) => {
     panel({
-      state: "accepted",
+      state,
       decidedBy: { _id: "u1", username: "owner", fullName: "Rafal" },
       decidedAt: new Date(NOW - 1000).toISOString(),
     });
 
-    expect(screen.getByTestId("decision-decided-by").textContent).toContain("Rafal");
+    expect(screen.getByTestId("decision-decided-by").textContent).toContain(said);
   });
 });
 
@@ -613,8 +624,82 @@ describe("the pull request it opened", () => {
     panel({ state: "delivered", prUrl: "https://github.com/owner/repo/pull/42" });
     const link = screen.getByTestId("decision-pr");
 
-    expect(link.textContent).toBe("Open the pull request");
+    expect(link.textContent).toBe("Open the pull request on github.com");
     expect(link.getAttribute("href")).toBe("https://github.com/owner/repo/pull/42");
     expect(link.getAttribute("title")).toBe("https://github.com/owner/repo/pull/42");
+  });
+
+  /**
+   * The url is worker-supplied. Its shape is checked server-side and its host is not — and the
+   * visible url was what let a reader notice an odd one, so the host has to stay where a person,
+   * a touch screen and a screen reader can all reach it.
+   */
+  it("says where it goes, so an unexpected host is visible rather than hovered", () => {
+    panel({ state: "delivered", prUrl: "https://ghe.internal:8443/owner/repo/pull/7" });
+
+    expect(screen.getByTestId("decision-pr").textContent).toContain("ghe.internal:8443");
+  });
+});
+
+/**
+ * `presumedGone` covers every live state, but only `accepted`/`declined` poll — so on the three
+ * states where nobody polls the warning was frozen at whatever it said when the panel mounted. On
+ * `pending` that is the state most in need of it: whether the machine is coming back is the whole
+ * of what separates Decline from Give up.
+ */
+describe("the liveness clock on a record waiting for a person", () => {
+  it.each(["pending", "refused", "failed"] as const)(
+    "notices the machine going quiet while %s is on screen",
+    async (state) => {
+      panel({ state, workerLastSeenAt: new Date(NOW - 60_000).toISOString() });
+      expect(screen.queryByTestId("decision-machine-quiet")).toBeNull();
+
+      await vi.advanceTimersByTimeAsync(PRESUMED_GONE_MS);
+
+      await waitFor(() => expect(screen.getByTestId("decision-machine-quiet")).toBeTruthy());
+    }
+  );
+
+  // The control: it advances a clock, it does not start asking the server anything
+  it("does not poll on a record waiting for a person", async () => {
+    panel({ state: "pending" });
+
+    await vi.advanceTimersByTimeAsync(PRESUMED_GONE_MS);
+
+    expect(get).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The poll already fetches `workerLastSeenAt` and used to throw it away, so the panel went on
+ * saying "may never see this" over a machine that had come back and was mid-push — because the
+ * state had not moved yet.
+ */
+describe("a machine that comes back", () => {
+  it("re-reads the task when it is heard from again, even with the state unmoved", async () => {
+    get.mockResolvedValue({
+      decision: { state: "accepted", workerLastSeenAt: new Date(NOW).toISOString() },
+    });
+    const onAnswered = panel({
+      state: "accepted",
+      workerLastSeenAt: new Date(NOW - 30 * 60_000).toISOString(),
+    });
+
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(onAnswered).toHaveBeenCalled();
+  });
+});
+
+// "Accepting pushes…" points at a verb nothing offers when the button says "Try again"
+describe("what the file count is named for", () => {
+  it.each([
+    ["pending", "Accepting pushes the whole commit"],
+    ["refused", "Trying again pushes the whole commit"],
+    ["failed", "Trying again pushes the whole commit"],
+  ] as const)("matches the button on %s", (state, said) => {
+    panel({ state });
+
+    expect(screen.getByTestId("decision-file-count").textContent).toContain(said);
   });
 });

@@ -250,12 +250,19 @@ export async function recordVerdict(
  */
 export async function mayDecide(
   workerId: string,
-  user: { _id: unknown; role?: string }
+  user: { _id: unknown; role?: string },
+  // The machine, where the caller already has it. Both readers resolve it for the panel anyway,
+  // and the poll runs every ten seconds — two reads of the same document per request is one more
+  // than the question needs.
+  known?: { owner?: unknown } | null
 ): Promise<boolean> {
   if (user.role === "admin") return true;
   if (!Types.ObjectId.isValid(workerId)) return false;
-  await connectDB();
-  const worker = await Worker.findById(workerId).select("owner").lean<{ owner?: unknown } | null>();
+  let worker = known;
+  if (worker === undefined) {
+    await connectDB();
+    worker = await Worker.findById(workerId).select("owner").lean<{ owner?: unknown } | null>();
+  }
   // typeof null is "object", and a worker whose owner has been released carries null here — so a
   // missing owner must never compare equal to a missing user id.
   return Boolean(worker?.owner) && String(worker!.owner) === String(user._id);

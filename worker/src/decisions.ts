@@ -157,6 +157,12 @@ export function worktreePathFor(worktreeRoot: string, taskKey: string): string {
  * surface: `collectDiff` bounds the patch, and a change too large to show is one nobody can
  * honestly accept. The first draft of this design never consulted `truncated` at all.
  */
+/** A few paths and a count, so a long list cannot eat the sentence it sits in. */
+function nameAFew(paths: string[], keep = 3): string {
+  if (paths.length <= keep) return paths.join(", ");
+  return `${paths.slice(0, keep).join(", ")} and ${paths.length - keep} more`;
+}
+
 export function acceptability(
   diff: Pick<DiffStats, "changedFiles" | "truncated" | "suppressedDiffs">
 ): {
@@ -189,8 +195,11 @@ export function acceptability(
   if (diff.suppressedDiffs.length > 0) {
     return {
       acceptable: false,
+      // Named, then counted. The server bounds this reason at 500 characters, and the preamble
+      // alone is most of 200 — so an unbounded list would be cut mid-path and take the sentence
+      // that explains the missing button with it.
       unacceptableReason:
-        `git does not show what changed in ${diff.suppressedDiffs.join(", ")} — the patch below ` +
+        `git does not show what changed in ${nameAFew(diff.suppressedDiffs)} — the patch below ` +
         "lists the file and not its contents, whether because it is binary or because something " +
         "in the repository says not to show it. Nobody can accept a change they have not been shown.",
     };
@@ -339,6 +348,17 @@ const GIT_TIMEOUT_MS = 60_000;
 const UNBOUND_MARKER_TTL_DAYS = 7;
 const UNBOUND_MARKER_TTL_MS = UNBOUND_MARKER_TTL_DAYS * 24 * 60 * 60_000;
 
+/**
+ * How many times a machine will act on one acceptance before it stops and says so.
+ *
+ * Dropping the outbox took away a ceiling as well as a hazard. An accepted decision that keeps
+ * failing is retried WHOLE every poll — `collectDiff`, a push, and a `gh pr create` — and the
+ * server's state does not change, so nothing ends it. Above this the record is settled `failed`
+ * with the count in the reason and left for a person, who can accept it again once they have
+ * looked. The same shape `MAX_EXECUTION_ATTEMPTS` gives a run.
+ */
+const MAX_SETTLEMENT_ATTEMPTS = 5;
+
 const PR_BODY = [
   "The protected-paths gate refused this change, and a person read it and accepted the push.",
   "",
@@ -416,6 +436,25 @@ export async function settleDecisions(
     const context = await deps.contextFor(decision.projectId);
     if (!context) continue;
 
+    /*
+     * Before anything is spent. `attempts` is the count the machine itself has been reporting, so
+     * a decision that has failed this many times has already cost five full settlements; going on
+     * would be the loop the outbox's twenty attempts used to bound, with no bound at all.
+     *
+     * Reported as `failed` rather than `refused`: nothing is known to be wrong with the change.
+     * A person accepting it again resets the count, which is what makes this a pause and not a
+     * verdict.
+     */
+    if ((decision.attempts ?? 0) >= MAX_SETTLEMENT_ATTEMPTS) {
+      await deps.settle({
+        taskId: decision.taskId,
+        state: decision.state === "declined" ? "discarded" : "failed",
+        error: `this machine has tried ${decision.attempts} times and stopped; accept it again to have another go`,
+        attempts: decision.attempts ?? 0,
+      });
+      continue;
+    }
+
     const marker = deps.markers.read(decision.taskKey);
     // A task key is unique per project, not per machine, and `rebind` can put two projects on one
     // checkout. `destroyWorktree` resolves against the project the CONTEXT names, so acting on a
@@ -424,14 +463,22 @@ export async function settleDecisions(
     // trusted.
     if (marker && marker.projectId !== decision.projectId) {
       // Settled rather than skipped. Skipping leaves the record live for ever — `sweepMarkers`
-      // will not take it, nothing ever answers it, and the line below is logged on every poll.
-      // `refused` says so on the task and can be accepted again once somebody has looked.
-      await deps.settle({
-        taskId: decision.taskId,
-        state: "refused",
-        error: `the worktree this machine holds for ${decision.taskKey} belongs to another project`,
-        attempts: (decision.attempts ?? 0) + 1,
-      });
+      // will not take it, nothing ever answers it, and nothing is logged but the same line every
+      // poll.
+      //
+      // And settled from the state it is IN: `refused` is reachable only from `accepted`, so
+      // reporting it for a declined row is a 409 on every pass — the same never-ending loop with
+      // a write attached. A decline that cannot be carried out is still a decline.
+      const stopped =
+        decision.state === "declined"
+          ? ({ taskId: decision.taskId, state: "discarded" } as const)
+          : ({
+              taskId: decision.taskId,
+              state: "refused",
+              error: `the worktree this machine holds for ${decision.taskKey} belongs to another project`,
+              attempts: (decision.attempts ?? 0) + 1,
+            } as const);
+      await deps.settle(stopped);
       continue;
     }
 

@@ -148,8 +148,8 @@ test("accepting says what it spends, and the record carries the verdict afterwar
   // And whose account it spends, which is the other half of what accepting costs. A machine name
   // alone answers WHICH token while hiding WHOSE — an instance admin may be answering for a
   // machine that is not theirs.
-  await expect(dialog).toContainText(`pinned to ${WORKER_NAME}`);
-  await expect(dialog).toContainText("not necessarily yours");
+  await expect(dialog).toContainText(`as whichever GitHub account ${WORKER_NAME} pushes as`);
+  await expect(dialog).toContainText("not as you");
 
   const answered = page.waitForResponse(
     (response) =>
@@ -191,7 +191,7 @@ test("giving up says it deletes the work, and asks before it does", async ({ pag
 
   await page.getByRole("button", { name: "Give up and delete the work" }).click();
   const dialog = page.getByRole("dialog");
-  await expect(dialog).toContainText("worktree holding this change is deleted");
+  await expect(dialog).toContainText("removes the worktree on its next poll");
 
   // Nothing is written until it is confirmed
   expect(await storedDecision().then((d) => d?.state)).toBe("pending");

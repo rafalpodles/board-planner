@@ -377,15 +377,24 @@ be the accepted commit, and the patch re-derived from the recorded base must sti
 person was shown. Either failing reports `refused` with the reason, and a refused or failed
 decision can be accepted again — a network fault does not cost a second reading.
 
-**Two families can never be accepted here.** A change touching `.github/workflows/**` or a composite
-action under `.github/actions/**`, because for a `push` event GitHub runs the workflow from the
-pushed ref — accepting one would run the agent's own version of CI. And a change whose patch was
-too large to carry, because the record is the reading surface and nobody can accept what they were
-not shown.
+**Three families can never be accepted here.**
+
+- A change touching a `.yml` under `.github/workflows/`, or anything under `.github/actions/`,
+  because for a `push` event GitHub runs the workflow from the pushed ref — accepting one would run
+  the agent's own version of CI.
+- A change whose patch was too large to carry.
+- A change holding a file `git diff` will not print — a binary asset, or one something in the
+  repository marks as one. `--numstat` reports `-` for both counts and the patch says
+  `Binary files … differ`; see `DiffStats.suppressedDiffs` for the four ways that happens.
+
+The last two are the same rule twice: the record is the reading surface, and nobody can accept what
+they were not shown.
 
 Be clear about what accepting spends: on a repository whose CI is `on: push`, the push itself runs
-the change's own build configuration on a runner, under the pinned GitHub identity of whoever
-accepted. The panel says so before the button does anything.
+the change's own build configuration on a runner — as whichever GitHub account **that machine**
+pushes as, which is the one pinned in its `github.json` or, failing that, whichever `gh` has active
+there. Not the account of whoever accepted, who may be an instance admin answering for a machine
+that is not theirs. The panel says so before the button does anything.
 
 ## Tests
 

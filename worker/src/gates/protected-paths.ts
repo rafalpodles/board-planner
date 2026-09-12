@@ -42,11 +42,12 @@ export const AGENT_INSTRUCTION_FILE =
 // `diff.<driver>.textconv` are selected per path by an attribute; a bare `-diff` needs no driver
 // and no config at all, and makes a patch read `Binary files … differ`.
 //
-// Two things this does NOT achieve, said here because the first draft of this comment claimed
-// both. It does not stop the attack — the untracked `.git/info/attributes` is the same attribute
-// with nothing tracked to refuse, which is why `collectDiff` passes `--text` rather than relying
-// on this line. And tripping this gate is what OPENS the decision panel, so refusing the path is
-// not by itself a reason the change cannot be accepted.
+// Two things this does NOT achieve, said here because two drafts of this comment have claimed one
+// or the other. It does not stop the attack — the untracked `.git/info/attributes` is the same
+// attribute with nothing tracked to refuse, and neither is the only way; what closes it is
+// `DiffStats.suppressedDiffs`, read off `--numstat` where every cause converges. And tripping this
+// gate is what OPENS the decision panel, so refusing the path is not by itself a reason the change
+// cannot be accepted.
 //
 // `.gitmodules` is its neighbour: it names other repositories a checkout pulls in.
 export const EXECUTABLE_CONFIG_FILE =

@@ -105,6 +105,28 @@ const LIVE: TaskDecisionState[] = ["pending", "accepted", "declined", "refused",
 /** Waiting on the machine rather than on a person. */
 const WITH_THE_MACHINE: TaskDecisionState[] = ["accepted", "declined"];
 
+/** What the person whose name sits at the foot of the panel actually did. */
+const ANSWERED_BY: Record<TaskDecisionState, string> = {
+  pending: "Last answered by",
+  accepted: "Accepted by",
+  delivered: "Accepted by",
+  refused: "Accepted by",
+  failed: "Accepted by",
+  declined: "Declined by",
+  discarded: "Declined by",
+  abandoned: "Given up by",
+  superseded: "Last answered by",
+};
+
+/** Where a link goes, for a reader to judge. Falsy urls never reach this. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return "an unknown host";
+  }
+}
+
 type Asking = "accept" | "abandon" | null;
 
 export function DecisionPanel({ projectId, taskId, decision, onAnswered }: DecisionPanelProps) {
@@ -126,12 +148,28 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
   const quiet = quietFor > PRESUMED_GONE_MS;
   /** Whether anybody else is still expected to act. */
   const waiting = state !== undefined && WITH_THE_MACHINE.includes(state);
+  const isLive = state !== undefined && LIVE.includes(state);
 
   /**
    * The task screen does not poll, so without this the panel stays on "waiting for the machine to
    * push it" for ever: the pull request, the refusal and the error all arrive on a reload nobody
    * knows to do. Bounded to the two states where somebody else is acting.
    */
+  /**
+   * The clock, on its own, for every live state.
+   *
+   * `presumedGone` covers all of `LIVE`, but only `accepted`/`declined` poll — so on `pending`,
+   * `refused` and `failed` the warning was frozen at whatever it said when the panel mounted: a
+   * machine going quiet while somebody read the diff was never announced, and one that came back
+   * never cleared. `pending` is the state that most needs it, since whether the machine is coming
+   * back is the whole of what separates Decline from Give up.
+   */
+  useEffect(() => {
+    if (!isLive) return;
+    const timer = setInterval(() => setNow(Date.now()), QUIET_POLL_MS);
+    return () => clearInterval(timer);
+  }, [isLive]);
+
   useEffect(() => {
     if (!waiting) return;
     let live = true;
@@ -141,8 +179,14 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
       // to 220 KB and never changes. A full reload happens only once the answer actually moves.
       void api
         .get(`/api/projects/${projectId}/tasks/${taskId}/decision`)
-        .then((body: { decision?: { state?: string } | null }) => {
-          if (live && body?.decision?.state && body.decision.state !== state) onAnswered();
+        .then((body: { decision?: { state?: string; workerLastSeenAt?: string | null } | null }) => {
+          if (!live || !body?.decision?.state) return;
+          // Liveness as well as the state. The read already carries `workerLastSeenAt`, and
+          // without this the panel goes on saying "may never see this" over a machine that came
+          // back and is mid-push, because the state has not moved yet.
+          const seen = body.decision.workerLastSeenAt;
+          const cameBack = Boolean(seen) && seen !== lastSeen;
+          if (body.decision.state !== state || cameBack) onAnswered();
         })
         .catch(() => {
           // A poll that cannot reach the server says nothing; the next one tries again.
@@ -152,7 +196,7 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
       live = false;
       clearInterval(timer);
     };
-  }, [waiting, quiet, onAnswered, api, projectId, taskId, state]);
+  }, [waiting, quiet, onAnswered, api, projectId, taskId, state, lastSeen]);
 
   // A scroll region is only a reading surface if a keyboard can reach it, and only worth a tab
   // stop when there is something to scroll to.
@@ -269,8 +313,10 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
             is on offer, or it promises a button that is not there. */}
         {canAccept && (
           <div className="text-sm text-text-muted" data-testid="decision-file-count">
-            Accepting pushes the whole commit — {decision.files.length}{" "}
-            {decision.files.length === 1 ? "file" : "files"}.
+            {/* Named for the button that is actually on screen: in the retry states it says
+                "Try again", and "Accepting pushes…" points at a verb nothing offers. */}
+            {state === "pending" ? "Accepting" : "Trying again"} pushes the whole commit —{" "}
+            {decision.files.length} {decision.files.length === 1 ? "file" : "files"}.
           </div>
         )}
 
@@ -307,13 +353,17 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
             rel="noopener noreferrer"
             data-testid="decision-pr"
           >
-            Open the pull request
+            {/* The host, visibly. The url is worker-supplied and its shape is checked but its
+                host is not, and a clipped url in a tooltip is invisible on a touch screen and to
+                a screen reader — which is where somebody would have noticed an odd one. */}
+            Open the pull request on {hostOf(decision.prUrl)}
           </a>
         )}
 
         {decision.decidedBy && decision.decidedAt && (
           <div className="text-xs text-text-muted" data-testid="decision-decided-by">
-            {decision.decidedBy.fullName || decision.decidedBy.username} ·{" "}
+            {/* With the verb. A bare name and date above the buttons reads as the assignee. */}
+            {ANSWERED_BY[state]} {decision.decidedBy.fullName || decision.decidedBy.username} ·{" "}
             {new Date(decision.decidedAt).toLocaleString()}
           </div>
         )}

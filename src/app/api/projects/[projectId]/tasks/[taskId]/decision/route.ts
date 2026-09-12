@@ -48,15 +48,17 @@ export const GET = withProjectAccess(async (_request, { params, user }) => {
     return NextResponse.json({ decision: null });
   }
 
+  // `owner` alongside the two the panel renders, so `mayDecide` does not read the same document a
+  // second time on a poll that runs every ten seconds.
   const worker = await Worker.findById(task.decision.workerId)
-    .select("name lastSeenAt")
-    .lean<{ name?: string; lastSeenAt?: Date | null } | null>();
+    .select("name lastSeenAt owner")
+    .lean<{ name?: string; lastSeenAt?: Date | null; owner?: unknown } | null>();
 
   return NextResponse.json({
     decision: toApiDecision(
       task.decision,
       worker,
-      await mayDecide(task.decision.workerId, user)
+      await mayDecide(task.decision.workerId, user, worker)
     ),
   });
 });

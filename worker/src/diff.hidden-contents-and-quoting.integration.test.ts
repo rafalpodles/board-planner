@@ -140,6 +140,40 @@ describe("what the patch shows when something decides how git renders it", () =>
     expect(diff.patch.length).toBeLessThan(500);
   });
 
+  /**
+   * The one case `--numstat` alone gets wrong: a gitlink measures `1  1` and prints two object
+   * ids, which is the whole of what a reader is shown for a change that can carry anything. It
+   * needs no `.gitmodules` edit either, so the protected path does not fire.
+   */
+  it("reports a submodule pointer, which numstat counts as two ordinary lines", async () => {
+    const sub = join(dir, "sub");
+    execFileSync("git", ["init", "--quiet", "-b", "main", sub], { stdio: "pipe" });
+    git(sub, "config", "user.email", "worker@example.com");
+    git(sub, "config", "user.name", "worker");
+    writeFileSync(join(sub, "f"), "one\n");
+    git(sub, "add", "-A");
+    git(sub, "commit", "--quiet", "-m", "one");
+    writeFileSync(join(sub, "f"), "two\n");
+    git(sub, "commit", "--quiet", "-am", "two");
+
+    execFileSync("git", ["-c", "protocol.file.allow=always", "submodule", "add", "--quiet", sub, "sub"], {
+      cwd: work,
+      stdio: "pipe",
+      env: { ...process.env, GIT_AUTHOR_NAME: "worker", GIT_AUTHOR_EMAIL: "worker@example.com" },
+    });
+    git(work, "commit", "--quiet", "-m", "add a submodule");
+    const withSubmodule = git(work, "rev-parse", "HEAD").trim();
+
+    git(join(work, "sub"), "checkout", "--quiet", "HEAD~1");
+    git(work, "commit", "--quiet", "-am", "bump the pointer");
+
+    const diff = await collectDiff(createRunner(), work, withSubmodule);
+
+    expect(diff.changedLines).toBe(2);
+    expect(diff.suppressedDiffs).toEqual(["sub"]);
+    expect(acceptability(diff).acceptable).toBe(false);
+  });
+
   // An ordinary text change, so the check cannot be passing by refusing to answer
   it("says nothing is suppressed for an ordinary change", async () => {
     writeFileSync(join(work, "package.json"), '{"a":2}\n');

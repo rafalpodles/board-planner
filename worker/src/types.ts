@@ -81,8 +81,15 @@ export interface DiffStats {
    *   nothing is planted anywhere.
    *
    * A genuinely binary asset lands here too, which is honest rather than a false positive: the
-   * patch really does not show what changed in it. Whoever renders this patch as "the change" is
-   * rendering something with holes, and only they can decide what that is worth (BP-381).
+   * patch really does not show what changed in it.
+   *
+   * And one that `--numstat` does NOT catch, read from the file mode instead: a gitlink. Bumping a
+   * submodule pointer measures `1  1` and prints two object ids, which is the whole of what a
+   * reader is shown for a change that can carry anything at all — and it needs no `.gitmodules`
+   * edit, so the protected path does not fire either.
+   *
+   * Whoever renders this patch as "the change" is rendering something with holes, and only they
+   * can decide what that is worth (BP-381).
    */
   suppressedDiffs: string[];
   // The commit the diff was taken against, resolved once to an object id rather than left as the

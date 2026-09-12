@@ -12,11 +12,17 @@ import { TaskDecisionState } from "@/types";
  * then accept it — which is the whole control, inverted.
  */
 
-// The patch this carries is bounded at 200 000 characters by the worker's own `collectDiff` — but
-// redaction can lengthen it two and a half times (see MAX_PATCH_CHARS), and the file list alone
-// may be 2000 paths of 512 characters. A cap under the honest maximum is worse than no cap: the
+// Arithmetic rather than taste, because a cap under the honest maximum is worse than no cap: the
 // refusal is a 413 the worker logs, and the panel never appears at all.
-const MAX_BODY_BYTES = 2 * 1024 * 1024;
+//
+//   patch                220 000 chars  (200 000 from collectDiff, and redaction can lengthen it)
+//   files                128 000 chars  (MAX_FILES x MAX_PATH_CHARS)
+//   protectedFiles       128 000 chars
+//                        -------------
+//                        476 000 chars, x6 bytes if every one of them escapes = 2.86 MB
+//
+// Four, so the worst case is inside it with the reason and the title still to come.
+const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
 /**
  * What the route will store however long the worker's copy is.
@@ -35,9 +41,12 @@ const MAX_BODY_BYTES = 2 * 1024 * 1024;
 const MAX_PATCH_CHARS = 220_000;
 
 // A change touching more paths than this is not one anybody reads file by file, and the list is
-// rendered in a browser
-const MAX_FILES = 2000;
-const MAX_PATH_CHARS = 512;
+// rendered in a browser. Kept small enough that `MAX_FILES × MAX_PATH_CHARS`, twice — `files` and
+// `protectedFiles` — plus MAX_PATCH_CHARS still clears MAX_BODY_BYTES with room for JSON escaping:
+// 2 × 500 × 256 is 256 KB against a 220 KB patch, inside a 2 MB cap even if every character
+// escapes to six bytes.
+const MAX_FILES = 500;
+const MAX_PATH_CHARS = 256;
 const MAX_REASON_CHARS = 500;
 
 function strings(value: unknown): string[] {

@@ -149,8 +149,27 @@ describe("POST /api/workers/:workerId/decisions", () => {
 
     await POST(req, ctx);
     const files = createDecision.mock.calls[0][3].files as string[];
-    expect(files).toHaveLength(2000);
-    expect(Math.max(...files.map((file) => file.length))).toBeLessThanOrEqual(512);
+    expect(files).toHaveLength(500);
+    expect(Math.max(...files.map((file) => file.length))).toBeLessThanOrEqual(256);
+  });
+
+  /**
+   * The bounds have to be arithmetic, not taste: `files` and `protectedFiles` at their maximum,
+   * plus a patch at its maximum, must still fit the body cap even if every character escapes to
+   * six bytes of JSON. A cap under the honest maximum is worse than no cap — the refusal is a 413
+   * the worker logs, and the panel never appears at all.
+   */
+  it("cannot describe a change too large for the body it must arrive in", async () => {
+    const path = "f".repeat(256);
+    const files = Array.from({ length: 500 }, () => path);
+    const { req, ctx } = call(
+      "POST",
+      record({ files, protectedFiles: files, patch: "x".repeat(220_000) })
+    );
+
+    expect((await POST(req, ctx)).status).toBe(201);
+    const body = JSON.stringify(createDecision.mock.calls[0][3]);
+    expect(Buffer.byteLength(body) * 6).toBeLessThan(4 * 1024 * 1024);
   });
 
   // A list carrying anything that is not a path is rebuilt, not trusted: it is rendered as the
