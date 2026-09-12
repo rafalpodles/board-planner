@@ -570,8 +570,12 @@ export async function runTask(
           //
           // The worktree is kept, for the reason the step path keeps it a hundred lines above: a
           // gate only runs once a commit exists — it refuses "there is no patch to review"
-          // otherwise — so on this path there is ALWAYS committed, unpushed work, and it is the one
-          // path where that work is fine and only the machine is broken.
+          // otherwise — so on this path there is always committed work, unpushed unless a Push step
+          // ran before the gate. The sequence is the board's to compose and its order is not
+          // validated, so `Implement → Push → Review` is expressible; there `unpushedWork` returns
+          // nothing and this keeps a tree nobody needs, which is what line 628 already does for a
+          // pushed-but-withheld branch. Either way it is the one path where the work is fine and
+          // only the machine is broken.
           //
           // Kept until the next attempt claims this task, not kept for good: workspace.create()
           // calls removeIfRegistered() before `worktree add -B`. So this buys a person a window to
