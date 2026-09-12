@@ -62,7 +62,7 @@ import Testing
     let request = notification(
         for: .outcome(Outcome(outcome: "machineFault", taskKey: "CP-1", detail: "no sandbox here")))
 
-    #expect(request?.title == "This machine couldn't run the last task")
+    #expect(request?.title == machineFaultHeadline)
     #expect(request?.body.contains("CP-1") == true)
     #expect(request?.body.contains("no sandbox here") == true)
 }
@@ -72,7 +72,7 @@ import Testing
     let request = notification(for: .outcome(Outcome(outcome: "machineFault", taskKey: "CP-1")))
 
     #expect(request != nil)
-    #expect(request?.body.contains("The reason is on the board") == true)
+    #expect(request?.body.contains("Reason: on the board") == true)
 }
 
 // With autoMerge off, "delivered" is what a successful run ends as — and the operator has to act
@@ -107,12 +107,21 @@ private func fault(_ taskKey: String, _ detail: String) -> TelemetryEvent {
     .outcome(Outcome(outcome: "machineFault", taskKey: taskKey, detail: detail))
 }
 
-// pipeline.ts:404 — String(BaseUnavailableError), which names the project's own remote
+/**
+ * pipeline.ts:411 — `String(error)` with the class names stripped, which names the project's remote.
+ *
+ * A TRANSPORT failure, deliberately. The first version of this helper built `<url> did not report
+ * <ref>`, which workspace.ts throws with kind `configuration` and pipeline.ts routes to `requeued`
+ * — so the fixture was a sentence this path can never send, and the worker's own suite uses that
+ * same sentence as its requeued control. Two suites disagreeing about what one sentence means
+ * (found in review). The property these tests rest on is unchanged: every transport message carries
+ * the remote, so two projects meet one fault as two texts.
+ */
 private func baseBranchFault(_ taskKey: String, remote: String) -> TelemetryEvent {
     fault(
         taskKey,
-        "the base branch could not be established: BaseUnavailableError: could not resolve base "
-            + "branch main: \(remote) did not report refs/heads/main")
+        "could not resolve base branch main: could not read refs/heads/main from \(remote) "
+            + "(fatal: Could not read from remote repository.)")
 }
 
 // pipeline.ts:601 — confine()'s refusal, which names the worktree, which carries the task key
@@ -226,6 +235,8 @@ private func gateFault(_ taskKey: String) -> TelemetryEvent {
  * review). This closes that for the decision. It does not close `handle`'s own call to it — that
  * line ends at UNUserNotificationCenter and no test here reaches it.
  */
+// `Notifier.shared` is a static, and this is the only test that touches it. That is what makes the
+// bracketing below enough; a second test on the shared object needs a different answer.
 @MainActor
 @Test func theNotifierItselfDedupesRatherThanJustOwningSomethingThatCould() {
     let recurring = gateFault("CP-1")
@@ -240,11 +251,19 @@ private func gateFault(_ taskKey: String) -> TelemetryEvent {
 
 // The operator has to read the consequence before the reason: a banner is cut after a couple of
 // lines and the reason can be 200 characters of git's stderr.
+// The pair drifted apart once already inside this review, so the constant is the invariant and
+// this is the assertion that it is still the one both sides use.
+@Test func theNotificationTitleIsTheSentenceThePanelShows() {
+    let request = notification(for: gateFault("CP-1"))
+
+    #expect(request?.title == machineFaultHeadline)
+}
+
 @Test func theFaultBodySaysWhatHappenedBeforeItSaysWhy() throws {
     let request = notification(for: gateFault("CP-1"))
     let body = try #require(request?.body)
 
-    let stopped = try #require(body.range(of: "claiming has stopped"))
+    let stopped = try #require(body.range(of: "take no more work until the next poll"))
     let why = try #require(body.range(of: "cannot confine"))
     #expect(stopped.lowerBound < why.lowerBound)
 }
@@ -309,8 +328,13 @@ private func gateFault(_ taskKey: String) -> TelemetryEvent {
     }
 
     // `case "delivered":` in the outcome switch, and `outcome.outcome == "blocked"` in apply()
-    let switchedOn = Set(
-        matches(notifier, #"(?m)^\s*case "(\w+)":"#) + matches(state, #"outcome\.outcome == "(\w+)""#))
+    let inTheSwitch = matches(notifier, #"(?m)^\s*case "(\w+)":"#)
+    let inTheState = matches(state, #"outcome\.outcome == "(\w+)""#)
+    // Asserted separately because WorkerState's literals are a subset of Notifier's: reformatting
+    // that file so the second pattern matched nothing left this test green, so its silence was
+    // undetectable (found in review).
+    #expect(!inTheState.isEmpty, "the WorkerState scanner found nothing — did that file change shape?")
+    let switchedOn = Set(inTheSwitch + inTheState)
 
     let telemetry = try read(root.appendingPathComponent("worker/src/telemetry.ts"))
     let opening = try #require(

@@ -48,13 +48,15 @@ public func notification(for event: TelemetryEvent) -> NotificationRequest? {
         // withdraw.
         case "machineFault":
             return NotificationRequest(
-                // The same sentence the panel shows for .faulted — two wordings for one state is
-                // two states as far as the operator is concerned.
-                title: "This machine couldn't run the last task",
+                title: machineFaultHeadline,
                 // What happened first, the reason last. sandbox.ts:59 keeps the same rule and says
                 // why: a banner is cut after a couple of lines, so whatever is at the end is what
                 // nobody reads — and the reason here can be 200 characters of git's own stderr.
-                body: "\(outcome.taskKey) went back to the queue and claiming has stopped for this cycle. \(outcome.detail ?? "The reason is on the board.")")
+                //
+                // "until the next poll", not "for this cycle": the loop ends one pass and sleeps,
+                // so the claim withdraws itself in thirty seconds and says so. A sticky sentence
+                // with no stated expiry is what BP-616 is about.
+                body: "\(outcome.taskKey) went back to the queue and this machine will take no more work until the next poll. Reason: \(outcome.detail ?? "on the board.")")
         default:
             return nil
         }
@@ -143,9 +145,12 @@ public final class Notifier: Sendable {
     }
 
     /// What this event would raise, dedupe applied — the whole decision, on the object the app
-    /// holds, so a test can drive it without a signed bundle. `handle` below is then one line of
-    /// delivery and one call to this; the call is not covered by anything, because reaching it
-    /// means reaching UNUserNotificationCenter.
+    /// holds, so a test can drive it without a signed bundle.
+    ///
+    /// What stays uncovered is `handle`'s delivery below: nothing checks that `title` and `body`
+    /// reach `content.title` and `content.body` rather than each other's. Swapped, the banner shows
+    /// two hundred characters of git's stderr as its heading and every test here still passes. It
+    /// ends at UNUserNotificationCenter, which needs a signed bundle and a running app.
     @MainActor
     public func request(for event: TelemetryEvent) -> NotificationRequest? {
         Notifier.faults.admit(event)

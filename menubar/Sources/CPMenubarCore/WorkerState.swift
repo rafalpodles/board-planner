@@ -1,5 +1,16 @@
 import Foundation
 
+/**
+ * What a machine fault is called, wherever it is said.
+ *
+ * One constant because the panel and the notification are one sentence about one state, and as two
+ * literals they had already drifted apart once inside a single review — the notification was
+ * reworded and the panel was not. Past tense on purpose: the worker stops claiming for one pass,
+ * several of these faults are transients, and a present-tense claim about the machine is one
+ * nothing here can withdraw.
+ */
+public let machineFaultHeadline = "This machine couldn't run the last task"
+
 public enum Health: Equatable, Sendable, CaseIterable {
     // faulted says the last run could not run on this machine at all — not that the task was
     // rejected, and not that the machine is latched off: the worker stops claiming for one pass
