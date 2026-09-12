@@ -1922,8 +1922,10 @@ describe("what a machine fault is recorded as", () => {
   it("does not cut a character in half at either seam", async () => {
     const execute = vi.fn<Executor["execute"]>().mockResolvedValue({
       kind: "machine_fault",
-      // Every character is a surrogate pair, so every possible cut point is inside one
-      message: "𝄞".repeat(200),
+      // One ASCII character first, so the head's slice lands mid-pair. Without it the head falls
+      // exactly on a pair boundary and only the tail guard is exercised — dropping the head's left
+      // the whole suite green (found in review).
+      message: `x${"𝄞".repeat(200)}`,
     });
     const { h, outcomes } = watchedOutcomes({ executor: { execute } });
 
@@ -1965,11 +1967,11 @@ describe("what a machine fault is recorded as", () => {
   it("redacts before it cuts, so a secret on a cut point is not published in halves", async () => {
     const token = `ghp_${"A".repeat(40)}`;
     // Positioned so the TAIL boundary lands inside it, because the tail is a fixed offset and is
-    // the cut point that is always there. The head can split a token too — its backup only runs
-    // when the first half holds a space far enough in, and in this very fixture it does not — but
-    // the tail is the one shape no detail can avoid. Swapped, the tail keeps a run of the token
-    // with its `ghp_` prefix left behind in the discarded middle, so `SECRET` matches neither half
-    // and a real credential fragment ships (found in review, whose measurement was at the head).
+    // the cut point no detail can avoid. The head can split a token too, and the neighbour below
+    // pins that: its backup only runs when the first half holds a space past 60% of the head, so a
+    // space-free detail and a detail whose only early space is git's own `fatal: ` both take a raw
+    // cut. Swapped, the tail keeps a run of the token with its `ghp_` prefix left behind in the
+    // discarded middle, so `SECRET` matches neither half and a real credential fragment ships.
     const detail = `${"x".repeat(150)} ${token} ${"y".repeat(70)}`;
     const execute = vi
       .fn<Executor["execute"]>()

@@ -114,10 +114,12 @@ const MAX_NOTIFICATION_CHARS = 200;
  * a short prefix would otherwise back up to a five-character head and throw away ninety-five
  * characters of a budget this whole function exists to spend well.
  *
- * Neither seam is safe to split a token at, and the backup does not change that: it only runs when
- * the first half holds a space far enough in, so a space-free detail — `delivered` carries a bare
- * URL — takes a raw cut at exactly the halfway mark. That is why `scrub` runs before this and not
- * after: a credential straddling either seam survives in halves that match no pattern.
+ * Neither seam is safe to split a token at, and the backup does not change that: it runs only when
+ * the first half holds a space past 60% of the head, so both a space-free detail — `delivered`
+ * carries a bare URL — and one whose only early space is git's own `fatal: ` take a raw cut at the
+ * halfway mark. The threshold widened that branch, which is the price of not spending five
+ * characters of the budget. That is why `scrub` runs before this and not after: a credential
+ * straddling either seam survives in halves that match no pattern.
  *
  * Both seams also avoid splitting a surrogate pair, which a lone half of renders as a replacement
  * character.
