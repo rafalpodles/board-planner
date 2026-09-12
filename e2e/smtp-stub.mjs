@@ -136,11 +136,17 @@ function command(socket, session, line) {
       //
       // `from` is discarded with the rest: RFC 3207 §4.2 has the server forget the session state
       // on upgrade, and the client repeats EHLO and MAIL over the new socket.
+      socket.removeAllListeners("data");
+      // Paused, not merely unlistened: removing the handler leaves the socket flowing with nobody
+      // reading, and anything arriving before `TLSSocket` takes over is dropped rather than
+      // buffered — measured at `readableLength` 0 with `read()` returning null, against 19 bytes
+      // retained when paused. `TLSSocket`'s constructor feeds whatever is buffered into the
+      // handshake, so pausing is what gives it something to find.
+      socket.pause();
       socket.write("220 2.0.0 Ready to start TLS\r\n", () => {
         const secured = new TLSSocket(socket, { isServer: true, secureContext: context });
         converse(secured, { ...session, secure: true, from: "", to: [], data: "", readingData: false });
       });
-      socket.removeAllListeners("data");
       return "upgraded";
     }
     case "AUTH":
