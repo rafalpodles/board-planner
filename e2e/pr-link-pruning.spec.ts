@@ -212,10 +212,7 @@ test("a removal and the other provider's write compose in either order", async (
 
 test("the badge goes with the link", async ({ page }) => {
   const stale = link("github", 7014);
-  const kept = {
-    ...link("gitlab", 7015, "https://gitlab.com/example/board/-/merge_requests/7015"),
-    provider: "gitlab",
-  };
+  const kept = link("gitlab", 7015, "https://gitlab.com/example/board/-/merge_requests/7015");
   const { _id, taskNumber } = await taskWith([stale, kept], { title: "Retitled away" });
 
   await signIn(page);

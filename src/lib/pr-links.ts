@@ -132,12 +132,17 @@ export interface StoredProviderLink {
  * Expect, then, a count with nothing behind it: weeks after a repoint, with nothing touched at
  * the provider, a sync reports links removed. That is this, not a bug to chase.
  *
- * And it is why a number is safe to compare where a URL was not. A number is only ever compared
- * inside one counter, and a repository renamed or transferred keeps its pull request numbers — so
- * the fetch returns the same pull request under the same number, and it either still matches its
+ * And it is why a number is safe to compare where a URL was not. Two numbers can only collide
+ * across two counters, which means two repositories, which means a repoint — and a repository
+ * **renamed or transferred keeps its pull request numbers**, so a rename stays inside one counter.
+ * The fetch returns the same pull request under the same number, and it either still matches its
  * task or genuinely does not. A URL compares across identity instead, which is exactly what a
- * rename breaks. The two collide only across two counters, which means two repositories, which
- * means a repoint.
+ * rename breaks.
+ *
+ * That numbers survive a rename is a fact about GitHub and GitLab, not one this repository can
+ * defend — no test here can reach either provider. It is the premise the whole design rests on,
+ * so it is worth naming as borrowed: were it ever false, a rename would read as a repoint and its
+ * links would be swept, which is the removed URL rule's defect returning by another door.
  *
  * The rule is only ever as accurate as the matcher it defers to: where `matchPRsToTasks` gives a
  * pull request to the wrong task, this deletes the right task's link rather than leaving a
