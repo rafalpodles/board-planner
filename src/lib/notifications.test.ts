@@ -5,10 +5,14 @@ const OTHER_KEY = "c".repeat(64);
 process.env.ENCRYPTION_KEY = KEY;
 
 const findById = vi.fn();
-const safeFetch = vi.fn(() => Promise.resolve(new Response("ok")));
+const safeFetch = vi.fn((url: string, init?: RequestInit) => {
+  void url;
+  void init;
+  return Promise.resolve(new Response("ok"));
+});
 
 vi.mock("@/models/project", () => ({ Project: { findById } }));
-vi.mock("./safe-fetch", () => ({ safeFetch: (...args: unknown[]) => safeFetch(...args) }));
+vi.mock("./safe-fetch", () => ({ safeFetch }));
 
 const { dispatchNotifications } = await import("./notifications");
 const { encryptSecret } = await import("./encryption");
