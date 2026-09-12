@@ -8,6 +8,7 @@ import { reviewGate } from "./review.js";
 import { createRunner, CommandResult, Runner } from "../exec.js";
 import { claimedTask } from "../__fixtures__/task.js";
 import { GateContext } from "../types.js";
+import { agentArgs, isAgentSpawn } from "../__fixtures__/agent-spawn.js";
 
 /**
  * BP-404. The CLI loads `CLAUDE.md`, `.claude/` and `.mcp.json` from its cwd as *instructions*,
@@ -40,10 +41,13 @@ function lookingReviewer(seen: Seen): Runner {
   const real = createRunner();
   return {
     async run(command, args, opts): Promise<CommandResult> {
-      if (command !== "claude") return real.run(command, args, opts);
+      // Since BP-349 the reviewer is spawned through sandbox-exec, so the match cannot be on the
+      // command alone: without this the stub falls through to the real runner and the suite spends
+      // its timeout on an actual model call.
+      if (!isAgentSpawn(command, args)) return real.run(command, args, opts);
       const cwd = opts.cwd ?? "";
       seen.cwd = cwd;
-      seen.argv = args;
+      seen.argv = agentArgs(command, args);
       seen.instructions = existsSync(join(cwd, "CLAUDE.md"));
       seen.committed = existsSync(join(cwd, "a.ts"));
       return {

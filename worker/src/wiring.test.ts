@@ -1,4 +1,5 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { agentArgs, isAgentSpawn } from "./__fixtures__/agent-spawn.js";
 import { tmpdir } from "os";
 import { join } from "path";
 import { describe, expect, it, vi } from "vitest";
@@ -196,10 +197,15 @@ describe("the worker's lifecycle", () => {
 // inert until this join exists, and in part A every whole-branch defect lived in exactly this kind
 // of seam: a producer in one task, a consumer in another, and no test that ran both at once.
 describe("telemetry, from the agent's stdout to the two sinks", () => {
-  const REPO = "/repos/demo";
+  // Real directories, not names. Since BP-349 the agent is confined to its worktree and seatbelt is
+  // given the resolved path, so a worktree that exists only in the stub's answers cannot be
+  // confined to — every run below would fail for that rather than for what the test is about. The
+  // worktree root the worker derives sits beside these, so one temp root covers all of it.
+  const REPO_ROOT = mkdtempSync(join(tmpdir(), "cp-wiring-repos-"));
+  const REPO = join(REPO_ROOT, "demo");
   const REMOTE = "git@github.com:owner/repo.git";
   // A second checkout on the same machine, for the tests about what a quarantine covers
-  const OTHER_REPO = "/repos/other";
+  const OTHER_REPO = join(REPO_ROOT, "other");
   const OTHER_REMOTE = "git@github.com:owner/other.git";
   const remoteFor = (cwd?: string) => (cwd === OTHER_REPO ? OTHER_REMOTE : REMOTE);
   const BASE_SHA = "cafef00d";
@@ -306,8 +312,16 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         if (command === "git" && (args[0] === "ls-remote" || args[0] === "fetch")) {
           remoteCalls.push({ args, env: opts.env ?? {} });
         }
-        if (command === "claude") {
-          claudeCalls.push(args);
+        // git is stubbed here, so the directory `git worktree add` would have made is made here:
+        // the agent cannot be confined to a worktree that does not exist (BP-349).
+        if (command === "git" && args.includes("worktree") && args.includes("add")) {
+          const separator = args.indexOf("--");
+          if (separator !== -1 && args[separator + 1]) {
+            mkdirSync(args[separator + 1], { recursive: true });
+          }
+        }
+        if (isAgentSpawn(command, args)) {
+          claudeCalls.push(agentArgs(command, args));
           onAgentStart?.(claudeCalls.length);
           for (const part of pipeFlushes(AGENT_STREAM)) {
             opts.onStdout?.(part);
@@ -554,7 +568,13 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
 
     const hangingRunner: Runner = {
       async run(command, args, opts) {
-        if (command === "claude") {
+        if (command === "git" && args.includes("worktree") && args.includes("add")) {
+          const separator = args.indexOf("--");
+          if (separator !== -1 && args[separator + 1]) {
+            mkdirSync(args[separator + 1], { recursive: true });
+          }
+        }
+        if (isAgentSpawn(command, args)) {
           shutdown();
           // shutdown aborts synchronously, so the signal is already aborted by the time we look —
           // registering a listener first and only then calling shutdown would wait forever

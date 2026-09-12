@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import { agentArgs, isAgentSpawn } from "../__fixtures__/agent-spawn.js";
 import { gateFromEntry } from "./from-entry.js";
 import { GateContext, SnapshotEntry } from "../types.js";
 
@@ -37,9 +38,11 @@ const FALLBACKS = { maxDiffLines: 400, maxDiffFiles: 10, reviewModel: "opus" };
 // BP-404: the review gate asks git for a config scan and a clean checkout before it runs the
 // reviewer, so the reviewer's argv is no longer the first call recorded.
 function reviewerArgv(run: { mock: { calls: unknown[][] } }): string[] {
-  const call = run.mock.calls.find(([command]) => command === "claude");
+  const call = run.mock.calls.find(([command, args]) =>
+    isAgentSpawn(command as string, args as string[])
+  );
   if (!call) throw new Error("the reviewer was never run");
-  return call[1] as string[];
+  return agentArgs(call[0] as string, call[1] as string[]);
 }
 
 describe("gateFromEntry", () => {
