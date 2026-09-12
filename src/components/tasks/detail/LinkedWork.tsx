@@ -1,6 +1,8 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
+import { useApi } from "@/hooks/use-api";
+import { useToast } from "@/components/ui/Toast";
 import { ApiTask } from "@/types";
 import { TaskLinks } from "@/components/tasks/TaskLinks";
 import { PullRequestState } from "@/components/tasks/PullRequestBadge";
@@ -23,11 +25,46 @@ export function LinkedWork({
   onChanged,
   onAddChild,
 }: LinkedWorkProps) {
+  const api = useApi();
+  const { toast } = useToast();
+  const [refreshing, setRefreshing] = useState(false);
   const prs = task.linkedPRs || [];
+
+  /**
+   * Asks GitHub again. The sync is the project's, not this task's — there is no per-pull-request
+   * endpoint and one request to GitHub answers for every open branch anyway — so what comes back
+   * refreshes the whole board and this row with it.
+   */
+  async function refresh() {
+    setRefreshing(true);
+    try {
+      await api.post(`/api/projects/${projectId}/github/sync`, {});
+      onChanged();
+    } catch (err) {
+      // The message the route gave, which says which of the several refusals it was — an
+      // unconfigured token and an unreachable GitHub send somebody to different places
+      toast(err instanceof Error ? err.message : "Could not refresh the pull requests", "error");
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   return (
     <section className="flex flex-col gap-2.5">
-      <SectionLabel>Linked work</SectionLabel>
+      <div className="flex items-center justify-between gap-3">
+        <SectionLabel>Linked work</SectionLabel>
+        {prs.length > 0 && (
+          <button
+            type="button"
+            onClick={refresh}
+            disabled={refreshing}
+            className="focus-ring rounded text-xs text-text-muted transition-colors
+              hover:text-text disabled:opacity-60"
+          >
+            {refreshing ? "Refreshing…" : "Refresh PR status"}
+          </button>
+        )}
+      </div>
 
       {prs.length > 0 && (
         <div className="flex flex-col gap-1.5">

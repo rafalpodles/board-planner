@@ -89,6 +89,9 @@ export async function register() {
       startPmScheduler();
       console.log("PM scheduler started");
 
+      const { startGithubSyncScheduler } = await import("@/lib/github-sync");
+      startGithubSyncScheduler();
+
       const { startDigestScheduler, digestHour, digestTimezone } = await import("@/lib/digest");
       const { isEmailConfigured } = await import("@/lib/email");
       if (isEmailConfigured()) {
