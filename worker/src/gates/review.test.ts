@@ -1,5 +1,10 @@
+import { realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { reviewGate } from "./review.js";
+import { SANDBOX_COMMAND, UNCONFINED_REASON } from "../sandbox.js";
+import { isAgentSpawn } from "../__fixtures__/agent-spawn.js";
 import { CommandResult, Runner } from "../exec.js";
 import { ClaimedTask, DiffStats, GateContext } from "../types.js";
 import { claimedTask } from "../__fixtures__/task.js";
@@ -44,8 +49,20 @@ function claudeStdout(stdout: string, overrides: Partial<CommandResult> = {}) {
   return { runner: { run }, run };
 }
 
+// Since BP-349 the reviewer is spawned through `sandbox-exec`, so the CLI's own name and arguments
+// sit inside that call rather than being it. Unwrapped here so every assertion below still reads as
+// an assertion about what the reviewer was asked; the confinement itself is asserted on its own.
 function claudeCall(run: ReturnType<typeof claudeStdout>["run"]) {
-  const call = run.mock.calls.find(([command]) => command === "claude");
+  const call = run.mock.calls.find(([command, args]) => isAgentSpawn(command, args));
+  if (!call) throw new Error("the reviewer was never run");
+  const start = call[1].indexOf("claude");
+  if (call[0] === "claude") return call;
+  return ["claude", call[1].slice(start + 1), call[2]] as typeof call;
+}
+
+/** The spawn as it was actually made, wrapper and all. */
+function spawnCall(run: ReturnType<typeof claudeStdout>["run"]) {
+  const call = run.mock.calls.find(([command, args]) => isAgentSpawn(command, args));
   if (!call) throw new Error("the reviewer was never run");
   return call;
 }
@@ -212,9 +229,10 @@ describe("reviewGate", () => {
 
   /**
    * BP-404 review. The clean checkout does not close the instruction channel on its own: measured
-   * on CLI 2.1.248, a CLAUDE.md planted in the checkout's PARENT was obeyed, and the agent is
-   * handed TMPDIR and writes unsandboxed. --safe-mode is what closes it — CLAUDE.md from the cwd
-   * and every directory above it, ~/.claude/CLAUDE.md, settings hooks, skills, plugins.
+   * on CLI 2.1.248, a CLAUDE.md planted in the checkout's PARENT was obeyed, and at the time the
+   * agent was handed TMPDIR and wrote unsandboxed. --safe-mode is what closes it — CLAUDE.md from
+   * the cwd and every directory above it, ~/.claude/CLAUDE.md, settings hooks, skills, plugins —
+   * and it still is on a machine where BP-349's confinement has been switched off.
    */
   it("starts the reviewer with every discovered instruction channel disabled", async () => {
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
@@ -225,18 +243,71 @@ describe("reviewGate", () => {
   });
 
   /**
-   * A tripwire, not a requirement. The reviewer inherits HOME because the CLI authenticates from
-   * the logged-in session there, and the agent can write under it — so ~/.claude is a channel
-   * --safe-mode closes by flag rather than by reach. This asserts the *inheritance* so that the
-   * day BP-349 changes it, whoever changes it reads this comment. Do not "fix" this by deleting
-   * the assertion: it is recording a known limit, not asking for one.
+   * The reviewer inherits HOME because the CLI authenticates from the logged-in session there, and
+   * BP-349 did not change that: a synthesised home answers "Not logged in", measured. What changed
+   * is that ~/.claude is no longer reachable to write — the step that would plant a hook there now
+   * runs confined, and so does this reviewer. So the channel is closed twice over, by --safe-mode
+   * above and by reach. This still asserts the *inheritance*, because it is the thing a future
+   * isolation attempt will be tempted to drop, and dropping it costs every run its credential.
    */
-  it("still inherits HOME, so BP-349's surface is closed by --safe-mode and not by isolation", async () => {
+  it("still inherits HOME, because that is where the CLI finds its logged-in session", async () => {
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 
     await reviewGate(runner, TIMEOUT_MS).run(context());
 
     expect(claudeCall(run)[2].env?.HOME).toBe(process.env.HOME);
+  });
+
+  // BP-349. The reviewer holds no write tool, so the only thing left that can write during a review
+  // is a hook — which is exactly what the escape this closes plants. Confined to the throwaway
+  // checkout, so nothing it leaves outlives the gate that made it.
+  it("spawns the reviewer through the sandbox", async () => {
+    const { runner, run } = claudeReturning({ approved: true, reason: "" });
+
+    await reviewGate(runner, TIMEOUT_MS).run(context());
+
+    expect(spawnCall(run)[0]).toBe(SANDBOX_COMMAND);
+  });
+
+  it("confines the reviewer to the checkout it made, and to nothing else", async () => {
+    const { runner, run } = claudeReturning({ approved: true, reason: "" });
+
+    await reviewGate(runner, TIMEOUT_MS).run(context());
+
+    const args = spawnCall(run)[1];
+    const writable = args.filter((_, index) => args[index - 1] === "-D");
+    // The gate removes the checkout as it returns, so the directory is gone by now and cannot be
+    // resolved again — rebuilt from the resolved temp root and the name the gate chose, which is
+    // unique per call. Asserting the resolved form matters: `/var/folders` and `/private/var`
+    // folders are different rules to seatbelt, and only one of them is the one it checks.
+    const checkout = join(realpathSync(tmpdir()), basename(spawnCall(run)[2].cwd));
+    expect(writable).toEqual([`W0=${checkout}`]);
+  });
+
+  // A gate that cannot confine its reviewer refuses the change rather than reviewing it unconfined,
+  // which is the same call the implementer step makes for the same reason. Driven by moving the
+  // platform rather than by giving reviewGate a seam for the test to pull: the seam would be the
+  // only caller of itself, and a branch only a test can reach is a branch nothing else protects.
+  it("refuses rather than reviewing unconfined", async () => {
+    const { runner, run } = claudeReturning({ approved: true, reason: "" });
+    const real = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+
+    try {
+      const result = await reviewGate(runner, TIMEOUT_MS).run(context());
+
+      expect(result.ok).toBe(false);
+      expect(result.reason).toBe(UNCONFINED_REASON);
+      // The flag, not just the refusal: without it the pipeline reports this as the reviewer
+      // rejecting the change — which blames the diff for the machine, charges the attempt and
+      // pushes the branch (BP-349 review).
+      expect(result.machineFault).toBe(true);
+      expect(
+        run.mock.calls.some(([command, args]) => isAgentSpawn(command, args))
+      ).toBe(false);
+    } finally {
+      Object.defineProperty(process, "platform", real);
+    }
   });
 
   // Without this the gate reviews an EMPTY directory and can return approved: the checkout failed,
@@ -252,7 +323,7 @@ describe("reviewGate", () => {
 
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/could not be checked out/i);
-    expect(run.mock.calls.find(([command]) => command === "claude")).toBeUndefined();
+    expect(run.mock.calls.find(([command, args]) => isAgentSpawn(command, args))).toBeUndefined();
   });
 
   // `git worktree add` fires .git/hooks/post-checkout — measured — and core.hooksPath=/dev/null is
@@ -332,7 +403,7 @@ describe("reviewGate", () => {
     expect(result.reason).toMatch(/filter\.z\.smudge/);
     expect(run.mock.calls.find(([command, args]) => command === "git" && args.includes("worktree")))
       .toBeUndefined();
-    expect(run.mock.calls.find(([command]) => command === "claude")).toBeUndefined();
+    expect(run.mock.calls.find(([command, args]) => isAgentSpawn(command, args))).toBeUndefined();
   });
 
   // A review checkout left behind is a copy of the change sitting in a world-readable tmpdir

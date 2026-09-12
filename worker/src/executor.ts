@@ -2,6 +2,7 @@ import { DEFAULT_FALLBACK_MODEL, DEFAULT_MODEL, modelOr, WorkerConfig } from "./
 import { childEnv } from "./env.js";
 import { PROTECTED_PATHS_BRIEF } from "./gates/protected-paths.js";
 import { Runner } from "./exec.js";
+import { confine } from "./sandbox.js";
 import { isRateLimitEvent, lastResultEvent, parseStream, ResultEvent, StreamEvent } from "./stream.js";
 import { ClaimedTask, ExecutionResult, RunOutcome } from "./types.js";
 
@@ -205,9 +206,7 @@ export function createExecutor(config: WorkerConfig, runner: Runner): Executor {
       const env = childEnv();
       const parser = onEvent ? incrementalParser(onEvent) : undefined;
 
-      const result = await runner.run(
-        "claude",
-        [
+      const claudeArgs = [
           "-p",
           buildPrompt(task),
           "--output-format",
@@ -232,7 +231,25 @@ export function createExecutor(config: WorkerConfig, runner: Runner): Executor {
           modelOr(brief.model || config.model, DEFAULT_MODEL),
           "--fallback-model",
           modelOr(brief.fallbackModel || config.fallbackModel, DEFAULT_FALLBACK_MODEL),
-        ],
+      ];
+
+      // The worktree and nothing else. `bypassPermissions` above is what makes an unattended step
+      // possible and also what makes `Write` reach any absolute path this uid can — measured, the
+      // CLI needs no write access to `~/.claude` or `~/.claude.json` to run, so the allowance is
+      // one directory rather than a denylist of the instruction channels inside the operator's
+      // home. See sandbox.ts for why this is not a per-run HOME.
+      const spawn = confine("claude", claudeArgs, { writable: [worktreePath] });
+
+      // Before the spawn, not after: a step that cannot be confined does not run half-confined and
+      // does not run at all. A machine fault rather than an error, because it is the machine that
+      // cannot do this and it will be just as unable on the next task — charging the attempt would
+      // walk the whole approved queue into the escalation column, which is the reasoning the base
+      // branch's own failure already records in pipeline.ts.
+      if ("refusal" in spawn) return { kind: "machine_fault", message: spawn.refusal };
+
+      const result = await runner.run(
+        spawn.command,
+        spawn.args,
         {
           cwd: worktreePath,
           timeoutMs: brief.timeoutMs,
@@ -262,7 +279,15 @@ export function createExecutor(config: WorkerConfig, runner: Runner): Executor {
       }
 
       if (result.code === 0) return parsed;
-      return { kind: "error", message: result.stderr || `claude exited ${result.code}` };
+      // "the agent", not "claude": the exit code now belongs to whichever process died, and since
+      // BP-349 that may be the sandbox wrapper rather than the CLI. stderr rides along whatever
+      // happened, and carries its own `sandbox-exec:` prefix when the wrapper is the one that
+      // refused — which is how a person reading this on the board learns it is the machine and not
+      // their task, without this code having to classify anything.
+      return {
+        kind: "error",
+        message: `the agent exited ${result.code}${result.stderr ? `\n${result.stderr}` : ""}`,
+      };
     },
   };
 }

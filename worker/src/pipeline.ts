@@ -485,6 +485,19 @@ export async function runTask(
           );
           return;
         }
+        // The machine cannot run the step and will be no more able on the next task. Same handling
+        // as an unreachable base branch above, for the same reason: charge the attempt and one
+        // misconfigured machine walks the whole approved queue into the escalation column, where
+        // nothing resets execution.attempts. Released with the attempt refunded, and the loop is
+        // told to stop claiming so the queue is left for a machine that can run it.
+        if (outcome.kind === "machine_fault") {
+          settle("released", outcome.message);
+          await reporter.released(
+            task,
+            `${outcome.message}${unpushedWork(state, worktree.path)}`,
+          );
+          return "machine-fault";
+        }
         if (outcome.kind === "timeout") {
           settle("requeued", `${entry.name} timed out`);
           await reporter.requeued(task, `${entry.name} timed out`);
@@ -552,6 +565,35 @@ export async function runTask(
         if (await releaseIfAborted(deps, reporter, task)) return;
 
         if (!verdict.ok) {
+          // The gate did not judge the change; this machine could not run it. Reported as a
+          // refusal it would blame the diff and push its branch (BP-349 review).
+          //
+          // The worktree is kept, for the reason the step path keeps it a hundred lines above: a
+          // gate only runs once a commit exists — it refuses "there is no patch to review"
+          // otherwise — so on this path there is always committed work, unpushed unless a Push step
+          // ran before the gate. The sequence is the board's to compose and its order is not
+          // validated, so `Implement → Push → Review` is expressible; there `unpushedWork` returns
+          // nothing and this keeps a tree nobody needs, which is what line 628 already does for a
+          // pushed-but-withheld branch. Either way it is the one path where the work is fine and
+          // only the machine is broken.
+          //
+          // Kept until the next attempt claims this task, not kept for good: workspace.create()
+          // calls removeIfRegistered() before `worktree add -B`. So this buys a person a window to
+          // look at what the run produced, and the comment above carries the path to look at — it
+          // does not make the work durable, and the run is repeated either way.
+          //
+          // The usage-limit branch below does not keep it, and that asymmetry is deliberate: a
+          // usage limit is this account waiting for a clock, and the same machine will run the
+          // task again.
+          if (verdict.machineFault) {
+            keepWorktree = true;
+            settle("released", `the ${gate.name} gate could not run`);
+            await reporter.released(
+              task,
+              `the ${gate.name} gate could not run: ${verdict.reason}${unpushedWork(state, worktree.path)}`,
+            );
+            return "machine-fault";
+          }
           if (hitUsageLimit(verdict)) {
             settle("released", `the ${gate.name} gate could not run`);
             await reporter.released(

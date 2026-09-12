@@ -53,6 +53,10 @@ export type RunOutcome =
   | { kind: "result"; result: ExecutionResult }
   | { kind: "usage_limit" }
   | { kind: "timeout" }
+  // Not the task's failure and not the agent's: this machine cannot run the step at all, and will
+  // fail the next task identically. Separate from "error" because the two are accounted for
+  // differently — see the released/machine-fault path in pipeline.ts.
+  | { kind: "machine_fault"; message: string }
   | { kind: "error"; message: string };
 
 export interface DiffStats {
@@ -111,6 +115,12 @@ export interface GateContext {
 export interface GateResult {
   ok: boolean;
   reason: string;
+  /**
+   * The gate did not judge the change — it could not run on this machine, and will not run for the
+   * next task either. A refusal, reported as one, would blame the change for the machine and push
+   * its branch; this routes it to the released path instead, with the attempt refunded.
+   */
+  machineFault?: boolean;
 }
 
 export interface Gate {

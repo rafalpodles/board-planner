@@ -1,9 +1,10 @@
-import { mkdtempSync, existsSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, existsSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { agentArgs, answerSandboxProbe, isAgentSpawn, isSandboxProbe } from "./__fixtures__/agent-spawn.js";
 import { createServer, IncomingMessage, Server, ServerResponse } from "http";
 import { AddressInfo } from "net";
 import { tmpdir } from "os";
 import { join } from "path";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CommandResult, Runner, RunOpts } from "./exec.js";
 import { createWorker } from "./wiring.js";
 
@@ -28,7 +29,12 @@ const TASK_ID = "6512f0a1b2c3d4e5f6a70002";
 const WORKER_ID = "6512f0a1b2c3d4e5f6a70003";
 const ENROLMENT_TOKEN = "cpe_single_use_enrolment";
 const MINTED_CREDENTIAL = "cpw_minted_by_the_board";
-const REPO = "/repos/demo";
+// A real directory, not a name. Since BP-349 the agent is confined to its worktree and seatbelt is
+// given the resolved path, so a worktree that exists only in the stub's answers cannot be confined
+// to — the run would fail for that rather than for the reason each test is about. The worktree root
+// the worker derives sits beside this, so one temp root covers both.
+const REPO_ROOT = mkdtempSync(join(tmpdir(), "bp381-repo-"));
+const REPO = join(REPO_ROOT, "demo");
 const REMOTE = "git@github.com:owner/repo.git";
 const TOOL_DIR = "/opt/cp-integration-bin";
 const BASE_SHA = "cafef00dcafef00dcafef00dcafef00dcafef00d";
@@ -260,6 +266,15 @@ function makeRunner(seen: GitCall[], registeredWorktree = ""): Runner {
     async run(command, args, runOpts: RunOpts) {
       seen.push({ command, args });
 
+      // BP-349 confines the agent to its worktree, and seatbelt is given the resolved path — so a
+      // worktree that exists only in this stub's answers cannot be confined to, and the run fails
+      // for that instead of for the reason under test. git is stubbed here, so the directory it
+      // would have made is made here.
+      if (command === "git" && args.includes("worktree") && args.includes("add")) {
+        const separator = args.indexOf("--");
+        if (separator !== -1 && args[separator + 1]) mkdirSync(args[separator + 1], { recursive: true });
+      }
+
       if (args[0] === "-lc") return ok(`${TOOL_DIR}/${(args[1] ?? "").split(" ").pop() ?? ""}`);
       if (args[0] === "--version") return ok("1.0.0");
       if (args[0] === "auth" && args[1] === "status") {
@@ -274,7 +289,14 @@ function makeRunner(seen: GitCall[], registeredWorktree = ""): Runner {
             : ""
         );
       }
-      if (command === "claude") {
+      // Before the agent branch: both go through sandbox-exec, and the probe is the one wrapping sh.
+      // A machine whose sandbox row is red claims nothing at all since BP-349, so without this the
+      // worker never reaches the run these tests are about.
+      if (isSandboxProbe(command, args)) {
+        answerSandboxProbe(args);
+        return ok();
+      }
+      if (isAgentSpawn(command, args)) {
         runOpts.onStdout?.(RESULT_LINE);
         return ok(RESULT_LINE);
       }
@@ -384,11 +406,15 @@ describe("a refused change, offered and then accepted, over a real HTTP surface"
   afterAllCleanup();
 
   function afterAllCleanup() {
-    // rmSync in an afterAll would race the beforeAll above on a failure; this runs once the suite
-    // has finished reading everything it captured.
-    process.once("exit", () => {
+    // `afterAll`, not `process.once("exit")`. The exit handler was written to avoid racing the
+    // beforeAll above, and it does — by never running at all: vitest runs this file in a pooled
+    // worker that does not exit between files, so nothing fired it. Measured: 82 `bp381-int-`
+    // directories had collected here, one per run. afterAll runs after every test in the file has
+    // read what it captured, which is what the original comment actually wanted.
+    afterAll(() => {
       try {
         rmSync(stateDir, { recursive: true, force: true });
+        rmSync(REPO_ROOT, { recursive: true, force: true });
       } catch {
         // a leftover temp directory is not worth failing a suite over
       }

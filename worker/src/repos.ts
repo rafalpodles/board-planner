@@ -217,7 +217,8 @@ function executes(key: string, value: string): boolean {
 /**
  * Everything the effective config says before the agent has touched the checkout, as raw
  * NUL-framed `scope\0key\nvalue` records. Held in this process and never written down: the agent runs as this
- * uid with no filesystem sandbox, so a baseline on disk is a baseline it can edit. Same reason
+ * uid, and BP-349's confinement is the operator's to switch off, so a baseline on disk is a
+ * baseline it can edit. Same reason
  * `Worktree.baseSha` is carried rather than re-read.
  *
  * `null` when git could not answer. That is not "clean" and not "everything is new" — it means the

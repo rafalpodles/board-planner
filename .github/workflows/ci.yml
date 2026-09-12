@@ -80,7 +80,13 @@ jobs:
 
   worker:
     name: Worker — the package npm test never reaches
-    runs-on: ubuntu-latest
+    # macOS since BP-349, and not for convenience: the worker confines the agent it runs with
+    # seatbelt, which is macOS only, so on Linux `confine()` refuses and 114 tests across eight
+    # files assert a spawn that never happens. Pinning the platform in those tests instead would
+    # buy a green Linux job that exercises a configuration nobody runs, and would leave
+    # sandbox.integration.test.ts — the only evidence that the kernel actually denies the write —
+    # skipped in CI, which is where it was measured to be worth the most.
+    runs-on: macos-15
     # The root vitest config includes src/** only, so these 680-odd tests run nowhere else
     defaults:
       run:
@@ -110,6 +116,28 @@ jobs:
       - name: Build
         if: ${{ !cancelled() }}
         run: npm run build
+
+  # The worker's tests need a kernel that can confine, so they run on macOS above. Building it does
+  # not — and the README supports running the worker on Linux with CP_ALLOW_UNCONFINED_AGENT=1, a
+  # configuration that after that move nothing compiled at all. A minute here keeps the platform we
+  # say we support from breaking silently; it deliberately runs no tests, because on Linux the ones
+  # about the sandbox assert a spawn that cannot happen.
+  worker-linux:
+    name: Worker — it still builds on the platform the escape hatch is for
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: worker/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck:tests
+      - run: npm run build
 
   mcp-server:
     name: MCP server — build

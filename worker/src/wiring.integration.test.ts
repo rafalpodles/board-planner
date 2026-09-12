@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { agentArgs, answerSandboxProbe, isAgentSpawn, isSandboxProbe } from "./__fixtures__/agent-spawn.js";
 import { createServer, IncomingMessage, request as httpRequest, Server, ServerResponse } from "http";
 import { AddressInfo } from "net";
 import { tmpdir } from "os";
@@ -22,7 +23,12 @@ const WORKER_ID = "6512f0a1b2c3d4e5f6a70003";
 const SERVER_RUN_ID = "run-minted-by-the-board";
 const ENROLMENT_TOKEN = "cpe_single_use_enrolment";
 const MINTED_CREDENTIAL = "cpw_minted_by_the_board";
-const REPO = "/repos/demo";
+// A real directory, not a name. Since BP-349 the agent is confined to its worktree and seatbelt is
+// given the resolved path, so a worktree that exists only in the stub's answers cannot be confined
+// to — the run would fail for that rather than for the reason each test is about. The worktree root
+// the worker derives sits beside this, so one temp root covers both.
+const REPO_ROOT = mkdtempSync(join(tmpdir(), "cp-int-repo-"));
+const REPO = join(REPO_ROOT, "demo");
 const REMOTE = "git@github.com:owner/repo.git";
 const TOOL_DIR = "/opt/cp-integration-bin";
 const BASE_SHA = "cafef00d";
@@ -421,7 +427,19 @@ async function runWorkerAgainstTheBoard(opts: { takeTheTask: boolean }): Promise
             : ""
         );
       }
-      if (command === "claude") return agent(runOpts);
+      // git is stubbed here, so the directory `git worktree add` would have made is made here —
+      // the agent cannot be confined to a worktree that does not exist (BP-349).
+      if (command === "git" && args.includes("worktree") && args.includes("add")) {
+        const separator = args.indexOf("--");
+        if (separator !== -1 && args[separator + 1]) mkdirSync(args[separator + 1], { recursive: true });
+      }
+      // Order is not load-bearing — the probe's argv carries no "claude" element, so isAgentSpawn
+      // cannot match it either way round. It sits here because that is the order they happen in.
+      if (isSandboxProbe(command, args)) {
+        answerSandboxProbe(args);
+        return ok();
+      }
+      if (isAgentSpawn(command, args)) return agent(runOpts);
       if (args[0] === "ls-remote") return ok(`${BASE_SHA}\t${args[args.length - 1]}\n`);
       // workspace.ts verifies the fetched sha with `rev-parse --verify <sha>^{commit}` before
       // trusting it as the base; collectDiff then refuses anything that is not an object id, so
@@ -469,6 +487,7 @@ async function runWorkerAgainstTheBoard(opts: { takeTheTask: boolean }): Promise
   } finally {
     await board.close();
     rmSync(stateDir, { recursive: true, force: true });
+    rmSync(REPO_ROOT, { recursive: true, force: true });
   }
 
   return { board, errors, sawAbort, agentTalked, cockpit, cockpitError, pathRepairs };

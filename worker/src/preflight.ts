@@ -1,5 +1,8 @@
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "fs";
+import { tmpdir } from "os";
 import { dirname, join } from "path";
-import { childEnv } from "./env.js";
+import { childEnv, unconfinedAgentAllowed } from "./env.js";
+import { confine, SANDBOX_COMMAND, UNCONFINED_ACCEPTED_DETAIL } from "./sandbox.js";
 import { Runner } from "./exec.js";
 import { GhAccount, parseGhAccounts, resolveGhToken, usableAccount } from "./github-account.js";
 
@@ -270,6 +273,91 @@ async function ghSession(
   };
 }
 
+const SANDBOX_PROBE_TIMEOUT_MS = 10_000;
+
+/** Enough of a spawn failure to diagnose it from the fleet screen, without pasting a stack there. */
+function firstLine(text: string): string {
+  return text.split("\n")[0].trim().slice(0, 200) || "no output";
+}
+
+/**
+ * Whether this machine can actually confine the agent — asked by confining something and watching
+ * it fail to escape, not by reading `process.platform`.
+ *
+ * At boot rather than only per run, because the alternative is an operator discovering it from a
+ * task that claimed, ran and failed. The probe writes to a path outside the one directory it is
+ * allowed, in a temp tree of its own: if that file exists afterwards, whatever the profile said,
+ * this machine does not confine anything (BP-349).
+ */
+/** The row wiring.ts reads to decide whether this machine may take work at all (BP-349). */
+export const SANDBOX_CHECK = "sandbox";
+
+async function sandboxCheck(deps: PreflightDeps, env: NodeJS.ProcessEnv): Promise<PreflightCheck> {
+  const name = SANDBOX_CHECK;
+
+  if (unconfinedAgentAllowed(deps.env)) {
+    return {
+      name,
+      ok: true,
+      detail: UNCONFINED_ACCEPTED_DETAIL,
+    };
+  }
+
+  // Inside the try, not before it: under `--preflight` the caller prints this report as JSON for the
+  // menubar app, and a throw out here dies in main().catch as a stack trace — a red row becomes no
+  // output at all.
+  let root = "";
+  try {
+    root = mkdtempSync(join(tmpdir(), "cp-sandbox-probe-"));
+    const worktree = join(root, "worktree");
+    const beyond = join(root, "beyond.txt");
+    const ran = join(worktree, "ran.txt");
+    mkdirSync(worktree);
+
+    // Paths as $0 and $1 rather than inside the script, so nothing about a temp directory's name
+    // can become shell syntax. The allowed write comes first and is the positive control: without
+    // it, every way the probe can fail to execute at all — sandbox-exec not on the machine, a
+    // profile that stopped compiling, the timeout — leaves `beyond` absent and reads exactly like
+    // a sandbox that worked.
+    const spawn = confine("/bin/sh", ["-c", 'printf ran > "$1"; printf escaped > "$0"', beyond, ran], {
+      writable: [worktree],
+      env: deps.env,
+    });
+    if ("refusal" in spawn) return { name, ok: false, detail: spawn.refusal };
+
+    const result = await deps.runner.run(spawn.command, spawn.args, {
+      cwd: worktree,
+      timeoutMs: SANDBOX_PROBE_TIMEOUT_MS,
+      env,
+    });
+
+    if (!existsSync(ran)) {
+      const why = result.timedOut
+        ? `it timed out after ${SANDBOX_PROBE_TIMEOUT_MS}ms`
+        : `${SANDBOX_COMMAND} exited ${result.code}: ${firstLine(result.stderr)}`;
+      return {
+        name,
+        ok: false,
+        detail: `the sandbox could not be tested because the probe never ran — ${why}`,
+      };
+    }
+
+    if (existsSync(beyond)) {
+      return {
+        name,
+        ok: false,
+        detail: "the sandbox ran but did not stop a write outside the directory it was given — the agent would not be confined to its worktree",
+      };
+    }
+
+    return { name, ok: true, detail: "the agent can only write inside its own worktree" };
+  } catch (error) {
+    return { name, ok: false, detail: `the sandbox could not be tested: ${String(error)}` };
+  } finally {
+    if (root) rmSync(root, { recursive: true, force: true });
+  }
+}
+
 export async function runPreflight(deps: PreflightDeps): Promise<PreflightReport> {
   // Resolve everything before verifying anything. Asking `npm --version` on the PATH this process
   // was started with is how a working npm reports itself broken: its shebang is `env node`, and the
@@ -318,6 +406,8 @@ export async function runPreflight(deps: PreflightDeps): Promise<PreflightReport
       checks.push({ name: tool, ok: true, detail: path });
     }
   }
+
+  checks.push(await sandboxCheck(deps, env));
 
   return {
     ok: checks.every((c) => c.ok),
