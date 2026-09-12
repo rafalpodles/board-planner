@@ -54,3 +54,132 @@ export async function writeProviderLinks(
     updatePipeline: true,
   });
 }
+
+/**
+ * The update that removes named links of one provider and leaves every other link alone.
+ *
+ * A pipeline for the same reason `replaceProviderLinks` is one: the surviving array is computed
+ * from the document as it is at write time, so an overlapping sync of either provider cannot be
+ * dropped by a copy read a moment earlier (BP-559). Only the numbers decided about are removed —
+ * anything a concurrent sync added in between is not in the list and survives.
+ */
+export function removeProviderLinks(
+  provider: "github" | "gitlab",
+  numbers: number[]
+): PipelineStage.Set[] {
+  return [
+    {
+      $set: {
+        linkedPRs: {
+          $filter: {
+            input: { $ifNull: ["$linkedPRs", []] },
+            cond: {
+              $not: [
+                {
+                  $and: [
+                    { $eq: [{ $ifNull: ["$$this.provider", "github"] }, provider] },
+                    { $in: ["$$this.number", { $literal: numbers }] },
+                  ],
+                },
+              ],
+            },
+          },
+        },
+      },
+    },
+  ];
+}
+
+export interface StoredProviderLink {
+  provider?: "github" | "gitlab" | null;
+  number: number;
+  url?: string | null;
+}
+
+/**
+ * Which of a task's stored links this round of the sync has **positively contradicted** (BP-610).
+ *
+ * Not "everything the round did not confirm". Neither provider is asked for its whole history:
+ * GitHub returns the open pull requests plus the thirty most recently updated closed ones, GitLab
+ * the first hundred by `updated_at`. A task whose pull request merged last quarter falls out of
+ * that window on every sync while remaining perfectly correct, so treating absence as removal
+ * would delete good links from healthy projects. Absent is unknown, not gone — which is also why
+ * a pull request deleted at the provider is not covered here: nothing in a bounded response tells
+ * it apart from one that simply did not fit.
+ *
+ * What is left is decidable:
+ * - the number came back in this round's fetch and did not match this task — it was retitled onto
+ *   another task, lost its key, or the key left `formerKeys`;
+ * - the link's URL parses and names a repository the project is no longer pointed at. A URL that
+ *   does not parse is kept.
+ *
+ * `?? "github"`, as everywhere else here: a link stored before the provider field existed is
+ * GitHub's, and the schema default is applied on hydration rather than stored.
+ */
+export function contradictedLinkNumbers(
+  links: StoredProviderLink[],
+  provider: "github" | "gitlab",
+  seenNumbers: ReadonlySet<number>,
+  namesAnotherRepository: (url: string) => boolean
+): number[] {
+  const numbers = new Set<number>();
+  for (const link of links) {
+    if ((link.provider ?? "github") !== provider) continue;
+    if (seenNumbers.has(link.number) || (link.url ? namesAnotherRepository(link.url) : false)) {
+      numbers.add(link.number);
+    }
+  }
+  return [...numbers];
+}
+
+/**
+ * The second pass a sync owes the tasks it did not visit.
+ *
+ * The first pass writes only the tasks in this round's grouping, so a pull request that stops
+ * matching a task takes its task out of the loop and leaves the stale link behind for ever
+ * (BP-610). This walks the tasks that hold links of this provider and are not in the grouping —
+ * a task in it has had its links of this provider replaced wholesale already — and removes the
+ * ones `contradictedLinkNumbers` can show are no longer this task's. A task with nothing
+ * contradicted is not written at all.
+ */
+export async function pruneContradictedLinks(opts: {
+  projectId: string;
+  provider: "github" | "gitlab";
+  linkedThisRound: ReadonlySet<number>;
+  seenNumbers: ReadonlySet<number>;
+  namesAnotherRepository: (url: string) => boolean;
+}): Promise<number> {
+  const { projectId, provider, linkedThisRound, seenNumbers, namesAnotherRepository } = opts;
+
+  // An unmarked link is GitHub's, and a stored document has no `provider` field for the query to
+  // match — the schema's default only appears on hydration, which a query does not do.
+  const owned =
+    provider === "github"
+      ? { $or: [{ provider: "github" }, { provider: { $exists: false } }, { provider: null }] }
+      : { provider: "gitlab" };
+
+  const holders = await Task.find(
+    { project: projectId, linkedPRs: { $elemMatch: owned } },
+    { taskNumber: 1, linkedPRs: 1 }
+  ).lean<{ _id: mongoose.Types.ObjectId; taskNumber: number; linkedPRs?: StoredProviderLink[] }[]>();
+
+  let removed = 0;
+  for (const holder of holders) {
+    if (linkedThisRound.has(holder.taskNumber)) continue;
+
+    const numbers = contradictedLinkNumbers(
+      holder.linkedPRs ?? [],
+      provider,
+      seenNumbers,
+      namesAnotherRepository
+    );
+    if (numbers.length === 0) continue;
+
+    await Task.updateOne({ _id: holder._id }, removeProviderLinks(provider, numbers), {
+      updatePipeline: true,
+    });
+    removed += numbers.length;
+  }
+
+  return removed;
+}

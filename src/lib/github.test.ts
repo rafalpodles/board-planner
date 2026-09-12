@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { matchPRsToTasks } from "./github";
+import { matchPRsToTasks, pullRequestIsElsewhere, pullRequestRepository } from "./github";
 
 /**
  * A task key is built from the project's current key, so renaming the key renames every
@@ -53,5 +53,50 @@ describe("matchPRsToTasks", () => {
   it("treats a key with regex characters literally", () => {
     expect(matchPRsToTasks([pr({ ref: "cX-5/x" })], "C(", ["C."])).toEqual([]);
     expect(matchPRsToTasks([pr({ ref: "c(-5/x" })], "C(")).toHaveLength(1);
+  });
+});
+
+/**
+ * BP-610. Repointing a project at another repository strands every link from the old one, and no
+ * amount of syncing the new repository ever contradicts them by number — the numbers simply mean
+ * something else now. The URL is the only evidence, so it has to be read carefully enough that an
+ * unfamiliar shape removes nothing.
+ */
+describe("pullRequestRepository", () => {
+  it("reads the owner and repository out of a pull request URL", () => {
+    expect(pullRequestRepository("https://github.com/o/r/pull/12")).toEqual({
+      owner: "o",
+      repo: "r",
+    });
+  });
+
+  it("refuses anything that is not a github.com pull request", () => {
+    expect(pullRequestRepository("https://gitlab.com/g/p/-/merge_requests/12")).toBeNull();
+    expect(pullRequestRepository("https://github.com/o/r/issues/12")).toBeNull();
+    expect(pullRequestRepository("https://evil.test/github.com/o/r/pull/12")).toBeNull();
+    expect(pullRequestRepository("not-a-url")).toBeNull();
+  });
+});
+
+describe("pullRequestIsElsewhere", () => {
+  it("says so when the link names a different repository", () => {
+    expect(pullRequestIsElsewhere("https://github.com/other/repo/pull/12", "o", "r")).toBe(true);
+  });
+
+  it("keeps a link from the repository the project is pointed at", () => {
+    expect(pullRequestIsElsewhere("https://github.com/o/r/pull/12", "o", "r")).toBe(false);
+  });
+
+  it("does not mind how GitHub cased the owner and repository", () => {
+    expect(pullRequestIsElsewhere("https://github.com/O/R/pull/12", "o", "r")).toBe(false);
+  });
+
+  /**
+   * The conservative half: a URL nobody anticipated must not delete a link. Only a positive
+   * reading of another owner and repository removes anything.
+   */
+  it("keeps a link whose URL it cannot read", () => {
+    expect(pullRequestIsElsewhere("not-a-url", "o", "r")).toBe(false);
+    expect(pullRequestIsElsewhere("https://ghe.example.test/o/r/pull/12", "o", "r")).toBe(false);
   });
 });

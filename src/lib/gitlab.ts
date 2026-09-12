@@ -161,3 +161,23 @@ export function parseGitlabRepo(gitlabRepo: string): string | null {
   const withoutOrigin = trimmed.replace(/^https?:\/\/[^/]+\//, "");
   return /^[\w.-]+(\/[\w.-]+)+$/.test(withoutOrigin) ? withoutOrigin : null;
 }
+
+// `/-/merge_requests/` is the modern path; instances older than GitLab 11.11 wrote it without the
+// `/-/`, and a link stored then is still in the database.
+const MERGE_REQUEST_URL = /^(https?:\/\/[^/]+)\/(.+?)(?:\/-)?\/merge_requests\/\d+/i;
+
+export function mergeRequestProject(url: string): { host: string; path: string } | null {
+  const match = MERGE_REQUEST_URL.exec(url.trim());
+  return match ? { host: match[1].toLowerCase(), path: match[2].toLowerCase() } : null;
+}
+
+// GitHub's twin, and for the reason given there: repointing a project strands every link from the
+// old project, and only a positive reading of a different host or path removes one.
+export function mergeRequestIsElsewhere(url: string, host: string, projectPath: string): boolean {
+  const named = mergeRequestProject(url);
+  if (!named) return false;
+  return (
+    named.host !== host.replace(/\/+$/, "").toLowerCase() ||
+    named.path !== projectPath.replace(/^\/+|\/+$/g, "").toLowerCase()
+  );
+}

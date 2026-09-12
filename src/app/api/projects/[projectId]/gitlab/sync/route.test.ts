@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { replaceProviderLinks } from "@/lib/pr-links";
+import { removeProviderLinks, replaceProviderLinks } from "@/lib/pr-links";
 
 /**
  * BP-429. The post-fetch half of sync had no test at any level, which is how three separate things
@@ -11,21 +11,29 @@ import { replaceProviderLinks } from "@/lib/pr-links";
 
 // Hoisted: `@/lib/pr-links` above reaches `@/models/task`, so the factory below runs before a
 // plain `const` in this scope is initialised (BP-559).
-const { fetchMergeRequests, projectFindById, taskFindOne, taskUpdateOne, logActivity } = vi.hoisted(
-  () => ({
-    fetchMergeRequests: vi.fn(),
-    projectFindById: vi.fn(),
-    taskFindOne: vi.fn(),
-    taskUpdateOne: vi.fn(),
-    logActivity: vi.fn(),
-  })
-);
+const {
+  fetchMergeRequests,
+  projectFindById,
+  taskFind,
+  taskFindOne,
+  taskUpdateOne,
+  logActivity,
+} = vi.hoisted(() => ({
+  fetchMergeRequests: vi.fn(),
+  projectFindById: vi.fn(),
+  taskFind: vi.fn(),
+  taskFindOne: vi.fn(),
+  taskUpdateOne: vi.fn(),
+  logActivity: vi.fn(),
+}));
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/encryption", () => ({ decryptSecret: (v: string) => `plain:${v}` }));
 vi.mock("@/lib/activity", () => ({ logActivity }));
 vi.mock("@/models/project", () => ({ Project: { findById: projectFindById } }));
-vi.mock("@/models/task", () => ({ Task: { findOne: taskFindOne, updateOne: taskUpdateOne } }));
+vi.mock("@/models/task", () => ({
+  Task: { find: taskFind, findOne: taskFindOne, updateOne: taskUpdateOne },
+}));
 // Partial: matchMRsToTasks is the REAL matcher, so the former-keys assertion is about the shipped
 // rule rather than about a stub that agrees with itself.
 vi.mock("@/lib/gitlab", async (importOriginal) => ({
@@ -86,6 +94,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   projectFindById.mockReturnValue({ lean: () => project() });
   taskFindOne.mockResolvedValue(task());
+  // BP-610's second pass. Nothing else on the project holds a GitLab link by default, so every
+  // test that predates it is still about the round's own writes.
+  taskFind.mockReturnValue({ lean: async () => [] });
   fetchMergeRequests.mockResolvedValue([]);
 });
 
@@ -275,5 +286,85 @@ describe("POST .../gitlab/sync — linking", () => {
       "checking",
       "verifying"
     );
+  });
+});
+
+/**
+ * BP-610. The same defect as GitHub's, in the copy: the loop visits only this round's grouping, so
+ * a merge request that stops matching a task leaves that task's link behind for ever.
+ */
+describe("POST .../gitlab/sync — links this round contradicted", () => {
+  it("takes a retitled merge request off the task it no longer belongs to", async () => {
+    fetchMergeRequests.mockResolvedValue([
+      { ...mr({ iid: 1 }), title: "BP-7 moved here", source_branch: "no-key-here" },
+    ]);
+    taskFindOne.mockResolvedValue(task({ _id: "t7", taskNumber: 7 }));
+    taskFind.mockReturnValue({
+      lean: async () => [
+        {
+          _id: "t5",
+          taskNumber: 5,
+          linkedPRs: [
+            { provider: "gitlab", number: 1, url: "https://gitlab.com/g/p/-/merge_requests/1" },
+          ],
+        },
+      ],
+    });
+
+    const body = await (await POST(request(), ctx())).json();
+
+    expect(body.prsUnlinked).toBe(1);
+    expect(taskUpdateOne).toHaveBeenCalledWith({ _id: "t5" }, removeProviderLinks("gitlab", [1]), {
+      updatePipeline: true,
+    });
+  });
+
+  it("leaves a link alone when this round's fetch never mentioned it", async () => {
+    // GitLab is asked for the first hundred merge requests by `updated_at`; everything older is
+    // absent from every sync while being perfectly correct.
+    fetchMergeRequests.mockResolvedValue([mr({ iid: 1 })]);
+    taskFind.mockReturnValue({
+      lean: async () => [
+        {
+          _id: "t9",
+          taskNumber: 9,
+          linkedPRs: [
+            { provider: "gitlab", number: 4321, url: "https://gitlab.com/g/p/-/merge_requests/4321" },
+          ],
+        },
+      ],
+    });
+
+    const body = await (await POST(request(), ctx())).json();
+
+    expect(body.prsUnlinked).toBe(0);
+    expect(body.prsLinked).toBe(1);
+  });
+
+  it("leaves GitHub's links alone, whatever the numbers are", async () => {
+    fetchMergeRequests.mockResolvedValue([mr({ iid: 4321 })]);
+    taskFind.mockReturnValue({
+      lean: async () => [
+        {
+          _id: "t9",
+          taskNumber: 9,
+          linkedPRs: [{ provider: "github", number: 4321, url: "https://github.com/o/r/pull/4321" }],
+        },
+      ],
+    });
+
+    const body = await (await POST(request(), ctx())).json();
+
+    expect(body.prsUnlinked).toBe(0);
+  });
+
+  it("does not reach the second pass when the fetch itself failed", async () => {
+    fetchMergeRequests.mockRejectedValue(new Error("GitLab API"));
+
+    const res = await POST(request(), ctx());
+
+    expect(res.status).toBe(502);
+    // Nothing may be removed on the strength of a round that never happened.
+    expect(taskFind).not.toHaveBeenCalled();
   });
 });

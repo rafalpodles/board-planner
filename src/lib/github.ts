@@ -103,3 +103,27 @@ export function parseRepoString(githubRepo: string): { owner: string; repo: stri
   if (!match) return null;
   return { owner: match[1], repo: match[2] };
 }
+
+const PULL_REQUEST_URL = /^https?:\/\/(?:www\.)?github\.com\/([^/]+)\/([^/]+)\/pull\/\d+/i;
+
+export function pullRequestRepository(url: string): { owner: string; repo: string } | null {
+  const match = PULL_REQUEST_URL.exec(url.trim());
+  return match ? { owner: match[1], repo: match[2] } : null;
+}
+
+/**
+ * Whether a stored link names a repository this project is no longer pointed at (BP-610).
+ *
+ * Repointing a project leaves every link from the old repository behind, and no amount of syncing
+ * the new one contradicts them by number. This is the one case that needs no fetch to decide.
+ * `false` for a URL that does not parse: only a positive reading of another owner and repository
+ * removes anything.
+ */
+export function pullRequestIsElsewhere(url: string, owner: string, repo: string): boolean {
+  const named = pullRequestRepository(url);
+  if (!named) return false;
+  return (
+    named.owner.toLowerCase() !== owner.toLowerCase() ||
+    named.repo.toLowerCase() !== repo.toLowerCase()
+  );
+}
