@@ -279,10 +279,19 @@ export async function syncGithubPullRequests(
 /**
  * Refreshes every project that has a GitHub repository and a token.
  *
- * The rate-limit arithmetic, since it is the reason this is safe to leave on: a token is a
- * project's own, so the 5,000 requests an hour are not shared between boards. One tick costs two
- * requests for the pull requests plus two per open pull request up to `MAX_CHECKED_PULL_REQUESTS`,
- * so at most 42 — about 500 an hour at this interval, a tenth of one project's allowance.
+ * The rate-limit arithmetic. One tick costs two requests for the pull requests plus two per open
+ * pull request up to `MAX_CHECKED_PULL_REQUESTS`, so at most 42 per project — about 500 an hour at
+ * the default interval.
+ *
+ * What that is a tenth of is worth stating precisely, because the first version of this comment got
+ * it wrong: GitHub's 5,000 an hour is **per account**, not per token and not per project. Ten
+ * boards configured with the same person's token share one budget, and nothing in the product warns
+ * that a token has been pasted twice. So the honest claim is 500 an hour per project, and an
+ * operator running many boards off one account should raise `GITHUB_SYNC_TICK_MS` or give each
+ * board a token of its own.
+ *
+ * Two further things the number assumes and nothing enforces: one replica, and no overlapping
+ * ticks. The second is guarded below; the first is not, so N replicas cost N times this.
  */
 export async function githubSyncTick(): Promise<void> {
   await connectDB();

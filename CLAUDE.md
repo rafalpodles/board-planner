@@ -155,10 +155,14 @@ DIGEST_TIMEZONE=          # Optional — the zone that hour is read in (default 
 DIGEST_TICK_MS=           # Optional — digest scheduler tick (default 300000)
 GITHUB_SYNC_TICK_MS=      # Optional — how often every project with a GitHub token is re-synced,
                           # which is what keeps a pull request's CI badge current (default
-                          # 300000). 0 turns the background sync off; the button in project
-                          # settings and the one on a task still work. A tick refreshes links
-                          # only — it never moves a task between columns, because that write
-                          # needs an author and a tick has none (BP-443)
+                          # 300000, floor 60000, and a value that is not a number falls back to
+                          # the default and says so). 0 turns the background sync off; the button
+                          # in project settings and the one on a task still work. A tick refreshes
+                          # links only — it never moves a task between columns, because that write
+                          # needs an author and a tick has none. Costs at most 42 GitHub requests
+                          # per project per tick against a 5,000/hour limit that is **per GitHub
+                          # account**, not per project — so raise this, or use a token per board,
+                          # if one account's token is pasted into several projects (BP-443)
 GITHUB_API_BASE_URL=      # Optional — where GitHub's API is (default https://api.github.com).
                           # An operator's setting, never a project's: a board naming its own
                           # host would be a request forgery with that project's token attached

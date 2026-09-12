@@ -134,7 +134,7 @@ test.describe("the badge on the board", () => {
    * it is not a third turn of the loop above: since the review, a sync that cannot ask keeps what
    * the last one learned, and the loop would hand it `running` to keep.
    */
-  test("says so when the checks could not be read at all", async ({ page, request }) => {
+  test("says the checks have not been read when it could not ask", async ({ page, request }) => {
     await github(request, { pulls: [pull()], checks: { [HEAD]: "refuse" } });
     await syncNow(request);
 
@@ -142,7 +142,9 @@ test.describe("the badge on the board", () => {
     await page.goto(`/projects/${PROJECT_KEY}`);
 
     await expect(state(page)).toHaveAttribute("data-look", "unknown");
-    await expect(state(page).getByText(/could not be read/)).toBeAttached();
+    await expect(state(page).getByText(/checks not read/)).toBeAttached();
+    // Not an accusation: the same state also means "past the cap, nobody asked"
+    await expect(state(page).getByText(/could not/)).toHaveCount(0);
   });
 
   /**

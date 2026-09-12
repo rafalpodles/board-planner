@@ -1,4 +1,17 @@
 import { escapeRegex } from "./escape-regex";
+import { MAX_RESPONSE_BYTES, readBoundedJson, readBoundedText, safeFetch } from "@/lib/safe-fetch";
+
+/**
+ * Every GitHub call goes through `safeFetch`, which re-checks the destination at each redirect hop
+ * and refuses a private address — the same guard `gitlab.ts` has always used.
+ *
+ * It was not needed while the host was the literal `api.github.com`, and making that injectable is
+ * what removed the reason: an operator with a typo, or a corporate proxy, now decides where a
+ * project's token is sent. The loopback carve-out is the one `mcp-client.ts` already makes, on the
+ * same condition — it is what lets `e2e/github-stub.mjs` be reachable at all, and production
+ * refuses it.
+ */
+const GITHUB_DESTINATION = { allowLoopback: process.env.NODE_ENV !== "production" };
 
 interface GitHubPR {
   number: number;
@@ -99,9 +112,13 @@ export async function fetchPullRequests(
 }
 
 async function fetchPage(url: string, headers: Record<string, string>): Promise<GitHubPR[]> {
-  const res = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
+  const res = await safeFetch(
+    url,
+    { headers, signal: AbortSignal.timeout(15000) },
+    GITHUB_DESTINATION
+  );
   if (!res.ok) throw await refusal(res);
-  return res.json();
+  return readBoundedJson(res, MAX_RESPONSE_BYTES);
 }
 
 /**
@@ -116,8 +133,11 @@ async function fetchPage(url: string, headers: Record<string, string>): Promise<
  * is to wait rather than to check the token.
  */
 async function refusal(res: Response): Promise<Error> {
-  const body = await res.text().catch(() => "");
-  console.error(`GitHub API ${res.status} for ${new URL(res.url || "http://x/").pathname}: ${body.slice(0, 500)}`);
+  // Bounded, not `res.text()`: a host answering an error with a multi-gigabyte body would exhaust
+  // the container while being politely refused, and nothing in the log would look like an attack
+  // (BP-317, which is why `readBoundedText` exists).
+  const body = await readBoundedText(res, 4096).catch(() => "");
+  console.error(`GitHub API ${res.status}: ${body.slice(0, 500)}`);
   const rateLimited =
     res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0";
   if (rateLimited) {
@@ -295,9 +315,13 @@ async function fetchCheckRuns(
 }
 
 async function fetchJson<T>(url: string, headers: Record<string, string>): Promise<T> {
-  const res = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
+  const res = await safeFetch(
+    url,
+    { headers, signal: AbortSignal.timeout(15000) },
+    GITHUB_DESTINATION
+  );
   if (!res.ok) throw await refusal(res);
-  return res.json();
+  return readBoundedJson(res, MAX_RESPONSE_BYTES);
 }
 
 /**

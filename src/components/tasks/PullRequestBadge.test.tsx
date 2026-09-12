@@ -137,8 +137,10 @@ describe("the badge on the board", () => {
       cleanup();
       render(<PullRequestBadge pr={pr(of)} />);
       const badge = screen.getByTestId("pr-badge");
+      // `data-look` is deliberately NOT in here. The first version of this compared it along with
+      // the rest, and `data-look` differs by construction — so the assertion could not fail however
+      // identical the badges looked, which is the bug it was written to catch wearing a disguise.
       return JSON.stringify({
-        look: badge.dataset.look,
         // The mark, the outline and the accent — the three things a glance has
         text: badge.textContent,
         icon: badge.querySelector("path")?.getAttribute("d")?.slice(0, 40),
