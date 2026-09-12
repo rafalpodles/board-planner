@@ -123,8 +123,17 @@ test.describe("the badge on the board", () => {
     }
   });
 
-  // A red check on work that shipped is not news, and the badge that matters says "merged"
-  test("lets a merge outrank the build that failed under it", async ({ page, request }) => {
+  /**
+   * A merged pull request reads as merged, and that is all this can claim.
+   *
+   * `pullRequestLook` also says a merge outranks a failing build, and the checks below are failing
+   * — but that rule is unreachable from here and the test was written before that was noticed: the
+   * sync never asks a finished pull request about its checks, so what is stored is `ci: "none"` and
+   * the precedence never fires. Watched staying green against a build with the precedence inverted,
+   * which is what proved it. The rule is defensive, and `PullRequestBadge.test.tsx` pins it where
+   * the state can be constructed.
+   */
+  test("shows a merged pull request as merged", async ({ page, request }) => {
     await github(request, {
       pulls: [pull({ state: "closed", merged_at: "2026-09-02T00:00:00Z" })],
       checks: { [HEAD]: failing },
@@ -135,6 +144,7 @@ test.describe("the badge on the board", () => {
     await page.goto(`/projects/${PROJECT_KEY}`);
 
     await expect(state(page)).toHaveAttribute("data-look", "merged");
+    await expect(state(page).getByText(/— merged$/)).toBeAttached();
   });
 
   /**

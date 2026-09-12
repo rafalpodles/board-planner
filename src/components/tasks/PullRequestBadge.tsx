@@ -26,6 +26,11 @@ export type PullRequestLook =
  *
  * The pull request's state wins: a merged branch's build is history, and a red check on work that
  * shipped a week ago is not news. CI only decides the look while the pull request is open.
+ *
+ * Defensive rather than live, and worth saying so: the sync never asks a finished pull request
+ * about its checks, so today nothing writes a merged link carrying a CI state for this to outrank.
+ * It is the right precedence the day something does, and it is pinned in the component test — the
+ * end-to-end one cannot construct the state and does not claim to.
  */
 export function pullRequestLook(pr: Pick<ApiLinkedPR, "state" | "ci">): PullRequestLook {
   if (pr.state === "merged") return "merged";
