@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { unstuff } from "./smtp-stub.mjs";
+import { unstuff } from "./dot-stuffing.mjs";
 
 /**
  * BP-465. The stub keeps what it is handed, and a spec asserts on the task title inside it. Every
  * message this suite sends happens to be free of dot-stuffing, so this transform has no other
  * witness.
+ *
+ * Imported from `dot-stuffing.mjs` rather than from the stub: this file runs under `npm test`, and
+ * importing `smtp-stub.mjs` would run its module body there — `openssl`, two bound ports and an
+ * `uncaughtException` handler inside the vitest worker.
  */
 describe("the mail stub's dot un-stuffing", () => {
   it("restores a body line the client had to double", () => {

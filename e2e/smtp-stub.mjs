@@ -4,6 +4,7 @@ import { createServer as createTcpServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TLSSocket, createSecureContext } from "node:tls";
+import { unstuff } from "./dot-stuffing.mjs";
 import { fatal, fatalOnListenFailure, keepAlive, serve } from "./stub-guard.mjs";
 
 /**
@@ -53,9 +54,11 @@ function selfSignedCertificate() {
     fatal(NAME, `openssl could not make a certificate: ${error}`);
   }
   const material = { key: readFileSync(key), cert: readFileSync(cert) };
-  // Dozens of runs a day would otherwise leave dozens of directories holding a private key. The
-  // handler runs on `fatal`'s exit too, which is how this process ends when a port is taken.
-  process.on("exit", () => rmSync(dir, { recursive: true, force: true }));
+  // Deleted now rather than on exit: Playwright stops a webServer with a signal, and Node's default
+  // signal handling runs no `exit` handler — so the ordinary end of a run would leave the directory
+  // and its private key behind, which is the path that happens every time. Nothing reads the files
+  // again once they are in memory.
+  rmSync(dir, { recursive: true, force: true });
   return material;
 }
 
@@ -179,19 +182,6 @@ function command(socket, session, line) {
     default:
       socket.write("250 2.0.0 Ok\r\n");
   }
-}
-
-/**
- * Undoes the dot-stuffing RFC 5321 §4.5.2 requires of the client: a body line beginning with a dot
- * is sent doubled so it cannot be mistaken for the terminator, and a reader that keeps both sees a
- * body its sender never wrote. The specs here match on a task title, so a title starting with a
- * dot would silently stop matching.
- *
- * Exported for `smtp-stub.test.ts`: no message nodemailer sends in this suite is dot-stuffed, so
- * nothing else here would notice this being wrong.
- */
-export function unstuff(body) {
-  return body.replace(/^\.\./gm, ".");
 }
 
 function address(line) {
