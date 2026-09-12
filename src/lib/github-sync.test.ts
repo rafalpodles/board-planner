@@ -321,3 +321,90 @@ describe("how often the background sync runs", () => {
     expect(syncTickMs("50")).toBe(60000);
   });
 });
+
+/**
+ * `taskSchema` has `timestamps: true`, and Mongoose appends `$set: { updatedAt: now }` to a
+ * pipeline update. An unconditional write therefore moved every task with a pull request to "just
+ * now" every five minutes — and the dashboard reads `updatedAt` on a done task as the date it was
+ * finished, so work closed weeks ago reported as finished this week for as long as its merged pull
+ * request stayed in GitHub's recently-closed window.
+ */
+describe("a sync that learned nothing", () => {
+  const storedFrom = (over: Record<string, unknown> = {}) => ({
+    provider: "github",
+    number: 1,
+    title: "Some change",
+    state: "merged",
+    url: "https://github.com/o/r/pull/1",
+    mergedAt: new Date("2026-08-02T00:00:00Z"),
+    updatedAt: new Date("2026-08-01T00:00:00Z"),
+    ci: "none",
+    ciLabel: null,
+    headSha: null,
+    ...over,
+  });
+
+  beforeEach(() => {
+    fetchPullRequests.mockResolvedValue([mergedPR]);
+  });
+
+  it("writes nothing, so the task's own updatedAt does not move", async () => {
+    taskFindOne.mockResolvedValue({
+      _id: "t1",
+      taskNumber: 5,
+      status: "done",
+      linkedPRs: [storedFrom()],
+    });
+
+    const result = await syncGithubPullRequests(project(), "u1");
+
+    expect(result).toMatchObject({ tasksWritten: 0 });
+    expect(taskUpdateOne).not.toHaveBeenCalled();
+    // Still counted as found: the sync did its job, it simply had nothing new to store
+    expect(result).toMatchObject({ prsLinked: 1 });
+  });
+
+  // The control, and the half that must not be broken by the one above
+  it("writes when anything about the pull request has changed", async () => {
+    for (const change of [
+      { title: "Renamed on GitHub" },
+      { state: "open", mergedAt: null },
+      { ci: "failure" },
+      { ciLabel: "e2e" },
+      { headSha: "abc123" },
+      { url: "https://github.com/o/r/pull/2" },
+      { updatedAt: new Date("2020-01-01T00:00:00Z") },
+    ] as Record<string, unknown>[]) {
+      vi.clearAllMocks();
+      taskUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+      taskFindOne.mockResolvedValue({
+        _id: "t1",
+        taskNumber: 5,
+        status: "done",
+        linkedPRs: [storedFrom(change)],
+      });
+
+      const result = await syncGithubPullRequests(project(), "u1");
+
+      expect(result, JSON.stringify(change)).toMatchObject({ tasksWritten: 1 });
+    }
+  });
+
+  it("writes when a pull request appears or disappears", async () => {
+    taskFindOne.mockResolvedValue({ _id: "t1", taskNumber: 5, status: "done", linkedPRs: [] });
+
+    expect(await syncGithubPullRequests(project(), "u1")).toMatchObject({ tasksWritten: 1 });
+  });
+
+  // A GitLab link beside it is not this sync's business and must not make it look changed
+  it("ignores the other provider's links when deciding", async () => {
+    taskFindOne.mockResolvedValue({
+      _id: "t1",
+      taskNumber: 5,
+      status: "done",
+      linkedPRs: [storedFrom(), { provider: "gitlab", number: 9, title: "MR", state: "open", url: "u" }],
+    });
+
+    expect(await syncGithubPullRequests(project(), "u1")).toMatchObject({ tasksWritten: 0 });
+  });
+});

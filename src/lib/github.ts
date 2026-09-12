@@ -19,9 +19,15 @@ const API_BASE = () => process.env.GITHUB_API_BASE_URL || "https://api.github.co
 /**
  * What continuous integration says about a pull request's head commit.
  *
- * `unknown` is not a state GitHub reports: it is what this instance says when it could not ask.
- * Distinct from `none` on purpose — "nothing has run" and "we do not know" send a reader to
- * different places, and collapsing them is how a broken token reads as a green board.
+ * `unknown` is not a state GitHub reports: it is what this instance says when it has not read the
+ * checks — because the request failed, or because the pull request was past the cap and nobody
+ * asked. Distinct from `none` on purpose: "nothing has run" and "we have not looked" send a reader
+ * to different places, and collapsing them is how an instance that cannot reach GitHub reads as a
+ * board where no build ever ran.
+ *
+ * Narrower than it sounds, and worth saying so: a token so broken that the pull-request listing
+ * fails never reaches this state at all, because the sync throws before any link is written and
+ * the badges keep whatever the last good sync stored.
  */
 export type CiState = "none" | "running" | "success" | "failure" | "unknown";
 
@@ -94,10 +100,32 @@ export async function fetchPullRequests(
 
 async function fetchPage(url: string, headers: Record<string, string>): Promise<GitHubPR[]> {
   const res = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
-  if (!res.ok) {
-    throw new Error(`GitHub API ${res.status}: ${await res.text().catch(() => res.statusText)}`);
-  }
+  if (!res.ok) throw await refusal(res);
   return res.json();
+}
+
+/**
+ * What GitHub said, as an error a person may be shown.
+ *
+ * The status and nothing else. The body used to travel in the message and the message now reaches
+ * a toast — and the body is written by whatever host `GITHUB_API_BASE_URL` names, which is handed
+ * an `Authorization` header. A server that echoes its request would put the project's token on
+ * somebody's screen. It goes to the log, which is where a diagnosis belongs.
+ *
+ * A rate limit is named rather than left as "403", because it is the one refusal where the answer
+ * is to wait rather than to check the token.
+ */
+async function refusal(res: Response): Promise<Error> {
+  const body = await res.text().catch(() => "");
+  console.error(`GitHub API ${res.status} for ${new URL(res.url || "http://x/").pathname}: ${body.slice(0, 500)}`);
+  const rateLimited =
+    res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0";
+  if (rateLimited) {
+    const resets = res.headers.get("x-ratelimit-reset");
+    const at = resets ? new Date(Number(resets) * 1000).toISOString() : "shortly";
+    return new Error(`GitHub rate limit reached for this token; it resets at ${at}`);
+  }
+  return new Error(`GitHub answered ${res.status}`);
 }
 
 /**
@@ -220,15 +248,21 @@ export async function fetchChecks(
   };
   const base = `${API_BASE()}/repos/${owner}/${repo}/commits/${sha}`;
 
-  try {
-    const [runs, status] = await Promise.all([
-      fetchCheckRuns(base, headers),
-      fetchJson<CommitStatus>(`${base}/status`, headers),
-    ]);
-    return reduceChecks(runs, status);
-  } catch {
+  // Settled, not all: the two mechanisms are independent, and a repository using only one of them
+  // gets a 404 or an error from the other. `Promise.all` threw the good half away with the bad and
+  // answered `unknown` for a commit whose checks had been read perfectly well.
+  const [runs, status] = await Promise.allSettled([
+    fetchCheckRuns(base, headers),
+    fetchJson<CommitStatus>(`${base}/status`, headers),
+  ]);
+
+  if (runs.status === "rejected" && status.status === "rejected") {
     return { ci: "unknown", ciLabel: null };
   }
+  return reduceChecks(
+    runs.status === "fulfilled" ? runs.value : [],
+    status.status === "fulfilled" ? status.value : null
+  );
 }
 
 /** Pages a commit can have before this stops reading them. */
@@ -262,7 +296,7 @@ async function fetchCheckRuns(
 
 async function fetchJson<T>(url: string, headers: Record<string, string>): Promise<T> {
   const res = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
-  if (!res.ok) throw new Error(`GitHub API ${res.status}`);
+  if (!res.ok) throw await refusal(res);
   return res.json();
 }
 
@@ -305,8 +339,9 @@ export async function withChecks(
   }
 
   // An open pull request nobody asked about — past the cap, or with no head commit to ask about —
-  // is `unknown` rather than `none`, which is the literal truth and keeps a capped sync from
-  // reporting a board full of builds that never ran.
+  // is `unknown` rather than `none`: nobody looked, which is not the same as nothing having run.
+  // `carryForward` in github-sync.ts keeps a previous answer where there is one, so this reaches
+  // the screen only for a pull request that has never been asked about.
   return prs.map((pr) => ({
     ...pr,
     ...(checks.get(pr) ?? {

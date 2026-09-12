@@ -334,4 +334,32 @@ describe("POST .../github/sync", () => {
       expect(linkWritten()[0]).toMatchObject({ ci: "unknown", headSha: null });
     });
   });
+
+  /**
+   * `fetchPullRequests` throws on every non-ok answer from GitHub. Uncaught, that is a 500 whose
+   * body is not JSON, and the client then falls back to `res.statusText` — which under HTTP/2 is
+   * empty by definition. On Railway that was a red toast with no words in it.
+   */
+  describe("when GitHub cannot be reached at all", () => {
+    it("answers 502 with something a person can read", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      fetchPullRequests.mockRejectedValue(new Error("GitHub answered 401"));
+
+      const res = await POST(request(), ctx());
+      const body = await res.json();
+
+      expect(res.status).toBe(502);
+      expect(body.error).toContain("401");
+      expect(String(body.error).length).toBeGreaterThan(10);
+    });
+
+    it("writes nothing when it could not read anything", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      fetchPullRequests.mockRejectedValue(new Error("GitHub answered 403"));
+
+      await POST(request(), ctx());
+
+      expect(taskUpdateOne).not.toHaveBeenCalled();
+    });
+  });
 });

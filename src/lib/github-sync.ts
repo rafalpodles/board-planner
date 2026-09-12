@@ -78,12 +78,62 @@ function carryForward(
   return { ci: previous.ci, ciLabel: previous.ciLabel ?? null };
 }
 
+/** A link reduced to what a sync can change about it, for comparing one round against the last. */
+function signature(link: {
+  number: number;
+  title: string;
+  state: string;
+  url: string;
+  mergedAt?: Date | null;
+  updatedAt?: Date | null;
+  ci?: CiState;
+  ciLabel?: string | null;
+  headSha?: string | null;
+}): string {
+  return JSON.stringify([
+    link.number,
+    link.title,
+    link.state,
+    link.url,
+    link.mergedAt?.getTime() ?? null,
+    link.updatedAt?.getTime() ?? null,
+    link.ci ?? "none",
+    link.ciLabel ?? null,
+    link.headSha ?? null,
+  ]);
+}
+
+/**
+ * Whether this sync learned anything about a task's GitHub links.
+ *
+ * The write is skipped when it did not, and that is not an optimisation. `taskSchema` has
+ * `timestamps: true`, and Mongoose appends `$set: { updatedAt: now }` to a pipeline update — so an
+ * unconditional write moved every task with a pull request to "just now" every five minutes. The
+ * dashboard reads `updatedAt` on a done task as the date it was finished
+ * (`api/projects/[id]/stats`), so tasks closed weeks ago would have reported as finished this week
+ * for as long as their merged pull request stayed in GitHub's recently-closed window; My Tasks,
+ * search and suggestions all sort by it too. `tasks/reorder` carries the same warning about drags.
+ */
+function unchanged(
+  stored: ILinkedPR[] | undefined,
+  fresh: { number: number; title: string; state: string; url: string }[]
+): boolean {
+  const before = (stored ?? [])
+    .filter((link) => (link.provider ?? "github") === "github")
+    .map(signature)
+    .sort();
+  const after = fresh.map(signature as (link: (typeof fresh)[number]) => string).sort();
+  return before.length === after.length && before.every((line, i) => line === after[i]);
+}
+
 export type SyncResult =
   | {
       ok: true;
       prsFound: number;
       tasksLinked: number;
       prsLinked: number;
+      /** Tasks whose links this sync actually rewrote — see `unchanged`. */
+      tasksWritten: number;
       autoTransitioned: number;
     }
   | { ok: false; status: number; error: string };
@@ -152,6 +202,7 @@ export async function syncGithubPullRequests(
   }
 
   let linked = 0;
+  let written = 0;
   let autoTransitioned = 0;
   const columnIds = new Set(getProjectColumns(project).map((c) => c.id));
 
@@ -177,7 +228,10 @@ export async function syncGithubPullRequests(
     // other provider's links.
     //
     // Dates are built here, not left to the schema: a pipeline update is not cast by Mongoose.
-    await writeProviderLinks(task._id, "github", prDocs);
+    if (!unchanged(task.linkedPRs, prDocs)) {
+      await writeProviderLinks(task._id, "github", prDocs);
+      written++;
+    }
     linked += prs.length;
 
     // Auto-transition: merged PR + task in_review → ready_to_test.
@@ -217,6 +271,7 @@ export async function syncGithubPullRequests(
     prsFound: matchedPRs.length,
     tasksLinked: prsByTask.size,
     prsLinked: linked,
+    tasksWritten: written,
     autoTransitioned,
   };
 }

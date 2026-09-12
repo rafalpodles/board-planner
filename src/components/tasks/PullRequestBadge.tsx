@@ -52,9 +52,10 @@ export function pullRequestStatusText(
     running: `${what} running`,
     success: `${what} passed`,
     failure: `${what} failed`,
-    // The one state GitHub never reports. Said in full, because a reader who cannot tell this from
-    // "nothing has run" will read a broken token as a quiet board.
-    unknown: "checks could not be read",
+    // The one state GitHub never reports. "Not read" rather than "could not be read", because it
+    // covers two causes: a request that failed, and a pull request past the sync's cap that nobody
+    // asked about. Accusing the token of the second would send a reader to the wrong place.
+    unknown: "checks not read",
   };
   return said[pullRequestLook(pr)];
 }

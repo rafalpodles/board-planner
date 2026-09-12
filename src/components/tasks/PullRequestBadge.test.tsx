@@ -29,6 +29,17 @@ const pr = (over: Partial<ApiLinkedPR> = {}): ApiLinkedPR =>
     ...over,
   }) as ApiLinkedPR;
 
+/** One pull request per look the badge can wear. */
+const ALL_LOOKS: Partial<ApiLinkedPR>[] = [
+  { state: "open" },
+  { state: "open", ci: "running" },
+  { state: "open", ci: "success" },
+  { state: "open", ci: "failure" },
+  { state: "open", ci: "unknown" },
+  { state: "merged" },
+  { state: "closed" },
+];
+
 afterEach(cleanup);
 
 describe("what the badge decides to show", () => {
@@ -64,11 +75,18 @@ describe("the sentence it carries", () => {
     expect(pullRequestSummary(pr({ ci: "failure", ciLabel: null }))).toContain("checks failed");
   });
 
-  // The whole reason `unknown` is a state of its own: a reader who cannot tell it from "nothing
-  // has run" reads a broken token as a quiet board
-  it("says plainly that the checks could not be read", () => {
-    expect(pullRequestSummary(pr({ ci: "unknown" }))).toContain("could not be read");
-    expect(pullRequestSummary(pr({ ci: "none" }))).not.toContain("could not be read");
+  /**
+   * The whole reason `unknown` is a state of its own: a reader who cannot tell it from "nothing has
+   * run" reads an instance that cannot reach GitHub as a board where no build ever ran.
+   *
+   * "not read" rather than "could not be read", and the distinction is the review's: the state has
+   * two causes — a request that failed, and a pull request past the sync's cap that nobody asked
+   * about — and only one of them is the token's fault.
+   */
+  it("says the checks have not been read, without blaming the token", () => {
+    expect(pullRequestSummary(pr({ ci: "unknown" }))).toContain("checks not read");
+    expect(pullRequestSummary(pr({ ci: "unknown" }))).not.toContain("could not");
+    expect(pullRequestSummary(pr({ ci: "none" }))).not.toContain("not read");
   });
 });
 
@@ -106,16 +124,29 @@ describe("the badge on the board", () => {
     expect(screen.getByRole("link", { name: /e2e failed/ })).toBeTruthy();
   });
 
-  // Shape, not hue: the two CI outcomes must differ by something a reader with red/green colour
-  // blindness can see, and the running state must survive prefers-reduced-motion
-  it("gives each state a glyph of its own", () => {
-    const glyphs = (["success", "failure", "running", "unknown"] as CiState[]).map((ci) => {
+  /**
+   * Shape, not hue: red against green on a badge this size is the pair colour blindness separates
+   * worst, and the pulse is dropped under prefers-reduced-motion.
+   *
+   * All seven looks, not the four CI ones. The version of this test that ran the four passed while
+   * `open` and `closed` were the same picture in the same grey — it iterated exactly the states
+   * that did not collide, so it could not have caught it.
+   */
+  it("makes every state look different from every other", () => {
+    const seen = ALL_LOOKS.map((of) => {
       cleanup();
-      render(<PullRequestBadge pr={pr({ ci })} />);
-      return screen.getByTestId("pr-badge").textContent;
+      render(<PullRequestBadge pr={pr(of)} />);
+      const badge = screen.getByTestId("pr-badge");
+      return JSON.stringify({
+        look: badge.dataset.look,
+        // The mark, the outline and the accent — the three things a glance has
+        text: badge.textContent,
+        icon: badge.querySelector("path")?.getAttribute("d")?.slice(0, 40),
+        accent: badge.getAttribute("style"),
+      });
     });
 
-    expect(new Set(glyphs).size).toBe(glyphs.length);
+    expect(new Set(seen).size, seen.join("\n")).toBe(ALL_LOOKS.length);
   });
 
   it("keeps the running state visible when motion is unwelcome", () => {

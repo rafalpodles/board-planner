@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { MAX_CHECKED_PULL_REQUESTS, fetchChecks, withChecks, type ParsedPR } from "./github";
+import {
+  MAX_CHECKED_PULL_REQUESTS,
+  fetchChecks,
+  fetchPullRequests,
+  withChecks,
+  type ParsedPR,
+} from "./github";
 
 /**
  * BP-443 review. The cap, its ordering and the batching are what the "safe to leave the background
@@ -150,5 +156,88 @@ describe("a commit with more check runs than one page holds", () => {
     await fetchChecks("o", "r", "sha1", "t");
 
     expect(asked.filter((url) => url.includes("/check-runs"))).toHaveLength(1);
+  });
+});
+
+/**
+ * The two mechanisms are independent, and a repository using only one gets an error from the
+ * other. `Promise.all` threw the good half away with the bad and answered `unknown` for a commit
+ * whose checks had been read perfectly well.
+ */
+describe("when only one of the two answers", () => {
+  function answering(check: "ok" | "fail", status: "ok" | "fail") {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const which = String(url).includes("/check-runs") ? check : status;
+        if (which === "fail") return new Response("no", { status: 500 });
+        return new Response(
+          JSON.stringify(
+            String(url).includes("/check-runs")
+              ? { check_runs: [{ name: "unit", status: "completed", conclusion: "failure" }] }
+              : { state: "success", statuses: [{ context: "ci/other", state: "success" }] }
+          ),
+          { status: 200 }
+        );
+      })
+    );
+  }
+
+  it("still reports the check runs when the commit status call fails", async () => {
+    answering("ok", "fail");
+
+    expect(await fetchChecks("o", "r", "sha1", "t")).toEqual({ ci: "failure", ciLabel: "unit" });
+  });
+
+  it("still reports the commit status when the check-runs call fails", async () => {
+    answering("fail", "ok");
+
+    expect(await fetchChecks("o", "r", "sha1", "t")).toEqual({
+      ci: "success",
+      ciLabel: "ci/other",
+    });
+  });
+
+  // Only when neither answered is there genuinely nothing to say
+  it("says unknown when neither answers", async () => {
+    answering("fail", "fail");
+
+    expect(await fetchChecks("o", "r", "sha1", "t")).toEqual({ ci: "unknown", ciLabel: null });
+  });
+});
+
+/**
+ * A rate limit is the one refusal where the answer is to wait rather than to check the token, so
+ * it says so. And GitHub's own body never travels in the message: the host is whatever
+ * GITHUB_API_BASE_URL names, it is handed an Authorization header, and a server that echoes its
+ * request would otherwise put the project's token in a toast.
+ */
+describe("what a refusal says", () => {
+  function refusing(status: number, headers: Record<string, string>, body: string) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(body, { status, headers }))
+    );
+  }
+
+  it("names a rate limit rather than reporting a bare 403", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    refusing(403, { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1789000000" }, "{}");
+
+    await expect(fetchPullRequests("o", "r", "t")).rejects.toThrow(/rate limit/i);
+  });
+
+  it("reports an ordinary refusal by its status", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    refusing(401, {}, "{}");
+
+    await expect(fetchPullRequests("o", "r", "t")).rejects.toThrow("GitHub answered 401");
+  });
+
+  it("never carries what the other end said into the message", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    refusing(401, {}, JSON.stringify({ echoed: "Bearer the-projects-secret-token" }));
+
+    await expect(fetchPullRequests("o", "r", "t")).rejects.not.toThrow(/secret-token/);
   });
 });
