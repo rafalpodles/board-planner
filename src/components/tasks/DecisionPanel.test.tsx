@@ -24,6 +24,7 @@ function decision(over: Partial<ApiTaskDecision> = {}): ApiTaskDecision {
     files: ["package.json", "src/a.ts", "src/b.ts"],
     fileCount: 3,
     protectedFiles: ["package.json"],
+    protectedFileCount: 1,
     patch: "diff --git a/package.json b/package.json\n+  \"build\": \"x\"\n",
     patchTruncated: false,
     commit: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
@@ -95,6 +96,30 @@ describe("what the panel shows", () => {
 
     expect(screen.getByTestId("decision-protected-files").textContent).toContain("package.json");
     expect(screen.getByTestId("decision-file-count").textContent).toContain("3 files");
+  });
+
+  /**
+   * Both lists are bounded by the route that stores them and both counts are not, so the panel has
+   * to render the counts — otherwise a seven-hundred-file change reads as five hundred on the one
+   * sentence whose job is to say how much is being consented to.
+   */
+  it("says how many files there really are, not how many it was given", () => {
+    panel({ files: ["a.ts"], fileCount: 700 });
+
+    expect(screen.getByTestId("decision-file-count").textContent).toContain("700 files");
+  });
+
+  it("says how many more tripped the gate than it can show", () => {
+    panel({ protectedFiles: ["package.json"], protectedFileCount: 600 });
+
+    expect(screen.getByTestId("decision-protected-files").textContent).toContain("and 599 more");
+  });
+
+  // The control: nothing extra when the list is whole
+  it("says nothing about more when it is showing all of them", () => {
+    panel();
+
+    expect(screen.getByTestId("decision-protected-files").textContent).not.toContain("more");
   });
 });
 
@@ -604,7 +629,11 @@ describe("what giving up is warned to cost", () => {
       fireEvent.click(screen.getByRole("button", { name: "Give up" }));
 
       const said = screen.getByRole("dialog").textContent ?? "";
-      expect(said).toContain("removes the worktree on its next poll");
+      // The machine's real name, verbatim. Capitalising whatever `workerName` holds — rather than
+      // only the fallback that starts a sentence — turned `e2e-macbook-pro` into
+      // `E2e-macbook-pro`, and every assertion here matched a substring after the name, so
+      // nothing could see it.
+      expect(said).toContain("e2e-macbook-pro removes the worktree on its next poll");
       // "worktree", not "checkout": what is left behind is the linked worktree under the worker's
       // own root, and this product uses "checkout" for the clone the operator approved
       expect(said).toContain("worktree stays on that machine until somebody removes it");

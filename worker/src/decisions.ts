@@ -279,6 +279,7 @@ export async function openDecision(
       files: input.diff.changedFiles,
       fileCount: input.diff.changedFiles.length,
       protectedFiles: protectedPaths(input.diff.changedFiles),
+      protectedFileCount: protectedPaths(input.diff.changedFiles).length,
       patch: deps.scrub(input.diff.patch),
       patchTruncated: input.diff.truncated,
       patchSha256: sha256(input.diff.patch),

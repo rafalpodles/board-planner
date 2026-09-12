@@ -674,6 +674,7 @@ describe("createApiClient", () => {
       files: ["package.json"],
       fileCount: 1,
       protectedFiles: ["package.json"],
+      protectedFileCount: 1,
       patch: "diff",
       patchTruncated: false,
       patchSha256: "b".repeat(64),

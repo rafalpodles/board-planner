@@ -49,12 +49,30 @@ const MAX_FILES = 500;
 const MAX_PATH_CHARS = 256;
 const MAX_REASON_CHARS = 500;
 
-function strings(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter((entry): entry is string => typeof entry === "string" && Boolean(entry.trim()))
-    .slice(0, MAX_FILES)
-    .map((entry) => entry.trim().slice(0, MAX_PATH_CHARS));
+/**
+ * A bounded list of paths, and how many there really were.
+ *
+ * Both halves matter to a reader. The panel renders the list as "what tripped the gate" and the
+ * count as the size of what accepting pushes, so a silently shortened list makes one of those
+ * sentences smaller than the change it describes — the same defect `patchTruncated` exists to
+ * prevent one field over.
+ *
+ * A path longer than the bound keeps a marker rather than being quietly shortened: a chip reading
+ * `src/very/long/…` is visibly a cut name, where `src/very/long` is a filename that does not
+ * exist.
+ */
+function paths(value: unknown): { kept: string[]; total: number } {
+  if (!Array.isArray(value)) return { kept: [], total: 0 };
+  const real = value.filter(
+    (entry): entry is string => typeof entry === "string" && Boolean(entry.trim())
+  );
+  return {
+    kept: real.slice(0, MAX_FILES).map((entry) => {
+      const path = entry.trim();
+      return path.length <= MAX_PATH_CHARS ? path : `${path.slice(0, MAX_PATH_CHARS - 1)}…`;
+    }),
+    total: real.length,
+  };
 }
 
 function text(value: unknown, max: number): string {
@@ -139,15 +157,15 @@ export const POST = withWorker(async (request, { worker }) => {
       ? ""
       : "the change is larger than the patch this record can carry, so what is shown below is not all of it. Nobody can accept a change they have not been shown.");
 
-  const sentFiles = Array.isArray(body.value.files) ? body.value.files.length : 0;
+  const files = paths(body.value.files);
+  const protectedFiles = paths(body.value.protectedFiles);
 
   const result = await createDecision(taskId, String(worker._id), runId, {
     gate,
-    files: strings(body.value.files),
-    // Beside the bounded list, because the panel renders it as "the whole commit — N files" and a
-    // sliced list would make that sentence smaller than the change it describes.
-    fileCount: sentFiles,
-    protectedFiles: strings(body.value.protectedFiles),
+    files: files.kept,
+    fileCount: files.total,
+    protectedFiles: protectedFiles.kept,
+    protectedFileCount: protectedFiles.total,
     patch,
     patchTruncated,
     patchSha256,

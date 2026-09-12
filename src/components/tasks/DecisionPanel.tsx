@@ -15,6 +15,9 @@ interface DecisionPanelProps {
   onAnswered: () => void;
 }
 
+/** What the panel calls a machine the fleet no longer names. */
+const FALLBACK_MACHINE = "that machine";
+
 /** A machine quiet for longer than this has probably not heard, and may never. */
 const PRESUMED_GONE_MS = 10 * 60_000;
 
@@ -77,10 +80,11 @@ function abandonWarning(state: TaskDecisionState, machine: string): string {
    * button is named for — a machine that is not coming back never polls, and its checkout stays
    * where it is.
    */
-  // Capitalised only where it starts a sentence. The fallback used to be "That machine" for every
-  // position, which read as "…and That machine may be pushing it right now."
-  const Machine = machine[0].toUpperCase() + machine.slice(1);
-  const after = `The task stops waiting. ${Machine} removes the worktree on its next poll, so if it is really gone the worktree stays on that machine until somebody removes it.`;
+  // The fallback, capitalised for the one position that starts a sentence — and ONLY the fallback.
+  // Transforming whatever `workerName` holds was the first shape of this fix and it mangled the
+  // real thing instead: a machine called `e2e-macbook-pro` came out as `E2e-macbook-pro`.
+  const sentenceStart = machine === FALLBACK_MACHINE ? "That machine" : machine;
+  const after = `The task stops waiting. ${sentenceStart} removes the worktree on its next poll, so if it is really gone the worktree stays on that machine until somebody removes it.`;
   if (state === "accepted") {
     return `This change was accepted and ${machine} may be pushing it right now. Giving up does not undo a push that has already landed — check for a pull request before you do. ${after}`;
   }
@@ -319,6 +323,13 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
                   {file}
                 </li>
               ))}
+              {/* The list is bounded; the count is not. Silently showing five hundred of seven
+                  hundred would make "what tripped the gate" smaller than what did. */}
+              {decision.protectedFileCount > decision.protectedFiles.length && (
+                <li className="px-1.5 py-0.5 text-xs text-text-muted">
+                  and {decision.protectedFileCount - decision.protectedFiles.length} more
+                </li>
+              )}
             </ul>
           </div>
         )}
@@ -421,7 +432,7 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
 
         {!decision.canDecide && LIVE.includes(state) && (
           <p className="text-xs text-text-muted" data-testid="decision-not-yours">
-            Only {decision.workerName || "that machine"}&apos;s owner, or an instance admin, can
+            Only {decision.workerName || FALLBACK_MACHINE}&apos;s owner, or an instance admin, can
             answer this.
           </p>
         )}
@@ -432,7 +443,7 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
         onClose={() => setAsking(null)}
         onConfirm={() => answer("accept")}
         title="Accept this change?"
-        message={acceptWarning(decision.workerName || "that machine")}
+        message={acceptWarning(decision.workerName || FALLBACK_MACHINE)}
         confirmLabel="Accept and push"
         loadingLabel="Accepting..."
         loading={busy === "accept"}
@@ -443,7 +454,7 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
         onClose={() => setAsking(null)}
         onConfirm={() => answer("abandon")}
         title="Give up on this change?"
-        message={abandonWarning(state, decision.workerName || "that machine")}
+        message={abandonWarning(state, decision.workerName || FALLBACK_MACHINE)}
         confirmLabel="Give up on it"
         loadingLabel="Giving up..."
         loading={busy === "abandon"}

@@ -652,8 +652,11 @@ describe("acting on a verdict", () => {
 
     expect(h.settled[0]).toEqual({ taskId: "t1", state: "discarded" });
     expect(h.destroyWorktree).not.toHaveBeenCalled();
-    // `discarded` has no error field, so the reason lives only in the log
-    expect(h.deps.log).toHaveBeenCalledWith(expect.stringContaining("another-project"));
+    // `discarded` has no error field, so the reason lives only in the log — and the reason is the
+    // PAIR. Asserting only the value this test supplied leaves the marker's side free to vanish.
+    expect(h.deps.log).toHaveBeenCalledWith(
+      "CP-158: the decision names project another-project, the worktree here belongs to p1"
+    );
   });
 
   // The fourth site, and the one D6 left out when it pinned the other three

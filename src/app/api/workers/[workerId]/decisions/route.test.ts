@@ -189,6 +189,32 @@ describe("POST /api/workers/:workerId/decisions", () => {
     expect(stored.fileCount).toBe(700);
   });
 
+  // The same for the subset the panel renders as chips: "what tripped the gate" must not be
+  // smaller than what did
+  it("counts every protected file too", async () => {
+    const protectedFiles = Array.from({ length: 600 }, (_, at) => `scripts/s${at}.js`);
+    const { req, ctx } = call("POST", record({ files: protectedFiles, protectedFiles }));
+
+    await POST(req, ctx);
+    const stored = createDecision.mock.calls[0][3];
+    expect(stored.protectedFiles).toHaveLength(500);
+    expect(stored.protectedFileCount).toBe(600);
+  });
+
+  /**
+   * Marked rather than quietly shortened. `src/very/long` is a filename that does not exist;
+   * `src/very/lon…` is visibly a cut one, and the chip is read as a path.
+   */
+  it("marks a path it had to cut, rather than inventing a shorter one", async () => {
+    const long = `src/${"d".repeat(400)}.ts`;
+    const { req, ctx } = call("POST", record({ files: [long] }));
+
+    await POST(req, ctx);
+    const [stored] = createDecision.mock.calls[0][3].files as string[];
+    expect(stored).toHaveLength(256);
+    expect(stored.endsWith("…")).toBe(true);
+  });
+
   // A list carrying anything that is not a path is rebuilt, not trusted: it is rendered as the
   // whole change a person is consenting to
   it("drops entries that are not paths at all", async () => {

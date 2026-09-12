@@ -165,6 +165,7 @@ const taskSchema = new Schema<ITask>(
         // The true number, beside a list bounded for rendering — see ITaskDecision.files
         fileCount: { type: Number, default: 0 },
         protectedFiles: { type: [String], default: [] },
+        protectedFileCount: { type: Number, default: 0 },
         // `select: false` on both, and it is load-bearing rather than tidy. A task document is
         // spread into a response by a dozen readers — the search, My Tasks, the release and claim
         // routes, every writer that echoes a task back — and each one would otherwise carry up to

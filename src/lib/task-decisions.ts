@@ -60,6 +60,7 @@ export interface DecisionRecord {
   files: string[];
   fileCount: number;
   protectedFiles: string[];
+  protectedFileCount: number;
   patch: string;
   patchTruncated: boolean;
   patchSha256: string;
@@ -292,6 +293,8 @@ export function toApiDecision(
     // The list may have been bounded; the count never is
     fileCount: decision.fileCount || (decision.files ?? []).length,
     protectedFiles: decision.protectedFiles ?? [],
+    protectedFileCount:
+      decision.protectedFileCount || (decision.protectedFiles ?? []).length,
     patch: decision.patch ?? "",
     patchTruncated: Boolean(decision.patchTruncated),
     commit: decision.commit,

@@ -729,6 +729,7 @@ export interface ITaskDecision {
   fileCount: number;
   /** The subset that tripped the gate, so the panel can say why it is here. */
   protectedFiles: string[];
+  protectedFileCount: number;
   /** The change itself, as `collectDiff` bounded it and with secrets redacted. */
   patch: string;
   /** `DiffStats.truncated`: a change too large to show is one nobody can honestly accept. */
@@ -756,6 +757,7 @@ export interface ApiTaskDecision {
   files: string[];
   fileCount: number;
   protectedFiles: string[];
+  protectedFileCount: number;
   patch: string;
   patchTruncated: boolean;
   commit: string;

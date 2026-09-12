@@ -58,6 +58,7 @@ export interface DecisionRequest {
   files: string[];
   fileCount: number;
   protectedFiles: string[];
+  protectedFileCount: number;
   patch: string;
   patchTruncated: boolean;
   patchSha256: string;
