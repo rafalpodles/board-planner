@@ -147,3 +147,30 @@ describe("decryptSecret", () => {
     expect(decryptSecret("")).toBe("");
   });
 });
+
+/**
+ * BP-372. This predicate is the only thing standing between a value written before that change
+ * and a second pass of `encryptSecret` over its own envelope, so each branch is named rather than
+ * reached through `encryptSecret`, which only ever writes v2.
+ */
+describe("isEncryptedSecret", () => {
+  it("recognises both envelopes, including the v1 one nothing writes any more", async () => {
+    const { isEncryptedSecret, encryptSecret } = await load();
+    process.env.ENCRYPTION_KEY = KEY_A;
+
+    expect(isEncryptedSecret("enc:v1:" + Buffer.from("anything").toString("base64"))).toBe(true);
+    expect(isEncryptedSecret("enc:v2:deadbeef:" + Buffer.from("anything").toString("base64"))).toBe(true);
+    expect(isEncryptedSecret(encryptSecret("https://hooks.slack.com/services/T/B/x"))).toBe(true);
+  });
+
+  it("says no to a plaintext URL, to a near-miss prefix, and to nothing at all", async () => {
+    const { isEncryptedSecret } = await load();
+
+    expect(isEncryptedSecret("https://hooks.slack.com/services/T/B/x")).toBe(false);
+    expect(isEncryptedSecret("enc:v3:deadbeef:zzz")).toBe(false);
+    expect(isEncryptedSecret("enc:")).toBe(false);
+    expect(isEncryptedSecret("")).toBe(false);
+    expect(isEncryptedSecret(undefined)).toBe(false);
+    expect(isEncryptedSecret(null)).toBe(false);
+  });
+});

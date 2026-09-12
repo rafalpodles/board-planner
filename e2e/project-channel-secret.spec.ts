@@ -97,7 +97,15 @@ async function addChannelThroughTheForm(page: Page, name: string, url: string) {
     (r) => r.url().includes("/notifications") && r.request().method() === "POST"
   );
   await saveButton(page).click();
-  expect((await written).status()).toBe(201);
+  const response = await written;
+  expect(response.status()).toBe(201);
+
+  // The wire, not just the database: the route answers with the channel list it just wrote, and
+  // that answer is the one surface `sanitizeProjectSecrets` has to strip on the way out
+  const body = JSON.stringify(await response.json());
+  expect(body).not.toContain(url);
+  expect(body).not.toContain("enc:v2:");
+  expect(body).toContain("webhookUrlMasked");
 }
 
 test.describe("a project's chat webhook URL", () => {
@@ -177,6 +185,13 @@ test.describe("a project's chat webhook URL", () => {
     const stored = await storedChannel("Legacy");
     expect(stored.webhookUrl).not.toContain("hooks.slack.com");
     expect(stored.webhookUrl).toMatch(/^enc:v2:[0-9a-f]{8}:/);
+
+    // Reloaded before reading the screen. The same masked string was already on it before the save
+    // — `decryptSecret` passes plaintext through, so both states mask identically — and asserting
+    // it in place would be satisfied by the DOM the trigger had not yet replaced.
+    await openTeamChannels(page);
     await expect(page.getByText("https://hooks.slack.com/••••p372")).toBeVisible();
+    await expect(page.getByText(/^enc:v2:/)).toHaveCount(0);
+    await expect(page.getByText("null/••••")).toHaveCount(0);
   });
 });
