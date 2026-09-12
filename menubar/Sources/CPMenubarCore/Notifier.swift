@@ -57,21 +57,28 @@ public func notification(for event: TelemetryEvent) -> NotificationRequest? {
 }
 
 /**
- * The fault the last notification reported.
+ * Whether the last run already reported a machine fault.
  *
  * A machine fault recurs on every poll: the task is released with its attempt refunded, so the
  * loop claims it again a poll interval later — thirty seconds by default — and meets the same
  * broken machine. The worker keeps `ReleaseMemory` for exactly this on the board side
  * (worker/src/reporter.ts), and without the same thing here an overnight fault stacks one banner
- * every thirty seconds until morning. Five notifications only works if none of them repeats.
+ * every thirty seconds until morning. Six notifications only works if none of them repeats.
  *
- * Keyed on the reason rather than the task, because the subject is the machine: the same fault met
- * by a different task is the same news. Kept until a run ends some other way — not until the next
- * run starts, because a run starting is not a machine working; a fault emits after a progress
- * event on every recurrence.
+ * A streak, not a key on the reason. Keying on the detail was the first attempt and it does not
+ * survive the details this worker actually sends: the base-branch fault names the project's remote,
+ * so a machine serving two projects alternates two reasons and every poll is "new" again, and
+ * confine()'s refusal names the worktree path, which carries the task key. Both are per-run text
+ * inside a 200-character cap that cuts before the part that says what broke.
+ *
+ * So the question is not "is this a new reason" but "have I already said the machine is failing".
+ * A second, different fault while it is still failing is not re-announced — the operator has
+ * already been told to go and look, and the run history keeps every reason. Cleared by an outcome
+ * that is not a fault, which is the machine proving it can work; not by a run merely starting,
+ * because a fault emits after a progress event on every recurrence.
  */
-public struct FaultMemory: Sendable {
-    private var last: String?
+public struct FaultStreak: Sendable {
+    private var faulting = false
 
     public init() {}
 
@@ -79,13 +86,12 @@ public struct FaultMemory: Sendable {
     public mutating func admit(_ event: TelemetryEvent) -> NotificationRequest? {
         guard case .outcome(let outcome) = event else { return notification(for: event) }
         guard outcome.outcome == "machineFault" else {
-            last = nil
+            faulting = false
             return notification(for: event)
         }
-        let reason = outcome.detail ?? ""
-        let repeated = last == reason
-        last = reason
-        return repeated ? nil : notification(for: event)
+        let alreadySaid = faulting
+        faulting = true
+        return alreadySaid ? nil : notification(for: event)
     }
 }
 
@@ -93,7 +99,7 @@ public final class Notifier: Sendable {
     public static let shared = Notifier()
 
     // MainActor-isolated because AppModel's pump is, and this is the only caller.
-    @MainActor private static var faults = FaultMemory()
+    @MainActor private static var faults = FaultStreak()
 
     private init() {}
 

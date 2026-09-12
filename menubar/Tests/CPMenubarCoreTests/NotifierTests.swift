@@ -96,84 +96,141 @@ import Testing
  * BP-609 review. The fault recurs on every poll — refunded attempt, same task, same broken machine
  * thirty seconds later — so an unguarded notification stacks one banner per poll all night. This is
  * the menubar's half of the worker's own ReleaseMemory.
+ *
+ * The details below are the shapes the worker actually sends, not short stand-ins. The first
+ * attempt at this dedupe keyed on the detail and passed a suite of hand-written strings while
+ * failing on every one of these: the remote and the worktree path are what make two recurrences of
+ * one fault look different, and the 200-character cap is what makes two different faults look the
+ * same.
  */
+private func fault(_ taskKey: String, _ detail: String) -> TelemetryEvent {
+    .outcome(Outcome(outcome: "machineFault", taskKey: taskKey, detail: detail))
+}
+
+// pipeline.ts:404 — String(BaseUnavailableError), which names the project's own remote
+private func baseBranchFault(_ taskKey: String, remote: String) -> TelemetryEvent {
+    fault(
+        taskKey,
+        "the base branch could not be established: BaseUnavailableError: could not resolve base "
+            + "branch main: \(remote) did not report refs/heads/main")
+}
+
+// pipeline.ts:601 — confine()'s refusal, which names the worktree, which carries the task key
+private func gateFault(_ taskKey: String) -> TelemetryEvent {
+    fault(
+        taskKey,
+        "the review gate could not run: cannot confine the agent to "
+            + "/Users/op/worktrees/\(taskKey.lowercased())/wt: Error: ENOENT")
+}
+
 @Test func reportsARecurringFaultOnceRatherThanOncePerPoll() {
-    var memory = FaultMemory()
-    let fault = TelemetryEvent.outcome(
-        Outcome(outcome: "machineFault", taskKey: "CP-1", detail: "no route to host"))
+    var streak = FaultStreak()
+    let recurring = baseBranchFault("CP-1", remote: "https://github.com/acme/api.git")
 
-    #expect(memory.admit(fault) != nil)
-    #expect(memory.admit(fault) == nil)
-    #expect(memory.admit(fault) == nil)
-}
-
-// The recurrence claims a different task each pass on a busy board; the news is the machine, so the
-// task key must not be what makes it new.
-@Test func theSameFaultOnAnotherTaskIsStillTheSameNews() {
-    var memory = FaultMemory()
-
-    #expect(memory.admit(.outcome(Outcome(outcome: "machineFault", taskKey: "CP-1", detail: "no route to host"))) != nil)
-    #expect(memory.admit(.outcome(Outcome(outcome: "machineFault", taskKey: "CP-2", detail: "no route to host"))) == nil)
-}
-
-// The control, without which the dedupe would be silence: a genuinely different fault is news.
-@Test func aDifferentFaultIsReportedAgain() {
-    var memory = FaultMemory()
-
-    #expect(memory.admit(.outcome(Outcome(outcome: "machineFault", taskKey: "CP-1", detail: "no route to host"))) != nil)
-    #expect(memory.admit(.outcome(Outcome(outcome: "machineFault", taskKey: "CP-1", detail: "no sandbox here"))) != nil)
-}
-
-// A run that ended some other way means the machine worked, so the same fault afterwards is new.
-// A run merely STARTING is not that — a fault emits after a progress event on every recurrence.
-@Test func aFaultAfterAHealthyRunIsReportedAgain() {
-    var memory = FaultMemory()
-    let fault = TelemetryEvent.outcome(
-        Outcome(outcome: "machineFault", taskKey: "CP-1", detail: "no route to host"))
-
-    #expect(memory.admit(fault) != nil)
-    _ = memory.admit(.outcome(Outcome(outcome: "merged", taskKey: "CP-2")))
-    #expect(memory.admit(fault) != nil)
-}
-
-@Test func progressBetweenTwoIdenticalFaultsDoesNotMakeTheSecondNews() {
-    var memory = FaultMemory()
-    let fault = TelemetryEvent.outcome(
-        Outcome(outcome: "machineFault", taskKey: "CP-1", detail: "no route to host"))
-
-    #expect(memory.admit(fault) != nil)
-    _ = memory.admit(.progress(Progress(phase: "claiming")))
-    #expect(memory.admit(fault) == nil)
-}
-
-// Everything that is not a fault still reaches the same decision it always did.
-@Test func theMemoryPassesEveryOtherEventStraightThrough() {
-    var memory = FaultMemory()
-
-    #expect(memory.admit(.outcome(Outcome(outcome: "merged", taskKey: "CP-1"))) != nil)
-    #expect(memory.admit(.outcome(Outcome(outcome: "merged", taskKey: "CP-1"))) != nil)
-    #expect(memory.admit(.quota(Quota(status: "rejected"))) != nil)
-    #expect(memory.admit(.progress(Progress(phase: "agent"))) == nil)
+    #expect(streak.admit(recurring) != nil)
+    #expect(streak.admit(recurring) == nil)
+    #expect(streak.admit(recurring) == nil)
 }
 
 /**
- * Nothing but this ties the literal above to the worker that emits it. Both sides are strings, the
- * Swift tests use the same literal as the Swift source, so a rename in `OutcomeKind` would leave
- * the menubar silent and idle — the exact state BP-609 exists to fix — with every test green.
- * Same shape as the worker's own catalog-contract test: read the source as text and compare.
+ * The case that sank the first attempt. A worker serving two projects meets one machine-wide fault
+ * as two different sentences, because each names its own remote — and `loop.ts`'s passOrder rotates
+ * the projects, so they alternate. Keyed on the detail this notified every thirty seconds forever,
+ * which is the bug.
  */
-@Test func theOutcomeThisSwitchesOnIsOneTheWorkerCanEmit() throws {
-    let telemetry = URL(fileURLWithPath: #filePath)
+@Test func oneMachineFaultAcrossTwoProjectsIsStillOnePieceOfNews() {
+    var streak = FaultStreak()
+
+    #expect(streak.admit(baseBranchFault("AA-1", remote: "https://github.com/acme/api.git")) != nil)
+    #expect(streak.admit(baseBranchFault("BB-7", remote: "https://github.com/acme/web.git")) == nil)
+    #expect(streak.admit(baseBranchFault("AA-1", remote: "https://github.com/acme/api.git")) == nil)
+}
+
+// The other half of it: the gate path's reason carries the worktree path, so every task recurring
+// through the same broken sandbox read as new.
+@Test func theSameGateFaultOnAnotherTaskIsStillTheSameNews() {
+    var streak = FaultStreak()
+
+    #expect(streak.admit(gateFault("CP-1")) != nil)
+    #expect(streak.admit(gateFault("CP-2")) == nil)
+}
+
+/**
+ * The control, without which the dedupe would be silence. An outcome that is not a fault is the
+ * machine proving it can work, so the next fault is news again. A run merely STARTING is not that
+ * — progress precedes a fault on every recurrence — which is the second half of this test.
+ */
+@Test func aFaultAfterAHealthyRunIsReportedAgain() {
+    var streak = FaultStreak()
+    let recurring = gateFault("CP-1")
+
+    #expect(streak.admit(recurring) != nil)
+    _ = streak.admit(.outcome(Outcome(outcome: "merged", taskKey: "CP-2")))
+    #expect(streak.admit(recurring) != nil)
+}
+
+@Test func progressBetweenTwoFaultsDoesNotMakeTheSecondNews() {
+    var streak = FaultStreak()
+    let recurring = gateFault("CP-1")
+
+    #expect(streak.admit(recurring) != nil)
+    _ = streak.admit(.progress(Progress(phase: "claiming")))
+    #expect(streak.admit(recurring) == nil)
+}
+
+// Everything that is not a fault still reaches the same decision it always did, repeats included:
+// the streak must not become a throttle on the other five notifications.
+@Test func theStreakPassesEveryOtherEventStraightThrough() {
+    var streak = FaultStreak()
+
+    #expect(streak.admit(.outcome(Outcome(outcome: "merged", taskKey: "CP-1"))) != nil)
+    #expect(streak.admit(.outcome(Outcome(outcome: "merged", taskKey: "CP-1"))) != nil)
+    #expect(streak.admit(.quota(Quota(status: "rejected"))) != nil)
+    #expect(streak.admit(.outcome(Outcome(outcome: "requeued", taskKey: "CP-1"))) == nil)
+    #expect(streak.admit(.progress(Progress(phase: "agent"))) == nil)
+}
+
+/**
+ * Nothing but this ties the outcome literals in this app to the worker that emits them. Both sides
+ * are strings, and the Swift tests are written against the same literals as the Swift source, so a
+ * rename in `OutcomeKind` would leave the menubar silent and idle — the exact state BP-609 exists
+ * to fix — with every test green. Same shape as the worker's own catalog-contract test: read the
+ * source as text and compare.
+ *
+ * The list is read out of the sources rather than written here, because a hand-written one is a
+ * list the next case can be left out of, and the claim is "every".
+ */
+@Test func everyOutcomeThisAppSwitchesOnIsOneTheWorkerCanEmit() throws {
+    let menubar = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent()
         .deletingLastPathComponent()
         .deletingLastPathComponent()
-        .deletingLastPathComponent()
-        .appendingPathComponent("worker/src/telemetry.ts")
-    let source = try String(contentsOf: telemetry, encoding: .utf8)
-    let kinds = source[source.range(of: "export type OutcomeKind =")!.upperBound...]
+    let root = menubar.deletingLastPathComponent()
+
+    func read(_ url: URL) throws -> String { try String(contentsOf: url, encoding: .utf8) }
+
+    let notifier = try read(menubar.appendingPathComponent("Sources/CPMenubarCore/Notifier.swift"))
+    let state = try read(menubar.appendingPathComponent("Sources/CPMenubarCore/WorkerState.swift"))
+
+    func matches(_ source: String, _ pattern: String) -> [String] {
+        let regex = try! NSRegularExpression(pattern: pattern)
+        let range = NSRange(source.startIndex..., in: source)
+        return regex.matches(in: source, range: range).compactMap {
+            Range($0.range(at: 1), in: source).map { r in String(source[r]) }
+        }
+    }
+
+    // `case "delivered":` in the outcome switch, and `outcome.outcome == "blocked"` in apply()
+    let switchedOn = Set(
+        matches(notifier, #"(?m)^\s*case "(\w+)":"#) + matches(state, #"outcome\.outcome == "(\w+)""#))
+
+    let telemetry = try read(root.appendingPathComponent("worker/src/telemetry.ts"))
+    let kinds = telemetry[telemetry.range(of: "export type OutcomeKind =")!.upperBound...]
     let declared = String(kinds[..<kinds.range(of: ";")!.lowerBound])
 
-    for outcome in ["machineFault", "merged", "delivered", "gateRejected", "blocked"] {
-        #expect(declared.contains("\"\(outcome)\""), "worker cannot emit \(outcome)")
+    #expect(switchedOn.contains("machineFault"), "the fault case is what BP-609 added; it must be here")
+    #expect(switchedOn.count >= 5)
+    for outcome in switchedOn.sorted() {
+        #expect(declared.contains("\"\(outcome)\""), "the worker cannot emit \(outcome)")
     }
 }

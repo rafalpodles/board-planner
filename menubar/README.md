@@ -98,4 +98,5 @@ unit tests; it is verified by running it.
 
 Six, and only six: merged, pull request open, gate rejected, needs a human, usage limit, machine
 fault. Anything more and the operator turns them off — which is why the machine fault is reported
-once per distinct reason and not once per poll (`FaultMemory`).
+once per run of consecutive faults and not once per poll (`FaultStreak`). It is the only one that
+can fire when no work happened, so it is the only one that needs the guard.

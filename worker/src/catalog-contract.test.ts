@@ -36,11 +36,13 @@ describe("the gate kinds the catalog offers", () => {
 
 describe("the outcomes the server records", () => {
   it("are exactly the ones the worker maps its own onto", () => {
-    // Comments stripped first: the assertion is containment, so any double-quoted word inside a
-    // comment in the array would silently become an outcome the server "accepts" — and the value
-    // dropped beside it would still pass. The array carries a comment as of BP-609 (found in
-    // review).
-    const types = source("types", "index.ts").replace(/^[ \t]*\/\/.*$/gm, "");
+    // Comments stripped first, both shapes: the assertion is containment, so any double-quoted
+    // word inside a comment in the array would silently become an outcome the server "accepts" —
+    // and the value dropped beside it would still pass. The array carries a comment as of BP-609
+    // (found in review).
+    const types = source("types", "index.ts")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/.*$/gm, "");
     const block = types.slice(types.indexOf("AGENT_RUN_OUTCOMES = ["));
     // `[a-zA-Z]`, not `[a-z]`: a camelCase outcome on either side was invisible to this test, so
     // the one shape a drift is most likely to take — a name copied from the worker's own
@@ -51,7 +53,16 @@ describe("the outcomes the server records", () => {
     const mapping = record.slice(record.indexOf("OUTCOMES: Record"));
     const sent = keysOf(mapping.slice(0, mapping.indexOf("};")), /: "([a-zA-Z]+)",/g);
 
-    expect(accepted.length).toBeGreaterThan(0);
+    // Both halves read every entry they are looking at. Containment alone cannot see a regex that
+    // has gone blind on BOTH sides at once — the value vanishes from `accepted` and `sent` together
+    // and the assertion still holds — so each side is counted against its own source first.
+    const body = mapping.slice(mapping.indexOf("{") + 1, mapping.indexOf("};"));
+    const declared = [...body.matchAll(/^\s*\w+:/gm)].length;
+    expect(sent.length).toBe(declared);
+    expect(accepted.length).toBe(
+      [...block.slice(0, block.indexOf("]")).matchAll(/^\s*"/gm)].length
+    );
+
     // Every outcome the worker sends is one the server takes. The server may carry more than the
     // worker ever produces, so this is containment rather than equality.
     expect(accepted).toEqual(expect.arrayContaining(sent));
