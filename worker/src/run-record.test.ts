@@ -87,7 +87,9 @@ describe("recordFor", () => {
 
     expect(record.detail).toHaveLength(2000);
     // The same cut on the field a refusal writes instead. Added in the same change and pinned by
-    // nothing, which is how one of two identical lines rots (found in review).
+    // nothing, which is how one of two identical lines rots (found in review). The server stores
+    // this one unbounded, so here the cut is ours rather than a match — a gate's name never
+    // approaches it either way.
     expect(recordFor(task, "gateRejected", "x".repeat(5000), 0, 1, 0).refusedBy).toHaveLength(2000);
   });
 

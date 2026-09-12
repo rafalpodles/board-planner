@@ -72,7 +72,9 @@ import Testing
     let request = notification(for: .outcome(Outcome(outcome: "machineFault", taskKey: "CP-1")))
 
     #expect(request != nil)
-    #expect(request?.body.contains("The reason is on the board.") == true)
+    // Answers "why" — none was recorded — before it answers "where". A label is what an operator
+    // reads a reason after, so the branch without one must not wear it.
+    #expect(request?.body.contains("No reason was recorded") == true)
     // A bare label with nothing after it is what a truncated banner looks like
     #expect(request?.body.contains("Reason:") == false)
 }
@@ -202,6 +204,8 @@ private func gateFault(_ taskKey: String) -> TelemetryEvent {
 
 // A task whose project could not be resolved is keyed `#42` — no hyphen, so it buckets as itself
 // rather than as the empty string shared with every other such task.
+// Defensive: a worker builds the key from the project it claimed against, so this shape does not
+// reach it. Pinned because the split has to be total, not because the state is reachable.
 @Test func aTaskWithNoProjectKeyGetsABucketOfItsOwn() {
     var streak = FaultStreak()
 

@@ -55,10 +55,20 @@ describe("the length the server stores a detail at", () => {
     const route = source("app", "api", "projects", "[projectId]", "runs", "route.ts");
     const server = route.match(/MAX_DETAIL = (\d+)/);
 
-    const record = readFileSync(join(import.meta.dirname, "run-record.ts"), "utf8");
+    // Through the strip, like the server's side: `.match` takes the FIRST hit, so a note above the
+    // constant mentioning the old number would be read as the constant — and the green direction
+    // is the silent one, a worker cutting shorter than the board stores (found in review, and the
+    // commit that added this claimed the opposite).
+    const record = withoutComments(
+      readFileSync(join(import.meta.dirname, "run-record.ts"), "utf8")
+    );
     const worker = record.match(/MAX_DETAIL_CHARS = (\d+)/);
 
     expect(server?.[1]).toBeDefined();
+    // Equality, though only one direction is a defect: a worker cutting SHORTER than the server
+    // stores loses text silently, while cutting longer only wastes bytes on a retried outbox entry.
+    // Equal is the simplest thing to keep true, and it ties the numbers rather than the behaviours
+    // — a server that kept the constant and stopped applying it leaves this green.
     expect(worker?.[1]).toBe(server?.[1]);
   });
 });

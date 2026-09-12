@@ -1889,6 +1889,10 @@ describe("what a machine fault is recorded as", () => {
     expect(emitted.detail).toContain("could not resolve base branch main");
     expect(emitted.detail).toContain("Could not resolve host");
     expect(emitted.detail.length).toBeLessThanOrEqual(200);
+    // And the head stops at a word boundary. Cut mid-URL the head reads as a real, shorter remote,
+    // which is the one way this can mislead rather than merely shorten — an operator checks the
+    // address first (found in review).
+    expect(emitted.detail).not.toMatch(/https:\/\/\S*…/);
   });
 
   // The control on the same cut: a 403 and a DNS failure against the same long remote must not

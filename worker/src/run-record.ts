@@ -15,10 +15,14 @@ const OUTCOMES: Record<OutcomeKind, string> = {
 };
 
 /**
- * What the server stores. Cut here as well as there, because it cuts after reading the body: a
- * failed fetch puts the whole of git's stderr in the detail, and this record goes to the outbox,
- * which retries it. The number is the server's own (`runs/route.ts`), so nothing is lost that the
- * board would have kept.
+ * The wire bound on what a finished run sends. Cut here as well as at the server, because the
+ * server cuts after reading the body: a failed fetch puts the whole of git's stderr in the detail,
+ * and this record goes to the outbox, which retries it.
+ *
+ * The same number as the route's `MAX_DETAIL`, held there by a contract test rather than by this
+ * sentence. For `detail` that means nothing is lost the board would have kept. Not so for
+ * `refusedBy`, which the route stores unbounded — that field is a gate's name, so 2000 is far past
+ * anything it can hold, but the symmetry is one field's and not both.
  */
 const MAX_DETAIL_CHARS = 2000;
 

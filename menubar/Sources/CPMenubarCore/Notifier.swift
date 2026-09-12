@@ -60,7 +60,8 @@ public func notification(for event: TelemetryEvent) -> NotificationRequest? {
                     + "work until the next poll. "
                     // A label with nothing after it reads as a truncation, so the branch with no
                     // detail gets a sentence rather than the same label and a shrug.
-                    + (outcome.detail.map { "Reason: \($0)" } ?? "The reason is on the board."))
+                    + (outcome.detail.map { "Reason: \($0)" }
+                        ?? "No reason was recorded; the run history has what there was."))
         default:
             return nil
         }
@@ -123,8 +124,9 @@ public struct FaultStreak: Sendable {
     /// character (`PROJECT_KEY_PATTERN`, `src/lib/urls.ts`). Splitting on the first collapsed
     /// `WEB-API` and `WEB-APP` into one bucket, which silenced one project's fault and let the
     /// other's healthy run re-arm it — the same storm this scoping exists to stop, one family
-    /// narrower (found in review). A key with no hyphen at all is the `#42` shape a task whose
-    /// project cannot be resolved gets, and it buckets as itself.
+    /// narrower (found in review). A key with no hyphen at all would be the `#42` shape a task
+    /// whose project cannot be resolved gets — which cannot reach a worker, since it builds the key
+    /// from the project it claimed against; it buckets as itself regardless.
     private static func project(of taskKey: String) -> String {
         guard let cut = taskKey.lastIndex(of: "-") else { return taskKey }
         return String(taskKey[..<cut])

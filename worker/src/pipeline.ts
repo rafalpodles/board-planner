@@ -82,7 +82,9 @@ export interface PipelineDeps {
   telemetry?: Pick<Telemetry, "emit" | "emitEvent">;
 }
 
-const MAX_DETAIL_CHARS = 200;
+// Named for what it bounds. run-record.ts has a cap of its own, ten times this, for the wire
+// rather than for a banner, and a contract test matches that one by name.
+const MAX_NOTIFICATION_CHARS = 200;
 
 /**
  * The cut that keeps both ends of a detail too long for a notification.
@@ -91,19 +93,32 @@ const MAX_DETAIL_CHARS = 200;
  * context-first — "the review gate could not run: ", "could not resolve base branch main: " — and
  * what actually broke is last, so a plain `slice` keeps the part every one of them shares and drops
  * the only part that differs. Over https git echoes the remote a second time inside its own stderr,
- * which is enough to push the cause past 200 on any repository with a slug over about 25
- * characters; this one's own origin is already past it.
+ * which doubles the cost of the URL. Measured on the base-branch path, the slug length at which a
+ * head-only cut loses the cause entirely: 14 characters behind a one-character organisation, 11
+ * behind `acme`, 4 behind `rafalpodles`, 1 behind a 24-character one. So this is load-bearing at
+ * ordinary repository names rather than at unusual ones. (An earlier version of this comment said
+ * "about 25", and a commit message said 26 for a different quantity; neither is reproducible.)
  *
  * Tail-only would be the mirror mistake: `UNCONFINED_REASON` deliberately puts the way out first
- * (sandbox.ts), because whatever is at the end is what an operator never reads.
+ * (sandbox.ts), because whatever is at the end is what an operator never reads. It is 204
+ * characters bare and 235 wrapped by the gate path, so it is genuinely over the cap, and tail-only
+ * would eat the word `set` along with the gate's name.
  *
- * The ellipsis is the cut, so nothing reads as a complete sentence it is not. `scrub` still runs
- * before this, so no secret is straddled — a redaction cannot be reassembled from the two halves.
+ * The ellipsis is the cut, so nothing reads as a complete sentence it is not, and the head backs up
+ * to a space: cut mid-URL it reads as a real, shorter remote, which is the one way this can mislead
+ * rather than merely shorten.
+ *
+ * `scrub` still runs before this, so no secret is straddled — a redaction cannot be reassembled
+ * from the two halves. What is new is that the last hundred characters leave the worker at all,
+ * where head-only dropped them, so scrub's coverage is now load-bearing over text that never
+ * reached Notification Center before.
  */
 function fitDetail(text: string): string {
-  if (text.length <= MAX_DETAIL_CHARS) return text;
-  const head = Math.ceil((MAX_DETAIL_CHARS - 1) / 2);
-  return `${text.slice(0, head)}…${text.slice(text.length - (MAX_DETAIL_CHARS - 1 - head))}`;
+  if (text.length <= MAX_NOTIFICATION_CHARS) return text;
+  const room = Math.ceil((MAX_NOTIFICATION_CHARS - 1) / 2);
+  const head = text.slice(0, room);
+  const space = head.lastIndexOf(" ");
+  return `${space > 0 ? head.slice(0, space) : head}…${text.slice(text.length - (MAX_NOTIFICATION_CHARS - 1 - room))}`;
 }
 const GIT_TIMEOUT_MS = 60_000;
 const ROLES = ["approved", "review", "done"] as const;
