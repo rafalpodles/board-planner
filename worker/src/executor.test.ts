@@ -680,7 +680,11 @@ describe("the agent is confined to its worktree", () => {
   // The step that cannot be confined does not run half-confined, and does not run at all. A
   // worktree that cannot be resolved is the reachable form of that here; a machine with no seatbelt
   // is the other, and sandbox.test.ts pins it.
-  it("fails the step instead of spawning when it cannot be confined", async () => {
+  //
+  // `machine_fault`, not `error`: the difference decides whether the attempt is charged. An error
+  // requeues and charges, so three tasks in the approved column would walk into the escalation
+  // column over one machine that cannot confine anything — and nothing resets execution.attempts.
+  it("reports a machine fault instead of spawning when it cannot be confined", async () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 
     const outcome = await createExecutor(config, runner).execute({
@@ -689,7 +693,7 @@ describe("the agent is confined to its worktree", () => {
     });
 
     expect(run).not.toHaveBeenCalled();
-    expect(outcome.kind).toBe("error");
+    expect(outcome.kind).toBe("machine_fault");
   });
 
   // What the operator accepted, honoured: the run happens, and it happens unwrapped.

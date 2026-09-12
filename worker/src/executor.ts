@@ -241,9 +241,11 @@ export function createExecutor(config: WorkerConfig, runner: Runner): Executor {
       const spawn = confine("claude", claudeArgs, { writable: [worktreePath] });
 
       // Before the spawn, not after: a step that cannot be confined does not run half-confined and
-      // does not run at all. The message is the operator's, so it names the variable that accepts
-      // the risk rather than reading as a defect in the task.
-      if ("refusal" in spawn) return { kind: "error", message: spawn.refusal };
+      // does not run at all. A machine fault rather than an error, because it is the machine that
+      // cannot do this and it will be just as unable on the next task — charging the attempt would
+      // walk the whole approved queue into the escalation column, which is the reasoning the base
+      // branch's own failure already records in pipeline.ts.
+      if ("refusal" in spawn) return { kind: "machine_fault", message: spawn.refusal };
 
       const result = await runner.run(
         spawn.command,

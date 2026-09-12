@@ -553,6 +553,54 @@ describe("runTask", () => {
     expect(h.workspace.destroy).toHaveBeenCalledWith("CP-158");
   });
 
+  /**
+   * BP-349. A machine that cannot confine the agent cannot run *any* step, and says so before
+   * spawning. Reported as an ordinary error it would requeue and charge the attempt — three tasks
+   * later the whole approved column sits in front of a human, permanently, because nothing resets
+   * execution.attempts. Same taxonomy as an unreachable base branch above: the machine's failure,
+   * refunded, and the loop told to stop claiming so another machine can take the queue.
+   */
+  it("releases a machine fault with its attempt refunded, and stops the loop claiming", async () => {
+    const execute = vi
+      .fn<Executor["execute"]>()
+      .mockResolvedValue({ kind: "machine_fault", message: "this machine has no sandbox" });
+    const h = harness({ executor: { execute } });
+
+    const disposition = await runTask(h.deps, task);
+
+    expect(disposition).toBe("machine-fault");
+    expect(h.reporter.released).toHaveBeenCalled();
+    expect(h.reporter.requeued).not.toHaveBeenCalled();
+    expect(h.reporter.failed).not.toHaveBeenCalled();
+    // the operator has to learn which machine and what to do, from the board
+    expect(h.reporter.released.mock.calls[0][1]).toMatch(/no sandbox/);
+  });
+
+  /**
+   * The gate's half of the same thing. A gate that could not run is not a gate that refused: the
+   * refusal path reports "blocked the merge at the review gate" and pushes the branch, which
+   * blames the change for the machine and leaves a branch behind on every task it touches.
+   */
+  it("releases a gate that could not run, rather than reporting it as a rejection", async () => {
+    const h = harness({
+      gateFor: () => ({
+        name: "review",
+        run: async () => ({
+          ok: false,
+          reason: "this machine has no sandbox",
+          machineFault: true,
+        }),
+      }),
+    });
+
+    const disposition = await runTask(h.deps, task);
+
+    expect(disposition).toBe("machine-fault");
+    expect(h.reporter.released).toHaveBeenCalled();
+    expect(h.reporter.gateRejected).not.toHaveBeenCalled();
+    expect(h.delivery.push).not.toHaveBeenCalled();
+  });
+
   it("requeues a timed-out run and charges it the attempt, so retries terminate", async () => {
     const execute = vi.fn<Executor["execute"]>().mockResolvedValue({ kind: "timeout" });
     const h = harness({ executor: { execute } });

@@ -485,6 +485,19 @@ export async function runTask(
           );
           return;
         }
+        // The machine cannot run the step and will be no more able on the next task. Same handling
+        // as an unreachable base branch above, for the same reason: charge the attempt and one
+        // misconfigured machine walks the whole approved queue into the escalation column, where
+        // nothing resets execution.attempts. Released with the attempt refunded, and the loop is
+        // told to stop claiming so the queue is left for a machine that can run it.
+        if (outcome.kind === "machine_fault") {
+          settle("released", outcome.message);
+          await reporter.released(
+            task,
+            `${outcome.message}${unpushedWork(state, worktree.path)}`,
+          );
+          return "machine-fault";
+        }
         if (outcome.kind === "timeout") {
           settle("requeued", `${entry.name} timed out`);
           await reporter.requeued(task, `${entry.name} timed out`);
@@ -552,6 +565,16 @@ export async function runTask(
         if (await releaseIfAborted(deps, reporter, task)) return;
 
         if (!verdict.ok) {
+          // The gate did not judge the change; this machine could not run it. Reported as a
+          // refusal it would blame the diff and push its branch (BP-349 review).
+          if (verdict.machineFault) {
+            settle("released", `the ${gate.name} gate could not run`);
+            await reporter.released(
+              task,
+              `the ${gate.name} gate could not run: ${verdict.reason}`,
+            );
+            return "machine-fault";
+          }
           if (hitUsageLimit(verdict)) {
             settle("released", `the ${gate.name} gate could not run`);
             await reporter.released(

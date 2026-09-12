@@ -298,6 +298,10 @@ describe("reviewGate", () => {
 
       expect(result.ok).toBe(false);
       expect(result.reason).toBe(UNCONFINED_REASON);
+      // The flag, not just the refusal: without it the pipeline reports this as the reviewer
+      // rejecting the change — which blames the diff for the machine, charges the attempt and
+      // pushes the branch (BP-349 review).
+      expect(result.machineFault).toBe(true);
       expect(
         run.mock.calls.some(([command, args]) => isAgentSpawn(command, args))
       ).toBe(false);

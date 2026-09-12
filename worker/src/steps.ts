@@ -10,6 +10,7 @@ export type StepOutcome =
   | { kind: "blocked"; reason: string }
   | { kind: "usage_limit" }
   | { kind: "timeout" }
+  | { kind: "machine_fault"; message: string }
   | { kind: "error"; message: string };
 
 export interface RunState {
@@ -132,6 +133,8 @@ export async function runStep(
 
   if (outcome.kind === "usage_limit") return { kind: "usage_limit" };
   if (outcome.kind === "timeout") return { kind: "timeout" };
+  if (outcome.kind === "machine_fault")
+    return { kind: "machine_fault", message: outcome.message };
   if (outcome.kind === "error")
     return { kind: "error", message: outcome.message };
   if (outcome.result.status === "blocked") {
