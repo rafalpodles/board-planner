@@ -12,7 +12,7 @@ import { Project } from "@/models/project";
 import { Worker } from "@/models/worker";
 import { ITaskExecution } from "@/types";
 import { withApiExecution } from "@/lib/task-execution-view";
-import { mayDecide, toApiDecision } from "@/lib/task-decisions";
+import { mayDecide, toApiDecision, DECISION_FIELDS_A_READER_NEEDS } from "@/lib/task-decisions";
 
 
 export const GET = withProjectAccess(async (_request, { params, user }) => {
@@ -23,12 +23,9 @@ export const GET = withProjectAccess(async (_request, { params, user }) => {
   await connectDB();
 
   const task = await Task.findOne({ _id: taskId, project: projectId })
-    // The patch and the gate's hits are `select: false` on the schema so that no other reader
-    // ships them by accident. This is the screen they exist for, so this is the one read that asks
-    // for them — and the panel is the whole of the second one's audience, so leaving it out does
-    // not save a byte anywhere, it deletes "what tripped the gate" from the only page that shows
-    // it.
-    .select("+decision.patch +decision.protectedFiles")
+    // What the panel reads and the schema withholds. Named once, in `task-decisions.ts`, because
+    // this route and `recordVerdict` were the two that had to be kept in step and were not.
+    .select(DECISION_FIELDS_A_READER_NEEDS)
     .populate(taskPopulateFields)
     // Without this `decidedBy` is an ObjectId, `toApiDecision` answers null for it, and the panel
     // never says who accepted the change — the one fact the audit row exists to preserve.

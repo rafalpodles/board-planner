@@ -32,7 +32,9 @@ export const GET = withProjectAccess(async (_request, { params, user }) => {
   }
 
   await connectDB();
-  // Field by field. `.select("decision")` is a parent INCLUSION — mongoose sends `{decision: 1}`
+  // Field by field, and NOT `DECISION_FIELDS_A_READER_NEEDS`: withholding the patch is the whole
+  // reason this route exists, and that constant re-includes it.
+  // `.select("decision")` is a parent INCLUSION — mongoose sends `{decision: 1}`
   // and the `select: false` on the subfields is overridden — which is the defect the verdict route
   // below had, and repeating it here would have made this poll carry the whole patch every ten
   // seconds while the comment claimed the opposite.

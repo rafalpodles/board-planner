@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Task } from "./task";
+import { toApiDecision, DECISION_FIELDS_A_READER_NEEDS } from "@/lib/task-decisions";
 
 // customFieldValues is a Map. JSON.stringify(new Map([["a", 1]])) is "{}", so
 // without flattenMaps every custom field value is absent from every API response
@@ -107,5 +108,75 @@ describe("what a refused change publishes by default", () => {
   it("keeps decidedBy a User reference, so a reader can populate it", () => {
     expect(Task.schema.path("decision.decidedBy").instance).toBe("ObjectId");
     expect(Task.schema.path("decision.decidedBy").options.ref).toBe("User");
+  });
+});
+
+/**
+ * The other half of `select: false`: the readers that DO need a withheld field have to name it,
+ * and `+decision.patch` compiles to an EXCLUSION projection, so a field given `select: false`
+ * joins that exclusion silently. That is how the panel's "What tripped the gate" left the product
+ * for seven review rounds — the schema changed, the two readers did not, every suite stayed green.
+ *
+ * Neither side of this is a hand-written list. What the serialiser needs is OBSERVED, by handing
+ * it a proxy and recording the reads; what the schema withholds is read off the schema. Add a
+ * sixth deselected field that `toApiDecision` renders and this goes red on its own; add one it
+ * does not read and it correctly stays quiet.
+ *
+ * What it cannot see, and what the e2e is for: whether mongoose honours the string. A parent
+ * inclusion (`.select("decision")`) names nothing and defeats every `select: false` under it, and
+ * this test would call that fine.
+ */
+describe("what a reader has to ask for", () => {
+  function fieldsRead(decision: Record<string, unknown>): string[] {
+    const read = new Set<string>();
+    const probe = new Proxy(decision, {
+      get(target, key) {
+        read.add(String(key));
+        return target[String(key)];
+      },
+    });
+    toApiDecision(probe as never, null, true);
+    return [...read];
+  }
+
+  it("names every withheld field the serialiser reads", () => {
+    // Twice, and unioned. A read inside a `||` or a `?.` is taken only when the value before it
+    // falls the right way, so one probe reports what its VALUES provoked rather than what the
+    // function can touch. Fully populated and near-empty between them take both sides.
+    const populated = {
+      gate: "protected-paths",
+      fileCount: 3,
+      protectedFiles: ["package.json"],
+      protectedFileCount: 1,
+      patch: "diff --git a/a b/a",
+      patchTruncated: false,
+      commit: "a".repeat(40),
+      workerId: "6a7c686f70ed274cf658b1b3",
+      taskKey: "BP-1",
+      title: "t",
+      acceptable: true,
+      unacceptableReason: "",
+      state: "pending",
+      decidedBy: null,
+      decidedAt: new Date(),
+      prUrl: "",
+      error: "",
+      createdAt: new Date(),
+    };
+    const read = new Set([
+      ...fieldsRead(populated),
+      ...fieldsRead({ gate: "protected-paths" }),
+    ]);
+
+    const withheld = [...read].filter(
+      (field) => Task.schema.path(`decision.${field}`)?.options.select === false
+    );
+    // Or the loop below is vacuous and this file would pass with the constant emptied
+    expect(withheld.sort()).toEqual(["patch", "protectedFiles"]);
+
+    const named = DECISION_FIELDS_A_READER_NEEDS.split(/\s+/).filter(Boolean);
+    for (const field of withheld) {
+      expect(named).toContain(`+decision.${field}`);
+    }
   });
 });

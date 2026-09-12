@@ -28,7 +28,10 @@ vi.mock("@/models/comment", () => ({ Comment: { deleteMany: commentDeleteMany } 
 vi.mock("@/models/activityLog", () => ({ ActivityLog: { deleteMany: activityDeleteMany } }));
 vi.mock("@/models/notification", () => ({ Notification: { deleteMany: notificationDeleteMany } }));
 vi.mock("@/models/worker", () => ({ Worker: { find: vi.fn(), findById: workerFindById } }));
-vi.mock("@/lib/task-decisions", () => ({
+// `importOriginal`, so the projection constant the route selects with is the real string and this
+// file cannot pass by agreeing with its own copy of it.
+vi.mock("@/lib/task-decisions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/task-decisions")>()),
   mayDecide,
   toApiDecision: (decision: unknown) => decision,
 }));
@@ -261,7 +264,7 @@ describe("GET: what the decision panel is served", () => {
       relations: [],
       toObject: () => ({ taskNumber: 1 }),
     };
-    const select = vi.fn(() => ({
+    const select = vi.fn((_fields: string) => ({
       populate: vi.fn(() => ({ populate: () => Promise.resolve(task) })),
     }));
     taskFindOne.mockReturnValue({ select });

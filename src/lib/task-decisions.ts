@@ -228,9 +228,9 @@ export async function recordVerdict(
     },
     { new: true }
   )
-    // Both for the answer this returns: the patch is `select: false` on the schema, and
-    // `decidedBy` is an ObjectId until somebody populates it.
-    .select("+decision.patch")
+    // Both for the answer this returns — which is the route's response body, and a record a
+    // caller renders — and `decidedBy`, an ObjectId until somebody populates it.
+    .select(DECISION_FIELDS_A_READER_NEEDS)
     .populate("decision.decidedBy", "username fullName");
 
   if (!updated?.decision) {
@@ -277,6 +277,21 @@ function decidedBy(value: ITaskDecision["decidedBy"]): ApiTaskDecision["decidedB
 }
 
 /**
+ * The `select: false` fields `toApiDecision` reads, re-included.
+ *
+ * Every reader that hands a whole task document to the serialiser needs exactly these back, and
+ * the day one of them was given `select: false` without this string being updated, the panel's
+ * "What tripped the gate" disappeared from the product for seven review rounds. `+decision.patch`
+ * alone compiles to an EXCLUSION projection, so a new `select: false` field silently joins it: the
+ * read keeps working and returns less. Named once, here, beside the function whose appetite it
+ * describes.
+ *
+ * The narrow poll route deliberately does not use this — it withholds the patch, which is the
+ * whole reason it exists — and carries its own projection with its own test.
+ */
+export const DECISION_FIELDS_A_READER_NEEDS = "+decision.patch +decision.protectedFiles";
+
+/**
  * What a reader may see. `patchSha256` and `attempts` are withheld for the reason
  * `toApiExecution` withholds `runId` and `phaseSeq`: they are the machine's own bookkeeping, and
  * publishing the hash invites somebody to think matching it is what accepting checks.
@@ -289,11 +304,14 @@ export function toApiDecision(
   if (!decision?.gate) return undefined;
   return {
     gate: decision.gate,
-    // The count, not the list — see ApiTaskDecision.fileCount
-    fileCount: decision.fileCount || (decision.files ?? []).length,
+    // The count, not the list — see ApiTaskDecision.fileCount. Both counts are read straight:
+    // `createDecision` is the only writer and the route passes both unconditionally, the schema
+    // defaults them to 0, and `files` is selected by no reader that reaches here — so a
+    // `count || list.length` fallback could never fire, and reading the lists inside a
+    // short-circuit made what this function touches depend on the values it is handed.
+    fileCount: decision.fileCount ?? 0,
     protectedFiles: decision.protectedFiles ?? [],
-    protectedFileCount:
-      decision.protectedFileCount || (decision.protectedFiles ?? []).length,
+    protectedFileCount: decision.protectedFileCount ?? 0,
     patch: decision.patch ?? "",
     patchTruncated: Boolean(decision.patchTruncated),
     commit: decision.commit,

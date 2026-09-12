@@ -11,6 +11,7 @@ vi.mock("@/models/task", () => ({ Task: { findOneAndUpdate, find } }));
 vi.mock("@/models/worker", () => ({ Worker: { findById: workerFindById } }));
 
 const {
+  DECISION_FIELDS_A_READER_NEEDS,
   createDecision,
   decisionsForWorker,
   mayDecide,
@@ -278,12 +279,23 @@ describe("a person's verdict", () => {
    * Both chained onto the update, and both load-bearing for the answer it returns: the patch is
    * `select: false` on the schema, and `decidedBy` is an ObjectId until somebody populates it.
    */
+  /**
+   * The constant, not a copy of its text: what it should CONTAIN is derived from what
+   * `toApiDecision` reads, in `models/task.serialization.test.ts`. Between them, a reader that
+   * hand-rolls a projection and a projection that has fallen behind the schema are both caught.
+   *
+   * A test phrased as the consequence — push this return through `toApiDecision` and require a
+   * patch and a non-empty list — was written here and removed: `findOneAndUpdate` is mocked, so
+   * the document comes back whole whatever the query asked for. Measured, with the select cut back
+   * to `+decision.patch`: this test reddens, that one stayed green.
+   */
   it("asks for the patch and the person, so the answer it returns is whole", async () => {
     await recordVerdict("t1", "accept", OWNER, PIN);
 
-    expect(chainedCalls.select).toEqual(["+decision.patch"]);
+    expect(chainedCalls.select).toEqual([DECISION_FIELDS_A_READER_NEEDS]);
     expect(chainedCalls.populate).toEqual(["decision.decidedBy"]);
   });
+
 
   it("says so when the record has already been answered", async () => {
     findOneAndUpdate.mockReturnValue(chained(null));
@@ -393,13 +405,21 @@ describe("what a reader is shown", () => {
    * A record written before the counts existed carries neither, and the panel still has to say
    * something true — the list it does have is the best available answer.
    */
-  it("falls back to the list for a record that predates the counts", () => {
+  /**
+   * The fallback this replaces read `files.length` when `fileCount` was absent. Nothing could
+   * reach it: `createDecision` is the only writer and passes both counts, the schema defaults them
+   * to 0, and no reader that hands a document to `toApiDecision` selects `files` — so the branch
+   * only ever fired for a hand-built fixture, which is what the test asserting it was. Reading the
+   * counts straight also means this function's reads no longer depend on the values it is given,
+   * which is what makes the projection test below deterministic.
+   */
+  it("reads the counts the writer stored, rather than measuring a list it was not sent", () => {
     const api = toApiDecision(
       decision({ fileCount: undefined as never, protectedFileCount: undefined as never })
     )!;
 
-    expect(api.fileCount).toBe(2);
-    expect(api.protectedFileCount).toBe(1);
+    expect(api.fileCount).toBe(0);
+    expect(api.protectedFileCount).toBe(0);
   });
 
   it("withholds the machine's own bookkeeping", () => {
