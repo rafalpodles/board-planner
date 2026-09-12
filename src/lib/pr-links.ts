@@ -99,16 +99,16 @@ export interface StoredProviderLink {
  * Which of a task's stored links this round of the sync has **positively contradicted** (BP-610).
  *
  * Not "everything the round did not confirm". Neither provider is asked for its whole history:
- * GitHub returns the open pull requests plus the thirty most recently updated closed ones, GitLab
- * the first hundred by `updated_at`. A task whose pull request merged last quarter falls out of
- * that window on every sync while remaining perfectly correct, so treating absence as removal
- * would delete good links from healthy projects. Absent is unknown, not gone.
+ * GitHub returns up to a hundred open pull requests plus the thirty most recently updated closed
+ * ones, GitLab the first hundred by `updated_at`. A task whose only pull request merged last
+ * quarter falls out of that window on every sync while remaining perfectly correct, so treating
+ * absence as removal would delete good links from healthy projects. Absent is unknown, not gone.
  *
  * Only the tasks this pass reaches, mind. A task that *does* have a pull request in the window is
  * written by the first loop instead, and `replaceProviderLinks` there replaces this provider's
  * links wholesale — so an older link of its own, outside the window, is already dropped today on
  * `origin/main`, before any of this runs. That is a separate defect, named rather than implied
- * away: the file argues for a conservatism its first half does not yet practise.
+ * away: the file argues for a conservatism its first half does not practise. BP-617.
  *
  * So one rule, and every removal carries the round's own evidence for it: the number came back in
  * this round's fetch and the matcher did not give it to this task. It was retitled onto another
