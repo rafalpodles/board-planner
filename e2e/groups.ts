@@ -92,6 +92,7 @@ export const GROUPS = {
     "admin-sets-password.spec.ts",
     "reset-by-email.spec.ts",
     "email-on-account.spec.ts",
+    "mail-test-send.spec.ts",
     "own-display-name.spec.ts",
     "user-card-names.spec.ts",
     "assignee-access.spec.ts",

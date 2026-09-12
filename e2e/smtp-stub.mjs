@@ -14,10 +14,11 @@ import { fatal, fatalOnListenFailure, keepAlive, serve } from "./stub-guard.mjs"
  * fire-and-forget, so the message is handed over after the route has answered and after the test's
  * own request has resolved.
  *
- * Two ports. The SMTP one is what `nodemailer` talks to; the HTTP one is what a spec reads:
- * `/reset` clears what has arrived, any other path returns it. Routed on the exact path and
- * nothing else — the method is not checked, and neither is a query string, which is the same
- * looseness every other stub's control port here has.
+ * Two ports. The SMTP one is what `nodemailer` talks to; the HTTP one is what a spec reads and
+ * steers: `/reset` clears what has arrived and cancels any refusal, `/refuse?to=<address>` makes
+ * the server answer 550 to mail for that one recipient (and `/refuse` with no address stops), and
+ * any other path returns what has arrived. Routed on the path; the method is not checked, which is
+ * the same looseness every other stub's control port here has.
  *
  * STARTTLS is not optional here. `src/lib/email.ts` sets `requireTLS` on every port but 465
  * (BP-306, so a stripped advertisement cannot get the AUTH exchange in cleartext), and nodemailer
@@ -34,6 +35,15 @@ const CONTROL_PORT = Number(process.env.SMTP_STUB_CONTROL_PORT ?? SMTP_PORT + 1)
 
 /** `{ from, to, data }` per message, oldest first. */
 let messages = [];
+
+/**
+ * An address the server refuses to accept mail for, or `null`.
+ *
+ * Named rather than a "refuse the next one" flag, because the run's other mail is fire-and-forget:
+ * a message dispatched by an earlier spec can still be on its way, and an unscoped refusal would
+ * land on whichever arrived first. An address one spec owns cannot be hit by anybody else's.
+ */
+let refuseFor = null;
 
 function selfSignedCertificate() {
   const dir = mkdtempSync(join(tmpdir(), "bp-smtp-stub-"));
@@ -90,10 +100,17 @@ function converse(socket, session) {
         session.data += unstuff(buffer.subarray(0, end).toString("utf8"));
         buffer = buffer.subarray(end + 5);
         session.readingData = false;
-        messages.push({ from: session.from, to: session.to, data: session.data });
+        const refused = refuseFor !== null && session.to.includes(refuseFor);
+        if (!refused) messages.push({ from: session.from, to: session.to, data: session.data });
         session.data = "";
         session.to = [];
-        socket.write("250 2.0.0 Ok: queued\r\n");
+        // After the body, not at RCPT: what the mail screen exists to show is the sentence a server
+        // says when it has read a message and will not take it, which is this one.
+        socket.write(
+          refused
+            ? "550 5.7.1 Rejected on request of the test\r\n"
+            : "250 2.0.0 Ok: queued\r\n"
+        );
         continue;
       }
 
@@ -210,14 +227,26 @@ serve({
   port: CONTROL_PORT,
   host: LOOPBACK,
   handler: async (req, res) => {
-    if (req.url === "/health") {
+    // Parsed rather than compared whole, because `/refuse` carries the address in its query. The
+    // other paths gain nothing from it and lose the looseness they had, which nothing relied on.
+    const { pathname, searchParams } = new URL(req.url ?? "/", "http://localhost");
+
+    if (pathname === "/health") {
       res.writeHead(200, { "Content-Type": "text/plain" }).end("ok");
       return;
     }
-    if (req.url === "/reset") {
+    if (pathname === "/reset") {
       messages = [];
+      // A spec that fails between refusing and accepting again must not leave the next one with a
+      // server that quietly drops its mail
+      refuseFor = null;
     }
-    const payload = JSON.stringify(req.url === "/reset" ? { ok: true } : messages);
+    // `/refuse?to=a@b` starts refusing that recipient; `/refuse` with no address stops.
+    if (pathname === "/refuse") {
+      refuseFor = searchParams.get("to");
+    }
+    const acknowledged = pathname === "/reset" || pathname === "/refuse";
+    const payload = JSON.stringify(acknowledged ? { ok: true, refuseFor } : messages);
     res.writeHead(200, {
       "Content-Type": "application/json",
       "Content-Length": Buffer.byteLength(payload),

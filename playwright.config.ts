@@ -37,10 +37,18 @@ export const WEBHOOK_RECEIVER_URL = `http://127.0.0.1:${WEBHOOK_RECEIVER_PORT}`;
 const SMTP_STUB_PORT = Number(process.env.SMTP_STUB_PORT ?? PORT + 7);
 const SMTP_STUB_CONTROL_PORT = Number(process.env.SMTP_STUB_CONTROL_PORT ?? PORT + 8);
 export const SMTP_STUB_CONTROL_URL = `http://127.0.0.1:${SMTP_STUB_CONTROL_PORT}`;
-// What the app is told its mail server is. Exported so a spec can assert the configured
-// branch of the mail screen against it, rather than reading an env var the runner
-// process does not have — the value is set on the dev server below, not on this one.
+// What the app is told its mail server is. Exported so a spec can assert the configured branch of
+// the mail screen against it, rather than reading an env var the runner process does not have —
+// these are set on the dev server below, not on this one. The dev server's environment is built
+// from this object rather than from literals beside it, so a spec asserting "Server 127.0.0.1:3994"
+// cannot go on passing against a server told something else.
 export const SMTP_STUB_HOST = "127.0.0.1";
+export const MAIL_SERVER = {
+  host: SMTP_STUB_HOST,
+  port: SMTP_STUB_PORT,
+  user: "e2e",
+  from: "Board Planner <noreply@board-planner.test>",
+};
 
 // MongoDB, through a proxy the suite can cut (e2e/mongo-proxy.mjs). The dev server is pointed at
 // the proxy rather than at the database, so a test can take the database away and give it back
@@ -222,11 +230,11 @@ export default defineConfig({
         WEBHOOK_SIGNING_SECRET: WEBHOOK_SECRET,
         // The mail server above. `isEmailConfigured()` wants all three, and without them the whole
         // e-mail column of the notification grid is unreachable from a browser (BP-465).
-        SMTP_HOST: SMTP_STUB_HOST,
-        SMTP_PORT: String(SMTP_STUB_PORT),
-        SMTP_USER: "e2e",
+        SMTP_HOST: MAIL_SERVER.host,
+        SMTP_PORT: String(MAIL_SERVER.port),
+        SMTP_USER: MAIL_SERVER.user,
         SMTP_PASS: "e2e",
-        SMTP_FROM: "Board Planner <noreply@board-planner.test>",
+        SMTP_FROM: MAIL_SERVER.from,
         // For the stub's throwaway certificate, and for nothing else: `email.ts` sets `requireTLS`
         // on every port but 465, so the stub has to offer STARTTLS and this run has to accept a
         // certificate no authority signed.
