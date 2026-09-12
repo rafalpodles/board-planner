@@ -7,6 +7,13 @@ const SAFE_CONFIG = [
   "core.pager=cat",
   "core.hooksPath=/dev/null",
   "credential.helper=",
+  // Every rule the gates apply is about a path, and by default git QUOTES a path carrying any
+  // non-ASCII byte: `.github/workflows/cié.yml` is printed as `".github/workflows/ci\303\251.yml"`,
+  // quotes included. Measured on git 2.50.1 — against that string every one of protected-paths'
+  // regexes answers false, because `(^|\/)` dies on the leading quote and `\.ya?ml$` on the
+  // trailing one. GitHub runs the file all the same. Here rather than at the one call site,
+  // because a path a rule cannot read is the same hazard wherever it is read (BP-381).
+  "core.quotePath=false",
 ];
 
 // Delivery does not go through here: it carries GH_TOKEN and has to reach the remote, so it

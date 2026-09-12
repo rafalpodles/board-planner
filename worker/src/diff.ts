@@ -37,6 +37,23 @@ function resolveRenamedPath(rawPath: string): string {
     : rawPath.slice(arrowIndex + " => ".length);
 }
 
+/**
+ * `core.quotePath=false` stops git quoting a non-ASCII path, which is the common case. It does not
+ * stop it quoting one that carries a quote, a backslash, a tab or a newline — and a quoted name is
+ * one every rule in `protected-paths` reads as something other than the file it is.
+ *
+ * So a name this worker cannot read back is refused rather than judged. Nothing downstream has to
+ * ask whether its input was really the path: the run ends and a person looks (BP-381).
+ */
+function refuseQuotedPath(path: string): string {
+  if (path.startsWith('"')) {
+    throw new Error(
+      `refusing the change: git quoted the path ${path}, and a quoted name is not the one the gates would read`,
+    );
+  }
+  return path;
+}
+
 function parseNumstat(
   output: string,
 ): Pick<DiffStats, "changedLines" | "changedFiles"> {
@@ -48,7 +65,7 @@ function parseNumstat(
     const [added, removed, rawPath] = line.split("\t");
     if (!rawPath) continue;
 
-    changedFiles.push(resolveRenamedPath(rawPath.trim()));
+    changedFiles.push(refuseQuotedPath(resolveRenamedPath(rawPath.trim())));
     if (added !== "-" && removed !== "-") {
       changedLines += Number(added) + Number(removed);
     }
@@ -148,9 +165,19 @@ export async function collectDiff(
     symlinks.push({ path, target: target.trim() });
   }
 
+  // --text is the third leaf of the same family, and the one `--no-ext-diff --no-textconv` misses:
+  // the `-diff` ATTRIBUTE needs no driver and no config at all. A committed `.gitattributes`
+  // carrying `package.json -diff` — or an untracked `.git/info/attributes`, which no gate can see
+  // — makes this read print `Binary files a/package.json and b/package.json differ` while
+  // `--numstat` still lists the path, so the file list stays honest and only the contents vanish.
+  // Measured on git 2.50.1, in a plain clone and in a linked worktree.
+  //
+  // That matters most here rather than at the gates: this patch is what a person is shown and asked
+  // to accept, and the settle-time re-derivation reads it the same way, so its digest agrees with
+  // the blanked version (BP-381).
   const patchOutput = await git(
     runner,
-    ["diff", "--no-ext-diff", "--no-textconv", baseSha, headSha, "--"],
+    ["diff", "--no-ext-diff", "--no-textconv", "--text", baseSha, headSha, "--"],
     opts,
   );
   const { patch, truncated } = boundPatch(patchOutput);

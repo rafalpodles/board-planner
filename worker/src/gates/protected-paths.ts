@@ -16,7 +16,7 @@ export const PROTECTED_PATHS_BRIEF = [
   "You may not create, edit or delete files that a later step executes or loads as instructions:",
   "package manifests and lockfiles (package.json, package-lock.json, pnpm-lock.yaml, yarn.lock, .npmrc),",
   "build and test tool configs (vite, vitest, next, webpack, jest, babel, playwright, tailwind and the like),",
-  "anything under scripts/, .husky/, .github/workflows/ or .claude/,",
+  "anything under scripts/, .husky/, .github/workflows/, .github/actions/ or .claude/,",
   "agent instruction files (CLAUDE.md, AGENTS.md, .mcp.json),",
   "the repository's own git metadata (.gitattributes, .gitmodules),",
   "container and CI manifests (Dockerfile, docker-compose.yml, .gitlab-ci.yml, Jenkinsfile),",
@@ -38,14 +38,19 @@ export const AGENT_INSTRUCTION_FILE =
 // test script loads, and for scripts/, because a package.json script pointing at scripts/build.js
 // means editing that file is code execution without touching package.json at all.
 // `.gitattributes` earns its place here for a reason the rest of the list does not share: it does
-// not run anything itself, it decides what git SHOWS. `diff.<driver>.textconv` and
-// `filter.<name>.smudge` are selected per path by an attribute, so an agent that adds
-// `package.json -diff` leaves the gate firing on the path exactly as before while the patch a
-// human is handed reads `Binary files … differ`. The driver still has to be defined somewhere the
-// config scan reads, but the attribute is the half that lives in the tree and was invisible here.
+// not run anything itself, it decides what git SHOWS. `filter.<name>.smudge` and
+// `diff.<driver>.textconv` are selected per path by an attribute; a bare `-diff` needs no driver
+// and no config at all, and makes a patch read `Binary files … differ`.
+//
+// Two things this does NOT achieve, said here because the first draft of this comment claimed
+// both. It does not stop the attack — the untracked `.git/info/attributes` is the same attribute
+// with nothing tracked to refuse, which is why `collectDiff` passes `--text` rather than relying
+// on this line. And tripping this gate is what OPENS the decision panel, so refusing the path is
+// not by itself a reason the change cannot be accepted.
+//
 // `.gitmodules` is its neighbour: it names other repositories a checkout pulls in.
 export const EXECUTABLE_CONFIG_FILE =
-  /(^|\/)(package(-lock)?\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.ya?ml|\.npmrc|\.yarnrc(\.yml)?|binding\.gyp)$|(^|\/)(next|vite|vitest|webpack|rollup|jest|babel|astro|svelte|nuxt|tailwind|postcss|playwright|esbuild|metro|remix|gatsby)\.config\.[cm]?[jt]sx?$|(^|\/)(\.babelrc(\.[cm]?js(on)?)?|Makefile|CMakeLists\.txt|\.gitattributes|\.gitmodules)$|(^|\/)(\.husky|\.git\/hooks|\.github\/workflows|scripts)\//i;
+  /(^|\/)(package(-lock)?\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.ya?ml|\.npmrc|\.yarnrc(\.yml)?|binding\.gyp)$|(^|\/)(next|vite|vitest|webpack|rollup|jest|babel|astro|svelte|nuxt|tailwind|postcss|playwright|esbuild|metro|remix|gatsby)\.config\.[cm]?[jt]sx?$|(^|\/)(\.babelrc(\.[cm]?js(on)?)?|Makefile|CMakeLists\.txt|\.gitattributes|\.gitmodules)$|(^|\/)(\.husky|\.git\/hooks|\.github\/workflows|\.github\/actions|scripts)\//i;
 
 // Manifests that decide what runs *after* this change lands, in a repository this worker's gates
 // cannot execute at all. A non-JS repo fails the build gate on `npm ci` before reading anything, so
@@ -73,8 +78,10 @@ export const BUILD_MANIFEST_FILE =
  * event GitHub runs the workflow from the pushed ref, and a workflow diff is the hardest thing on
  * the list to read for safety.
  *
- * A composite action under `.github/actions` is here for the same reason: a workflow executes it,
- * and it matches none of the three patterns above.
+ * A composite action under `.github/actions` is here for the same reason: a workflow executes it.
+ * It is also on the protected list above — this predicate narrows what may be ACCEPTED and never
+ * widens what the gate refuses, so a family that is unacceptable here has to be refused there too,
+ * or a change touching only a composite action would sail past the gate with nothing to accept.
  */
 export const WORKFLOW_FILE =
   /(^|\/)\.github\/workflows\/[^/]+\.ya?ml$|(^|\/)\.github\/actions\/.+\/action\.ya?ml$/i;

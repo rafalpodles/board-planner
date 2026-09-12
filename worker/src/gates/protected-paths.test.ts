@@ -254,6 +254,7 @@ describe("what the agent is told matches what the gate refuses", () => {
     "go.mod",
     ".gitattributes",
     ".gitmodules",
+    ".github/actions/setup/action.yml",
   ];
 
   it("warns about every family the gate actually refuses", async () => {
@@ -311,11 +312,18 @@ describe("the files that decide what CI itself does", () => {
     expect(isWorkflowPath(file)).toBe(false);
   });
 
-  // Every one of them is still protected: this predicate narrows what may be ACCEPTED, and changes
-  // nothing about what the gate refuses
-  it("does not loosen the gate — a workflow file is refused as it always was", async () => {
-    expect((await protectedPathsGate().run(context([".github/workflows/ci.yml"]))).ok).toBe(false);
-  });
+  /**
+   * This predicate narrows what may be ACCEPTED and never widens what the gate refuses — so every
+   * family it names has to be refused by the gate as well. A composite action was not: none of the
+   * three path patterns covered `.github/actions/`, so a change touching only one tripped nothing,
+   * was pushed, and ran in Actions with the repository's secrets by the ordinary route.
+   */
+  it.each([".github/workflows/ci.yml", ".github/actions/setup/action.yml"])(
+    "is refused by the gate as well: %s",
+    async (file) => {
+      expect((await protectedPathsGate().run(context([file]))).ok).toBe(false);
+    }
+  );
 
   it("lists the offending files, so a refusal can name them", () => {
     expect(workflowPaths(["src/a.ts", ".github/workflows/ci.yml"])).toEqual([
