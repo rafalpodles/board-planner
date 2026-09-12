@@ -205,12 +205,23 @@ describe("once it has been answered", () => {
   });
 
   /**
-   * The guard is `waitingOnAMachine`, not the clock alone. A `pending` record is waiting on a
-   * PERSON, and a machine that has said nothing for an hour is neither surprising nor something
-   * they can act on — the sentence would only be noise over the decision they are there to make.
+   * Across every live state, including the one waiting on a person — which is the opposite of what
+   * the first round of this review asked for, and the second round was right. On `pending` the
+   * panel offers Decline and Give up side by side, both saying "delete", and the only thing
+   * separating them is whether that machine is coming back.
    */
-  it("says nothing about liveness while the decision is waiting on a person", () => {
-    panel({ state: "pending", workerLastSeenAt: new Date(NOW - 60 * 60_000).toISOString() });
+  it.each(["pending", "refused", "failed"] as const)(
+    "says the machine has gone quiet while it is %s too, because that is what decides the choice",
+    (state) => {
+      panel({ state, workerLastSeenAt: new Date(NOW - 60 * 60_000).toISOString() });
+
+      expect(screen.getByTestId("decision-machine-quiet")).toBeTruthy();
+    }
+  );
+
+  // The control: a machine answering promptly says nothing, in any state
+  it.each(["pending", "accepted"] as const)("says nothing while it is %s and alive", (state) => {
+    panel({ state });
 
     expect(screen.queryByTestId("decision-machine-quiet")).toBeNull();
   });
@@ -305,7 +316,7 @@ describe("giving up", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Give up and delete the work" }));
 
-    expect(screen.getByRole("dialog").textContent).toContain("deletes the worktree");
+    expect(screen.getByRole("dialog").textContent).toContain("worktree holding this change is deleted");
     expect(post).not.toHaveBeenCalled();
   });
 
@@ -367,11 +378,88 @@ describe("the change itself", () => {
     panel({ patch: "diff\n".repeat(500) });
     const pre = screen.getByTestId("decision-patch");
 
-    // happy-dom reports no layout, so the tab stop is driven by the measurement rather than
-    // asserted through it; the name is what a screen reader announces either way.
-    expect(pre.getAttribute("aria-label")).toBe("The refused change");
     expect(pre.className).toContain("focus-ring");
     // Wrapped rather than scrolled sideways: a long diff line is unreachable otherwise
     expect(pre.className).toContain("whitespace-pre-wrap");
+  });
+
+  /**
+   * The tab stop and the name are both conditional on there being something to scroll to, and they
+   * go together: a name on a role-less element is ignored by some assistive technology and
+   * suppresses the content in others. happy-dom reports no layout, so this drives the measurement
+   * rather than waiting for one.
+   */
+  it("names itself as a region exactly when it takes a tab stop", () => {
+    panel();
+    const pre = screen.getByTestId("decision-patch");
+    const scrollable = pre.getAttribute("tabindex") === "0";
+
+    expect(pre.getAttribute("role")).toBe(scrollable ? "region" : null);
+    expect(pre.getAttribute("aria-label")).toBe(scrollable ? "The refused change" : null);
+  });
+});
+
+/**
+ * The verdict is pinned to the record this screen read, so a refusal means what is on screen is not
+ * what is there any more — a superseded patch, its file list, and a live Accept button over a change
+ * that no longer exists.
+ */
+describe("when the verdict is refused", () => {
+  it("re-reads the task rather than leaving the stale record up", async () => {
+    post.mockRejectedValue(new Error("no longer the one you read"));
+    const onAnswered = panel();
+
+    fireEvent.click(screen.getByRole("button", { name: "Decline and delete" }));
+
+    await waitFor(() => expect(toast).toHaveBeenCalled());
+    await waitFor(() => expect(onAnswered).toHaveBeenCalled());
+  });
+});
+
+/**
+ * `loadData` fetches three endpoints, so a poll that never stops is three requests every ten
+ * seconds per open tab, for ever — and a machine that was re-imaged or switched off stays
+ * `accepted` for ever. The moment it becomes pointless is the moment the panel already computes.
+ */
+describe("when the machine is not coming back", () => {
+  it("stops polling once it has gone quiet", () => {
+    const onAnswered = panel({
+      state: "accepted",
+      workerLastSeenAt: new Date(NOW - 30 * 60_000).toISOString(),
+    });
+
+    vi.advanceTimersByTime(120_000);
+
+    expect(onAnswered).not.toHaveBeenCalled();
+    // The control: the panel says why, and offers the way out
+    expect(screen.getByTestId("decision-machine-quiet")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Give up and delete the work" })).toBeTruthy();
+  });
+});
+
+/**
+ * Giving up means three different things, and one sentence saying "stops waiting for an answer"
+ * is simply false on the two states where it is the only button.
+ */
+describe("what giving up is warned to cost", () => {
+  it.each([
+    ["pending", "stops waiting for an answer"],
+    ["accepted", "may be pushing it right now"],
+    ["declined", "is removing it"],
+  ] as const)("describes the moment it is offered at, on %s", (state, said) => {
+    panel({ state });
+
+    fireEvent.click(screen.getByRole("button", { name: "Give up and delete the work" }));
+
+    expect(screen.getByRole("dialog").textContent).toContain(said);
+  });
+
+  // Whatever the moment, it always says what happens to the work
+  it.each(["pending", "accepted", "declined"] as const)("always says the work goes, on %s", (state) => {
+    panel({ state });
+
+    fireEvent.click(screen.getByRole("button", { name: "Give up and delete the work" }));
+
+    expect(screen.getByRole("dialog").textContent).toContain("deleted");
   });
 });

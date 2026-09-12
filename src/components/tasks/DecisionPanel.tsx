@@ -38,9 +38,23 @@ const ACCEPT_WARNING =
  * live list exactly as it treats a declined one: the worktree goes. So the button says so and asks,
  * the way the board's forced move does — the difference between this and Decline is who is expected
  * to come back, not what happens to the work.
+ *
+ * Three sentences rather than one, because giving up means three different things. On `pending` the
+ * answer was never given. On `accepted` it was, and the machine may be pushing right now — a person
+ * who got impatient is racing a push that may already have succeeded, and one message saying "stops
+ * waiting for an answer" would be simply false there.
  */
-const ABANDON_WARNING =
-  "The machine stops waiting for an answer and deletes the worktree holding this change, the same as declining. Use it when that machine is not coming back.";
+function abandonWarning(state: TaskDecisionState): string {
+  const deletes =
+    "The worktree holding this change is deleted, the same as declining. Use it when that machine is not coming back.";
+  if (state === "accepted") {
+    return `This change was accepted and the machine may be pushing it right now. Giving up stops waiting for the result — it does not undo a push that has already landed. ${deletes}`;
+  }
+  if (state === "declined") {
+    return `This change was declined and the machine is removing it. Giving up stops waiting for it to confirm. ${deletes}`;
+  }
+  return `The machine stops waiting for an answer. ${deletes}`;
+}
 
 const HEADLINE: Record<TaskDecisionState, string> = {
   pending: "A change is waiting for you",
@@ -74,7 +88,17 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
   const [patchScrolls, setPatchScrolls] = useState(false);
 
   const state = decision?.state;
-  const waiting = state !== undefined && WITH_THE_MACHINE.includes(state);
+  const lastSeen = decision?.workerLastSeenAt;
+  /**
+   * Whether anybody else is still expected to act. `loadData` fetches three endpoints, so a poll
+   * that never stops is three requests every ten seconds per open tab, for ever — and a machine
+   * that was re-imaged or switched off stays `accepted` for ever. The moment it becomes pointless
+   * is the moment the panel already computes.
+   */
+  const waiting =
+    state !== undefined &&
+    WITH_THE_MACHINE.includes(state) &&
+    (!lastSeen || Date.now() - Date.parse(lastSeen) <= PRESUMED_GONE_MS);
 
   /**
    * The task screen does not poll, so without this the panel stays on "waiting for the machine to
@@ -107,7 +131,16 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
   const quietFor = decision.workerLastSeenAt
     ? now - Date.parse(decision.workerLastSeenAt)
     : Number.POSITIVE_INFINITY;
-  const presumedGone = waiting && quietFor > PRESUMED_GONE_MS;
+  /**
+   * Across every live state, not only the two the machine is acting in.
+   *
+   * The first round of review had this the other way round — noise on a record waiting for a
+   * person. It is the opposite: on `pending` the panel offers Decline and Give up side by side,
+   * both saying "delete", and the only thing separating them is whether that machine is coming
+   * back. Withholding the one fact that answers that made the advice unactionable exactly where
+   * the choice is made.
+   */
+  const presumedGone = LIVE.includes(state) && quietFor > PRESUMED_GONE_MS;
   const canAccept = ANSWERABLE.includes(state) && decision.acceptable;
 
   async function answer(verdict: "accept" | "decline" | "abandon") {
@@ -117,6 +150,11 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
       onAnswered();
     } catch (error) {
       toast(error instanceof Error ? error.message : "Could not record that", "error");
+      // Reloaded on the way out too. The verdict is pinned to the record this screen read, so a
+      // refusal means what is on screen is not what is there any more — the patch, the file list
+      // and the buttons all belong to a decision that has been answered or replaced. Leaving them
+      // up gives somebody a live Accept button over a change that no longer exists.
+      onAnswered();
     } finally {
       setBusy(null);
       setAsking(null);
@@ -202,7 +240,9 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
             // Wrapped rather than scrolled sideways, for the same reason.
             tabIndex={patchScrolls ? 0 : undefined}
             role={patchScrolls ? "region" : undefined}
-            aria-label="The refused change"
+            // With the role: a name on a role-less element is ignored by some assistive technology
+            // and suppresses the content in others.
+            aria-label={patchScrolls ? "The refused change" : undefined}
             className="focus-ring max-h-96 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-bg p-3 text-xs leading-relaxed"
             data-testid="decision-patch"
           >
@@ -296,7 +336,7 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
         onClose={() => setAsking(null)}
         onConfirm={() => answer("abandon")}
         title="Give up on this change?"
-        message={ABANDON_WARNING}
+        message={abandonWarning(state)}
         confirmLabel="Give up and delete"
         loadingLabel="Giving up..."
         loading={busy === "abandon"}
