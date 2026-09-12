@@ -91,6 +91,12 @@ function abandonWarning(state: TaskDecisionState, machine: string): string {
   if (state === "declined") {
     return `This change was declined and ${machine} is removing it. Giving up stops waiting for it to confirm. ${after}`;
   }
+  // `refused` and `failed`: somebody DID answer — the panel says "Accepted by …" two lines above
+  // the button — and the push is what did not work. Falling through to the `pending` sentence told
+  // them nobody had answered a change they had accepted themselves.
+  if (state === "refused" || state === "failed") {
+    return `This change was accepted and the push did not go through. Giving up abandons the retry rather than the question. ${after}`;
+  }
   return `Nobody has answered this change, and giving up is not an answer — it withdraws the question. ${after}`;
 }
 
@@ -162,11 +168,21 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
   /** Whether anybody else is still expected to act. */
   const waiting = state !== undefined && WITH_THE_MACHINE.includes(state);
   const isLive = state !== undefined && LIVE.includes(state);
+  /**
+   * And whether to ask the server anything.
+   *
+   * The two states the machine is acting in, plus any live state where the panel is CLAIMING the
+   * machine has gone. `workerLastSeenAt` arrives only as a prop, so on `pending`, `refused` and
+   * `failed` nothing refetched it: the warning appeared correctly once the clock passed ten
+   * minutes and could then never clear, over a machine that had come back — while sitting beside
+   * the Accept and Decline buttons it argues against pressing.
+   */
+  const polls = waiting || (isLive && quiet);
 
   /**
    * The task screen does not poll, so without this the panel stays on "waiting for the machine to
    * push it" for ever: the pull request, the refusal and the error all arrive on a reload nobody
-   * knows to do. Bounded to the two states where somebody else is acting.
+   * knows to do.
    */
   /**
    * The clock, on its own, for every live state.
@@ -184,7 +200,7 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
   }, [isLive]);
 
   useEffect(() => {
-    if (!waiting) return;
+    if (!polls) return;
     let live = true;
     const timer = setInterval(() => {
       setNow(Date.now());
@@ -214,7 +230,7 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
       live = false;
       clearInterval(timer);
     };
-  }, [waiting, quiet, onAnswered, api, projectId, taskId, state, lastSeen]);
+  }, [polls, quiet, onAnswered, api, projectId, taskId, state, lastSeen]);
 
   // A scroll region is only a reading surface if a keyboard can reach it, and only worth a tab
   // stop when there is something to scroll to.
@@ -297,7 +313,8 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
         {state === "pending" && (
           <p className="text-sm text-text-muted" data-testid="decision-where-the-work-is">
             The branch was not pushed, on purpose: what it carries is exactly what the gate refused.
-            The work is in a worktree on <strong>{decision.workerName || decision.workerId}</strong>.
+            The work is in a worktree on{" "}
+            <strong>{decision.workerName || FALLBACK_MACHINE}</strong>.
           </p>
         )}
 
@@ -305,6 +322,8 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
           <p className="text-sm text-warning" data-testid="decision-machine-quiet">
             {decision.workerName || "That machine"} has not been heard from since{" "}
             {new Date(decision.workerLastSeenAt!).toLocaleString()}. It may never see this.
+            {ANSWERABLE.includes(state) &&
+              " Accepting and declining both wait for it; giving up does not."}
           </p>
         )}
 

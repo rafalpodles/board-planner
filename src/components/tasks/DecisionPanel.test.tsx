@@ -842,3 +842,86 @@ describe("a healthy machine's heartbeat", () => {
     expect(onAnswered).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Read whole rather than as a delta: each of these was a sentence that contradicted something
+ * else on the same screen, in a state the conditionals had grown past.
+ */
+describe("states the panel has to stay coherent in", () => {
+  /**
+   * `refused` and `failed` are the two where somebody DID answer — the panel says "Accepted by …"
+   * two lines above the button — and the push is what did not work. The default branch was
+   * written for `pending` and told them nobody had answered a change they accepted themselves.
+   */
+  it.each(["refused", "failed"] as const)(
+    "does not tell somebody nobody answered a change they accepted, on %s",
+    (state) => {
+      panel({ state, error: "remote hung up" });
+
+      fireEvent.click(screen.getByRole("button", { name: "Give up" }));
+      const said = screen.getByRole("dialog").textContent ?? "";
+
+      expect(said).toContain("accepted and the push did not go through");
+      expect(said).not.toContain("Nobody has answered");
+    }
+  );
+
+  /**
+   * On a quiet `pending` the warning sits beside Accept and Decline, both of which are
+   * instructions to a machine the panel has just said may never hear them. Nothing said which of
+   * the three buttons survives a dead machine.
+   */
+  it("says which buttons survive a machine that may never hear them", () => {
+    panel({ workerLastSeenAt: new Date(NOW - 30 * 60_000).toISOString() });
+
+    const said = screen.getByTestId("decision-machine-quiet").textContent ?? "";
+    expect(said).toContain("giving up does not");
+    // The control: all three buttons really are on screen, so the sentence is about this state
+    expect(screen.getByRole("button", { name: "Accept and push" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Decline" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Give up" })).toBeTruthy();
+  });
+
+  // Nothing to choose between on a state the machine owns — the only button is Give up
+  it("says nothing about which buttons survive where there is one", () => {
+    panel({ state: "accepted", workerLastSeenAt: new Date(NOW - 30 * 60_000).toISOString() });
+
+    expect(screen.getByTestId("decision-machine-quiet").textContent).not.toContain(
+      "giving up does not"
+    );
+  });
+
+  /**
+   * `workerLastSeenAt` arrives only as a prop, so a state that never polls could raise the warning
+   * and never lower it — over a machine that had come back, next to the buttons it argues against.
+   */
+  it.each(["pending", "refused", "failed"] as const)(
+    "keeps asking after it has called the machine quiet, on %s",
+    async (state) => {
+      panel({ state, workerLastSeenAt: new Date(NOW - 30 * 60_000).toISOString() });
+
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(get).toHaveBeenCalled();
+    }
+  );
+
+  // The control: a live machine on a state a person owns is nobody's business to poll
+  it("asks nothing on a live pending record", async () => {
+    panel();
+
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  // One box, one referent: the paragraph used to fall back to the worker id while the warning
+  // beneath it fell back to "That machine"
+  it("calls a nameless machine the same thing twice", () => {
+    panel({ workerName: undefined, workerLastSeenAt: new Date(NOW - 30 * 60_000).toISOString() });
+
+    expect(screen.getByTestId("decision-where-the-work-is").textContent).toContain("that machine");
+    expect(screen.getByTestId("decision-machine-quiet").textContent).toContain("That machine");
+    expect(screen.getByTestId("decision-panel").textContent).not.toContain("w1");
+  });
+});

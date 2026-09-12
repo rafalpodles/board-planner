@@ -528,8 +528,12 @@ export async function settleDecisions(
      * machine's count climbs — and resetting on it would wipe the counter in the one case it
      * exists for.
      */
-    if (marker && (marker.attempts ?? 0) > 0 && marker.decidedFor !== decision.decidedAt) {
-      marker = { ...marker, attempts: 0, lastAttemptAt: undefined, decidedFor: decision.decidedAt };
+    // An empty `decidedAt` is "the server did not say", not "answered at no time" — a server that
+    // predates the field would otherwise make `decidedFor` and the row agree at `""` on every row,
+    // and the reset would silently never fire again.
+    const answeredAt = decision.decidedAt || undefined;
+    if (marker && (marker.attempts ?? 0) > 0 && marker.decidedFor !== answeredAt) {
+      marker = { ...marker, attempts: 0, lastAttemptAt: undefined, decidedFor: answeredAt };
       writeMarker(deps, marker);
     }
 
@@ -601,7 +605,7 @@ export async function settleDecisions(
       // Counted here as well, cheap though this path is: without it the ceiling's `discarded` arm
       // is unreachable, and the code reads as though a decline stops after five tries when it
       // never would.
-      if (marker) writeMarker(deps, spent(marker, tried, now, decision.decidedAt));
+      if (marker) writeMarker(deps, spent(marker, tried, now, answeredAt));
       // Reported first, and the worktree removed only once the board has taken the answer: the
       // other order deletes the only copy of the work and then finds out the report did not land,
       // leaving a record that still says `declined` with nothing left to decline.
@@ -632,7 +636,7 @@ export async function settleDecisions(
      * so with the board refusing settlements the branch below ran that work every poll, unspaced
      * and uncounted: the same runaway, one branch earlier in the same function.
      */
-    writeMarker(deps, spent(marker, tried, now, decision.decidedAt));
+    writeMarker(deps, spent(marker, tried, now, answeredAt));
 
     const why = await whyNotPushable(context, marker, decision).catch((error) => String(error));
     if (why) {

@@ -161,7 +161,12 @@ const taskSchema = new Schema<ITask>(
     decision: {
       type: {
         gate: { type: String, required: true },
-        files: { type: [String], default: [] },
+        // `select: false` like the patch, and for the same reason: nothing publishes this list any
+        // more — the panel renders the COUNT and the subset that tripped the gate — so its only
+        // remaining reader is the audit detail's fallback for records written before `fileCount`
+        // existed, which asks for it by name. Up to five hundred paths otherwise ride along on any
+        // future reader that takes the parent.
+        files: { type: [String], default: [], select: false },
         // The true number, beside a list bounded for rendering — see ITaskDecision.files
         fileCount: { type: Number, default: 0 },
         protectedFiles: { type: [String], default: [] },

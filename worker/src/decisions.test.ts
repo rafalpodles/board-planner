@@ -913,6 +913,21 @@ describe("telling one verdict from a retry of it", () => {
    * The case the count exists for, and the one the obvious signal gets wrong: the board is taking
    * nothing, so the record still says `attempts: 0` on the fifth pass as on the first.
    */
+  /**
+   * An empty `decidedAt` is "the server did not say", not "answered at no time". A server that
+   * predates the field sends nothing, and treating that as a value made `decidedFor` and the row
+   * agree at `""` on every row — the reset would silently never fire again, which is round 6's
+   * double-accept back with no sign of it.
+   */
+  it("still resets when the server says nothing about when it was answered", async () => {
+    const markers = store();
+    markers.write(marker({ attempts: 5, decidedFor: "2026-09-01T09:00:00.000Z" }));
+
+    await settleDecisions(deps(markers), [row({ decidedAt: "" })], NOW, () => NOW);
+
+    expect(markers.read("CP-158")?.attempts).toBe(1);
+  });
+
   it("keeps counting a retry of the same verdict, even while the record still reads zero", async () => {
     const markers = store();
     markers.write(marker({ attempts: 3, decidedFor: "2026-09-01T11:00:00.000Z" }));
