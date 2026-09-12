@@ -149,18 +149,34 @@ describe("the mail screen, once it has a mail server", () => {
     expect(screen.getByRole("alert").textContent).toContain("Nothing was sent");
   });
 
-  // A second attempt after a failure must not read as both answers at once
-  it("clears the previous answer before the next attempt", async () => {
+  /**
+   * Measured while the second attempt is still in flight, which is the only window in which the
+   * two versions differ: the answer that lands afterwards overwrites the panel either way, so an
+   * assertion made after it passes with `setResult(null)` deleted. What a reader must not be shown
+   * is last attempt's refusal sitting under a button that says "Sending…".
+   */
+  it("takes the previous answer down before the next attempt, not after it", async () => {
     api.post.mockRejectedValueOnce(refusalWith(502, "550 5.7.1 Rejected"));
 
     await openTheScreen();
     await pressSend();
     expect(screen.getByRole("alert")).toBeTruthy();
 
-    api.post.mockResolvedValue({ to: "admin@example.test" });
+    let accept!: (answer: { to: string }) => void;
+    api.post.mockReturnValueOnce(
+      new Promise<{ to: string }>((resolve) => {
+        accept = resolve;
+      })
+    );
     await pressSend();
 
+    expect(screen.getByRole("button", { name: "Sending…" })).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
+
+    await act(async () => {
+      accept({ to: "admin@example.test" });
+    });
+
     expect(screen.getByText("Accepted for delivery to admin@example.test")).toBeTruthy();
   });
 });
