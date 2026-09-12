@@ -31,10 +31,18 @@ import { UNCONFINED_ESCAPE_HATCH, unconfinedAgentAllowed } from "./env.js";
  * where the agent itself now cannot (BP-608). This closes the agent's own tools, which is the move
  * that needed no gate and left no trace.
  *
- * Measured the same day: the CLI needs no write access to `~/.claude` or `~/.claude.json` at all.
- * `claude -p` under the profile below exits 0 with empty stderr and no permission denials, which is
- * what lets the allowance stay a list of directories rather than a denylist of the instruction
- * channels inside the operator's home.
+ * Measured the same day, and the limits of the measurement matter: under the profile below, and
+ * with the `--tools` lists executor.ts actually passes, `claude -p` exits 0 with empty stderr and
+ * no permission denials, and needs no write access to `~/.claude` or `~/.claude.json`. That is what
+ * lets the allowance stay a list of directories rather than a denylist of the instruction channels
+ * inside the operator's home.
+ *
+ * Those three signals cannot see a *tool* that fails, though — the model routes around one and
+ * still reports success. Measured: with Bash in the list, its scratch root `/tmp/claude-<uid>/…`
+ * is outside the worktree and not TMPDIR-derived, so every Bash call fails EPERM while the run
+ * still exits 0. Neither spawn gives the agent Bash, so nothing is broken today; the claim above
+ * holds for those tool lists and not for a wider one. Whoever adds a tool re-measures at the tool
+ * level, because no test here runs the real CLI.
  */
 
 // Absolute, not `sandbox-exec` on the PATH. The worker extends its own PATH with directories

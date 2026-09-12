@@ -298,11 +298,11 @@ export function reviewGate(
             model,
         ];
 
-        // `--safe-mode` above closes the instruction channels the CLI would read; this closes the
-        // ones it could write. The reviewer holds no write tool, so the only writer left is a hook
-        // — and a hook is exactly what the escape BP-349 describes plants. Confined to the clean
-        // checkout it was given, which is a throwaway directory, so nothing it leaves survives the
-        // gate that made it.
+        // Defence in depth, and it closes nothing that is open today: the reviewer holds no write
+        // tool, and `--safe-mode` below already disables hooks — so there is no writer here to
+        // confine. It is what keeps the gate shut if either of those changes: a write tool added to
+        // the reviewer's capability, or `--safe-mode` narrowed. Confined to the clean checkout,
+        // which is a throwaway directory, so nothing it leaves survives the gate that made it.
         const spawn = confine("claude", reviewArgs, { writable: [checkout.path] });
         // machineFault, not a plain refusal: an unconfinable machine has not judged the change, and
         // reporting it as the reviewer rejecting one would blame the diff and push its branch.

@@ -57,10 +57,11 @@ registration mints.
 | `CP_STATE_DIR` | no | `~/.boardplanner` |
 | `CP_ALLOW_UNCONFINED_AGENT` | no | unset |
 
-The last one is a risk acceptance rather than a setting, and it is the one thing besides bootstrap
-that is read from the environment: it runs the agent with nothing confining its writes. See
-**Safety** for what that means and why it is not a policy field. Everything else an operator can
-choose is worker policy, below.
+The last one is not bootstrap and not a setting: it is a risk acceptance, and the only other thing
+read from the environment. It runs the agent with nothing confining its writes. `1`, `true` and
+`yes` all mean yes, after trimming and lower-casing; anything else, including `0` and `false`,
+leaves the confinement on. See **Safety** for what accepting it means and why it is not a policy
+field. Everything else an operator can choose is worker policy, below.
 
 A worker holds **one** credential. An enrolment token is spent by the first registration, and
 everything after that — claiming, reporting status, commenting, releasing, and all of
@@ -258,11 +259,14 @@ and `SIGINT` both finish the task in flight before the loop exits.
 
   The escape it closes: a step runs with `--permission-mode bypassPermissions`, so `Write` used to
   take any absolute path this user can reach. `$HOME/.claude/settings.json` is the shortest one —
-  a hook entry there runs a shell command on the **next** `claude` invocation, which in every
-  shipped composition is a later step or the review gate. Nothing downstream could see it: the file
-  is outside the repository, so it never reaches the diff and `protected-paths` cannot match a path
-  it is never given. `~/.zshrc`, `~/Library/LaunchAgents/*.plist` and `~/.gitconfig` were the same
-  escape with different timing.
+  a hook entry there runs a shell command on the **next** `claude` invocation — a later step in the
+  same run, and, with a larger blast radius than anything the worker does, **the operator's own
+  interactive `claude`**, the next time they open one. Not the review gate: that passes
+  `--safe-mode`, which disables hooks along with every other customisation.
+
+  Nothing downstream could see it either: the file is outside the repository, so it never reaches
+  the diff, and `protected-paths` cannot match a path it is never given. `~/.zshrc`,
+  `~/Library/LaunchAgents/*.plist` and `~/.gitconfig` were the same escape with different timing.
 
   **Not a per-run `HOME`**, which is the cheaper thing this looks like. Measured: a fresh home
   answers `Not logged in · Please run /login`, with or without a `hasCompletedOnboarding` file, and
@@ -273,6 +277,15 @@ and `SIGINT` both finish the task in flight before the loop exits.
   The allowance is one directory rather than a list of the instruction channels inside your home,
   because measured, the CLI needs no write access to `~/.claude` or `~/.claude.json` at all: it
   runs under the profile with exit 0, empty stderr and no permission denials.
+
+  That measurement holds **for the tool lists the two spawns pass**, and cannot see further. Exit
+  code, stderr and `permission_denials` are all blind to a single tool failing — the model routes
+  around one and still reports success. Measured with Bash added to the list: its scratch root
+  `/tmp/claude-<uid>/…` is outside the worktree and is not derived from `TMPDIR`, so every Bash
+  call fails `EPERM` while the run still exits 0. `git add` inside the worktree fails the same way,
+  because a linked worktree's `index.lock` lives in the parent clone. Neither agent is given Bash,
+  so neither is a live break — but a capability that adds one has to be re-measured at the tool
+  level, and no test in this package runs the real CLI.
 
   **macOS only.** Seatbelt is what this uses, and there is no equivalent wired up elsewhere. On any
   other platform the worker **refuses the step** rather than running it unconfined, and says so.
