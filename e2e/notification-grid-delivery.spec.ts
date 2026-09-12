@@ -452,13 +452,12 @@ test("a personal chat connection is saved through its own form and survives the 
   await test.step("the member connects Slack", async () => {
     await page.getByRole("button", { name: "slack" }).click();
 
-    // Typed rather than filled once and hoped for: the field is controlled, the screen is still
-    // settling two reads when it appears, and a `fill` that lands between them is discarded
+    // Filled once and read back once. This used to retry, because a superseded read could unmount
+    // the field mid-fill and the retry was the only way past it; that is fixed in the page itself
+    // (BP-465), so a discarded fill is a regression this test should report rather than absorb.
     const address = page.getByPlaceholder("https://hooks.slack.com/services/...");
-    await expect(async () => {
-      await address.fill("https://hooks.slack.com/services/E2E/CONNECTION/one");
-      await expect(address).toHaveValue("https://hooks.slack.com/services/E2E/CONNECTION/one");
-    }).toPass({ timeout: 15_000 });
+    await address.fill("https://hooks.slack.com/services/E2E/CONNECTION/one");
+    await expect(address).toHaveValue("https://hooks.slack.com/services/E2E/CONNECTION/one");
 
     const written = saved(page);
     await page.getByRole("button", { name: "Save" }).click();
