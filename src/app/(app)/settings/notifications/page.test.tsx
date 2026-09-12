@@ -57,8 +57,8 @@ afterEach(cleanup);
 describe("the notifications page while its load effect is running twice", () => {
   it("does not paint a superseded read over a cell the reader has just ticked", async () => {
     // Strict Mode mounts, cleans up, and mounts again, so the effect runs twice and each run reads
-    // both endpoints. The first run's two reads are held; the second run's answer straight away
-    // and are what paints the screen.
+    // both endpoints. The first run's two reads are held; the second run's come back straight
+    // away, and are what paints the screen.
     let releaseSuperseded!: () => void;
     const held = new Promise<void>((resolve) => {
       releaseSuperseded = resolve;
@@ -98,6 +98,55 @@ describe("the notifications page while its load effect is running twice", () => 
 
     await waitFor(() =>
       expect((screen.getByLabelText(ASSIGNED_EMAIL) as HTMLInputElement).checked).toBe(true)
+    );
+  });
+
+  // The digest box is the one control on this screen that does not wait for Save: `toggleDigest`
+  // PUTs on change. So a superseded answer cannot undo a save here — it leaves the box showing
+  // the opposite of what was just stored, which is the worse failure of the two.
+  it("does not leave the digest box disagreeing with what it just stored", async () => {
+    let releaseSuperseded!: () => void;
+    const held = new Promise<void>((resolve) => {
+      releaseSuperseded = resolve;
+    });
+
+    let call = 0;
+    api.get.mockImplementation((path: string) => {
+      call += 1;
+      return call <= 2
+        ? held.then(() => answerFor(path, grid(false)))
+        : Promise.resolve(answerFor(path, grid(false)));
+    });
+
+    render(
+      <StrictMode>
+        <NotificationsPage />
+      </StrictMode>
+    );
+
+    const digest = (await screen.findByLabelText(
+      "Collect the e-mail column into one daily digest"
+    )) as HTMLInputElement;
+    expect(digest.checked).toBe(false);
+
+    await act(async () => {
+      fireEvent.click(digest);
+    });
+    expect(api.put).toHaveBeenCalledWith("/api/users/me", { emailDigest: true });
+
+    await act(async () => {
+      releaseSuperseded();
+      await held;
+    });
+
+    await waitFor(() =>
+      expect(
+        (
+          screen.getByLabelText(
+            "Collect the e-mail column into one daily digest"
+          ) as HTMLInputElement
+        ).checked
+      ).toBe(true)
     );
   });
 

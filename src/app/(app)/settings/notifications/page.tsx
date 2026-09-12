@@ -38,10 +38,12 @@ export default function NotificationsPage() {
 
   useEffect(() => {
     if (!user) return;
-    // Everything below is seeded from this read and then held unsaved until Save. React runs a
-    // mount effect twice under Strict Mode, so a second read is already in flight when the first
-    // one paints the screen — and without the flag the slower answer lands on top of whatever has
-    // been ticked or typed since, which `save()` then PUTs back as the reader's grid (BP-465).
+    // React runs a mount effect twice under Strict Mode, so a second read is already in flight
+    // when the first one paints the screen, and without the flag the slower answer lands on top
+    // of whatever has been ticked or typed since. The grid and the chat fields are held unsaved
+    // until Save, so `save()` then PUTs the server's values back as the reader's; the digest box
+    // writes on the spot, so a late answer there leaves it disagreeing with what was stored
+    // (BP-465).
     let ignore = false;
     Promise.all([
       api.get("/api/users/me/notifications"),
