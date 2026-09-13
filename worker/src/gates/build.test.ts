@@ -123,6 +123,7 @@ describe("buildGate", () => {
 
       expect(result.ok).toBe(false);
       expect(result.reason).toContain(UNCONFINED_REASON);
+      expect(result.machineFault).toBe(true);
       expect(run).not.toHaveBeenCalled();
     } finally {
       Object.defineProperty(process, "platform", real);
@@ -137,6 +138,17 @@ describe("buildGate", () => {
 
     expect(run.mock.calls[0][2].signal).toBe(controller.signal);
     expect(run.mock.calls[1][2].signal).toBe(controller.signal);
+  });
+
+  // The control for the two above: an ordinary failure of the suite or the build is the change's,
+  // and must NOT be reported as the machine's — that would refund the attempt for a red build.
+  it("reports a failing build as the change's, not the machine's", async () => {
+    const { runner: r } = runner(ok, { ...ok, code: 1, stderr: "Type error on line 4" });
+
+    const result = await buildGate(r, TIMEOUT_MS).run(context);
+
+    expect(result.ok).toBe(false);
+    expect(result.machineFault).toBeFalsy();
   });
 
   it("rejects and carries the tail of the output", async () => {

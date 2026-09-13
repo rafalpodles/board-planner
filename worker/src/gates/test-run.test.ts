@@ -155,6 +155,9 @@ describe("testRunGate", () => {
 
       expect(result.ok).toBe(false);
       expect(result.reason).toContain(UNCONFINED_REASON);
+      // A machine fault, not a rejection: this machine has judged nothing, so blaming the change
+      // would spend the attempt and push the branch — the same call `gates/review.ts` makes.
+      expect(result.machineFault).toBe(true);
       expect(run).not.toHaveBeenCalled();
     } finally {
       Object.defineProperty(process, "platform", real);

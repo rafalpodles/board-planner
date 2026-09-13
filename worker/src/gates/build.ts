@@ -27,8 +27,9 @@ export function buildGate(runner: Runner, timeoutMs: number): Gate {
         signal,
         withCache: true,
       });
+      // machineFault: this machine has judged nothing — see the same call in test-run.ts
       if ("refusal" in install) {
-        return { ok: false, reason: `the dependency install could not be run confined: ${install.refusal}` };
+        return { ok: false, reason: install.refusal, machineFault: true };
       }
       if (install.timedOut) {
         return { ok: false, reason: `dependency install timed out after ${timeoutMs}ms` };
@@ -57,7 +58,7 @@ export function buildGate(runner: Runner, timeoutMs: number): Gate {
         signal,
       });
       if ("refusal" in build) {
-        return { ok: false, reason: `the build could not be run confined: ${build.refusal}` };
+        return { ok: false, reason: build.refusal, machineFault: true };
       }
       if (build.timedOut) {
         return {

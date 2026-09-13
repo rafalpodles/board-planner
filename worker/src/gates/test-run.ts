@@ -18,8 +18,11 @@ export function testRunGate(runner: Runner, timeoutMs: number): Gate {
       // Implement step wrote is inside the worktree, so the agent's sandbox permitted writing it,
       // and this is where it executes (BP-608).
       const result = await runConfinedNpm(runner, ["test"], { cwd: worktreePath, timeoutMs, signal });
+      // machineFault, not a plain refusal, and the same call the review gate makes: a machine that
+      // cannot confine has judged nothing, so reporting it as the suite failing would blame the
+      // diff, spend the attempt and push the branch.
       if ("refusal" in result) {
-        return { ok: false, reason: `the test suite could not be run confined: ${result.refusal}` };
+        return { ok: false, reason: result.refusal, machineFault: true };
       }
 
       if (result.timedOut) {

@@ -82,16 +82,21 @@ export async function runConfinedNpm(
 ): Promise<CommandResult | { refusal: string }> {
   const { withCache, env: source, ...runOptions } = options;
   const cache = npmCacheDir(source);
+
   // This run's own scratch directory, inside the machine's. Created before `confine` resolves it:
   // seatbelt matches the real path, and realpath on a directory that does not exist throws —
-  // which would read as "this machine cannot confine anything".
-  const temp = mkdtempSync(join(npmTempBase(source), "cp-gate-"));
+  // which would read as "this machine cannot confine anything". A disk that will not give us one
+  // answers the same way a machine with no sandbox does, because it is the same kind of fact.
+  let temp: string;
+  try {
+    temp = mkdtempSync(join(npmTempBase(source), "cp-gate-"));
+    if (withCache) mkdirSync(cache, { recursive: true, mode: 0o700 });
+  } catch (error) {
+    return { refusal: `could not prepare a directory for this gate to write in: ${String(error)}` };
+  }
 
   const writable = [options.cwd, temp];
-  if (withCache) {
-    mkdirSync(cache, { recursive: true, mode: 0o700 });
-    writable.push(cache);
-  }
+  if (withCache) writable.push(cache);
 
   try {
     // `env` left to `confine`'s own default unless a test said otherwise, so the operator's risk
