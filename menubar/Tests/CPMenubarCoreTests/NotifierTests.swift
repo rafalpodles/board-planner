@@ -475,11 +475,24 @@ private func gateFault(_ taskKey: String) -> TelemetryEvent {
     #expect(streak.admit(.quota(Quota(status: "rejected"))) != nil)
 }
 
-// The guard is on the limit, not on the channel: the ordinary readings still pass through it to
-// the decision that keeps them silent.
-@Test func anOrdinaryQuotaReadingIsStillJudgedByTheNotificationRule() {
-    var streak = FaultStreak()
+// The guard is on the limit, not on the channel: an ordinary reading passes through it to the rule
+// that keeps it silent, and re-arms the limit on the way.
+//
+// It is the RE-ARMING this asserts, not the silence. `#expect(admit(.quota(allowed)) == nil)` is
+// unfalsifiable — the rule returns nil for that reading whatever the streak does, so a dedupe that
+// swallowed every quota event would pass it, which is the very thing it was written to exclude
+// (found in review). Comparing against `notification(for:)` instead does not help: that is nil too.
+//
+// Both readings, because `admit` branches on "rejected" and nothing else: the 90% warning is an
+// ordinary reading here, and a guard that re-armed on "allowed" alone would leave an operator who
+// only ever sees warnings between limits with one notification for the night.
+@Test func anOrdinaryQuotaReadingRearmsTheLimitOnItsWayThroughTheRule() {
+    for reading in [Quota(status: "allowed", utilization: 0.4), Quota(status: "allowed_warning", utilization: 0.9)] {
+        var streak = FaultStreak()
+        #expect(streak.admit(.quota(Quota(status: "rejected"))) != nil)
 
-    #expect(streak.admit(.quota(Quota(status: "allowed", utilization: 0.4))) == nil)
-    #expect(streak.admit(.quota(Quota(status: "allowed_warning", utilization: 0.9))) == nil)
+        #expect(streak.admit(.quota(reading)) == nil)
+
+        #expect(streak.admit(.quota(Quota(status: "rejected"))) != nil)
+    }
 }
