@@ -90,7 +90,9 @@ function PreflightCell({ preflight }: { preflight: ApiWorkerPreflight | null }) 
       <span className="text-xs text-text-muted block truncate" title={detail}>
         ready{preflight.account ? ` · ${preflight.account}` : ""}
         {warned.length > 0 ? (
-          <span className="text-warning"> · {warned.map((c) => c.name).join(", ")}</span>
+          // The mark, not the amber: without it the check's name parses as one more field in a
+          // row of them, which is what `ready · owner · sandbox` reads as in grey.
+          <span className="text-warning"> · ⚠ {warned.map((c) => c.name).join(", ")}</span>
         ) : null}
       </span>
     );
@@ -119,8 +121,12 @@ function PreflightWarning({ preflight }: { preflight: ApiWorkerPreflight | null 
     // cell, so its own 100% is the TABLE's width — wider than the screen — and the sentence ran
     // off the right edge exactly like the column it was moved out of. Measured at 1280px: the
     // table starts around x=550, so 40rem lands well inside it, and the `calc` holds the phone.
+    //
+    // `sticky left-3` because the width cap fixes the size and not the position: the cell's left
+    // edge is the TABLE's, so scrolling right to reach the Preflight column — the very act the
+    // move was made for — used to carry the sentence off the left instead (found in review).
     <div
-      className="mb-1.5 max-w-[min(40rem,calc(100vw-4rem))] whitespace-normal break-words text-xs text-warning"
+      className="sticky left-3 mb-1.5 max-w-[min(40rem,calc(100vw-4rem))] whitespace-normal break-words text-xs text-warning"
       data-testid="preflight-warning"
     >
       {/* The amber is the second signal. Without the word this line is a warning only to somebody

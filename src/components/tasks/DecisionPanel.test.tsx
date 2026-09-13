@@ -701,7 +701,7 @@ describe("the pull request it opened", () => {
     const said = screen.getByTestId("decision-pr-elsewhere");
     // The whole address, and a sentence that does not blame the host: this one's host is the
     // project's own, and only the repository differs (BP-604 review)
-    expect(said.textContent).toContain("outside this project's repository");
+    expect(said.textContent).toContain("could be confirmed as the project's repository");
     expect(said.textContent).toContain("https://github.com/attacker/repo/pull/1");
   });
 

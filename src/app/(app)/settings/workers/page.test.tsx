@@ -253,7 +253,8 @@ describe("a check that passed at a cost", () => {
 
     // Still ready, and still allowed to take work: a permanently red row is one people read past.
     const cell = await screen.findByText(/^ready/);
-    expect(cell.textContent).toBe("ready · owner · sandbox");
+    // The mark as well as the amber, so the check's name does not read as one more field
+    expect(cell.textContent).toBe("ready · owner · ⚠ sandbox");
     expect(cell.querySelector(".text-warning")?.textContent).toContain("sandbox");
   });
 

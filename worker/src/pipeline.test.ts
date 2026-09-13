@@ -1839,10 +1839,11 @@ describe("what a machine fault is recorded as", () => {
    * every broken checkout read identically (found in review).
    */
   /**
-   * The cap is where the reason was being lost. `settle` cuts the emitted detail at 200 characters,
-   * workspace.ts wraps one BaseUnavailableError in another to keep its kind, and git's stderr — the
-   * half that says what broke — is last. Against this repository's own remote the nested class
-   * names and the URL alone reached 200 before the cause began, so the operator got boilerplate.
+   * The cap is where the reason was being lost. `settle` cuts the emitted detail at 200 characters
+   * and git's stderr — the half that says what broke — is last. Against this repository's own
+   * remote the URL and the wrapping that used to go in front of it reached 200 before the cause
+   * began, so the operator got boilerplate. workspace.ts no longer wraps one BaseUnavailableError
+   * in another (BP-619); the cap is still what this test is about, which is why it stayed.
    *
    * Built from the real message rather than a short stand-in, because a short one fits either way
    * and proves nothing (found in review).

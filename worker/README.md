@@ -255,8 +255,8 @@ and `SIGINT` both finish the task in flight before the loop exits.
   that wrote a test which writes to your home, followed by a Test gate that ran it, reached outside
   in two moves. Each command now gets the worktree and a scratch directory of its own (handed to it
   as `TMPDIR`, so `os.tmpdir()` and `mktemp` find it), and nothing else; the install also gets a
-  **per-worker npm cache** under the temp directory, or wherever `CP_NPM_CACHE` points, never your
-  own `~/.npm`. What that leaves: the cache is shared between runs on this machine, so a package an
+  **per-account npm cache** under the temp directory, or wherever `CP_NPM_CACHE` points, never your
+  own `~/.npm` — named for the uid, so two workers you run share it. What that leaves: the cache is shared between runs on this machine, so a package an
   agent could get written into it is one a later run installs — npm verifies tarball integrity
   against the lockfile, which bounds it, and your own cache is out of reach either way. A machine
   that cannot confine refuses the gate rather than running it unconfined.
