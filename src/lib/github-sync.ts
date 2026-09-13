@@ -205,6 +205,8 @@ export type SyncResult =
       tasksWritten: number;
       /** Links dropped because this round's fetch gave their pull request to somebody else. */
       prsUnlinked: number;
+      /** How many tasks those came off, which is not `tasksWritten` — most writes remove nothing. */
+      tasksUnlinked: number;
       autoTransitioned: number;
     }
   | { ok: false; status: number; error: string };
@@ -289,6 +291,7 @@ export async function syncGithubPullRequests(
   let linked = 0;
   let written = 0;
   let unlinked = 0;
+  let unlinkedTasks = 0;
   let autoTransitioned = 0;
   const columnIds = new Set(getProjectColumns(project).map((c) => c.id));
 
@@ -329,6 +332,7 @@ export async function syncGithubPullRequests(
       // After the write, so a row never claims a change the write then failed to make
       await recordLinkChanges(task._id, actor, added, removed);
       unlinked += removed.length;
+      if (removed.length > 0) unlinkedTasks++;
       written++;
     }
     linked += prs.length;
@@ -391,6 +395,7 @@ export async function syncGithubPullRequests(
       await writeProviderLinks(task._id, "github", [], seenList);
       await recordLinkChanges(task._id, actor, [], removed);
       unlinked += removed.length;
+      unlinkedTasks++;
       written++;
     }
   }
@@ -402,6 +407,7 @@ export async function syncGithubPullRequests(
     prsLinked: linked,
     tasksWritten: written,
     prsUnlinked: unlinked,
+    tasksUnlinked: unlinkedTasks,
     autoTransitioned,
   };
 }
@@ -445,7 +451,7 @@ export async function githubSyncTick(): Promise<void> {
       // unlinked nothing says nothing, which keeps the log worth reading.
       if (result.prsUnlinked > 0) {
         console.info(
-          `GitHub sync unlinked ${result.prsUnlinked} pull request(s) across ${result.tasksWritten} task(s) on ${project.key}`
+          `GitHub sync unlinked ${result.prsUnlinked} pull request(s) from ${result.tasksUnlinked} task(s) on ${project.key}`
         );
       }
     } catch (err) {

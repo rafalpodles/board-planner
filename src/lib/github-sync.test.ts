@@ -906,8 +906,12 @@ describe("what a link change leaves behind", () => {
 
     await githubSyncTick();
 
-    expect(info).toHaveBeenCalledWith(expect.stringContaining("unlinked 1 pull request"));
-    expect(info).toHaveBeenCalledWith(expect.stringContaining("BP"));
+    // The count of tasks is the ones it took a link OFF, not every task the round rewrote —
+    // most writes remove nothing, and a line that said otherwise would be a claim the numbers
+    // beside it contradict
+    expect(info).toHaveBeenCalledWith(
+      "GitHub sync unlinked 1 pull request(s) from 1 task(s) on BP"
+    );
   });
 
   it("says nothing at all when a round unlinked nothing", async () => {
