@@ -998,9 +998,11 @@ describe("a rename the project's own url has caught up with", () => {
 
     const result = await syncGithubPullRequests(project(), "u1");
 
-    // The write keeps what it did not see: only this round's own doc is written, and the filter
-    // leaves the other one alone
+    // The write keeps what it did not see. Both halves, because "written" alone would pass on a
+    // round that had also contradicted the old link: the round's field of view does not contain
+    // the address the old link wears, which is what leaves the filter no reason to drop it.
     expect(linkArgs()[0].written).toEqual([1]);
+    expect(linkArgs()[0].seen).not.toContain("https://github.com/o/before-the-rename/pull/1");
     expect(result).toMatchObject({ prsUnlinked: 0 });
     expect(rowsOf("pr_unlinked")).toEqual([]);
     // And the row that IS written, because by address this is a link the task did not have
