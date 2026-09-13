@@ -2,11 +2,17 @@ import XCTest
 @testable import CPMenubarCore
 
 final class ProjectSyncTests: XCTestCase {
+    // The name is not the key, and is deliberately not derived from it: every message under test
+    // reads one of the two, and a fixture where they are the same string cannot say which
+    // (found in review).
+    private static let names = ["SB": "Ventures", "BP": "Board Planner"]
+
     private func row(
         _ key: String, repo: String, wanted: Bool, servedHere: Bool, available: Bool = true
     ) -> ProjectCatalogueRow {
         ProjectCatalogueRow(
-            project: "p-\(key)", key: key, name: key, repositoryUrl: repo,
+            project: "p-\(key)", key: key, name: Self.names[key] ?? "The \(key) project",
+            repositoryUrl: repo,
             available: available, workersEnabled: true, servedHere: servedHere, wanted: wanted)
     }
 
@@ -104,7 +110,9 @@ final class ProjectSyncTests: XCTestCase {
 
         let step = ProjectSync.nowhereToPut(plan: plan, checkoutsFolder: "")
 
-        XCTAssertEqual(step, .nowhereToPut(projects: ["SB"], where: checkoutsFolderLocation))
+        // "Ventures", not "SB": the pane is read by whoever set the machine up, and the name is
+        // what they picked the project by on the board
+        XCTAssertEqual(step, .nowhereToPut(projects: ["Ventures"], where: checkoutsFolderLocation))
     }
 
     // The message names where the folder is set, not only that it is missing.
@@ -133,7 +141,7 @@ final class ProjectSyncTests: XCTestCase {
 
         XCTAssertEqual(
             ProjectSync.nowhereToPut(plan: plan, checkoutsFolder: ""),
-            .nowhereToPut(projects: ["BP"], where: checkoutsFolderLocation))
+            .nowhereToPut(projects: ["Board Planner"], where: checkoutsFolderLocation))
     }
 
     // A machine nobody has given a project to is not misconfigured, it is unused.

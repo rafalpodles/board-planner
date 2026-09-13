@@ -288,4 +288,27 @@ describe("a check that passed at a cost", () => {
     expect(await screen.findByText(/there is no sandbox here/)).toBeTruthy();
     expect(screen.queryByTestId("preflight-warning")).toBeNull();
   });
+
+  // The "or not" above is the half with no warn on it at all. This is the other half, and the one
+  // `c.ok &&` is there for: the heartbeat route strips a warn off a failing check, so a report
+  // carrying both is either an older worker or a route that stopped stripping — and the screen
+  // must not then say "ready, with a caution" about a machine that is red (found in review).
+  it("keeps it red when the failing check carries a warning too", async () => {
+    api.get.mockResolvedValue([
+      worker({
+        preflight: {
+          ...preflight([
+            { name: "sandbox", ok: false, warn: true, detail: "there is no sandbox here" },
+          ]),
+          ok: false,
+        },
+      }),
+    ]);
+
+    render(<WorkersPage />);
+
+    expect(await screen.findByText(/there is no sandbox here/)).toBeTruthy();
+    expect(screen.queryByTestId("preflight-warning")).toBeNull();
+    expect(screen.queryByText(/^ready/)).toBeNull();
+  });
 });
