@@ -42,7 +42,8 @@ export interface AuthState {
    * reported its own generic failure instead (BP-362 review).
    *
    * `relayed` is for the endpoints whose 5xx is a report about somebody else — a mail server that
-   * refused, and any proxy the product grows — where the instance answered perfectly well (BP-607).
+   * refused, and any proxy the product grows (BP-607). Such an answer leaves the outage state where
+   * it was rather than clearing it: an edge 502 over a dead instance looks exactly the same.
    */
   noteApiStatus: (status: number, opts?: { relayed?: boolean }) => void;
 }
@@ -138,9 +139,12 @@ export function useAuthProvider(): AuthState {
   }, []);
 
   const noteApiStatus = useCallback((status: number, opts?: { relayed?: boolean }) => {
-    // Any answer below 500 proves the instance is answering, whatever it thinks of the request —
-    // and so does a relayed 5xx, which is this instance reporting a third party's refusal.
-    setOutage(status >= 500 && !opts?.relayed);
+    // A relayed 5xx is unreadable in either direction: the edge in front of a dead instance answers
+    // 502 too, and the browser cannot tell that apart from the route deciding a mail server refused.
+    // So it neither raises the banner nor clears one another answer raised (BP-627).
+    if (opts?.relayed) return;
+    // Any answer below 500 proves the instance is answering, whatever it thinks of the request
+    setOutage(status >= 500);
   }, []);
 
   // Preferences saved elsewhere in the app have to reach the cached user, or a
