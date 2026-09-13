@@ -1171,14 +1171,28 @@ test("the fleet screen says whether a machine confines the agent it runs", async
   // And still in it once the table is scrolled sideways to reach the Preflight column — the act
   // this move exists for. The line sits in a `colSpan` cell whose left edge is the TABLE's, so
   // without `sticky` it slides off the left exactly when somebody goes looking (found in review).
-  await page.locator("table").evaluate((table) => {
+  const scrolled = await page.locator("table").evaluate((table) => {
     const scroller = table.parentElement as HTMLElement;
     scroller.scrollLeft = scroller.scrollWidth;
+    return scroller.scrollLeft;
   });
+  // The table really did move — an assertion about a scrolled table is worth nothing on one that
+  // did not scroll, and this fleet's table is only wider than its box because of the columns
+  expect(scrolled, "the table did not scroll, so nothing below is about scrolling").toBeGreaterThan(0);
+
+  // Against the SCROLLER's left edge, not the viewport's: the sentence slides to around x=68 when
+  // the table scrolls under it, which is still inside a 1280px viewport and behind the sidebar,
+  // clipped by `overflow-x-auto`. A viewport-only assertion passes on exactly the bug.
+  const scrollerBox = await page.locator("table").locator("..").boundingBox();
   const afterScroll = await warning.boundingBox();
   expect(afterScroll, "the warning has no box after the table scrolled").not.toBeNull();
-  expect(afterScroll!.x, "the warning slid off the left when the table scrolled").toBeGreaterThanOrEqual(0);
-  expect(afterScroll!.x + afterScroll!.width).toBeLessThanOrEqual(width);
+  expect(
+    afterScroll!.x,
+    "the warning slid out of the scrolling area when the table moved under it"
+  ).toBeGreaterThanOrEqual(scrollerBox!.x - 1);
+  expect(afterScroll!.x + afterScroll!.width).toBeLessThanOrEqual(
+    Math.min(width, scrollerBox!.x + scrollerBox!.width) + 1
+  );
   // Amber, not red: a row a machine cannot act on is the row people learn to read past.
   await expect(warning).toHaveClass(/text-warning/);
   await expect(accepted.getByText(/^ready/)).toHaveAttribute(
