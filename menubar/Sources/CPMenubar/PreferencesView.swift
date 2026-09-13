@@ -205,10 +205,10 @@ private struct RepositoriesTab: View {
                     Text("\(project): \(reason)").font(.caption2).foregroundStyle(.red)
                 case .nowhereToPut(let projects, let location):
                     // Orange rather than red: nothing is broken and nothing was lost — there is a
-                    // setting to fill in, and the message says which one.
+                    // setting to fill in, and the message says where.
                     Text(
                         "Nothing was set up for \(projects.joined(separator: ", ")): this machine "
-                            + "has no checkouts folder. Set one in \(location)."
+                            + "has no checkouts folder. Choose one on \(location)."
                     )
                     .font(.caption2).foregroundStyle(.orange)
                 }

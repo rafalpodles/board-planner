@@ -68,6 +68,11 @@ final class ProjectSyncRunner {
             if !steps.contains(blocked) { steps.append(blocked) }
             return
         }
+        // Every other step is a thing that happened and stays true; this one is a **condition**, so
+        // it has to be retracted when it stops holding. Otherwise the operator chooses a folder,
+        // the next pass clones the projects, and the orange line saying nothing was set up sits
+        // above the line saying it was — for the life of the app (found in review).
+        steps = ProjectSync.withoutNowhereToPut(steps)
         guard !state.checkoutsFolder.isEmpty else { return }
         // Nothing to do is not a problem worth a line.
         guard !plan.isEmpty else { return }

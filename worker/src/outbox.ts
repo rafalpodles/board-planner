@@ -35,18 +35,29 @@ const MAX_ENTRIES = 500;
 /**
  * Whether the server's answer can be expected to differ next time.
  *
- * A 4xx is not transient: the server read the request and refused it, so the twenty-first attempt
- * is the first one identical to the first — and until it is dropped every later report waits
- * behind it, because order within a task matters and one failure stops the drain (BP-613). A
- * worker newer than its board is the way this happens in practice: an outcome the board's enum
- * does not know answers `400 Unknown outcome`, and one arrives per poll.
+ * Named rather than a range, and the range was the first attempt: most 4xx answers say the request
+ * was malformed, and the twenty-first attempt is then the first one identical to the first — while
+ * every later report waits behind it, because order within a task matters and one failure stops
+ * the drain (BP-613). A worker newer than its board is how that happens in practice: an outcome
+ * the board's enum does not know answers `400 Unknown outcome`, once per poll.
  *
- * 408 and 429 are the two the server means to be retried, so they stay transient.
+ * But "4xx" swept up three answers that are among the most transient the board gives, and dropping
+ * one of those destroys the report this whole module exists to keep — the post-merge comment,
+ * status or run record, without which a merged task sits in a column `claimNextTask` never looks at
+ * (found in review):
+ *
+ * - **401** — the operator rotated or revoked this machine's credential. It comes back.
+ * - **403** — a grant was being edited, or the worker was paused for a moment.
+ * - **409** — `changeStatus` refuses a task another run holds (`task-service.ts`), which is exactly
+ *   what an expired lease reclaiming a run looks like. The next flush is after that has settled.
+ *
+ * 408 and 429 are the two a server sends to mean "ask again" and were never in question. So the
+ * list is what is left: a request the board will refuse in the same words for ever.
  */
+const PERMANENT_REFUSALS = new Set([400, 404, 405, 410, 413, 414, 415, 422]);
+
 function permanent(error: unknown): boolean {
-  if (!(error instanceof ApiError)) return false;
-  if (error.status === 408 || error.status === 429) return false;
-  return error.status >= 400 && error.status < 500;
+  return error instanceof ApiError && PERMANENT_REFUSALS.has(error.status);
 }
 
 type Log = (message: string) => void;

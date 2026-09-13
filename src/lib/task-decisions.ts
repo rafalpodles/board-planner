@@ -319,10 +319,14 @@ export function toApiDecision(
   worker?: { name?: string; lastSeenAt?: Date | null } | null,
   canDecide = false,
   /**
-   * Whether `prUrl` names this project's repository — `repositoryOfProject` answers it, and the
-   * default is the answer for a caller that has not asked: the url is rendered as it always was.
+   * Whether `prUrl` names this project's repository — `prUrlNamesProjectRepo` below answers it.
+   *
+   * Defaulted **false**, which is the answer a caller that has not asked deserves: this is a
+   * security check, and a check that fails open is one a future reader silently switches off by
+   * not passing it (found in review). All three callers pass it; a fourth that forgets renders the
+   * url as text, which is visible and harmless, rather than as a link nobody verified.
    */
-  prUrlNamesRepo = true
+  prUrlNamesRepo = false
 ): ApiTaskDecision | undefined {
   if (!decision?.gate) return undefined;
   return {

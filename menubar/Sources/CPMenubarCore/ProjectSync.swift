@@ -57,7 +57,13 @@ public enum SyncStep: Equatable, Sendable {
 }
 
 /// Where the folder is set, named in the message rather than left for the operator to find.
-public let checkoutsFolderLocation = "Preferences → General"
+///
+/// The setup screen, and not a Preferences tab: `Preferences` has four — Connection, Repositories,
+/// Policy, Advanced — and none of them writes `checkoutsFolder`. Its only writer is
+/// `Onboarding.folderChosen`, reached from **2 · Where it keeps its checkouts** on the first-run
+/// screen, which is what the panel shows until this machine is set up. A message naming a tab that
+/// does not exist is worse than the silence BP-602 replaced (found in review).
+public let checkoutsFolderLocation = "the setup screen, under \"Where it keeps its checkouts\""
 
 
 public enum ProjectSync {
@@ -79,6 +85,21 @@ public enum ProjectSync {
         // so a message naming only the clones would describe half of what did not happen.
         let projects = plan.add.map(\.name) + plan.remove.map(\.project.name)
         return .nowhereToPut(projects: projects, where: checkoutsFolderLocation)
+    }
+
+    /**
+     * The steps a pass keeps once it has somewhere to clone to.
+     *
+     * `nowhereToPut` is the one step that is a **condition** rather than an event: every other line
+     * in the pane records something that happened and stays true, while this one stops being true
+     * the moment a folder is chosen. Dropped here rather than in the runner, for the reason the
+     * decision above lives here — the app target has no tests.
+     */
+    public static func withoutNowhereToPut(_ steps: [SyncStep]) -> [SyncStep] {
+        steps.filter { step in
+            if case .nowhereToPut = step { return false }
+            return true
+        }
     }
 
     public static func plan(

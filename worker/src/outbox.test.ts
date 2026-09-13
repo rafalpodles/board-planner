@@ -119,6 +119,17 @@ describe("createOutbox", () => {
     expect(log.mock.calls.at(-1)?.[0]).toMatch(/refused it and will refuse it again/);
   });
 
+  it.each([400, 404, 422])("drops a %i, which the board will refuse in the same words for ever", async (status) => {
+    const store = memoryStore();
+    const outbox = createOutbox(store, vi.fn());
+    outbox.add({ kind: "comment", projectId: "CP", taskId: "t1", body: "merged" });
+    const api = apiSpy({
+      comment: vi.fn().mockRejectedValue(new ApiError(`POST failed: ${status}`, status, "no")),
+    });
+
+    expect(await outbox.flush(api)).toEqual({ delivered: 0, pending: 0, dropped: 1 });
+  });
+
   it("does not hold a later report behind one the board refused", async () => {
     const store = memoryStore();
     const outbox = createOutbox(store, vi.fn());
@@ -132,8 +143,14 @@ describe("createOutbox", () => {
     expect(api.setStatus).toHaveBeenCalledWith("CP", "t2", "done");
   });
 
+  /**
+   * The answers that look permanent and are not, each one a state the board leaves within minutes:
+   * a rotated credential (401), a grant being edited (403), and a task another run holds — which is
+   * what an expired lease being reclaimed looks like (409, `task-service.ts`). Dropping one of
+   * these destroys the post-merge report, which is the thing this module exists to keep.
+   */
   // The two a server sends to mean "ask again", and the control for the rule above
-  it.each([408, 429, 500, 502, 503])("keeps retrying a %i", async (status) => {
+  it.each([401, 403, 409, 408, 429, 500, 502, 503])("keeps retrying a %i", async (status) => {
     const store = memoryStore();
     const outbox = createOutbox(store, vi.fn());
     outbox.add({ kind: "comment", projectId: "CP", taskId: "t1", body: "merged" });

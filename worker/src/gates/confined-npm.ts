@@ -46,8 +46,13 @@ import { confine } from "../sandbox.js";
 export function npmCacheDir(env?: NodeJS.ProcessEnv): string {
   const configured = env ? (env.CP_NPM_CACHE?.trim() ?? "") : npmCacheOverride();
   if (configured) return configured;
-  // Named for the uid rather than shared: a multi-user machine must not hand one worker's cache to
-  // another user's process, and `tmpdir()` is world-writable.
+  // Named for the uid so two accounts on one machine do not share a cache by accident. That is a
+  // separation, not a defence, and the difference is worth stating: `tmpdir()` is world-writable
+  // where `TMPDIR` is unset (a daemon context, or Linux under the escape hatch), another local
+  // user can create this directory first, and `mkdirSync(..., { mode })` applies its mode only to
+  // a directory it creates — so an existing one is used as it is. What bounds that is npm checking
+  // what it installs against the lockfile, not this name. An operator who needs more points
+  // `CP_NPM_CACHE` at a directory they own (found in review).
   return join(tmpdir(), `cp-npm-cache-${typeof process.getuid === "function" ? process.getuid() : "0"}`);
 }
 
