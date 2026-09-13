@@ -41,6 +41,8 @@ let nextId = 0;
  * `toast-placement.ts`; this reads the rectangles and applies the answer.
  */
 const OBSTACLES = "[data-corner-obstacle],[data-pinned-bottom-bar],[data-pinned-phone-bar]";
+/** Everything `measure` reads, in one selector so the observer cannot drift from the watch */
+const CORNER = `${OBSTACLES},[data-corner-panel]`;
 
 function measure(overASheet: boolean, trayHeight: number): Surroundings {
   const panel = document.querySelector<HTMLElement>("[data-corner-panel]");
@@ -119,18 +121,35 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     // first pass too. The constant survives only as the value for the pass where it is not: one
     // line of text with its padding, which is what the placement assumed for every tray before.
     const trayHeight = () => trayRef.current?.getBoundingClientRect().height || 44;
-    const remeasure = () =>
+    const measureNow = () =>
       setPlacement((was) => {
         const now = placeToast(measure(overASheet, trayHeight()));
         // Same numbers, same object: a new one every time would re-render the tray, whose own
         // style change is a mutation this observer would see again
         return was.anchor === now.anchor && was.offset === now.offset ? was : now;
       });
-    remeasure();
+
+    // Coalesced: `measure` forces a synchronous layout, and the things that ask for it arrive in
+    // bursts — a resize drag, a pinned bar's 200ms `max-height`, a scroll. One frame, one layout,
+    // however many asked (BP-622).
+    let frame = 0;
+    const remeasure = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        measureNow();
+      });
+    };
+    measureNow();
 
     if (typeof ResizeObserver === "undefined" || typeof MutationObserver === "undefined") {
       window.addEventListener("resize", remeasure);
-      return () => window.removeEventListener("resize", remeasure);
+      document.addEventListener("scroll", remeasure, { capture: true, passive: true });
+      return () => {
+        window.removeEventListener("resize", remeasure);
+        document.removeEventListener("scroll", remeasure, { capture: true });
+        if (frame) cancelAnimationFrame(frame);
+      };
     }
 
     const sizes = new ResizeObserver(remeasure);
@@ -140,18 +159,32 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     // `Combobox` re-runs its own watch for exactly this reason. `observe` on an element already
     // observed is a no-op, and its initial callback is absorbed by the bail-out above.
     const watch = () => {
-      document.querySelectorAll<HTMLElement>(OBSTACLES).forEach((el) => sizes.observe(el));
-      const panel = document.querySelector<HTMLElement>("[data-corner-panel]");
-      if (panel) sizes.observe(panel);
+      document.querySelectorAll<HTMLElement>(CORNER).forEach((el) => sizes.observe(el));
     };
     watch();
 
-    // The panel and the bars come and go, so their arrival is a mutation rather than a resize
+    // The panel and the bars come and go, so their arrival is a mutation rather than a resize.
+    //
+    // `attributeFilter` narrows only the attribute records; `childList` with `subtree` fires on
+    // every node inserted or removed anywhere in the app, and the tray-containment guard below
+    // suppressed almost none of them. A toast lives three seconds — long enough for the board's
+    // ten-second poll to re-render its cards, or for a dnd-kit drag to rewrite the DOM on every
+    // pointer move — and each record ran two whole-document `querySelectorAll` and then forced a
+    // synchronous layout. So an added or removed node has to be one of the things the placement
+    // actually reads before any of that happens (BP-622).
+    const movesTheTray = (node: Node) =>
+      node instanceof Element && (node.matches(CORNER) || node.querySelector(CORNER) !== null);
+
     const arrivals = new MutationObserver((records) => {
-      const outsideTheTray = records.some(
-        (record) => !trayRef.current?.contains(record.target as Node)
-      );
-      if (!outsideTheTray) return;
+      const relevant = records.some((record) => {
+        if (trayRef.current?.contains(record.target as Node)) return false;
+        if (record.type === "attributes") return true;
+        return (
+          Array.from(record.addedNodes).some(movesTheTray) ||
+          Array.from(record.removedNodes).some(movesTheTray)
+        );
+      });
+      if (!relevant) return;
       watch();
       remeasure();
     });
@@ -163,10 +196,21 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     });
 
     window.addEventListener("resize", remeasure);
+    // Both obstacles are `sticky`, not `fixed` — `SaveBar` and `MobileCommentBar` are both
+    // `sticky bottom-0` — so their place in the viewport changes when their scrollport reaches the
+    // point where they un-stick. That is no resize and no mutation, so nothing else here notices,
+    // and the offset computed when the toast was raised is simply wrong from then on: scroll a
+    // settings column to its end while a failure toast is up and the toast stays where the Save
+    // bar used to be (BP-625). Capture, because the scroll happens in a container rather than on
+    // the window; passive, because nothing is cancelled; and armed only while a toast is up, which
+    // the effect's own bail-out already guarantees.
+    document.addEventListener("scroll", remeasure, { capture: true, passive: true });
     return () => {
       sizes.disconnect();
       arrivals.disconnect();
       window.removeEventListener("resize", remeasure);
+      document.removeEventListener("scroll", remeasure, { capture: true });
+      if (frame) cancelAnimationFrame(frame);
     };
   }, [toasts.length, overASheet]);
 

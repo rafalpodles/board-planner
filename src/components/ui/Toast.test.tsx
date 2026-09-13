@@ -114,7 +114,44 @@ function Raiser() {
   return null;
 }
 
+/**
+ * Re-measuring is coalesced into one animation frame (BP-622), so a test that dispatches an event
+ * and reads the tray in the same tick reads the placement from before it. The frame is driven
+ * rather than made synchronous: a stub that ran the callback immediately would assert the
+ * behaviour of a build without the coalescing.
+ */
+const frames = new Map<number, FrameRequestCallback>();
+let nextFrame = 0;
+
+function stubFrames() {
+  vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+    frames.set(++nextFrame, cb);
+    return nextFrame;
+  });
+  vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
+}
+
+/** How many frames were asked for and not yet run — one, however many things asked */
+function pendingFrames() {
+  return frames.size;
+}
+
+function paint() {
+  act(() => {
+    const due = [...frames.values()];
+    frames.clear();
+    due.forEach((cb) => cb(0));
+  });
+}
+
+/** How many times the placement has read the viewport, which `measure` does once per pass */
+function measurements() {
+  return vi.mocked(Object.getOwnPropertyDescriptor(document.documentElement, "clientHeight")!.get!)
+    .mock.calls.length;
+}
+
 function mounted() {
+  stubFrames();
   render(
     <ToastProvider>
       <Raiser />
@@ -133,6 +170,9 @@ function trayClasses() {
 afterEach(() => {
   cleanup();
   FakeResizeObserver.live.length = 0;
+  frames.clear();
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
   opened.splice(0).forEach((close) => close());
   document
     .querySelectorAll("[data-corner-obstacle],[data-corner-panel]")
@@ -188,6 +228,7 @@ describe("where a toast lands", () => {
     act(() => {
       window.dispatchEvent(new Event("resize"));
     });
+    paint();
 
     expect(tray().style.bottom).toBe("216px");
   });
@@ -215,10 +256,12 @@ describe("where a toast lands", () => {
     act(() => raise("Saved"));
     expect(tray().style.bottom).toBe("96px");
 
-    // The MutationObserver delivers on a microtask, so the assertion has to wait for one
+    // The MutationObserver delivers on a microtask, so the assertion has to wait for one — and
+    // then for the frame the re-measure is coalesced into
     await act(async () => {
       panel({ top: 32, bottom: 704 }, 69);
     });
+    paint();
 
     expect(tray().style.top).toBe("85px");
   });
@@ -238,8 +281,117 @@ describe("where a toast lands", () => {
 
     stateRect(bar, { top: 600, bottom: 800 });
     act(() => resized(bar));
+    paint();
 
     expect(tray().style.bottom).toBe("216px");
+  });
+
+  /**
+   * BP-622. `childList` with `subtree` fires on every node inserted or removed anywhere in the
+   * app, and a toast lives three seconds — long enough for the board's ten-second poll to re-render
+   * its cards, or for a dnd-kit drag to rewrite the DOM on every pointer move. Each record ran two
+   * whole-document `querySelectorAll` and then forced a layout.
+   *
+   * Counted rather than eyeballed: `measure` reads the viewport height once per pass, so the spy
+   * on it is the measurement count.
+   */
+  it("ignores a DOM change that cannot move the tray", async () => {
+    stateViewport(800);
+    obstacle({ top: 720, bottom: 776 });
+    mounted();
+    act(() => raise("Saved"));
+    const before = measurements();
+
+    // A card re-rendering under the toast: a node arrives, and it is none of the things the
+    // placement reads
+    await act(async () => {
+      const card = document.createElement("div");
+      card.textContent = "a task card";
+      document.body.appendChild(card);
+    });
+
+    expect(pendingFrames()).toBe(0);
+    paint();
+    expect(measurements()).toBe(before);
+  });
+
+  it("still moves for the panel, which arrives the same way", async () => {
+    // The control for the test above: the narrowing must not cost BP-597 its own case
+    stateViewport(800);
+    obstacle({ top: 720, bottom: 776 });
+    mounted();
+    act(() => raise("Saved"));
+
+    await act(async () => {
+      panel({ top: 32, bottom: 704 }, 69);
+    });
+    paint();
+
+    expect(tray().style.top).toBe("85px");
+  });
+
+  it("costs one layout for a burst, not one each", async () => {
+    stateViewport(800);
+    const bar = obstacle({ top: 720, bottom: 776 });
+    mounted();
+    act(() => raise("Saved"));
+    const before = measurements();
+
+    act(() => {
+      window.dispatchEvent(new Event("resize"));
+      window.dispatchEvent(new Event("resize"));
+      resized(bar);
+      document.dispatchEvent(new Event("scroll"));
+    });
+
+    // Four askers, one frame
+    expect(pendingFrames()).toBe(1);
+    paint();
+    expect(measurements()).toBe(before + 1);
+  });
+
+  /**
+   * BP-625. `SaveBar` and `MobileCommentBar` are both `sticky bottom-0`, so their place in the
+   * viewport changes when their scrollport reaches the point where they un-stick. That is no
+   * resize and no mutation — the bar's size and the DOM are both untouched — so nothing else here
+   * notices, and the offset computed when the toast was raised is wrong from then on.
+   */
+  it("re-places when a sticky bar moves without resizing or changing the DOM", () => {
+    stateViewport(800);
+    const bar = obstacle({ top: 720, bottom: 776 });
+    mounted();
+    act(() => raise("Saved"));
+    expect(tray().style.bottom).toBe("96px");
+
+    // The bar un-sticks and rises. No ResizeObserver callback, no mutation: only a scroll.
+    stateRect(bar, { top: 600, bottom: 656 });
+    act(() => {
+      document.dispatchEvent(new Event("scroll"));
+    });
+    paint();
+
+    expect(tray().style.bottom).toBe("216px");
+  });
+
+  it("does not listen for scrolls once the toast has gone", () => {
+    vi.useFakeTimers();
+    stateViewport(800);
+    const bar = obstacle({ top: 720, bottom: 776 });
+    mounted();
+    act(() => raise("Saved"));
+    // The toast's own three seconds. The tray unmounts, and the effect's bail-out takes the
+    // listeners with it.
+    act(() => vi.advanceTimersByTime(3100));
+    expect(screen.queryByTestId("toast-tray")).toBeNull();
+
+    stateRect(bar, { top: 600, bottom: 656 });
+    act(() => {
+      document.dispatchEvent(new Event("scroll"));
+    });
+
+    // Nothing asked for a frame, because the effect's bail-out tore the listener down with the
+    // last toast
+    expect(pendingFrames()).toBe(0);
   });
 
   it("goes to the top over a sheet, whatever else is in the corner", () => {
