@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import {
   matchRepo,
   normaliseRemote,
@@ -308,5 +308,23 @@ describe("prUrlNamesProjectRepo", () => {
     expect(prUrlNamesProjectRepo("https://github.com/owner/repo-fork/pull/1", project())).toBe(
       false
     );
+  });
+});
+
+// BP-634: the guard judges by host, so on a GitHub Enterprise instance an unmigrated project used
+// to confirm nothing — the corporate pull request was printed as text rather than linked.
+describe("prUrlNamesProjectRepo on an instance whose GitHub is not github.com", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("accepts a pull request on the corporate host, and still refuses every other one", () => {
+    vi.stubEnv("GITHUB_API_BASE_URL", "https://ghe.corp.example/api/v3");
+    const project = { _id: "p1", githubRepo: "owner/repo" };
+
+    expect(prUrlNamesProjectRepo("https://ghe.corp.example/owner/repo/pull/7", project)).toBe(true);
+    expect(prUrlNamesProjectRepo("https://evil.example.com/owner/repo/pull/7", project)).toBe(false);
+    // github.com is now the other host, and fails closed like any other
+    expect(prUrlNamesProjectRepo("https://github.com/owner/repo/pull/7", project)).toBe(false);
   });
 });
