@@ -783,6 +783,13 @@ export interface ApiTaskDecision {
   decidedBy?: { _id: string; username: string; fullName: string } | null;
   decidedAt: string | null;
   prUrl: string;
+  /**
+   * Whether that url names this project's own repository. The url is worker-supplied and its shape
+   * is checked at the settle route, but not which repository it names — so the panel offers it as
+   * a link only when this is true, and prints it as text otherwise (BP-604). A project that names
+   * no repository has nothing to disagree with, and this is true there.
+   */
+  prUrlNamesRepo: boolean;
   error: string;
   createdAt: string;
 }

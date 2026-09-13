@@ -12,7 +12,12 @@ import { Project } from "@/models/project";
 import { Worker } from "@/models/worker";
 import { ITaskExecution } from "@/types";
 import { withApiExecution } from "@/lib/task-execution-view";
-import { mayDecide, toApiDecision, DECISION_FIELDS_A_READER_NEEDS } from "@/lib/task-decisions";
+import {
+  mayDecide,
+  toApiDecision,
+  prUrlNamesProjectRepo,
+  DECISION_FIELDS_A_READER_NEEDS,
+} from "@/lib/task-decisions";
 
 
 export const GET = withProjectAccess(async (_request, { params, user }) => {
@@ -64,7 +69,8 @@ export const GET = withProjectAccess(async (_request, { params, user }) => {
   taskObj.decision = toApiDecision(
     task.decision,
     decider,
-    task.decision ? await mayDecide(task.decision.workerId, user, decider) : false
+    task.decision ? await mayDecide(task.decision.workerId, user, decider) : false,
+    await prUrlNamesProjectRepo(task.decision?.prUrl, projectId)
   );
 
   return NextResponse.json(taskObj);

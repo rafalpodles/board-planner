@@ -3,6 +3,8 @@ import { connectDB } from "@/lib/db";
 import { Task } from "@/models/task";
 import { Worker } from "@/models/worker";
 import { ApiTaskDecision, ITaskDecision, IUser, TaskDecisionState } from "@/types";
+import { prUrlNamesProjectRepo as namesProjectRepo } from "@/lib/repo-match";
+import type { RepositoryFields } from "@/lib/repository";
 
 /** Nothing is owed on these any more, and a new claim leaves them alone. */
 const SETTLED: TaskDecisionState[] = ["delivered", "discarded", "abandoned", "superseded"];
@@ -315,7 +317,12 @@ export const DECISION_FIELDS_FOR_THE_POLL =
 export function toApiDecision(
   decision: ITaskDecision | null | undefined,
   worker?: { name?: string; lastSeenAt?: Date | null } | null,
-  canDecide = false
+  canDecide = false,
+  /**
+   * Whether `prUrl` names this project's repository — `repositoryOfProject` answers it, and the
+   * default is the answer for a caller that has not asked: the url is rendered as it always was.
+   */
+  prUrlNamesRepo = true
 ): ApiTaskDecision | undefined {
   if (!decision?.gate) return undefined;
   return {
@@ -345,9 +352,30 @@ export function toApiDecision(
     decidedBy: decidedBy(decision.decidedBy),
     decidedAt: decision.decidedAt ? new Date(decision.decidedAt).toISOString() : null,
     prUrl: decision.prUrl ?? "",
+    prUrlNamesRepo,
     error: decision.error ?? "",
     createdAt: decision.createdAt ? new Date(decision.createdAt).toISOString() : "",
   };
+}
+
+/**
+ * Whether this decision's pull-request url names the project's own repository.
+ *
+ * The project is read only when there is a url to judge, so a task with no decision and the poll
+ * on a decision that reported none cost nothing. A project that has been deleted out from under
+ * the task answers true — the same as one naming no repository, and the record is unreadable for
+ * bigger reasons by then.
+ */
+export async function prUrlNamesProjectRepo(
+  prUrl: string | undefined,
+  projectId: unknown
+): Promise<boolean> {
+  if (!prUrl) return true;
+  const { Project } = await import("@/models/project");
+  const project = await Project.findById(projectId)
+    .select("repositoryUrl githubRepo gitlabRepo gitlabHost")
+    .lean<{ _id: unknown } & RepositoryFields | null>();
+  return project ? namesProjectRepo(prUrl, project) : true;
 }
 
 /** One decision, as the machine that holds the work needs to see it. */
