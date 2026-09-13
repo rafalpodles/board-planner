@@ -47,10 +47,40 @@ public enum SyncStep: Equatable, Sendable {
     /// while meaning the second.
     case partiallyRemoved(project: String, removed: [String], reason: String)
     case failed(project: String, reason: String)
+    /// The machine was given projects and has nowhere to clone them.
+    ///
+    /// The guard itself is right — there is nowhere to put a checkout — but it used to return in
+    /// silence, so the operator ticked a project, was told the app would pick it up, and then read
+    /// a healthy fleet screen, an empty Repositories pane and a row that never connected. Every
+    /// surface agreed that everything was fine (BP-602).
+    case nowhereToPut(projects: [String], where: String)
 }
+
+/// Where the folder is set, named in the message rather than left for the operator to find.
+public let checkoutsFolderLocation = "Preferences → General"
+
 
 public enum ProjectSync {
     /// `checkouts` maps an allowlisted path to the remote its `origin` reports.
+    /**
+     * The one step a pass can produce before it starts: it has work to do and nowhere to do it.
+     *
+     * In Core rather than in the runner because the runner is in the app target, which carries no
+     * tests at all — a decision nothing can drive is a decision that quietly stops being made.
+     *
+     * Nil when the folder is set, and nil when there was nothing to act on either: a machine
+     * nobody has given a project to is not misconfigured, it is unused.
+     */
+    public static func nowhereToPut(plan: SyncPlan, checkoutsFolder: String) -> SyncStep? {
+        guard checkoutsFolder.trimmingCharacters(in: .whitespaces).isEmpty, !plan.isEmpty else {
+            return nil
+        }
+        // Both halves of the plan: a removal needs no folder, but the pass returns before it too,
+        // so a message naming only the clones would describe half of what did not happen.
+        let projects = plan.add.map(\.name) + plan.remove.map(\.project.name)
+        return .nowhereToPut(projects: projects, where: checkoutsFolderLocation)
+    }
+
     public static func plan(
         catalogue: [ProjectCatalogueRow],
         checkouts: [String: String]

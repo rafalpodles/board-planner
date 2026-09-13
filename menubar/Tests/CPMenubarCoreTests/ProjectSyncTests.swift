@@ -93,4 +93,59 @@ final class ProjectSyncTests: XCTestCase {
         XCTAssertEqual(plan.add.map(\.key), ["SB"])
         XCTAssertEqual(plan.remove.map(\.path), ["/checkouts/BP"])
     }
+
+    // BP-602. The guard is right — there is nowhere to clone to — but it returned in silence, so
+    // the operator ticked a project, was told the app would pick it up, and then read a healthy
+    // fleet screen, an empty Repositories pane and a row that never connected.
+    func testItSaysSoWhenThereIsNowhereToPutWhatWasPicked() {
+        let plan = ProjectSync.plan(
+            catalogue: [row("SB", repo: sbRemote, wanted: true, servedHere: false)],
+            checkouts: [:])
+
+        let step = ProjectSync.nowhereToPut(plan: plan, checkoutsFolder: "")
+
+        XCTAssertEqual(step, .nowhereToPut(projects: ["SB"], where: checkoutsFolderLocation))
+    }
+
+    // The message names where the folder is set, not only that it is missing.
+    func testItNamesWhereTheFolderIsSet() {
+        let plan = ProjectSync.plan(
+            catalogue: [row("SB", repo: sbRemote, wanted: true, servedHere: false)],
+            checkouts: [:])
+
+        guard case .nowhereToPut(_, let location)? =
+            ProjectSync.nowhereToPut(plan: plan, checkoutsFolder: "") else {
+            return XCTFail("no step")
+        }
+
+        XCTAssertTrue(location.contains("Preferences"))
+    }
+
+    // A removal needs no folder, but the pass returns before it too, so naming only the clones
+    // would describe half of what did not happen.
+    func testItNamesTheRemovalsItCouldNotActOnEither() {
+        let plan = ProjectSync.plan(
+            catalogue: [row("BP", repo: bpRemote, wanted: false, servedHere: true)],
+            checkouts: ["/checkouts/BP": bpRemote])
+
+        XCTAssertEqual(
+            ProjectSync.nowhereToPut(plan: plan, checkoutsFolder: ""),
+            .nowhereToPut(projects: ["BP"], where: checkoutsFolderLocation))
+    }
+
+    // A machine nobody has given a project to is not misconfigured, it is unused.
+    func testItSaysNothingWhenThereWasNothingToDo() {
+        XCTAssertNil(
+            ProjectSync.nowhereToPut(plan: SyncPlan(add: [], remove: []), checkoutsFolder: ""))
+    }
+
+    // The control: a machine that has a folder is not told it has none, whitespace included.
+    func testItSaysNothingWhenTheFolderIsSet() {
+        let plan = ProjectSync.plan(
+            catalogue: [row("SB", repo: sbRemote, wanted: true, servedHere: false)],
+            checkouts: [:])
+
+        XCTAssertNil(ProjectSync.nowhereToPut(plan: plan, checkoutsFolder: "/checkouts"))
+        XCTAssertNotNil(ProjectSync.nowhereToPut(plan: plan, checkoutsFolder: "   "))
+    }
 }

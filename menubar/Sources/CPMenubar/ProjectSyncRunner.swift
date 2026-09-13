@@ -56,11 +56,20 @@ final class ProjectSyncRunner {
 
     private func pass(catalogue: [ProjectCatalogueRow], isBusy: @escaping SyncPass.IsBusy) async {
         let state = Onboarding.load()
-        guard !state.checkoutsFolder.isEmpty else { return }
 
         let granted = (try? file.read()) ?? []
         let checkouts = await originsOf(granted, toolPath: state.toolPath)
         let plan = ProjectSync.plan(catalogue: catalogue, checkouts: checkouts)
+        // After the plan, not before it: the message names the projects it could not act on, and
+        // the plan is the only thing that knows them (BP-602).
+        if let blocked = ProjectSync.nowhereToPut(plan: plan, checkoutsFolder: state.checkoutsFolder) {
+            // One line, not one per pass: a reconnect runs a pass, and the pane is a list of what
+            // happened rather than a log of how often it did not.
+            if !steps.contains(blocked) { steps.append(blocked) }
+            return
+        }
+        guard !state.checkoutsFolder.isEmpty else { return }
+        // Nothing to do is not a problem worth a line.
         guard !plan.isEmpty else { return }
 
         let token = WorkerProcess.githubToken(
