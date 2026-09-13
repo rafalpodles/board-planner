@@ -607,7 +607,7 @@ describe("what a round of the window may say about a link", () => {
         // Read straight, with no fallback for a missing `$or`: `replaceProviderLinks` always
         // emits one, so the branch that guarded against its absence could never run and only hid
         // a shape change behind a `null` some assertion would have to interpret (found in review).
-        seen: keep.$filter.cond.$or[1].$not[0].$in[1],
+        seen: keep.$filter.cond.$or![1].$not[0].$in[1],
       };
     });
 

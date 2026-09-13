@@ -29,7 +29,7 @@ export const GET = withProjectAccessOrWorker(async (request, { params }) => {
   return NextResponse.json(runs.map(toApiRun));
 });
 
-export const POST = withProjectAccessOrWorker(async (request, { params }) => {
+export const POST = withProjectAccessOrWorker(async (request, { params, workerId: caller }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -65,8 +65,13 @@ export const POST = withProjectAccessOrWorker(async (request, { params }) => {
   // gets the same length bound the board path already applies.
   const detail = typeof body.detail === "string" ? body.detail.slice(0, MAX_DETAIL) : "";
 
-  const workerId =
-    typeof body.workerId === "string" && Types.ObjectId.isValid(body.workerId) ? body.workerId : null;
+  // The caller the middleware verified, never `body.workerId`: that field is whatever the sender
+  // typed, and on the person branch there is no machine behind it at all. A member of the board
+  // could attribute a run to any machine on the instance, and `toFleetRun` carries the machine —
+  // so a forged machineFault arrived on an instance admin's fleet screen as that machine's
+  // (found in review). The worker still sends the field and it is still the same id; it is simply
+  // not the source any more.
+  const workerId = caller && Types.ObjectId.isValid(caller) ? caller : null;
 
   const run = await AgentRun.create({
     project: projectId,
