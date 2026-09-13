@@ -277,7 +277,9 @@ and `SIGINT` both finish the task in flight before the loop exits.
   bare `-diff` attribute, a `diff=<name>` driver declared binary in the config, a file git decides
   is binary on its own, and a submodule pointer. The **submodule pointer is refused** by
   `protected-paths`: its whole change is two object ids, in a repository these gates never fetch,
-  so neither a reviewer nor a person reading the pull request can say what it now brings in. The
+  so neither a reviewer nor a person reading the pull request can say what it now brings in. By
+  that gate and only that gate — gates are the blocks an agent names (`gates/from-entry.ts`), so a
+  sequence without a **Protected files** step has no such refusal, which is BP-626. The
   other three are **allowed and named**: a binary fixture or an image is ordinary work, and a gate
   refusing every one of them would be switched off — so the review gate is told, in the prompt,
   which files it is not being shown and that it should decline if their contents would matter.
