@@ -81,15 +81,17 @@ function PreflightCell({ preflight }: { preflight: ApiWorkerPreflight | null }) 
 
   if (failed.length === 0) {
     // `preflight.ok` is untouched by a warning, so the machine is not permanently red and nobody
-    // learns to read past it. The row still opens with `ready`, because it is.
+    // learns to read past it. The row still opens with `ready`, because it is — and the check's
+    // name follows it in amber. The sentence itself is on the full-width line under the worker
+    // (`PreflightWarning`): this cell is one truncated column in a table that scrolls sideways,
+    // and measured at 1280×720 it starts past the right edge of the viewport — so a warning that
+    // lived only here would be one nobody reads (BP-606).
     return (
-      <span
-        className={`text-xs block truncate ${warned.length > 0 ? "text-warning" : "text-text-muted"}`}
-        title={detail}
-        data-testid={warned.length > 0 ? "preflight-warning" : undefined}
-      >
+      <span className="text-xs text-text-muted block truncate" title={detail}>
         ready{preflight.account ? ` · ${preflight.account}` : ""}
-        {warned.length > 0 ? ` · ${warned.map((c) => c.name).join(", ")} — ${warned[0].detail}` : ""}
+        {warned.length > 0 ? (
+          <span className="text-warning"> · {warned.map((c) => c.name).join(", ")}</span>
+        ) : null}
       </span>
     );
   }
@@ -98,6 +100,31 @@ function PreflightCell({ preflight }: { preflight: ApiWorkerPreflight | null }) 
     <span className="text-xs text-danger block truncate" title={detail}>
       {failed.map((c) => c.name).join(", ")} — {failed[0].detail}
     </span>
+  );
+}
+
+/**
+ * The cost a passing check carries, on the full-width line under the worker.
+ *
+ * Where it can be read: the Preflight column is the eighth of twelve in a table that scrolls
+ * sideways, and an instance admin who never scrolls it would have met this machine as `ready`.
+ * Nothing is duplicated — the cell names the check, this says what it means (BP-606).
+ */
+function PreflightWarning({ preflight }: { preflight: ApiWorkerPreflight | null }) {
+  const warned = (preflight?.checks ?? []).filter((c) => c.ok && c.warn);
+  if (warned.length === 0) return null;
+
+  return (
+    // Wrapped at a reading width, and never wider than the viewport: this sits in a `colSpan`
+    // cell, so its own 100% is the TABLE's width — wider than the screen — and the sentence ran
+    // off the right edge exactly like the column it was moved out of. Measured at 1280px: the
+    // table starts around x=550, so 40rem lands well inside it, and the `calc` holds the phone.
+    <div
+      className="max-w-[min(40rem,calc(100vw-4rem))] whitespace-normal break-words text-xs text-warning"
+      data-testid="preflight-warning"
+    >
+      {warned.map((c) => `${c.name} — ${c.detail}`).join(" · ")}
+    </div>
   );
 }
 
@@ -376,7 +403,8 @@ export default function AdminWorkersPage() {
                   </tr>,
                   <tr key={`${worker._id}-policy`} className="border-b border-border last:border-b-0">
                     <td colSpan={12} className="px-3 pb-3 pt-0">
-                      <div className="flex flex-wrap gap-1.5">
+                      <PreflightWarning preflight={worker.preflight} />
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
                         {workerPolicyRows(worker as never).map((row) => (
                           <span
                             key={row.field}

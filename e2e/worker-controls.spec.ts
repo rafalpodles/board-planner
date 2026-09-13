@@ -1148,10 +1148,21 @@ test("the fleet screen says whether a machine confines the agent it runs", async
   await page.reload();
   const accepted = fleetRow(page, WORKER_NAME);
   await expect(accepted.getByText(/^ready/)).toBeVisible();
-  await expect(accepted).toContainText("nothing confining its writes");
-  await expect(accepted.getByTestId("preflight-warning")).toBeVisible();
-  // Amber, not red: the row a machine cannot act on is the row people learn to read past.
-  await expect(accepted.locator(".text-warning")).toHaveCount(1);
+  // The sentence is on the full-width line under the worker, not in the Preflight column: that
+  // column is the eighth of twelve and starts past the right edge of a 1280px viewport, so a
+  // warning that lived only there is one nobody reads without scrolling the table sideways.
+  // Page-scoped, not row-scoped: the line lives in the full-width row BENEATH the worker's own,
+  // which is the whole of the change — and this fleet has one machine on it.
+  const warning = page.getByTestId("preflight-warning");
+  await expect(warning).toBeVisible();
+  await expect(warning).toContainText("nothing confining its writes");
+  // In the viewport as it stands, which is the whole point of moving it
+  const box = await warning.boundingBox();
+  const width = page.viewportSize()?.width ?? 0;
+  expect(box, "the warning has no box at all").not.toBeNull();
+  expect(box!.x, "the warning starts off the right edge of the viewport").toBeLessThan(width);
+  // Amber, not red: a row a machine cannot act on is the row people learn to read past.
+  await expect(warning).toHaveClass(/text-warning/);
   await expect(accepted.getByText(/^ready/)).toHaveAttribute(
     "title",
     /nothing confining its writes/
@@ -1169,8 +1180,8 @@ test("the fleet screen says whether a machine confines the agent it runs", async
   await page.reload();
   const plain = fleetRow(page, WORKER_NAME);
   await expect(plain.getByText(/^ready/)).toBeVisible();
-  await expect(plain.getByTestId("preflight-warning")).toHaveCount(0);
-  await expect(plain).not.toContainText("nothing confining its writes");
+  await expect(page.getByTestId("preflight-warning")).toHaveCount(0);
+  await expect(page.locator("table")).not.toContainText("nothing confining its writes");
 });
 
 /**

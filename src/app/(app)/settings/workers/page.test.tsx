@@ -225,19 +225,32 @@ describe("a check that passed at a cost", () => {
   const UNCONFINED =
     "CP_ALLOW_UNCONFINED_AGENT is set — the agent runs with nothing confining its writes";
 
-  it("says it on the row, not only in the tooltip", async () => {
+  it("says it where the table does not have to be scrolled to reach it", async () => {
     api.get.mockResolvedValue([
       worker({ preflight: preflight([{ name: "sandbox", ok: true, warn: true, detail: UNCONFINED }]) }),
     ]);
 
     render(<WorkersPage />);
 
-    const cell = await screen.findByTestId("preflight-warning");
-    expect(cell.textContent).toContain("sandbox");
-    expect(cell.textContent).toContain("nothing confining its writes");
+    // The full-width line under the worker, because the Preflight column is the eighth of twelve
+    // in a table that scrolls sideways — measured off the right edge of a 1280px viewport.
+    const line = await screen.findByTestId("preflight-warning");
+    expect(line.textContent).toContain("sandbox");
+    expect(line.textContent).toContain("nothing confining its writes");
+    expect(line.className).toContain("text-warning");
+  });
+
+  it("still opens the preflight cell with ready, and names the check in amber", async () => {
+    api.get.mockResolvedValue([
+      worker({ preflight: preflight([{ name: "sandbox", ok: true, warn: true, detail: UNCONFINED }]) }),
+    ]);
+
+    render(<WorkersPage />);
+
     // Still ready, and still allowed to take work: a permanently red row is one people read past.
-    expect(cell.textContent?.startsWith("ready")).toBe(true);
-    expect(cell.className).toContain("text-warning");
+    const cell = await screen.findByText(/^ready/);
+    expect(cell.textContent).toBe("ready · owner · sandbox");
+    expect(cell.querySelector(".text-warning")?.textContent).toContain("sandbox");
   });
 
   it("leaves an ordinary pass exactly as it was", async () => {
