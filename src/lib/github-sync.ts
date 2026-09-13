@@ -71,12 +71,16 @@ export function syncTickMs(raw = process.env.GITHUB_SYNC_TICK_MS): number {
  * about something else, and `unknown` is then the truth.
  */
 function carryForward(
-  fresh: { number: number; ci: CiState; ciLabel: string | null; headSha: string | null },
+  fresh: { url: string; ci: CiState; ciLabel: string | null; headSha: string | null },
   stored: ILinkedPR[] | undefined
 ): { ci: CiState; ciLabel: string | null } {
   if (fresh.ci !== "unknown") return { ci: fresh.ci, ciLabel: fresh.ciLabel };
+  // By url, not by number: since BP-631 a repointed project's task legitimately holds both
+  // repositories' links, and two of them can wear the same number. Matching on the number picked
+  // whichever came first, and `headSha` then refused it — so the badge of the pull request this
+  // round DID ask about read "?" instead of what the last sync knew (found in review).
   const previous = stored?.find(
-    (link) => (link.provider ?? "github") === "github" && link.number === fresh.number
+    (link) => (link.provider ?? "github") === "github" && link.url === fresh.url
   );
   if (!previous?.ci || !CARRYABLE.has(previous.ci)) return { ci: fresh.ci, ciLabel: fresh.ciLabel };
   if (!fresh.headSha || previous.headSha !== fresh.headSha) {

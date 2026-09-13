@@ -267,3 +267,26 @@ test("each link keeps the subdocument id the API type promises", async () => {
   // `ApiLinkedPR._id` is declared required.
   expect((await linksOf(_id))[0]._id).toBeInstanceOf(mongoose.Types.ObjectId);
 });
+
+/**
+ * A stored link with no `url` is a shape the schema forbids and only the two syncs write, so it
+ * should not exist — but the first loop finds its task by `taskNumber` rather than by the url
+ * query, so such a link reaches the pipeline anyway. Keeping it is the safe direction for
+ * something nothing can identify, and it is the direction the url-keyed rule takes: a missing
+ * field is not one of the strings the round saw.
+ *
+ * Only a real database can answer that. The first version of the filter wrapped the url in
+ * `$ifNull` to make it explicit; this test is what showed the guard changed nothing, so it went.
+ */
+test("a link stored without an address is kept, not silently dropped", async () => {
+  const _id = await taskWith([
+    { provider: "github", number: 50, title: "No address", state: "open" },
+  ]);
+
+  await apply(_id, "github", [link("github", 51)], [50, 51]);
+
+  // The round claims to have seen 50 — under the old rule, by number, that is a contradiction.
+  // By address it is not, because this link has none to contradict.
+  expect((await linksOf(_id)).map((l) => l.number).sort((a, b) => (a as number) - (b as number)))
+    .toEqual([50, 51]);
+});

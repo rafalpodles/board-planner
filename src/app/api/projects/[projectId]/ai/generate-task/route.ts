@@ -8,14 +8,20 @@ import { choiceFieldsForPrompt, resolveGeneratedFields } from "@/lib/ai-fields";
 import { getSettings } from "@/models/settings";
 import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
 
-async function fetchReadme(githubRepo: string): Promise<string | undefined> {
+export async function fetchReadme(githubRepo: string): Promise<string | undefined> {
   if (!githubRepo) return undefined;
 
+  const trimmed = githubRepo.trim().replace(/\.git$/, "");
+
+  // raw.githubusercontent.com serves github.com and nothing else. A GitHub Enterprise host reaches
+  // here now that `repositoryProvider` recognises this instance's own (BP-634), and without this
+  // the corporate hostname and a private repository's path went out to GitHub inside a url that
+  // could only 404 (found in review).
+  const host = /^https?:\/\/([^/]+)/i.exec(trimmed)?.[1]?.toLowerCase();
+  if (host && host !== "github.com" && !host.endsWith(".github.com")) return undefined;
+
   // Support both "owner/repo" and full URL formats
-  const ownerRepo = githubRepo
-    .replace(/^https?:\/\/github\.com\//, "")
-    .replace(/\.git$/, "")
-    .trim();
+  const ownerRepo = trimmed.replace(/^https?:\/\/github\.com\//i, "");
 
   if (!ownerRepo.includes("/")) return undefined;
 
@@ -63,8 +69,9 @@ export const POST = withProjectAccess(async (request, { params }) => {
   }
 
   const [readme, tasks] = await Promise.all([
-    // raw.githubusercontent.com only serves GitHub, so a project hosted anywhere else gets no
-    // README rather than a request that cannot work
+    // raw.githubusercontent.com only serves github.com, so a project hosted anywhere else — and
+    // that now includes this instance's own GitHub Enterprise — gets no README rather than a
+    // request that cannot work, sent to a host that should never see the address
     fetchReadme(repositoryProvider(project) === "github" ? projectRepositoryUrl(project) : ""),
     Task.find(
       { project: projectId, status: { $ne: "done" } },

@@ -24,8 +24,19 @@ const REQUEST_PATH = { github: "/pull/", gitlab: "/-/merge_requests/" } as const
  * request it saw, which is not redundant. GitHub answers a renamed repository through a redirect
  * and returns the *new* name in `html_url`, while the project still names the old one — so without
  * this the links written before the rename would stop being contradicted, and every task would
- * hold two badges for one pull request for ever. With it, a rename prunes as it always has and a
- * repoint does not.
+ * hold two badges for one pull request for ever.
+ *
+ * That covers the rename as it is actually lived through: the repository is renamed, and the
+ * project's setting is still the old name until somebody gets round to it. It does **not** cover
+ * the moment after the setting is changed too — at which point a rename is byte-identical to a
+ * repoint, from the fetch and from the setting alike, and this rule chooses *keep*. A task
+ * carrying a link written under the old name then keeps it beside the new one: one pull request,
+ * two badges, stable for ever, with no row saying anything went.
+ *
+ * Chosen rather than overlooked. The two are indistinguishable from anything this code can see,
+ * so the choice is which way to be wrong: a visible duplicate that redirects to the same place, or
+ * the silent deletion of a link to a pull request that still exists (BP-631's defect). Pinned by
+ * `github-sync.test.ts`, so it is a decision and not an accident.
  *
  * Exact strings on both sides rather than a case-folded comparison, because the same rule has to
  * hold in the aggregation pipeline, in this module's counting and in the second pass's database
@@ -85,16 +96,6 @@ export function removedLinks(
   );
 }
 
-/** How many of a task's links this write removes. */
-export function droppedCount(
-  stored: ILinkedPR[] | undefined,
-  provider: "github" | "gitlab",
-  seen: Set<string>,
-  matched: Set<string>
-): number {
-  return removedLinks(stored, provider, seen, matched).length;
-}
-
 /** The links this write puts on the task that were not on it before. */
 export function addedLinks<T extends { url: string }>(
   stored: ILinkedPR[] | undefined,
@@ -121,6 +122,12 @@ export function addedLinks<T extends { url: string }>(
  * this pull request to this task" is a fact about GitHub that no person authored.
  *
  * Nothing is written when nothing changed, so a round that only refreshed a badge is silent.
+ *
+ * `added` and `removed` are computed from the task as it was read, and two rounds of the same
+ * provider overlap easily — a tick against a double-clicked Sync now. Both can read "no link",
+ * both write, and both log: one link, two rows. The link itself survives that (the write is one
+ * atomic pipeline update, BP-559); what it costs is a duplicate line in a history, which is why
+ * there is no guard here of the kind BP-489 gives a status change.
  */
 export async function recordLinkChanges(
   taskId: mongoose.Types.ObjectId | string,
@@ -151,8 +158,10 @@ export async function recordLinkChanges(
  * `?? "github"` in reverse: a link stored before the provider field existed is GitHub's, so a
  * GitHub sync owns it rather than leaving it beside its own replacement.
  *
- * `$ifNull` on the url too, so a link stored without one compares as `""` and is kept: a missing
- * field is not a value this round can have seen.
+ * A link stored without a `url` at all — a shape the schema forbids and only the two syncs write —
+ * is kept, because a missing field is not one of the strings in `seen`. Measured against a real
+ * MongoDB rather than assumed, and `e2e/pr-link-replacement.spec.ts` holds it: an `$ifNull` guard
+ * written here first turned out to change nothing, which is only knowable from the database.
  *
  * Mongoose does not cast a pipeline update, so `docs` must already hold real `Date`s.
  */
@@ -172,7 +181,7 @@ export function replaceProviderLinks(
                 cond: {
                   $or: [
                     { $ne: [{ $ifNull: ["$$this.provider", "github"] }, provider] },
-                    { $not: [{ $in: [{ $ifNull: ["$$this.url", ""] }, seen] }] },
+                    { $not: [{ $in: ["$$this.url", seen] }] },
                   ],
                 },
               },

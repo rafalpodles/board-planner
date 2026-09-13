@@ -17,19 +17,38 @@ export function githubApiBase(raw = process.env.GITHUB_API_BASE_URL): string {
 /**
  * The origin the pull requests of this instance are read by a person at.
  *
- * Stripping a leading `api.` label covers both hosted shapes — `api.github.com` and the data
- * residency form `api.<tenant>.ghe.com` — and leaves an Enterprise Server base alone, where the
- * API is a path and the origin is already the site. A base that is not a url at all falls back to
- * github.com rather than throwing: it is read on the render path of every project page, and an
- * operator's typo must not take those down.
+ * Derived **only** from the two shapes that are GitHub's own API layout, because the variable is
+ * documented as accepting a corporate proxy as well (`github.ts`), and a proxy's address is not a
+ * repository's. Getting that wrong is not cosmetic: `projectRepositoryUrl` is what a worker is
+ * handed as the remote to clone and what `prUrlNamesProjectRepo` judges a reported pull request
+ * against, so a proxy origin there would refuse genuine github.com pull requests and offer a
+ * machine an address that is not a git remote (found in review).
+ *
+ * - a host of its own — `api.github.com`, and the data residency form `api.<tenant>.ghe.com`,
+ *   where the site is the same name without the label;
+ * - a path on the site — `https://HOST/api/v3`, which is Enterprise Server's documented base and
+ *   the only spelling of it that works: a bare Enterprise origin would 404 every API call, so it
+ *   cannot be a working configuration to preserve.
+ *
+ * Anything else — a proxy, a rewriting gateway, a typo, the end-to-end stub — keeps github.com,
+ * which is what this answered before it was derived at all. A base that is not a url falls back
+ * the same way rather than throwing: it is read on the render path of every project page.
  */
 export function githubWebBase(raw = process.env.GITHUB_API_BASE_URL): string {
+  if (!raw) return DEFAULT_WEB;
+
   let url: URL;
   try {
-    url = new URL(githubApiBase(raw));
+    url = new URL(raw);
   } catch {
     return DEFAULT_WEB;
   }
-  url.hostname = url.hostname.replace(/^api\./i, "");
-  return url.origin;
+
+  const path = url.pathname.replace(/\/+$/, "");
+  if (path === "/api/v3") return url.origin;
+  if (path === "" && /^api\./i.test(url.hostname)) {
+    url.hostname = url.hostname.replace(/^api\./i, "");
+    return url.origin;
+  }
+  return DEFAULT_WEB;
 }

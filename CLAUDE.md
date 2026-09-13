@@ -166,7 +166,13 @@ GITHUB_SYNC_TICK_MS=      # Optional — how often every project with a GitHub t
                           # projects (BP-443)
 GITHUB_API_BASE_URL=      # Optional — where GitHub's API is (default https://api.github.com).
                           # An operator's setting, never a project's: a board naming its own
-                          # host would be a request forgery with that project's token attached
+                          # host would be a request forgery with that project's token attached.
+                          # It also says where GitHub is for a reader — but only when it is one
+                          # of GitHub's own API shapes (`api.*` with no path, or `.../api/v3`),
+                          # from which the WEB host is derived for a legacy `githubRepo` and for
+                          # provider classification (BP-634). A proxy in front of api.github.com
+                          # is neither shape and leaves both at github.com, because a proxy's
+                          # address is not a repository's
 SMTP_HOST=                # Optional — Email notifications
 SMTP_PORT=587
 SMTP_USER=

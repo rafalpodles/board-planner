@@ -99,6 +99,10 @@ beforeEach(() => {
 const rowsOf = (action: string) =>
   logActivity.mock.calls.filter((call: unknown[]) => call[2] === action);
 
+/** Every action a round wrote a row for. Asserting this rather than one action keeps the old
+ *  guarantee that nothing ELSE was logged either. */
+const actionsLogged = () => logActivity.mock.calls.map((call: unknown[]) => call[2]).sort();
+
 describe("POST .../gitlab/sync — matching", () => {
   it("still finds merge requests opened under a key the project has since left", async () => {
     projectFindById.mockReturnValue({ lean: () => project({ key: "BP", formerKeys: ["CP"] }) });
@@ -191,7 +195,7 @@ describe("POST .../gitlab/sync — linking", () => {
       taskUpdateOne.mock.calls.filter(([, update]) => !Array.isArray(update))
     ).toHaveLength(0);
     expect(body.autoTransitioned).toBe(0);
-    expect(rowsOf("status_changed")).toHaveLength(0);
+    expect(actionsLogged()).toEqual(["pr_linked"]);
     // The control: the route reached this task and linked its merge request, so the status
     // standing still is a decision rather than a sync that did nothing at all.
     expect(body.prsLinked).toBe(1);
@@ -420,6 +424,39 @@ describe("POST .../gitlab/sync — what a round may contradict, and what it reco
     expect(rowsOf("pr_linked")).toEqual([
       ["t1", "u1", "pr_linked", "linkedPRs", "", mrUrl(7)],
     ]);
+  });
+
+  /**
+   * The rename half of BP-631, on the provider whose fixtures cannot show it otherwise: `mr()`
+   * builds `web_url` from the project's own repository, so both halves of `seenUrls` produce the
+   * same string in every other test here and the configured-url claim is invisible. GitLab keeps
+   * a merge request's iid across a rename and answers under the new path, exactly as GitHub does.
+   */
+  it("still prunes the old name's links after a rename", async () => {
+    projectFindById.mockReturnValue({
+      lean: () => project({ repositoryUrl: "https://gitlab.com/g/before-the-rename" }),
+    });
+    taskFind.mockResolvedValue([
+      {
+        _id: "t8",
+        taskNumber: 8,
+        linkedPRs: [
+          {
+            provider: "gitlab",
+            number: 1,
+            title: "Stored under the old name",
+            state: "opened",
+            url: "https://gitlab.com/g/before-the-rename/-/merge_requests/1",
+          },
+        ],
+      },
+    ]);
+    fetchMergeRequests.mockResolvedValue([mr({ iid: 1 })]);
+
+    const body = await (await POST(request(), ctx())).json();
+
+    expect(taskUpdateOne.mock.calls.find(([filter]) => filter._id === "t8")).toBeDefined();
+    expect(body.prsUnlinked).toBe(1);
   });
 
   it("writes one naming what it took away", async () => {

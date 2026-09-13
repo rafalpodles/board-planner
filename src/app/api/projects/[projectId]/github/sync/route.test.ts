@@ -107,6 +107,10 @@ beforeEach(() => {
 const rowsOf = (action: string) =>
   logActivity.mock.calls.filter((call: unknown[]) => call[2] === action);
 
+/** Every action a round wrote a row for. Asserting this rather than one action keeps the old
+ *  guarantee that nothing ELSE was logged either. */
+const actionsLogged = () => logActivity.mock.calls.map((call: unknown[]) => call[2]).sort();
+
 describe("POST .../github/sync", () => {
   it("still finds pull requests opened under a key the project has since left", async () => {
     projectFindById.mockReturnValue({ lean: () => project({ formerKeys: ["CP"] }) });
@@ -189,7 +193,7 @@ describe("POST .../github/sync", () => {
     const body = await (await POST(request(), ctx())).json();
 
     expect(doc.status).toBe("needs_human_review");
-    expect(rowsOf("status_changed")).toHaveLength(0);
+    expect(actionsLogged()).toEqual(["pr_linked"]);
     // The control: the route ran and did its other work, so the silence above is a decision
     // rather than a sync that never reached this task.
     expect(body.prsLinked).toBe(1);

@@ -9,14 +9,8 @@ const { logActivity, taskUpdateOne } = vi.hoisted(() => ({
 vi.mock("@/lib/activity", () => ({ logActivity }));
 vi.mock("@/models/task", () => ({ Task: { updateOne: taskUpdateOne } }));
 
-const {
-  addedLinks,
-  droppedCount,
-  recordLinkChanges,
-  removedLinks,
-  seenUrls,
-  unseenLinks,
-} = await import("./pr-links");
+const { addedLinks, recordLinkChanges, removedLinks, seenUrls, unseenLinks } =
+  await import("./pr-links");
 
 const REPO = "https://github.com/example/board";
 // The address follows the number unless the caller names one: a fixture where it does not is a
@@ -99,7 +93,6 @@ describe("what a round contradicts", () => {
     const elsewhere = link({ number: 12, url: "https://github.com/example/previous/pull/12" });
 
     expect(removedLinks([elsewhere], "github", seen, new Set())).toEqual([]);
-    expect(droppedCount([elsewhere], "github", seen, new Set())).toBe(0);
     expect(unseenLinks([elsewhere], "github", seen)).toEqual([elsewhere]);
   });
 
