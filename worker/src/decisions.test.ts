@@ -44,7 +44,7 @@ function diff(over: Partial<DiffStats> = {}): DiffStats {
     truncated: false,
     headSha: "a".repeat(40),
     symlinks: [],
-    suppressedDiffs: [],
+    suppressedDiffs: [], gitlinks: [],
     ...over,
   };
 }

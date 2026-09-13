@@ -33,7 +33,7 @@ function context(diff: Partial<DiffStats> = {}, task: Partial<ClaimedTask> = {})
       testsAdded: ["a.test.ts"],
       blockedReason: "",
     },
-    diff: { changedLines: 2, changedFiles: ["a.ts"], patch, truncated: false, headSha: "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c", symlinks: [], suppressedDiffs: [], ...diff },
+    diff: { changedLines: 2, changedFiles: ["a.ts"], patch, truncated: false, headSha: "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c", symlinks: [], suppressedDiffs: [], gitlinks: [], ...diff },
   };
 }
 
@@ -119,6 +119,35 @@ describe("reviewGate", () => {
 
     expect(promptOf(run)).toMatch(/untrusted/i);
     expect(promptOf(run)).toMatch(/not instructions/i);
+  });
+
+  /**
+   * BP-603. Four ways a file's contents leave a patch — a bare `-diff` attribute, a driver declared
+   * binary in the config, a file git calls binary on its own, and a gitlink — and until now only
+   * the decision panel read any of them. On an ordinary run the reviewer approved a patch with
+   * holes in it and had no way to know there were any.
+   */
+  it("tells the reviewer which files the patch does not show", async () => {
+    const { runner, run } = claudeReturning({ approved: true, reason: "" });
+
+    await reviewGate(runner, TIMEOUT_MS).run(
+      context({ changedFiles: ["a.ts", "logo.png"], suppressedDiffs: ["logo.png"] })
+    );
+
+    const prompt = promptOf(run);
+    expect(prompt).toContain("does NOT show their contents");
+    expect(prompt).toContain("logo.png");
+    expect(prompt).toMatch(/decline/i);
+  });
+
+  // The control, and what keeps the sentence above from becoming noise the model learns to skip:
+  // a change with nothing hidden says nothing about hidden files.
+  it("says nothing of the kind when the patch shows everything", async () => {
+    const { runner, run } = claudeReturning({ approved: true, reason: "" });
+
+    await reviewGate(runner, TIMEOUT_MS).run(context());
+
+    expect(promptOf(run)).not.toContain("does NOT show");
   });
 
   it("withholds the author's own summary so the reviewer is not primed by it", async () => {

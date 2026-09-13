@@ -267,6 +267,15 @@ and `SIGINT` both finish the task in flight before the loop exits.
   not by the kernel, so a future capability that yields process execution has to close it in the
   profile. And reads, and the network, neither of which this touches at all.
 
+  **A file git will not print** (**BP-603**). Four things take a file's contents out of a patch: a
+  bare `-diff` attribute, a `diff=<name>` driver declared binary in the config, a file git decides
+  is binary on its own, and a submodule pointer. The **submodule pointer is refused** by
+  `protected-paths`: its whole change is two object ids, in a repository these gates never fetch,
+  so neither a reviewer nor a person reading the pull request can say what it now brings in. The
+  other three are **allowed and named**: a binary fixture or an image is ordinary work, and a gate
+  refusing every one of them would be switched off — so the review gate is told, in the prompt,
+  which files it is not being shown and that it should decline if their contents would matter.
+
   **macOS only.** Seatbelt is what this uses. **A machine that cannot confine takes no work at
   all**: the loop stops claiming, says why once, and keeps heartbeating, so the fleet screen and the
   menubar still show it and the kill switch still reaches it. Draining what it already owes carries

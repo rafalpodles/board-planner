@@ -49,7 +49,7 @@ describe.skipIf(!onMac)("the test gate against the real sandbox", () => {
         truncated: false,
         headSha: "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c",
         symlinks: [],
-        suppressedDiffs: [],
+        suppressedDiffs: [], gitlinks: [],
       },
     };
   }

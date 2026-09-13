@@ -101,6 +101,33 @@ function capped(reason: string): string {
   return `${reason.slice(0, MAX_REASON_CHARS)}\n[reason truncated to ${MAX_REASON_CHARS} characters]`;
 }
 
+/**
+ * The files the patch below names and does not show.
+ *
+ * Four ways a file's contents leave a patch — a bare `-diff` attribute, a `diff=<name>` driver
+ * declared binary in the config, a file git decides is binary on its own (a raw NUL inside a
+ * JavaScript block comment is enough, and it is still valid JavaScript), and a gitlink — and only
+ * the decision panel ever read them. On an ordinary run the reviewer was handed a patch with holes
+ * in it and no way to know (BP-603).
+ *
+ * Said rather than refused, for the three that are left here: a binary fixture, an image or a
+ * generated asset is ordinary work, and a gate refusing every change that carries one would be
+ * switched off. A model told plainly that it cannot see a file can decline for that reason, and
+ * says so in a sentence a person reads. The gitlink is the one that IS refused, one gate earlier,
+ * because there is no reading of it anybody can do.
+ */
+function unreadableFiles(context: GateContext): string {
+  const hidden = context.diff.suppressedDiffs;
+  if (hidden.length === 0) return "";
+  return [
+    "",
+    "These files changed and the diff above does NOT show their contents:",
+    ...hidden.map((file) => `- ${file}`),
+    "You are reviewing a change you cannot fully see. Judge the rest on its merits, and decline if",
+    "what those files could contain would matter for this task.",
+  ].join("\n");
+}
+
 function buildPrompt(context: GateContext): string {
   const criteria = context.task.acceptanceCriteria.length
     ? `\nAcceptance criteria:\n${context.task.acceptanceCriteria.map((c) => `- ${c}`).join("\n")}`
@@ -114,6 +141,7 @@ function buildPrompt(context: GateContext): string {
     "",
     "Diff under review:",
     context.diff.patch,
+    unreadableFiles(context),
   ].join("\n");
 }
 
