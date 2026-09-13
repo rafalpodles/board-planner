@@ -53,8 +53,17 @@ const MAX_ENTRIES = 500;
  *
  * 408 and 429 are the two a server sends to mean "ask again" and were never in question. So the
  * list is what is left: a request the board will refuse in the same words for ever.
+ *
+ * **404 is not on it**, and that is the entry worth explaining. It is the one answer here a
+ * *platform* can give rather than the board: merging to `main` redeploys the app, which is exactly
+ * the moment this module's header says the report is most likely to fail, and a proxy answering
+ * 404 in that window is not the board saying the task is gone. A deleted project really does
+ * answer 404 for ever — and `MAX_ATTEMPTS` bounds that at twenty flushes, which is what it is for
+ * (found in review). 405 stays: App Router answers it for a route file without that verb, which is
+ * the "worker newer than its board" family this exists for. 413 earns its place — a `comment` op
+ * carries patch output, and a body a platform limit rejects is rejected identically for ever.
  */
-const PERMANENT_REFUSALS = new Set([400, 404, 405, 410, 413, 414, 415, 422]);
+const PERMANENT_REFUSALS = new Set([400, 405, 410, 413, 414, 415, 422]);
 
 function permanent(error: unknown): boolean {
   return error instanceof ApiError && PERMANENT_REFUSALS.has(error.status);

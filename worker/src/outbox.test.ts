@@ -119,7 +119,7 @@ describe("createOutbox", () => {
     expect(log.mock.calls.at(-1)?.[0]).toMatch(/refused it and will refuse it again/);
   });
 
-  it.each([400, 404, 422])("drops a %i, which the board will refuse in the same words for ever", async (status) => {
+  it.each([400, 405, 413, 422])("drops a %i, which the board will refuse in the same words for ever", async (status) => {
     const store = memoryStore();
     const outbox = createOutbox(store, vi.fn());
     outbox.add({ kind: "comment", projectId: "CP", taskId: "t1", body: "merged" });
@@ -150,7 +150,7 @@ describe("createOutbox", () => {
    * these destroys the post-merge report, which is the thing this module exists to keep.
    */
   // The two a server sends to mean "ask again", and the control for the rule above
-  it.each([401, 403, 409, 408, 429, 500, 502, 503])("keeps retrying a %i", async (status) => {
+  it.each([401, 403, 404, 409, 408, 429, 500, 502, 503])("keeps retrying a %i", async (status) => {
     const store = memoryStore();
     const outbox = createOutbox(store, vi.fn());
     outbox.add({ kind: "comment", projectId: "CP", taskId: "t1", body: "merged" });

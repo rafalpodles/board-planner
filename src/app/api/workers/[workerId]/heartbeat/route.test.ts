@@ -358,6 +358,70 @@ describe("the preflight report a worker sends", () => {
     expect(preflightPatch()?.checks[0]).toMatchObject({ warn: false });
   });
 
+  /**
+   * A worker too old to send `warn` still reports the unconfined sandbox as a plain pass, and
+   * enrolling a machine is self-service — so a mixed-version fleet is the ordinary state, not an
+   * edge case. Read from the flag alone, such a machine renders a clean `ready`: an agent running
+   * with nothing confining its writes, and the instance admin told nothing (found in review).
+   */
+  it("recognises an older worker's unconfined machine by what its sandbox check says", async () => {
+    const { req, ctx } = request({
+      preflight: {
+        ok: true,
+        checks: [
+          {
+            name: "sandbox",
+            ok: true,
+            detail:
+              "CP_ALLOW_UNCONFINED_AGENT is set — the agent runs with nothing confining its writes",
+          },
+        ],
+      },
+    });
+
+    await POST(req, ctx);
+
+    expect(preflightPatch()?.checks[0]).toMatchObject({ ok: true, warn: true });
+  });
+
+  // The control: a sandbox check that passed because the sandbox works is not a warning, and no
+  // other check is read for the marker at all.
+  it("leaves a working sandbox, and any other check, unwarned", async () => {
+    const { req, ctx } = request({
+      preflight: {
+        ok: true,
+        checks: [
+          { name: "sandbox", ok: true, detail: "the agent can only write inside its own worktree" },
+          { name: "git", ok: true, detail: "mentions CP_ALLOW_UNCONFINED_AGENT for no reason" },
+        ],
+      },
+    });
+
+    await POST(req, ctx);
+
+    expect(preflightPatch()?.checks.map((c: { warn: boolean }) => c.warn)).toEqual([false, false]);
+  });
+
+  // And a machine whose sandbox is broken stays red rather than turning amber on the same words.
+  it("does not turn a failed sandbox check into a warning", async () => {
+    const { req, ctx } = request({
+      preflight: {
+        ok: false,
+        checks: [
+          {
+            name: "sandbox",
+            ok: false,
+            detail: "set CP_ALLOW_UNCONFINED_AGENT=1 on this machine to run anyway",
+          },
+        ],
+      },
+    });
+
+    await POST(req, ctx);
+
+    expect(preflightPatch()?.checks[0]).toMatchObject({ ok: false, warn: false });
+  });
+
   it("caps what a worker can write into the console", async () => {
     const { req, ctx } = request({
       preflight: {
