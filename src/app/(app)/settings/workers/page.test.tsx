@@ -238,6 +238,10 @@ describe("a check that passed at a cost", () => {
     expect(line.textContent).toContain("sandbox");
     expect(line.textContent).toContain("nothing confining its writes");
     expect(line.className).toContain("text-warning");
+    // The word, so the amber is not the only thing saying this is a warning
+    expect(line.textContent).toContain("Warning:");
+    // And the line that proves it left the Preflight column: only the full-width row spans the table
+    expect(line.closest("td")?.colSpan).toBe(12);
   });
 
   it("still opens the preflight cell with ready, and names the check in amber", async () => {
@@ -249,7 +253,8 @@ describe("a check that passed at a cost", () => {
 
     // Still ready, and still allowed to take work: a permanently red row is one people read past.
     const cell = await screen.findByText(/^ready/);
-    expect(cell.textContent).toBe("ready · owner · sandbox");
+    // The mark as well as the amber, so the check's name does not read as one more field
+    expect(cell.textContent).toBe("ready · owner · ⚠ sandbox");
     expect(cell.querySelector(".text-warning")?.textContent).toContain("sandbox");
   });
 
@@ -282,5 +287,28 @@ describe("a check that passed at a cost", () => {
 
     expect(await screen.findByText(/there is no sandbox here/)).toBeTruthy();
     expect(screen.queryByTestId("preflight-warning")).toBeNull();
+  });
+
+  // The "or not" above is the half with no warn on it at all. This is the other half, and the one
+  // `c.ok &&` is there for: the heartbeat route strips a warn off a failing check, so a report
+  // carrying both is either an older worker or a route that stopped stripping — and the screen
+  // must not then say "ready, with a caution" about a machine that is red (found in review).
+  it("keeps it red when the failing check carries a warning too", async () => {
+    api.get.mockResolvedValue([
+      worker({
+        preflight: {
+          ...preflight([
+            { name: "sandbox", ok: false, warn: true, detail: "there is no sandbox here" },
+          ]),
+          ok: false,
+        },
+      }),
+    ]);
+
+    render(<WorkersPage />);
+
+    expect(await screen.findByText(/there is no sandbox here/)).toBeTruthy();
+    expect(screen.queryByTestId("preflight-warning")).toBeNull();
+    expect(screen.queryByText(/^ready/)).toBeNull();
   });
 });

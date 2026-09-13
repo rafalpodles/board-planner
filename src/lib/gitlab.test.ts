@@ -1,5 +1,19 @@
-import { describe, it, expect } from "vitest";
-import { matchMRsToTasks, parseGitlabRepo } from "./gitlab";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { fetchTaskBranches, matchMRsToTasks, parseGitlabRepo } from "./gitlab";
+
+// Hoisted, the way every other spec in this repo declares one: `vi.mock` is lifted above the module
+// body, so a plain `const` is not initialised when the factory runs.
+const { safeFetch } = vi.hoisted(() => ({ safeFetch: vi.fn() }));
+
+vi.mock("./safe-fetch", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./safe-fetch")>()),
+  safeFetch,
+}));
+
+// A unit test must not be able to reach the network even if the mock above ever stops applying
+vi.stubGlobal("fetch", () => {
+  throw new Error("a unit test reached the network");
+});
 
 /**
  * BP-429. `matchPRsToTasks` took `formerKeys` and this did not: the GitLab half was written from the
@@ -133,5 +147,84 @@ describe("parseGitlabRepo", () => {
   it("refuses what is not a path", () => {
     expect(parseGitlabRepo("  ")).toBeNull();
     expect(parseGitlabRepo("project")).toBeNull();
+  });
+});
+
+/**
+ * BP-611's other half. The lookbehind went into `taskKeyPattern` here at the same time as the
+ * shared `projectKeyPattern`, and this side shipped with no test of any kind — the branch list a
+ * task shows is filtered locally, so the defect the ticket describes (`websucp-5` listed among
+ * CP-5's branches) lives in this function as much as in the matcher (found in review).
+ */
+describe("fetchTaskBranches — which branch belongs to a task", () => {
+  const branch = (name: string) => ({
+    name,
+    web_url: `https://gitlab.com/g/p/-/tree/${name}`,
+    commit: { committed_date: "2026-08-01T00:00:00Z" },
+  });
+
+  const answering = (names: string[]) =>
+    safeFetch.mockResolvedValue(
+      new Response(JSON.stringify(names.map(branch)), { status: 200 })
+    );
+
+  const branchesFor = (key: string) =>
+    fetchTaskBranches("https://gitlab.com", "g/p", "token", key);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("takes the shapes a person writes a key in", async () => {
+    answering(["CP-5", "cp-5/slug", "CP 5", "feature/CP-5-fix"]);
+
+    expect((await branchesFor("CP-5")).map((b) => b.name)).toEqual([
+      "CP-5",
+      "cp-5/slug",
+      "CP 5",
+      "feature/CP-5-fix",
+    ]);
+  });
+
+  it("does not take a key that is the tail of a longer word", async () => {
+    // The ticket's own example, and the reason the lookbehind is there: two-letter keys sit inside
+    // ordinary words, and `websucp-5` was listed as CP-5's branch
+    answering(["websucp-5", "mycp-5"]);
+
+    expect(await branchesFor("CP-5")).toEqual([]);
+  });
+
+  it("still takes a key somebody prefixed with a word and a hyphen", async () => {
+    // A hyphen IS the boundary, on purpose and on both providers: `wip-cp-5` is how people label
+    // a branch, and the lookbehind excludes letters and digits rather than punctuation
+    answering(["wip-cp-5"]);
+
+    expect((await branchesFor("CP-5")).map((b) => b.name)).toEqual(["wip-cp-5"]);
+  });
+
+  it("does not take a longer number that starts with this one", async () => {
+    answering(["CP-50", "CP-5"]);
+
+    expect((await branchesFor("CP-5")).map((b) => b.name)).toEqual(["CP-5"]);
+  });
+
+  it("keeps the number of a key that has hyphens of its own", async () => {
+    // Split on the LAST hyphen: on the first, "MY" is the key and every branch with a number
+    // matches
+    answering(["MY-PROJ-5/x", "MY-PROJ-6/x"]);
+
+    expect((await branchesFor("MY-PROJ-5")).map((b) => b.name)).toEqual(["MY-PROJ-5/x"]);
+  });
+
+  it("carries the branch through with its url and its last commit", async () => {
+    answering(["CP-5/x"]);
+
+    expect(await branchesFor("CP-5")).toEqual([
+      {
+        name: "CP-5/x",
+        url: "https://gitlab.com/g/p/-/tree/CP-5/x",
+        lastCommitAt: new Date("2026-08-01T00:00:00Z"),
+      },
+    ]);
   });
 });

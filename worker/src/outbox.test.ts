@@ -149,7 +149,10 @@ describe("createOutbox", () => {
    * what an expired lease being reclaimed looks like (409, `task-service.ts`). Dropping one of
    * these destroys the post-merge report, which is the thing this module exists to keep.
    */
-  // The two a server sends to mean "ask again", and the control for the rule above
+  // Everything that is not a permanent refusal: the two a server sends to mean "ask again" (408,
+  // 429), the 5xx it sends to mean "not now", and the four 4xx the board can retract — 401 a token
+  // being renewed, 403 a grant arriving, 404 the edge during a redeploy, 409 another run's hold
+  // clearing. The control for the rule above, which lists the refusals that are final.
   it.each([401, 403, 404, 409, 408, 429, 500, 502, 503])("keeps retrying a %i", async (status) => {
     const store = memoryStore();
     const outbox = createOutbox(store, vi.fn());

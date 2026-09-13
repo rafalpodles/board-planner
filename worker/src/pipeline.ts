@@ -475,13 +475,14 @@ export async function runTask(
       // all once its notification is gone. A fixed sentence cannot tell a DNS outage from a
       // revoked token.
       //
-      // Unprefixed: the error's text already opens with "could not resolve base branch", so it
-      // needs no sentence of ours in front of it. The class names go because `String(error)` here
-      // is two BaseUnavailableErrors nested (workspace.ts wraps one to keep its kind) and that is
-      // sixty characters of noise in a two-hundred-character notification — readability, not
-      // fitting: what makes the cause survive the cut is fitDetail, and this pattern naming no
-      // class in particular is what keeps a rename from quietly undoing it. `\w+`, not `\w*`,
-      // which matched empty and ate a bare "Error: " out of git's own output too.
+      // Unprefixed: the error already names the branch, the remote and git's own answer, so it
+      // needs no sentence of ours in front of it. The class names go because they are noise in a
+      // two-hundred-character notification — one `BaseUnavailableError: ` since workspace.ts
+      // stopped wrapping one in another (BP-619), and `String(error)` on anything that reached
+      // there by another route can still carry its own. Readability, not fitting: what makes the
+      // cause survive the cut is fitDetail, and this pattern naming no class in particular is what
+      // keeps a rename from quietly undoing it. `\w+`, not `\w*`, which matched empty and ate a
+      // bare "Error: " out of git's own output too.
       settle("machineFault", String(error).replace(/\w+Error: /g, ""));
       await reporter.released(task, String(error));
       return "machine-fault";

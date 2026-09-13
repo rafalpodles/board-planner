@@ -98,8 +98,14 @@ test("a pull request that has left the window is kept when a newer one arrives",
   await syncNow(request);
   expect(await linksOn(request, SIBLING_TASK_NUMBER)).toEqual([9]);
 
-  // The window has moved on: 9 is past the thirty most recently updated closed ones, and only the
-  // newer pull request comes back. Nothing says 9 stopped being this task's.
+  // The window has moved on and only the newer pull request comes back. Nothing says 9 stopped
+  // being this task's, and the sync must not read its own blind spot as a contradiction.
+  //
+  // Not narrated as "9 has aged past the thirty closed ones": `pull()` builds an OPEN pull request
+  // and GitHub's window holds every one of those, so that story could not happen (found in
+  // review). What this drives is the shape that matters — a round that does not mention 9 — and
+  // the real ways to get one are a closed pull request ageing out, a fetch that failed, or a
+  // repository whose open list is longer than the page.
   await github(request, [pull(412, `${PROJECT_KEY}-${SIBLING_TASK_NUMBER}/second`)]);
   const result = await syncNow(request);
 

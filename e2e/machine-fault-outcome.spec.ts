@@ -169,7 +169,7 @@ test("a project's own run list does not name a machine it cannot show", async ({
   await expect(page.getByText("Recent runs")).toBeVisible();
 
   const row = page.locator("tr", { hasText: HELD_TASK_KEY }).first();
-  await expect(row.getByText("Didn't run")).toBeVisible();
+  await expect(row.getByText("Didn't finish")).toBeVisible();
   await expect(row.getByText("Machine fault")).toHaveCount(0);
 
   // The fleet screen, where the column exists, still says it in full — the two readings are the

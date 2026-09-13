@@ -21,10 +21,15 @@ import { UNCONFINED_ESCAPE_HATCH, unconfinedAgentAllowed } from "./env.js";
  * What this does not reach — writes a *daemon* performs on the process's behalf. `(allow default)`
  * leaves `process-exec` and `mach-lookup` open, and measured under this exact profile,
  * `defaults write <domain> <key> <value>` returns 0 and cfprefsd writes the plist under
- * `~/Library/Preferences`, outside the worktree. It is not reachable by the agent this worker runs
- * — `--tools` gives it no shell, so it spawns nothing — which means that particular gap is closed
- * by the tool allowlist in executor.ts and not by the kernel. A capability that ever yields process
- * execution has to close it here instead.
+ * `~/Library/Preferences`, outside the worktree. That gap is **open**, and BP-608 is what opened
+ * it: the tool allowlist used to close it by giving the agent no shell, but the npm gates below run
+ * agent-written code inside this same profile, so a test file that spawns `defaults` is executed by
+ * the Test gate. Narrow, and the narrowness is measured too — the channel is preference domains
+ * only. `defaults write <absolute path>` is refused, because that one `defaults` writes itself
+ * instead of asking cfprefsd, so `~/Library/LaunchAgents/*.plist` stays out of reach. Adding
+ * `(deny mach-lookup (global-name "com.apple.cfprefsd.daemon"))` closes it, also measured — what is
+ * not measured is what else in a run reads a preference through the same daemon, which is why it is
+ * BP-630 rather than a line above.
  *
  * The gates are inside it too, since BP-608: `npm ci`, `npm run build` and `npm test` run
  * agent-written code — a test file is exactly what an Implement step is asked to write — and they

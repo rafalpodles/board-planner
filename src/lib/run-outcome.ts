@@ -32,13 +32,18 @@ interface Ended {
  * act on: an instance admin gets the column, and the machine's owner is notified locally (BP-614).
  *
  * So the project's view says what happened to the task rather than what happened to a machine it
- * cannot name. "Didn't run" and the neighbouring "Back in the queue" are different words for
+ * cannot name. "Didn't finish" and the neighbouring "Back in the queue" are different words for
  * different outcomes, which is the distinction BP-609 recorded them apart for.
+ *
+ * Not "Didn't run", which the same row contradicts: a fault is not only a machine that failed
+ * preflight. A gate that cannot confine the command it was asked to run reports the fault after
+ * the agent has worked (BP-608), and the row then shows the minutes and the cost of a run this
+ * label would be claiming never happened.
  */
 export type RunAudience = "fleet" | "project";
 
 const PROJECT_LABELS: Partial<Record<AgentRunOutcome, string>> = {
-  machineFault: "Didn't run",
+  machineFault: "Didn't finish",
 };
 
 /** Which gate refused is the difference between raising a limit and rewriting the change. */

@@ -604,9 +604,10 @@ describe("what a round of the window may say about a link", () => {
       return {
         id: (filter as { _id: string })._id,
         written: add.$literal.map((doc) => doc.number),
-        // `null` rather than a throw when the write was never told what the round saw: a shape
-        // error reads as a broken test, and the failure this has to report is a product one.
-        seen: keep.$filter.cond.$or ? keep.$filter.cond.$or[1].$not[0].$in[1] : null,
+        // Read straight, with no fallback for a missing `$or`: `replaceProviderLinks` always
+        // emits one, so the branch that guarded against its absence could never run and only hid
+        // a shape change behind a `null` some assertion would have to interpret (found in review).
+        seen: keep.$filter.cond.$or![1].$not[0].$in[1],
       };
     });
 

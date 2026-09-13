@@ -255,23 +255,31 @@ and `SIGINT` both finish the task in flight before the loop exits.
   that wrote a test which writes to your home, followed by a Test gate that ran it, reached outside
   in two moves. Each command now gets the worktree and a scratch directory of its own (handed to it
   as `TMPDIR`, so `os.tmpdir()` and `mktemp` find it), and nothing else; the install also gets a
-  **per-worker npm cache** under the temp directory, or wherever `CP_NPM_CACHE` points, never your
-  own `~/.npm`. What that leaves: the cache is shared between runs on this machine, so a package an
+  **per-account npm cache** under the temp directory, or wherever `CP_NPM_CACHE` points, never your
+  own `~/.npm` — named for the uid, so two workers you run share it. What that leaves: the cache is shared between runs on this machine, so a package an
   agent could get written into it is one a later run installs — npm verifies tarball integrity
   against the lockfile, which bounds it, and your own cache is out of reach either way. A machine
   that cannot confine refuses the gate rather than running it unconfined.
 
   **What it does not close.** Writes a *daemon* performs on a spawned process's behalf: `(allow default)` leaves
-  `process-exec` and `mach-lookup` open, and `defaults write` makes cfprefsd write a plist outside
-  the worktree, measured. Today that one is closed by the `--tools` list giving the agent no shell,
-  not by the kernel, so a future capability that yields process execution has to close it in the
-  profile. And reads, and the network, neither of which this touches at all.
+  `process-exec` and `mach-lookup` open, and `defaults write` makes cfprefsd write a plist under
+  `~/Library/Preferences`, outside the worktree, measured. The tool allowlist used to close it by
+  giving the agent no shell — and then the gates above moved inside the profile, where they run
+  agent-written code, so it is open: a test file that spawns `defaults` gets there. What it buys is
+  a preference domain and nothing more: `defaults write <absolute path>` is refused, because that
+  one `defaults` writes itself rather than asking cfprefsd, so `~/Library/LaunchAgents/*.plist` is
+  not reachable this way. Denying `mach-lookup` on `com.apple.cfprefsd.daemon` closes it and still
+  leaves the worktree writable, measured; what nobody has measured is which parts of a run read a
+  preference through that same daemon, and that is **BP-630**. And reads, and the network, neither
+  of which this touches at all.
 
   **A file git will not print** (**BP-603**). Four things take a file's contents out of a patch: a
   bare `-diff` attribute, a `diff=<name>` driver declared binary in the config, a file git decides
   is binary on its own, and a submodule pointer. The **submodule pointer is refused** by
   `protected-paths`: its whole change is two object ids, in a repository these gates never fetch,
-  so neither a reviewer nor a person reading the pull request can say what it now brings in. The
+  so neither a reviewer nor a person reading the pull request can say what it now brings in. By
+  that gate and only that gate — gates are the blocks an agent names (`gates/from-entry.ts`), so a
+  sequence without a **Protected files** step has no such refusal, which is BP-626. The
   other three are **allowed and named**: a binary fixture or an image is ordinary work, and a gate
   refusing every one of them would be switched off — so the review gate is told, in the prompt,
   which files it is not being shown and that it should decline if their contents would matter.

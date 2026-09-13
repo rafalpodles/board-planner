@@ -196,6 +196,42 @@ test("two rounds of one provider landing together keep both sets of links", asyn
     .toEqual([20, 21]);
 });
 
+/**
+ * BP-627. `updatedAt` means "when somebody changed this task", and `stats/route.ts` reads a done
+ * task's as the day it was finished — so a sync tidying a badge moved a task finished last quarter
+ * onto this week's chart, and the detail read "Edited just now" on a task nobody had edited.
+ *
+ * Only a real write against a real database shows it: the non-obvious half is that Mongoose stamps
+ * a **pipeline** update at all, which no assertion over the pipeline's shape can see.
+ */
+test("a sync that changes a task's links does not stamp it as edited", async () => {
+  const _id = await taskWith([link("github", 30)]);
+  const handle = await db();
+  const finished = new Date("2026-06-01T09:00:00Z");
+  await handle.collection("tasks").updateOne({ _id }, { $set: { updatedAt: finished } });
+
+  // The removal pass: the round saw 30 and gave it to somebody else, so this task loses it
+  await apply(_id, "github", [], [30]);
+
+  expect((await linksOf(_id)).map((l) => l.number)).toEqual([]);
+  const after = await handle.collection("tasks").findOne({ _id });
+  expect(after?.updatedAt).toEqual(finished);
+});
+
+test("nor when the round gives it a new link", async () => {
+  const _id = await taskWith([]);
+  const handle = await db();
+  const finished = new Date("2026-06-01T09:00:00Z");
+  await handle.collection("tasks").updateOne({ _id }, { $set: { updatedAt: finished } });
+
+  // The matching loop, which reaches the same screen by a different door: a done task whose merged
+  // pull request's badge changes — a late CI re-run — is written here, with no removal at all.
+  await apply(_id, "github", [link("github", 31)], [31]);
+
+  expect((await linksOf(_id)).map((l) => l.number)).toEqual([31]);
+  expect((await handle.collection("tasks").findOne({ _id }))?.updatedAt).toEqual(finished);
+});
+
 test("dates reach the database as dates, not as strings", async () => {
   const _id = await taskWith([]);
 

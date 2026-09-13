@@ -41,6 +41,32 @@ export function repositoryCandidates(project: RepositoryFields): string[] {
   return [project.githubRepo?.trim() ?? "", project.gitlabRepo?.trim() ?? ""].filter(Boolean);
 }
 
+/**
+ * Every repository this project names, each one carrying a host.
+ *
+ * `repositoryCandidates` deliberately does not: it feeds `sameRepo`, where a bare `owner/repo`
+ * must match any host, because that is the only way a project pointing at a self-hosted git ever
+ * matched a worker's checkout. That rule is right for matching a machine and wrong for judging a
+ * url somebody else supplied — a hostless candidate makes every host correct, which is how
+ * BP-604's guard came to pass `evil.example.com/owner/repo/pull/1` on a project still on the
+ * legacy fields (found in review).
+ *
+ * So the legacy fields are resolved the way `projectRepositoryUrl` resolves them — `githubRepo` is
+ * GitHub's by definition, `gitlabRepo` belongs to the host the project already had to configure
+ * for its API calls to work — and both are offered, because a project can carry both.
+ */
+export function repositoryUrlCandidates(project: RepositoryFields): string[] {
+  const explicit = project.repositoryUrl?.trim();
+  if (explicit) return [explicit];
+
+  const github = project.githubRepo?.trim();
+  const gitlab = project.gitlabRepo?.trim();
+  return [
+    github ? absolute(github, "https://github.com") : "",
+    gitlab ? absolute(gitlab, project.gitlabHost?.trim() || "https://gitlab.com") : "",
+  ].filter(Boolean);
+}
+
 export function projectRepositoryUrl(project: RepositoryFields): string {
   const explicit = project.repositoryUrl?.trim();
   if (explicit) return explicit;

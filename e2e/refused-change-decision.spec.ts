@@ -248,7 +248,9 @@ test("a pull request url naming another repository is shown but not offered", as
   await signIn(page, "owner");
   await openTheTask(page);
 
-  await expect(page.getByTestId("decision-pr-elsewhere")).toContainText("github.com");
+  await expect(page.getByTestId("decision-pr-elsewhere")).toContainText(
+    "could be confirmed as the project's repository"
+  );
   await expect(page.getByTestId("decision-pr-elsewhere")).toContainText(
     "https://github.com/attacker/repo/pull/1"
   );

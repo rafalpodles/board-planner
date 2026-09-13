@@ -455,8 +455,13 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
             and a rename or a fork is the innocent version of it (BP-604). */}
         {decision.prUrl && hostOf(decision.prUrl) && !decision.prUrlNamesRepo && (
           <p className="text-sm text-text-muted" data-testid="decision-pr-elsewhere">
-            The machine reported this pull request on {hostOf(decision.prUrl)}, which is not this
-            project&apos;s repository, so it is not offered as a link:{" "}
+            {/* Not "on <host>, which is not this project's repository", and not a flat claim that
+                it is somebody else's either: the check reads owner and repository as well as host,
+                and it answers no to a url of any shape it does not recognise — `?w=1` on the end
+                of the project's own pull request included. What the panel knows is that it could
+                not confirm this one, which is also the reason it is shown at all. */}
+            The machine reported this pull request, and this is not an address that could be
+            confirmed as the project&apos;s repository, so it is not offered as a link:{" "}
             <code className="break-all text-xs">{decision.prUrl}</code>
           </p>
         )}

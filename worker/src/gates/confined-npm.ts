@@ -33,8 +33,9 @@ import { confine } from "../sandbox.js";
  * `~/.npm/_cacache` is the operator's own, outside the worktree, and allowing it would re-open a
  * directory an agent could then poison for every later run on the machine — including runs of
  * other projects, and including whatever the operator installs by hand. So the install gets a
- * **per-worker cache** instead (`npm_config_cache`), under the system temp directory and named for
- * the uid, or wherever `CP_NPM_CACHE` says.
+ * **per-account cache** instead (`npm_config_cache`), under the system temp directory and named
+ * for the uid, or wherever `CP_NPM_CACHE` says. Per account and not per worker: two workers the
+ * same operator runs share it, which is the same sentence as the blast radius below.
  *
  * The blast radius that leaves, stated rather than implied: the cache is shared between runs on
  * this machine, so a package an agent can get written into it is one a later run can install. npm

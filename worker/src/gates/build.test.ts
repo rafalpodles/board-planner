@@ -110,7 +110,13 @@ describe("buildGate", () => {
     await buildGate(r, TIMEOUT_MS).run(context);
 
     const args = run.mock.calls[1][1];
-    expect(args.filter((_, index) => args[index - 1] === "-D")).toHaveLength(2);
+    // The list, not its length: two entries with the cache swapped in for the scratch directory is
+    // also two, and that is the mistake this test exists to catch (found in review)
+    expect(args.filter((_, index) => args[index - 1] === "-D")).toEqual([
+      `W0=${realpathSync(worktree)}`,
+      expect.stringMatching(/^W1=.*cp-gate-/),
+    ]);
+    expect(args.join(" ")).not.toContain(npmCacheDir());
   });
 
   it("refuses rather than installing or building unconfined", async () => {

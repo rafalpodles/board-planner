@@ -114,7 +114,12 @@ const TWO_GH_ACCOUNTS = `github.com
   - Git operations protocol: ssh
 `;
 
-function check(report: { checks: { name: string; ok: boolean; detail: string }[] }, name: string) {
+// `warn` on the shape as well: it is optional on a check and the fleet screen's amber line is
+// built on it, so a helper that dropped it made every assertion about it a type error
+function check(
+  report: { checks: { name: string; ok: boolean; warn?: boolean; detail: string }[] },
+  name: string
+) {
   const found = report.checks.find((c) => c.name === name);
   if (!found) throw new Error(`no check named ${name} in ${report.checks.map((c) => c.name).join(", ")}`);
   return found;
@@ -553,8 +558,23 @@ describe("the sandbox check", () => {
 
     const row = check(report, "sandbox");
     expect(row.ok).toBe(true);
+    // The field the fleet screen hangs the whole amber line on: green without it is a row that
+    // says "ready" and nothing else (BP-606 review)
+    expect(row.warn).toBe(true);
     expect(row.detail).toContain(UNCONFINED_ESCAPE_HATCH);
     expect(row.detail).toMatch(/nothing confining its writes/);
+  });
+
+  // The control for the line above: an ordinary pass must not carry it, or every machine on the
+  // fleet screen wears the warning and it stops meaning anything.
+  it("leaves warn off on a machine that really does confine the agent", async () => {
+    const m = machine();
+
+    const report = await runPreflight(depsFor(m, { env }));
+
+    const row = check(report, "sandbox");
+    expect(row.ok).toBe(true);
+    expect(row.warn).toBeFalsy();
   });
 
   // A throw building the probe used to escape sandboxCheck entirely, and under `--preflight` that

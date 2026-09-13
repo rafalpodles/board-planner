@@ -2,11 +2,17 @@ import XCTest
 @testable import CPMenubarCore
 
 final class ProjectSyncTests: XCTestCase {
+    // The name is not the key, and is deliberately not derived from it: every message under test
+    // reads one of the two, and a fixture where they are the same string cannot say which
+    // (found in review).
+    private static let names = ["SB": "Ventures", "BP": "Board Planner"]
+
     private func row(
         _ key: String, repo: String, wanted: Bool, servedHere: Bool, available: Bool = true
     ) -> ProjectCatalogueRow {
         ProjectCatalogueRow(
-            project: "p-\(key)", key: key, name: key, repositoryUrl: repo,
+            project: "p-\(key)", key: key, name: Self.names[key] ?? "The \(key) project",
+            repositoryUrl: repo,
             available: available, workersEnabled: true, servedHere: servedHere, wanted: wanted)
     }
 
@@ -104,7 +110,9 @@ final class ProjectSyncTests: XCTestCase {
 
         let step = ProjectSync.nowhereToPut(plan: plan, checkoutsFolder: "")
 
-        XCTAssertEqual(step, .nowhereToPut(projects: ["SB"], where: checkoutsFolderLocation))
+        // "Ventures", not "SB": the pane is read by whoever set the machine up, and the name is
+        // what they picked the project by on the board
+        XCTAssertEqual(step, .nowhereToPut(projects: ["Ventures"], where: checkoutsFolderLocation))
     }
 
     // The message names where the folder is set, not only that it is missing.
@@ -133,7 +141,7 @@ final class ProjectSyncTests: XCTestCase {
 
         XCTAssertEqual(
             ProjectSync.nowhereToPut(plan: plan, checkoutsFolder: ""),
-            .nowhereToPut(projects: ["BP"], where: checkoutsFolderLocation))
+            .nowhereToPut(projects: ["Board Planner"], where: checkoutsFolderLocation))
     }
 
     // A machine nobody has given a project to is not misconfigured, it is unused.
@@ -162,6 +170,28 @@ final class ProjectSyncTests: XCTestCase {
 
         XCTAssertEqual(
             ProjectSync.withoutNowhereToPut(steps), [.added(project: "BP", path: "/checkouts/BP")])
+    }
+
+    // Ticking a second project renames the condition, and a dedupe by value read that as a second
+    // condition: the pane held both lines, the older one describing a state that was over.
+    func testItReplacesTheBlockedLineRatherThanAddingASecondOne() {
+        let first: SyncStep = .nowhereToPut(projects: ["Recurro"], where: checkoutsFolderLocation)
+        let second: SyncStep = .nowhereToPut(
+            projects: ["Recurro", "Atlas"], where: checkoutsFolderLocation)
+
+        let steps = ProjectSync.replacingNowhereToPut(
+            [.added(project: "BP", path: "/a"), first], with: second)
+
+        XCTAssertEqual(steps, [.added(project: "BP", path: "/a"), second])
+    }
+
+    // What the runner's "only when it changed" guard is allowed to rely on: an unchanged condition
+    // rebuilds to an equal list, so a pass that says nothing new writes nothing.
+    func testAnUnchangedBlockedLineRebuildsToTheSameSteps() {
+        let blocked: SyncStep = .nowhereToPut(projects: ["Recurro"], where: checkoutsFolderLocation)
+        let steps: [SyncStep] = [.added(project: "BP", path: "/a"), blocked]
+
+        XCTAssertEqual(ProjectSync.replacingNowhereToPut(steps, with: blocked), steps)
     }
 
     // Every other line is a thing that happened and stays true, so none of them is dropped.

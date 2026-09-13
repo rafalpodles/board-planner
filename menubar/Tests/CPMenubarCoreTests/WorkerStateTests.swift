@@ -248,6 +248,31 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
     #expect(state.effectiveHealth(now: t0.addingTimeInterval(6)) == .idle)
 }
 
+// The stamp as well as the health, which the test above cannot see: `adopt` sets `.idle`, so it
+// passes with the clock left behind (found in review). Reached through `forceHealth` because no
+// event sets `.faulted` without stamping it — that is the whole point of clearing it here, and the
+// day one does, a stale stamp would age the new fault out before it was ever drawn.
+@Test func aReconnectDropsTheFaultClockAlongWithTheFault() {
+    var state = WorkerState()
+    state.apply(.outcome(Outcome(outcome: "machineFault", taskKey: "CP-1")), at: t0)
+    state.adopt(StatusResponse(paused: false, current: nil, recent: []), at: t0.addingTimeInterval(5))
+
+    state.forceHealth(.faulted)
+
+    #expect(state.effectiveHealth(now: t0.addingTimeInterval(WorkerState.faultGrace * 4)) == .faulted)
+}
+
+// The same for the socket dropping, which is the other path that ends a fault without an outcome.
+@Test func aDisconnectDropsTheFaultClockAlongWithTheFault() {
+    var state = WorkerState()
+    state.apply(.outcome(Outcome(outcome: "machineFault", taskKey: "CP-1")), at: t0)
+    state.markDisconnected()
+
+    state.forceHealth(.faulted)
+
+    #expect(state.effectiveHealth(now: t0.addingTimeInterval(WorkerState.faultGrace * 4)) == .faulted)
+}
+
 // Nothing else expires. A machine waiting for a person is waiting until somebody comes.
 @Test func nothingButAFaultIsAgedOut() {
     for health in Health.allCases where health != .faulted {

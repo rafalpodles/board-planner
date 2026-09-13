@@ -224,14 +224,19 @@ describe("useAuthProvider — what the rest of the app reports back", () => {
   // instance answered that question perfectly well, so the shell must not tell everybody it cannot
   // reach its database.
   it("takes no outage from a 5xx that reports somebody else's failure", async () => {
-    await renderSettled();
+    // signedIn(), not a bare render: an unmocked /api/auth/me leaves the flag already set, and the
+    // assertion would then be measuring the clearing this endpoint must not do (BP-607 review)
+    await signedIn();
+    expect(screen.getByTestId("outage").textContent).toBe("false");
     await act(async () => {
       screen.getByText("saw a relayed 502").click();
     });
     expect(screen.getByTestId("outage").textContent).toBe("false");
   });
 
-  it("clears a stale outage when a relayed endpoint answers, because the instance did answer", async () => {
+  // BP-607 review: Railway answers 502 for an instance that is down, and that is the very status
+  // the mail route uses for "the mail server said no": a relayed 502 is not evidence of health.
+  it("leaves an outage somebody else measured alone, rather than clearing it on a relayed 502", async () => {
     await renderSettled();
     await act(async () => {
       screen.getByText("saw 503").click();
@@ -240,6 +245,11 @@ describe("useAuthProvider — what the rest of the app reports back", () => {
 
     await act(async () => {
       screen.getByText("saw a relayed 502").click();
+    });
+    expect(screen.getByTestId("outage").textContent).toBe("true");
+
+    await act(async () => {
+      screen.getByText("saw 200").click();
     });
     expect(screen.getByTestId("outage").textContent).toBe("false");
   });
