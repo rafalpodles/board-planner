@@ -177,6 +177,25 @@ test("two providers syncing at once keep both sets of links", async () => {
   expect(links.map((l) => l.number).sort()).toEqual([8, 9]);
 });
 
+/**
+ * BP-559's property, re-proved for the merge rule BP-617 put in its place: the write is still one
+ * atomic pipeline, so two rounds of the SAME provider landing together cannot drop each other's
+ * links. Before BP-617 this was the one case replacement could not survive — each round replaced
+ * the provider's links with its own — and it is why the fix had to stay inside the pipeline rather
+ * than become a read, a merge in JS and a save.
+ */
+test("two rounds of one provider landing together keep both sets of links", async () => {
+  const _id = await taskWith([]);
+
+  await Promise.all([
+    apply(_id, "github", [link("github", 20)], [20]),
+    apply(_id, "github", [link("github", 21)], [21]),
+  ]);
+
+  expect((await linksOf(_id)).map((l) => l.number).sort((a, b) => (a as number) - (b as number)))
+    .toEqual([20, 21]);
+});
+
 test("dates reach the database as dates, not as strings", async () => {
   const _id = await taskWith([]);
 
