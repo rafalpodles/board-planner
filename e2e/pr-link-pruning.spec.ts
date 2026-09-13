@@ -1,5 +1,6 @@
 import { test, expect, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import mongoose from "mongoose";
+import { logActivity } from "@/lib/activity";
 import { GITHUB_STUB_URL } from "../playwright.config";
 import { ADMIN_AUTH } from "./api";
 import {
@@ -300,4 +301,48 @@ test("a round that only looked again writes nothing", async ({ page, request }) 
   await expect(
     history.getByText(`E2E Admin linked github.com/example/board/pull/78`)
   ).toHaveCount(1);
+});
+
+/**
+ * The row a **scheduled** round leaves, which is the one with no person to name (BP-628, BP-632).
+ *
+ * The tick cannot be driven from a browser — it runs on an interval inside the server — so what is
+ * driven here is everything the tick's row passes through afterwards: a schema that used to
+ * require a user, `logActivity`'s own catch, which would have swallowed the refusal in silence,
+ * the route that populates the reference, and the sentence the panel builds from an absence that
+ * looks exactly like a deleted account.
+ */
+test("a row the scheduled sync wrote names the sync, not Unknown", async ({ page }) => {
+  const handle = await db();
+  const task = await handle
+    .collection("tasks")
+    .findOne({ project: new mongoose.Types.ObjectId(PROJECT_ID), taskNumber: SIBLING_TASK_NUMBER });
+
+  await logActivity(
+    String(task!._id),
+    null,
+    "pr_unlinked",
+    "linkedPRs",
+    `${REPO}/pull/91`,
+    ""
+  );
+
+  await signIn(page);
+  const history = await openHistory(page, SIBLING_TASK_NUMBER);
+
+  await expect(
+    history.getByText("The repository sync unlinked github.com/example/board/pull/91")
+  ).toBeVisible();
+  // The control: a deleted author is the same absence in the database and must still read as one
+  await handle.collection("activitylogs").insertOne({
+    task: task!._id,
+    user: null,
+    action: "comment_added",
+    field: "",
+    oldValue: "",
+    newValue: "",
+    createdAt: new Date(),
+  });
+  const again = await openHistory(page, SIBLING_TASK_NUMBER);
+  await expect(again.getByText("Unknown added a comment")).toBeVisible();
 });
