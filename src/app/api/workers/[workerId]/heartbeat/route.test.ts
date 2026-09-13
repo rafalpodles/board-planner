@@ -310,7 +310,52 @@ describe("the preflight report a worker sends", () => {
 
     await POST(req, ctx);
 
-    expect(preflightPatch()?.checks).toEqual([{ name: "git", ok: true, detail: "fine" }]);
+    expect(preflightPatch()?.checks).toEqual([
+      { name: "git", ok: true, warn: false, detail: "fine" },
+    ]);
+  });
+
+  /**
+   * BP-606. A check may pass at a cost the operator chose — the agent running unconfined is the one
+   * in the product — and the fleet screen renders such a row inline rather than leaving it in a
+   * tooltip. `warn` is rebuilt like every other field a worker sends.
+   */
+  it("keeps a warning on a check that passed", async () => {
+    const { req, ctx } = request({
+      preflight: {
+        ok: true,
+        checks: [{ name: "sandbox", ok: true, warn: true, detail: "nothing confines this agent" }],
+      },
+    });
+
+    await POST(req, ctx);
+
+    expect(preflightPatch()?.checks[0]).toMatchObject({ ok: true, warn: true });
+  });
+
+  // "failed, and also a warning" is not a state: a worker sending one would otherwise paint a red
+  // row amber, which is the one direction this must not go.
+  it("drops a warning from a check that failed", async () => {
+    const { req, ctx } = request({
+      preflight: {
+        ok: false,
+        checks: [{ name: "sandbox", ok: false, warn: true, detail: "there is no sandbox here" }],
+      },
+    });
+
+    await POST(req, ctx);
+
+    expect(preflightPatch()?.checks[0]).toMatchObject({ ok: false, warn: false });
+  });
+
+  it("takes a check with no warning at all, which is every check an older worker sends", async () => {
+    const { req, ctx } = request({
+      preflight: { ok: true, checks: [{ name: "git", ok: true, detail: "fine" }] },
+    });
+
+    await POST(req, ctx);
+
+    expect(preflightPatch()?.checks[0]).toMatchObject({ warn: false });
   });
 
   it("caps what a worker can write into the console", async () => {
