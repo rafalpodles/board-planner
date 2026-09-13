@@ -240,6 +240,47 @@ describe("prUrlNamesProjectRepo", () => {
     ).toBe(true);
   });
 
+  /**
+   * The shape the guard did not cover, measured by two reviewers independently: a project still on
+   * the legacy `githubRepo`/`gitlabRepo` fields. `projectRemotes` hands those out as stored, and a
+   * bare `owner/repo` has no host — which `sameRepo` treats as matching any host. So every url in
+   * this block used to answer `true` and render as a clickable link.
+   */
+  it("holds on a project that has not been migrated to repositoryUrl", () => {
+    const legacy = { _id: "p1", githubRepo: "owner/repo" };
+
+    expect(prUrlNamesProjectRepo("https://evil.example.com/owner/repo/pull/1", legacy)).toBe(false);
+    expect(prUrlNamesProjectRepo("http://evil.internal/owner/repo/pull/1", legacy)).toBe(false);
+    // And the machine's own pull request still is one: a legacy githubRepo is GitHub's by
+    // definition, which is how `projectRepositoryUrl` has always resolved it.
+    expect(prUrlNamesProjectRepo("https://github.com/owner/repo/pull/42", legacy)).toBe(true);
+  });
+
+  it("holds on a legacy GitLab project, against the host it had to configure anyway", () => {
+    const legacy = {
+      _id: "p1",
+      gitlabRepo: "group/proj",
+      gitlabHost: "https://gitlab.example.com",
+    };
+
+    expect(
+      prUrlNamesProjectRepo("http://evil.internal/group/proj/-/merge_requests/2", legacy)
+    ).toBe(false);
+    expect(
+      prUrlNamesProjectRepo("https://gitlab.example.com/group/proj/-/merge_requests/2", legacy)
+    ).toBe(true);
+  });
+
+  // A project carrying both legacy fields names two repositories, and a pull request from either
+  // is its own.
+  it("offers both legacy fields when a project has both", () => {
+    const both = { _id: "p1", githubRepo: "owner/repo", gitlabRepo: "group/proj" };
+
+    expect(prUrlNamesProjectRepo("https://github.com/owner/repo/pull/1", both)).toBe(true);
+    expect(prUrlNamesProjectRepo("https://gitlab.com/group/proj/-/merge_requests/1", both)).toBe(true);
+    expect(prUrlNamesProjectRepo("https://evil.example.com/owner/repo/pull/1", both)).toBe(false);
+  });
+
   it("is not fooled by a repository whose name ends in the project's", () => {
     expect(prUrlNamesProjectRepo("https://github.com/owner/repo-fork/pull/1", project())).toBe(
       false

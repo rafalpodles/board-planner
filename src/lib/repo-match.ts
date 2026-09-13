@@ -1,4 +1,4 @@
-import { repositoryCandidates, RepositoryFields } from "./repository";
+import { repositoryCandidates, repositoryUrlCandidates, RepositoryFields } from "./repository";
 
 // One repository is reachable by many strings — ssh, https, with or without .git, and through a
 // per-account ssh host alias like `git@github-owner:owner/repo.git`. Matching a worker's
@@ -93,7 +93,13 @@ export function matchRepo(project: MatchableProject, reported: RepoReport[]): st
  * this answers true so such a board reads exactly as it does today.
  */
 export function prUrlNamesProjectRepo(prUrl: string, project: MatchableProject): boolean {
-  const wanted = projectRemotes(project);
+  // `repositoryUrlCandidates`, not `projectRemotes`: the latter hands out the legacy fields exactly
+  // as stored, and a bare `owner/repo` has no host — which `sameRepo` reads as "matches any host",
+  // deliberately, for matching a worker's checkout. Against a url a machine supplied that rule
+  // says yes to every host, so this guard did not hold at all on a project that has not been
+  // migrated to `repositoryUrl`: `https://evil.example.com/owner/repo/pull/1` rendered as a link
+  // (found in review, measured on both legacy fields).
+  const wanted = repositoryUrlCandidates(project).filter((url) => normaliseRemote(url).length > 0);
   if (wanted.length === 0) return true;
   if (!prUrl) return true;
 
