@@ -1,7 +1,10 @@
 import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
+import mongoose from "mongoose";
 import { GITHUB_STUB_URL } from "../playwright.config";
 import { ADMIN_AUTH } from "./api";
 import {
+  E2E_MONGODB_URI,
+  PROJECT_ID,
   PROJECT_KEY,
   SIBLING_TASK_NUMBER,
   SIBLING_TASK_TITLE,
@@ -70,9 +73,20 @@ async function openTheTask(page: Page, taskNumber: number, title: string) {
   await expect(page.getByLabel("Task title").first()).toHaveValue(title);
 }
 
+async function db() {
+  if (mongoose.connection.readyState === 0) await mongoose.connect(E2E_MONGODB_URI);
+  const handle = mongoose.connection.db;
+  if (!handle) throw new Error("no database handle");
+  return handle;
+}
+
 test.beforeEach(async () => {
   await seed();
   await seedRepository({ repositoryUrl: REPO, githubToken: SEEDED_TOKEN });
+});
+
+test.afterAll(async () => {
+  if (mongoose.connection.readyState !== 0) await mongoose.disconnect();
 });
 
 test("a pull request that has left the window is kept when a newer one arrives", async ({
@@ -122,4 +136,44 @@ test("a pull request the round gives to another task leaves the first one", asyn
   // The title above is the positive this negative needs: the panel has loaded, and the badge the
   // sync removed is not on it.
   await expect(page.getByTestId("pr-state")).toHaveCount(0, { timeout: 1_000 });
+});
+
+/**
+ * The link shape the second pass has to find and nothing else can see: written before the
+ * `provider` field existed, so it carries none. The schema's `default: "github"` is applied on
+ * hydration rather than stored, so a query for `provider: "github"` misses it — and this is the
+ * query, against a real database, which is the only place that can be shown.
+ */
+test("a link stored before the provider field existed is pruned too", async ({ request }) => {
+  const handle = await db();
+  const task = await handle
+    .collection("tasks")
+    .findOne({ project: new mongoose.Types.ObjectId(PROJECT_ID), taskNumber: SIBLING_TASK_NUMBER });
+  await handle.collection("tasks").updateOne(
+    { _id: task!._id },
+    {
+      $set: {
+        linkedPRs: [
+          {
+            _id: new mongoose.Types.ObjectId(),
+            number: 41,
+            title: "written before providers existed",
+            state: "open",
+            url: `${REPO}/pull/41`,
+            mergedAt: null,
+            updatedAt: new Date("2026-08-01T00:00:00Z"),
+          },
+        ],
+      },
+    }
+  );
+  expect(await linksOn(request, SIBLING_TASK_NUMBER)).toEqual([41]);
+
+  // The round sees 41 and gives it to another task, so the sibling's copy is contradicted
+  await github(request, [pull(41, "feat/no-key", { title: `${PROJECT_KEY}-${DECOY_TASK_NUMBER} mine now` })]);
+  const result = await syncNow(request);
+
+  expect(await linksOn(request, SIBLING_TASK_NUMBER)).toEqual([]);
+  expect(await linksOn(request, DECOY_TASK_NUMBER)).toEqual([41]);
+  expect(result.prsUnlinked).toBe(1);
 });
