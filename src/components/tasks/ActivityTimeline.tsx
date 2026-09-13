@@ -29,6 +29,10 @@ function actionIcon(action: string) {
       return "✎";
     case "comment_deleted":
       return "×";
+    case "pr_linked":
+      return "⎇";
+    case "pr_unlinked":
+      return "⌫";
     default:
       return "•";
   }
@@ -41,6 +45,7 @@ function actionColor(action: string) {
     case "status_changed":
       return "text-primary";
     case "comment_deleted":
+    case "pr_unlinked":
       return "text-danger";
     default:
       return "text-text-muted";
@@ -65,9 +70,28 @@ function formatValue(field: string, value: string): string {
   return value;
 }
 
+// A link's address, shortened from the front. `formatValue` cuts the tail, which on a pull request
+// url is the repository and the number — the only part worth reading.
+function linkLabel(url: string): string {
+  if (!url) return "a pull request";
+  const bare = url.replace(/^https?:\/\//, "");
+  return bare.length > 60 ? `…${bare.slice(-59)}` : bare;
+}
+
+// The only two actions ever written without an actor, which is what lets an absent one be read as
+// the scheduled sync rather than as a deleted account (BP-628)
+const SYNC_ACTIONS = new Set(["pr_linked", "pr_unlinked"]);
+
+function actorName(log: ApiActivityLog): string {
+  if (log.user && typeof log.user === "object") return log.user.fullName;
+  if (!log.user && SYNC_ACTIONS.has(log.action)) return "The repository sync";
+  // A deleted user also arrives as null, and null is an object to `typeof` — which is why the
+  // check above leads with the value itself. For every other action that is what an absence means.
+  return "Unknown";
+}
+
 function describeAction(log: ApiActivityLog): string {
-  const userName =
-    log.user && typeof log.user === "object" ? log.user.fullName : "Unknown";
+  const userName = actorName(log);
 
   switch (log.action) {
     case "created":
@@ -97,6 +121,12 @@ function describeAction(log: ApiActivityLog): string {
       return `${userName} edited a comment`;
     case "comment_deleted":
       return `${userName} deleted a comment`;
+    // The address, not the number: a task can hold links to two repositories, and after a repoint
+    // the numbers collide (BP-631)
+    case "pr_linked":
+      return `${userName} linked ${linkLabel(log.newValue)}`;
+    case "pr_unlinked":
+      return `${userName} unlinked ${linkLabel(log.oldValue)}`;
     default:
       return `${userName} performed an action`;
   }

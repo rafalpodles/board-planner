@@ -26,12 +26,14 @@ async function db() {
 let nextNumber = 900_000 + Math.floor(Math.random() * 90_000);
 const created: mongoose.Types.ObjectId[] = [];
 
+const urlOf = (number: number) => `https://example.test/${number}`;
+
 function link(provider: "github" | "gitlab" | null, number: number) {
   const doc: Record<string, unknown> = {
     number,
     title: `PR ${number}`,
     state: "open",
-    url: `https://example.test/${number}`,
+    url: urlOf(number),
     mergedAt: null,
     updatedAt: new Date("2026-08-01T00:00:00Z"),
   };
@@ -64,14 +66,16 @@ async function apply(
   _id: mongoose.Types.ObjectId,
   provider: "github" | "gitlab",
   docs: Record<string, unknown>[],
-  // What the round saw. Defaulting to the numbers being written keeps every test written before
-  // BP-617 saying what it said: a round that saw exactly what it wrote.
+  // What the round saw, given as numbers the way the tickets talk about them. Defaulting to the
+  // numbers being written keeps every test written before BP-617 saying what it said: a round
+  // that saw exactly what it wrote. `link()` builds the address from the number, so this is the
+  // same round expressed in the urls the sync now carries (BP-631).
   seen: number[] = docs.map((doc) => doc.number as number)
 ) {
   await db();
   // Through the model, exactly as the routes issue it: Mongoose refuses a pipeline update
   // without `updatePipeline`, and every unit test in this repo mocks the model away.
-  await writeProviderLinks(_id, provider, docs, seen);
+  await writeProviderLinks(_id, provider, docs, seen.map(urlOf));
 }
 
 async function linksOf(_id: mongoose.Types.ObjectId) {

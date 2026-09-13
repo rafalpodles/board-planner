@@ -94,6 +94,11 @@ beforeEach(() => {
   fetchMergeRequests.mockResolvedValue([]);
 });
 
+/** The history rows of one action: a link change writes rows of its own now, so "nothing was
+ *  logged" has to say which nothing it means (BP-628). */
+const rowsOf = (action: string) =>
+  logActivity.mock.calls.filter((call: unknown[]) => call[2] === action);
+
 describe("POST .../gitlab/sync — matching", () => {
   it("still finds merge requests opened under a key the project has since left", async () => {
     projectFindById.mockReturnValue({ lean: () => project({ key: "BP", formerKeys: ["CP"] }) });
@@ -114,6 +119,9 @@ describe("POST .../gitlab/sync — matching", () => {
   });
 });
 
+// The round names what it saw by url, not by number (BP-631)
+const mrUrl = (iid: number) => `https://gitlab.com/g/p/-/merge_requests/${iid}`;
+
 describe("POST .../gitlab/sync — linking", () => {
   it("names its own provider, which is what decides whose links are replaced", async () => {
     const doc = task();
@@ -129,7 +137,11 @@ describe("POST .../gitlab/sync — linking", () => {
     expect(options).toEqual({ updatePipeline: true, timestamps: false });
     expect(filter).toEqual({ _id: doc._id });
     expect(update).toEqual(
-      replaceProviderLinks("gitlab", [expect.objectContaining({ provider: "gitlab", number: 7 })], [7])
+      replaceProviderLinks(
+        "gitlab",
+        [expect.objectContaining({ provider: "gitlab", number: 7 })],
+        [mrUrl(7)]
+      )
     );
     expect(doc.save).not.toHaveBeenCalled();
   });
@@ -179,7 +191,7 @@ describe("POST .../gitlab/sync — linking", () => {
       taskUpdateOne.mock.calls.filter(([, update]) => !Array.isArray(update))
     ).toHaveLength(0);
     expect(body.autoTransitioned).toBe(0);
-    expect(logActivity).not.toHaveBeenCalled();
+    expect(rowsOf("status_changed")).toHaveLength(0);
     // The control: the route reached this task and linked its merge request, so the status
     // standing still is a decision rather than a sync that did nothing at all.
     expect(body.prsLinked).toBe(1);
@@ -292,12 +304,15 @@ describe("POST .../gitlab/sync — linking", () => {
  * (BP-610 review).
  */
 describe("POST .../gitlab/sync — the tasks a round contradicts without visiting", () => {
+  // The address follows the number. It did not before, so `link({ number: 9 })` was a link to
+  // merge request 1 wearing a 9 — a fixture no round could tell apart from the one beside it
+  // once the round started naming what it saw by url (BP-631).
   const link = (over: Record<string, unknown> = {}) => ({
     provider: "gitlab",
     number: 1,
     title: "Some change",
     state: "open",
-    url: "https://gitlab.com/g/p/-/merge_requests/1",
+    url: mrUrl((over.number as number) ?? 1),
     ...over,
   });
 
@@ -310,10 +325,10 @@ describe("POST .../gitlab/sync — the tasks a round contradicts without visitin
 
     expect(taskFind).toHaveBeenCalledWith({
       project: "p1",
-      linkedPRs: { $elemMatch: { number: { $in: [1] }, provider: "gitlab" } },
+      linkedPRs: { $elemMatch: { url: { $in: [mrUrl(1)] }, provider: "gitlab" } },
     });
     const pruned = taskUpdateOne.mock.calls.find(([filter]) => filter._id === "t8");
-    expect(pruned?.[1]).toEqual(replaceProviderLinks("gitlab", [], [1]));
+    expect(pruned?.[1]).toEqual(replaceProviderLinks("gitlab", [], [mrUrl(1)]));
     expect(body.prsUnlinked).toBe(1);
   });
 
@@ -349,7 +364,7 @@ describe("POST .../gitlab/sync — the tasks a round contradicts without visitin
     expect(body.prsFound).toBe(0);
     expect(taskFind).toHaveBeenCalledWith({
       project: "p1",
-      linkedPRs: { $elemMatch: { number: { $in: [1] }, provider: "gitlab" } },
+      linkedPRs: { $elemMatch: { url: { $in: [mrUrl(1)] }, provider: "gitlab" } },
     });
     expect(body.prsUnlinked).toBe(1);
   });

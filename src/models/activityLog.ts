@@ -8,6 +8,8 @@ const ACTIONS = [
   "comment_added",
   "comment_edited",
   "comment_deleted",
+  "pr_linked",
+  "pr_unlinked",
 ];
 
 const activityLogSchema = new Schema<IActivityLog>(
@@ -17,10 +19,12 @@ const activityLogSchema = new Schema<IActivityLog>(
       ref: "Task",
       required: true,
     },
+    // Optional, and only for the two `pr_*` actions: a scheduled sync has nobody to name, and a
+    // borrowed name would be a history row that cannot be asked about (BP-628).
     user: {
       type: Schema.Types.ObjectId,
       ref: "User",
-      required: true,
+      default: null,
     },
     action: {
       type: String,

@@ -43,6 +43,10 @@ vi.mock("@/lib/middleware", () => ({
 
 const { POST } = await import("./route");
 
+// The round names what it saw by url, not by number (BP-631). The fixture's repository and its
+// pull request addresses agree, so a round that saw #1 saw exactly this one string.
+const PR_URL = "https://github.com/o/r/pull/1";
+
 const pr = (
   over: Partial<{
     number: number;
@@ -98,6 +102,11 @@ beforeEach(() => {
   fetchPullRequests.mockResolvedValue([]);
 });
 
+/** The history rows of one action: a link change writes rows of its own now, so "nothing was
+ *  logged" has to say which nothing it means (BP-628). */
+const rowsOf = (action: string) =>
+  logActivity.mock.calls.filter((call: unknown[]) => call[2] === action);
+
 describe("POST .../github/sync", () => {
   it("still finds pull requests opened under a key the project has since left", async () => {
     projectFindById.mockReturnValue({ lean: () => project({ formerKeys: ["CP"] }) });
@@ -128,7 +137,7 @@ describe("POST .../github/sync", () => {
     expect(options).toEqual({ updatePipeline: true, timestamps: false });
     expect(filter).toEqual({ _id: doc._id });
     expect(update).toEqual(
-      replaceProviderLinks("github", [expect.objectContaining({ number: 1 })], [1])
+      replaceProviderLinks("github", [expect.objectContaining({ number: 1 })], [PR_URL])
     );
     expect(doc.save).not.toHaveBeenCalled();
   });
@@ -141,7 +150,11 @@ describe("POST .../github/sync", () => {
     await POST(request(), ctx());
 
     expect(taskUpdateOne.mock.calls[0][1]).toEqual(
-      replaceProviderLinks("github", [expect.objectContaining({ provider: "github", number: 1 })], [1])
+      replaceProviderLinks(
+        "github",
+        [expect.objectContaining({ provider: "github", number: 1 })],
+        [PR_URL]
+      )
     );
   });
 
@@ -176,7 +189,7 @@ describe("POST .../github/sync", () => {
     const body = await (await POST(request(), ctx())).json();
 
     expect(doc.status).toBe("needs_human_review");
-    expect(logActivity).not.toHaveBeenCalled();
+    expect(rowsOf("status_changed")).toHaveLength(0);
     // The control: the route ran and did its other work, so the silence above is a decision
     // rather than a sync that never reached this task.
     expect(body.prsLinked).toBe(1);
