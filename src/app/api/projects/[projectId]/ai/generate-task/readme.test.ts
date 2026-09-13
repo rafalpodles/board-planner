@@ -50,6 +50,39 @@ describe("fetchReadme", () => {
     expect(await fetchReadme("acme/board")).toBe("# Board");
   });
 
+  /**
+   * An ssh remote hides the host from a `https?://` test, so the guard above let it through and
+   * the whole string — `git@github.com:o/r` — was pasted into the raw.githubusercontent path.
+   * Found by printing what the function does for each spelling rather than by reading it.
+   */
+  it("reads an ssh remote as the repository it names, not as a path", async () => {
+    expect(await fetchReadme("git@github.com:acme/board.git")).toBe("# Board");
+    expect(fetch).toHaveBeenCalledWith(
+      "https://raw.githubusercontent.com/acme/board/main/README.md",
+      expect.anything()
+    );
+  });
+
+  it("asks nobody about an ssh remote somewhere else", async () => {
+    expect(await fetchReadme("git@ghe.corp.example:acme/board.git")).toBeUndefined();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  // A per-account ssh alias resolves only on the machine that has it, so there is no host to
+  // judge — the same assumption a bare owner/repo has always been given
+  it("still reads a per-account ssh alias as GitHub's", async () => {
+    expect(await fetchReadme("git@github-work:acme/board.git")).toBe("# Board");
+  });
+
+  // raw.githubusercontent serves a path, and a lower-cased path is a different one
+  it("keeps the case of the repository it was given", async () => {
+    await fetchReadme("https://github.com/Acme/Board");
+    expect(fetch).toHaveBeenCalledWith(
+      "https://raw.githubusercontent.com/Acme/Board/main/README.md",
+      expect.anything()
+    );
+  });
+
   it("asks nobody when the project names no repository", async () => {
     expect(await fetchReadme("")).toBeUndefined();
     expect(fetch).not.toHaveBeenCalled();
