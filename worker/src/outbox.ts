@@ -1,4 +1,4 @@
-import { ApiClient } from "./api.js";
+import { ApiClient, ApiError } from "./api.js";
 import { RunRecord } from "./run-record.js";
 
 // A report that cannot be delivered is worse than a failed run: the merge already happened, so
@@ -31,6 +31,23 @@ export interface Outbox {
 
 const MAX_ATTEMPTS = 20;
 const MAX_ENTRIES = 500;
+
+/**
+ * Whether the server's answer can be expected to differ next time.
+ *
+ * A 4xx is not transient: the server read the request and refused it, so the twenty-first attempt
+ * is the first one identical to the first — and until it is dropped every later report waits
+ * behind it, because order within a task matters and one failure stops the drain (BP-613). A
+ * worker newer than its board is the way this happens in practice: an outcome the board's enum
+ * does not know answers `400 Unknown outcome`, and one arrives per poll.
+ *
+ * 408 and 429 are the two the server means to be retried, so they stay transient.
+ */
+function permanent(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return false;
+  if (error.status === 408 || error.status === 429) return false;
+  return error.status >= 400 && error.status < 500;
+}
 
 type Log = (message: string) => void;
 
@@ -114,6 +131,13 @@ export function createOutbox(store: Store, log: Log = (m) => console.error(m)): 
           await deliver(api, entry.op);
           delivered += 1;
         } catch (error) {
+          if (permanent(error)) {
+            dropped += 1;
+            log(
+              `outbox: dropping ${entry.op.kind} for task ${taskOf(entry.op)} — the board refused it and will refuse it again: ${String(error)}`
+            );
+            continue;
+          }
           const attempts = entry.attempts + 1;
           if (attempts >= MAX_ATTEMPTS) {
             dropped += 1;

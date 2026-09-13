@@ -366,12 +366,17 @@ export function createWorkspace(
       try {
         baseSha = await resolveBase();
       } catch (error) {
-        // Kept as BaseUnavailableError, and its kind with it: the pipeline tells a machine fault
-        // from a project's own misconfiguration by those two, and flattening either here would
-        // charge the wrong party.
+        // A BaseUnavailableError already says which branch, which remote and what git answered, so
+        // wrapping it restated the first clause of its own message — "could not resolve base
+        // branch main: could not read refs/heads/main from …" — inside a notification budget of
+        // two hundred characters (BP-619). Rethrown as it is, kind and all.
+        if (error instanceof BaseUnavailableError) throw error;
+        // Anything else reached here without naming the subject, so this is where it is named. The
+        // pipeline tells a machine fault from a project's own misconfiguration by the kind, and an
+        // unexpected throw is this machine's until something says otherwise.
         throw new BaseUnavailableError(
           `could not resolve base branch ${config.baseBranch}: ${String(error)}`,
-          error instanceof BaseUnavailableError ? error.kind : "transport"
+          "transport"
         );
       }
 
