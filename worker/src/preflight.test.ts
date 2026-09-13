@@ -553,8 +553,23 @@ describe("the sandbox check", () => {
 
     const row = check(report, "sandbox");
     expect(row.ok).toBe(true);
+    // The field the fleet screen hangs the whole amber line on: green without it is a row that
+    // says "ready" and nothing else (BP-606 review)
+    expect(row.warn).toBe(true);
     expect(row.detail).toContain(UNCONFINED_ESCAPE_HATCH);
     expect(row.detail).toMatch(/nothing confining its writes/);
+  });
+
+  // The control for the line above: an ordinary pass must not carry it, or every machine on the
+  // fleet screen wears the warning and it stops meaning anything.
+  it("leaves warn off on a machine that really does confine the agent", async () => {
+    const m = machine();
+
+    const report = await runPreflight(depsFor(m, { env }));
+
+    const row = check(report, "sandbox");
+    expect(row.ok).toBe(true);
+    expect(row.warn).toBeFalsy();
   });
 
   // A throw building the probe used to escape sandboxCheck entirely, and under `--preflight` that
