@@ -114,7 +114,12 @@ const TWO_GH_ACCOUNTS = `github.com
   - Git operations protocol: ssh
 `;
 
-function check(report: { checks: { name: string; ok: boolean; detail: string }[] }, name: string) {
+// `warn` on the shape as well: it is optional on a check and the fleet screen's amber line is
+// built on it, so a helper that dropped it made every assertion about it a type error
+function check(
+  report: { checks: { name: string; ok: boolean; warn?: boolean; detail: string }[] },
+  name: string
+) {
   const found = report.checks.find((c) => c.name === name);
   if (!found) throw new Error(`no check named ${name} in ${report.checks.map((c) => c.name).join(", ")}`);
   return found;
