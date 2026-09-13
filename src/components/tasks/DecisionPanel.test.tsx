@@ -690,7 +690,7 @@ describe("the pull request it opened", () => {
    * shape: the shape check at the settle route cannot tell it from the genuine one, and the
    * machine that supplied it is running somebody's agent.
    */
-  it("prints a url naming another repository as text, with its host and no link", () => {
+  it("prints a url naming another repository as text, whole and with no link", () => {
     panel({
       state: "delivered",
       prUrl: "https://github.com/attacker/repo/pull/1",
@@ -699,7 +699,9 @@ describe("the pull request it opened", () => {
 
     expect(screen.queryByTestId("decision-pr")).toBeNull();
     const said = screen.getByTestId("decision-pr-elsewhere");
-    expect(said.textContent).toContain("github.com");
+    // The whole address, and a sentence that does not blame the host: this one's host is the
+    // project's own, and only the repository differs (BP-604 review)
+    expect(said.textContent).toContain("outside this project's repository");
     expect(said.textContent).toContain("https://github.com/attacker/repo/pull/1");
   });
 

@@ -455,9 +455,12 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
             and a rename or a fork is the innocent version of it (BP-604). */}
         {decision.prUrl && hostOf(decision.prUrl) && !decision.prUrlNamesRepo && (
           <p className="text-sm text-text-muted" data-testid="decision-pr-elsewhere">
-            The machine reported this pull request on {hostOf(decision.prUrl)}, which is not this
-            project&apos;s repository, so it is not offered as a link:{" "}
-            <code className="break-all text-xs">{decision.prUrl}</code>
+            {/* Not "on <host>, which is not this project's repository": the check is the whole
+                address, so the commonest way to land here is the right host and the wrong
+                repository — and naming github.com as the thing that is not a repository reads as
+                a different accusation from the one being made. */}
+            The machine reported this pull request outside this project&apos;s repository, so it is
+            not offered as a link: <code className="break-all text-xs">{decision.prUrl}</code>
           </p>
         )}
 
