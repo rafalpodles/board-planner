@@ -42,17 +42,23 @@ let nextId = 0;
  */
 const OBSTACLES = "[data-corner-obstacle],[data-pinned-bottom-bar],[data-pinned-phone-bar]";
 
-function measure(overASheet: boolean): Surroundings {
+function measure(overASheet: boolean, trayHeight: number): Surroundings {
   const panel = document.querySelector<HTMLElement>("[data-corner-panel]");
   const header = panel?.querySelector<HTMLElement>("[data-corner-panel-header]");
   return {
     viewportHeight: document.documentElement.clientHeight,
+    trayHeight,
     // `matchMedia`, not `clientWidth`: the breakpoint mirrors a Tailwind one, and a media query
     // counts the scrollbar while `clientWidth` does not — a 15px band on Windows and Linux where
     // the dialog renders centred while the tray thought it was a sheet
-    viewportWidth: window.matchMedia(`(min-width: ${SHEET_BREAKPOINT}px)`).matches
-      ? SHEET_BREAKPOINT
-      : SHEET_BREAKPOINT - 1,
+    // Guarded like `Combobox`: `ToastProvider` is mounted app-wide through `AuthProvider`, so a
+    // component suite on a DOM that lacks this throws inside a layout effect instead of degrading.
+    // Absent, assume the wide branch — the sheet rule is the narrow exception.
+    viewportWidth:
+      typeof window.matchMedia === "undefined" ||
+      window.matchMedia(`(min-width: ${SHEET_BREAKPOINT}px)`).matches
+        ? SHEET_BREAKPOINT
+        : SHEET_BREAKPOINT - 1,
     panel:
       panel && header
         ? {
@@ -109,14 +115,23 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
    */
   useLayoutEffect(() => {
     if (toasts.length === 0) return;
+    // The tray is in the DOM by the time a layout effect runs, so this is the real height on the
+    // first pass too. The constant survives only as the value for the pass where it is not: one
+    // line of text with its padding, which is what the placement assumed for every tray before.
+    const trayHeight = () => trayRef.current?.getBoundingClientRect().height || 44;
     const remeasure = () =>
       setPlacement((was) => {
-        const now = placeToast(measure(overASheet));
+        const now = placeToast(measure(overASheet, trayHeight()));
         // Same numbers, same object: a new one every time would re-render the tray, whose own
         // style change is a mutation this observer would see again
         return was.anchor === now.anchor && was.offset === now.offset ? was : now;
       });
     remeasure();
+
+    if (typeof ResizeObserver === "undefined" || typeof MutationObserver === "undefined") {
+      window.addEventListener("resize", remeasure);
+      return () => window.removeEventListener("resize", remeasure);
+    }
 
     const sizes = new ResizeObserver(remeasure);
     // Re-run on every arrival, not once: `SaveBar` is always mounted and turns its attribute on in
