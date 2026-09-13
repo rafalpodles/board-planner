@@ -337,6 +337,23 @@ describe("POST .../gitlab/sync — the tasks a round contradicts without visitin
     expect(taskUpdateOne.mock.calls.filter(([filter]) => filter._id === "t1")).toHaveLength(1);
   });
 
+  it("counts a merge request the round saw but matched to nobody", async () => {
+    // `seen` is built from the matched MRs' `number` AND the raw ones' `iid`, and nothing pinned
+    // that those are the same id space (found in review). This round matches nothing — the branch
+    // names no task — so 1 can only reach `seen` through the raw half.
+    taskFind.mockResolvedValue([{ _id: "t8", taskNumber: 8, linkedPRs: [link()] }]);
+    fetchMergeRequests.mockResolvedValue([mr({ iid: 1, branch: "no-task-here" })]);
+
+    const body = await (await POST(request(), ctx())).json();
+
+    expect(body.prsFound).toBe(0);
+    expect(taskFind).toHaveBeenCalledWith({
+      project: "p1",
+      linkedPRs: { $elemMatch: { number: { $in: [1] }, provider: "gitlab" } },
+    });
+    expect(body.prsUnlinked).toBe(1);
+  });
+
   it("never answers the query with an unmarked link, which is GitHub's", async () => {
     taskFind.mockResolvedValue([]);
     fetchMergeRequests.mockResolvedValue([mr({ iid: 1 })]);
