@@ -6,6 +6,8 @@ import { useCallback, useMemo } from "react";
 interface ApiOptions {
   body?: unknown;
   headers?: Record<string, string>;
+  /** This endpoint answers 502 for "a third party refused", not for its own health (BP-607) */
+  relayed?: boolean;
 }
 
 export function useApi() {
@@ -24,7 +26,10 @@ export function useApi() {
         body: opts?.body ? JSON.stringify(opts.body) : undefined,
       });
 
-      noteApiStatus(res.status);
+      // 502 and no other status: that is the one this endpoint speaks for somebody else with. A
+      // 503 from the same route is the middleware answering for this instance, database and all,
+      // and the shell still has to hear it.
+      noteApiStatus(res.status, { relayed: opts?.relayed === true && res.status === 502 });
 
       if (!res.ok) {
         // Only a 401. A 5xx means the server could not answer, and clearing the session on that is
@@ -87,7 +92,11 @@ export function useApi() {
   );
 
   const get = useCallback((url: string) => request("GET", url), [request]);
-  const post = useCallback((url: string, body: unknown) => request("POST", url, { body }), [request]);
+  const post = useCallback(
+    (url: string, body: unknown, opts?: { relayed?: boolean }) =>
+      request("POST", url, { body, relayed: opts?.relayed }),
+    [request]
+  );
   const put = useCallback((url: string, body: unknown) => request("PUT", url, { body }), [request]);
   const patch = useCallback((url: string, body: unknown) => request("PATCH", url, { body }), [request]);
   const del = useCallback((url: string, body?: unknown) => request("DELETE", url, { body }), [request]);

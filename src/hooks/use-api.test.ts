@@ -122,11 +122,34 @@ describe("useApi during an outage", () => {
     const { result } = renderHook(() => useApi());
 
     await expect(result.current.get("/api/x")).rejects.toThrow();
-    expect(noteApiStatus).toHaveBeenCalledWith(503);
+    expect(noteApiStatus).toHaveBeenCalledWith(503, { relayed: false });
 
     vi.mocked(fetch).mockResolvedValue(response(200, "OK", { ok: true }));
     await result.current.get("/api/x");
-    expect(noteApiStatus).toHaveBeenLastCalledWith(200);
+    expect(noteApiStatus).toHaveBeenLastCalledWith(200, { relayed: false });
+  });
+
+  // BP-607. The caller that knows its endpoint is reporting a third party says so, and the shell
+  // is told the difference; an ordinary POST to the same helper is unchanged.
+  it("marks a relayed endpoint's answer, so a mail server's refusal is not read as an outage", async () => {
+    vi.mocked(fetch).mockResolvedValue(response(502, "Bad Gateway", { error: "550 refused" }));
+    const { result } = renderHook(() => useApi());
+
+    await expect(result.current.post("/api/admin/email", {}, { relayed: true })).rejects.toThrow();
+    expect(noteApiStatus).toHaveBeenCalledWith(502, { relayed: true });
+
+    await expect(result.current.post("/api/projects", {})).rejects.toThrow();
+    expect(noteApiStatus).toHaveBeenLastCalledWith(502, { relayed: false });
+  });
+
+  // The endpoint is marked, the status is not: the middleware answers 503 from this same route
+  // when the database is unreachable, and that is this instance's own voice.
+  it("keeps a relayed endpoint's 503 as an outage, because that one is ours", async () => {
+    vi.mocked(fetch).mockResolvedValue(outage());
+    const { result } = renderHook(() => useApi());
+
+    await expect(result.current.post("/api/admin/email", {}, { relayed: true })).rejects.toThrow();
+    expect(noteApiStatus).toHaveBeenCalledWith(503, { relayed: false });
   });
 
   it("reports the status from upload and stream too", async () => {
