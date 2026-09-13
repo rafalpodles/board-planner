@@ -157,24 +157,19 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     };
     measureNow();
 
-    if (typeof ResizeObserver === "undefined" || typeof MutationObserver === "undefined") {
-      window.addEventListener("resize", remeasure);
-      document.addEventListener("scroll", remeasure, { capture: true, passive: true });
-      return () => {
-        window.removeEventListener("resize", remeasure);
-        document.removeEventListener("scroll", remeasure, { capture: true });
-        gone = true;
-      };
-    }
-
-    const sizes = new ResizeObserver(remeasure);
+    // Each guarded on its own, the way `Combobox` guards them (`Combobox.tsx:214,222`): losing
+    // one must not cost the other. `ToastProvider` is mounted app-wide through `AuthProvider`, so
+    // a component suite on a DOM without either would otherwise throw inside a layout effect —
+    // and coupling them would take the panel-arrival path away from a DOM that has
+    // `MutationObserver` and not `ResizeObserver`, which is correctness rather than economy.
+    const sizes = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(remeasure);
     // Re-run on every arrival, not once: `SaveBar` is always mounted and turns its attribute on in
     // the same commit that starts a 200ms `max-height`, so at the moment it announces itself it is
     // still zero tall and `measure` discards it. Observing it then is what catches the growth —
     // `Combobox` re-runs its own watch for exactly this reason. `observe` on an element already
     // observed is a no-op, and its initial callback is absorbed by the bail-out above.
     const watch = () => {
-      document.querySelectorAll<HTMLElement>(CORNER).forEach((el) => sizes.observe(el));
+      document.querySelectorAll<HTMLElement>(CORNER).forEach((el) => sizes?.observe(el));
     };
     watch();
 
@@ -190,20 +185,23 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     const movesTheTray = (node: Node) =>
       node instanceof Element && (node.matches(CORNER) || node.querySelector(CORNER) !== null);
 
-    const arrivals = new MutationObserver((records) => {
-      const relevant = records.some((record) => {
-        if (trayRef.current?.contains(record.target as Node)) return false;
-        if (record.type === "attributes") return true;
-        return (
-          Array.from(record.addedNodes).some(movesTheTray) ||
-          Array.from(record.removedNodes).some(movesTheTray)
-        );
-      });
-      if (!relevant) return;
-      watch();
-      remeasure();
-    });
-    arrivals.observe(document.body, {
+    const arrivals =
+      typeof MutationObserver === "undefined"
+        ? null
+        : new MutationObserver((records) => {
+            const relevant = records.some((record) => {
+              if (trayRef.current?.contains(record.target as Node)) return false;
+              if (record.type === "attributes") return true;
+              return (
+                Array.from(record.addedNodes).some(movesTheTray) ||
+                Array.from(record.removedNodes).some(movesTheTray)
+              );
+            });
+            if (!relevant) return;
+            watch();
+            remeasure();
+          });
+    arrivals?.observe(document.body, {
       childList: true,
       subtree: true,
       attributes: true,
@@ -221,8 +219,8 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     // the effect's own bail-out already guarantees.
     document.addEventListener("scroll", remeasure, { capture: true, passive: true });
     return () => {
-      sizes.disconnect();
-      arrivals.disconnect();
+      sizes?.disconnect();
+      arrivals?.disconnect();
       window.removeEventListener("resize", remeasure);
       document.removeEventListener("scroll", remeasure, { capture: true });
       gone = true;

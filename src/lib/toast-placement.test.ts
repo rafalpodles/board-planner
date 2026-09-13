@@ -75,7 +75,11 @@ describe("where a toast may stand", () => {
     });
 
     // Where the tray's lower edge ends up. Before, 119 — flush with the panel's bottom, which is
-    // where its composer is. It must not descend past the header into the transcript at all.
+    // where its composer is; now above the header's end.
+    //
+    // Pinned for this geometry, not asserted as an invariant: with a taller tray on a taller-but-
+    // still-short viewport the clamp takes over and the tray does reach into the header. What the
+    // branch buys is the composer, which is what BP-597 is about — see the note in `placeToast`.
     const trayBottom = 215 - placed.offset;
     expect(placed.anchor).toBe("bottom");
     expect(trayBottom).toBeLessThanOrEqual(headerBottom);

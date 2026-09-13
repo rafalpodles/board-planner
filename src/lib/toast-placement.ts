@@ -77,7 +77,10 @@ export function placeToast(around: Surroundings): Placement {
     if (under + around.trayHeight <= around.panel.box.bottom) {
       return { anchor: "top", offset: under };
     }
-    corner.push(around.panel.box);
+    // Height-checked like every other member of this list. `measure` drops a zero-height obstacle
+    // before it gets here but does not drop the panel, so without this the clamp's claim below —
+    // that the caller already did it — stops being true for the one element BP-623 adds.
+    if (around.panel.box.bottom > around.panel.box.top) corner.push(around.panel.box);
   }
 
   const highest = corner.reduce((top, box) => Math.min(top, box.top), around.viewportHeight);
