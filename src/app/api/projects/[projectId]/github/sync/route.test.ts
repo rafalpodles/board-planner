@@ -121,9 +121,11 @@ describe("POST .../github/sync", () => {
     // `e2e/pr-link-replacement.spec.ts`; what this file pins is that the route asks the database
     // to do it, rather than saving a copy it read a moment ago (BP-559)
     const [filter, update, options] = taskUpdateOne.mock.calls[0];
-    // Mongoose refuses a pipeline update without it — the option is the whole reason the write
-    // lives in `writeProviderLinks` rather than in this route
-    expect(options).toEqual({ updatePipeline: true });
+    // Mongoose refuses a pipeline update without `updatePipeline` — the option is the whole reason
+    // the write lives in `writeProviderLinks` rather than in this route. `timestamps: false` is
+    // the second half: a sync is not somebody editing the task, and the dashboard reads a done
+    // task's `updatedAt` as the day it was finished (BP-627).
+    expect(options).toEqual({ updatePipeline: true, timestamps: false });
     expect(filter).toEqual({ _id: doc._id });
     expect(update).toEqual(
       replaceProviderLinks("github", [expect.objectContaining({ number: 1 })], [1])

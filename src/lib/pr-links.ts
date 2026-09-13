@@ -108,5 +108,27 @@ export async function writeProviderLinks(
   const withIds = docs.map((doc) => ({ _id: new mongoose.Types.ObjectId(), ...doc }));
   await Task.updateOne({ _id: taskId }, replaceProviderLinks(provider, withIds, seen), {
     updatePipeline: true,
+    // `updatedAt` means "when somebody changed this task", and a sync is not somebody. Mongoose
+    // stamps a pipeline update like any other unless told not to, and `stats/route.ts:70,147`
+    // reads a **done** task's `updatedAt` as the day it was finished — so tidying a stale badge
+    // off a task finished last quarter moved it onto this week's chart, and the detail read
+    // "Edited just now" on a task nobody had edited (BP-627).
+    //
+    // Both writes, not only the removal pass — and the churn BP-443's `unchanged()` removed is not
+    // the reason, because after it the first loop also writes only when something genuinely
+    // changed. The reason is the same screen reached by a different door: a done task whose merged
+    // pull request's badge changes — a late CI re-run, a check an app posts hours after the merge —
+    // is written by the first loop, with no removal involved at all.
+    //
+    // The reading that would justify stamping — "a badge appearing is a visible change, so
+    // `recently updated` should surface it" — is an argument about the board filter and the My
+    // Tasks sort, where being wrong costs a card not jumping to the top. `stats` is the reader
+    // where being wrong produces a false number.
+    //
+    // What it costs, stated because nothing else records it: `updatedAt` was the only trace a link
+    // change left on a task — no activity row is written for linking or unlinking and neither sync
+    // route fires a webhook — so link changes are now traceless per task. Whether one earns a row
+    // is BP-628, deliberately not decided here.
+    timestamps: false,
   });
 }

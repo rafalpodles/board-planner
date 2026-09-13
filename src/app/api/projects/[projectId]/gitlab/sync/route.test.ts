@@ -125,7 +125,8 @@ describe("POST .../gitlab/sync — linking", () => {
     // Which link survives is asserted against a real database in `e2e/pr-link-replacement.spec.ts`;
     // what this pins is that the route hands the job over rather than saving a copy (BP-559)
     const [filter, update, options] = taskUpdateOne.mock.calls[0];
-    expect(options).toEqual({ updatePipeline: true });
+    // Both options, for the reason its GitHub twin carries: a sync is not an edit (BP-627)
+    expect(options).toEqual({ updatePipeline: true, timestamps: false });
     expect(filter).toEqual({ _id: doc._id });
     expect(update).toEqual(
       replaceProviderLinks("gitlab", [expect.objectContaining({ provider: "gitlab", number: 7 })], [7])
