@@ -283,3 +283,67 @@ describe("POST .../gitlab/sync — linking", () => {
     );
   });
 });
+
+/**
+ * BP-610's second pass, on the provider that never got tests for it: a merge request retitled onto
+ * another task leaves its old task's grouping, so that task is not in the loop the round walks and
+ * its stale link used to survive every later sync. The `provider` filter is the half that matters
+ * here — GitHub's links are on the same array, and a GitLab round must not adopt or prune them
+ * (BP-610 review).
+ */
+describe("POST .../gitlab/sync — the tasks a round contradicts without visiting", () => {
+  const link = (over: Record<string, unknown> = {}) => ({
+    provider: "gitlab",
+    number: 1,
+    title: "Some change",
+    state: "open",
+    url: "https://gitlab.com/g/p/-/merge_requests/1",
+    ...over,
+  });
+
+  it("visits a task this round contradicts but never matched, and counts what it removed", async () => {
+    // Merge request 1 used to be task 8's, and this round gave it to task 5
+    taskFind.mockResolvedValue([{ _id: "t8", taskNumber: 8, linkedPRs: [link(), link({ number: 9, state: "merged" })] }]);
+    fetchMergeRequests.mockResolvedValue([mr({ iid: 1 })]);
+
+    const body = await (await POST(request(), ctx())).json();
+
+    expect(taskFind).toHaveBeenCalledWith({
+      project: "p1",
+      linkedPRs: { $elemMatch: { number: { $in: [1] }, provider: "gitlab" } },
+    });
+    const pruned = taskUpdateOne.mock.calls.find(([filter]) => filter._id === "t8");
+    expect(pruned?.[1]).toEqual(replaceProviderLinks("gitlab", [], [1]));
+    expect(body.prsUnlinked).toBe(1);
+  });
+
+  it("leaves a task alone when the round contradicts nothing it holds", async () => {
+    taskFind.mockResolvedValue([{ _id: "t8", taskNumber: 8, linkedPRs: [link({ number: 9, state: "merged" })] }]);
+    fetchMergeRequests.mockResolvedValue([mr({ iid: 1 })]);
+
+    const body = await (await POST(request(), ctx())).json();
+
+    expect(taskUpdateOne.mock.calls.find(([filter]) => filter._id === "t8")).toBeUndefined();
+    expect(body.prsUnlinked).toBe(0);
+  });
+
+  it("does not prune the task the round did match, from the second pass as well as the first", async () => {
+    // The query is a database query, so a task in this round's grouping comes back from it too
+    taskFind.mockResolvedValue([{ _id: "t1", taskNumber: 5, linkedPRs: [link()] }]);
+    fetchMergeRequests.mockResolvedValue([mr({ iid: 1 })]);
+
+    await POST(request(), ctx());
+
+    expect(taskUpdateOne.mock.calls.filter(([filter]) => filter._id === "t1")).toHaveLength(1);
+  });
+
+  it("never answers the query with an unmarked link, which is GitHub's", async () => {
+    taskFind.mockResolvedValue([]);
+    fetchMergeRequests.mockResolvedValue([mr({ iid: 1 })]);
+
+    await POST(request(), ctx());
+
+    const [query] = taskFind.mock.calls[0];
+    expect(query.linkedPRs.$elemMatch.provider).toBe("gitlab");
+  });
+});
