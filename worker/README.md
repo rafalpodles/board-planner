@@ -262,10 +262,16 @@ and `SIGINT` both finish the task in flight before the loop exits.
   that cannot confine refuses the gate rather than running it unconfined.
 
   **What it does not close.** Writes a *daemon* performs on a spawned process's behalf: `(allow default)` leaves
-  `process-exec` and `mach-lookup` open, and `defaults write` makes cfprefsd write a plist outside
-  the worktree, measured. Today that one is closed by the `--tools` list giving the agent no shell,
-  not by the kernel, so a future capability that yields process execution has to close it in the
-  profile. And reads, and the network, neither of which this touches at all.
+  `process-exec` and `mach-lookup` open, and `defaults write` makes cfprefsd write a plist under
+  `~/Library/Preferences`, outside the worktree, measured. The tool allowlist used to close it by
+  giving the agent no shell — and then the gates above moved inside the profile, where they run
+  agent-written code, so it is open: a test file that spawns `defaults` gets there. What it buys is
+  a preference domain and nothing more: `defaults write <absolute path>` is refused, because that
+  one `defaults` writes itself rather than asking cfprefsd, so `~/Library/LaunchAgents/*.plist` is
+  not reachable this way. Denying `mach-lookup` on `com.apple.cfprefsd.daemon` closes it and still
+  leaves the worktree writable, measured; what nobody has measured is which parts of a run read a
+  preference through that same daemon, and that is **BP-630**. And reads, and the network, neither
+  of which this touches at all.
 
   **A file git will not print** (**BP-603**). Four things take a file's contents out of a patch: a
   bare `-diff` attribute, a `diff=<name>` driver declared binary in the config, a file git decides
