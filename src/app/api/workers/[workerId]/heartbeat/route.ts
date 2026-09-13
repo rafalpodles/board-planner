@@ -32,11 +32,14 @@ function reportedPreflight(value: unknown): WorkerPreflight | null {
   const cleaned: WorkerPreflightCheck[] = [];
   for (const entry of checks) {
     if (typeof entry !== "object" || entry === null) continue;
-    const { name, ok: checkOk, detail } = entry as Record<string, unknown>;
+    const { name, ok: checkOk, warn, detail } = entry as Record<string, unknown>;
     if (typeof name !== "string" || !name.trim() || typeof checkOk !== "boolean") continue;
     cleaned.push({
       name: name.trim(),
       ok: checkOk,
+      // Only on a check that passed: "failed, and also a warning" is not a state, and a worker
+      // sending one would otherwise paint a red row amber (BP-606).
+      warn: checkOk && warn === true,
       detail: typeof detail === "string" ? detail.trim().slice(0, 500) : "",
     });
   }

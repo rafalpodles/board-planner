@@ -71,12 +71,25 @@ function PreflightCell({ preflight }: { preflight: ApiWorkerPreflight | null }) 
   if (!preflight) return <span className="text-text-muted">not reported</span>;
 
   const failed = preflight.checks.filter((c) => !c.ok);
-  const detail = preflight.checks.map((c) => `${c.ok ? "ok" : "FAILED"}  ${c.name} — ${c.detail}`).join("\n");
+  // Passed, at a cost somebody chose. Rendered inline rather than left in the tooltip below: an
+  // unconfined agent can write the operator's shell profile and launch agents, and the instance
+  // admin reading this screen is not the person who accepted that (BP-606).
+  const warned = preflight.checks.filter((c) => c.ok && c.warn);
+  const detail = preflight.checks
+    .map((c) => `${c.ok ? (c.warn ? "WARN" : "ok") : "FAILED"}  ${c.name} — ${c.detail}`)
+    .join("\n");
 
   if (failed.length === 0) {
+    // `preflight.ok` is untouched by a warning, so the machine is not permanently red and nobody
+    // learns to read past it. The row still opens with `ready`, because it is.
     return (
-      <span className="text-xs text-text-muted block truncate" title={detail}>
+      <span
+        className={`text-xs block truncate ${warned.length > 0 ? "text-warning" : "text-text-muted"}`}
+        title={detail}
+        data-testid={warned.length > 0 ? "preflight-warning" : undefined}
+      >
         ready{preflight.account ? ` · ${preflight.account}` : ""}
+        {warned.length > 0 ? ` · ${warned.map((c) => c.name).join(", ")} — ${warned[0].detail}` : ""}
       </span>
     );
   }

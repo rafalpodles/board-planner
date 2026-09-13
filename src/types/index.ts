@@ -542,6 +542,14 @@ export interface WorkerRepo {
 export interface WorkerPreflightCheck {
   name: string;
   ok: boolean;
+  /**
+   * Passed, and at a cost the operator chose. A third state between passed and failed, because the
+   * two it sits between are both wrong for it: `ok: false` makes a machine that is working
+   * perfectly read as broken and trains people to ignore a permanently red row, while a plain pass
+   * put "the agent runs with nothing confining its writes" in a tooltip an instance admin has to
+   * hover to find — and the admin looking at the fleet is not the person who accepted that (BP-606).
+   */
+  warn?: boolean;
   detail: string;
 }
 

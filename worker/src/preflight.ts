@@ -14,6 +14,12 @@ export type ToolName = (typeof TOOLS)[number];
 export interface PreflightCheck {
   name: string;
   ok: boolean;
+  /**
+   * Passed, at a cost this machine's operator chose. The fleet screen renders such a row inline
+   * and in amber while leaving `ok` true, so the machine is not permanently red and the cost is
+   * not left in a tooltip an instance admin has to hover to find (BP-606).
+   */
+  warn?: boolean;
   detail: string;
 }
 
@@ -299,6 +305,9 @@ async function sandboxCheck(deps: PreflightDeps, env: NodeJS.ProcessEnv): Promis
     return {
       name,
       ok: true,
+      // The machine works and may take work — and every run on it is one the agent could walk out
+      // of, which is not a thing to say only in a tooltip (BP-606).
+      warn: true,
       detail: UNCONFINED_ACCEPTED_DETAIL,
     };
   }
