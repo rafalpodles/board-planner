@@ -36,7 +36,7 @@ describe("how a finished run reads", () => {
    * label naming a machine names a thing that screen withholds. The fleet's does have one.
    */
   it("tells a project reader what happened to the task, not to a machine it cannot name", () => {
-    expect(endState(ended("machineFault"), "project")).toBe("Didn't run");
+    expect(endState(ended("machineFault"), "project")).toBe("Didn't finish");
     expect(endState(ended("machineFault"), "fleet")).toBe("Machine fault");
   });
 

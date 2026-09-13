@@ -120,9 +120,12 @@ function PreflightWarning({ preflight }: { preflight: ApiWorkerPreflight | null 
     // off the right edge exactly like the column it was moved out of. Measured at 1280px: the
     // table starts around x=550, so 40rem lands well inside it, and the `calc` holds the phone.
     <div
-      className="max-w-[min(40rem,calc(100vw-4rem))] whitespace-normal break-words text-xs text-warning"
+      className="mb-1.5 max-w-[min(40rem,calc(100vw-4rem))] whitespace-normal break-words text-xs text-warning"
       data-testid="preflight-warning"
     >
+      {/* The amber is the second signal. Without the word this line is a warning only to somebody
+          who can tell it from the muted grey three lines up. */}
+      <span className="font-medium">Warning:</span>{" "}
       {warned.map((c) => `${c.name} — ${c.detail}`).join(" · ")}
     </div>
   );
@@ -404,7 +407,7 @@ export default function AdminWorkersPage() {
                   <tr key={`${worker._id}-policy`} className="border-b border-border last:border-b-0">
                     <td colSpan={12} className="px-3 pb-3 pt-0">
                       <PreflightWarning preflight={worker.preflight} />
-                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                      <div className="flex flex-wrap gap-1.5">
                         {workerPolicyRows(worker as never).map((row) => (
                           <span
                             key={row.field}
