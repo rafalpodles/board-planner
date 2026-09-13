@@ -37,7 +37,9 @@ export function seenUrls(
   repositoryUrl: string,
   fetched: { number: number; url?: string | null }[]
 ): string[] {
-  const base = repositoryUrl.trim().replace(/\.git$/i, "").replace(/\/+$/, "");
+  // Trailing slash first: `…/board.git/` is a spelling a person types, and stripping `.git` from
+  // the other end would leave it in place.
+  const base = repositoryUrl.trim().replace(/\/+$/, "").replace(/\.git$/i, "").replace(/\/+$/, "");
   const own = base ? `${base}${REQUEST_PATH[provider]}` : "";
   const urls = new Set<string>();
   for (const request of fetched) {

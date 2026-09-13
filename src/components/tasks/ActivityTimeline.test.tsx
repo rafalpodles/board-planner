@@ -259,3 +259,64 @@ describe("ActivityTimeline across a task switch", () => {
     await waitFor(() => expect(screen.getByText(/No history yet/)).toBeTruthy());
   });
 });
+
+/**
+ * BP-628. A sync giving a task a pull request, or taking one away, used to leave no trace on the
+ * task at all — so "there was a pull request here last week" had nowhere to look.
+ */
+describe("ActivityTimeline — what a sync did to the links", () => {
+  const PR = "https://github.com/example/board/pull/412";
+
+  it("names what was linked, by address", async () => {
+    api.get.mockResolvedValue([
+      { ...log, action: "pr_linked", field: "linkedPRs", oldValue: "", newValue: PR },
+    ]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() =>
+      expect(
+        screen.getByText("Owner Name linked github.com/example/board/pull/412")
+      ).toBeTruthy()
+    );
+  });
+
+  it("names what was taken away", async () => {
+    api.get.mockResolvedValue([
+      { ...log, action: "pr_unlinked", field: "linkedPRs", oldValue: PR, newValue: "" },
+    ]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() =>
+      expect(
+        screen.getByText("Owner Name unlinked github.com/example/board/pull/412")
+      ).toBeTruthy()
+    );
+  });
+
+  // A scheduled round has nobody to name, and the row is written anyway — so the absence has to
+  // read as the sync rather than as the deleted account it looks identical to
+  it("reads a link row with no user as the sync", async () => {
+    api.get.mockResolvedValue([
+      { ...log, user: null, action: "pr_unlinked", field: "linkedPRs", oldValue: PR, newValue: "" },
+    ]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() =>
+      expect(screen.getByText(/^The repository sync unlinked /)).toBeTruthy()
+    );
+  });
+
+  // The control for the line above: the same absence on any other action is still a lost author
+  it("still calls a missing author Unknown everywhere else", async () => {
+    api.get.mockResolvedValue([{ ...log, user: null, action: "comment_added" }]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() => expect(screen.getByText("Unknown added a comment")).toBeTruthy());
+  });
+
+  // `formatValue` cuts the tail, which on a pull request url is the repository and the number
+  it("shortens a long address from the front, keeping the number", async () => {
+    const long = `https://github.example.com/a-rather-long-organisation-name/and-its-longer-repository/pull/12345`;
+    api.get.mockResolvedValue([
+      { ...log, action: "pr_linked", field: "linkedPRs", oldValue: "", newValue: long },
+    ]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() => expect(screen.getByText(/….*\/pull\/12345$/)).toBeTruthy());
+  });
+});

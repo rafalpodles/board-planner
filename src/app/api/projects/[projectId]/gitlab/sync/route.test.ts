@@ -379,3 +379,65 @@ describe("POST .../gitlab/sync — the tasks a round contradicts without visitin
     expect(query.linkedPRs.$elemMatch.provider).toBe("gitlab");
   });
 });
+
+/**
+ * The GitLab half of BP-631 and BP-628: a round's field of view is one repository's, and what it
+ * changes about a task is written into that task's history.
+ */
+describe("POST .../gitlab/sync — what a round may contradict, and what it records", () => {
+  it("leaves the previous repository's merge request number alone", async () => {
+    taskFind.mockResolvedValue([
+      {
+        _id: "t8",
+        taskNumber: 8,
+        linkedPRs: [
+          {
+            provider: "gitlab",
+            number: 1,
+            title: "Opened before the move",
+            state: "opened",
+            url: "https://gitlab.com/g/previous/-/merge_requests/1",
+          },
+        ],
+      },
+    ]);
+    fetchMergeRequests.mockResolvedValue([mr({ iid: 1 })]);
+
+    const body = await (await POST(request(), ctx())).json();
+
+    expect(taskUpdateOne.mock.calls.find(([filter]) => filter._id === "t8")).toBeUndefined();
+    expect(body.prsUnlinked).toBe(0);
+    // The control: the round reached its own task and linked its merge request
+    expect(body.prsLinked).toBe(1);
+  });
+
+  it("writes a row naming the merge request it linked", async () => {
+    taskFindOne.mockResolvedValue(task());
+    fetchMergeRequests.mockResolvedValue([mr({ iid: 7 })]);
+
+    await POST(request(), ctx());
+
+    expect(rowsOf("pr_linked")).toEqual([
+      ["t1", "u1", "pr_linked", "linkedPRs", "", mrUrl(7)],
+    ]);
+  });
+
+  it("writes one naming what it took away", async () => {
+    taskFind.mockResolvedValue([
+      {
+        _id: "t8",
+        taskNumber: 8,
+        linkedPRs: [
+          { provider: "gitlab", number: 1, title: "Was task 8's", state: "opened", url: mrUrl(1) },
+        ],
+      },
+    ]);
+    fetchMergeRequests.mockResolvedValue([mr({ iid: 1 })]);
+
+    await POST(request(), ctx());
+
+    expect(rowsOf("pr_unlinked")).toEqual([
+      ["t8", "u1", "pr_unlinked", "linkedPRs", mrUrl(1), ""],
+    ]);
+  });
+});
