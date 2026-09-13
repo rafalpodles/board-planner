@@ -29,10 +29,12 @@ function actionIcon(action: string) {
       return "✎";
     case "comment_deleted":
       return "×";
+    // From the set the rest of this table already proves renders at 12px: the branch and
+    // erase-left glyphs both came out as tofu next to it.
     case "pr_linked":
-      return "⎇";
+      return "↗";
     case "pr_unlinked":
-      return "⌫";
+      return "×";
     default:
       return "•";
   }
