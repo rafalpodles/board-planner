@@ -1156,11 +1156,29 @@ test("the fleet screen says whether a machine confines the agent it runs", async
   const warning = page.getByTestId("preflight-warning");
   await expect(warning).toBeVisible();
   await expect(warning).toContainText("nothing confining its writes");
-  // In the viewport as it stands, which is the whole point of moving it
+  // In the viewport as it stands, which is the whole point of moving it. Both edges: `x` alone
+  // passes on a sentence that starts at 1270 and runs to 1910, which is the failure being
+  // defended against (found in review).
   const box = await warning.boundingBox();
   const width = page.viewportSize()?.width ?? 0;
   expect(box, "the warning has no box at all").not.toBeNull();
-  expect(box!.x, "the warning starts off the right edge of the viewport").toBeLessThan(width);
+  expect(box!.x, "the warning starts off the left edge of the viewport").toBeGreaterThanOrEqual(0);
+  expect(
+    box!.x + box!.width,
+    "the warning runs off the right edge of the viewport"
+  ).toBeLessThanOrEqual(width);
+
+  // And still in it once the table is scrolled sideways to reach the Preflight column — the act
+  // this move exists for. The line sits in a `colSpan` cell whose left edge is the TABLE's, so
+  // without `sticky` it slides off the left exactly when somebody goes looking (found in review).
+  await page.locator("table").evaluate((table) => {
+    const scroller = table.parentElement as HTMLElement;
+    scroller.scrollLeft = scroller.scrollWidth;
+  });
+  const afterScroll = await warning.boundingBox();
+  expect(afterScroll, "the warning has no box after the table scrolled").not.toBeNull();
+  expect(afterScroll!.x, "the warning slid off the left when the table scrolled").toBeGreaterThanOrEqual(0);
+  expect(afterScroll!.x + afterScroll!.width).toBeLessThanOrEqual(width);
   // Amber, not red: a row a machine cannot act on is the row people learn to read past.
   await expect(warning).toHaveClass(/text-warning/);
   await expect(accepted.getByText(/^ready/)).toHaveAttribute(
