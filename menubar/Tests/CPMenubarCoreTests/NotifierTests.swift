@@ -413,3 +413,73 @@ private func gateFault(_ taskKey: String) -> TelemetryEvent {
         #expect(declared.contains("\"\(outcome)\""), "the worker cannot emit \(outcome)")
     }
 }
+
+/**
+ * BP-618. A rate-limited run ends with the task released and its attempt refunded, so the loop
+ * claims it again a poll interval later — thirty seconds by default — the CLI rejects it again,
+ * and another banner arrives. All night, until the limit resets.
+ *
+ * The property is the one a machine fault has: the task comes back and the condition still holds.
+ * It is not "no work happened" — on the gate path the agent has a commit and only the gate could
+ * not run.
+ */
+@Test func aUsageLimitThatPersistsIsAnnouncedOnce() {
+    var streak = FaultStreak()
+
+    #expect(streak.admit(.quota(Quota(status: "rejected"))) != nil)
+    #expect(streak.admit(.quota(Quota(status: "rejected"))) == nil)
+    #expect(streak.admit(.quota(Quota(status: "rejected"))) == nil)
+}
+
+// The released outcome the usage limit itself produces must not re-arm it: that is the same storm
+// with an extra event in it.
+@Test func theReleaseTheLimitCausesDoesNotRearmTheLimit() {
+    var streak = FaultStreak()
+    #expect(streak.admit(.quota(Quota(status: "rejected"))) != nil)
+
+    _ = streak.admit(.outcome(Outcome(outcome: "released", taskKey: "CP-1")))
+    _ = streak.admit(.progress(Progress(phase: "claiming")))
+
+    #expect(streak.admit(.quota(Quota(status: "rejected"))) == nil)
+}
+
+@Test func aLimitThatClearsAndIsHitAgainIsNewsAgain() {
+    var streak = FaultStreak()
+    #expect(streak.admit(.quota(Quota(status: "rejected"))) != nil)
+
+    _ = streak.admit(.quota(Quota(status: "allowed", utilization: 0.2)))
+
+    #expect(streak.admit(.quota(Quota(status: "rejected"))) != nil)
+}
+
+// A run that reached the end proves the limit is not in the way, and is the only signal for that
+// when no further quota reading arrives.
+@Test func aFinishedRunRearmsTheLimit() {
+    for outcome in ["merged", "delivered"] {
+        var streak = FaultStreak()
+        #expect(streak.admit(.quota(Quota(status: "rejected"))) != nil)
+
+        _ = streak.admit(.outcome(Outcome(outcome: outcome, taskKey: "CP-1")))
+
+        #expect(streak.admit(.quota(Quota(status: "rejected"))) != nil)
+    }
+}
+
+// Restarting the worker is what an operator does to fix a machine, and it emits no outcome.
+@Test func aLimitAfterTheWorkerWentAwayIsAnnouncedAgain() {
+    var streak = FaultStreak()
+    #expect(streak.admit(.quota(Quota(status: "rejected"))) != nil)
+
+    streak.disconnected()
+
+    #expect(streak.admit(.quota(Quota(status: "rejected"))) != nil)
+}
+
+// The guard is on the limit, not on the channel: the ordinary readings still pass through it to
+// the decision that keeps them silent.
+@Test func anOrdinaryQuotaReadingIsStillJudgedByTheNotificationRule() {
+    var streak = FaultStreak()
+
+    #expect(streak.admit(.quota(Quota(status: "allowed", utilization: 0.4))) == nil)
+    #expect(streak.admit(.quota(Quota(status: "allowed_warning", utilization: 0.9))) == nil)
+}

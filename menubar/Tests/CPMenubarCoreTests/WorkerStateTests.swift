@@ -128,7 +128,7 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
     state.apply(.progress(Progress(phase: "agent")), at: t0)
 
     #expect(state.health == .working)
-    #expect(state.iconName() == "circle.fill")
+    #expect(state.iconName(now: t0) == "circle.fill")
 }
 
 @Test func losingTheSocketIsDisconnectedAndSaysSo() {
@@ -137,7 +137,7 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
     state.markDisconnected()
 
     #expect(state.health == .disconnected)
-    #expect(state.iconName() == "exclamationmark.triangle")
+    #expect(state.iconName(now: t0) == "exclamationmark.triangle")
     #expect(state.title(now: t0) == nil)
 }
 
@@ -148,7 +148,7 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
     let icons = Set(every.map { health -> String in
         var state = WorkerState()
         state.forceHealth(health)
-        return state.iconName()
+        return state.iconName(now: t0)
     })
 
     #expect(icons.count == every.count)
@@ -183,4 +183,77 @@ private let t0 = Date(timeIntervalSince1970: 1_000_000)
 
     #expect(state.currentPhase == "agent")
     #expect(state.lastQuota?.status == "allowed_warning")
+}
+
+/**
+ * BP-612. The loop claims nothing while paused, so an outcome arriving during a pause is the tail
+ * of a run that started before it. Dropping `.paused` for it leaves a paused worker offering
+ * "Pause", and pressing that sends `pause` to a worker that is already paused — the operator's way
+ * back to work is a button that is no longer there.
+ */
+@Test func aBlockedOutcomeDoesNotUnpauseAPausedWorker() {
+    var state = WorkerState()
+    state.forceHealth(.paused)
+
+    state.apply(.outcome(Outcome(outcome: "blocked", taskKey: "CP-1")), at: t0)
+
+    #expect(state.health == .paused)
+}
+
+// The control: on a worker that is not paused, blocked still reaches the state that asks for a
+// person.
+@Test func aBlockedOutcomeStillNeedsAHuman() {
+    var state = WorkerState()
+    state.apply(.progress(Progress(phase: "agent")), at: t0)
+
+    state.apply(.outcome(Outcome(outcome: "blocked", taskKey: "CP-1")), at: t0)
+
+    #expect(state.health == .needsHuman)
+}
+
+/**
+ * BP-616. `faulted` is sticky and nothing clears it on an idle machine: progress comes only from
+ * inside a run, `adopt` runs once per socket connection, and a pass that claims nothing says
+ * nothing. So the wrench icon outlived the fault by a night.
+ */
+@Test func aFaultThatNothingRepeatsStopsShowingAfterTheGrace() {
+    var state = WorkerState()
+    state.apply(.outcome(Outcome(outcome: "machineFault", taskKey: "CP-1")), at: t0)
+
+    #expect(state.effectiveHealth(now: t0.addingTimeInterval(60)) == .faulted)
+    #expect(
+        state.effectiveHealth(now: t0.addingTimeInterval(WorkerState.faultGrace + 1)) == .idle)
+    #expect(
+        state.iconName(now: t0.addingTimeInterval(WorkerState.faultGrace + 1))
+            == WorkerState().iconName(now: t0))
+}
+
+// The case that matters, and the one a grace period could have broken: a machine failing on every
+// poll keeps saying so, because each fault re-stamps the clock.
+@Test func aMachineStillFaultingKeepsTheFaultIcon() {
+    var state = WorkerState()
+    state.apply(.outcome(Outcome(outcome: "machineFault", taskKey: "CP-1")), at: t0)
+    let later = t0.addingTimeInterval(WorkerState.faultGrace - 30)
+    state.apply(.outcome(Outcome(outcome: "machineFault", taskKey: "CP-1")), at: later)
+
+    #expect(state.effectiveHealth(now: later.addingTimeInterval(60)) == .faulted)
+}
+
+// A reconnect re-reads the worker's real state, so a fault it did not report is over.
+@Test func aReconnectEndsAFaultRatherThanLettingItExpire() {
+    var state = WorkerState()
+    state.apply(.outcome(Outcome(outcome: "machineFault", taskKey: "CP-1")), at: t0)
+    state.adopt(StatusResponse(paused: false, current: nil, recent: []), at: t0.addingTimeInterval(5))
+
+    #expect(state.effectiveHealth(now: t0.addingTimeInterval(6)) == .idle)
+}
+
+// Nothing else expires. A machine waiting for a person is waiting until somebody comes.
+@Test func nothingButAFaultIsAgedOut() {
+    for health in Health.allCases where health != .faulted {
+        var state = WorkerState()
+        state.forceHealth(health)
+        #expect(
+            state.effectiveHealth(now: t0.addingTimeInterval(WorkerState.faultGrace * 10)) == health)
+    }
 }

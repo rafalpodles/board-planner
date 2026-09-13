@@ -102,4 +102,14 @@ once per run of consecutive faults, per project, and not once per poll (`FaultSt
 
 The property that makes a notification need that guard is not "no work happened", it is "the task
 comes back and the condition holds": the loop claims it again a poll interval later and meets the
-same wall. The usage limit has that property too and has no guard — BP-618.
+same wall. The usage limit has that property too and carries the same guard (BP-618) — machine-wide
+rather than per project, because the limit is the account's and the event carries no task key. It
+re-arms on a quota reading that is not rejected, on a run that merged or delivered, and when the
+socket drops; not on the `released` outcome the limit itself produces.
+
+The icon has a clock the panel's words do not need. `faulted` is sticky and nothing clears it on an
+idle machine, so the wrench outlived the fault by a night; `WorkerState.effectiveHealth(now:)` ages
+one out after `faultGrace`, and the headline reads the same function so the two channels cannot
+disagree (BP-616). The worker emitting a telemetry tick on a pass that claimed nothing is the
+truthful version of this and is still worth doing — it would also let the panel say something about
+an idle machine at all.

@@ -116,12 +116,15 @@ public func notification(for event: TelemetryEvent) -> NotificationRequest? {
  */
 public struct FaultStreak: Sendable {
     private var faulting: Set<String> = []
+    /// Whether the usage limit has already been announced. See `admit`.
+    private var quotaAnnounced = false
 
     public init() {}
 
     /// The worker went away. Whatever it does next is news again.
     public mutating func disconnected() {
         faulting.removeAll()
+        quotaAnnounced = false
     }
 
     /// The project half of `WEB-API-12`, which is `WEB-API` and not `WEB`.
@@ -139,9 +142,38 @@ public struct FaultStreak: Sendable {
         return String(taskKey[..<cut])
     }
 
-    /// The notification this event deserves, or nil — including nil for a fault already reported.
+    /**
+     * The notification this event deserves, or nil — including nil for a condition already
+     * reported.
+     *
+     * The quota is the second such condition (BP-618). A rate-limited run ends with the task
+     * released and its attempt refunded, so the loop claims it again a poll interval later, the
+     * CLI rejects it again, and another banner arrives — all night, until the limit resets. The
+     * property it shares with a machine fault is not "no work happened": on the gate path the
+     * agent has a commit and only the gate could not run. It is **the task comes back and the
+     * condition still holds**.
+     *
+     * Machine-wide rather than per project, unlike a fault: a usage limit is the account's, the
+     * event carries no task key to scope by, and every project on the machine meets the same wall.
+     *
+     * Re-armed by a reading that is not rejected — the ordinary "usage at 40%" event — and by a run
+     * that actually finished. Not by `released`, which is the outcome the usage limit itself
+     * produces, and not by the gate rejections and faults that prove nothing about quota.
+     */
     public mutating func admit(_ event: TelemetryEvent) -> NotificationRequest? {
+        if case .quota(let quota) = event {
+            guard quota.status == "rejected" else {
+                quotaAnnounced = false
+                return notification(for: event)
+            }
+            guard !quotaAnnounced else { return nil }
+            quotaAnnounced = true
+            return notification(for: event)
+        }
         guard case .outcome(let outcome) = event else { return notification(for: event) }
+        // A run that reached the end proves the limit is not in the way any more, and is the one
+        // signal for that when no further quota reading arrives.
+        if outcome.outcome == "merged" || outcome.outcome == "delivered" { quotaAnnounced = false }
         let project = Self.project(of: outcome.taskKey)
         guard outcome.outcome == "machineFault" else {
             faulting.remove(project)
