@@ -398,8 +398,20 @@ test("syncing twice over the same pull requests does not touch the task", async 
   expect(await storedUpdatedAt(SIBLING_TASK_ID)).toBe(after);
 });
 
-// The control: a sync that genuinely learned something does write, and the timestamp does move
-test("a build going red does touch it", async ({ request }) => {
+/**
+ * The control for the test above, and the half of it BP-627 turned around.
+ *
+ * A sync that genuinely learned something still **writes** — `tasksWritten: 1`, and the badge on
+ * the board goes red — and that is what keeps the test above from being vacuous. What it no longer
+ * does is move `updatedAt`: `stats/route.ts:70,147` reads a done task's `updatedAt` as the day the
+ * work finished, so a check an app posts hours after a merge moved that task onto this week's
+ * chart, with nobody having touched it. `writeProviderLinks` carries the whole argument, including
+ * what suppressing it costs; BP-628 is where "should a link change earn an activity row" lives.
+ *
+ * The write is now proved by the write and by the screen rather than by the stamp, which is the
+ * stronger pair anyway — a timestamp moving never said WHAT had been written.
+ */
+test("a build going red writes, and does not stamp the task as edited", async ({ page, request }) => {
   await github(request, { pulls: [pull()], checks: { [HEAD]: passing } });
   await syncNow(request);
   const after = await storedUpdatedAt(SIBLING_TASK_ID);
@@ -408,5 +420,9 @@ test("a build going red does touch it", async ({ request }) => {
   await github(request, { pulls: [pull()], checks: { [HEAD]: failing } });
 
   expect(await syncNow(request)).toMatchObject({ tasksWritten: 1 });
-  expect(await storedUpdatedAt(SIBLING_TASK_ID)).toBeGreaterThan(after);
+  expect(await storedUpdatedAt(SIBLING_TASK_ID)).toBe(after);
+
+  await signIn(page);
+  await page.goto(`/projects/${PROJECT_KEY}`);
+  await expect(state(page)).toHaveAttribute("data-look", "failure");
 });
