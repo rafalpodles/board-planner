@@ -1,16 +1,34 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { buildGate } from "./build.js";
 import { CommandResult, Runner } from "../exec.js";
 import { GateContext } from "../types.js";
 import { claimedTask } from "../__fixtures__/task.js";
+import { SANDBOX_COMMAND, UNCONFINED_REASON } from "../sandbox.js";
+import { npmCacheDir } from "./confined-npm.js";
 
 const TIMEOUT_MS = 5000;
+
+// A real directory: the gate confines both commands to it since BP-608, and seatbelt matches the
+// resolved path.
+let worktree = "";
+
+beforeEach(() => {
+  worktree = mkdtempSync(join(tmpdir(), "bp608-build-"));
+  context.worktreePath = worktree;
+});
+
+afterEach(() => {
+  rmSync(worktree, { recursive: true, force: true });
+});
 
 const context: GateContext = {
   worktreePath: "/wt",
   task: claimedTask({ taskKey: "CP-1", taskNumber: 1, title: "t", description: "d" }),
   result: { status: "completed", summary: "", filesChanged: [], testsAdded: [], blockedReason: "" },
-  diff: { changedLines: 10, changedFiles: ["src/a.ts"], patch: "", truncated: false, headSha: "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c" , symlinks: [], suppressedDiffs: []},
+  diff: { changedLines: 10, changedFiles: ["src/a.ts"], patch: "", truncated: false, headSha: "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c" , symlinks: [], suppressedDiffs: [], gitlinks: []},
 };
 
 const ok: CommandResult = { code: 0, stdout: "", stderr: "", timedOut: false };
@@ -46,10 +64,70 @@ describe("buildGate", () => {
 
     expect(result.ok).toBe(true);
     expect(run).toHaveBeenCalledTimes(2);
-    expect(run.mock.calls[0][1][0]).toBe("ci");
-    expect(run.mock.calls[0][2].cwd).toBe("/wt");
-    expect(run.mock.calls[1][1]).toEqual(["run", "build"]);
-    expect(run.mock.calls[1][2].cwd).toBe("/wt");
+    expect(run.mock.calls[0][0]).toBe(SANDBOX_COMMAND);
+    // The install's own arguments, after everything the sandbox wrapper put in front of them
+    expect(run.mock.calls[0][1].slice(-5)).toEqual([
+      "npm",
+      "ci",
+      "--ignore-scripts",
+      "--no-audit",
+      "--no-fund",
+    ]);
+    expect(run.mock.calls[0][2].cwd).toBe(worktree);
+    expect(run.mock.calls[1][1].slice(-3)).toEqual(["npm", "run", "build"]);
+    expect(run.mock.calls[1][2].cwd).toBe(worktree);
+  });
+
+  /**
+   * BP-608. `npm ci` runs a dependency's lifecycle scripts — `--ignore-scripts` is why it does not,
+   * today — and `npm run build` runs the worktree's own build script, which the agent wrote.
+   * Neither was inside a profile.
+   */
+  it("confines the install to the worktree, a temp directory and the npm cache", async () => {
+    const { runner: r, run } = runner(ok, ok);
+
+    await buildGate(r, TIMEOUT_MS).run(context);
+
+    const args = run.mock.calls[0][1];
+    const writable = args.filter((_, index) => args[index - 1] === "-D");
+    expect(writable).toEqual([
+      `W0=${realpathSync(worktree)}`,
+      // This run's own scratch directory, inside the machine's temp tree and gone when the
+      // command ends — not the whole of `/var/folders`, which every process of this user writes to
+      expect.stringMatching(/^W1=.*cp-gate-/),
+      `W2=${realpathSync(npmCacheDir())}`,
+    ]);
+    // npm is told where it is, or it would reach for the operator's own `~/.npm` and be denied
+    expect(run.mock.calls[0][2].env?.npm_config_cache).toBe(npmCacheDir());
+    expect(existsSync(npmCacheDir())).toBe(true);
+  });
+
+  // The build does not need the cache, and it runs the agent's own script: a cache it can write is
+  // one every later run on this machine installs from.
+  it("does not give the build the npm cache", async () => {
+    const { runner: r, run } = runner(ok, ok);
+
+    await buildGate(r, TIMEOUT_MS).run(context);
+
+    const args = run.mock.calls[1][1];
+    expect(args.filter((_, index) => args[index - 1] === "-D")).toHaveLength(2);
+  });
+
+  it("refuses rather than installing or building unconfined", async () => {
+    const { runner: r, run } = runner(ok, ok);
+    const real = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+
+    try {
+      const result = await buildGate(r, TIMEOUT_MS).run(context);
+
+      expect(result.ok).toBe(false);
+      expect(result.reason).toContain(UNCONFINED_REASON);
+      expect(result.machineFault).toBe(true);
+      expect(run).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(process, "platform", real);
+    }
   });
 
   it("passes the signal through to both the install and the build, so a stop can kill either", async () => {
@@ -60,6 +138,17 @@ describe("buildGate", () => {
 
     expect(run.mock.calls[0][2].signal).toBe(controller.signal);
     expect(run.mock.calls[1][2].signal).toBe(controller.signal);
+  });
+
+  // The control for the two above: an ordinary failure of the suite or the build is the change's,
+  // and must NOT be reported as the machine's — that would refund the attempt for a red build.
+  it("reports a failing build as the change's, not the machine's", async () => {
+    const { runner: r } = runner(ok, { ...ok, code: 1, stderr: "Type error on line 4" });
+
+    const result = await buildGate(r, TIMEOUT_MS).run(context);
+
+    expect(result.ok).toBe(false);
+    expect(result.machineFault).toBeFalsy();
   });
 
   it("rejects and carries the tail of the output", async () => {

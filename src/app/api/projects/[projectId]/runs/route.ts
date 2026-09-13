@@ -7,6 +7,9 @@ import { Types } from "mongoose";
 import { AGENT_RUN_OUTCOMES, AgentRunOutcome } from "@/types";
 
 const MAX_DETAIL = 2000;
+// A key and an agent's name, both of which a member can post directly. Far past anything the
+// worker sends, and short enough that a record cannot be made a sink.
+const MAX_NAME = 200;
 
 export const GET = withProjectAccessOrWorker(async (request, { params }) => {
   const { projectId } = await params;
@@ -62,15 +65,18 @@ export const POST = withProjectAccessOrWorker(async (request, { params }) => {
   // gets the same length bound the board path already applies.
   const detail = typeof body.detail === "string" ? body.detail.slice(0, MAX_DETAIL) : "";
 
+  const workerId =
+    typeof body.workerId === "string" && Types.ObjectId.isValid(body.workerId) ? body.workerId : null;
+
   const run = await AgentRun.create({
     project: projectId,
     task: body.taskId,
-    taskKey: body.taskKey,
-    worker: body.workerId ?? null,
+    taskKey: body.taskKey.slice(0, MAX_NAME),
+    worker: workerId,
     agent: agentId,
-    agentName: typeof body.agentName === "string" ? body.agentName : "",
+    agentName: typeof body.agentName === "string" ? body.agentName.slice(0, MAX_NAME) : "",
     outcome,
-    refusedBy: typeof body.refusedBy === "string" ? body.refusedBy : "",
+    refusedBy: typeof body.refusedBy === "string" ? body.refusedBy.slice(0, MAX_DETAIL) : "",
     detail,
     startedAt: Number.isNaN(startedAt.valueOf()) ? new Date() : startedAt,
     finishedAt: Number.isNaN(finishedAt.valueOf()) ? new Date() : finishedAt,

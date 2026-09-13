@@ -362,7 +362,7 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
                       <td
                         className={`px-3 py-2 ${endedBadly(run) ? "text-danger" : "text-success"}`}
                       >
-                        {endState(run)}
+                        {endState(run, "project")}
                         {/* What the run said on the way out. It was written to the database and
                             rendered nowhere, so the only way to read it was a Mongo shell. */}
                         {run.detail && (

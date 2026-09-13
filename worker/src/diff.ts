@@ -159,6 +159,7 @@ export async function collectDiff(
     opts,
   );
   const symlinks: DiffStats["symlinks"] = [];
+  const gitlinks: string[] = [];
   for (const line of rawOutput.split("\n")) {
     // `:<oldmode> <newmode> <oldsha> <newsha> <status>\t<path>`, and a rename carries two paths —
     // the destination is the last, which is the one that exists after the change
@@ -180,6 +181,7 @@ export async function collectDiff(
      */
     if (fields[1] === "160000") {
       suppressedDiffs.push(path);
+      gitlinks.push(path);
       continue;
     }
 
@@ -195,7 +197,7 @@ export async function collectDiff(
   );
   const { patch, truncated } = boundPatch(patchOutput);
 
-  return { changedLines, changedFiles, patch, truncated, headSha, symlinks, suppressedDiffs };
+  return { changedLines, changedFiles, patch, truncated, headSha, symlinks, suppressedDiffs, gitlinks };
 }
 
 

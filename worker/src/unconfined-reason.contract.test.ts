@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { UNCONFINED_ACCEPTED_DETAIL, UNCONFINED_REASON } from "./sandbox.js";
+import { UNCONFINED_ESCAPE_HATCH } from "./env.js";
 
 /**
  * BP-349 review. `e2e/worker-controls.spec.ts` drives the fleet screen by posting a heartbeat it
@@ -18,6 +19,18 @@ import { UNCONFINED_ACCEPTED_DETAIL, UNCONFINED_REASON } from "./sandbox.js";
  * differently. Same approach as server-values.contract.test.ts, for the same reason.
  */
 const SPEC = join(import.meta.dirname, "..", "..", "e2e", "worker-controls.spec.ts");
+const HEARTBEAT = join(
+  import.meta.dirname,
+  "..",
+  "..",
+  "src",
+  "app",
+  "api",
+  "workers",
+  "[workerId]",
+  "heartbeat",
+  "route.ts"
+);
 
 describe("what the fleet screen shows about the sandbox", () => {
   const spec = () => readFileSync(SPEC, "utf8");
@@ -34,5 +47,43 @@ describe("what the fleet screen shows about the sandbox", () => {
   // pass vacuously against a spec that had been renamed away or emptied.
   it("is reading the spec that drives the fleet screen", () => {
     expect(spec()).toContain("the fleet screen says whether a machine confines the agent it runs");
+  });
+});
+
+/**
+ * BP-606 review. The server marks a passing check as "passed at a cost" from the `warn` flag the
+ * worker sends — and a worker too old to send one reports the unconfined sandbox as a plain pass,
+ * on a fleet that runs mixed versions as a matter of course because enrolling a machine is
+ * self-service. So the route recognises that check by what its detail says as well, which puts a
+ * copy of two of this package's strings on the other side of the boundary.
+ */
+describe("what the server reads an older worker's sandbox check by", () => {
+  const route = () => readFileSync(HEARTBEAT, "utf8");
+
+  it("names the escape hatch this worker actually reports", () => {
+    expect(route()).toContain(UNCONFINED_ESCAPE_HATCH);
+  });
+
+  /**
+   * The forward half of the same contract: the route recognises an older worker by the marker
+   * *inside* the detail, and today the detail carries it only because it is built from that
+   * constant. A reword that drops the literal name — "the unconfined escape hatch is set — …" —
+   * would leave every other assertion here green while the recompute quietly stopped matching
+   * (found in review). What older released binaries froze is not testable from here, and has
+   * always led with the name.
+   */
+  it("is carried by the detail a machine with the hatch set reports", () => {
+    expect(UNCONFINED_ACCEPTED_DETAIL).toContain(UNCONFINED_ESCAPE_HATCH);
+  });
+
+  it("names the check whose detail carries it", () => {
+    // `SANDBOX_CHECK` in preflight.ts, and the name the report is keyed by on both sides
+    expect(route()).toContain('"sandbox"');
+  });
+
+  // The positive control: the two above are "this file contains that string" and would pass
+  // against a route that had been renamed away or emptied.
+  it("is reading the route that stores a preflight report", () => {
+    expect(route()).toContain("function reportedPreflight");
   });
 });

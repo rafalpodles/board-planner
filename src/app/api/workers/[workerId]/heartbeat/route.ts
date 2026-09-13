@@ -22,6 +22,34 @@ function reportedRepos(value: unknown): RepoReport[] | null {
   return out;
 }
 
+/**
+ * The sandbox check's name, and the marker its detail carries when the operator has switched the
+ * confinement off (`worker/src/env.ts`'s `UNCONFINED_ESCAPE_HATCH`, `worker/src/sandbox.ts`'s
+ * `UNCONFINED_ACCEPTED_DETAIL`). Held against the worker's own source by
+ * `worker/src/unconfined-reason.contract.test.ts`.
+ */
+const SANDBOX_CHECK = "sandbox";
+const UNCONFINED_MARKER = "CP_ALLOW_UNCONFINED_AGENT";
+
+/**
+ * Whether a check that PASSED did so at a cost.
+ *
+ * The worker says so directly since BP-606 — but enrolling a machine is self-service, so a fleet
+ * runs mixed versions as a matter of course, and a worker too old to send `warn` reports the
+ * unconfined sandbox as a plain pass. Read only from the flag, that machine would render a clean
+ * `ready` on the fleet screen: no amber name, no line under the row, an agent running with nothing
+ * confining its writes, and the instance admin — who is not the person who accepted that — told
+ * nothing (found in review).
+ *
+ * So the one check that can warn is also recognised by what it says. A second source of truth for
+ * one string, deliberately, and the contract test is what keeps the two in step.
+ */
+function passedAtACost(name: string, ok: boolean, warn: unknown, detail: string): boolean {
+  if (!ok) return false;
+  if (warn === true) return true;
+  return name === SANDBOX_CHECK && detail.includes(UNCONFINED_MARKER);
+}
+
 // Also worker-reported, so also rebuilt field by field rather than trusted. A malformed report is
 // dropped whole: leaving the previous one standing beats storing half a verdict.
 function reportedPreflight(value: unknown): WorkerPreflight | null {
@@ -32,12 +60,16 @@ function reportedPreflight(value: unknown): WorkerPreflight | null {
   const cleaned: WorkerPreflightCheck[] = [];
   for (const entry of checks) {
     if (typeof entry !== "object" || entry === null) continue;
-    const { name, ok: checkOk, detail } = entry as Record<string, unknown>;
+    const { name, ok: checkOk, warn, detail } = entry as Record<string, unknown>;
     if (typeof name !== "string" || !name.trim() || typeof checkOk !== "boolean") continue;
+    const text = typeof detail === "string" ? detail.trim().slice(0, 500) : "";
     cleaned.push({
       name: name.trim(),
       ok: checkOk,
-      detail: typeof detail === "string" ? detail.trim().slice(0, 500) : "",
+      // Only on a check that passed: "failed, and also a warning" is not a state, and a worker
+      // sending one would otherwise paint a red row amber (BP-606).
+      warn: passedAtACost(name.trim(), checkOk, warn, text),
+      detail: text,
     });
   }
 

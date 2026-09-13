@@ -188,6 +188,40 @@ test("when the mail server refuses, the screen says so and repeats what it said"
   // decides — and it is here as that stub's contract: were a refused message recorded anyway, the
   // delivery test's count above it would be measuring something that never left.
   expect(await mailFor(ADDRESS)).toHaveLength(0);
+
+  // BP-607: the refusal travels as a 502, and the shell used to read any 5xx as "this instance
+  // cannot reach its database" — so an admin read an outage banner above the panel that had just
+  // told them exactly what was wrong. The panel above is the positive this negative needs: the
+  // banner is asserted absent on a screen that has demonstrably finished the request.
+  await expect(page.getByText(/having trouble reaching its database/)).toHaveCount(0, {
+    timeout: 1_000,
+  });
+});
+
+// The control for the case above: the signal itself still works, and narrowing it to the endpoints
+// that speak for this instance did not switch it off.
+test("a 5xx that is this instance's own still raises the outage banner", async ({
+  page,
+}, testInfo) => {
+  const ADDRESS = mailbox("the-instance-itself", testInfo);
+  await giveTheAdminTheAddress(ADDRESS);
+  await openTheMailScreen(page);
+
+  // The send only, as above: the screen has already read its settings through the same path.
+  await page.route("**/api/admin/email", (route) =>
+    route.request().method() === "POST"
+      ? route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "The database is unreachable" }),
+        })
+      : route.fallback()
+  );
+
+  await sendButton(page).click();
+
+  await expect(page.getByRole("alert").getByText("Nothing was sent")).toBeVisible();
+  await expect(page.getByText(/having trouble reaching its database/)).toBeVisible();
 });
 
 // The other half of that distinction. Nothing was handed to a mail server, so blaming one sends

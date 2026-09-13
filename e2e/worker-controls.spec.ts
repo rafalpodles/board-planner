@@ -1126,10 +1126,9 @@ test("the fleet screen says whether a machine confines the agent it runs", async
   await expect(row).toContainText("sandbox — set CP_ALLOW_UNCONFINED_AGENT=1");
   await expect(row.getByText(/^ready/), "the machine still reads ready").toHaveCount(0);
 
-  // And the accepted state, where this screen puts a chosen cost: green in the cell, spelled out in
-  // its tooltip — the same place "signed in with an API key — every run bills per token" lands.
-  // That it is only a tooltip is a real gap and BP-606 asks whether it should be louder; this
-  // asserts today's answer rather than pretending it is the other one.
+  // And the accepted state, which BP-606 answered: the row still reads `ready`, because it is and
+  // the machine may take work — and the cost is on the line rather than in a tooltip nobody hovers.
+  // `preflight.ok` stays true for it, so the machine is not permanently red.
   await heartbeat(request, {
     preflight: {
       ok: true,
@@ -1138,6 +1137,7 @@ test("the fleet screen says whether a machine confines the agent it runs", async
         {
           name: "sandbox",
           ok: true,
+          warn: true,
           detail:
             "CP_ALLOW_UNCONFINED_AGENT is set — the agent runs with nothing confining its writes and can reach anything this user can",
         },
@@ -1148,10 +1148,40 @@ test("the fleet screen says whether a machine confines the agent it runs", async
   await page.reload();
   const accepted = fleetRow(page, WORKER_NAME);
   await expect(accepted.getByText(/^ready/)).toBeVisible();
+  // The sentence is on the full-width line under the worker, not in the Preflight column: that
+  // column is the eighth of twelve and starts past the right edge of a 1280px viewport, so a
+  // warning that lived only there is one nobody reads without scrolling the table sideways.
+  // Page-scoped, not row-scoped: the line lives in the full-width row BENEATH the worker's own,
+  // which is the whole of the change — and this fleet has one machine on it.
+  const warning = page.getByTestId("preflight-warning");
+  await expect(warning).toBeVisible();
+  await expect(warning).toContainText("nothing confining its writes");
+  // In the viewport as it stands, which is the whole point of moving it
+  const box = await warning.boundingBox();
+  const width = page.viewportSize()?.width ?? 0;
+  expect(box, "the warning has no box at all").not.toBeNull();
+  expect(box!.x, "the warning starts off the right edge of the viewport").toBeLessThan(width);
+  // Amber, not red: a row a machine cannot act on is the row people learn to read past.
+  await expect(warning).toHaveClass(/text-warning/);
   await expect(accepted.getByText(/^ready/)).toHaveAttribute(
     "title",
     /nothing confining its writes/
   );
+
+  // The control: an ordinary pass says `ready` and nothing else, and is not painted as a warning.
+  await heartbeat(request, {
+    preflight: {
+      ok: true,
+      account: "owner",
+      checks: [{ name: "sandbox", ok: true, detail: "the agent can only write inside its own worktree" }],
+    },
+  });
+
+  await page.reload();
+  const plain = fleetRow(page, WORKER_NAME);
+  await expect(plain.getByText(/^ready/)).toBeVisible();
+  await expect(page.getByTestId("preflight-warning")).toHaveCount(0);
+  await expect(page.locator("table")).not.toContainText("nothing confining its writes");
 });
 
 /**

@@ -392,6 +392,19 @@ describe("who may answer", () => {
 
 describe("what a reader is shown", () => {
   /**
+   * BP-604. `prUrlNamesRepo` decides whether the panel offers a worker-supplied url as a link, and
+   * the caller has to have asked — a security answer that defaults to "yes" is one a future reader
+   * switches off by not passing it, which is how the check would quietly stop existing.
+   */
+  it("does not vouch for a pull request url the caller said nothing about", () => {
+    expect(toApiDecision(decision())!.prUrlNamesRepo).toBe(false);
+  });
+
+  it("carries the caller's answer when there is one", () => {
+    expect(toApiDecision(decision(), null, false, true)!.prUrlNamesRepo).toBe(true);
+  });
+
+  /**
    * Both lists are bounded by the route that stores them, so the counts are the only true numbers
    * — and the panel renders them as "how much am I consenting to" and "how many more tripped the
    * gate". Reading either off the stored list would under-report by exactly the amount that was cut.

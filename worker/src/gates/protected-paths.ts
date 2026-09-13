@@ -144,6 +144,20 @@ export function protectedPathsGate(): Gate {
   return {
     name: "protected-paths",
     async run({ diff }) {
+      // Refused outright, for the reason the symlink below is: every rule this gate applies is
+      // about paths, and a submodule pointer is a path standing for a whole repository nothing
+      // here fetches. It measures `1  1`, so `diff-size` sees a two-line change; it needs no
+      // `.gitmodules` edit, so nothing on the protected list matches; and the patch is two object
+      // ids, so a reviewer — model or human — is shown nothing about what it now points at.
+      // Deliberately refused rather than allowed and reported: unlike a binary file, there is no
+      // reading of it that a person could do in a pull request either (BP-603).
+      if (diff.gitlinks.length > 0) {
+        return {
+          ok: false,
+          reason: `the change moves a submodule pointer (${diff.gitlinks.join(", ")}). The whole of that change is two object ids, in a repository these gates never fetch, so nothing here — and nothing in the pull request — can say what it now brings in. A human has to look at this.`,
+        };
+      }
+
       const escaping = escapingSymlinks(diff.symlinks);
       if (escaping.length > 0) {
         return {

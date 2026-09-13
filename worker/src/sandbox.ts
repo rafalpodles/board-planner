@@ -26,10 +26,11 @@ import { UNCONFINED_ESCAPE_HATCH, unconfinedAgentAllowed } from "./env.js";
  * by the tool allowlist in executor.ts and not by the kernel. A capability that ever yields process
  * execution has to close it here instead.
  *
- * What this does not reach: the gates. `npm ci`, `npm run build` and `npm test` run agent-written
- * code in the worktree and are not inside this profile, so a test the agent wrote can still write
- * where the agent itself now cannot (BP-608). This closes the agent's own tools, which is the move
- * that needed no gate and left no trace.
+ * The gates are inside it too, since BP-608: `npm ci`, `npm run build` and `npm test` run
+ * agent-written code — a test file is exactly what an Implement step is asked to write — and they
+ * used to run as the worker's uid with nothing confining them, which made the escape above
+ * reachable in two moves rather than closed. `gates/confined-npm.ts` owns what each of them may
+ * write, and `gates/npm-confinement.integration.test.ts` runs a suite that tries to plant a hook.
  *
  * Children inherit it: `sandbox(7)` states that new processes inherit the sandbox of their parent,
  * and `sandbox.integration.test.ts` drives a grandchild to confirm it here.

@@ -12,6 +12,7 @@ import {
   WORKER_ID,
   WORKER_NAME,
   seed,
+  seedRepository,
 } from "./seed";
 import { signIn } from "./session";
 import { ADMIN_AUTH, SAME_ORIGIN } from "./api";
@@ -223,6 +224,53 @@ test("declining says so without a dialog, and is recorded", async ({ page, reque
   expect((await answered).status()).toBe(200);
 
   await expect.poll(async () => (await storedDecision())?.state).toBe("declined");
+});
+
+/**
+ * BP-604. The url the machine reports is as worker-supplied as the patch beside it, and the settle
+ * route checks its shape and not which repository it names. So the panel offers it as a link only
+ * when it names this project's own repository, and prints it — host and all — when it does not.
+ */
+test("a pull request url naming another repository is shown but not offered", async ({
+  page,
+  request,
+}) => {
+  await seedRepository({ repositoryUrl: "https://github.com/owner/repo" });
+  await request.post(`/api/workers/${WORKER_ID}/decisions`, {
+    headers: workerHeaders(),
+    data: record(),
+  });
+  // Stored, not refused — which is the point, and is pinned on the settle route itself in
+  // `src/app/api/workers/[workerId]/decisions/route.test.ts`: refusing it there would strand real
+  // work on a machine whenever a repository is renamed or forked.
+  await settleAs("delivered", "https://github.com/attacker/repo/pull/1");
+
+  await signIn(page, "owner");
+  await openTheTask(page);
+
+  await expect(page.getByTestId("decision-pr-elsewhere")).toContainText("github.com");
+  await expect(page.getByTestId("decision-pr-elsewhere")).toContainText(
+    "https://github.com/attacker/repo/pull/1"
+  );
+  await expect(page.getByTestId("decision-pr")).toHaveCount(0);
+});
+
+test("the project's own pull request is still a link — the control", async ({ page, request }) => {
+  await seedRepository({ repositoryUrl: "https://github.com/owner/repo" });
+  await request.post(`/api/workers/${WORKER_ID}/decisions`, {
+    headers: workerHeaders(),
+    data: record(),
+  });
+  await settleAs("delivered", "https://github.com/owner/repo/pull/42");
+
+  await signIn(page, "owner");
+  await openTheTask(page);
+
+  await expect(page.getByTestId("decision-pr")).toHaveAttribute(
+    "href",
+    "https://github.com/owner/repo/pull/42"
+  );
+  await expect(page.getByTestId("decision-pr-elsewhere")).toHaveCount(0);
 });
 
 /**

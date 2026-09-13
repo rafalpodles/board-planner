@@ -43,3 +43,21 @@ export function childEnv(
   }
   return env;
 }
+
+/**
+ * Where the npm gates keep the cache `npm ci` needs (BP-608).
+ *
+ * Read here for the reason everything else in this module is: this file owns what of the worker's
+ * own environment is allowed to matter. Deliberately absent from ALLOWED — the gates pass the path
+ * to npm as `npm_config_cache`, and nothing the agent runs is told where the operator put it.
+ */
+export const NPM_CACHE_OVERRIDE = "CP_NPM_CACHE";
+
+export function npmCacheOverride(source: NodeJS.ProcessEnv = process.env): string {
+  return source[NPM_CACHE_OVERRIDE]?.trim() ?? "";
+}
+
+/** The temp directory a confined command may write to, when the operator has moved it. */
+export function tempDirOverride(source: NodeJS.ProcessEnv = process.env): string {
+  return source.TMPDIR?.trim() ?? "";
+}

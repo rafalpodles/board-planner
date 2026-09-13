@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { matchRepo, normaliseRemote, projectRemotes, sameRepo } from "./repo-match";
+import {
+  matchRepo,
+  normaliseRemote,
+  projectRemotes,
+  prUrlNamesProjectRepo,
+  sameRepo,
+} from "./repo-match";
 
 describe("normaliseRemote", () => {
   it("reduces every spelling of the same repository to one form", () => {
@@ -180,5 +186,63 @@ describe("a project migrated to one repository URL", () => {
     expect(
       projectRemotes({ _id: "p1", repositoryUrl: "https://gitlab.example.com/group/thing" })
     ).toEqual(["https://gitlab.example.com/group/thing"]);
+  });
+});
+
+/**
+ * BP-604. A settlement is never refused by this — the check is on the render side, so a rename, a
+ * fork or GitHub Enterprise under another name costs a click rather than stranding real work
+ * behind a verdict nobody can override from the panel.
+ */
+describe("prUrlNamesProjectRepo", () => {
+  const project = (over: Record<string, unknown> = {}) => ({
+    _id: "p1",
+    repositoryUrl: "https://github.com/owner/repo",
+    ...over,
+  });
+
+  it("accepts the project's own repository, however the project spells it", () => {
+    expect(prUrlNamesProjectRepo("https://github.com/owner/repo/pull/42", project())).toBe(true);
+    expect(
+      prUrlNamesProjectRepo(
+        "https://github.com/owner/repo/pull/42",
+        project({ repositoryUrl: "git@github.com:owner/repo.git" })
+      )
+    ).toBe(true);
+  });
+
+  it("refuses a well-formed url naming somebody else's repository", () => {
+    expect(prUrlNamesProjectRepo("https://github.com/attacker/repo/pull/1", project())).toBe(false);
+  });
+
+  it("refuses the same path on a different host", () => {
+    expect(prUrlNamesProjectRepo("https://evil.example.com/owner/repo/pull/1", project())).toBe(
+      false
+    );
+  });
+
+  it("leaves a project that names no repository exactly as it is", () => {
+    expect(prUrlNamesProjectRepo("https://github.com/o/r/pull/1", { _id: "p1" })).toBe(true);
+  });
+
+  it("says nothing about a url with no pull request in it", () => {
+    // Nothing the settle route accepts looks like this; if one ever arrives, the panel's own
+    // unreadable branch is the right home for it and a link is not.
+    expect(prUrlNamesProjectRepo("https://github.com/owner/repo", project())).toBe(false);
+  });
+
+  it("reads GitLab's merge request shape too", () => {
+    expect(
+      prUrlNamesProjectRepo(
+        "https://gitlab.com/group/thing/-/merge_requests/3",
+        project({ repositoryUrl: "https://gitlab.com/group/thing" })
+      )
+    ).toBe(true);
+  });
+
+  it("is not fooled by a repository whose name ends in the project's", () => {
+    expect(prUrlNamesProjectRepo("https://github.com/owner/repo-fork/pull/1", project())).toBe(
+      false
+    );
   });
 });

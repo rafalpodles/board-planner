@@ -40,8 +40,11 @@ export interface AuthState {
    * Every API answer the app receives. Somebody already signed in is not sent back through
    * /api/auth/me, so without this the shell had no idea an outage was under way and each screen
    * reported its own generic failure instead (BP-362 review).
+   *
+   * `relayed` is for the endpoints whose 5xx is a report about somebody else — a mail server that
+   * refused, and any proxy the product grows — where the instance answered perfectly well (BP-607).
    */
-  noteApiStatus: (status: number) => void;
+  noteApiStatus: (status: number, opts?: { relayed?: boolean }) => void;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -134,9 +137,10 @@ export function useAuthProvider(): AuthState {
     setOutage(false);
   }, []);
 
-  const noteApiStatus = useCallback((status: number) => {
-    // Any answer below 500 proves the instance is answering, whatever it thinks of the request
-    setOutage(status >= 500);
+  const noteApiStatus = useCallback((status: number, opts?: { relayed?: boolean }) => {
+    // Any answer below 500 proves the instance is answering, whatever it thinks of the request —
+    // and so does a relayed 5xx, which is this instance reporting a third party's refusal.
+    setOutage(status >= 500 && !opts?.relayed);
   }, []);
 
   // Preferences saved elsewhere in the app have to reach the cached user, or a

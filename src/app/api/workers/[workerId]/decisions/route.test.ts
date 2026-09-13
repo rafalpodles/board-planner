@@ -389,6 +389,20 @@ describe("PATCH /api/workers/:workerId/decisions", () => {
     expect(settleDecision.mock.calls[0][3]).toMatchObject({ prUrl });
   });
 
+  /**
+   * BP-604 put the "is this the project's own repository?" question on the render side and not
+   * here, deliberately: a settlement the board refuses is retried whole on the next poll, so a
+   * rename, a fork or GitHub Enterprise under another name would strand real work behind a check
+   * nobody can override from the panel. The panel prints such a url instead of linking it.
+   */
+  it("stores a well-formed url naming another repository rather than refusing the settlement", async () => {
+    const prUrl = "https://github.com/somebody-else/repo/pull/1";
+    const { req, ctx } = call("PATCH", { taskId: TASK_ID, state: "delivered", prUrl });
+
+    expect((await PATCH(req, ctx)).status).toBe(200);
+    expect(settleDecision.mock.calls[0][3]).toMatchObject({ prUrl });
+  });
+
   // Every settlement but `delivered` carries none, and an empty one is not a wrong one
   it("takes a settlement with no pull request at all", async () => {
     const { req, ctx } = call("PATCH", { taskId: TASK_ID, state: "refused", error: "moved" });

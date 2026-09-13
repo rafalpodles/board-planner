@@ -75,3 +75,34 @@ export function matchRepo(project: MatchableProject, reported: RepoReport[]): st
   }
   return null;
 }
+
+/**
+ * Whether a worker-supplied pull-request url names the project's own repository.
+ *
+ * The url is as attacker-controlled as the patch beside it — an agent can read the worker
+ * credential off its own disk — and the shape check at the settle route only proves it is *a*
+ * pull request somewhere. What is left is a well-formed link to a real host that is not this
+ * project's, which is a phishing shape rather than an execution one (BP-604).
+ *
+ * Answered on the render side and never at settle time: a settlement the board refuses is retried
+ * whole on the next poll, so a repository whose remote spelling differs from its pull request host
+ * — a rename, a fork, GitHub Enterprise under another name — would strand real work behind a check
+ * nobody can override from the panel. Here it costs a click and nothing else.
+ *
+ * A project that names no repository is not a mismatch: there is nothing to disagree with, and
+ * this answers true so such a board reads exactly as it does today.
+ */
+export function prUrlNamesProjectRepo(prUrl: string, project: MatchableProject): boolean {
+  const wanted = projectRemotes(project);
+  if (wanted.length === 0) return true;
+  if (!prUrl) return true;
+
+  // `/pull/123` and GitLab's `/-/merge_requests/123`, which is the shape the delivery step would
+  // produce were GitLab delivery added — the repository is what precedes it.
+  const repo = prUrl
+    .replace(/\/(?:-\/)?(?:pull|merge_requests)\/\d+\/?$/, "")
+    .replace(/\/+$/, "");
+  if (repo === prUrl) return false;
+
+  return wanted.some((candidate) => sameRepo(candidate, repo));
+}

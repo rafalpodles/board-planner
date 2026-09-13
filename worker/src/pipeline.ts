@@ -121,6 +121,12 @@ const MAX_NOTIFICATION_CHARS = 200;
  * characters of the budget. That is why `scrub` runs before this and not after: a credential
  * straddling either seam survives in halves that match no pattern.
  *
+ * The one exception to the threshold is a token carrying `://`, which is backed up to whatever it
+ * costs. That is the shape the misleading-remote argument above is entirely about, and the
+ * threshold is a budget rule rather than a truth one — so where the two disagree the budget gives
+ * way. Reached by an ordinary base-branch failure since BP-619 stopped restating the branch in
+ * front of the remote: the shorter sentence moved the cut from after the URL to inside it.
+ *
  * Both seams also avoid splitting a surrogate pair, which a lone half of renders as a replacement
  * character.
  *
@@ -134,7 +140,8 @@ function fitDetail(text: string): string {
   const room = Math.ceil((MAX_NOTIFICATION_CHARS - 1) / 2);
   const head = text.slice(0, room);
   const space = head.lastIndexOf(" ");
-  const kept = space > room * 0.6 ? head.slice(0, space) : head;
+  const cuttingAnAddress = head.slice(space + 1).includes("://");
+  const kept = space > 0 && (space > room * 0.6 || cuttingAnAddress) ? head.slice(0, space) : head;
   const tail = text.slice(text.length - (MAX_NOTIFICATION_CHARS - 1 - room));
   return `${withoutHalfAPair(kept)}…${withoutLeadingHalfAPair(tail)}`;
 }

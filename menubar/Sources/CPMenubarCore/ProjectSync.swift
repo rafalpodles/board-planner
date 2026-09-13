@@ -47,10 +47,61 @@ public enum SyncStep: Equatable, Sendable {
     /// while meaning the second.
     case partiallyRemoved(project: String, removed: [String], reason: String)
     case failed(project: String, reason: String)
+    /// The machine was given projects and has nowhere to clone them.
+    ///
+    /// The guard itself is right — there is nowhere to put a checkout — but it used to return in
+    /// silence, so the operator ticked a project, was told the app would pick it up, and then read
+    /// a healthy fleet screen, an empty Repositories pane and a row that never connected. Every
+    /// surface agreed that everything was fine (BP-602).
+    case nowhereToPut(projects: [String], where: String)
 }
+
+/// Where the folder is set, named in the message rather than left for the operator to find.
+///
+/// The setup screen, and not a Preferences tab: `Preferences` has four — Connection, Repositories,
+/// Policy, Advanced — and none of them writes `checkoutsFolder`. Its only writer is
+/// `Onboarding.folderChosen`, reached from **2 · Where it keeps its checkouts** on the first-run
+/// screen, which is what the panel shows until this machine is set up. A message naming a tab that
+/// does not exist is worse than the silence BP-602 replaced (found in review).
+public let checkoutsFolderLocation = "the setup screen, under \"Where it keeps its checkouts\""
+
 
 public enum ProjectSync {
     /// `checkouts` maps an allowlisted path to the remote its `origin` reports.
+    /**
+     * The one step a pass can produce before it starts: it has work to do and nowhere to do it.
+     *
+     * In Core rather than in the runner because the runner is in the app target, which carries no
+     * tests at all — a decision nothing can drive is a decision that quietly stops being made.
+     *
+     * Nil when the folder is set, and nil when there was nothing to act on either: a machine
+     * nobody has given a project to is not misconfigured, it is unused.
+     */
+    public static func nowhereToPut(plan: SyncPlan, checkoutsFolder: String) -> SyncStep? {
+        guard checkoutsFolder.trimmingCharacters(in: .whitespaces).isEmpty, !plan.isEmpty else {
+            return nil
+        }
+        // Both halves of the plan: a removal needs no folder, but the pass returns before it too,
+        // so a message naming only the clones would describe half of what did not happen.
+        let projects = plan.add.map(\.name) + plan.remove.map(\.project.name)
+        return .nowhereToPut(projects: projects, where: checkoutsFolderLocation)
+    }
+
+    /**
+     * The steps a pass keeps once it has somewhere to clone to.
+     *
+     * `nowhereToPut` is the one step that is a **condition** rather than an event: every other line
+     * in the pane records something that happened and stays true, while this one stops being true
+     * the moment a folder is chosen. Dropped here rather than in the runner, for the reason the
+     * decision above lives here — the app target has no tests.
+     */
+    public static func withoutNowhereToPut(_ steps: [SyncStep]) -> [SyncStep] {
+        steps.filter { step in
+            if case .nowhereToPut = step { return false }
+            return true
+        }
+    }
+
     public static func plan(
         catalogue: [ProjectCatalogueRow],
         checkouts: [String: String]

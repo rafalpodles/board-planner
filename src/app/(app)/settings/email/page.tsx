@@ -58,7 +58,10 @@ export default function EmailSettingsPage() {
     setSending(true);
     setResult(null);
     try {
-      const res: { to: string } = await api.post("/api/admin/email", {});
+      // A 502 from here is this endpoint reporting a mail server, so it says nothing about whether
+      // this instance can reach its own database — the shell used to paint an outage banner over
+      // a refusal panel that had just explained itself (BP-607). Its 503 still counts as ours.
+      const res: { to: string } = await api.post("/api/admin/email", {}, { relayed: true });
       setResult({ ok: true, heading: `Accepted for delivery to ${res.to}`, message: "" });
     } catch (err) {
       // A refusal by the mail server and a refusal by us are different answers to the question the

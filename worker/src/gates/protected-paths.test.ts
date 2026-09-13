@@ -7,8 +7,12 @@ import {
 } from "./protected-paths.js";
 import { DiffStats, GateContext } from "../types.js";
 
-function context(changedFiles: string[], symlinks: DiffStats["symlinks"] = []): GateContext {
-  return { diff: { changedFiles, symlinks } } as GateContext;
+function context(
+  changedFiles: string[],
+  symlinks: DiffStats["symlinks"] = [],
+  gitlinks: string[] = []
+): GateContext {
+  return { diff: { changedFiles, symlinks, gitlinks } } as GateContext;
 }
 
 const gate = protectedPathsGate();
@@ -333,5 +337,34 @@ describe("the files that decide what CI itself does", () => {
     expect(workflowPaths(["src/a.ts", ".github/workflows/ci.yml"])).toEqual([
       ".github/workflows/ci.yml",
     ]);
+  });
+});
+
+/**
+ * BP-603. A submodule pointer bump measures `1  1`, so `diff-size` sees an ordinary two-line
+ * change; it needs no `.gitmodules` edit, so nothing on the protected list matches it; and its
+ * whole patch is two object ids, in a repository these gates never fetch. A submodule can carry
+ * anything.
+ */
+describe("a change that moves a submodule pointer", () => {
+  it("is refused, and the refusal says which pointer", async () => {
+    const result = await gate.run(context(["vendor/thing"], [], ["vendor/thing"]));
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("vendor/thing");
+    expect(result.reason).toMatch(/submodule pointer/);
+  });
+
+  // The control: the same path as an ordinary file is ordinary work.
+  it("passes the same path when it is a file and not a pointer", async () => {
+    expect((await gate.run(context(["vendor/thing"]))).ok).toBe(true);
+  });
+
+  // It is refused before the protected-path list is consulted, because it is the one this gate's
+  // other rules cannot see at all — and the reason has to name what was found.
+  it("says the pointer, not the path list, when both would fire", async () => {
+    const result = await gate.run(context(["package.json", "vendor/thing"], [], ["vendor/thing"]));
+
+    expect(result.reason).toMatch(/submodule pointer/);
   });
 });

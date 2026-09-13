@@ -96,6 +96,17 @@ export interface DiffStats {
    * can decide what that is worth (BP-381).
    */
   suppressedDiffs: string[];
+  /**
+   * The submodule pointers this change moves, which are a subset of `suppressedDiffs` and the one
+   * subset no reader can judge at all.
+   *
+   * A bare `-diff` or a binary file at least declares itself: the patch says `Binary files … differ`
+   * and the file list still names it. A gitlink measures `1  1` and prints two object ids, so
+   * `diff-size` sees an ordinary two-line change, `protected-paths` sees a path nothing matches —
+   * bumping a pointer needs no `.gitmodules` edit — and what the pointer now names can be anything
+   * at all, in a repository none of these gates ever fetch (BP-603).
+   */
+  gitlinks: string[];
   // The commit the diff was taken against, resolved once to an object id rather than left as the
   // ref `HEAD`. The review gate checks this out to read the change, so "what the reviewer saw" and
   // "what the gates judged" are the same commit by construction (BP-404).

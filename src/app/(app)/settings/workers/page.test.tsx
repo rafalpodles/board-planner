@@ -207,3 +207,80 @@ describe("releasing a machine from its owner", () => {
     expect(api.patch).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * BP-606. A machine running the agent unconfined passes its preflight — the operator set the
+ * escape hatch and the worker honours it — so the row read `ready · owner`, exactly like a machine
+ * whose sandbox works, with the difference in a tooltip. The instance admin reading the fleet is
+ * not the person who accepted that cost.
+ */
+describe("a check that passed at a cost", () => {
+  const preflight = (checks: { name: string; ok: boolean; warn?: boolean; detail: string }[]) => ({
+    ok: true,
+    account: "owner",
+    checks,
+    reportedAt: new Date().toISOString(),
+  });
+
+  const UNCONFINED =
+    "CP_ALLOW_UNCONFINED_AGENT is set — the agent runs with nothing confining its writes";
+
+  it("says it where the table does not have to be scrolled to reach it", async () => {
+    api.get.mockResolvedValue([
+      worker({ preflight: preflight([{ name: "sandbox", ok: true, warn: true, detail: UNCONFINED }]) }),
+    ]);
+
+    render(<WorkersPage />);
+
+    // The full-width line under the worker, because the Preflight column is the eighth of twelve
+    // in a table that scrolls sideways — measured off the right edge of a 1280px viewport.
+    const line = await screen.findByTestId("preflight-warning");
+    expect(line.textContent).toContain("sandbox");
+    expect(line.textContent).toContain("nothing confining its writes");
+    expect(line.className).toContain("text-warning");
+  });
+
+  it("still opens the preflight cell with ready, and names the check in amber", async () => {
+    api.get.mockResolvedValue([
+      worker({ preflight: preflight([{ name: "sandbox", ok: true, warn: true, detail: UNCONFINED }]) }),
+    ]);
+
+    render(<WorkersPage />);
+
+    // Still ready, and still allowed to take work: a permanently red row is one people read past.
+    const cell = await screen.findByText(/^ready/);
+    expect(cell.textContent).toBe("ready · owner · sandbox");
+    expect(cell.querySelector(".text-warning")?.textContent).toContain("sandbox");
+  });
+
+  it("leaves an ordinary pass exactly as it was", async () => {
+    api.get.mockResolvedValue([
+      worker({
+        preflight: preflight([
+          { name: "sandbox", ok: true, detail: "the agent can only write inside its own worktree" },
+        ]),
+      }),
+    ]);
+
+    render(<WorkersPage />);
+
+    expect(await screen.findByText(/^ready/)).toBeTruthy();
+    expect(screen.queryByTestId("preflight-warning")).toBeNull();
+  });
+
+  it("keeps a failing check red, warning or not", async () => {
+    api.get.mockResolvedValue([
+      worker({
+        preflight: {
+          ...preflight([{ name: "sandbox", ok: false, detail: "there is no sandbox here" }]),
+          ok: false,
+        },
+      }),
+    ]);
+
+    render(<WorkersPage />);
+
+    expect(await screen.findByText(/there is no sandbox here/)).toBeTruthy();
+    expect(screen.queryByTestId("preflight-warning")).toBeNull();
+  });
+});

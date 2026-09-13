@@ -8,6 +8,7 @@ import {
   mayDecide,
   recordVerdict,
   toApiDecision,
+  prUrlNamesProjectRepo,
   Verdict,
   DECISION_FIELDS_FOR_THE_POLL,
 } from "@/lib/task-decisions";
@@ -58,7 +59,8 @@ export const GET = withProjectAccess(async (_request, { params, user }) => {
     decision: toApiDecision(
       task.decision,
       worker,
-      await mayDecide(task.decision.workerId, user, worker)
+      await mayDecide(task.decision.workerId, user, worker),
+      await prUrlNamesProjectRepo(task.decision.prUrl, projectId)
     ),
   });
 });
@@ -155,5 +157,12 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
     } gate, ${decision.fileCount || decision.files.length} file(s)`,
   });
 
-  return NextResponse.json({ decision: toApiDecision(result.decision, worker, true) });
+  return NextResponse.json({
+    decision: toApiDecision(
+      result.decision,
+      worker,
+      true,
+      await prUrlNamesProjectRepo(result.decision?.prUrl, projectId)
+    ),
+  });
 });

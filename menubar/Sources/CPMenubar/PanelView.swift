@@ -90,7 +90,9 @@ struct PanelView: View {
     }
 
     private var headline: String {
-        switch model.state.health {
+        // The same reading the icon takes, so the two channels cannot say different things about
+        // one machine (BP-616).
+        switch model.state.effectiveHealth(now: now) {
         case .idle: return "Waiting for work"
         case .working: return model.state.title(now: now) ?? "Working"
         case .paused: return "Paused"

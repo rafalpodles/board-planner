@@ -1,4 +1,4 @@
-import { escapeRegex, ParsedPR } from "./github";
+import { escapeRegex, ParsedPR, projectKeyPattern } from "./github";
 import { safeFetch, logUpstreamFailure, readBoundedJson, MAX_RESPONSE_BYTES } from "./safe-fetch";
 
 interface GitLabMR {
@@ -38,7 +38,7 @@ export function matchMRsToTasks(
   formerKeys: string[] = []
 ): ParsedPR[] {
   const keys = [projectKey, ...formerKeys].filter(Boolean);
-  const pattern = new RegExp(`(?:${keys.map(escapeRegex).join("|")})[- ](\\d+)`, "i");
+  const pattern = projectKeyPattern(keys);
   const results: ParsedPR[] = [];
 
   for (const mr of mrs) {
@@ -149,11 +149,14 @@ export async function fetchTaskCommits(
 
 // "CP-5" also matches "cp-5/slug" and "CP 5". Split on the LAST hyphen so a
 // hyphenated project key ("MY-PROJ-5") keeps its number instead of matching every branch.
+//
+// The lookbehind is the same boundary the shared pattern grew in BP-611: without it this listed
+// `websucp-5` among CP-5's branches, for the same reason and with the same two-letter keys.
 function taskKeyPattern(taskKey: string): RegExp {
   const separator = taskKey.lastIndexOf("-");
   const key = escapeRegex(taskKey.slice(0, separator));
   const number = taskKey.slice(separator + 1);
-  return new RegExp(`${key}[- ]?${number}(?![0-9])`, "i");
+  return new RegExp(`(?<![A-Za-z0-9])${key}[- ]?${number}(?![0-9])`, "i");
 }
 
 // Accepts "group/project" or a full URL on the configured host

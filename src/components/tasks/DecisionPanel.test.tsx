@@ -39,6 +39,7 @@ function decision(over: Partial<ApiTaskDecision> = {}): ApiTaskDecision {
     decidedBy: null,
     decidedAt: null,
     prUrl: "",
+    prUrlNamesRepo: true,
     error: "",
     createdAt: new Date(NOW - 60_000).toISOString(),
     ...over,
@@ -682,6 +683,42 @@ describe("the pull request it opened", () => {
     panel({ state: "delivered", prUrl: "https://ghe.internal:8443/owner/repo/pull/7" });
 
     expect(screen.getByTestId("decision-pr").textContent).toContain("ghe.internal:8443");
+  });
+
+  /**
+   * BP-604. A well-formed link to a real host that is not this project's repository is a phishing
+   * shape: the shape check at the settle route cannot tell it from the genuine one, and the
+   * machine that supplied it is running somebody's agent.
+   */
+  it("prints a url naming another repository as text, with its host and no link", () => {
+    panel({
+      state: "delivered",
+      prUrl: "https://github.com/attacker/repo/pull/1",
+      prUrlNamesRepo: false,
+    });
+
+    expect(screen.queryByTestId("decision-pr")).toBeNull();
+    const said = screen.getByTestId("decision-pr-elsewhere");
+    expect(said.textContent).toContain("github.com");
+    expect(said.textContent).toContain("https://github.com/attacker/repo/pull/1");
+  });
+
+  it("is still a link when the url does name it — the control", () => {
+    panel({
+      state: "delivered",
+      prUrl: "https://github.com/owner/repo/pull/42",
+      prUrlNamesRepo: true,
+    });
+
+    expect(screen.getByTestId("decision-pr")).toBeTruthy();
+    expect(screen.queryByTestId("decision-pr-elsewhere")).toBeNull();
+  });
+
+  it("keeps the unreadable branch for a url it cannot parse at all", () => {
+    panel({ state: "delivered", prUrl: "not a url", prUrlNamesRepo: false });
+
+    expect(screen.getByTestId("decision-pr-unreadable")).toBeTruthy();
+    expect(screen.queryByTestId("decision-pr-elsewhere")).toBeNull();
   });
 });
 

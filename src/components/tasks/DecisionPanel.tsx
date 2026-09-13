@@ -450,7 +450,18 @@ export function DecisionPanel({ projectId, taskId, decision, onAnswered }: Decis
           </p>
         )}
 
-        {decision.prUrl && hostOf(decision.prUrl) && (
+        {/* Readable, and not this project's repository. Shown for the same reason as the branch
+            above and withheld as a link for a different one: the address is a real one somewhere,
+            and a rename or a fork is the innocent version of it (BP-604). */}
+        {decision.prUrl && hostOf(decision.prUrl) && !decision.prUrlNamesRepo && (
+          <p className="text-sm text-text-muted" data-testid="decision-pr-elsewhere">
+            The machine reported this pull request on {hostOf(decision.prUrl)}, which is not this
+            project&apos;s repository, so it is not offered as a link:{" "}
+            <code className="break-all text-xs">{decision.prUrl}</code>
+          </p>
+        )}
+
+        {decision.prUrl && hostOf(decision.prUrl) && decision.prUrlNamesRepo && (
           <a
             className="text-sm text-primary underline"
             href={decision.prUrl}

@@ -111,7 +111,7 @@ describe("the review gate against an ignored instruction file", () => {
         truncated: false,
         headSha,
         symlinks: [],
-        suppressedDiffs: [],
+        suppressedDiffs: [], gitlinks: [],
       },
     };
   }

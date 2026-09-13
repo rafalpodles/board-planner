@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { ApiClient } from "./api.js";
+import { ApiClient, ApiError } from "./api.js";
 import { createOutbox, Store } from "./outbox.js";
 
 function memoryStore(initial = ""): Store & { text: string } {
@@ -99,6 +99,77 @@ describe("createOutbox", () => {
 
     expect(await outbox.flush(api)).toEqual({ delivered: 0, pending: 0, dropped: 1 });
     expect(log.mock.calls.at(-1)?.[0]).toMatch(/giving up/);
+  });
+
+  /**
+   * BP-613. A 4xx is the server having read the request and refused it, so the twenty-first
+   * attempt is the first one identical to the first — and every later report waits behind it for
+   * the ten minutes that takes. A worker newer than its board produces one of these per poll.
+   */
+  it("drops a refusal the board will only refuse again, on its first flush", async () => {
+    const store = memoryStore();
+    const log = vi.fn();
+    const outbox = createOutbox(store, log);
+    outbox.add({ kind: "comment", projectId: "CP", taskId: "t1", body: "merged" });
+    const api = apiSpy({
+      comment: vi.fn().mockRejectedValue(new ApiError("POST failed: 400", 400, "Unknown outcome")),
+    });
+
+    expect(await outbox.flush(api)).toEqual({ delivered: 0, pending: 0, dropped: 1 });
+    expect(log.mock.calls.at(-1)?.[0]).toMatch(/refused it and will refuse it again/);
+  });
+
+  it.each([400, 405, 413, 422])("drops a %i, which the board will refuse in the same words for ever", async (status) => {
+    const store = memoryStore();
+    const outbox = createOutbox(store, vi.fn());
+    outbox.add({ kind: "comment", projectId: "CP", taskId: "t1", body: "merged" });
+    const api = apiSpy({
+      comment: vi.fn().mockRejectedValue(new ApiError(`POST failed: ${status}`, status, "no")),
+    });
+
+    expect(await outbox.flush(api)).toEqual({ delivered: 0, pending: 0, dropped: 1 });
+  });
+
+  it("does not hold a later report behind one the board refused", async () => {
+    const store = memoryStore();
+    const outbox = createOutbox(store, vi.fn());
+    outbox.add({ kind: "comment", projectId: "CP", taskId: "t1", body: "refused" });
+    outbox.add({ kind: "status", projectId: "CP", taskId: "t2", status: "done" });
+    const api = apiSpy({
+      comment: vi.fn().mockRejectedValue(new ApiError("POST failed: 400", 400, "no")),
+    });
+
+    expect(await outbox.flush(api)).toEqual({ delivered: 1, pending: 0, dropped: 1 });
+    expect(api.setStatus).toHaveBeenCalledWith("CP", "t2", "done");
+  });
+
+  /**
+   * The answers that look permanent and are not, each one a state the board leaves within minutes:
+   * a rotated credential (401), a grant being edited (403), and a task another run holds — which is
+   * what an expired lease being reclaimed looks like (409, `task-service.ts`). Dropping one of
+   * these destroys the post-merge report, which is the thing this module exists to keep.
+   */
+  // The two a server sends to mean "ask again", and the control for the rule above
+  it.each([401, 403, 404, 409, 408, 429, 500, 502, 503])("keeps retrying a %i", async (status) => {
+    const store = memoryStore();
+    const outbox = createOutbox(store, vi.fn());
+    outbox.add({ kind: "comment", projectId: "CP", taskId: "t1", body: "merged" });
+    const api = apiSpy({
+      comment: vi.fn().mockRejectedValue(new ApiError(`POST failed: ${status}`, status, "later")),
+    });
+
+    expect(await outbox.flush(api)).toEqual({ delivered: 0, pending: 1, dropped: 0 });
+  });
+
+  // A failure with no status at all — a socket that never connected — is a transient, and the
+  // twenty attempts are what it has always had.
+  it("keeps retrying a failure that never reached the server", async () => {
+    const store = memoryStore();
+    const outbox = createOutbox(store, vi.fn());
+    outbox.add({ kind: "comment", projectId: "CP", taskId: "t1", body: "merged" });
+    const api = apiSpy({ comment: vi.fn().mockRejectedValue(new Error("ECONNREFUSED")) });
+
+    expect(await outbox.flush(api)).toEqual({ delivered: 0, pending: 1, dropped: 0 });
   });
 
   it("carries the refund flag, so a requeue does not silently become a refund", async () => {

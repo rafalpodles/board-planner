@@ -56,11 +56,25 @@ final class ProjectSyncRunner {
 
     private func pass(catalogue: [ProjectCatalogueRow], isBusy: @escaping SyncPass.IsBusy) async {
         let state = Onboarding.load()
-        guard !state.checkoutsFolder.isEmpty else { return }
 
         let granted = (try? file.read()) ?? []
         let checkouts = await originsOf(granted, toolPath: state.toolPath)
         let plan = ProjectSync.plan(catalogue: catalogue, checkouts: checkouts)
+        // After the plan, not before it: the message names the projects it could not act on, and
+        // the plan is the only thing that knows them (BP-602).
+        if let blocked = ProjectSync.nowhereToPut(plan: plan, checkoutsFolder: state.checkoutsFolder) {
+            // One line, not one per pass: a reconnect runs a pass, and the pane is a list of what
+            // happened rather than a log of how often it did not.
+            if !steps.contains(blocked) { steps.append(blocked) }
+            return
+        }
+        // Every other step is a thing that happened and stays true; this one is a **condition**, so
+        // it has to be retracted when it stops holding. Otherwise the operator chooses a folder,
+        // the next pass clones the projects, and the orange line saying nothing was set up sits
+        // above the line saying it was — for the life of the app (found in review).
+        steps = ProjectSync.withoutNowhereToPut(steps)
+        guard !state.checkoutsFolder.isEmpty else { return }
+        // Nothing to do is not a problem worth a line.
         guard !plan.isEmpty else { return }
 
         let token = WorkerProcess.githubToken(

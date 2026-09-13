@@ -11,21 +11,25 @@ import { replaceProviderLinks } from "@/lib/pr-links";
 
 // Hoisted: `@/lib/pr-links` above reaches `@/models/task`, so the factory below runs before a
 // plain `const` in this scope is initialised (BP-559).
-const { fetchMergeRequests, projectFindById, taskFindOne, taskUpdateOne, logActivity } = vi.hoisted(
-  () => ({
+const { fetchMergeRequests, projectFindById, taskFindOne, taskUpdateOne, taskFind, logActivity } =
+  vi.hoisted(() => ({
     fetchMergeRequests: vi.fn(),
     projectFindById: vi.fn(),
     taskFindOne: vi.fn(),
     taskUpdateOne: vi.fn(),
+    taskFind: vi.fn(),
     logActivity: vi.fn(),
-  })
-);
+  }));
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/encryption", () => ({ decryptSecret: (v: string) => `plain:${v}` }));
 vi.mock("@/lib/activity", () => ({ logActivity }));
 vi.mock("@/models/project", () => ({ Project: { findById: projectFindById } }));
-vi.mock("@/models/task", () => ({ Task: { findOne: taskFindOne, updateOne: taskUpdateOne } }));
+// `find` is the second pass BP-610 added: the tasks this round contradicts without visiting.
+// Every test here drives a round whose matches are its whole story, so it answers with nothing.
+vi.mock("@/models/task", () => ({
+  Task: { findOne: taskFindOne, updateOne: taskUpdateOne, find: taskFind },
+}));
 // Partial: matchMRsToTasks is the REAL matcher, so the former-keys assertion is about the shipped
 // rule rather than about a stub that agrees with itself.
 vi.mock("@/lib/gitlab", async (importOriginal) => ({
@@ -86,6 +90,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   projectFindById.mockReturnValue({ lean: () => project() });
   taskFindOne.mockResolvedValue(task());
+  taskFind.mockResolvedValue([]);
   fetchMergeRequests.mockResolvedValue([]);
 });
 
@@ -122,9 +127,9 @@ describe("POST .../gitlab/sync — linking", () => {
     const [filter, update, options] = taskUpdateOne.mock.calls[0];
     expect(options).toEqual({ updatePipeline: true });
     expect(filter).toEqual({ _id: doc._id });
-    expect(update).toEqual(replaceProviderLinks("gitlab", [
-      expect.objectContaining({ provider: "gitlab", number: 7 }),
-    ]));
+    expect(update).toEqual(
+      replaceProviderLinks("gitlab", [expect.objectContaining({ provider: "gitlab", number: 7 })], [7])
+    );
     expect(doc.save).not.toHaveBeenCalled();
   });
 

@@ -45,10 +45,13 @@ describe("every spawn of the agent is confined", () => {
   // the two agent calls plus preflight's own probe, which confines a shell rather than the CLI.
   it("is looking for a spawn shape this package still uses", () => {
     expect(filesMatching(/\.run\(\s*spawn\.command/)).toEqual([
-      "executor.ts",
+      // The npm gates, since BP-608: `npm test` and `npm run build` run agent-written code, and
+      // `npm ci` runs it too through any dependency that ships a lifecycle script.
+      "gates/confined-npm.ts",
       "gates/review.ts",
+      "executor.ts",
       "preflight.ts",
-    ]);
+    ].sort());
   });
 
   it("only the implementer step and the review gate run the agent at all", () => {

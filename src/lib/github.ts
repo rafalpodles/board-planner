@@ -76,6 +76,23 @@ const NEUTRAL = new Set(["neutral", "skipped", "stale"]);
 // blow up the matcher
 export { escapeRegex };
 
+/**
+ * The pattern that finds a task key in a branch name or a title, shared with GitLab so the two
+ * providers cannot drift apart — they were separate copies of the same regex, and the hole below
+ * was in both.
+ *
+ * The lookbehind is the hole: without it the key is found inside a longer word, so a branch named
+ * `feat/websubp-99` contains `bp-99` and was read as task 99 — beating the `BP-5` the title
+ * actually said, because the branch is tried first. A two-letter key makes that easy, and this
+ * board's key is two letters. Since a sync now removes a link the round contradicts, a matcher
+ * false negative deletes a correct link rather than merely adding a wrong one (BP-611).
+ *
+ * A lookbehind rather than a consumed character, so the digits stay group 1 for both callers.
+ */
+export function projectKeyPattern(keys: string[]): RegExp {
+  return new RegExp(`(?<![A-Za-z0-9])(?:${keys.map(escapeRegex).join("|")})[- ](\\d+)`, "i");
+}
+
 export interface ParsedPR {
   number: number;
   title: string;
@@ -197,11 +214,14 @@ export function matchPRsToTasks(
   // renames every task at once — while the branches and PR titles already on GitHub keep
   // the prefix they were created with, and would otherwise all stop matching.
   const keys = [projectKey, ...formerKeys].filter(Boolean);
-  const pattern = new RegExp(`(?:${keys.map(escapeRegex).join("|")})[- ](\\d+)`, "i");
+  const pattern = projectKeyPattern(keys);
 
   const results: ParsedPR[] = [];
 
   for (const pr of prs) {
+    // Branch first, then title: a branch is written once, by whoever started the work, while a
+    // title is edited freely afterwards. Kept deliberately (BP-611) — the case that made the
+    // order look wrong was the missing boundary, not the order.
     // Try branch name first, then title
     const branchMatch = pr.head.ref.match(pattern);
     const titleMatch = pr.title.match(pattern);

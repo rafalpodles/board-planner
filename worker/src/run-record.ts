@@ -20,9 +20,7 @@ const OUTCOMES: Record<OutcomeKind, string> = {
  * and this record goes to the outbox, which retries it.
  *
  * The same number as the route's `MAX_DETAIL`, held there by a contract test rather than by this
- * sentence. For `detail` that means nothing is lost the board would have kept. Not so for
- * `refusedBy`, which the route stores unbounded — that field is a gate's name, so 2000 is far past
- * anything it can hold, but the symmetry is one field's and not both.
+ * sentence, and since BP-620 the route cuts `refusedBy` at it too, so the symmetry is both fields'.
  */
 const MAX_DETAIL_CHARS = 2000;
 

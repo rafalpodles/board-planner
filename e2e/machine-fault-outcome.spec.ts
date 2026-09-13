@@ -7,6 +7,7 @@ import {
   HELD_TASK_ID,
   HELD_TASK_KEY,
   PROJECT_ID,
+  PROJECT_KEY,
   SIBLING_TASK_ID,
   SIBLING_TASK_KEY,
   WORKER_CREDENTIAL,
@@ -142,4 +143,40 @@ test("the run history shows a machine fault apart from a release, and marks only
   // page picks between, and a screenshot cannot say which branch ran.
   await expect(faultRow.locator("td.text-danger")).toHaveCount(1);
   await expect(releaseRow.locator("td.text-success")).toHaveCount(1);
+});
+
+/**
+ * BP-614. The same run, read on the screen that has no Machine column and nothing to fill one
+ * with: `toApiRun` does not carry the worker, and putting every machine's name in front of every
+ * project member to answer a question none of them can act on is not the trade this screen wants.
+ * So it says what happened to the task instead of naming a machine it withholds.
+ */
+test("a project's own run list does not name a machine it cannot show", async ({
+  page,
+  request,
+}) => {
+  const faulted = await postRun(
+    request,
+    "machineFault",
+    HELD_TASK_ID,
+    HELD_TASK_KEY,
+    "this machine has no sandbox"
+  );
+  expect(faulted.status(), await faulted.text()).toBe(201);
+
+  await signIn(page);
+  await page.goto(`/projects/${PROJECT_KEY}/settings?section=workers`);
+  await expect(page.getByText("Recent runs")).toBeVisible();
+
+  const row = page.locator("tr", { hasText: HELD_TASK_KEY }).first();
+  await expect(row.getByText("Didn't run")).toBeVisible();
+  await expect(row.getByText("Machine fault")).toHaveCount(0);
+
+  // The fleet screen, where the column exists, still says it in full — the two readings are the
+  // point, not a rename.
+  await page.goto("/settings/workers/runs");
+  await expect(page.getByRole("heading", { name: "Run history" })).toBeVisible();
+  await expect(
+    page.locator("tr", { hasText: HELD_TASK_KEY }).first().getByText("Machine fault")
+  ).toBeVisible();
 });

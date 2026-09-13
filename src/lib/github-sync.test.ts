@@ -6,21 +6,25 @@ import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
  * refreshes what the badges show and moves no task between columns.
  */
 
-const { fetchPullRequests, projectFind, taskFindOne, taskUpdateOne, logActivity } = vi.hoisted(
-  () => ({
+const { fetchPullRequests, projectFind, taskFindOne, taskUpdateOne, taskFind, logActivity } =
+  vi.hoisted(() => ({
     fetchPullRequests: vi.fn(),
     projectFind: vi.fn(),
     taskFindOne: vi.fn(),
     taskUpdateOne: vi.fn(),
+    taskFind: vi.fn(),
     logActivity: vi.fn(),
-  })
-);
+  }));
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/encryption", () => ({ decryptSecret: (v: string) => `plain:${v}` }));
 vi.mock("@/lib/activity", () => ({ logActivity }));
 vi.mock("@/models/project", () => ({ Project: { find: projectFind } }));
-vi.mock("@/models/task", () => ({ Task: { findOne: taskFindOne, updateOne: taskUpdateOne } }));
+// `find` is the second pass BP-610 added: the tasks this round contradicts without visiting.
+// Every test here drives a round whose matches are its whole story, so it answers with nothing.
+vi.mock("@/models/task", () => ({
+  Task: { findOne: taskFindOne, updateOne: taskUpdateOne, find: taskFind },
+}));
 vi.mock("@/lib/github", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/github")>()),
   fetchPullRequests,
@@ -62,6 +66,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   taskUpdateOne.mockResolvedValue({ modifiedCount: 1 });
   taskFindOne.mockResolvedValue({ _id: "t1", taskNumber: 5, status: "in_review" });
+  taskFind.mockResolvedValue([]);
   fetchPullRequests.mockResolvedValue([mergedPR]);
   projectFind.mockReturnValue({ lean: () => Promise.resolve([project()]) });
 });
@@ -569,5 +574,148 @@ describe("a sync that learned nothing", () => {
     });
 
     expect(await syncGithubPullRequests(project(), "u1")).toMatchObject({ tasksWritten: 0 });
+  });
+});
+
+/**
+ * BP-617 and BP-610, which are one rule seen from two sides: a fetch is a window, so a link the
+ * round did not see is unknown and a link it saw and gave to somebody else is gone.
+ *
+ * The pipeline's *meaning* — which link survives the write — is asserted against a real database
+ * in `e2e/pr-link-replacement.spec.ts`. What is pinned here is the decision this module takes: who
+ * is written, who is visited, and what the operator is told.
+ */
+describe("what a round of the window may say about a link", () => {
+  type Written = {
+    $set: {
+      linkedPRs: {
+        $concatArrays: [
+          { $filter: { cond: { $or?: [unknown, { $not: [{ $in: [string, number[]] }] }] } } },
+          { $literal: Record<string, unknown>[] },
+        ];
+      };
+    };
+  };
+
+  const linkArgs = () =>
+    taskUpdateOne.mock.calls.map(([filter, update]) => {
+      const [stage] = update as Written[];
+      const [keep, add] = stage.$set.linkedPRs.$concatArrays;
+      return {
+        id: (filter as { _id: string })._id,
+        written: add.$literal.map((doc) => doc.number),
+        // `null` rather than a throw when the write was never told what the round saw: a shape
+        // error reads as a broken test, and the failure this has to report is a product one.
+        seen: keep.$filter.cond.$or ? keep.$filter.cond.$or[1].$not[0].$in[1] : null,
+      };
+    });
+
+  beforeEach(() => {
+    fetchPullRequests.mockResolvedValue([openPR]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ state: "pending", statuses: [] }), { status: 200 }))
+    );
+  });
+
+  it("hands the write every number the round saw, not only the ones it matched", async () => {
+    // A second pull request in the fetch that belongs to no task at all: it is still a fact about
+    // the round, and it is what makes a removal a fact rather than a guess.
+    fetchPullRequests.mockResolvedValue([openPR, { ...openPR, number: 77, head: { ref: "chore/none", sha: "z" } }]);
+    taskFindOne.mockResolvedValue({ _id: "t1", taskNumber: 5, status: "todo", linkedPRs: [] });
+    taskFind.mockResolvedValue([]);
+
+    await syncGithubPullRequests(project(), "u1");
+
+    expect(linkArgs()[0].seen?.sort((a, b) => a - b) ?? null).toEqual([1, 77]);
+  });
+
+  it("does not write a task whose only change would be keeping a link out of the window", async () => {
+    // Task 5 holds 1 (this round's match, unchanged) and 9 (merged last quarter, out of window)
+    taskFindOne.mockResolvedValue({
+      _id: "t1",
+      taskNumber: 5,
+      status: "done",
+      linkedPRs: [
+        {
+          provider: "github",
+          number: 1,
+          title: "Some change",
+          state: "open",
+          url: "https://github.com/o/r/pull/1",
+          mergedAt: null,
+          updatedAt: new Date("2026-08-01T00:00:00Z"),
+          ci: "none",
+          ciLabel: null,
+          headSha: "abc123",
+        },
+        {
+          provider: "github",
+          number: 9,
+          title: "Older",
+          state: "merged",
+          url: "https://github.com/o/r/pull/9",
+          mergedAt: new Date("2026-05-01T00:00:00Z"),
+          updatedAt: new Date("2026-05-01T00:00:00Z"),
+          ci: "none",
+          ciLabel: null,
+          headSha: null,
+        },
+      ],
+    });
+    taskFind.mockResolvedValue([]);
+
+    const result = await syncGithubPullRequests(project(), "u1");
+
+    // The out-of-window link is not in this round's docs, so a comparison against the docs alone
+    // would call this changed and write every five minutes — moving `updatedAt` on a done task,
+    // which is the corruption `unchanged` exists to prevent.
+    expect(result).toMatchObject({ tasksWritten: 0, prsUnlinked: 0 });
+    expect(taskUpdateOne).not.toHaveBeenCalled();
+  });
+
+  it("visits a task this round contradicts but never matched, and counts what it removed", async () => {
+    taskFindOne.mockResolvedValue({ _id: "t1", taskNumber: 5, status: "todo", linkedPRs: [] });
+    // Pull request 1 used to be task 8's, and this round gave it to task 5
+    taskFind.mockResolvedValue([
+      {
+        _id: "t8",
+        taskNumber: 8,
+        linkedPRs: [
+          { provider: "github", number: 1, title: "Some change", state: "open", url: "u" },
+          { provider: "github", number: 9, title: "Older", state: "merged", url: "u9" },
+        ],
+      },
+    ]);
+
+    const result = await syncGithubPullRequests(project(), "u1");
+
+    const pruned = linkArgs().find((call) => call.id === "t8");
+    expect(pruned?.written).toEqual([]);
+    expect(result).toMatchObject({ prsUnlinked: 1 });
+  });
+
+  it("leaves a task alone when the round contradicts nothing it holds", async () => {
+    taskFindOne.mockResolvedValue({ _id: "t1", taskNumber: 5, status: "todo", linkedPRs: [] });
+    taskFind.mockResolvedValue([
+      { _id: "t8", taskNumber: 8, linkedPRs: [{ provider: "github", number: 9, title: "Older", state: "merged", url: "u9" }] },
+    ]);
+
+    const result = await syncGithubPullRequests(project(), "u1");
+
+    expect(linkArgs().find((call) => call.id === "t8")).toBeUndefined();
+    expect(result).toMatchObject({ prsUnlinked: 0 });
+  });
+
+  it("does not prune the task the round did match, from the second pass as well as the first", async () => {
+    taskFindOne.mockResolvedValue({ _id: "t1", taskNumber: 5, status: "todo", linkedPRs: [] });
+    // The query is a database query, so a task in this round's grouping can come back from it too
+    taskFind.mockResolvedValue([
+      { _id: "t1", taskNumber: 5, linkedPRs: [{ provider: "github", number: 1, title: "x", state: "open", url: "u" }] },
+    ]);
+
+    await syncGithubPullRequests(project(), "u1");
+
+    expect(linkArgs().filter((call) => call.id === "t1")).toHaveLength(1);
   });
 });

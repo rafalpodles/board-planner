@@ -38,6 +38,7 @@ function Probe() {
       <button onClick={() => onUnauthorized()}>rejected</button>
       <button onClick={() => noteApiStatus(503)}>saw 503</button>
       <button onClick={() => noteApiStatus(200)}>saw 200</button>
+      <button onClick={() => noteApiStatus(502, { relayed: true })}>saw a relayed 502</button>
     </div>
   );
 }
@@ -215,6 +216,30 @@ describe("useAuthProvider — what the rest of the app reports back", () => {
 
     await act(async () => {
       screen.getByText("saw 200").click();
+    });
+    expect(screen.getByTestId("outage").textContent).toBe("false");
+  });
+
+  // BP-607: /api/admin/email answers 502 to mean "a mail server was reached and said no". The
+  // instance answered that question perfectly well, so the shell must not tell everybody it cannot
+  // reach its database.
+  it("takes no outage from a 5xx that reports somebody else's failure", async () => {
+    await renderSettled();
+    await act(async () => {
+      screen.getByText("saw a relayed 502").click();
+    });
+    expect(screen.getByTestId("outage").textContent).toBe("false");
+  });
+
+  it("clears a stale outage when a relayed endpoint answers, because the instance did answer", async () => {
+    await renderSettled();
+    await act(async () => {
+      screen.getByText("saw 503").click();
+    });
+    expect(screen.getByTestId("outage").textContent).toBe("true");
+
+    await act(async () => {
+      screen.getByText("saw a relayed 502").click();
     });
     expect(screen.getByTestId("outage").textContent).toBe("false");
   });

@@ -54,6 +54,33 @@ describe("matchPRsToTasks", () => {
     expect(matchPRsToTasks([pr({ ref: "cX-5/x" })], "C(", ["C."])).toEqual([]);
     expect(matchPRsToTasks([pr({ ref: "c(-5/x" })], "C(")).toHaveLength(1);
   });
+
+  // BP-611. `websubp-99` contains `bp-99`, the branch is tried before the title, and since a sync
+  // removes the links a round contradicts, the correct link is deleted rather than duplicated.
+  it("does not find the key inside a longer word", () => {
+    const matched = matchPRsToTasks(
+      [pr({ ref: "feat/websubp-99", title: "BP-5 real work" })],
+      "BP"
+    );
+    expect(matched.map((m) => m.matchedTaskNumber)).toEqual([5]);
+  });
+
+  it("still matches the key after a separator, which is every branch anyone writes", () => {
+    const matched = matchPRsToTasks(
+      [
+        pr({ number: 1, ref: "feat/bp-7/slug" }),
+        pr({ number: 2, ref: "x", title: "BP-8 at the front" }),
+        pr({ number: 3, ref: "x", title: "fixes BP-9 mid-sentence" }),
+        pr({ number: 4, ref: "bp 10/spaced" }),
+      ],
+      "BP"
+    );
+    expect(matched.map((m) => m.matchedTaskNumber)).toEqual([7, 8, 9, 10]);
+  });
+
+  it("holds the boundary against a former key too", () => {
+    expect(matchPRsToTasks([pr({ ref: "websucp-3/x" })], "BP", ["CP"])).toEqual([]);
+  });
 });
 
 /**

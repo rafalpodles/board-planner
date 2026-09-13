@@ -8,7 +8,7 @@ import { logActivity } from "@/lib/activity";
 import { decryptSecret } from "@/lib/encryption";
 import { mergedReviewDestination } from "@/lib/columns";
 import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
-import { writeProviderLinks } from "@/lib/pr-links";
+import { droppedCount, writeProviderLinks } from "@/lib/pr-links";
 
 export const POST = withProjectAccess(async (_request, { params, user }) => {
   const { projectId } = await params;
@@ -61,7 +61,15 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
     mrsByTask.set(mr.matchedTaskNumber, existing);
   }
 
+  // Every merge request this round saw, matched or not. The fetch is a window — a hundred by
+  // `updated_at`, no paging — so a link the round did not see is unknown rather than gone, while
+  // one it saw and gave to somebody else is a fact (BP-610, BP-617).
+  const seen = new Set(matchedMRs.map((mr) => mr.number));
+  for (const mr of rawMRs) seen.add(mr.iid);
+  const seenList = [...seen];
+
   let linked = 0;
+  let unlinked = 0;
   let autoTransitioned = 0;
 
   for (const [taskNumber, mrs] of mrsByTask) {
@@ -81,7 +89,8 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
     // In the database rather than in JS, for the reason its GitHub twin carries: two overlapping
     // syncs of one task meant the later save dropped whatever the earlier one had added (BP-559).
     // Dates are built above, because a pipeline update is not cast by Mongoose.
-    await writeProviderLinks(task._id, "gitlab", mrDocs);
+    unlinked += droppedCount(task.linkedPRs, "gitlab", seen, new Set(mrs.map((mr) => mr.number)));
+    await writeProviderLinks(task._id, "gitlab", mrDocs, seenList);
     linked += mrs.length;
 
     const hasMerged = mrs.some((mr) => mr.state === "merged");
@@ -101,11 +110,30 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
     }
   }
 
+  // The tasks this round contradicts without visiting: a merge request retitled onto another task
+  // leaves its old task's grouping, so that task is never in the loop above and its stale link
+  // survived every later sync (BP-610). `provider: null` is not in the query here — an unmarked
+  // link is GitHub's, and a GitLab sync must not adopt it.
+  if (seen.size > 0) {
+    const contradicted = await Task.find({
+      project: projectId,
+      linkedPRs: { $elemMatch: { number: { $in: seenList }, provider: "gitlab" } },
+    });
+    for (const task of contradicted) {
+      if (mrsByTask.has(task.taskNumber)) continue;
+      const dropping = droppedCount(task.linkedPRs, "gitlab", seen, new Set());
+      if (dropping === 0) continue;
+      await writeProviderLinks(task._id, "gitlab", [], seenList);
+      unlinked += dropping;
+    }
+  }
+
   return NextResponse.json({
     synced: true,
     prsFound: matchedMRs.length,
     tasksLinked: mrsByTask.size,
     prsLinked: linked,
+    prsUnlinked: unlinked,
     autoTransitioned,
   });
 });

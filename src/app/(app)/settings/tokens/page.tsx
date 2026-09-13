@@ -42,22 +42,40 @@ export default function TokensPage() {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
+    // The reader revokes rows out of these lists and creates rows into them, so a superseded
+    // mount read is not a repaint of the same data: it puts a revoked token back on screen
+    // (BP-601).
+    let ignore = false;
     Promise.all([api.get("/api/tokens"), api.get("/api/oauth/connections")])
       .then(([t, c]: [ApiApiToken[], OAuthConnection[]]) => {
+        if (ignore) return;
         setTokens(t);
         setConnections(c);
       })
-      .catch(() => toast("Failed to load tokens", "error"))
-      .finally(() => setLoading(false));
+      .catch(() => {
+        if (!ignore) toast("Failed to load tokens", "error");
+      })
+      .finally(() => {
+        if (!ignore) setLoading(false);
+      });
+    return () => {
+      ignore = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     if (!isAdmin) return;
+    let ignore = false;
     api
       .get("/api/oauth/clients")
-      .then(setOauthClients)
+      .then((rows: OAuthClientRow[]) => {
+        if (!ignore) setOauthClients(rows);
+      })
       .catch(() => {});
+    return () => {
+      ignore = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin]);
 

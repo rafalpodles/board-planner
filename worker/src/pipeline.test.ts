@@ -76,7 +76,7 @@ const board = [
   { id: "shipped", role: "done" },
 ];
 
-const diff: DiffStats = { changedLines: 10, changedFiles: ["a.ts"], patch: "d", truncated: false, headSha: "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c" , symlinks: [], suppressedDiffs: []};
+const diff: DiffStats = { changedLines: 10, changedFiles: ["a.ts"], patch: "d", truncated: false, headSha: "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c" , symlinks: [], suppressedDiffs: [], gitlinks: []};
 
 const config: WorkerConfig = {
   apiBaseUrl: "http://localhost:3000",
@@ -322,7 +322,7 @@ describe("runTask", () => {
   it("releases the task with its attempt refunded when the base cannot be established", async () => {
     const h = harness();
     h.workspace.create.mockRejectedValue(
-      new BaseUnavailableError("could not resolve base branch main: no route to host")
+      new BaseUnavailableError("could not read refs/heads/main from origin (no route to host)")
     );
 
     const disposition = await runTask(h.deps, task);
@@ -342,7 +342,7 @@ describe("runTask", () => {
     const h = harness();
     h.workspace.create.mockRejectedValue(
       new BaseUnavailableError(
-        "could not resolve base branch main: ssh://git@github.com/x/y did not report refs/heads/main",
+        "ssh://git@github.com/x/y did not report refs/heads/main",
         "configuration"
       )
     );
@@ -1849,19 +1849,21 @@ describe("what a machine fault is recorded as", () => {
    */
   it("keeps git's own answer inside the cap the menubar reads", async () => {
     const url = "git@github-rafalpodles:rafalpodles/board-planner.git";
-    const inner = new BaseUnavailableError(
-      `could not read refs/heads/main from ${url} (fatal: Could not read from remote repository.)`
-    );
+    // The shape `workspace.create` throws since BP-619: one clause, naming the branch, the remote
+    // and git's own answer once each. It used to arrive wrapped in a sentence that said the first
+    // of those a second time.
     const { h, outcomes } = watchedOutcomes();
     h.workspace.create.mockRejectedValue(
-      new BaseUnavailableError(`could not resolve base branch main: ${String(inner)}`)
+      new BaseUnavailableError(
+        `could not read refs/heads/main from ${url} (fatal: Could not read from remote repository.)`
+      )
     );
 
     await runTask(h.deps, task);
 
     const emitted = outcomes().at(-1) as { detail: string };
     expect(emitted.detail).toContain("Could not read from remote repository");
-    expect(emitted.detail).toContain("could not resolve base branch main");
+    expect(emitted.detail).toContain("could not read refs/heads/main");
     // This shape composes to 172, under the cap, so `fitDetail` returns on its first line and the
     // assertions above pass against the head-only version they were written to reject. Said here
     // rather than fixed by lengthening it: the point of THIS test is the class-name strip and the
@@ -1880,27 +1882,45 @@ describe("what a machine fault is recorded as", () => {
    */
   it("keeps the cause even when the remote is long enough to fill the cap twice", async () => {
     const url = "https://github.com/acme-engineering-platform/deployment-service.git";
-    const inner = new BaseUnavailableError(
-      `could not read refs/heads/main from ${url} (fatal: unable to access '${url}/': ` +
-        `Could not resolve host: github.com)`
-    );
     const { h, outcomes } = watchedOutcomes();
     h.workspace.create.mockRejectedValue(
-      new BaseUnavailableError(`could not resolve base branch main: ${String(inner)}`)
+      new BaseUnavailableError(
+        `could not read refs/heads/main from ${url} (fatal: unable to access '${url}/': ` +
+          `Could not resolve host: github.com)`
+      )
     );
 
     await runTask(h.deps, task);
 
     const emitted = outcomes().at(-1) as { detail: string };
-    // Both ends: what was being attempted, and what went wrong. The middle is the part that says
-    // the same thing twice.
-    expect(emitted.detail).toContain("could not resolve base branch main");
+    // Both ends: what was being attempted, and what went wrong. The middle is git echoing the
+    // remote a second time inside its own stderr — which BP-619 could not remove, and this cut
+    // is what keeps it from costing the cause.
+    expect(emitted.detail).toContain("could not read refs/heads/main");
     expect(emitted.detail).toContain("Could not resolve host");
     expect(emitted.detail.length).toBeLessThanOrEqual(200);
     // And the head stops at a word boundary. Cut mid-URL the head reads as a real, shorter remote,
     // which is the one way this can mislead rather than merely shorten — an operator checks the
-    // address first (found in review).
+    // address first (found in review). Since BP-619 the sentence is short enough that the cut
+    // lands inside the first URL rather than after it, so the address exception is what holds
+    // this now and the 60% budget rule no longer reaches the case.
     expect(emitted.detail).not.toMatch(/https:\/\/\S*…/);
+  });
+
+  // The address exception, against the rule it overrides: a cut inside a URL is backed up even
+  // when the space before it is early enough that the budget rule would keep the raw cut.
+  it("never shows half an address, whatever that costs the budget", async () => {
+    const execute = vi.fn<Executor["execute"]>().mockResolvedValue({
+      kind: "machine_fault",
+      message: `at https://github.com/${"a".repeat(300)} (fatal: Could not resolve host)`,
+    });
+    const { h, outcomes } = watchedOutcomes({ executor: { execute } });
+
+    await runTask(h.deps, task);
+
+    const { detail } = outcomes().at(-1) as { detail: string };
+    expect(detail).not.toMatch(/https:\/\/\S*…/);
+    expect(detail.startsWith("at…")).toBe(true);
   });
 
   // Backing up to a space is only worth it while it leaves a head worth reading: a long unbroken
@@ -1944,8 +1964,7 @@ describe("what a machine fault is recorded as", () => {
       const { h, outcomes } = watchedOutcomes();
       h.workspace.create.mockRejectedValue(
         new BaseUnavailableError(
-          `could not resolve base branch main: BaseUnavailableError: could not read ` +
-            `refs/heads/main from ${url} (fatal: unable to access '${url}/': ${stderr})`
+          `could not read refs/heads/main from ${url} (fatal: unable to access '${url}/': ${stderr})`
         )
       );
       await runTask(h.deps, task);
@@ -1992,9 +2011,10 @@ describe("what a machine fault is recorded as", () => {
   it("strips the wrapper's class names and leaves git's own words alone", async () => {
     const { h, outcomes } = watchedOutcomes();
     h.workspace.create.mockRejectedValue(
+      // The class name the strip removes is the one `String(error)` puts on the FRONT of this
+      // message at the pipeline seam — since BP-619 there is no second one nested inside it.
       new BaseUnavailableError(
-        "could not resolve base branch main: BaseUnavailableError: could not read refs/heads/main " +
-          "(remote: Error: repository not found)"
+        "could not read refs/heads/main (remote: Error: repository not found)"
       )
     );
 

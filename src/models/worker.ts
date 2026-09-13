@@ -53,6 +53,9 @@ const workerSchema = new Schema<IWorker>(
                 {
                   name: { type: String, required: true, trim: true },
                   ok: { type: Boolean, required: true },
+                  // Passed, at a cost somebody chose. Absent on every check that has none, so an
+                  // older worker's report stays exactly what it was (BP-606).
+                  warn: { type: Boolean, default: false },
                   detail: { type: String, default: "", trim: true },
                 },
                 { _id: false }

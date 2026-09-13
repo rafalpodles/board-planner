@@ -483,6 +483,7 @@ export function toApiWorker(
           checks: (worker.preflight.checks ?? []).map((c) => ({
             name: c.name,
             ok: c.ok,
+            warn: Boolean(c.warn),
             detail: c.detail,
           })),
           reportedAt: new Date(worker.preflight.reportedAt).toISOString(),

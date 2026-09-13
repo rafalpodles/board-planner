@@ -6,7 +6,8 @@ import { join } from "node:path";
 import { collectDiff } from "./diff.js";
 import { createRunner } from "./exec.js";
 import { acceptability } from "./decisions.js";
-import { isProtectedPath, workflowPaths } from "./gates/protected-paths.js";
+import { isProtectedPath, protectedPathsGate, workflowPaths } from "./gates/protected-paths.js";
+import { GateContext } from "./types.js";
 
 /**
  * BP-381. Two ways an agent makes the patch a person is asked to accept describe something other
@@ -171,8 +172,16 @@ describe("what the patch shows when something decides how git renders it", () =>
 
     expect(diff.changedLines).toBe(2);
     expect(diff.suppressedDiffs).toEqual(["sub"]);
+    expect(diff.gitlinks).toEqual(["sub"]);
     expect(acceptability(diff).acceptable).toBe(false);
+
+    // BP-603: and a gate refuses it, so an ordinary run — one that trips nothing else and opens no
+    // decision — does not push the branch and open a pull request nobody can read the change in.
+    const refusal = await protectedPathsGate().run({ diff } as GateContext);
+    expect(refusal.ok).toBe(false);
+    expect(refusal.reason).toMatch(/submodule pointer/);
   });
+
 
   // An ordinary text change, so the check cannot be passing by refusing to answer
   it("says nothing is suppressed for an ordinary change", async () => {

@@ -37,6 +37,8 @@ public struct WorkerState: Equatable, Sendable {
     public private(set) var lastQuota: Quota?
     public private(set) var lastEventAt: Date?
     private var phaseSince: Date?
+    /// When this machine last said it could not run a task. See `effectiveHealth(now:)`.
+    private var faultedAt: Date?
 
     public init() {}
 
@@ -64,7 +66,11 @@ public struct WorkerState: Equatable, Sendable {
             phaseSince = nil
             if outcome.outcome == "merged" { mergedToday += 1 }
             if outcome.outcome == "blocked" {
-                health = .needsHuman
+                // Behind the same pause guard as the two branches below. The loop claims nothing
+                // while paused, so an outcome arriving during a pause is the tail of a run that
+                // started before it — and dropping .paused turns the panel's Resume button back
+                // into Pause, on a worker that is already paused (BP-612).
+                if health != .paused { health = .needsHuman }
             } else if outcome.outcome == "machineFault" {
                 // Not .idle, which is what a released run leaves and what a machine with nothing to
                 // do looks like — the last run here could not run at all.
@@ -77,7 +83,10 @@ public struct WorkerState: Equatable, Sendable {
                 // Behind the pause guard, unlike the blocked branch above: the loop claims nothing
                 // while paused, so a fault can only be the tail of a run that started before the
                 // pause, and overwriting .paused turns the panel's Resume button back into Pause.
-                if health != .paused { health = .faulted }
+                if health != .paused {
+                    health = .faulted
+                    faultedAt = now
+                }
             } else if health != .paused {
                 health = .idle
             }
@@ -86,6 +95,7 @@ public struct WorkerState: Equatable, Sendable {
 
     public mutating func adopt(_ status: StatusResponse, at now: Date) {
         lastEventAt = now
+        faultedAt = nil
         currentPhase = status.current?.phase
         if let key = status.current?.taskKey { currentTaskKey = key }
         if status.current != nil, phaseSince == nil { phaseSince = now }
@@ -96,10 +106,39 @@ public struct WorkerState: Equatable, Sendable {
         health = .disconnected
         currentPhase = nil
         phaseSince = nil
+        faultedAt = nil
     }
 
-    public func iconName() -> String {
-        switch health {
+    /**
+     * How long a machine fault keeps saying so while nothing else happens.
+     *
+     * `faulted` is sticky, and on an idle machine nothing ever clears it: progress is emitted only
+     * from inside a run, `adopt` runs once per socket connection, and a pass that claims nothing
+     * emits nothing at all. So a transient blip at 02:00 left the wrench icon on screen at 09:00,
+     * on a machine that had been healthy for seven hours — and the icon, unlike the panel's
+     * headline, cannot be put in the past tense (BP-616).
+     *
+     * Fifteen minutes, in the menubar, rather than an idle telemetry tick from the worker. The tick
+     * is the truthful fix and is worth doing on its own; this is the half that stops the icon
+     * lying, and it is well clear of the default thirty-second poll — a machine that is still
+     * faulting re-stamps this on every pass and keeps the icon, which is the case that matters.
+     */
+    public static let faultGrace: TimeInterval = 15 * 60
+
+    /**
+     * The health the panel shows, which is what `health` says except for a fault nothing has
+     * repeated for `faultGrace`.
+     *
+     * Read by both the icon and the headline, so the two cannot disagree about a machine — they
+     * are one claim in two channels, and only one of them can be phrased in the past tense.
+     */
+    public func effectiveHealth(now: Date) -> Health {
+        guard health == .faulted, let since = faultedAt else { return health }
+        return now.timeIntervalSince(since) >= Self.faultGrace ? .idle : .faulted
+    }
+
+    public func iconName(now: Date) -> String {
+        switch effectiveHealth(now: now) {
         case .idle: return "circle"
         case .working: return "circle.fill"
         case .paused: return "pause.circle"

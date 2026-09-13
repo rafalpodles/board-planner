@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import CPMenubarCore
 
@@ -37,18 +38,41 @@ struct CPMenubarApp: App {
                 FirstRunView(onboarding: onboarding)
             }
         } label: {
-            // The menu bar renders this as a template image, so state is carried by which symbol it
-            // is rather than by colour.
-            if let title = model.state.title(now: Date()) {
-                Label(title, systemImage: model.state.iconName())
-            } else {
-                Image(systemName: model.state.iconName())
-            }
+            MenuBarLabel(model: model)
         }
         .menuBarExtraStyle(.window)
 
         // The same onboarding object the panel renders, so changing boards in Preferences puts
         // the panel back on the first-run screen rather than leaving two views disagreeing.
         Settings { PreferencesView(model: model, onboarding: onboarding) }
+    }
+}
+
+/**
+ * The symbol in the menu bar, and the one thing that redraws it when nothing is happening.
+ *
+ * A fault expires after `WorkerState.faultGrace` with no new event to mark the moment, so without
+ * a clock of its own this label would keep the wrench until the worker next said anything at all —
+ * which on an idle machine is never (BP-616). A minute, not the panel's second: the only thing
+ * that turns on this timer is a fifteen-minute expiry, and the menu bar redraws on every event
+ * anyway while a run is under way.
+ */
+private struct MenuBarLabel: View {
+    let model: AppModel
+
+    @State private var now = Date()
+    private let tick = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        // The menu bar renders this as a template image, so state is carried by which symbol it
+        // is rather than by colour.
+        Group {
+            if let title = model.state.title(now: now) {
+                Label(title, systemImage: model.state.iconName(now: now))
+            } else {
+                Image(systemName: model.state.iconName(now: now))
+            }
+        }
+        .onReceive(tick) { now = $0 }
     }
 }

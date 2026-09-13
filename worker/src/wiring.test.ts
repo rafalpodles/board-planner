@@ -819,7 +819,12 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     expect(counts.claims).toBe(3);
     expect(api.release).toHaveBeenCalledTimes(3);
     expect(api.comment).toHaveBeenCalledTimes(1);
-    expect(api.comment.mock.calls[0][2]).toMatch(/Returned to the queue: .*could not resolve base branch main/s);
+    // BP-619: one clause, not two. The wrapper used to restate the fact the inner message
+    // already carries — "could not resolve base branch main: could not read refs/heads/main …" —
+    // against a two-hundred-character notification budget.
+    const comment = api.comment.mock.calls[0][2] as string;
+    expect(comment).toMatch(/Returned to the queue: .*could not read refs\/heads\/main from/s);
+    expect(comment).not.toContain("could not resolve base branch");
   });
 
   // The whole run, as the board would see it: the three stage boundaries it got past, the three
