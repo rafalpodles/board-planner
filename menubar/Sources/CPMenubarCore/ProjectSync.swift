@@ -102,6 +102,19 @@ public enum ProjectSync {
         }
     }
 
+    /**
+     * The steps a blocked pass leaves behind: this pass's line, and no earlier one.
+     *
+     * The runner used to append under `!steps.contains(blocked)`, which dedupes by **value** — and
+     * the value names the projects it could not act on. Ticking a second project therefore made a
+     * new value and left the pane holding both lines, "…for Recurro" above "…for Recurro, Atlas",
+     * one of them describing a state that is over (found in review). The condition is one line
+     * whatever the list does, so the old one goes rather than the new one being suppressed.
+     */
+    public static func replacingNowhereToPut(_ steps: [SyncStep], with blocked: SyncStep) -> [SyncStep] {
+        withoutNowhereToPut(steps) + [blocked]
+    }
+
     public static func plan(
         catalogue: [ProjectCatalogueRow],
         checkouts: [String: String]

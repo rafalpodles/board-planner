@@ -64,8 +64,10 @@ final class ProjectSyncRunner {
         // the plan is the only thing that knows them (BP-602).
         if let blocked = ProjectSync.nowhereToPut(plan: plan, checkoutsFolder: state.checkoutsFolder) {
             // One line, not one per pass: a reconnect runs a pass, and the pane is a list of what
-            // happened rather than a log of how often it did not.
-            if !steps.contains(blocked) { steps.append(blocked) }
+            // happened rather than a log of how often it did not. Written back only when it says
+            // something different, so an unchanged condition is not a view update every pass.
+            let updated = ProjectSync.replacingNowhereToPut(steps, with: blocked)
+            if updated != steps { steps = updated }
             return
         }
         // Every other step is a thing that happened and stays true; this one is a **condition**, so

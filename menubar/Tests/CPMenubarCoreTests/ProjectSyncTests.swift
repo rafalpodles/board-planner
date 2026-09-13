@@ -164,6 +164,28 @@ final class ProjectSyncTests: XCTestCase {
             ProjectSync.withoutNowhereToPut(steps), [.added(project: "BP", path: "/checkouts/BP")])
     }
 
+    // Ticking a second project renames the condition, and a dedupe by value read that as a second
+    // condition: the pane held both lines, the older one describing a state that was over.
+    func testItReplacesTheBlockedLineRatherThanAddingASecondOne() {
+        let first: SyncStep = .nowhereToPut(projects: ["Recurro"], where: checkoutsFolderLocation)
+        let second: SyncStep = .nowhereToPut(
+            projects: ["Recurro", "Atlas"], where: checkoutsFolderLocation)
+
+        let steps = ProjectSync.replacingNowhereToPut(
+            [.added(project: "BP", path: "/a"), first], with: second)
+
+        XCTAssertEqual(steps, [.added(project: "BP", path: "/a"), second])
+    }
+
+    // What the runner's "only when it changed" guard is allowed to rely on: an unchanged condition
+    // rebuilds to an equal list, so a pass that says nothing new writes nothing.
+    func testAnUnchangedBlockedLineRebuildsToTheSameSteps() {
+        let blocked: SyncStep = .nowhereToPut(projects: ["Recurro"], where: checkoutsFolderLocation)
+        let steps: [SyncStep] = [.added(project: "BP", path: "/a"), blocked]
+
+        XCTAssertEqual(ProjectSync.replacingNowhereToPut(steps, with: blocked), steps)
+    }
+
     // Every other line is a thing that happened and stays true, so none of them is dropped.
     func testItKeepsEveryStepThatRecordsSomethingThatHappened() {
         let steps: [SyncStep] = [
