@@ -63,12 +63,15 @@ async function taskWith(linkedPRs: Record<string, unknown>[] | undefined) {
 async function apply(
   _id: mongoose.Types.ObjectId,
   provider: "github" | "gitlab",
-  docs: Record<string, unknown>[]
+  docs: Record<string, unknown>[],
+  // What the round saw. Defaulting to the numbers being written keeps every test written before
+  // BP-617 saying what it said: a round that saw exactly what it wrote.
+  seen: number[] = docs.map((doc) => doc.number as number)
 ) {
   await db();
   // Through the model, exactly as the routes issue it: Mongoose refuses a pipeline update
   // without `updatePipeline`, and every unit test in this repo mocks the model away.
-  await writeProviderLinks(_id, provider, docs);
+  await writeProviderLinks(_id, provider, docs, seen);
 }
 
 async function linksOf(_id: mongoose.Types.ObjectId) {
@@ -86,7 +89,8 @@ test.afterAll(async () => {
 test("a GitLab sync replaces only GitLab's links", async () => {
   const _id = await taskWith([link("github", 1), link("gitlab", 2)]);
 
-  await apply(_id, "gitlab", [link("gitlab", 3)]);
+  // The round saw 2 and gave it to somebody else, and saw 3 and gave it here
+  await apply(_id, "gitlab", [link("gitlab", 3)], [2, 3]);
 
   const links = await linksOf(_id);
   expect(links.map((l) => [l.provider, l.number])).toEqual([
@@ -95,14 +99,59 @@ test("a GitLab sync replaces only GitLab's links", async () => {
   ]);
 });
 
+/**
+ * BP-617. The fetch is a window — GitHub answers with its open pull requests plus the thirty most
+ * recently updated closed ones — so "not in this round" and "not this task's any more" are
+ * different facts, and the write used to treat them as one.
+ */
+test("a link the round never saw survives a round that found a newer one", async () => {
+  const _id = await taskWith([link("github", 9), link("github", 412)]);
+
+  // 9 merged last quarter and is outside the window; 412 is open and inside it
+  await apply(_id, "github", [link("github", 412)], [412]);
+
+  expect((await linksOf(_id)).map((l) => l.number).sort((a, b) => (a as number) - (b as number)))
+    .toEqual([9, 412]);
+});
+
+test("a link the round saw and gave to somebody else is removed", async () => {
+  const _id = await taskWith([link("github", 9), link("github", 412)]);
+
+  // Both came back in the fetch this time, and only 412 was matched here: 9 has been retitled
+  await apply(_id, "github", [link("github", 412)], [9, 412]);
+
+  expect((await linksOf(_id)).map((l) => l.number)).toEqual([412]);
+});
+
+test("a task the round contradicts and never matched loses that link, and keeps the rest", async () => {
+  const _id = await taskWith([link("github", 9), link("github", 412), link("gitlab", 412)]);
+
+  // The second pass: no match for this task at all, so nothing is written back
+  await apply(_id, "github", [], [412]);
+
+  expect((await linksOf(_id)).map((l) => [l.provider, l.number])).toEqual([
+    ["github", 9],
+    ["gitlab", 412],
+  ]);
+});
+
+test("a round that saw nothing at all removes nothing", async () => {
+  const _id = await taskWith([link("github", 9)]);
+
+  await apply(_id, "github", [], []);
+
+  expect((await linksOf(_id)).map((l) => l.number)).toEqual([9]);
+});
+
 test("a link stored before the provider field existed belongs to GitHub", async () => {
   const legacy = await taskWith([link(null, 4)]);
-  await apply(legacy, "gitlab", [link("gitlab", 5)]);
-  // GitLab must not adopt it: an unmarked link is GitHub's, so it survives a GitLab sync…
+  await apply(legacy, "gitlab", [link("gitlab", 5)], [4, 5]);
+  // GitLab must not adopt it: an unmarked link is GitHub's, so it survives a GitLab sync even
+  // when the round's numbers name it…
   expect((await linksOf(legacy)).map((l) => l.number)).toEqual([4, 5]);
 
   const replaced = await taskWith([link(null, 4)]);
-  await apply(replaced, "github", [link("github", 6)]);
+  await apply(replaced, "github", [link("github", 6)], [4, 6]);
   // …and is replaced by a GitHub one rather than left beside it, which is what a duplicated card
   // in the task panel looked like before the provider field existed.
   expect((await linksOf(replaced)).map((l) => l.number)).toEqual([6]);

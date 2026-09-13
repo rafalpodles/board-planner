@@ -4,7 +4,7 @@ import { decryptSecret } from "@/lib/encryption";
 import { fetchPullRequests, matchPRsToTasks, parseRepoString, withChecks } from "@/lib/github";
 import { logActivity } from "@/lib/activity";
 import { getProjectColumns } from "@/lib/columns";
-import { writeProviderLinks } from "@/lib/pr-links";
+import { droppedCount, unseenLinks, writeProviderLinks } from "@/lib/pr-links";
 import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
 import { Project } from "@/models/project";
 import { Task } from "@/models/task";
@@ -196,6 +196,8 @@ export type SyncResult =
       prsLinked: number;
       /** Tasks whose links this sync actually rewrote — see `unchanged`. */
       tasksWritten: number;
+      /** Links dropped because this round's fetch gave their pull request to somebody else. */
+      prsUnlinked: number;
       autoTransitioned: number;
     }
   | { ok: false; status: number; error: string };
@@ -265,8 +267,15 @@ export async function syncGithubPullRequests(
     prsByTask.set(pr.matchedTaskNumber, existing);
   }
 
+  // Every pull request this round saw, matched or not — the round's whole field of view. A stored
+  // link whose number is in here and which this round did not give to that task has been seen and
+  // reassigned, which is a fact; one that is absent is merely out of the window (BP-610, BP-617).
+  const seen = new Set(rawPRs.map((pr) => pr.number));
+  const seenList = [...seen];
+
   let linked = 0;
   let written = 0;
+  let unlinked = 0;
   let autoTransitioned = 0;
   const columnIds = new Set(getProjectColumns(project).map((c) => c.id));
 
@@ -292,8 +301,12 @@ export async function syncGithubPullRequests(
     // other provider's links.
     //
     // Dates are built here, not left to the schema: a pipeline update is not cast by Mongoose.
-    if (!unchanged(task.linkedPRs, prDocs)) {
-      await writeProviderLinks(task._id, "github", prDocs);
+    // What the task will hold: this round's matches, plus its own links the round never saw.
+    // Compared against what it holds now, because `unchanged` is not an optimisation — see above.
+    const kept = unseenLinks(task.linkedPRs, "github", seen);
+    if (!unchanged(task.linkedPRs, [...kept, ...prDocs])) {
+      await writeProviderLinks(task._id, "github", prDocs, seenList);
+      unlinked += droppedCount(task.linkedPRs, "github", seen, new Set(prs.map((pr) => pr.number)));
       written++;
     }
     linked += prs.length;
@@ -330,15 +343,41 @@ export async function syncGithubPullRequests(
     }
   }
 
+  // The tasks this round contradicts without ever visiting: a pull request retitled onto another
+  // task, or one that lost its key altogether, leaves its old task's grouping entirely — so the
+  // loop above never sees that task and the stale link used to survive every later sync (BP-610).
+  //
+  // `provider: null` is in the query because the schema's `default: "github"` is applied on
+  // hydration rather than stored: a link written before the field existed has no `provider` at
+  // all, and those are exactly the links `$ifNull` goes out of its way to catch on the way out.
+  if (seen.size > 0) {
+    const contradicted = await Task.find({
+      project: project._id,
+      linkedPRs: {
+        $elemMatch: { number: { $in: seenList }, provider: { $in: ["github", null] } },
+      },
+    });
+    for (const task of contradicted) {
+      if (prsByTask.has(task.taskNumber)) continue;
+      const dropping = droppedCount(task.linkedPRs, "github", seen, new Set());
+      if (dropping === 0) continue;
+      await writeProviderLinks(task._id, "github", [], seenList);
+      unlinked += dropping;
+      written++;
+    }
+  }
+
   return {
     ok: true,
     prsFound: matchedPRs.length,
     tasksLinked: prsByTask.size,
     prsLinked: linked,
     tasksWritten: written,
+    prsUnlinked: unlinked,
     autoTransitioned,
   };
 }
+
 
 /**
  * Refreshes every project that has a GitHub repository and a token.

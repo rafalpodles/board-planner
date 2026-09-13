@@ -80,6 +80,7 @@ export const GROUPS = {
     "pr-status.spec.ts",
     "project-channel-secret.spec.ts",
     "pr-link-replacement.spec.ts",
+    "pr-link-pruning.spec.ts",
     "mcp-oauth.spec.ts",
     "mcp-tools.spec.ts",
     "db-reconnect-leaks.spec.ts",
