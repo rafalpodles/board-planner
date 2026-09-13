@@ -99,9 +99,20 @@ export function prUrlNamesProjectRepo(prUrl: string, project: MatchableProject):
   // says yes to every host, so this guard did not hold at all on a project that has not been
   // migrated to `repositoryUrl`: `https://evil.example.com/owner/repo/pull/1` rendered as a link
   // (found in review, measured on both legacy fields).
-  const wanted = repositoryUrlCandidates(project).filter((url) => normaliseRemote(url).length > 0);
-  if (wanted.length === 0) return true;
+  const named = repositoryUrlCandidates(project).filter((url) => normaliseRemote(url).length > 0);
+  if (named.length === 0) return true;
   if (!prUrl) return true;
+
+  // Resolving the legacy fields is not enough on its own: `repositoryUrl` is stored as typed, and
+  // two shapes it accepts carry no host either — a per-account ssh alias (`git@github-work:o/r`,
+  // which only that machine's ssh config resolves) and a bare `owner/repo`, which the PATCH does
+  // not refuse. Each left `sameRepo`'s any-host rule in place and the same phishing url passed
+  // (found in the second review, measured). So a candidate with no host is not a candidate here,
+  // and a project whose every candidate is one of those shapes can confirm nothing — the panel
+  // prints the address rather than linking it, which is what its sentence says. Deliberately not
+  // the same answer as "names no repository at all" above.
+  const wanted = named.filter((url) => parseRemote(url).host.length > 0);
+  if (wanted.length === 0) return false;
 
   // `/pull/123` and GitLab's `/-/merge_requests/123`, which is the shape the delivery step would
   // produce were GitLab delivery added — the repository is what precedes it.

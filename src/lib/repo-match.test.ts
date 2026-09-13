@@ -281,6 +281,29 @@ describe("prUrlNamesProjectRepo", () => {
     expect(prUrlNamesProjectRepo("https://evil.example.com/owner/repo/pull/1", both)).toBe(false);
   });
 
+  // The second review's finding: resolving the legacy fields left the same hole open for the two
+  // shapes `repositoryUrl` itself accepts without a host. Both measured as `true` before this.
+  it("confirms nothing for a project whose repository is a per-account ssh alias", () => {
+    const aliased = { _id: "p1", repositoryUrl: "git@github-work:owner/repo.git" };
+
+    expect(prUrlNamesProjectRepo("https://evil.example.com/owner/repo/pull/1", aliased)).toBe(false);
+    // Not even its own, and that is the trade: only that machine's ssh config knows what
+    // `github-work` resolves to, so there is no host here to agree with
+    expect(prUrlNamesProjectRepo("https://github.com/owner/repo/pull/1", aliased)).toBe(false);
+  });
+
+  it("confirms nothing for a bare owner/repo typed into repositoryUrl", () => {
+    const bare = { _id: "p1", repositoryUrl: "owner/repo" };
+
+    expect(prUrlNamesProjectRepo("https://evil.example.com/owner/repo/pull/1", bare)).toBe(false);
+  });
+
+  // The distinction the branch above must not flatten: a board naming no repository at all has
+  // nothing to disagree with, and reads exactly as it did before BP-604.
+  it("still says yes for a project that names no repository", () => {
+    expect(prUrlNamesProjectRepo("https://github.com/owner/repo/pull/1", { _id: "p1" })).toBe(true);
+  });
+
   it("is not fooled by a repository whose name ends in the project's", () => {
     expect(prUrlNamesProjectRepo("https://github.com/owner/repo-fork/pull/1", project())).toBe(
       false

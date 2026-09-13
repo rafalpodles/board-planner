@@ -225,7 +225,7 @@ describe("useAuthProvider — what the rest of the app reports back", () => {
   // reach its database.
   it("takes no outage from a 5xx that reports somebody else's failure", async () => {
     // signedIn(), not a bare render: an unmocked /api/auth/me leaves the flag already set, and the
-    // assertion would then be measuring the clearing this endpoint must not do (BP-627)
+    // assertion would then be measuring the clearing this endpoint must not do (BP-607 review)
     await signedIn();
     expect(screen.getByTestId("outage").textContent).toBe("false");
     await act(async () => {
@@ -234,8 +234,8 @@ describe("useAuthProvider — what the rest of the app reports back", () => {
     expect(screen.getByTestId("outage").textContent).toBe("false");
   });
 
-  // BP-627: Railway answers 502 for an instance that is down, and that is the very status the mail
-  // route uses for "the mail server said no" — so a relayed 502 is not evidence of health either.
+  // BP-607 review: Railway answers 502 for an instance that is down, and that is the very status
+  // the mail route uses for "the mail server said no": a relayed 502 is not evidence of health.
   it("leaves an outage somebody else measured alone, rather than clearing it on a relayed 502", async () => {
     await renderSettled();
     await act(async () => {
