@@ -40,8 +40,12 @@ const REQUEST_PATH = { github: "/pull/", gitlab: "/-/merge_requests/" } as const
  *
  * Exact strings on both sides rather than a case-folded comparison, because the same rule has to
  * hold in the aggregation pipeline, in this module's counting and in the second pass's database
- * query, and only one of those three folds case cheaply. A configured url that differs from the
- * stored ones in case therefore leaves a rename showing two badges — visible, and not a deletion.
+ * query, and only one of those three folds case cheaply.
+ *
+ * So the claim is only as good as the configured url's spelling, and two spellings make it a claim
+ * about nothing: a different case, and an ssh remote (`git@github.com:o/r.git`), which no provider
+ * puts a pull request under. Both land in the same place as the paragraph above — a rename showing
+ * two badges rather than losing a link.
  */
 export function seenUrls(
   provider: "github" | "gitlab",
