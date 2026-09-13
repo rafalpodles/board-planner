@@ -351,12 +351,17 @@ export async function syncGithubPullRequests(
   // hydration rather than stored: a link written before the field existed has no `provider` at
   // all, and those are exactly the links `$ifNull` goes out of its way to catch on the way out.
   if (seen.size > 0) {
-    const contradicted = await Task.find({
-      project: project._id,
-      linkedPRs: {
-        $elemMatch: { number: { $in: seenList }, provider: { $in: ["github", null] } },
+    const contradicted = await Task.find(
+      {
+        project: project._id,
+        linkedPRs: {
+          $elemMatch: { number: { $in: seenList }, provider: { $in: ["github", null] } },
+        },
       },
-    });
+      // Everything this pass reads and nothing else: on a board with hundreds of linked tasks the
+      // alternative is loading every description to decide a write that touches one array.
+      "taskNumber linkedPRs"
+    );
     for (const task of contradicted) {
       if (prsByTask.has(task.taskNumber)) continue;
       const dropping = droppedCount(task.linkedPRs, "github", seen, new Set());
@@ -377,7 +382,6 @@ export async function syncGithubPullRequests(
     autoTransitioned,
   };
 }
-
 
 /**
  * Refreshes every project that has a GitHub repository and a token.
