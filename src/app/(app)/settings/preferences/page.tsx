@@ -15,13 +15,23 @@ export default function PreferencesPage() {
 
   useEffect(() => {
     if (!user) return;
+    // Strict Mode runs a mount effect twice, so a second read is in flight while the first paints
+    // the switch. The switch saves on change, so a superseded answer landing after it leaves the
+    // screen showing the opposite of what was stored (BP-601, the shape BP-465 measured).
+    let ignore = false;
     api
       .get("/api/auth/me")
       .then((data: { collapseEmptyColumns?: boolean }) => {
+        if (ignore) return;
         setCollapseEmptyColumns(data.collapseEmptyColumns ?? true);
         setLoaded(true);
       })
-      .catch(() => setLoaded(true));
+      .catch(() => {
+        if (!ignore) setLoaded(true);
+      });
+    return () => {
+      ignore = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
