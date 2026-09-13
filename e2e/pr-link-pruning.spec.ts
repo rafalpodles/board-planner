@@ -291,8 +291,15 @@ test("a link arriving and leaving is written into the task's own history", async
  * history under "the sync looked again" five minutes apart.
  */
 test("a round that only looked again writes nothing", async ({ page, request }) => {
-  await github(request, [pull(78, `${PROJECT_KEY}-${SIBLING_TASK_NUMBER}/first`)]);
+  const branch = `${PROJECT_KEY}-${SIBLING_TASK_NUMBER}/first`;
+  await github(request, [pull(78, branch)]);
   await syncNow(request);
+
+  // The second round changes the pull request's title, so the task IS written — the badge's text
+  // is part of what a link stores. What must not follow is a second "linked" row: the link did
+  // not arrive twice. A round that was byte-identical would prove nothing here, because
+  // `unchanged` skips the write entirely and nothing downstream of it runs (BP-443).
+  await github(request, [pull(78, branch, { title: "Renamed upstream" })]);
   await syncNow(request);
 
   await signIn(page);
@@ -301,6 +308,9 @@ test("a round that only looked again writes nothing", async ({ page, request }) 
   await expect(
     history.getByText(`E2E Admin linked github.com/example/board/pull/78`)
   ).toHaveCount(1);
+  // The control: the round did reach this task, and the row carries what the second round said
+  await openTheTask(page, SIBLING_TASK_NUMBER, SIBLING_TASK_TITLE);
+  await expect(page.getByRole("link", { name: /#78 Renamed upstream/ })).toBeVisible();
 });
 
 /**
