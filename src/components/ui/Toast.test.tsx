@@ -114,6 +114,21 @@ function Raiser() {
   return null;
 }
 
+/**
+ * Re-measuring is coalesced into one microtask (BP-622), so a test that triggers it and reads the
+ * tray in the same tick reads the placement from before it. `flush` awaits the microtask inside
+ * `act`, which is what the pre-existing tests already did for the MutationObserver's own delivery.
+ */
+async function flush() {
+  await act(async () => {});
+}
+
+/** How many times the placement has read the viewport, which `measure` does once per pass */
+function measurements() {
+  return vi.mocked(Object.getOwnPropertyDescriptor(document.documentElement, "clientHeight")!.get!)
+    .mock.calls.length;
+}
+
 function mounted() {
   render(
     <ToastProvider>
@@ -133,6 +148,7 @@ function trayClasses() {
 afterEach(() => {
   cleanup();
   FakeResizeObserver.live.length = 0;
+  vi.useRealTimers();
   opened.splice(0).forEach((close) => close());
   document
     .querySelectorAll("[data-corner-obstacle],[data-corner-panel]")
@@ -175,7 +191,7 @@ describe("where a toast lands", () => {
     expect(tray().style.bottom).toBe("16px");
   });
 
-  it("re-measures when the thing in the corner moves", () => {
+  it("re-measures when the thing in the corner moves", async () => {
     stateViewport(800);
     const bar = obstacle({ top: 720, bottom: 776 });
     mounted();
@@ -185,7 +201,7 @@ describe("where a toast lands", () => {
     // The comment bar arrives over 200ms of `max-height`, so the floor measured on the raise is
     // not the one the reader ends up with
     stateRect(bar, { top: 600, bottom: 800 });
-    act(() => {
+    await act(async () => {
       window.dispatchEvent(new Event("resize"));
     });
 
@@ -215,7 +231,8 @@ describe("where a toast lands", () => {
     act(() => raise("Saved"));
     expect(tray().style.bottom).toBe("96px");
 
-    // The MutationObserver delivers on a microtask, so the assertion has to wait for one
+    // The MutationObserver delivers on a microtask, so the assertion has to wait for one — and
+    // then for the frame the re-measure is coalesced into
     await act(async () => {
       panel({ top: 32, bottom: 704 }, 69);
     });
@@ -237,9 +254,121 @@ describe("where a toast lands", () => {
     expect(tray().style.bottom).toBe("16px");
 
     stateRect(bar, { top: 600, bottom: 800 });
-    act(() => resized(bar));
+    await act(async () => resized(bar));
 
     expect(tray().style.bottom).toBe("216px");
+  });
+
+  /**
+   * BP-622. `childList` with `subtree` fires on every node inserted or removed anywhere in the
+   * app, and a toast lives three seconds — long enough for the board's ten-second poll to re-render
+   * its cards, or for a dnd-kit drag to rewrite the DOM on every pointer move. Each record ran two
+   * whole-document `querySelectorAll` and then forced a layout.
+   *
+   * Counted rather than eyeballed: `measure` reads the viewport height once per pass, so the spy
+   * on it is the measurement count.
+   */
+  it("ignores a DOM change that cannot move the tray", async () => {
+    stateViewport(800);
+    obstacle({ top: 720, bottom: 776 });
+    mounted();
+    act(() => raise("Saved"));
+    const before = measurements();
+
+    // A card re-rendering under the toast: a node arrives, and it is none of the things the
+    // placement reads
+    await act(async () => {
+      const card = document.createElement("div");
+      card.textContent = "a task card";
+      document.body.appendChild(card);
+    });
+
+    await flush();
+    expect(measurements()).toBe(before);
+  });
+
+  it("still moves for the panel, which arrives the same way", async () => {
+    // The control for the test above: the narrowing must not cost BP-597 its own case
+    stateViewport(800);
+    obstacle({ top: 720, bottom: 776 });
+    mounted();
+    act(() => raise("Saved"));
+
+    await act(async () => {
+      panel({ top: 32, bottom: 704 }, 69);
+    });
+
+    expect(tray().style.top).toBe("85px");
+  });
+
+  it("costs one layout for a burst, not one each", async () => {
+    stateViewport(800);
+    const bar = obstacle({ top: 720, bottom: 776 });
+    mounted();
+    act(() => raise("Saved"));
+    const before = measurements();
+
+    act(() => {
+      window.dispatchEvent(new Event("resize"));
+      window.dispatchEvent(new Event("resize"));
+      resized(bar);
+      document.dispatchEvent(new Event("scroll"));
+    });
+
+    // Four askers, one measurement
+    await flush();
+    expect(measurements()).toBe(before + 1);
+  });
+
+  /**
+   * BP-625. `SaveBar` and `MobileCommentBar` are both `sticky bottom-0`, so their place in the
+   * viewport changes when their scrollport reaches the point where they un-stick. That is no
+   * resize and no mutation — the bar's size and the DOM are both untouched — so nothing else here
+   * notices, and the offset computed when the toast was raised is wrong from then on.
+   */
+  it("re-places when a sticky bar moves without resizing or changing the DOM", async () => {
+    stateViewport(800);
+    const bar = obstacle({ top: 720, bottom: 776 });
+    mounted();
+    act(() => raise("Saved"));
+    expect(tray().style.bottom).toBe("96px");
+
+    // The bar un-sticks and rises. No ResizeObserver callback, no mutation: only a scroll.
+    stateRect(bar, { top: 600, bottom: 656 });
+    await act(async () => {
+      document.dispatchEvent(new Event("scroll"));
+    });
+
+    expect(tray().style.bottom).toBe("216px");
+  });
+
+  /**
+   * The listener has to come off with the last toast, and the only honest way to say so is the
+   * handler's own identity. Asserting that nothing measures afterwards passes whether or not the
+   * listener was removed: the effect's cleanup also sets a flag that suppresses a queued
+   * re-measure, so a leaked listener is absorbed downstream and the test reads the flag rather
+   * than the teardown it names.
+   */
+  it("takes its scroll listener off with the last toast", async () => {
+    vi.useFakeTimers();
+    const added = vi.spyOn(document, "addEventListener");
+    const removed = vi.spyOn(document, "removeEventListener");
+    stateViewport(800);
+    obstacle({ top: 720, bottom: 776 });
+    mounted();
+    act(() => raise("Saved"));
+
+    const listener = added.mock.calls.find(([type]) => type === "scroll")?.[1];
+    expect(listener, "a scroll listener was added while a toast was up").toBeTypeOf("function");
+
+    // The toast's own three seconds. The tray unmounts and the effect bails out.
+    act(() => vi.advanceTimersByTime(3100));
+    expect(screen.queryByTestId("toast-tray")).toBeNull();
+
+    expect(
+      removed.mock.calls.some(([type, fn]) => type === "scroll" && fn === listener),
+      "the same handler was removed"
+    ).toBe(true);
   });
 
   it("goes to the top over a sheet, whatever else is in the corner", () => {

@@ -6,7 +6,15 @@ import { placeToast } from "@/lib/toast-placement";
  * constant, so a regression is a regression against what was actually on screen.
  */
 describe("where a toast may stand", () => {
-  const nothing = { viewportHeight: 800, viewportWidth: 1280, obstacles: [], overASheet: false };
+  // 44 is one line of toast with its padding, which is what every number below was measured
+  // against — so a test that does not care about the height reads as it did before BP-624.
+  const nothing = {
+    viewportHeight: 800,
+    viewportWidth: 1280,
+    obstacles: [],
+    trayHeight: 44,
+    overASheet: false,
+  };
 
   it("keeps the corner when the corner is empty", () => {
     expect(placeToast(nothing)).toEqual({ anchor: "bottom", offset: 16 });
@@ -45,14 +53,74 @@ describe("where a toast may stand", () => {
     ).toEqual({ anchor: "top", offset: 85 });
   });
 
-  it("falls back to the corner when the panel cannot hold the tray below its header", () => {
+  /**
+   * BP-623. The old fixture put the panel at 32-100 against an 800px viewport, where the corner is
+   * six hundred pixels below the panel and no arrangement of this branch could collide with it —
+   * so it passed while the tray was being put back on the composer.
+   *
+   * The numbers are a 215px viewport, worked out rather than picked: the panel is
+   * `min(44rem, 100vh - 8rem)` from `top-8`, so it is 32-119 and its header still ends at 69,
+   * leaving 50px under the header where a one-line tray needs 60. The launcher sits `bottom-6`, so
+   * 135-191. Standing above the launcher alone puts the tray at 75-119 — inside the panel and over
+   * its composer, which is the arrangement BP-597 exists to prevent, reached from the other side.
+   */
+  it("does not put the tray back on the panel it could not stand in", () => {
+    const panelBottom = 119;
+    const headerBottom = 69;
+    const placed = placeToast({
+      ...nothing,
+      viewportHeight: 215,
+      panel: { box: { top: 32, bottom: panelBottom }, headerBottom },
+      obstacles: [{ top: 135, bottom: 191 }],
+    });
+
+    // Where the tray's lower edge ends up. Before, 119 — flush with the panel's bottom, which is
+    // where its composer is; now above the header's end.
+    //
+    // Pinned for this geometry, not asserted as an invariant: with a taller tray on a taller-but-
+    // still-short viewport the clamp takes over and the tray does reach into the header. What the
+    // branch buys is the composer, which is what BP-597 is about — see the note in `placeToast`.
+    const trayBottom = 215 - placed.offset;
+    expect(placed.anchor).toBe("bottom");
+    expect(trayBottom).toBeLessThanOrEqual(headerBottom);
+  });
+
+  it("still stands above the launcher when the panel is not there at all", () => {
+    // The control: the same short viewport without a panel places by the launcher as it always did
     expect(
       placeToast({
         ...nothing,
-        panel: { box: { top: 32, bottom: 100 }, headerBottom: 69 },
-        obstacles: [{ top: 720, bottom: 776 }],
+        viewportHeight: 215,
+        obstacles: [{ top: 135, bottom: 191 }],
       })
     ).toEqual({ anchor: "bottom", offset: 96 });
+  });
+
+  /**
+   * BP-624. `saveAllGroups` raises several at once and one failure sentence wraps on a phone, so
+   * 150-200px is ordinary. The check below used to be asked about 44 and accepted a panel that
+   * could not hold what was actually there.
+   */
+  it("asks the panel about the tray's real height, not one line of it", () => {
+    const panel = { box: { top: 32, bottom: 704 }, headerBottom: 600 };
+
+    // 616 + 44 fits under 704, so a one-line tray stands in the transcript
+    expect(placeToast({ ...nothing, panel })).toEqual({ anchor: "top", offset: 616 });
+    // 616 + 160 does not, so a tall one must not be told it fits
+    expect(placeToast({ ...nothing, panel, trayHeight: 160 }).anchor).toBe("bottom");
+  });
+
+  it("keeps a tall tray's top edge on the screen", () => {
+    // The clamp exists for an obstacle that genuinely reaches the top of the screen. Asked about
+    // 44 while the tray is 160 it allows an offset of 740, putting the tray at -100 to 60: the
+    // top edge is off the top by the difference between the guess and the truth.
+    //
+    // The *top* edge is the one to read. The bottom edge stays on screen either way, so an
+    // assertion on it passes against both numbers and proves nothing.
+    const trayHeight = 160;
+    const placed = placeToast({ ...nothing, trayHeight, obstacles: [{ top: 0, bottom: 700 }] });
+
+    expect(800 - placed.offset - trayHeight).toBeGreaterThanOrEqual(0);
   });
 
   // BP-590: a phone's dialog is a bottom sheet and the top of the screen is what it leaves free
