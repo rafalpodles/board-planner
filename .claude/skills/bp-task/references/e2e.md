@@ -38,6 +38,9 @@ The database name must end in `_e2e`. A run owns `E2E_PORT` through `E2E_PORT+9`
 - A `fill()` before hydration is dropped, and `toHaveValue` cannot tell. Poll on something derived from React state.
 - A save button relabels itself to "Saving…". Waiting for the old label to vanish returns at click time.
 - Two saves share one toast. Sync on the responses; read the toast with `.last()`.
+- `clock.install()` then `pauseAt(Date.now())` fails a few runs in ten: the page's clock starts from the
+  browser's reading and `pauseAt` refuses to go backwards. Pin the origin and pause ahead of it —
+  `const now = Date.now(); await page.clock.install({ time: now }); await page.clock.pauseAt(now + 1_000);`
 - `test.fail()` turns any failure into a pass.
 - When the test types the expected text into the app, scope the locator to the surface only the product writes.
 - Notification writes are fire-and-forget: `toPass` retries, not one load.

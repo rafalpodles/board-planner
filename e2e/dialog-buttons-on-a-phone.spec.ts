@@ -277,8 +277,9 @@ test("a toast still on screen clears the sheet it opens under", async ({ page })
   // A toast lives three seconds on a real timer, and reopening the sheet is a menu, a popover and
   // an option click. `install` alone leaves the clock running; the pair is what stops it, so a
   // loaded machine cannot turn "it expired" into "the fix regressed".
-  await page.clock.install();
-  await page.clock.pauseAt(Date.now());
+  const now = Date.now();
+  await page.clock.install({ time: now });
+  await page.clock.pauseAt(now + 1_000);
 
   await test.step("a refused delete raises the toast", async () => {
     await openDeleteConfirm(page);
@@ -339,8 +340,9 @@ test("a failed post's toast keeps off the Post button and the launcher", async (
   await expect(launcher(page)).toBeVisible();
 
   // The toast's own three seconds must not run out while the geometry is read
-  await page.clock.install();
-  await page.clock.pauseAt(Date.now());
+  const now = Date.now();
+  await page.clock.install({ time: now });
+  await page.clock.pauseAt(now + 1_000);
 
   await page.getByLabel("Add a comment").fill("this will not go through");
   await post.click();
