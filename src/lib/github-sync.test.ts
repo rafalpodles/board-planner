@@ -586,23 +586,29 @@ describe("a sync that learned nothing", () => {
  * is written, who is visited, and what the operator is told.
  */
 describe("what a round of the window may say about a link", () => {
+  type Written = {
+    $set: {
+      linkedPRs: {
+        $concatArrays: [
+          { $filter: { cond: { $or?: [unknown, { $not: [{ $in: [string, number[]] }] }] } } },
+          { $literal: Record<string, unknown>[] },
+        ];
+      };
+    };
+  };
+
   const linkArgs = () =>
     taskUpdateOne.mock.calls.map(([filter, update]) => {
-      const [stage] = update as {
-        $set: {
-          linkedPRs: {
-            $concatArrays: [{ $filter: { cond: { $or: [unknown, { $not: [{ $in: [string, number[]] }] }] } } }, { $literal: Record<string, unknown>[] }];
-          };
-        };
-      }[];
+      const [stage] = update as Written[];
+      const [keep, add] = stage.$set.linkedPRs.$concatArrays;
       return {
         id: (filter as { _id: string })._id,
-        written: stage.$set.linkedPRs.$concatArrays[1].$literal.map((doc) => doc.number),
-        seen: stage.$set.linkedPRs.$concatArrays[0].$filter.cond.$or[1] as { $not: [{ $in: [string, number[]] }] },
+        written: add.$literal.map((doc) => doc.number),
+        // `null` rather than a throw when the write was never told what the round saw: a shape
+        // error reads as a broken test, and the failure this has to report is a product one.
+        seen: keep.$filter.cond.$or ? keep.$filter.cond.$or[1].$not[0].$in[1] : null,
       };
     });
-
-  const seenNumbers = (call: ReturnType<typeof linkArgs>[number]) => call.seen.$not[0].$in[1];
 
   beforeEach(() => {
     fetchPullRequests.mockResolvedValue([openPR]);
@@ -621,7 +627,7 @@ describe("what a round of the window may say about a link", () => {
 
     await syncGithubPullRequests(project(), "u1");
 
-    expect(seenNumbers(linkArgs()[0]).sort((a, b) => a - b)).toEqual([1, 77]);
+    expect(linkArgs()[0].seen?.sort((a, b) => a - b) ?? null).toEqual([1, 77]);
   });
 
   it("does not write a task whose only change would be keeping a link out of the window", async () => {
