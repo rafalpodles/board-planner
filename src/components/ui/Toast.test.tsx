@@ -115,33 +115,12 @@ function Raiser() {
 }
 
 /**
- * Re-measuring is coalesced into one animation frame (BP-622), so a test that dispatches an event
- * and reads the tray in the same tick reads the placement from before it. The frame is driven
- * rather than made synchronous: a stub that ran the callback immediately would assert the
- * behaviour of a build without the coalescing.
+ * Re-measuring is coalesced into one microtask (BP-622), so a test that triggers it and reads the
+ * tray in the same tick reads the placement from before it. `flush` awaits the microtask inside
+ * `act`, which is what the pre-existing tests already did for the MutationObserver's own delivery.
  */
-const frames = new Map<number, FrameRequestCallback>();
-let nextFrame = 0;
-
-function stubFrames() {
-  vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
-    frames.set(++nextFrame, cb);
-    return nextFrame;
-  });
-  vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
-}
-
-/** How many frames were asked for and not yet run — one, however many things asked */
-function pendingFrames() {
-  return frames.size;
-}
-
-function paint() {
-  act(() => {
-    const due = [...frames.values()];
-    frames.clear();
-    due.forEach((cb) => cb(0));
-  });
+async function flush() {
+  await act(async () => {});
 }
 
 /** How many times the placement has read the viewport, which `measure` does once per pass */
@@ -151,7 +130,6 @@ function measurements() {
 }
 
 function mounted() {
-  stubFrames();
   render(
     <ToastProvider>
       <Raiser />
@@ -170,8 +148,6 @@ function trayClasses() {
 afterEach(() => {
   cleanup();
   FakeResizeObserver.live.length = 0;
-  frames.clear();
-  vi.unstubAllGlobals();
   vi.useRealTimers();
   opened.splice(0).forEach((close) => close());
   document
@@ -215,7 +191,7 @@ describe("where a toast lands", () => {
     expect(tray().style.bottom).toBe("16px");
   });
 
-  it("re-measures when the thing in the corner moves", () => {
+  it("re-measures when the thing in the corner moves", async () => {
     stateViewport(800);
     const bar = obstacle({ top: 720, bottom: 776 });
     mounted();
@@ -225,10 +201,9 @@ describe("where a toast lands", () => {
     // The comment bar arrives over 200ms of `max-height`, so the floor measured on the raise is
     // not the one the reader ends up with
     stateRect(bar, { top: 600, bottom: 800 });
-    act(() => {
+    await act(async () => {
       window.dispatchEvent(new Event("resize"));
     });
-    paint();
 
     expect(tray().style.bottom).toBe("216px");
   });
@@ -261,7 +236,6 @@ describe("where a toast lands", () => {
     await act(async () => {
       panel({ top: 32, bottom: 704 }, 69);
     });
-    paint();
 
     expect(tray().style.top).toBe("85px");
   });
@@ -280,8 +254,7 @@ describe("where a toast lands", () => {
     expect(tray().style.bottom).toBe("16px");
 
     stateRect(bar, { top: 600, bottom: 800 });
-    act(() => resized(bar));
-    paint();
+    await act(async () => resized(bar));
 
     expect(tray().style.bottom).toBe("216px");
   });
@@ -310,8 +283,7 @@ describe("where a toast lands", () => {
       document.body.appendChild(card);
     });
 
-    expect(pendingFrames()).toBe(0);
-    paint();
+    await flush();
     expect(measurements()).toBe(before);
   });
 
@@ -325,7 +297,6 @@ describe("where a toast lands", () => {
     await act(async () => {
       panel({ top: 32, bottom: 704 }, 69);
     });
-    paint();
 
     expect(tray().style.top).toBe("85px");
   });
@@ -344,9 +315,8 @@ describe("where a toast lands", () => {
       document.dispatchEvent(new Event("scroll"));
     });
 
-    // Four askers, one frame
-    expect(pendingFrames()).toBe(1);
-    paint();
+    // Four askers, one measurement
+    await flush();
     expect(measurements()).toBe(before + 1);
   });
 
@@ -356,7 +326,7 @@ describe("where a toast lands", () => {
    * resize and no mutation — the bar's size and the DOM are both untouched — so nothing else here
    * notices, and the offset computed when the toast was raised is wrong from then on.
    */
-  it("re-places when a sticky bar moves without resizing or changing the DOM", () => {
+  it("re-places when a sticky bar moves without resizing or changing the DOM", async () => {
     stateViewport(800);
     const bar = obstacle({ top: 720, bottom: 776 });
     mounted();
@@ -365,15 +335,14 @@ describe("where a toast lands", () => {
 
     // The bar un-sticks and rises. No ResizeObserver callback, no mutation: only a scroll.
     stateRect(bar, { top: 600, bottom: 656 });
-    act(() => {
+    await act(async () => {
       document.dispatchEvent(new Event("scroll"));
     });
-    paint();
 
     expect(tray().style.bottom).toBe("216px");
   });
 
-  it("does not listen for scrolls once the toast has gone", () => {
+  it("does not listen for scrolls once the toast has gone", async () => {
     vi.useFakeTimers();
     stateViewport(800);
     const bar = obstacle({ top: 720, bottom: 776 });
@@ -385,13 +354,13 @@ describe("where a toast lands", () => {
     expect(screen.queryByTestId("toast-tray")).toBeNull();
 
     stateRect(bar, { top: 600, bottom: 656 });
-    act(() => {
+    const before = measurements();
+    await act(async () => {
       document.dispatchEvent(new Event("scroll"));
     });
 
-    // Nothing asked for a frame, because the effect's bail-out tore the listener down with the
-    // last toast
-    expect(pendingFrames()).toBe(0);
+    // Nothing measured, because the effect's bail-out tore the listener down with the last toast
+    expect(measurements()).toBe(before);
   });
 
   it("goes to the top over a sheet, whatever else is in the corner", () => {

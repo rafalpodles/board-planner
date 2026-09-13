@@ -129,15 +129,26 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         return was.anchor === now.anchor && was.offset === now.offset ? was : now;
       });
 
-    // Coalesced: `measure` forces a synchronous layout, and the things that ask for it arrive in
-    // bursts — a resize drag, a pinned bar's 200ms `max-height`, a scroll. One frame, one layout,
-    // however many asked (BP-622).
-    let frame = 0;
+    // Coalesced: `measure` forces a synchronous layout, and the things that ask for it arrive
+    // together — a MutationObserver delivers a batch of records as one callback, a resize and a
+    // scroll land in the same tick, several observers fire in sequence. One layout, however many
+    // asked (BP-622).
+    //
+    // A microtask rather than `requestAnimationFrame`, though a placement is a paint concern and
+    // the frame is the tempting primitive: a frame is not guaranteed to arrive. It does not in a
+    // hidden tab, and it does not under a frozen clock — `toast-finds-its-place.spec.ts` freezes
+    // time so the toast's own three seconds cannot expire while the panel is opened over it, and
+    // with the work deferred to a frame the tray never moved off the composer at all. Deferring
+    // correctness to something that may never run is the wrong trade for a burst that is, in
+    // practice, one tick wide.
+    let queued = false;
+    let gone = false;
     const remeasure = () => {
-      if (frame) return;
-      frame = requestAnimationFrame(() => {
-        frame = 0;
-        measureNow();
+      if (queued) return;
+      queued = true;
+      queueMicrotask(() => {
+        queued = false;
+        if (!gone) measureNow();
       });
     };
     measureNow();
@@ -148,7 +159,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       return () => {
         window.removeEventListener("resize", remeasure);
         document.removeEventListener("scroll", remeasure, { capture: true });
-        if (frame) cancelAnimationFrame(frame);
+        gone = true;
       };
     }
 
@@ -210,7 +221,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       arrivals.disconnect();
       window.removeEventListener("resize", remeasure);
       document.removeEventListener("scroll", remeasure, { capture: true });
-      if (frame) cancelAnimationFrame(frame);
+      gone = true;
     };
   }, [toasts.length, overASheet]);
 
