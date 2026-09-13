@@ -64,6 +64,13 @@ export function placeToast(around: Surroundings): Placement {
   // still the thing the tray must not cover, so it becomes an obstacle rather than nothing at all.
   // Falling through to the corner was the defect BP-597 exists to prevent, arrived at from the
   // other side: on a short viewport the corner *is* inside the panel, over its composer (BP-623).
+  //
+  // This buys the composer, not the whole panel, and on a short enough viewport that is all there
+  // is to buy. Standing above a panel that starts at 32 needs 32px of room, so the clamp below
+  // takes over and the tray ends up against the top of the screen — which on a landscape phone
+  // with several toasts up is the panel's header. Deliberate: the header carries the panel's own
+  // ⤢ and ✕, the composer carries Send, and a toast over Send is the thing this file exists to
+  // prevent. A viewport that short has no placement that covers nothing.
   const corner = [...around.obstacles];
   if (around.panel) {
     const under = around.panel.headerBottom + GAP;

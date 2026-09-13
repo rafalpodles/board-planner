@@ -342,25 +342,33 @@ describe("where a toast lands", () => {
     expect(tray().style.bottom).toBe("216px");
   });
 
-  it("does not listen for scrolls once the toast has gone", async () => {
+  /**
+   * The listener has to come off with the last toast, and the only honest way to say so is the
+   * handler's own identity. Asserting that nothing measures afterwards passes whether or not the
+   * listener was removed: the effect's cleanup also sets a flag that suppresses a queued
+   * re-measure, so a leaked listener is absorbed downstream and the test reads the flag rather
+   * than the teardown it names.
+   */
+  it("takes its scroll listener off with the last toast", async () => {
     vi.useFakeTimers();
+    const added = vi.spyOn(document, "addEventListener");
+    const removed = vi.spyOn(document, "removeEventListener");
     stateViewport(800);
-    const bar = obstacle({ top: 720, bottom: 776 });
+    obstacle({ top: 720, bottom: 776 });
     mounted();
     act(() => raise("Saved"));
-    // The toast's own three seconds. The tray unmounts, and the effect's bail-out takes the
-    // listeners with it.
+
+    const listener = added.mock.calls.find(([type]) => type === "scroll")?.[1];
+    expect(listener, "a scroll listener was added while a toast was up").toBeTypeOf("function");
+
+    // The toast's own three seconds. The tray unmounts and the effect bails out.
     act(() => vi.advanceTimersByTime(3100));
     expect(screen.queryByTestId("toast-tray")).toBeNull();
 
-    stateRect(bar, { top: 600, bottom: 656 });
-    const before = measurements();
-    await act(async () => {
-      document.dispatchEvent(new Event("scroll"));
-    });
-
-    // Nothing measured, because the effect's bail-out tore the listener down with the last toast
-    expect(measurements()).toBe(before);
+    expect(
+      removed.mock.calls.some(([type, fn]) => type === "scroll" && fn === listener),
+      "the same handler was removed"
+    ).toBe(true);
   });
 
   it("goes to the top over a sheet, whatever else is in the corner", () => {

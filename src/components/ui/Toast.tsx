@@ -41,8 +41,12 @@ let nextId = 0;
  * `toast-placement.ts`; this reads the rectangles and applies the answer.
  */
 const OBSTACLES = "[data-corner-obstacle],[data-pinned-bottom-bar],[data-pinned-phone-bar]";
-/** Everything `measure` reads, in one selector so the observer cannot drift from the watch */
-const CORNER = `${OBSTACLES},[data-corner-panel]`;
+/**
+ * Everything `measure` reads, in one selector so the observer cannot drift from the watch. The
+ * panel's header is in it because `measure` takes `headerBottom` from it, and a selector that
+ * claimed to be complete while missing one would be the drift it exists to prevent.
+ */
+const CORNER = `${OBSTACLES},[data-corner-panel],[data-corner-panel-header]`;
 
 function measure(overASheet: boolean, trayHeight: number): Surroundings {
   const panel = document.querySelector<HTMLElement>("[data-corner-panel]");
