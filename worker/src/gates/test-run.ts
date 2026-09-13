@@ -1,5 +1,6 @@
 import { CommandResult, Runner } from "../exec.js";
 import { Gate } from "../types.js";
+import { runConfinedNpm } from "./confined-npm.js";
 
 const MAX_REASON_CHARS = 2000;
 
@@ -13,7 +14,13 @@ export function testRunGate(runner: Runner, timeoutMs: number): Gate {
   return {
     name: "test-run",
     async run({ worktreePath, signal }) {
-      const result = await runner.run("npm", ["test"], { cwd: worktreePath, timeoutMs, signal });
+      // Confined, because this is the command that runs the agent's own code: a test file the
+      // Implement step wrote is inside the worktree, so the agent's sandbox permitted writing it,
+      // and this is where it executes (BP-608).
+      const result = await runConfinedNpm(runner, ["test"], { cwd: worktreePath, timeoutMs, signal });
+      if ("refusal" in result) {
+        return { ok: false, reason: `the test suite could not be run confined: ${result.refusal}` };
+      }
 
       if (result.timedOut) {
         return { ok: false, reason: `the test suite timed out after ${timeoutMs}ms` };

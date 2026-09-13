@@ -1,10 +1,28 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { testRunGate } from "./test-run.js";
 import { CommandResult, Runner } from "../exec.js";
 import { GateContext } from "../types.js";
 import { claimedTask } from "../__fixtures__/task.js";
+import { SANDBOX_COMMAND, UNCONFINED_REASON } from "../sandbox.js";
 
 const TIMEOUT_MS = 5000;
+
+// A real directory, because the gate confines itself to it since BP-608 and seatbelt matches the
+// resolved path — a name that does not exist cannot be resolved, and reads as a machine that
+// cannot confine anything.
+let worktree = "";
+
+beforeEach(() => {
+  worktree = mkdtempSync(join(tmpdir(), "bp608-test-run-"));
+  context.worktreePath = worktree;
+});
+
+afterEach(() => {
+  rmSync(worktree, { recursive: true, force: true });
+});
 
 const context: GateContext = {
   worktreePath: "/wt",
@@ -86,8 +104,61 @@ describe("testRunGate", () => {
 
     await testRunGate(runner, TIMEOUT_MS).run(context);
 
-    expect(run).toHaveBeenCalledWith("npm", ["test"], expect.objectContaining({ cwd: "/wt" }));
-    expect(run.mock.calls[0][2].timeoutMs).toBe(TIMEOUT_MS);
+    const [command, args, opts] = run.mock.calls[0];
+    expect(command).toBe(SANDBOX_COMMAND);
+    expect(args.slice(-2)).toEqual(["npm", "test"]);
+    expect(opts.cwd).toBe(worktree);
+    expect(opts.timeoutMs).toBe(TIMEOUT_MS);
+  });
+
+  /**
+   * BP-608. The agent's own tools are confined, so an Implement step writes its escape as a *test*
+   * — inside the worktree, which the sandbox permits, and exactly what the Test-presence gate asks
+   * for — and this is the command that executes it as the worker's uid.
+   */
+  it("confines the suite to the worktree and a temp directory, and to nothing else", async () => {
+    const { runner, run } = runnerReturning(ok);
+
+    await testRunGate(runner, TIMEOUT_MS).run(context);
+
+    const args = run.mock.calls[0][1];
+    const writable = args.filter((_, index) => args[index - 1] === "-D");
+    expect(writable).toEqual([
+      `W0=${realpathSync(worktree)}`,
+      // This run's own scratch directory, inside the machine's temp tree and gone when the
+      // command ends — not the whole of `/var/folders`, which every process of this user writes to
+      expect.stringMatching(/^W1=.*cp-gate-/),
+    ]);
+  });
+
+  // The npm cache is the install's, and only the install's: this is the command that runs the
+  // agent's code, and a cache it can write is one a later run installs from.
+  it("is not given the npm cache", async () => {
+    const { runner, run } = runnerReturning(ok);
+
+    await testRunGate(runner, TIMEOUT_MS).run(context);
+
+    const args = run.mock.calls[0][1];
+    expect(args.filter((_, index) => args[index - 1] === "-D")).toHaveLength(2);
+    expect(run.mock.calls[0][2].env?.npm_config_cache).toBeTruthy();
+  });
+
+  // A machine that cannot confine refuses the gate rather than running the suite unconfined —
+  // the same call the implementer step and the review gate make, for the same reason.
+  it("refuses rather than running the suite unconfined", async () => {
+    const { runner, run } = runnerReturning(ok);
+    const real = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+
+    try {
+      const result = await testRunGate(runner, TIMEOUT_MS).run(context);
+
+      expect(result.ok).toBe(false);
+      expect(result.reason).toContain(UNCONFINED_REASON);
+      expect(run).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(process, "platform", real);
+    }
   });
 
   it("passes the signal through to the runner, so a stop can kill the suite", async () => {

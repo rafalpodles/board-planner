@@ -250,10 +250,18 @@ and `SIGINT` both finish the task in flight before the loop exits.
   `protected-paths` cannot match a path it is never given. `~/.zshrc`,
   `~/Library/LaunchAgents/*.plist` and `~/.gitconfig` were the same escape with different timing.
 
-  **What it does not close.** The gates: `npm ci`, `npm run build` and `npm test` run in the worktree
-  and outside this profile, so a step that writes a test which writes to your home, followed by a
-  Test gate that runs it, still reaches outside — the same chain in two moves instead of one
-  (**BP-608**). Writes a *daemon* performs on a spawned process's behalf: `(allow default)` leaves
+  **The npm gates are inside it too** (**BP-608**). `npm ci`, `npm run build` and `npm test` run
+  agent-written code — a test file is exactly what an Implement step is asked to write — so a step
+  that wrote a test which writes to your home, followed by a Test gate that ran it, reached outside
+  in two moves. Each command now gets the worktree and a scratch directory of its own (handed to it
+  as `TMPDIR`, so `os.tmpdir()` and `mktemp` find it), and nothing else; the install also gets a
+  **per-worker npm cache** under the temp directory, or wherever `CP_NPM_CACHE` points, never your
+  own `~/.npm`. What that leaves: the cache is shared between runs on this machine, so a package an
+  agent could get written into it is one a later run installs — npm verifies tarball integrity
+  against the lockfile, which bounds it, and your own cache is out of reach either way. A machine
+  that cannot confine refuses the gate rather than running it unconfined.
+
+  **What it does not close.** Writes a *daemon* performs on a spawned process's behalf: `(allow default)` leaves
   `process-exec` and `mach-lookup` open, and `defaults write` makes cfprefsd write a plist outside
   the worktree, measured. Today that one is closed by the `--tools` list giving the agent no shell,
   not by the kernel, so a future capability that yields process execution has to close it in the

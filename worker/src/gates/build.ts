@@ -1,5 +1,6 @@
 import { CommandResult, Runner } from "../exec.js";
 import { Gate } from "../types.js";
+import { runConfinedNpm } from "./confined-npm.js";
 
 const MAX_REASON_CHARS = 2000;
 // --ignore-scripts: a lifecycle script from the worktree or any dependency would run as the
@@ -19,7 +20,16 @@ export function buildGate(runner: Runner, timeoutMs: number): Gate {
       const deadline = Date.now() + timeoutMs;
 
       // a worktree is a fresh checkout with no node_modules — skip this and every build fails with "next: command not found"
-      const install = await runner.run("npm", INSTALL_ARGS, { cwd: worktreePath, timeoutMs, signal });
+      // The one command allowed the npm cache, and the reason `confined-npm.ts` has a cache at all
+      const install = await runConfinedNpm(runner, INSTALL_ARGS, {
+        cwd: worktreePath,
+        timeoutMs,
+        signal,
+        withCache: true,
+      });
+      if ("refusal" in install) {
+        return { ok: false, reason: `the dependency install could not be run confined: ${install.refusal}` };
+      }
       if (install.timedOut) {
         return { ok: false, reason: `dependency install timed out after ${timeoutMs}ms` };
       }
@@ -39,11 +49,16 @@ export function buildGate(runner: Runner, timeoutMs: number): Gate {
         };
       }
 
-      const build = await runner.run("npm", ["run", "build"], {
+      // No cache: the install has already filled node_modules, and this runs the worktree's own
+      // build script — agent-written, like the tests
+      const build = await runConfinedNpm(runner, ["run", "build"], {
         cwd: worktreePath,
         timeoutMs: remainingMs,
         signal,
       });
+      if ("refusal" in build) {
+        return { ok: false, reason: `the build could not be run confined: ${build.refusal}` };
+      }
       if (build.timedOut) {
         return {
           ok: false,
