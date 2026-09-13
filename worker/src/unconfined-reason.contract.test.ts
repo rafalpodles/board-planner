@@ -64,6 +64,18 @@ describe("what the server reads an older worker's sandbox check by", () => {
     expect(route()).toContain(UNCONFINED_ESCAPE_HATCH);
   });
 
+  /**
+   * The forward half of the same contract: the route recognises an older worker by the marker
+   * *inside* the detail, and today the detail carries it only because it is built from that
+   * constant. A reword that drops the literal name — "the unconfined escape hatch is set — …" —
+   * would leave every other assertion here green while the recompute quietly stopped matching
+   * (found in review). What older released binaries froze is not testable from here, and has
+   * always led with the name.
+   */
+  it("is carried by the detail a machine with the hatch set reports", () => {
+    expect(UNCONFINED_ACCEPTED_DETAIL).toContain(UNCONFINED_ESCAPE_HATCH);
+  });
+
   it("names the check whose detail carries it", () => {
     // `SANDBOX_CHECK` in preflight.ts, and the name the report is keyed by on both sides
     expect(route()).toContain('"sandbox"');
