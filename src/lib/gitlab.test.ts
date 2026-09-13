@@ -107,6 +107,20 @@ describe("matchMRsToTasks", () => {
     const [matched] = matchMRsToTasks([mr({ branch: "bp-11/a", title: "BP-22 b" })], "BP");
     expect(matched.matchedTaskNumber).toBe(11);
   });
+
+  // BP-611, the GitLab half. The same regex was built twice; the hole was in both copies, and
+  // both now come from `projectKeyPattern`.
+  it("does not find the key inside a longer word", () => {
+    const matched = matchMRsToTasks(
+      [mr({ branch: "feat/websubp-99", title: "BP-5 real work" })],
+      "BP"
+    );
+    expect(matched.map((m) => m.matchedTaskNumber)).toEqual([5]);
+  });
+
+  it("still matches the key after a separator", () => {
+    expect(matchMRsToTasks([mr({ branch: "feat/bp-7/slug" })], "BP")).toHaveLength(1);
+  });
 });
 
 describe("parseGitlabRepo", () => {
