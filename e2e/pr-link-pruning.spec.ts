@@ -1,5 +1,6 @@
-import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
+import { test, expect, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import mongoose from "mongoose";
+import { logActivity } from "@/lib/activity";
 import { GITHUB_STUB_URL } from "../playwright.config";
 import { ADMIN_AUTH } from "./api";
 import {
@@ -66,6 +67,18 @@ async function linksOn(request: APIRequestContext, taskNumber: number): Promise<
   return (task.linkedPRs ?? []).map((link: { number: number }) => link.number).sort(
     (a: number, b: number) => a - b
   );
+}
+
+/** The task's History tab, once its rows are in — the empty line is also the loading state. */
+async function openHistory(page: Page, taskNumber: number): Promise<Locator> {
+  await page.goto(`/projects/${PROJECT_KEY}/tasks/${taskNumber}`);
+  await page.getByRole("tab", { name: /^History/ }).click();
+  const panel = page.locator("#task-panel-history");
+  await expect(panel).toBeVisible();
+  await expect(panel.getByText("No history yet")).toBeHidden();
+  const showAll = page.getByRole("button", { name: /Show all \d+ entries/ });
+  if (await showAll.isVisible()) await showAll.click();
+  return panel;
 }
 
 async function openTheTask(page: Page, taskNumber: number, title: string) {
@@ -182,4 +195,164 @@ test("a link stored before the provider field existed is pruned too", async ({ r
   expect(await linksOn(request, SIBLING_TASK_NUMBER)).toEqual([]);
   expect(await linksOn(request, DECOY_TASK_NUMBER)).toEqual([41]);
   expect(result.prsUnlinked).toBe(1);
+});
+
+/**
+ * BP-631. `seen` used to be bare numbers, and a number is only unique inside one repository. A
+ * project repointed at a different repository therefore had the *old* one's links pruned by the
+ * new one's numbers — a real pull request, deleted over a collision the round never observed.
+ *
+ * Driven against a real database because the rule lives in three places that have to agree: the
+ * `$filter` in the pipeline, the counting in `pr-links.ts`, and the query that finds the tasks a
+ * round contradicts without visiting.
+ */
+test("a repointed project keeps the previous repository's pull request", async ({
+  page,
+  request,
+}) => {
+  const handle = await db();
+  const task = await handle
+    .collection("tasks")
+    .findOne({ project: new mongoose.Types.ObjectId(PROJECT_ID), taskNumber: SIBLING_TASK_NUMBER });
+  await handle.collection("tasks").updateOne(
+    { _id: task!._id },
+    {
+      $set: {
+        linkedPRs: [
+          {
+            _id: new mongoose.Types.ObjectId(),
+            provider: "github",
+            number: 41,
+            title: "Opened before the project moved",
+            state: "open",
+            url: "https://github.com/example/previous/pull/41",
+            mergedAt: null,
+            updatedAt: new Date("2026-08-01T00:00:00Z"),
+          },
+        ],
+      },
+    }
+  );
+
+  // The project now names a different repository, and its 41 is a different pull request
+  await github(request, [pull(41, `${PROJECT_KEY}-${DECOY_TASK_NUMBER}/mine`)]);
+  const result = await syncNow(request);
+
+  expect(result.prsUnlinked).toBe(0);
+  expect(await linksOn(request, SIBLING_TASK_NUMBER)).toEqual([41]);
+  // The control: the round was not a no-op — it gave its own 41 to the task its branch names
+  expect(await linksOn(request, DECOY_TASK_NUMBER)).toEqual([41]);
+
+  await signIn(page);
+  await openTheTask(page, SIBLING_TASK_NUMBER, SIBLING_TASK_TITLE);
+  await expect(
+    page.getByRole("link", { name: /#41/ })
+  ).toHaveAttribute("href", "https://github.com/example/previous/pull/41");
+});
+
+/**
+ * BP-628 and BP-632. `updatedAt` stopped moving on a link change, no webhook fires from either
+ * sync route, and no row was written — so a link arriving on a task, or leaving it, left the task
+ * itself saying nothing. This is the row, read off the screen a person would look at.
+ */
+test("a link arriving and leaving is written into the task's own history", async ({
+  page,
+  request,
+}) => {
+  await github(request, [pull(77, `${PROJECT_KEY}-${SIBLING_TASK_NUMBER}/first`)]);
+  await syncNow(request);
+
+  await signIn(page);
+  let history = await openHistory(page, SIBLING_TASK_NUMBER);
+  await expect(
+    history.getByText(`E2E Admin linked github.com/example/board/pull/77`)
+  ).toBeVisible();
+
+  // Retitled onto another task: the link leaves, which is the direction with nowhere else to look
+  await github(request, [
+    pull(77, "feat/no-key-at-all", { title: `${PROJECT_KEY}-${DECOY_TASK_NUMBER} moved` }),
+  ]);
+  expect((await syncNow(request)).prsUnlinked).toBe(1);
+
+  history = await openHistory(page, SIBLING_TASK_NUMBER);
+  await expect(
+    history.getByText(`E2E Admin unlinked github.com/example/board/pull/77`)
+  ).toBeVisible();
+  // And the row it left on the task that gained it
+  const gained = await openHistory(page, DECOY_TASK_NUMBER);
+  await expect(
+    gained.getByText(`E2E Admin linked github.com/example/board/pull/77`)
+  ).toBeVisible();
+});
+
+/**
+ * The control for both rows above: a round that changes no link writes no history. Without it,
+ * a sync that wrote a row on every tick would pass the two tests above and bury the task's real
+ * history under "the sync looked again" five minutes apart.
+ */
+test("a round that only looked again writes nothing", async ({ page, request }) => {
+  const branch = `${PROJECT_KEY}-${SIBLING_TASK_NUMBER}/first`;
+  await github(request, [pull(78, branch)]);
+  await syncNow(request);
+
+  // The second round changes the pull request's title, so the task IS written — the badge's text
+  // is part of what a link stores. What must not follow is a second "linked" row: the link did
+  // not arrive twice. A round that was byte-identical would prove nothing here, because
+  // `unchanged` skips the write entirely and nothing downstream of it runs (BP-443).
+  await github(request, [pull(78, branch, { title: "Renamed upstream" })]);
+  await syncNow(request);
+
+  await signIn(page);
+  const history = await openHistory(page, SIBLING_TASK_NUMBER);
+
+  await expect(
+    history.getByText(`E2E Admin linked github.com/example/board/pull/78`)
+  ).toHaveCount(1);
+  // The control: the round did reach this task, and the row carries what the second round said
+  await openTheTask(page, SIBLING_TASK_NUMBER, SIBLING_TASK_TITLE);
+  await expect(page.getByRole("link", { name: /#78 Renamed upstream/ })).toBeVisible();
+});
+
+/**
+ * The row a **scheduled** round leaves, which is the one with no person to name (BP-628, BP-632).
+ *
+ * The tick cannot be driven from a browser — it runs on an interval inside the server — so what is
+ * driven here is everything the tick's row passes through afterwards: a schema that used to
+ * require a user, `logActivity`'s own catch, which would have swallowed the refusal in silence,
+ * the route that populates the reference, and the sentence the panel builds from an absence that
+ * looks exactly like a deleted account.
+ */
+test("a row the scheduled sync wrote names the sync, not Unknown", async ({ page }) => {
+  const handle = await db();
+  const task = await handle
+    .collection("tasks")
+    .findOne({ project: new mongoose.Types.ObjectId(PROJECT_ID), taskNumber: SIBLING_TASK_NUMBER });
+
+  await logActivity(
+    String(task!._id),
+    null,
+    "pr_unlinked",
+    "linkedPRs",
+    `${REPO}/pull/91`,
+    ""
+  );
+
+  await signIn(page);
+  const history = await openHistory(page, SIBLING_TASK_NUMBER);
+
+  await expect(
+    history.getByText("The repository sync unlinked github.com/example/board/pull/91")
+  ).toBeVisible();
+  // The control: a deleted author is the same absence in the database and must still read as one
+  await handle.collection("activitylogs").insertOne({
+    task: task!._id,
+    user: null,
+    action: "comment_added",
+    field: "",
+    oldValue: "",
+    newValue: "",
+    createdAt: new Date(),
+  });
+  const again = await openHistory(page, SIBLING_TASK_NUMBER);
+  await expect(again.getByText("Unknown added a comment")).toBeVisible();
 });

@@ -1,4 +1,5 @@
 import { escapeRegex } from "./escape-regex";
+import { githubApiBase } from "./github-host";
 import { MAX_RESPONSE_BYTES, readBoundedJson, readBoundedText, safeFetch } from "@/lib/safe-fetch";
 
 /**
@@ -28,7 +29,7 @@ interface GitHubPR {
 // the sync was the one integration no browser test could drive, so `e2e/seed.ts` planted its
 // results by hand instead. Read per call, never per project — an operator sets where GitHub is,
 // and a project naming its own host would be a request forgery with a token attached.
-const API_BASE = () => process.env.GITHUB_API_BASE_URL || "https://api.github.com";
+const API_BASE = githubApiBase;
 
 /**
  * What continuous integration says about a pull request's head commit.

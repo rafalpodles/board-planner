@@ -8,7 +8,13 @@ import { logActivity } from "@/lib/activity";
 import { decryptSecret } from "@/lib/encryption";
 import { mergedReviewDestination } from "@/lib/columns";
 import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
-import { droppedCount, writeProviderLinks } from "@/lib/pr-links";
+import {
+  addedLinks,
+  recordLinkChanges,
+  removedLinks,
+  seenUrls,
+  writeProviderLinks,
+} from "@/lib/pr-links";
 
 export const POST = withProjectAccess(async (_request, { params, user }) => {
   const { projectId } = await params;
@@ -63,10 +69,14 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
 
   // Every merge request this round saw, matched or not. The fetch is a window — a hundred by
   // `updated_at`, no paging — so a link the round did not see is unknown rather than gone, while
-  // one it saw and gave to somebody else is a fact (BP-610, BP-617).
-  const seen = new Set(matchedMRs.map((mr) => mr.number));
-  for (const mr of rawMRs) seen.add(mr.iid);
-  const seenList = [...seen];
+  // one it saw and gave to somebody else is a fact (BP-610, BP-617). Named by url, so a repointed
+  // project's numbers do not contradict the old repository's links (BP-631).
+  const seenList = seenUrls(
+    "gitlab",
+    repositoryUrl,
+    rawMRs.map((mr) => ({ number: mr.iid, url: mr.web_url }))
+  );
+  const seen = new Set(seenList);
 
   let linked = 0;
   let unlinked = 0;
@@ -89,8 +99,17 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
     // In the database rather than in JS, for the reason its GitHub twin carries: two overlapping
     // syncs of one task meant the later save dropped whatever the earlier one had added (BP-559).
     // Dates are built above, because a pipeline update is not cast by Mongoose.
-    unlinked += droppedCount(task.linkedPRs, "gitlab", seen, new Set(mrs.map((mr) => mr.number)));
+    const added = addedLinks(task.linkedPRs, "gitlab", mrDocs);
+    const removed = removedLinks(
+      task.linkedPRs,
+      "gitlab",
+      seen,
+      new Set(mrDocs.map((doc) => doc.url))
+    );
     await writeProviderLinks(task._id, "gitlab", mrDocs, seenList);
+    // The trace a link change leaves on the task, since nothing else does any more (BP-628)
+    await recordLinkChanges(task._id, String(user._id), added, removed);
+    unlinked += removed.length;
     linked += mrs.length;
 
     const hasMerged = mrs.some((mr) => mr.state === "merged");
@@ -114,17 +133,18 @@ export const POST = withProjectAccess(async (_request, { params, user }) => {
   // leaves its old task's grouping, so that task is never in the loop above and its stale link
   // survived every later sync (BP-610). `provider: null` is not in the query here — an unmarked
   // link is GitHub's, and a GitLab sync must not adopt it.
-  if (seen.size > 0) {
+  if (seenList.length > 0) {
     const contradicted = await Task.find({
       project: projectId,
-      linkedPRs: { $elemMatch: { number: { $in: seenList }, provider: "gitlab" } },
+      linkedPRs: { $elemMatch: { url: { $in: seenList }, provider: "gitlab" } },
     });
     for (const task of contradicted) {
       if (mrsByTask.has(task.taskNumber)) continue;
-      const dropping = droppedCount(task.linkedPRs, "gitlab", seen, new Set());
-      if (dropping === 0) continue;
+      const removed = removedLinks(task.linkedPRs, "gitlab", seen, new Set());
+      if (removed.length === 0) continue;
       await writeProviderLinks(task._id, "gitlab", [], seenList);
-      unlinked += dropping;
+      await recordLinkChanges(task._id, String(user._id), [], removed);
+      unlinked += removed.length;
     }
   }
 

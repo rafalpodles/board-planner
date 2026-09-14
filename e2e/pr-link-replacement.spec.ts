@@ -26,12 +26,14 @@ async function db() {
 let nextNumber = 900_000 + Math.floor(Math.random() * 90_000);
 const created: mongoose.Types.ObjectId[] = [];
 
+const urlOf = (number: number) => `https://example.test/${number}`;
+
 function link(provider: "github" | "gitlab" | null, number: number) {
   const doc: Record<string, unknown> = {
     number,
     title: `PR ${number}`,
     state: "open",
-    url: `https://example.test/${number}`,
+    url: urlOf(number),
     mergedAt: null,
     updatedAt: new Date("2026-08-01T00:00:00Z"),
   };
@@ -64,14 +66,16 @@ async function apply(
   _id: mongoose.Types.ObjectId,
   provider: "github" | "gitlab",
   docs: Record<string, unknown>[],
-  // What the round saw. Defaulting to the numbers being written keeps every test written before
-  // BP-617 saying what it said: a round that saw exactly what it wrote.
+  // What the round saw, given as numbers the way the tickets talk about them. Defaulting to the
+  // numbers being written keeps every test written before BP-617 saying what it said: a round
+  // that saw exactly what it wrote. `link()` builds the address from the number, so this is the
+  // same round expressed in the urls the sync now carries (BP-631).
   seen: number[] = docs.map((doc) => doc.number as number)
 ) {
   await db();
   // Through the model, exactly as the routes issue it: Mongoose refuses a pipeline update
   // without `updatePipeline`, and every unit test in this repo mocks the model away.
-  await writeProviderLinks(_id, provider, docs, seen);
+  await writeProviderLinks(_id, provider, docs, seen.map(urlOf));
 }
 
 async function linksOf(_id: mongoose.Types.ObjectId) {
@@ -262,4 +266,27 @@ test("each link keeps the subdocument id the API type promises", async () => {
   // `save()` used to mint these; a pipeline stores exactly what it is handed, and
   // `ApiLinkedPR._id` is declared required.
   expect((await linksOf(_id))[0]._id).toBeInstanceOf(mongoose.Types.ObjectId);
+});
+
+/**
+ * A stored link with no `url` is a shape the schema forbids and only the two syncs write, so it
+ * should not exist — but the first loop finds its task by `taskNumber` rather than by the url
+ * query, so such a link reaches the pipeline anyway. Keeping it is the safe direction for
+ * something nothing can identify, and it is the direction the url-keyed rule takes: a missing
+ * field is not one of the strings the round saw.
+ *
+ * Only a real database can answer that. The first version of the filter wrapped the url in
+ * `$ifNull` to make it explicit; this test is what showed the guard changed nothing, so it went.
+ */
+test("a link stored without an address is kept, not silently dropped", async () => {
+  const _id = await taskWith([
+    { provider: "github", number: 50, title: "No address", state: "open" },
+  ]);
+
+  await apply(_id, "github", [link("github", 51)], [50, 51]);
+
+  // The round claims to have seen 50 — under the old rule, by number, that is a contradiction.
+  // By address it is not, because this link has none to contradict.
+  expect((await linksOf(_id)).map((l) => l.number).sort((a, b) => (a as number) - (b as number)))
+    .toEqual([50, 51]);
 });

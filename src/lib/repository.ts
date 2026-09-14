@@ -2,6 +2,8 @@
 // are still read as a fallback so the app works against a database the migration has not run on
 // yet — see scripts/migrate-repository-url.ts.
 
+import { githubWebBase } from "./github-host";
+
 export type RepositoryProvider = "github" | "gitlab" | "";
 
 export interface RepositoryFields {
@@ -62,7 +64,7 @@ export function repositoryUrlCandidates(project: RepositoryFields): string[] {
   const github = project.githubRepo?.trim();
   const gitlab = project.gitlabRepo?.trim();
   return [
-    github ? absolute(github, "https://github.com") : "",
+    github ? absolute(github, githubWebBase()) : "",
     gitlab ? absolute(gitlab, project.gitlabHost?.trim() || "https://gitlab.com") : "",
   ].filter(Boolean);
 }
@@ -71,8 +73,12 @@ export function projectRepositoryUrl(project: RepositoryFields): string {
   const explicit = project.repositoryUrl?.trim();
   if (explicit) return explicit;
 
+  // Not the literal github.com: an instance pointed at GitHub Enterprise reads its pull requests
+  // from the corporate host, and a legacy `githubRepo` resolved to github.com is a link to a
+  // repository somebody else owns — and, through `repositoryProvider` below, a sync that refuses
+  // to run (BP-634).
   const github = project.githubRepo?.trim();
-  if (github) return absolute(github, "https://github.com");
+  if (github) return absolute(github, githubWebBase());
 
   const gitlab = project.gitlabRepo?.trim();
   if (gitlab) return absolute(gitlab, project.gitlabHost?.trim() || "https://gitlab.com");
@@ -93,6 +99,12 @@ export function repositoryProvider(project: RepositoryFields): RepositoryProvide
 
   const configured = hostOf(project.gitlabHost);
   if (configured && configured === host) return "gitlab";
+
+  // This instance's own GitHub, when it is not github.com. Last, so a project that went to the
+  // trouble of naming a self-hosted GitLab keeps it even if the two hosts somehow coincide: a
+  // per-project hint beats an instance-wide default.
+  const instance = hostOf(githubWebBase());
+  if (instance && instance === host) return "github";
 
   return "";
 }

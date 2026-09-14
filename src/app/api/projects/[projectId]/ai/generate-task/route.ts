@@ -8,14 +8,31 @@ import { choiceFieldsForPrompt, resolveGeneratedFields } from "@/lib/ai-fields";
 import { getSettings } from "@/models/settings";
 import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
 
-async function fetchReadme(githubRepo: string): Promise<string | undefined> {
+export async function fetchReadme(githubRepo: string): Promise<string | undefined> {
   if (!githubRepo) return undefined;
 
-  // Support both "owner/repo" and full URL formats
-  const ownerRepo = githubRepo
-    .replace(/^https?:\/\/github\.com\//, "")
-    .replace(/\.git$/, "")
-    .trim();
+  const trimmed = githubRepo.trim().replace(/\/+$/, "").replace(/\.git$/, "");
+
+  // Every spelling `repositoryUrl` accepts, because each carries the host somewhere different —
+  // and an ssh remote is the one that hides it from a `https?://` test, so `git@github.com:o/r`
+  // was pasted into the url whole (found by probing this function rather than by reading it).
+  const ssh = /^[^/]+@([^/:]+):(.+)$/.exec(trimmed);
+  const named = ssh?.[1] ?? /^https?:\/\/([^/]+)/i.exec(trimmed)?.[1] ?? "";
+  // A dot is what separates a real hostname from a per-account ssh alias like `github-work`, which
+  // only that machine's ssh config resolves — the same rule `repo-match.parseRemote` uses, so the
+  // two do not disagree about the same string.
+  const host = named.includes(".") ? named.toLowerCase() : "";
+
+  // raw.githubusercontent.com serves github.com and nothing else. A GitHub Enterprise host reaches
+  // here now that `repositoryProvider` recognises this instance's own (BP-634), and without this
+  // the corporate hostname and a private repository's path went out to GitHub inside a url that
+  // could only 404 (found in review). A host it cannot read at all — a bare `owner/repo`, or a
+  // per-account ssh alias — is left as it always was: GitHub's by assumption.
+  if (host && host !== "github.com" && !host.endsWith(".github.com")) return undefined;
+
+  // Support "owner/repo", an https url and an ssh remote. Case is preserved: raw.githubusercontent
+  // serves a path, and a lower-cased one is a different path.
+  const ownerRepo = ssh ? ssh[2] : trimmed.replace(/^https?:\/\/github\.com\//i, "");
 
   if (!ownerRepo.includes("/")) return undefined;
 
@@ -63,8 +80,9 @@ export const POST = withProjectAccess(async (request, { params }) => {
   }
 
   const [readme, tasks] = await Promise.all([
-    // raw.githubusercontent.com only serves GitHub, so a project hosted anywhere else gets no
-    // README rather than a request that cannot work
+    // raw.githubusercontent.com only serves github.com, so a project hosted anywhere else — and
+    // that now includes this instance's own GitHub Enterprise — gets no README rather than a
+    // request that cannot work, sent to a host that should never see the address
     fetchReadme(repositoryProvider(project) === "github" ? projectRepositoryUrl(project) : ""),
     Task.find(
       { project: projectId, status: { $ne: "done" } },

@@ -4,7 +4,14 @@ import { decryptSecret } from "@/lib/encryption";
 import { fetchPullRequests, matchPRsToTasks, parseRepoString, withChecks } from "@/lib/github";
 import { logActivity } from "@/lib/activity";
 import { getProjectColumns } from "@/lib/columns";
-import { droppedCount, unseenLinks, writeProviderLinks } from "@/lib/pr-links";
+import {
+  addedLinks,
+  recordLinkChanges,
+  removedLinks,
+  seenUrls,
+  unseenLinks,
+  writeProviderLinks,
+} from "@/lib/pr-links";
 import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
 import { Project } from "@/models/project";
 import { Task } from "@/models/task";
@@ -64,12 +71,16 @@ export function syncTickMs(raw = process.env.GITHUB_SYNC_TICK_MS): number {
  * about something else, and `unknown` is then the truth.
  */
 function carryForward(
-  fresh: { number: number; ci: CiState; ciLabel: string | null; headSha: string | null },
+  fresh: { url: string; ci: CiState; ciLabel: string | null; headSha: string | null },
   stored: ILinkedPR[] | undefined
 ): { ci: CiState; ciLabel: string | null } {
   if (fresh.ci !== "unknown") return { ci: fresh.ci, ciLabel: fresh.ciLabel };
+  // By url, not by number: since BP-631 a repointed project's task legitimately holds both
+  // repositories' links, and two of them can wear the same number. Matching on the number picked
+  // whichever came first, and `headSha` then refused it — so the badge of the pull request this
+  // round DID ask about read "?" instead of what the last sync knew (found in review).
   const previous = stored?.find(
-    (link) => (link.provider ?? "github") === "github" && link.number === fresh.number
+    (link) => (link.provider ?? "github") === "github" && link.url === fresh.url
   );
   if (!previous?.ci || !CARRYABLE.has(previous.ci)) return { ci: fresh.ci, ciLabel: fresh.ciLabel };
   if (!fresh.headSha || previous.headSha !== fresh.headSha) {
@@ -198,6 +209,8 @@ export type SyncResult =
       tasksWritten: number;
       /** Links dropped because this round's fetch gave their pull request to somebody else. */
       prsUnlinked: number;
+      /** How many tasks those came off, which is not `tasksWritten` — most writes remove nothing. */
+      tasksUnlinked: number;
       autoTransitioned: number;
     }
   | { ok: false; status: number; error: string };
@@ -268,14 +281,21 @@ export async function syncGithubPullRequests(
   }
 
   // Every pull request this round saw, matched or not — the round's whole field of view. A stored
-  // link whose number is in here and which this round did not give to that task has been seen and
+  // link whose url is in here and which this round did not give to that task has been seen and
   // reassigned, which is a fact; one that is absent is merely out of the window (BP-610, BP-617).
-  const seen = new Set(rawPRs.map((pr) => pr.number));
-  const seenList = [...seen];
+  // By url rather than by number, so a repointed repository's numbers do not contradict the old
+  // repository's links (BP-631).
+  const seenList = seenUrls(
+    "github",
+    repositoryUrl,
+    rawPRs.map((pr) => ({ number: pr.number, url: pr.html_url }))
+  );
+  const seen = new Set(seenList);
 
   let linked = 0;
   let written = 0;
   let unlinked = 0;
+  let unlinkedTasks = 0;
   let autoTransitioned = 0;
   const columnIds = new Set(getProjectColumns(project).map((c) => c.id));
 
@@ -305,8 +325,18 @@ export async function syncGithubPullRequests(
     // Compared against what it holds now, because `unchanged` is not an optimisation — see above.
     const kept = unseenLinks(task.linkedPRs, "github", seen);
     if (!unchanged(task.linkedPRs, [...kept, ...prDocs])) {
+      const added = addedLinks(task.linkedPRs, "github", prDocs);
+      const removed = removedLinks(
+        task.linkedPRs,
+        "github",
+        seen,
+        new Set(prDocs.map((doc) => doc.url))
+      );
       await writeProviderLinks(task._id, "github", prDocs, seenList);
-      unlinked += droppedCount(task.linkedPRs, "github", seen, new Set(prs.map((pr) => pr.number)));
+      // After the write, so a row never claims a change the write then failed to make
+      await recordLinkChanges(task._id, actor, added, removed);
+      unlinked += removed.length;
+      if (removed.length > 0) unlinkedTasks++;
       written++;
     }
     linked += prs.length;
@@ -350,12 +380,12 @@ export async function syncGithubPullRequests(
   // `provider: null` is in the query because the schema's `default: "github"` is applied on
   // hydration rather than stored: a link written before the field existed has no `provider` at
   // all, and those are exactly the links `$ifNull` goes out of its way to catch on the way out.
-  if (seen.size > 0) {
+  if (seenList.length > 0) {
     const contradicted = await Task.find(
       {
         project: project._id,
         linkedPRs: {
-          $elemMatch: { number: { $in: seenList }, provider: { $in: ["github", null] } },
+          $elemMatch: { url: { $in: seenList }, provider: { $in: ["github", null] } },
         },
       },
       // Everything this pass reads and nothing else: on a board with hundreds of linked tasks the
@@ -364,10 +394,12 @@ export async function syncGithubPullRequests(
     );
     for (const task of contradicted) {
       if (prsByTask.has(task.taskNumber)) continue;
-      const dropping = droppedCount(task.linkedPRs, "github", seen, new Set());
-      if (dropping === 0) continue;
+      const removed = removedLinks(task.linkedPRs, "github", seen, new Set());
+      if (removed.length === 0) continue;
       await writeProviderLinks(task._id, "github", [], seenList);
-      unlinked += dropping;
+      await recordLinkChanges(task._id, actor, [], removed);
+      unlinked += removed.length;
+      unlinkedTasks++;
       written++;
     }
   }
@@ -379,6 +411,7 @@ export async function syncGithubPullRequests(
     prsLinked: linked,
     tasksWritten: written,
     prsUnlinked: unlinked,
+    tasksUnlinked: unlinkedTasks,
     autoTransitioned,
   };
 }
@@ -416,6 +449,15 @@ export async function githubSyncTick(): Promise<void> {
     try {
       const result = await syncGithubPullRequests(project, null);
       if (!result.ok) continue;
+      // The scheduled path is how most rounds happen, and it used to report nothing at all — so
+      // the ordinary way a link disappears was invisible (BP-632). The activity rows on the tasks
+      // themselves are the honest half; this is the half an operator can grep. A round that
+      // unlinked nothing says nothing, which keeps the log worth reading.
+      if (result.prsUnlinked > 0) {
+        console.info(
+          `GitHub sync unlinked ${result.prsUnlinked} pull request(s) from ${result.tasksUnlinked} task(s) on ${project.key}`
+        );
+      }
     } catch (err) {
       // One unreachable repository must not stop the others
       console.error(`GitHub sync failed for ${project.key}:`, err);

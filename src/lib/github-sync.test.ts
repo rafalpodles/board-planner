@@ -32,6 +32,15 @@ vi.mock("@/lib/github", async (importOriginal) => ({
 
 const { syncGithubPullRequests, githubSyncTick, syncTickMs } = await import("./github-sync");
 
+/** The history rows of one action. A link change writes rows too now, so "nothing was logged" has
+ *  to name which nothing it means (BP-628). */
+const rowsOf = (action: string) =>
+  logActivity.mock.calls.filter((call: unknown[]) => call[2] === action);
+
+/** Every action a round wrote a row for. Asserting this rather than one action keeps the old
+ *  guarantee that nothing ELSE was logged either. */
+const actionsLogged = () => logActivity.mock.calls.map((call: unknown[]) => call[2]).sort();
+
 const project = (over: Record<string, unknown> = {}) => ({
   _id: "p1",
   key: "BP",
@@ -41,6 +50,36 @@ const project = (over: Record<string, unknown> = {}) => ({
   columns: null,
   ...over,
 });
+
+// The fixture repository, so a stored link's address and a fetched pull request's agree — which
+// is what the round compares now that it names what it saw by url (BP-631)
+const prUrl = (number: number) => `https://github.com/o/r/pull/${number}`;
+
+type Written = {
+  $set: {
+    linkedPRs: {
+      $concatArrays: [
+        { $filter: { cond: { $or?: [unknown, { $not: [{ $in: [unknown, string[]] }] }] } } },
+        { $literal: Record<string, unknown>[] },
+      ];
+    };
+  };
+};
+
+/** Each link write, read back out of the pipeline the route handed the database. */
+const linkArgs = () =>
+  taskUpdateOne.mock.calls.map(([filter, update]) => {
+    const [stage] = update as Written[];
+    const [keep, add] = stage.$set.linkedPRs.$concatArrays;
+    return {
+      id: (filter as { _id: string })._id,
+      written: add.$literal.map((doc) => doc.number),
+      // Read straight, with no fallback for a missing `$or`: `replaceProviderLinks` always
+      // emits one, so the branch that guarded against its absence could never run and only hid
+      // a shape change behind a `null` some assertion would have to interpret (found in review).
+      seen: keep.$filter.cond.$or![1].$not[0].$in[1],
+    };
+  });
 
 const openPR = {
   number: 1,
@@ -97,7 +136,12 @@ describe("who asked, and what that earns", () => {
     const result = await syncGithubPullRequests(project(), null);
 
     expect(result).toMatchObject({ ok: true, autoTransitioned: 0 });
-    expect(logActivity).not.toHaveBeenCalled();
+    expect(actionsLogged()).toEqual(["pr_linked"]);
+    // The link row is written all the same, with no actor: the absence that stops a column change
+    // being attributed is not a reason to leave the link change untraceable (BP-628, BP-632)
+    expect(rowsOf("pr_linked")).toEqual([
+      ["t1", null, "pr_linked", "linkedPRs", "", "https://github.com/o/r/pull/1"],
+    ]);
     // The status write is the one that must not happen; the link write still must
     expect(taskUpdateOne).toHaveBeenCalledTimes(1);
     expect(taskUpdateOne.mock.calls[0][0]).toEqual({ _id: "t1" });
@@ -155,6 +199,9 @@ describe("the background tick", () => {
  * badge.
  */
 describe("an answer this sync could not get", () => {
+  // The stored links below carry a `url`, which the schema requires and these fixtures used to
+  // omit: `carryForward` matches on it since a repointed project's task can hold two links
+  // wearing the same number (BP-631).
   const linkWritten = (): Record<string, unknown>[] => {
     const [stage] = taskUpdateOne.mock.calls[0][1] as {
       $set: { linkedPRs: { $concatArrays: [unknown, { $literal: Record<string, unknown>[] }] } };
@@ -184,7 +231,7 @@ describe("an answer this sync could not get", () => {
       _id: "t1",
       taskNumber: 5,
       status: "todo",
-      linkedPRs: [{ provider: "github", number: 1, ci: "success", ciLabel: "e2e", headSha: "abc123" }],
+      linkedPRs: [{ provider: "github", number: 1, url: prUrl(1), ci: "success", ciLabel: "e2e", headSha: "abc123" }],
     });
 
     await syncGithubPullRequests(project(), "u1");
@@ -198,7 +245,7 @@ describe("an answer this sync could not get", () => {
       _id: "t1",
       taskNumber: 5,
       status: "todo",
-      linkedPRs: [{ provider: "github", number: 1, ci: "success", ciLabel: "e2e", headSha: "older" }],
+      linkedPRs: [{ provider: "github", number: 1, url: prUrl(1), ci: "success", ciLabel: "e2e", headSha: "older" }],
     });
 
     await syncGithubPullRequests(project(), "u1");
@@ -217,7 +264,7 @@ describe("an answer this sync could not get", () => {
       _id: "t1",
       taskNumber: 5,
       status: "todo",
-      linkedPRs: [{ provider: "github", number: 1, ci: "running", ciLabel: "e2e", headSha: "abc123" }],
+      linkedPRs: [{ provider: "github", number: 1, url: prUrl(1), ci: "running", ciLabel: "e2e", headSha: "abc123" }],
     });
 
     await syncGithubPullRequests(project(), "u1");
@@ -235,7 +282,7 @@ describe("an answer this sync could not get", () => {
         _id: "t1",
         taskNumber: 5,
         status: "todo",
-        linkedPRs: [{ provider: "github", number: 1, ci, ciLabel: "e2e", headSha: "abc123" }],
+        linkedPRs: [{ provider: "github", number: 1, url: prUrl(1), ci, ciLabel: "e2e", headSha: "abc123" }],
       });
 
       await syncGithubPullRequests(project(), "u1");
@@ -256,12 +303,40 @@ describe("an answer this sync could not get", () => {
       _id: "t1",
       taskNumber: 5,
       status: "todo",
-      linkedPRs: [{ provider: "github", number: 1, ci: "none", ciLabel: null, headSha: "abc123" }],
+      linkedPRs: [{ provider: "github", number: 1, url: prUrl(1), ci: "none", ciLabel: null, headSha: "abc123" }],
     });
 
     await syncGithubPullRequests(project(), "u1");
 
     expect(linkWritten()[0]).toMatchObject({ ci: "unknown" });
+  });
+
+  /**
+   * Since BP-631 a repointed project's task holds both repositories' links, and two of them can
+   * wear the same number. Matched on the number, the answer stored for the OTHER repository's #1
+   * is what this finds — and `headSha` is the only thing that refused it, so a stored answer with
+   * a matching commit would have been carried onto a different pull request (found in review).
+   */
+  it("does not carry an answer stored for another repository's same number", async () => {
+    taskFindOne.mockResolvedValue({
+      _id: "t1",
+      taskNumber: 5,
+      status: "todo",
+      linkedPRs: [
+        {
+          provider: "github",
+          number: 1,
+          url: "https://github.com/o/previous/pull/1",
+          ci: "success",
+          ciLabel: "e2e",
+          headSha: "abc123",
+        },
+      ],
+    });
+
+    await syncGithubPullRequests(project(), "u1");
+
+    expect(linkWritten()[0]).toMatchObject({ ci: "unknown", ciLabel: null });
   });
 
   it("says unknown when there was never an answer to keep", async () => {
@@ -291,7 +366,7 @@ describe("an answer this sync could not get", () => {
       _id: "t1",
       taskNumber: 5,
       status: "todo",
-      linkedPRs: [{ provider: "github", number: 1, ci: "success", ciLabel: "e2e", headSha: "abc123" }],
+      linkedPRs: [{ provider: "github", number: 1, url: prUrl(1), ci: "success", ciLabel: "e2e", headSha: "abc123" }],
     });
 
     await syncGithubPullRequests(project(), "u1");
@@ -315,7 +390,7 @@ describe("which task a refresh may move", () => {
     const result = await syncGithubPullRequests(project(), "u1", 999);
 
     expect(result).toMatchObject({ autoTransitioned: 0, prsLinked: 1 });
-    expect(logActivity).not.toHaveBeenCalled();
+    expect(actionsLogged()).toEqual(["pr_linked"]);
   });
 
   // Project settings' own Sync sends no task number and keeps the behaviour it always had
@@ -347,7 +422,7 @@ describe("a board with nowhere to move the task to", () => {
     const result = await syncGithubPullRequests(withoutTheColumn, "u1");
 
     expect(result).toMatchObject({ autoTransitioned: 0, prsLinked: 1 });
-    expect(logActivity).not.toHaveBeenCalled();
+    expect(actionsLogged()).toEqual(["pr_linked"]);
   });
 });
 
@@ -586,31 +661,6 @@ describe("a sync that learned nothing", () => {
  * is written, who is visited, and what the operator is told.
  */
 describe("what a round of the window may say about a link", () => {
-  type Written = {
-    $set: {
-      linkedPRs: {
-        $concatArrays: [
-          { $filter: { cond: { $or?: [unknown, { $not: [{ $in: [string, number[]] }] }] } } },
-          { $literal: Record<string, unknown>[] },
-        ];
-      };
-    };
-  };
-
-  const linkArgs = () =>
-    taskUpdateOne.mock.calls.map(([filter, update]) => {
-      const [stage] = update as Written[];
-      const [keep, add] = stage.$set.linkedPRs.$concatArrays;
-      return {
-        id: (filter as { _id: string })._id,
-        written: add.$literal.map((doc) => doc.number),
-        // Read straight, with no fallback for a missing `$or`: `replaceProviderLinks` always
-        // emits one, so the branch that guarded against its absence could never run and only hid
-        // a shape change behind a `null` some assertion would have to interpret (found in review).
-        seen: keep.$filter.cond.$or![1].$not[0].$in[1],
-      };
-    });
-
   beforeEach(() => {
     fetchPullRequests.mockResolvedValue([openPR]);
     vi.stubGlobal(
@@ -619,7 +669,7 @@ describe("what a round of the window may say about a link", () => {
     );
   });
 
-  it("hands the write every number the round saw, not only the ones it matched", async () => {
+  it("hands the write every pull request the round saw, not only the ones it matched", async () => {
     // A second pull request in the fetch that belongs to no task at all: it is still a fact about
     // the round, and it is what makes a removal a fact rather than a guess.
     fetchPullRequests.mockResolvedValue([openPR, { ...openPR, number: 77, head: { ref: "chore/none", sha: "z" } }]);
@@ -628,7 +678,7 @@ describe("what a round of the window may say about a link", () => {
 
     await syncGithubPullRequests(project(), "u1");
 
-    expect(linkArgs()[0].seen?.sort((a, b) => a - b) ?? null).toEqual([1, 77]);
+    expect(linkArgs()[0].seen?.slice().sort() ?? null).toEqual([prUrl(1), prUrl(77)].sort());
   });
 
   it("does not write a task whose only change would be keeping a link out of the window", async () => {
@@ -683,8 +733,8 @@ describe("what a round of the window may say about a link", () => {
         _id: "t8",
         taskNumber: 8,
         linkedPRs: [
-          { provider: "github", number: 1, title: "Some change", state: "open", url: "u" },
-          { provider: "github", number: 9, title: "Older", state: "merged", url: "u9" },
+          { provider: "github", number: 1, title: "Some change", state: "open", url: prUrl(1) },
+          { provider: "github", number: 9, title: "Older", state: "merged", url: prUrl(9) },
         ],
       },
     ]);
@@ -699,7 +749,7 @@ describe("what a round of the window may say about a link", () => {
   it("leaves a task alone when the round contradicts nothing it holds", async () => {
     taskFindOne.mockResolvedValue({ _id: "t1", taskNumber: 5, status: "todo", linkedPRs: [] });
     taskFind.mockResolvedValue([
-      { _id: "t8", taskNumber: 8, linkedPRs: [{ provider: "github", number: 9, title: "Older", state: "merged", url: "u9" }] },
+      { _id: "t8", taskNumber: 8, linkedPRs: [{ provider: "github", number: 9, title: "Older", state: "merged", url: prUrl(9) }] },
     ]);
 
     const result = await syncGithubPullRequests(project(), "u1");
@@ -712,11 +762,250 @@ describe("what a round of the window may say about a link", () => {
     taskFindOne.mockResolvedValue({ _id: "t1", taskNumber: 5, status: "todo", linkedPRs: [] });
     // The query is a database query, so a task in this round's grouping can come back from it too
     taskFind.mockResolvedValue([
-      { _id: "t1", taskNumber: 5, linkedPRs: [{ provider: "github", number: 1, title: "x", state: "open", url: "u" }] },
+      { _id: "t1", taskNumber: 5, linkedPRs: [{ provider: "github", number: 1, title: "x", state: "open", url: prUrl(1) }] },
     ]);
 
     await syncGithubPullRequests(project(), "u1");
 
     expect(linkArgs().filter((call) => call.id === "t1")).toHaveLength(1);
+  });
+});
+
+/**
+ * BP-631. A round's field of view is one repository's, and a number is only unique inside one —
+ * so a project whose `repositoryUrl` has been repointed used to have the *old* repository's links
+ * pruned by the new one's numbers, which is a real pull request deleted over a collision nothing
+ * observed.
+ */
+describe("a project whose repository has moved", () => {
+  beforeEach(() => {
+    fetchPullRequests.mockResolvedValue([openPR]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ state: "pending", statuses: [] }), { status: 200 }))
+    );
+    taskFindOne.mockResolvedValue({ _id: "t1", taskNumber: 5, status: "todo", linkedPRs: [] });
+  });
+
+  it("asks the database for the addresses it saw, not the numbers", async () => {
+    taskFind.mockResolvedValue([]);
+
+    await syncGithubPullRequests(project(), "u1");
+
+    expect(taskFind.mock.calls[0][0]).toEqual({
+      project: "p1",
+      linkedPRs: {
+        $elemMatch: { url: { $in: [prUrl(1)] }, provider: { $in: ["github", null] } },
+      },
+    });
+  });
+
+  it("leaves the previous repository's pull request number alone", async () => {
+    // The query is scoped by url now, so this task would not come back from it at all — it is
+    // answered here anyway, because a rule that only holds while the query narrows correctly is
+    // one bad projection away from deleting the link again.
+    taskFind.mockResolvedValue([
+      {
+        _id: "t8",
+        taskNumber: 8,
+        linkedPRs: [
+          {
+            provider: "github",
+            number: 1,
+            title: "Opened before the move",
+            state: "open",
+            url: "https://github.com/o/previous/pull/1",
+          },
+        ],
+      },
+    ]);
+
+    const result = await syncGithubPullRequests(project(), "u1");
+
+    expect(taskUpdateOne.mock.calls.find(([filter]) => filter._id === "t8")).toBeUndefined();
+    expect(result).toMatchObject({ prsUnlinked: 0 });
+    // The control: the round did reach its own task and wrote its link, so the silence above is
+    // the rule rather than a sync that did nothing
+    expect(result).toMatchObject({ prsLinked: 1, tasksWritten: 1 });
+  });
+
+  /**
+   * The other side of the same coin, and the reason the round claims the project's own spelling as
+   * well as GitHub's. A renamed repository answers through a redirect under its NEW name while the
+   * project still names the old one, so the links already stored are addressed the old way — and
+   * without this they would survive every later round beside their own replacement.
+   */
+  it("still prunes the old name's links after a rename", async () => {
+    const renamed = project({ repositoryUrl: "https://github.com/o/before-the-rename" });
+    taskFind.mockResolvedValue([
+      {
+        _id: "t8",
+        taskNumber: 8,
+        linkedPRs: [
+          {
+            provider: "github",
+            number: 1,
+            title: "Stored under the old name",
+            state: "open",
+            url: "https://github.com/o/before-the-rename/pull/1",
+          },
+        ],
+      },
+    ]);
+
+    const result = await syncGithubPullRequests(renamed, "u1");
+
+    expect(taskUpdateOne.mock.calls.find(([filter]) => filter._id === "t8")).toBeDefined();
+    expect(result).toMatchObject({ prsUnlinked: 1 });
+  });
+});
+
+/**
+ * BP-628 and BP-632. `updatedAt` stopped moving on a link change (BP-627), no webhook fires from
+ * either sync route, and the toast reaches nobody on a scheduler tick — so a link arriving on a
+ * task, or leaving it, left no trace anywhere a person could look.
+ */
+describe("what a link change leaves behind", () => {
+  beforeEach(() => {
+    fetchPullRequests.mockResolvedValue([openPR]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ state: "pending", statuses: [] }), { status: 200 }))
+    );
+  });
+
+  it("writes a row on the task the round took a link off, with no actor on a tick", async () => {
+    taskFindOne.mockResolvedValue({ _id: "t1", taskNumber: 5, status: "todo", linkedPRs: [] });
+    taskFind.mockResolvedValue([
+      {
+        _id: "t8",
+        taskNumber: 8,
+        linkedPRs: [
+          { provider: "github", number: 1, title: "Was task 8's", state: "open", url: prUrl(1) },
+        ],
+      },
+    ]);
+    vi.spyOn(console, "info").mockImplementation(() => {});
+
+    await githubSyncTick();
+
+    expect(rowsOf("pr_unlinked")).toEqual([
+      ["t8", null, "pr_unlinked", "linkedPRs", prUrl(1), ""],
+    ]);
+  });
+
+  // A round that only refreshed a badge changed no link, and a history of "the sync looked again"
+  // is a history nobody can read
+  it("writes nothing for a link the round re-matched to the same task", async () => {
+    taskFindOne.mockResolvedValue({
+      _id: "t1",
+      taskNumber: 5,
+      status: "todo",
+      linkedPRs: [
+        {
+          provider: "github",
+          number: 1,
+          title: "Some change",
+          state: "open",
+          url: prUrl(1),
+          mergedAt: null,
+          updatedAt: new Date("2026-08-01T00:00:00Z"),
+          ci: "none",
+          ciLabel: null,
+          // A different head commit, so the task IS written — what must stay silent is the row,
+          // not the write
+          headSha: "older",
+        },
+      ],
+    });
+    taskFind.mockResolvedValue([]);
+
+    const result = await syncGithubPullRequests(project(), "u1");
+
+    expect(result).toMatchObject({ tasksWritten: 1 });
+    expect(rowsOf("pr_linked")).toEqual([]);
+    expect(rowsOf("pr_unlinked")).toEqual([]);
+  });
+
+  it("says on the log what a scheduled round unlinked", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    taskFindOne.mockResolvedValue({ _id: "t1", taskNumber: 5, status: "todo", linkedPRs: [] });
+    taskFind.mockResolvedValue([
+      {
+        _id: "t8",
+        taskNumber: 8,
+        linkedPRs: [
+          { provider: "github", number: 1, title: "Was task 8's", state: "open", url: prUrl(1) },
+        ],
+      },
+    ]);
+
+    await githubSyncTick();
+
+    // The count of tasks is the ones it took a link OFF, not every task the round rewrote —
+    // most writes remove nothing, and a line that said otherwise would be a claim the numbers
+    // beside it contradict
+    expect(info).toHaveBeenCalledWith(
+      "GitHub sync unlinked 1 pull request(s) from 1 task(s) on BP"
+    );
+  });
+
+  it("says nothing at all when a round unlinked nothing", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    taskFindOne.mockResolvedValue({ _id: "t1", taskNumber: 5, status: "todo", linkedPRs: [] });
+    taskFind.mockResolvedValue([]);
+
+    await githubSyncTick();
+
+    expect(info).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The half of the rename BP-631 does not cover, pinned so that it is a decision rather than an
+ * accident: once the project's own url has been changed to the new name too, a rename is
+ * byte-identical to a repoint — same fetch, same setting — and the rule keeps both links.
+ *
+ * Which way to be wrong is the whole question. This way costs a visible duplicate badge that
+ * redirects to the same pull request; the other way is the silent deletion of a link to a pull
+ * request that still exists, which is the defect BP-631 was filed for.
+ */
+describe("a rename the project's own url has caught up with", () => {
+  beforeEach(() => {
+    fetchPullRequests.mockResolvedValue([openPR]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ state: "pending", statuses: [] }), { status: 200 }))
+    );
+    taskFind.mockResolvedValue([]);
+  });
+
+  it("keeps the old name's link beside the new one, and says nothing went", async () => {
+    taskFindOne.mockResolvedValue({
+      _id: "t1",
+      taskNumber: 5,
+      status: "todo",
+      linkedPRs: [
+        {
+          provider: "github",
+          number: 1,
+          title: "Written before the rename",
+          state: "open",
+          url: "https://github.com/o/before-the-rename/pull/1",
+        },
+      ],
+    });
+
+    const result = await syncGithubPullRequests(project(), "u1");
+
+    // The write keeps what it did not see. Both halves, because "written" alone would pass on a
+    // round that had also contradicted the old link: the round's field of view does not contain
+    // the address the old link wears, which is what leaves the filter no reason to drop it.
+    expect(linkArgs()[0].written).toEqual([1]);
+    expect(linkArgs()[0].seen).not.toContain("https://github.com/o/before-the-rename/pull/1");
+    expect(result).toMatchObject({ prsUnlinked: 0 });
+    expect(rowsOf("pr_unlinked")).toEqual([]);
+    // And the row that IS written, because by address this is a link the task did not have
+    expect(rowsOf("pr_linked")).toHaveLength(1);
   });
 });

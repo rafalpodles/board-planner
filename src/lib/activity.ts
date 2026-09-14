@@ -4,7 +4,8 @@ import { ActivityAction } from "@/types";
 
 export async function logActivity(
   taskId: Types.ObjectId | string,
-  userId: Types.ObjectId | string,
+  // Null is a sync writing about what GitHub said, which no person authored (BP-628)
+  userId: Types.ObjectId | string | null,
   action: ActivityAction,
   field?: string,
   oldValue?: string,

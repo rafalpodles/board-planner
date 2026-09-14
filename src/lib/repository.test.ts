@@ -1,5 +1,10 @@
-import { describe, it, expect } from "vitest";
-import { projectRepositoryUrl, repositoryCandidates, repositoryProvider } from "./repository";
+import { describe, it, expect, afterEach, vi } from "vitest";
+import {
+  projectRepositoryUrl,
+  repositoryCandidates,
+  repositoryProvider,
+  repositoryUrlCandidates,
+} from "./repository";
 
 describe("projectRepositoryUrl", () => {
   it("uses the repository URL when the project has one", () => {
@@ -154,5 +159,73 @@ describe("repositoryCandidates", () => {
 
   it("is empty for a project that names no repository", () => {
     expect(repositoryCandidates({})).toEqual([]);
+  });
+});
+
+/**
+ * BP-634. The legacy fields were resolved against the literal github.com while the API calls went
+ * to `GITHUB_API_BASE_URL`, so on a GitHub Enterprise instance every unmigrated project named a
+ * repository on somebody else's host — and `repositoryProvider`, which classifies by host, then
+ * had to answer `""` for the corporate one, which is both sync routes refusing to run.
+ */
+describe("an instance whose GitHub is not github.com", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  const enterprise = () => vi.stubEnv("GITHUB_API_BASE_URL", "https://ghe.corp.example/api/v3");
+
+  it("resolves a legacy GitHub field to the corporate host", () => {
+    enterprise();
+    expect(projectRepositoryUrl({ githubRepo: "owner/repo" })).toBe(
+      "https://ghe.corp.example/owner/repo"
+    );
+    expect(repositoryUrlCandidates({ githubRepo: "owner/repo" })).toEqual([
+      "https://ghe.corp.example/owner/repo",
+    ]);
+  });
+
+  it("still calls the corporate host GitHub", () => {
+    enterprise();
+    expect(repositoryProvider({ githubRepo: "owner/repo" })).toBe("github");
+    // And for a project the migration has already reached, which was refused outright before
+    expect(repositoryProvider({ repositoryUrl: "https://ghe.corp.example/owner/repo" })).toBe(
+      "github"
+    );
+  });
+
+  // The project-specific hint wins over the instance-wide one, so a board that went to the trouble
+  // of naming a self-hosted GitLab keeps it
+  it("does not take a self-hosted GitLab that happens to share the host", () => {
+    enterprise();
+    expect(
+      repositoryProvider({
+        repositoryUrl: "https://ghe.corp.example/group/thing",
+        gitlabHost: "https://ghe.corp.example",
+      })
+    ).toBe("gitlab");
+  });
+
+  it("leaves every other host alone", () => {
+    enterprise();
+    expect(repositoryProvider({ repositoryUrl: "https://evil.example.com/owner/repo" })).toBe("");
+  });
+
+  it("changes nothing on a github.com instance", () => {
+    vi.stubEnv("GITHUB_API_BASE_URL", "");
+    expect(projectRepositoryUrl({ githubRepo: "owner/repo" })).toBe("https://github.com/owner/repo");
+    expect(repositoryUrlCandidates({ githubRepo: "owner/repo" })).toEqual([
+      "https://github.com/owner/repo",
+    ]);
+    expect(repositoryProvider({ githubRepo: "owner/repo" })).toBe("github");
+  });
+
+  // The durable fix for all of this is the migration: once the field carries a real url, the
+  // instance's host has no say in it at all
+  it("does not touch a project that names its repository outright", () => {
+    enterprise();
+    expect(projectRepositoryUrl({ repositoryUrl: "https://github.com/owner/repo" })).toBe(
+      "https://github.com/owner/repo"
+    );
   });
 });

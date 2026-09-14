@@ -1,0 +1,67 @@
+import { describe, it, expect, afterEach, vi } from "vitest";
+import { githubApiBase, githubWebBase } from "./github-host";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe("githubApiBase", () => {
+  it("is api.github.com when nothing is configured", () => {
+    vi.stubEnv("GITHUB_API_BASE_URL", "");
+    expect(githubApiBase()).toBe("https://api.github.com");
+  });
+
+  it("is whatever the operator configured", () => {
+    vi.stubEnv("GITHUB_API_BASE_URL", "https://ghe.corp.example/api/v3");
+    expect(githubApiBase()).toBe("https://ghe.corp.example/api/v3");
+  });
+});
+
+describe("githubWebBase", () => {
+  it("is github.com when nothing is configured", () => {
+    vi.stubEnv("GITHUB_API_BASE_URL", "");
+    expect(githubWebBase()).toBe("https://github.com");
+  });
+
+  // The one shape where the API host is not the web host: the API is a subdomain of the site
+  it("drops the api subdomain that github.com answers on", () => {
+    expect(githubWebBase("https://api.github.com")).toBe("https://github.com");
+  });
+
+  // Enterprise Cloud with data residency, where the same subdomain rule applies under a tenant
+  it("drops it for the tenant form too", () => {
+    expect(githubWebBase("https://api.acme.ghe.com")).toBe("https://acme.ghe.com");
+  });
+
+  // Enterprise Server: the API is a path on the site, so the origin is already the web address
+  it("is the origin of an Enterprise Server base, path and all discarded", () => {
+    expect(githubWebBase("https://ghe.corp.example/api/v3")).toBe("https://ghe.corp.example");
+    expect(githubWebBase("https://ghe.corp.example/api/v3/")).toBe("https://ghe.corp.example");
+  });
+
+  /**
+   * The variable is documented as accepting a proxy too, and a proxy's address is not a
+   * repository's: `projectRepositoryUrl` is handed to a worker as the remote to clone and judged
+   * against a reported pull request's host. So anything that is not one of GitHub's own two API
+   * shapes keeps github.com, which is what this answered before it was derived at all.
+   */
+  it("does not read a proxy in front of GitHub as a place repositories live", () => {
+    expect(githubWebBase("https://gh-proxy.corp.internal")).toBe("https://github.com");
+    expect(githubWebBase("https://gateway.corp.internal/github")).toBe("https://github.com");
+  });
+
+  // A bare Enterprise origin 404s every API call, so it is not a working configuration this has
+  // to preserve — and it is indistinguishable from the proxy above
+  it("does not take a bare origin for an Enterprise site", () => {
+    expect(githubWebBase("https://ghe.corp.example")).toBe("https://github.com");
+  });
+
+  it("leaves the end-to-end stub alone", () => {
+    expect(githubWebBase("http://127.0.0.1:30061")).toBe("https://github.com");
+  });
+
+  // Read on the render path of every project page: a typo must not throw there
+  it("falls back to github.com for a value that is not a url", () => {
+    expect(githubWebBase("ghe.corp.example")).toBe("https://github.com");
+  });
+});

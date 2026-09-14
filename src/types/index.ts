@@ -1364,12 +1364,18 @@ export type ActivityAction =
   | "status_changed"
   | "comment_added"
   | "comment_edited"
-  | "comment_deleted";
+  | "comment_deleted"
+  // A sync gave this task a pull request, or took one away. The only two a machine writes, and
+  // the only two whose `user` may be absent (BP-628).
+  | "pr_linked"
+  | "pr_unlinked";
 
 export interface IActivityLog {
   _id: Types.ObjectId;
   task: Types.ObjectId;
-  user: Types.ObjectId | IUser;
+  // Null for a row a scheduler tick wrote: there is no person to name, and naming one would be
+  // the invention the auto-transition refuses to make.
+  user: Types.ObjectId | IUser | null;
   action: ActivityAction;
   field: string;
   oldValue: string;
@@ -1380,7 +1386,7 @@ export interface IActivityLog {
 export interface ApiActivityLog {
   _id: string;
   task: string;
-  user: { _id: string; username: string; fullName: string } | string;
+  user: { _id: string; username: string; fullName: string } | string | null;
   action: ActivityAction;
   field: string;
   oldValue: string;

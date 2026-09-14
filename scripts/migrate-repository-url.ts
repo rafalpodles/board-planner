@@ -5,6 +5,13 @@
  *   MONGODB_URI=... npx tsx scripts/migrate-repository-url.ts --dry-run
  *   MONGODB_URI=... npx tsx scripts/migrate-repository-url.ts
  *
+ * On an instance running GitHub Enterprise, pass `GITHUB_API_BASE_URL` as well — the same value
+ * the app runs with. A legacy `githubRepo` of `owner/repo` names no host, so the host has to come
+ * from somewhere, and without the variable that somewhere is github.com (BP-634). This script
+ * skips a project that already has a `repositoryUrl`, so running it without the variable writes
+ * the wrong host permanently rather than being fixed by a second run. The dry run below prints
+ * which host it is about to use.
+ *
  * Safe to re-run: a project that already has a repositoryUrl is left alone, and the legacy fields
  * are not touched, so a rollback loses nothing.
  *
@@ -14,6 +21,7 @@
  */
 
 import mongoose from "mongoose";
+import { githubWebBase } from "../src/lib/github-host";
 import { projectRepositoryUrl } from "../src/lib/repository";
 
 const dryRun = process.argv.includes("--dry-run");
@@ -30,6 +38,10 @@ interface LegacyProject {
 async function main() {
   const uri = process.env.MONGODB_URI;
   if (!uri) throw new Error("MONGODB_URI is required");
+
+  // Said out loud, because a legacy `githubRepo` carries no host and this is where it gets one.
+  // Getting it wrong is not reversible by re-running: a project that already has a url is skipped.
+  console.log(`Resolving a legacy githubRepo against ${githubWebBase()}`);
 
   await mongoose.connect(uri);
   const db = mongoose.connection.db;
