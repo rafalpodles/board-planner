@@ -7,6 +7,9 @@
  * a link is a claim about somebody else's instance (BP-634).
  */
 
+/** GitHub's own API hosts: github.com's, and a data-residency tenant's. Nobody else's. */
+const HOSTED_API = /^api\.(?:github\.com|[a-z0-9-]+\.ghe\.com)$/i;
+
 const DEFAULT_API = "https://api.github.com";
 const DEFAULT_WEB = "https://github.com";
 
@@ -25,7 +28,9 @@ export function githubApiBase(raw = process.env.GITHUB_API_BASE_URL): string {
  * machine an address that is not a git remote (found in review).
  *
  * - a host of its own — `api.github.com`, and the data residency form `api.<tenant>.ghe.com`,
- *   where the site is the same name without the label;
+ *   where the site is the same name without the label. Those two names and no others: "any host
+ *   beginning `api.`" reads `https://api.gh-proxy.corp` as a place repositories live, which is
+ *   the very thing this is narrow to avoid (found in review);
  * - a path on the site — `https://HOST/api/v3`, which is Enterprise Server's documented base and
  *   the only spelling of it that works: a bare Enterprise origin would 404 every API call, so it
  *   cannot be a working configuration to preserve.
@@ -46,7 +51,7 @@ export function githubWebBase(raw = process.env.GITHUB_API_BASE_URL): string {
 
   const path = url.pathname.replace(/\/+$/, "");
   if (path === "/api/v3") return url.origin;
-  if (path === "" && /^api\./i.test(url.hostname)) {
+  if (path === "" && HOSTED_API.test(url.hostname)) {
     url.hostname = url.hostname.replace(/^api\./i, "");
     return url.origin;
   }

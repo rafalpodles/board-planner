@@ -83,6 +83,39 @@ describe("fetchReadme", () => {
     );
   });
 
+  /**
+   * The spellings two earlier attempts at this guard each missed, and three reviewers found
+   * independently. `repositoryUrl` is a free-form string with no format validation, and
+   * `repositoryProvider` reads the host out of every one of these — so each reaches this function
+   * on a GitHub Enterprise instance, and each used to be pasted into the raw.githubusercontent
+   * path whole, corporate hostname and private path included.
+   */
+  it.each([
+    "ssh://git@ghe.corp.example/acme/private.git",
+    "git+ssh://git@ghe.corp.example/acme/private",
+    "git://ghe.corp.example/acme/private",
+    "git@ghe.corp.example:acme/private.git",
+    "https://ghe.corp.example/acme/private",
+  ])("asks nobody about %s", async (spelling) => {
+    expect(await fetchReadme(spelling)).toBeUndefined();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  // The same spellings on GitHub's own host still read, which is the control: a guard that
+  // refused everything would pass the block above
+  it.each([
+    "ssh://git@github.com/acme/board.git",
+    "https://www.github.com/acme/board",
+    "https://token@github.com/acme/board",
+    "https://github.com:443/acme/board",
+  ])("still reads %s", async (spelling) => {
+    expect(await fetchReadme(spelling)).toBe("# Board");
+    expect(fetch).toHaveBeenCalledWith(
+      "https://raw.githubusercontent.com/acme/board/main/README.md",
+      expect.anything()
+    );
+  });
+
   it("asks nobody when the project names no repository", async () => {
     expect(await fetchReadme("")).toBeUndefined();
     expect(fetch).not.toHaveBeenCalled();

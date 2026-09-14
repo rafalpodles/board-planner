@@ -6,33 +6,38 @@ import { Task } from "@/models/task";
 import { isAIEnabled, generateTask, ExistingTaskSummary } from "@/lib/ai";
 import { choiceFieldsForPrompt, resolveGeneratedFields } from "@/lib/ai-fields";
 import { getSettings } from "@/models/settings";
-import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
+import { bareHost, hostOf, projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
 
 export async function fetchReadme(githubRepo: string): Promise<string | undefined> {
   if (!githubRepo) return undefined;
 
   const trimmed = githubRepo.trim().replace(/\/+$/, "").replace(/\.git$/, "");
 
-  // Every spelling `repositoryUrl` accepts, because each carries the host somewhere different —
-  // and an ssh remote is the one that hides it from a `https?://` test, so `git@github.com:o/r`
-  // was pasted into the url whole (found by probing this function rather than by reading it).
-  const ssh = /^[^/]+@([^/:]+):(.+)$/.exec(trimmed);
-  const named = ssh?.[1] ?? /^https?:\/\/([^/]+)/i.exec(trimmed)?.[1] ?? "";
-  // A dot is what separates a real hostname from a per-account ssh alias like `github-work`, which
-  // only that machine's ssh config resolves — the same rule `repo-match.parseRemote` uses, so the
-  // two do not disagree about the same string.
-  const host = named.includes(".") ? named.toLowerCase() : "";
-
-  // raw.githubusercontent.com serves github.com and nothing else. A GitHub Enterprise host reaches
-  // here now that `repositoryProvider` recognises this instance's own (BP-634), and without this
-  // the corporate hostname and a private repository's path went out to GitHub inside a url that
-  // could only 404 (found in review). A host it cannot read at all — a bare `owner/repo`, or a
-  // per-account ssh alias — is left as it always was: GitHub's by assumption.
+  /**
+   * raw.githubusercontent.com serves github.com and nothing else. A GitHub Enterprise host reaches
+   * here now that `repositoryProvider` recognises this instance's own (BP-634), and without a check
+   * the corporate hostname and a private repository's path went out to GitHub inside a url that
+   * could only 404.
+   *
+   * `hostOf` rather than a regex written here, because the field accepts more spellings than any
+   * one pattern catches and the first two attempts at this each missed one — `git@host:path` hides
+   * the host from a `https?://` test, and `ssh://git@host/path` hides it from both that and an
+   * scp-form test while `repositoryProvider` reads it happily (three reviewers, independently).
+   * One rule for the host, or the two readers of the same field disagree about the same string.
+   *
+   * A host it cannot read at all — a bare `owner/repo`, or a per-account ssh alias — is left as it
+   * always was: GitHub's by assumption.
+   */
+  const host = bareHost(hostOf(trimmed));
   if (host && host !== "github.com" && !host.endsWith(".github.com")) return undefined;
 
-  // Support "owner/repo", an https url and an ssh remote. Case is preserved: raw.githubusercontent
-  // serves a path, and a lower-cased one is a different path.
-  const ownerRepo = ssh ? ssh[2] : trimmed.replace(/^https?:\/\/github\.com\//i, "");
+  // What is left once the host is taken off, whichever way it was spelled. Case is preserved:
+  // raw.githubusercontent serves a path, and a lower-cased one is a different path — which is why
+  // this is not `parseRemote`, whose job is comparison rather than addressing.
+  const ownerRepo = trimmed
+    .replace(/^[a-z][a-z0-9+.-]*:\/\/(?:[^@/]*@)?[^/]+\//i, "")
+    .replace(/^[^/]+@[^/:]+:/, "")
+    .replace(/^\/+/, "");
 
   if (!ownerRepo.includes("/")) return undefined;
 

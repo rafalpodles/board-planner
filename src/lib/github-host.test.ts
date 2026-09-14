@@ -48,6 +48,9 @@ describe("githubWebBase", () => {
   it("does not read a proxy in front of GitHub as a place repositories live", () => {
     expect(githubWebBase("https://gh-proxy.corp.internal")).toBe("https://github.com");
     expect(githubWebBase("https://gateway.corp.internal/github")).toBe("https://github.com");
+    // Including one named after what it proxies. "Any host beginning `api.`" read this as
+    // `https://gh-proxy.corp` — a clone remote that is not a git remote (found in review).
+    expect(githubWebBase("https://api.gh-proxy.corp")).toBe("https://github.com");
   });
 
   // A bare Enterprise origin 404s every API call, so it is not a working configuration this has
@@ -56,7 +59,8 @@ describe("githubWebBase", () => {
     expect(githubWebBase("https://ghe.corp.example")).toBe("https://github.com");
   });
 
-  it("leaves the end-to-end stub alone", () => {
+  // Named for what it asserts: the stub is an API base, not a site, so it does not become one
+  it("does not turn the end-to-end stub into a place repositories live", () => {
     expect(githubWebBase("http://127.0.0.1:30061")).toBe("https://github.com");
   });
 

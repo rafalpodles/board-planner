@@ -102,11 +102,6 @@ beforeEach(() => {
   fetchPullRequests.mockResolvedValue([]);
 });
 
-/** The history rows of one action: a link change writes rows of its own now, so "nothing was
- *  logged" has to say which nothing it means (BP-628). */
-const rowsOf = (action: string) =>
-  logActivity.mock.calls.filter((call: unknown[]) => call[2] === action);
-
 /** Every action a round wrote a row for. Asserting this rather than one action keeps the old
  *  guarantee that nothing ELSE was logged either. */
 const actionsLogged = () => logActivity.mock.calls.map((call: unknown[]) => call[2]).sort();

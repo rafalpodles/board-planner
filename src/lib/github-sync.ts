@@ -79,6 +79,12 @@ function carryForward(
   // repositories' links, and two of them can wear the same number. Matching on the number picked
   // whichever came first, and `headSha` then refused it — so the badge of the pull request this
   // round DID ask about read "?" instead of what the last sync knew (found in review).
+  //
+  // What it costs, because it is not strictly better: across a repository **rename** the stored url
+  // is the old name and `fresh.url` the new one, so a cap-starved pull request loses the answer it
+  // had and reads "?" until something asks about it again. `unknown` is the honest word for "we
+  // have not looked", and the number match traded that for carrying an answer onto whichever link
+  // happened to share a number — but the trade is real and not free (found in review).
   const previous = stored?.find(
     (link) => (link.provider ?? "github") === "github" && link.url === fresh.url
   );
