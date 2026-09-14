@@ -163,9 +163,11 @@ export async function recordLinkChanges(
  * GitHub sync owns it rather than leaving it beside its own replacement.
  *
  * A link stored without a `url` at all — a shape the schema forbids and only the two syncs write —
- * is kept, because a missing field is not one of the strings in `seen`. Measured against a real
- * MongoDB rather than assumed, and `e2e/pr-link-replacement.spec.ts` holds it: an `$ifNull` guard
- * written here first turned out to change nothing, which is only knowable from the database.
+ * is kept, because a missing field is not one of the strings in `seen`. That is a fact about
+ * MongoDB rather than about this expression, and `e2e/pr-link-replacement.spec.ts` pins the
+ * outcome; an `$ifNull` guard written here first was removed after the database showed it changed
+ * nothing. Nothing reproduces that measurement now — the test holds "kept", not "the guard was
+ * redundant" (found in review).
  *
  * Mongoose does not cast a pipeline update, so `docs` must already hold real `Date`s.
  */

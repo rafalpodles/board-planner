@@ -17,13 +17,27 @@ const SSH_HOST = /^[^/]+@([^/:]+):/;
 const SCHEMED_HOST = /^[a-z][a-z0-9+.-]*:\/\/(?:[^@/]*@)?([^/]+)/i;
 const ABSOLUTE = /^(?:[a-z][a-z0-9+.-]*:\/\/|[^/]+@[^/:]+:)/i;
 
-// Empty for anything with no real hostname in it — a bare `owner/repo`, or a per-account ssh alias
-// like `github-work`, which only that machine's ssh config can resolve.
-function hostOf(value: string | undefined): string {
+/**
+ * The host a repository string names, for every spelling the field accepts: an ssh remote, any
+ * scheme (`https://`, `ssh://`, `git://`), with or without userinfo.
+ *
+ * Empty for anything with no real hostname in it — a bare `owner/repo`, or a per-account ssh alias
+ * like `github-work`, which only that machine's ssh config can resolve.
+ *
+ * Exported because a second reader of the same field wrote its own `^https?://` test and let every
+ * other spelling through, which is how a private Enterprise path reached github.com (BP-634
+ * review). One rule, or the two disagree about the same string.
+ */
+export function hostOf(value: string | undefined): string {
   const trimmed = value?.trim() ?? "";
   if (!trimmed) return "";
   const raw = SSH_HOST.exec(trimmed)?.[1] ?? SCHEMED_HOST.exec(trimmed)?.[1] ?? "";
   return raw.includes(".") ? raw.toLowerCase() : "";
+}
+
+/** The host without the port, which is how every caller compares one. */
+export function bareHost(host: string): string {
+  return host.replace(/:\d+$/, "");
 }
 
 function absolute(value: string, base: string): string {
@@ -93,7 +107,7 @@ export function repositoryProvider(project: RepositoryFields): RepositoryProvide
   const host = hostOf(projectRepositoryUrl(project));
   if (!host) return "";
 
-  const bare = host.replace(/:\d+$/, "");
+  const bare = bareHost(host);
   if (bare === "github.com" || bare.endsWith(".github.com")) return "github";
   if (bare === "gitlab.com" || bare.endsWith(".gitlab.com")) return "gitlab";
 
