@@ -344,6 +344,8 @@ describe("The list view with a filter that matches nothing", () => {
 
     expect(screen.getByText("No tasks match the search")).toBeTruthy();
     expect(screen.queryByText("No tasks match the filters")).toBeNull();
+    // The button clears both, but offering to clear filters nobody set reads as a mistake
+    expect(screen.getByRole("button", { name: "Clear search" })).toBeTruthy();
   });
 
   it("offers a way back that actually brings the rows back", () => {

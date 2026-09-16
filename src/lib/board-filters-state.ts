@@ -75,6 +75,12 @@ export function sanitizeFieldFilters(
   return result;
 }
 
+/** The UNFILED option's name, and the fallback for a value the picker no longer offers */
+export function statusLabel(value: string): string {
+  if (value === UNFILED) return "No column";
+  return ROLE_LABELS[value as ColumnRole]?.label ?? value;
+}
+
 /**
  * What the status filter offers. Roles, not column ids: two boards agree on roles and on
  * nothing else (BP-128), so a board whose columns were renamed or rebuilt still filters.
@@ -83,12 +89,6 @@ export function sanitizeFieldFilters(
  * Several columns commonly share one role — the default board has three review columns —
  * so an option names the role and covers all of them.
  */
-/** The UNFILED option's name, and the fallback for a value the picker no longer offers */
-export function statusLabel(value: string): string {
-  if (value === UNFILED) return "No column";
-  return ROLE_LABELS[value as ColumnRole]?.label ?? value;
-}
-
 export function statusOptions(
   columns: AnyColumn[] | null | undefined,
   tasks: { status: string }[] = []

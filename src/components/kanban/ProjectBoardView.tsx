@@ -312,12 +312,10 @@ export function ProjectBoardView({
                pinned by one of the two copy tests. */
             <div className="flex flex-col items-center justify-center py-16 text-center">
               <h2 className="mb-2 text-lg font-medium text-text-muted">
-                {filterMeta.activeCount > 0
-                  ? "No tasks match the filters"
-                  : "No tasks match the search"}
+                {filterMeta.activeCount > 0 ? "No tasks match the filters" : "No tasks match the search"}
               </h2>
               <Button size="sm" variant="secondary" onClick={filterMeta.clearAll}>
-                Clear filters
+                {filterMeta.activeCount > 0 ? "Clear filters" : "Clear search"}
               </Button>
             </div>
           ) : (
