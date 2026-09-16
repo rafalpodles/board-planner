@@ -47,6 +47,8 @@ const RING_ROOM = 5;
  */
 // The panel is clipped by its nearest scrolling ancestor, not only by the screen: the app's <main>
 // scrolls, so beside a sidebar a panel can be on screen and still cut off at main's edge
+const FADE = "linear-gradient(to bottom, #000 calc(100% - 28px), transparent)";
+
 const CLIPS = new Set(["auto", "scroll", "hidden", "clip"]);
 
 function clippingBounds(panel: HTMLElement): { left: number; right: number } {
@@ -68,6 +70,7 @@ export function usePanelClamp(open: boolean): {
   const applied = useRef(0);
   const [shiftX, setShiftX] = useState(0);
   const [maxHeight, setMaxHeight] = useState(0);
+  const [moreBelow, setMoreBelow] = useState(false);
 
   const measure = useCallback(() => {
     const panel = ref.current;
@@ -87,6 +90,7 @@ export function usePanelClamp(open: boolean): {
     setShiftX(applied.current);
     const room = window.innerHeight - box.top - GUTTER;
     setMaxHeight(Math.min(Math.max(room, 0), window.innerHeight - GUTTER));
+    setMoreBelow(panel!.scrollHeight - panel!.scrollTop - panel!.clientHeight > 1);
   }, []);
 
   useLayoutEffect(() => {
@@ -94,10 +98,16 @@ export function usePanelClamp(open: boolean): {
       applied.current = 0;
       setShiftX(0);
       setMaxHeight(0);
+      setMoreBelow(false);
       return;
     }
     measure();
   }, [open, measure]);
+
+  // Overflow only exists once the bound is applied, so read it again after that render
+  useLayoutEffect(() => {
+    if (open && maxHeight) measure();
+  }, [open, maxHeight, measure]);
 
   useEffect(() => {
     if (!open) return;
@@ -132,6 +142,8 @@ export function usePanelClamp(open: boolean): {
       ...(maxHeight
         ? { maxHeight, overflowY: "auto" as const, scrollPaddingBlock: RING_ROOM }
         : {}),
+      // Scrollbars are hidden app-wide, so the fade is what says the panel continues
+      ...(moreBelow ? { maskImage: FADE, WebkitMaskImage: FADE } : {}),
     },
   };
 }

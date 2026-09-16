@@ -191,4 +191,49 @@ describe("usePanelClamp", () => {
 
     expect(shiftOf()).toBe("translateX(84px)");
   });
+
+  // BP-636: every scrollbar in the app is hidden, so nothing else says a bounded panel continues
+  describe("the fade that says there is more", () => {
+    let scroll = { height: 0, top: 0, client: 0 };
+    beforeEach(() => {
+      Object.defineProperty(HTMLElement.prototype, "scrollHeight", { configurable: true, get: () => scroll.height });
+      Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, get: () => scroll.client });
+      Object.defineProperty(HTMLElement.prototype, "scrollTop", { configurable: true, get: () => scroll.top });
+    });
+
+    // happy-dom reports a never-set maskImage as undefined and a cleared one as ""
+    const maskOf = () => screen.getByTestId("panel").style.maskImage ?? "";
+
+    it("fades the bottom edge while there is content below it", () => {
+      scroll = { height: 717, top: 0, client: 171 };
+      rect = { left: 12, right: 352, width: 340, top: 600, height: 171 };
+      render(<Panel open />);
+
+      expect(maskOf()).toContain("transparent");
+    });
+
+    it("drops the fade once the reader has scrolled to the end", async () => {
+      scroll = { height: 717, top: 0, client: 171 };
+      rect = { left: 12, right: 352, width: 340, top: 600, height: 171 };
+      render(<Panel open />);
+      expect(maskOf()).toContain("transparent");
+
+      scroll = { height: 717, top: 546, client: 171 };
+      await act(async () => {
+        screen.getByTestId("panel").dispatchEvent(new Event("scroll", { bubbles: false }));
+        await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+      });
+
+      expect(maskOf()).toBe("");
+    });
+
+    it("never fades a panel that fits", () => {
+      scroll = { height: 277, top: 0, client: 277 };
+      rect = { left: 12, right: 352, width: 340, top: 138, height: 277 };
+      render(<Panel open />);
+
+      expect(maxHeightOf()).toBe("650px");
+      expect(maskOf()).toBe("");
+    });
+  });
 });
