@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/Button";
 
@@ -14,12 +14,14 @@ export default function ConfirmEmailPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [confirmed, setConfirmed] = useState("");
+  const held = useRef<string | null>(null);
 
   // In the fragment, so it never reaches a server log or a Referer; off the address bar once held
+  // Read once: an effect that runs twice would find the address bar already cleared
   useEffect(() => {
-    const held = tokenFromFragment();
-    setToken(held);
-    if (held) window.history.replaceState(null, "", "/confirm-email");
+    if (held.current === null) held.current = tokenFromFragment();
+    setToken(held.current);
+    if (held.current) window.history.replaceState(null, "", "/confirm-email");
   }, []);
 
   async function confirm() {
