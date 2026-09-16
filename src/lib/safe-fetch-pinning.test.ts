@@ -46,8 +46,8 @@ describe("safeFetch connects only to the addresses it vetted", () => {
     expect(hits).toBe(0);
   });
 
-  // The control: the name reaches the server only through the dispatcher's own lookup, because
-  // nothing else on this machine resolves rebind.localhost to this port's listener by that route
+  // The control. A .localhost name skips the early assertion's lookup entirely, so any call the
+  // resolver sees came from the connection itself
   it("connects through its own lookup when the answer is allowed", async () => {
     lookup.mockResolvedValue([{ address: "127.0.0.1", family: 4 }]);
 
@@ -59,6 +59,6 @@ describe("safeFetch connects only to the addresses it vetted", () => {
 
     expect(await response.text()).toBe("internal");
     expect(hits).toBe(1);
-    expect(lookup.mock.calls.every(([host]) => host === "rebind.localhost")).toBe(true);
+    expect(lookup).toHaveBeenCalledWith("rebind.localhost", expect.objectContaining({ all: true }));
   });
 });
