@@ -369,3 +369,28 @@ describe("GET /api/projects/:projectId/tasks — the status filter", () => {
     expect(invented.status).toBe(400);
   });
 });
+
+// BP-326: the board loads every task for every member, and a stored execution names the run that
+// authorises release; a refused change carries the whole patch
+describe("GET /api/projects/:projectId/tasks — what a card publishes", () => {
+  it("projects execution and drops decision on every task", async () => {
+    const stored = {
+      _id: "t1",
+      title: "Held by a run",
+      execution: { runId: "run-secret-123", workerId: "w1", attempts: 2, phaseSeq: 9, lastError: "boom" },
+      decision: { patchSha256: "patch-hash-abc" },
+    };
+    taskFind.mockReturnValue({
+      sort: () => ({
+        populate: () => Promise.resolve([{ ...stored, toObject: () => ({ ...stored }) }]),
+      }),
+    });
+    workerFind.mockReturnValue({ select: () => ({ lean: async () => [{ _id: "w1", name: "mac" }] }) });
+
+    const text = await (await GET(request(), ctx())).text();
+
+    expect(text).toContain("Held by a run");
+    expect(text).not.toContain("run-secret-123");
+    expect(text).not.toContain("patch-hash-abc");
+  });
+});
