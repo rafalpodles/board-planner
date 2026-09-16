@@ -179,7 +179,7 @@ export default function ProfilePage() {
           <div role="status" className="rounded-lg border border-border bg-surface-muted p-3 text-sm">
             <p>
               Waiting for <strong>{pendingEmail}</strong> to be confirmed. Open the link we sent there;
-              until then, {savedEmail || "no address"} stays on your account.
+              {savedEmail ? ` until then, ${savedEmail} stays on your account.` : " until then, your account has no address."}
             </p>
             <button type="button" onClick={() => void cancelPending()} className="mt-2 text-xs underline">
               Cancel this change

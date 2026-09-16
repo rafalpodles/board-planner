@@ -16,6 +16,7 @@ import type { ReferenceScope } from "@/lib/task-references";
 import { useTriggerAutocomplete, type Trigger } from "@/hooks/use-trigger-autocomplete";
 import { SuggestionList } from "@/components/ui/SuggestionList";
 import { useEditorTriggers } from "@/hooks/use-editor-triggers";
+import { COMMENT_BODY_MAX_LENGTH } from "@/lib/identifiers";
 
 interface CommentsProps {
   projectId: string;
@@ -118,8 +119,8 @@ export function Comments({
       setBody("");
       await loadComments();
       onMutated?.();
-    } catch {
-      toast("Failed to post comment", "error");
+    } catch (err) {
+      toast(err instanceof Error && err.message ? err.message : "Failed to post comment", "error");
     } finally {
       setLoading(false);
     }
@@ -138,8 +139,8 @@ export function Comments({
       await loadComments();
       onMutated?.();
       toast("Comment updated", "success");
-    } catch {
-      toast("Failed to update comment", "error");
+    } catch (err) {
+      toast(err instanceof Error && err.message ? err.message : "Failed to update comment", "error");
     } finally {
       setEditLoading(false);
     }
@@ -275,6 +276,7 @@ export function Comments({
                   <textarea
                     ref={editTextareaRef}
                     value={editBody}
+                    maxLength={COMMENT_BODY_MAX_LENGTH}
                     onChange={(e) => {
                       setEditBody(e.target.value);
                       editMention.detect(e.target.value, e.target.selectionStart);
@@ -412,6 +414,7 @@ export function Comments({
             <textarea
               ref={textareaRef}
               value={body}
+              maxLength={COMMENT_BODY_MAX_LENGTH}
               onChange={(e) => {
                 setBody(e.target.value);
                 newMention.detect(e.target.value, e.target.selectionStart);

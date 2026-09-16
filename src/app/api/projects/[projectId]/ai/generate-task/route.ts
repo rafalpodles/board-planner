@@ -10,9 +10,10 @@ import { choiceFieldsForPrompt, resolveGeneratedFields } from "@/lib/ai-fields";
 import { getSettings } from "@/models/settings";
 import { bareHost, hostOf, projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
 import { countAttempt, sourceKey } from "@/lib/rate-limit";
+import { AI_PROMPT_MAX_LENGTH } from "@/lib/identifiers";
 import { readJsonBody } from "@/lib/request-body";
 
-export const MAX_PROMPT_LENGTH = 10_000;
+export const MAX_PROMPT_LENGTH = AI_PROMPT_MAX_LENGTH;
 /** Generations one person may start in the rate limiter's 15-minute window */
 export const GENERATIONS_PER_USER_WINDOW = 20;
 const DAY_MS = 24 * 60 * 60 * 1000;

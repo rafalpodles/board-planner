@@ -54,6 +54,8 @@ export async function POST(request: Request) {
   if (previousEmail !== outcome.email) {
     const taken = await User.exists({ email: outcome.email, _id: { $ne: user._id } });
     if (taken) {
+      // Nothing changed, so the link stays good for when the address is free again
+      await releaseEmailChange(token).catch(() => {});
       return NextResponse.json({ error: "That email is already on another account" }, { status: 409 });
     }
     try {

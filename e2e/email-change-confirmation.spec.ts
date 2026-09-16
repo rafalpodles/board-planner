@@ -1,8 +1,8 @@
 import { test, expect, type Page, type TestInfo } from "@playwright/test";
 import mongoose from "mongoose";
-import { SMTP_STUB_CONTROL_URL } from "../playwright.config";
 import { E2E_MONGODB_URI, MEMBER_ID, MEMBER_PASSWORD, seed } from "./seed";
 import { signIn } from "./session";
+import { confirmLinkIn, mailFor } from "./mailbox";
 
 /**
  * BP-359. Changing your own address used to store it at once and mail the old one, so anybody could
@@ -26,31 +26,11 @@ async function storedEmail(): Promise<string> {
   return member?.email ?? "";
 }
 
-interface StubMessage {
-  to: string[];
-  data: string;
-}
-
-async function mailFor(address: string): Promise<StubMessage[]> {
-  const response = await fetch(`${SMTP_STUB_CONTROL_URL}/messages`);
-  expect(response.ok, "the mail server's control port refused /messages").toBe(true);
-  const all: StubMessage[] = await response.json();
-  return all.filter((message) => message.to.includes(address));
-}
-
 // The test's id as well as the attempt: the stub's log holds every earlier test's mail too
 const addresses = (attempt: TestInfo) => {
   const tag = `${attempt.testId}-${attempt.repeatEachIndex}-${attempt.retry}`;
   return { old: `old-${tag}@e2e.invalid`, next: `next-${tag}@e2e.invalid` };
 };
-
-/** The link as the message carries it, quoted-printable soft breaks and `=3D` undone */
-function confirmLinkIn(message: StubMessage): string {
-  const unfolded = message.data.replace(/=\r?\n/g, "").replace(/=3D/g, "=");
-  const match = unfolded.match(/https?:\/\/[^\s"<>]+\/confirm-email#token=[A-Za-z0-9_%-]+/);
-  expect(match, "no confirmation link in the message").not.toBeNull();
-  return match![0];
-}
 
 async function requestChange(page: Page, next: string, old: string) {
   await signIn(page, "member");

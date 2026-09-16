@@ -18,10 +18,12 @@ const oauthCodeDeleteMany = vi.fn();
 const enrolmentTokenDeleteMany = vi.fn();
 const deviceEnrolmentDeleteMany = vi.fn();
 const workerUpdateMany = vi.fn();
+const emailChangeDeleteMany = vi.fn();
 vi.mock("@/models/oauthCode", () => ({ OAuthCode: { deleteMany: oauthCodeDeleteMany } }));
 vi.mock("@/models/enrolmentToken", () => ({ EnrolmentToken: { deleteMany: enrolmentTokenDeleteMany } }));
 vi.mock("@/models/deviceEnrolment", () => ({ DeviceEnrolment: { deleteMany: deviceEnrolmentDeleteMany } }));
 vi.mock("@/models/worker", () => ({ Worker: { updateMany: workerUpdateMany } }));
+vi.mock("@/models/emailChangeToken", () => ({ EmailChangeToken: { deleteMany: emailChangeDeleteMany } }));
 
 const {
   allowsInsecureCookie,
@@ -582,6 +584,13 @@ describe("revokeUserCredentials", () => {
     expect(apiTokenDeleteMany).toHaveBeenCalledWith({ user: "user-1" });
     expect(oauthTokenDeleteMany).toHaveBeenCalledWith({ user: "user-1" });
     expect(oauthCodeDeleteMany).toHaveBeenCalledWith({ user: "user-1" });
+  });
+
+  // BP-359 review: a link to a pending address outlived the recovery that was meant to end it
+  it("drops a pending address change, so its link cannot move the address after a recovery", async () => {
+    await revokeUserCredentials("user-1");
+
+    expect(emailChangeDeleteMany).toHaveBeenCalledWith({ user: "user-1", usedAt: null });
   });
 
   // An enrolled machine reaches every project its owner reaches, on a credential of its own

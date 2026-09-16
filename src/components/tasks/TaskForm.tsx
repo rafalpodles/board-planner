@@ -25,7 +25,7 @@ import {
 } from "@/types";
 import { effectiveColumns } from "@/lib/columns";
 import { parseChecklistString } from "@/lib/checklist";
-import { TASK_TITLE_MAX_LENGTH } from "@/lib/identifiers";
+import { AI_PROMPT_MAX_LENGTH, TASK_TITLE_MAX_LENGTH } from "@/lib/identifiers";
 import { MAX_RECURRENCE_INTERVAL, clampInterval } from "@/lib/recurrence";
 import { activeFields, sortedFields, orderedOptions } from "@/lib/custom-fields";
 import type { GeneratedTask } from "@/lib/ai";
@@ -174,8 +174,9 @@ export function TaskForm({
       // failure below is deliberately not held back the same way: a request that failed is worth
       // hearing about wherever the reader ended up.
       if (mounted.current) toast("Fields filled by AI — review and save", "success");
-    } catch {
-      toast("AI generation failed", "error");
+    } catch (err) {
+      // The server's words: a prompt that is too long or a day's budget spent is something to act on
+      toast(err instanceof Error && err.message ? err.message : "AI generation failed", "error");
     } finally {
       setAiLoading(false);
     }
@@ -256,6 +257,7 @@ export function TaskForm({
             <input
               type="text"
               value={aiPrompt}
+              maxLength={AI_PROMPT_MAX_LENGTH}
               onChange={(e) => setAiPrompt(e.target.value)}
               placeholder="Describe what you need, e.g. 'add dark mode toggle'"
               className="focus-ring flex-1 bg-bg border border-border rounded px-3 py-1.5 text-sm"

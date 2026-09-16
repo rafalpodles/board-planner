@@ -7,6 +7,7 @@ import { isValidEmail, normaliseEmail } from "@/lib/email";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { notifyAddressChanged, notifyPasswordChanged } from "@/lib/security-mail";
 import { invalidateResetTokens } from "@/lib/password-reset";
+import { cancelEmailChange } from "@/lib/email-change";
 import { clearAccountAttempts } from "@/lib/rate-limit";
 import { duplicateKeyField } from "@/lib/mongo-errors";
 import { withAdmin } from "@/lib/middleware";
@@ -220,6 +221,8 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
     // A link already sent to the old address would otherwise keep working for its hour — which is
     // exactly the address this change is moving away from
     await invalidateResetTokens(target._id);
+    // And a change the account itself asked for would otherwise overwrite this one once confirmed
+    await cancelEmailChange(target._id);
   }
 
   // The quieter half of the same takeover: repointing an address takes an account over at the next

@@ -7,6 +7,7 @@ import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { ApiToken } from "@/models/apiToken";
 import { DeviceEnrolment } from "@/models/deviceEnrolment";
+import { EmailChangeToken } from "@/models/emailChangeToken";
 import { EnrolmentToken } from "@/models/enrolmentToken";
 import { OAuthCode } from "@/models/oauthCode";
 import { OAuthToken } from "@/models/oauthToken";
@@ -294,6 +295,9 @@ export async function revokeUserCredentials(
   await OAuthCode.deleteMany({ user: userId });
   await EnrolmentToken.deleteMany({ createdBy: userId, usedAt: null });
   await DeviceEnrolment.deleteMany({ enrolledBy: userId, deliveredAt: null });
+  // A pending address change is a link somebody else may hold: confirmed after the recovery, it
+  // would move the address back to them and hand them the next reset (BP-359 review)
+  await EmailChangeToken.deleteMany({ user: userId, usedAt: null });
   // A machine keeps its identity and owner; only the credential it holds stops matching
   const unmatchable = await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10);
   await Worker.updateMany({ owner: userId }, { $set: { credentialHash: unmatchable } });

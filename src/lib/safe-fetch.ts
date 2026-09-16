@@ -141,8 +141,9 @@ function blockedCause(error: unknown): BlockedDestinationError | undefined {
  * `fetch` that re-checks the destination at every hop.
  *
  * Node follows redirects itself, so a guard applied only to the configured URL sees
- * the one address the attacker is happy for it to see. Every caller of an outbound
- * fetch goes through here (BP-303), and every hop connects only to addresses it vetted (BP-344).
+ * the one address the attacker is happy for it to see. Every request to a destination somebody
+ * configured goes through here (BP-303), and every hop connects only to addresses it vetted
+ * (BP-344). Requests to fixed hosts — OpenRouter, raw.githubusercontent.com — do not.
  */
 export async function safeFetch(
   rawUrl: string,
