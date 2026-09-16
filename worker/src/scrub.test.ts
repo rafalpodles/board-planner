@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { scrub } from "./scrub.js";
+import { scrubPatch, scrub } from "./scrub.js";
 
 // Shapes taken from what this system actually mints: src/app/api/tokens/route.ts:56 is
 // `cp_` + 40 hex, src/lib/worker-service.ts:50 is `cpw_` + 64 hex.
@@ -291,5 +291,93 @@ describe("credentials an agent reads off a disk", () => {
   it("leaves ordinary text alone", () => {
     const text = "see src/lib/task-service.ts and the AKIA-shaped column header";
     expect(scrub(text)).toBe(text);
+  });
+});
+
+describe("what sits in the checkout the agent works in (BP-324)", () => {
+  it("redacts a .env line whatever the variable is called, keeping the name", () => {
+    const env = [
+      "ENCRYPTION_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "WEBHOOK_SIGNING_SECRET=whsec-anything-at-all",
+      'SMTP_PASSWORD="hunter2 is not it"',
+      "SMTP_PASS=hunter2",
+      "PASSWORD=bare-names-count-too",
+      "export GITHUB_TOKEN=exported-one",
+      "NEXT_PUBLIC_APP_URL=http://localhost:3000",
+    ].join("\n");
+
+    expect(scrub(env).split("\n")).toEqual([
+      "ENCRYPTION_KEY=[redacted]",
+      "WEBHOOK_SIGNING_SECRET=[redacted]",
+      "SMTP_PASSWORD=[redacted]",
+      "SMTP_PASS=[redacted]",
+      "PASSWORD=[redacted]",
+      "export GITHUB_TOKEN=[redacted]",
+      "NEXT_PUBLIC_APP_URL=http://localhost:3000",
+    ]);
+  });
+
+  it("redacts the same line quoted in a diff or a list, and single-quoted values whole", () => {
+    const text = ["+API_KEY=sk_live_abc", "- SECRET=abc", "* DB_PASSWORD='two words'"].join("\n");
+
+    expect(scrub(text).split("\n")).toEqual([
+      "+API_KEY=[redacted]",
+      "- SECRET=[redacted]",
+      "* DB_PASSWORD=[redacted]",
+    ]);
+  });
+
+  // The shape is a line of configuration, not a word: in code it is a comparison or an object key
+  it("leaves code and settings that merely resemble it alone", () => {
+    const text = [
+      "PM_MAX_TOKENS=8192",
+      "MONKEY_BUSINESS=true",
+      "BYPASS=true",
+      "COMPASS=north",
+      "X_TOKEN==expected",
+      "if (SESSION_TOKEN === expected) {",
+      "  PRIMARY_KEY: id,",
+      "const API_KEY = process.env.API_KEY;",
+    ].join("\n");
+
+    expect(scrub(text)).toBe(text);
+  });
+
+  it("does not reach past the end of the line for a value", () => {
+    expect(scrub("API_TOKEN=\nthe next line stays")).toBe("API_TOKEN=[redacted]\nthe next line stays");
+  });
+
+  it("takes the value and leaves the rest of the line to read", () => {
+    expect(scrub("GH_TOKEN=abc123 was rejected by the remote")).toBe(
+      "GH_TOKEN=[redacted] was rejected by the remote"
+    );
+  });
+
+  it("redacts an OpenAI project key, a Slack webhook and a Discord webhook", () => {
+    const text = [
+      "key sk-proj-AbCdEf0123456789_AbCdEf0123456789-xyz",
+      "posting to https://hooks.slack.com/services/T0000000/B0000000/XXXXXXXXXXXXXXXXXXXXXXXX",
+      "and https://discord.com/api/webhooks/123456789012345678/abcdefghijklmnopqrstuvwxyz_0123",
+    ].join("\n");
+
+    const scrubbed = scrub(text);
+    expect(scrubbed).not.toMatch(/sk-proj-AbCd|T0000000\/B0000000|abcdefghijklmnop/);
+    expect(scrubbed).toContain("https://[redacted]");
+    expect(scrub(scrubbed)).toBe(scrubbed);
+  });
+});
+
+// A diff shown for someone to accept is pushed as written, so it must be shown as written
+describe("scrubPatch", () => {
+  it("keeps a line of code named like a secret visible", () => {
+    const patch = "+PAYLOAD_KEY=eval(atob(ZXZpbA==));";
+
+    expect(scrubPatch(patch)).toBe(patch);
+    // The control: the same line outside a decision is redacted
+    expect(scrub(patch)).toBe("+PAYLOAD_KEY=[redacted]");
+  });
+
+  it("still redacts a token by its shape", () => {
+    expect(scrubPatch("+const t = 'ghp_0123456789abcdefghijklmnopqrstuvwxyz';")).not.toContain("ghp_0123");
   });
 });

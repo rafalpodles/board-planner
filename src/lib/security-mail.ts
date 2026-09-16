@@ -54,10 +54,10 @@ export async function notifyPasswordChanged(n: PasswordChangedNotice): Promise<v
     intro: byAdmin
       ? [
           `An administrator${n.actor ? ` (${n.actor})` : ""} set a new password for this account. The password itself is not sent by email — they will pass it to you directly.`,
-          "Every session was signed out, so you will be asked to sign in again.",
+          "Every session was signed out, and every API token, connected app and enrolled machine was revoked, so you will be asked to sign in and set those up again.",
         ]
       : [
-          "Somebody followed a reset link and set a new password. Every session was signed out, including anyone still signed in on the old password.",
+          "Somebody followed a reset link and set a new password. Every session was signed out, including anyone still signed in on the old password, and every API token, connected app and enrolled machine was revoked.",
         ],
     alert: byAdmin
       ? undefined

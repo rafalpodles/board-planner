@@ -387,6 +387,7 @@ export function TaskFieldsSection({
               <CustomFieldForm
                 key={field._id}
                 field={field}
+                canRemoveSavedOptions={canDelete}
                 onSubmit={(draft) => saveCustomField(field._id, draft)}
                 onCancel={() => setFieldForm(null)}
               />

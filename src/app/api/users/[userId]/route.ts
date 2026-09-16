@@ -10,7 +10,7 @@ import { invalidateResetTokens } from "@/lib/password-reset";
 import { clearAccountAttempts } from "@/lib/rate-limit";
 import { duplicateKeyField } from "@/lib/mongo-errors";
 import { withAdmin } from "@/lib/middleware";
-import { revokeUserSessions } from "@/lib/session";
+import { revokeUserCredentials, revokeUserSessions } from "@/lib/session";
 import { User } from "@/models/user";
 
 export const GET = withAdmin(async (_request, { params }) => {
@@ -84,10 +84,7 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
     target.role = body.role as "admin" | "member";
   }
 
-  // A worker's account is deliberately un-loginable, and both halves of that promise live here: a
-  // password makes it loginable, and an address makes it resettable. Refusing one and not the other
-  // only moves the escape a slice later. Note this keys on `kind`, so it does not cover the `pm`
-  // identity, which is stored as a person — BP-348.
+  // A machine account (a worker's, or pm) is un-loginable: a password or an address would undo that
   const wantsCredentialChange = body.email !== undefined || body.password !== undefined;
   if (wantsCredentialChange && target.kind === "machine") {
     return NextResponse.json(
@@ -165,10 +162,8 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
     // A link already in the target's inbox would otherwise still work, and overwrite the password
     // the admin has just handed them
     await invalidateResetTokens(target._id);
-    // Before the save, not after: a revoke that throws here leaves the account exactly as it was,
-    // and the admin retries. The other order commits the new password, answers 500, and leaves the
-    // old holder signed in — a failure that reads to the admin as "nothing happened".
-    await revokeUserSessions(target._id);
+    // Before the save: a failure revokes too much rather than leaving the old holder a way in
+    await revokeUserCredentials(target._id);
   }
 
   try {

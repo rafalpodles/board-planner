@@ -4,12 +4,11 @@ import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { Task } from "@/models/task";
 import { DEFAULT_PRIORITY, PRIORITIES } from "@/types";
-import { createTask, toApiExecution, taskPopulateFields } from "@/lib/task-service";
+import { createTask, taskPopulateFields } from "@/lib/task-service";
+import { withApiExecutions } from "@/lib/task-execution-view";
 import { getColumnIds } from "@/lib/columns";
-import { Worker } from "@/models/worker";
 import { User } from "@/models/user";
 import { Project } from "@/models/project";
-import { ITaskExecution } from "@/types";
 
 
 export const GET = withProjectAccess(async (request, { params }) => {
@@ -152,28 +151,9 @@ export const GET = withProjectAccess(async (request, { params }) => {
 
   // The board loads every task, so a raw document here would publish each one's whole execution
   // subdocument — run identity included — to every project member on every page load
-  const workerNames = await workerNamesFor(tasks.map((task) => task.execution));
-  return NextResponse.json(
-    tasks.map((task) => ({
-      ...task.toObject(),
-      execution: toApiExecution(task.execution, workerNames),
-      // The board loads every task, and a refused change carries the whole patch — up to 200 KB
-      // per card, to every member, on every poll. The panel that renders one is on the task
-      // screen, which reads the task on its own.
-      decision: undefined,
-    }))
-  );
+  return NextResponse.json(await withApiExecutions(tasks));
 });
 
-
-// Only runs still holding a task carry a workerId, so this reads a handful of documents at most —
-// and skips the query entirely when nothing is running.
-async function workerNamesFor(executions: (ITaskExecution | undefined)[]): Promise<Map<string, string>> {
-  const ids = [...new Set(executions.filter((e) => e?.runId && e.workerId).map((e) => e!.workerId))];
-  if (ids.length === 0) return new Map();
-  const workers = await Worker.find({ _id: { $in: ids } }).select("name").lean();
-  return new Map(workers.map((w) => [String(w._id), w.name as string]));
-}
 
 export const POST = withProjectAccess(async (request, { params, user }) => {
   const { projectId } = await params;
@@ -186,5 +166,5 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
     return NextResponse.json({ error: result.error }, { status: result.status });
   }
 
-  return NextResponse.json(result.data, { status: 201 });
+  return NextResponse.json((await withApiExecutions([result.data]))[0], { status: 201 });
 });

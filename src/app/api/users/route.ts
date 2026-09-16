@@ -3,13 +3,15 @@ import { readJsonBody } from "@/lib/request-body";
 import {
   FULL_NAME_RULE,
   isValidFullName,
-  isValidUsername,
+  isReservedUsername, isValidUsername,
   normaliseFullName,
   USERNAME_RULE,
 } from "@/lib/identifiers";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
-import { getAuthUser, MIN_PASSWORD_LENGTH, PASSWORD_COST_FACTOR } from "@/lib/auth";
+import { getAuthUser, getClientIp, MIN_PASSWORD_LENGTH, PASSWORD_COST_FACTOR } from "@/lib/auth";
+import { anonymousMultiplier, isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
+import { setupCodeIsConfigured, setupCodeMatches } from "@/lib/setup-code";
 import { isValidEmail, normaliseEmail } from "@/lib/email";
 import { duplicateKeyField } from "@/lib/mongo-errors";
 import { ProvenanceError, provenanceRefusal } from "@/lib/session";
@@ -30,9 +32,13 @@ export const GET = withAdmin(async () => {
 export async function POST(request: Request) {
   await connectDB();
 
-  const read = await readJsonBody<{ username?: string; password?: string; fullName?: string; email?: string }>(
-    request
-  );
+  const read = await readJsonBody<{
+    username?: string;
+    password?: string;
+    fullName?: string;
+    email?: string;
+    setupCode?: string;
+  }>(request);
   if (!read.ok) return read.response;
   const body = read.value;
   const { username, password, fullName } = body;
@@ -50,6 +56,9 @@ export async function POST(request: Request) {
   const storedUsername = String(username).trim().toLowerCase();
   if (!isValidUsername(storedUsername)) {
     return NextResponse.json({ error: USERNAME_RULE }, { status: 400 });
+  }
+  if (isReservedUsername(storedUsername)) {
+    return NextResponse.json({ error: "That username is reserved" }, { status: 400 });
   }
   // Same rule the account itself gets under Settings → Profile, and for the same sinks. The
   // truthiness check above passes a name of nothing but spaces, which the schema then trims to ""
@@ -86,6 +95,19 @@ export async function POST(request: Request) {
   if (isBootstrap) {
     const refusal = provenanceRefusal(request);
     if (refusal) return refusal;
+    // A configured token is throttled before it is compared; a generated code is checked first, so a
+    // stranger filling the shared bucket cannot lock the operator out of an unguessable one
+    const clientIp = getClientIp(request);
+    const throttleKey = sourceKey(clientIp ?? "-", "bootstrap");
+    const throttled = () => isRateLimited(throttleKey, anonymousMultiplier(clientIp, 10));
+    const tooMany = () =>
+      NextResponse.json({ error: "Too many attempts. Try again in 15 minutes." }, { status: 429 });
+    if (setupCodeIsConfigured() && (await throttled())) return tooMany();
+    if (!setupCodeMatches(body.setupCode)) {
+      if (await throttled()) return tooMany();
+      await recordFailedAttempt(throttleKey);
+      return NextResponse.json({ error: "The setup code is missing or wrong." }, { status: 403 });
+    }
   } else {
     try {
       authUser = await getAuthUser(request);

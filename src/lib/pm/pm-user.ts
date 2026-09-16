@@ -4,6 +4,7 @@ import { connectDB } from "@/lib/db";
 import { User } from "@/models/user";
 import { IUser } from "@/types";
 import { PM_USERNAME } from "@/lib/pm/username";
+import { revokeUserCredentials } from "@/lib/session";
 
 export { PM_USERNAME };
 
@@ -18,11 +19,29 @@ export async function pmUserId(): Promise<string | null> {
   return pm ? String(pm._id) : null;
 }
 
+// BP-348: older releases stored pm as a person; run at boot, before anyone can act on it
+export async function markPmAsMachine(): Promise<void> {
+  await connectDB();
+  const stored = await User.findOne({ username: PM_USERNAME, kind: { $ne: "machine" } });
+  if (!stored) return;
+  await User.updateOne({ _id: stored._id }, { $set: { kind: "machine" } });
+  await revokeUserCredentials(stored._id);
+  console.warn(
+    `The "${PM_USERNAME}" account was stored as a person (role ${stored.role}). It is now the PM's machine identity: it can no longer sign in, and its sessions, tokens and machines were revoked.`
+  );
+}
+
 export async function getPmUser(): Promise<IUser> {
   await connectDB();
 
   const existing = await User.findOne({ username: PM_USERNAME });
-  if (existing) return existing;
+  if (existing?.kind === "machine") return existing;
+  if (existing) {
+    existing.kind = "machine";
+    const saved = await existing.save();
+    await revokeUserCredentials(existing._id);
+    return saved;
+  }
 
   // Random hash makes the account not loginable; unique username index makes the upsert race-safe
   const password = bcrypt.hashSync(crypto.randomBytes(32).toString("hex"), 10);
@@ -35,6 +54,7 @@ export async function getPmUser(): Promise<IUser> {
         fullName: "PM Agent",
         email: "",
         role: "member",
+        kind: "machine",
       },
     },
     { upsert: true, returnDocument: "after" }

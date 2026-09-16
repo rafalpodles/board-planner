@@ -11,7 +11,7 @@ import {
   withLockout,
 } from "@/lib/rate-limit";
 import { invalidateResetTokens } from "@/lib/password-reset";
-import { revokeUserSessions } from "@/lib/session";
+import { revokeUserCredentials } from "@/lib/session";
 import { User } from "@/models/user";
 
 export const PUT = withAuth(async (request, { user }) => {
@@ -66,6 +66,8 @@ export const PUT = withAuth(async (request, { user }) => {
     return NextResponse.json({ error: "Current password is incorrect" }, { status: 400 });
   }
 
+  // Before the save, so a failed revoke never leaves a new password beside the old credentials
+  await revokeUserCredentials(user._id, user.sessionId);
   record.password = await bcrypt.hash(newPassword, PASSWORD_COST_FACTOR);
   await record.save();
 
@@ -77,7 +79,6 @@ export const PUT = withAuth(async (request, { user }) => {
   // Somebody who changes their password after asking for a reset link has answered the question
   // themselves; the link in their inbox must not still be able to overwrite this
   await invalidateResetTokens(user._id);
-  await revokeUserSessions(user._id, user.sessionId);
 
   return NextResponse.json({ ok: true });
 });

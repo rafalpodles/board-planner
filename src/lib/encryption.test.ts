@@ -56,6 +56,33 @@ describe("assertEncryptionConfig", () => {
     await expect(load()).rejects.toThrowError(/not 32 bytes/);
   });
 
+  // BP-324: a 43-character phrase decodes to 32 bytes under Node's lenient decoder
+  it("refuses a passphrase that merely decodes to 32 bytes", async () => {
+    process.env.ENCRYPTION_KEY = "correct-horse-battery-staple-please-work-ok";
+    expect(Buffer.from(process.env.ENCRYPTION_KEY, "base64")).toHaveLength(32);
+
+    await expect(load()).rejects.toThrowError(/not 32 bytes of hex or base64/);
+  });
+
+  // Valid alphabet and 32 bytes; only the set trailing bits show no key was ever encoded as this
+  it("refuses base64 whose unused trailing bits are set", async () => {
+    const canonical = KEY_B.replace(/=$/, "");
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const last = alphabet.indexOf(canonical[42]);
+    process.env.ENCRYPTION_KEY = canonical.slice(0, 42) + alphabet[last | 1];
+    expect(Buffer.from(process.env.ENCRYPTION_KEY, "base64")).toHaveLength(32);
+
+    await expect(load()).rejects.toThrowError(/not 32 bytes of hex or base64/);
+  });
+
+  it("still accepts genuine base64, padded or not, and genuine hex", async () => {
+    for (const key of [KEY_A, KEY_B, KEY_B.replace(/=$/, "")]) {
+      process.env.ENCRYPTION_KEY = key;
+      const { encryptSecret, decryptSecret } = await load();
+      expect(decryptSecret(encryptSecret("ghp_supersecret"))).toBe("ghp_supersecret");
+    }
+  });
+
   it("refuses a retired key that does not parse", async () => {
     process.env.ENCRYPTION_KEY = KEY_A;
     process.env.ENCRYPTION_KEYS_OLD = "nonsense";

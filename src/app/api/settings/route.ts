@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withAuth, withAdmin } from "@/lib/middleware";
 import { getSettings, Settings } from "@/models/settings";
+import { logInstanceAudit } from "@/lib/instanceAudit";
 
 const MAX_MODEL_LENGTH = 100;
 
@@ -15,15 +16,22 @@ export const GET = withAuth(async () => {
   });
 });
 
-export const PUT = withAdmin(async (request) => {
+export const PUT = withAdmin(async (request, { user }) => {
+  // /api/admin/agents already refuses a machine credential for one project's copy of these (BP-306)
+  if (user.viaMachineCredential) {
+    return NextResponse.json({ error: "Interactive admin session required" }, { status: 403 });
+  }
   await connectDB();
 
   const body = await request.json();
   const updates: Record<string, unknown> = {};
 
   if (body.aiModel !== undefined) {
-    if (typeof body.aiModel !== "string" || !body.aiModel.trim()) {
-      return NextResponse.json({ error: "aiModel is required" }, { status: 400 });
+    if (typeof body.aiModel !== "string" || !body.aiModel.trim() || body.aiModel.length > MAX_MODEL_LENGTH) {
+      return NextResponse.json(
+        { error: `aiModel is required, up to ${MAX_MODEL_LENGTH} chars` },
+        { status: 400 }
+      );
     }
     updates.aiModel = body.aiModel.trim();
   }
@@ -58,6 +66,15 @@ export const PUT = withAdmin(async (request) => {
     { $set: updates },
     { upsert: true, returnDocument: "after" }
   );
+
+  void logInstanceAudit({
+    action: "instance_settings_changed",
+    user: user._id,
+    actorUsername: user.username,
+    detail: Object.entries(updates)
+      .map(([key, value]) => `${key}: ${value}`)
+      .join(", "),
+  });
 
   return NextResponse.json({
     aiModel: settings.aiModel,

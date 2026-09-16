@@ -48,7 +48,8 @@ export async function verifyCredentials(
   }
 
   const valid = await bcrypt.compare(password, user.password);
-  return valid ? user : null;
+  // What makes a machine identity non-loginable, rather than trusting its password to be unknown
+  return valid && user.kind !== "machine" ? user : null;
 }
 
 // A token scoped to specific projects downgrades its bearer to member-level and records the

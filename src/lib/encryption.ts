@@ -16,13 +16,17 @@ interface EncryptionKey {
   material: Buffer;
 }
 
+const CONVERT_TO_HEX = `node -e 'console.log(Buffer.from(process.env.ENCRYPTION_KEY.trim(), "base64").toString("hex"))'`;
+
 function parseKeyMaterial(raw: string): Buffer | null {
   const trimmed = raw.trim();
-  if (!trimmed) return null;
-  const key = /^[0-9a-fA-F]{64}$/.test(trimmed)
-    ? Buffer.from(trimmed, "hex")
-    : Buffer.from(trimmed, "base64");
-  return key.length === 32 ? key : null;
+  if (/^[0-9a-fA-F]{64}$/.test(trimmed)) return Buffer.from(trimmed, "hex");
+  const key = Buffer.from(trimmed, "base64");
+  // Node's decoder is lenient, so only a value that re-encodes to itself was ever base64
+  if (key.length !== 32 || key.toString("base64").replace(/=$/, "") !== trimmed.replace(/=$/, "")) {
+    return null;
+  }
+  return key;
 }
 
 function keyIdOf(material: Buffer): string {
@@ -57,14 +61,14 @@ export function assertEncryptionConfig(): void {
 
   if (raw && !parseKeyMaterial(raw)) {
     throw new Error(
-      "ENCRYPTION_KEY is set but is not 32 bytes of hex or base64. Fix it or unset it — a malformed key is not the same as no key, and must not be treated as one."
+      `ENCRYPTION_KEY is set but is not 32 bytes of hex or base64. base64url, a passphrase, or a value with spaces or quotes inside is refused. If secrets were already saved with this value, keep the same bytes rather than generating a new key — ${CONVERT_TO_HEX} prints them as hex to set instead.`
     );
   }
 
   const badRetired = retiredRaw().filter((k) => !parseKeyMaterial(k));
   if (badRetired.length > 0) {
     throw new Error(
-      `ENCRYPTION_KEYS_OLD contains ${badRetired.length} value(s) that are not 32 bytes of hex or base64. Every retired key must parse, or a secret it wrote can no longer be read.`
+      `ENCRYPTION_KEYS_OLD contains ${badRetired.length} value(s) that are not 32 bytes of hex or base64. Every retired key must parse, or a secret it wrote can no longer be read — convert each to hex the way the ENCRYPTION_KEY message describes.`
     );
   }
 

@@ -8,12 +8,15 @@ import {
   ADMIN_PASSWORD,
   ADMIN_USERNAME,
   E2E_MONGODB_URI,
+  MEMBER_API_TOKEN,
   MEMBER_ID,
   MEMBER_PASSWORD,
   MEMBER_USERNAME,
   PROJECT_KEY,
   SIBLING_TASK_NUMBER,
   SIBLING_TASK_TITLE,
+  WORKER_CREDENTIAL,
+  WORKER_ID,
   seedWithoutSessions,
 } from "./seed";
 
@@ -582,6 +585,51 @@ test("changing your own password: the new one works, the old one stops, this dev
 
   await signIn(page, MEMBER_USERNAME, NEW_PASSWORD);
   await expect(page).toHaveURL(/\/projects/);
+});
+
+// BP-325: tokens, OAuth grants and machines minted with a stolen password used to survive the change
+test("changing your own password signs out its API tokens, connected apps and machines too", async ({
+  page,
+  request,
+}) => {
+  const oauthAccess = `cpat_${randomBytes(24).toString("hex")}`;
+  const hash = (value: string) => createHash("sha256").update(value).digest("hex");
+  await (await db()).collection("oauthtokens").insertOne({
+    accessTokenHash: hash(oauthAccess),
+    refreshTokenHash: hash(`cprt_${randomBytes(24).toString("hex")}`),
+    clientId: "e2e-connected-app",
+    user: MEMBER_ID,
+    scope: "mcp",
+    allowedProjects: [],
+    accessExpiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    refreshExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    createdAt: new Date(),
+  });
+  const me = (bearer: string) =>
+    request.get("/api/auth/me", { headers: { authorization: `Bearer ${bearer}` } });
+  // A machine the member enrolled reaches every project they reach, on a credential of its own
+  await (await db()).collection("workers").updateOne({ _id: WORKER_ID }, { $set: { owner: MEMBER_ID } });
+  const machine = () =>
+    request.get(`/api/workers/${WORKER_ID}`, {
+      headers: { authorization: `Bearer ${WORKER_CREDENTIAL}`, "x-worker-id": String(WORKER_ID) },
+    });
+
+  // The control: every credential authenticates before anything changes
+  expect((await me(MEMBER_API_TOKEN)).status()).toBe(200);
+  expect((await me(oauthAccess)).status()).toBe(200);
+  expect((await machine()).status()).toBe(200);
+
+  await signInAsMember(page);
+  await page.goto("/settings/security");
+  await expect(page.getByText(/API token, connected app such as/)).toBeVisible();
+  await changeOwnPassword(page, MEMBER_PASSWORD, NEW_PASSWORD);
+  await expect(page.getByText("Password changed")).toBeVisible();
+
+  expect((await me(MEMBER_API_TOKEN)).status()).toBe(401);
+  expect((await me(oauthAccess)).status()).toBe(401);
+  expect((await machine()).status()).toBe(401);
+  // And the device that made the change is still the member's
+  await loadsAuthenticated(page, `/projects/${PROJECT_KEY}`);
 });
 
 test("the current password is what stands between a borrowed session and the account", async ({

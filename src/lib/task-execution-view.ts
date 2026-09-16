@@ -28,13 +28,20 @@ export async function workerNamesFor(
 export async function withApiExecution<T extends { execution?: ITaskExecution }>(
   task: T
 ): Promise<Record<string, unknown>> {
-  // Callers hand this either a hydrated document or a plain object, and spreading a document
-  // copies its internals rather than its fields
-  const asDocument = task as unknown as { toObject?: () => Record<string, unknown> };
-  const plain = typeof asDocument.toObject === "function" ? asDocument.toObject() : { ...task };
-  const names = await workerNamesFor([task.execution]);
-  // `decision` goes the same way, and for a second reason on top of its size: the stored record
-  // carries `patchSha256` and the settlement attempt count, which are the machine's own
-  // bookkeeping. The task screen asks for it through the detail route, which serialises it.
-  return { ...plain, execution: toApiExecution(task.execution, names), decision: undefined };
+  return (await withApiExecutions([task]))[0];
+}
+
+export async function withApiExecutions<T extends { execution?: ITaskExecution }>(
+  tasks: T[]
+): Promise<Record<string, unknown>[]> {
+  const names = await workerNamesFor(tasks.map((task) => task.execution));
+  return tasks.map((task) => {
+    // Callers hand this either a hydrated document or a plain object, and spreading a document
+    // copies its internals rather than its fields
+    const asDocument = task as unknown as { toObject?: () => Record<string, unknown> };
+    const plain = typeof asDocument.toObject === "function" ? asDocument.toObject() : { ...task };
+    // `decision` goes the same way: the stored record carries `patchSha256` and the settlement
+    // attempt count. The task screen reads it through the detail route, which serialises it.
+    return { ...plain, execution: toApiExecution(task.execution, names), decision: undefined };
+  });
 }

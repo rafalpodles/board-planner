@@ -33,6 +33,7 @@ const LABELS: Partial<Record<InstanceAuditAction, string>> = {
   worker_decision_accepted: "Refused change accepted",
   worker_decision_declined: "Refused change declined",
   worker_decision_abandoned: "Refused change given up on",
+  instance_settings_changed: "Instance AI defaults changed",
 };
 
 // The one action whose verb lives in `detail` rather than in its name, because a single endpoint

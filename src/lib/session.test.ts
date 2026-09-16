@@ -10,6 +10,18 @@ vi.mock("./db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/session", () => ({
   Session: { findOne, updateOne, create, deleteOne, deleteMany },
 }));
+const apiTokenDeleteMany = vi.fn();
+const oauthTokenDeleteMany = vi.fn();
+vi.mock("@/models/apiToken", () => ({ ApiToken: { deleteMany: apiTokenDeleteMany } }));
+vi.mock("@/models/oauthToken", () => ({ OAuthToken: { deleteMany: oauthTokenDeleteMany } }));
+const oauthCodeDeleteMany = vi.fn();
+const enrolmentTokenDeleteMany = vi.fn();
+const deviceEnrolmentDeleteMany = vi.fn();
+const workerUpdateMany = vi.fn();
+vi.mock("@/models/oauthCode", () => ({ OAuthCode: { deleteMany: oauthCodeDeleteMany } }));
+vi.mock("@/models/enrolmentToken", () => ({ EnrolmentToken: { deleteMany: enrolmentTokenDeleteMany } }));
+vi.mock("@/models/deviceEnrolment", () => ({ DeviceEnrolment: { deleteMany: deviceEnrolmentDeleteMany } }));
+vi.mock("@/models/worker", () => ({ Worker: { updateMany: workerUpdateMany } }));
 
 const {
   allowsInsecureCookie,
@@ -24,6 +36,7 @@ const {
   readSessionCookie,
   resolveSession,
   revokeSession,
+  revokeUserCredentials,
   revokeUserSessions,
   sessionCookieName,
   SESSION_IDLE_TTL_MS,
@@ -56,6 +69,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   delete process.env.COOKIE_ALLOW_INSECURE;
   delete process.env.APP_ORIGIN;
+  delete process.env.PUBLIC_ORIGIN;
   found(null);
   updateOne.mockResolvedValue({});
   deleteOne.mockResolvedValue({ deletedCount: 1 });
@@ -66,6 +80,7 @@ beforeEach(() => {
 afterEach(() => {
   delete process.env.COOKIE_ALLOW_INSECURE;
   delete process.env.APP_ORIGIN;
+  delete process.env.PUBLIC_ORIGIN;
 });
 
 describe("COOKIE_ALLOW_INSECURE parsing", () => {
@@ -230,6 +245,21 @@ describe("provenance", () => {
 
   it("refuses an Origin when APP_ORIGIN is unset", () => {
     expect(checkProvenance(mutating({ origin: "https://app.example.com" })).ok).toBe(false);
+  });
+
+  // BP-361: /oauth/authorize is advertised under PUBLIC_ORIGIN, so with only that set a proxy that
+  // strips Sec-Fetch-* took out sign-in and the OAuth flow together
+  it("falls back to Origin against PUBLIC_ORIGIN when APP_ORIGIN is unset", () => {
+    process.env.PUBLIC_ORIGIN = "https://app.example.com/";
+    expect(checkProvenance(mutating({ origin: "https://app.example.com" })).ok).toBe(true);
+  });
+
+  it("still refuses a cross-site Origin when only PUBLIC_ORIGIN is set", () => {
+    process.env.PUBLIC_ORIGIN = "https://app.example.com";
+    expect(checkProvenance(mutating({ origin: "https://evil.example.com" }))).toEqual({
+      ok: false,
+      reason: "origin-mismatch",
+    });
   });
 
   it("refuses when both signals are absent", () => {
@@ -539,5 +569,31 @@ describe("selfOrigin", () => {
     process.env.APP_ORIGIN = "https://board.example.com";
 
     expect(selfOrigin()).toBe("https://board.example.com");
+  });
+});
+
+// BP-325: changing a password is how a person ejects whoever has it, and a token minted with it
+// outlived every session
+describe("revokeUserCredentials", () => {
+  it("ends the sessions, the API tokens and the OAuth grants, sparing only the caller's session", async () => {
+    await revokeUserCredentials("user-1", "session-keep");
+
+    expect(deleteMany).toHaveBeenCalledWith({ user: "user-1", _id: { $ne: "session-keep" } });
+    expect(apiTokenDeleteMany).toHaveBeenCalledWith({ user: "user-1" });
+    expect(oauthTokenDeleteMany).toHaveBeenCalledWith({ user: "user-1" });
+    expect(oauthCodeDeleteMany).toHaveBeenCalledWith({ user: "user-1" });
+  });
+
+  // An enrolled machine reaches every project its owner reaches, on a credential of its own
+  it("leaves no machine the person enrolled able to authenticate", async () => {
+    await revokeUserCredentials("user-1");
+
+    expect(enrolmentTokenDeleteMany).toHaveBeenCalledWith({ createdBy: "user-1", usedAt: null });
+    expect(deviceEnrolmentDeleteMany).toHaveBeenCalledWith({ enrolledBy: "user-1", deliveredAt: null });
+    const [filter, update] = workerUpdateMany.mock.calls[0];
+    expect(filter).toEqual({ owner: "user-1" });
+    expect(update.$set.credentialHash).toMatch(/^\$2[aby]\$/);
+    const bcrypt = (await vi.importActual<typeof import("bcryptjs")>("bcryptjs")).default;
+    expect(await bcrypt.compare("", update.$set.credentialHash)).toBe(false);
   });
 });

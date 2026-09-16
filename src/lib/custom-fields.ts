@@ -191,6 +191,14 @@ export function orderedOptions(field: { options?: LegacyOption[] }): ICustomFiel
 export const MAX_FIELD_NAME_LENGTH = 100;
 export const MAX_OPTIONS = 100;
 
+export function optionIdsDropped(existing: ICustomFieldOption[], input: unknown): boolean {
+  if (!Array.isArray(input)) return false;
+  const kept = new Set(
+    input.map((raw) => (raw && typeof raw === "object" ? (raw as Partial<ICustomFieldOption>).id : undefined))
+  );
+  return existing.some((option) => !kept.has(option.id));
+}
+
 /**
  * Turns whatever the editor posted into storable options. Strings are accepted so
  * the API keeps working for older clients; each one becomes its own id, matching

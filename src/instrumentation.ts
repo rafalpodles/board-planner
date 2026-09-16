@@ -85,6 +85,14 @@ export async function register() {
       //
       // Projects it already reached keep what it wrote; removing it unsets nothing.
 
+      const { User } = await import("@/models/user");
+      // Printed now rather than on the first visit, so the operator finds it in the startup log
+      const { setupCode } = await import("@/lib/setup-code");
+      if ((await User.countDocuments()) === 0) setupCode();
+
+      const { markPmAsMachine } = await import("@/lib/pm/pm-user");
+      await markPmAsMachine();
+
       const { startPmScheduler } = await import("@/lib/pm/scheduler");
       startPmScheduler();
       console.log("PM scheduler started");

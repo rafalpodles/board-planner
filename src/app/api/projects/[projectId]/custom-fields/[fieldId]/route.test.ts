@@ -125,3 +125,57 @@ describe("PATCH /api/projects/:projectId/custom-fields/:fieldId", () => {
     expect(project.estimateFieldId).toBe(numberFieldId);
   });
 });
+
+// BP-326: removing a saved option erases it from every task, with none of the DELETE's cleanup
+describe("PATCH options — who may remove one", () => {
+  const dropdownId = "drop1";
+  const saved = [
+    { id: "opt-a", value: "Small", color: "#000000", order: 0 },
+    { id: "opt-b", value: "Large", color: "#000000", order: 1 },
+  ];
+
+  beforeEach(() => {
+    project.customFields.push({
+      _id: { toString: () => dropdownId },
+      name: "Size",
+      fieldType: "dropdown",
+      archived: false,
+      options: saved.map((o) => ({ ...o })),
+    } as (typeof project.customFields)[number]);
+  });
+
+  const asMember = () =>
+    check.mockImplementation(async (_user: unknown, _project: unknown, relation: string) => relation !== "admin");
+
+  it("refuses a member who drops a saved option", async () => {
+    asMember();
+    const res = await PATCH(patchRequest({ options: [saved[0]] }), fieldCtx(dropdownId));
+
+    expect(res.status).toBe(403);
+    expect(project.save).not.toHaveBeenCalled();
+  });
+
+  it("still lets a member add an option and rename one", async () => {
+    asMember();
+    const res = await PATCH(
+      patchRequest({ options: [{ ...saved[0], value: "Tiny" }, saved[1], { value: "Huge" }] }),
+      fieldCtx(dropdownId)
+    );
+
+    expect(res.status).toBe(200);
+  });
+
+  it("still lets a member archive a field, which keeps every value", async () => {
+    asMember();
+    const res = await PATCH(patchRequest({ archived: true }), fieldCtx(dropdownId));
+
+    expect(res.status).toBe(200);
+  });
+
+  it("lets a project admin drop a saved option", async () => {
+    const res = await PATCH(patchRequest({ options: [saved[0]] }), fieldCtx(dropdownId));
+
+    expect(res.status).toBe(200);
+    expect(check).toHaveBeenCalledWith(OWNER, PROJECT_ID, "admin");
+  });
+});

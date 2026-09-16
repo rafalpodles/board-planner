@@ -41,15 +41,28 @@ const SECRET = new RegExp(
     "AKIA[0-9A-Z]{16}",
     "ASIA[0-9A-Z]{16}",
     "glpat-[A-Za-z0-9_-]{20,}",
+    // What sits in the checkout the agent is told to work in, not only on the disk around it (BP-324)
+    "sk-proj-[A-Za-z0-9_-]{20,}",
+    "hooks\\.slack\\.com/(?:services|workflows|triggers)/[A-Za-z0-9/_-]{20,}",
+    "(?:discord|discordapp)\\.com/api/webhooks/\\d+/[A-Za-z0-9_-]{20,}",
   ].join("|"),
   "g"
 );
+
+// By position like bp_session=, where a line (or a diff or list line) starts with it: mid-line it is code
+const ENV_ASSIGNMENT =
+  /^([ \t]*(?:[-+*>][ \t]*)?(?:export[ \t]+)?(?:[A-Z0-9_]{0,64}_)?(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|PASS|PWD|CREDENTIALS?))[ \t]*=(?!=)[ \t]*("[^"\n]*"|'[^'\n]*'|[^\s"']*)/gm;
 
 // A private key is a block, not a token: redacting the header alone leaves the body, and the
 // body is the secret. Matched non-greedily so two keys in one text do not merge into one match.
 const PEM_BLOCK = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g;
 
 export function scrub(text: string): string {
+  return scrubPatch(text).replace(ENV_ASSIGNMENT, `$1=${REDACTED}`);
+}
+
+// For a diff someone accepts: it is pushed as written, so it must be shown as written
+export function scrubPatch(text: string): string {
   return text
     .replace(PEM_BLOCK, REDACTED)
     .replace(URL_USERINFO, `$1${REDACTED}@`)

@@ -6,6 +6,7 @@ import { Task } from "@/models/task";
 import { Project } from "@/models/project";
 import { DEFAULT_PRIORITY } from "@/types";
 import { PROJECT_KEY_PATTERN } from "@/lib/urls";
+import { withApiExecutions } from "@/lib/task-execution-view";
 
 // Lean queries skip schema defaults, so tasks predating the priority field need it applied here
 function withPriorityDefault<T extends { priority?: string }>(tasks: T[]): T[] {
@@ -66,7 +67,7 @@ export const GET = withAuth(async (request, { user }) => {
         .populate("assignee", "username fullName")
         .lean();
 
-      return NextResponse.json(withPriorityDefault(tasks));
+      return NextResponse.json(withPriorityDefault(await withApiExecutions(tasks)));
     }
     if (project) return NextResponse.json([]);
   }
@@ -83,5 +84,5 @@ export const GET = withAuth(async (request, { user }) => {
     .limit(50)
     .lean();
 
-  return NextResponse.json(withPriorityDefault(tasks));
+  return NextResponse.json(withPriorityDefault(await withApiExecutions(tasks)));
 });

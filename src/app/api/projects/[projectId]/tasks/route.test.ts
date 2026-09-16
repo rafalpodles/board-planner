@@ -26,7 +26,8 @@ vi.mock("@/lib/task-service", async (importOriginal) => ({
   toApiExecution: vi.fn(() => undefined),
 }));
 
-const { GET } = await import("./route");
+const { GET, POST } = await import("./route");
+const { createTask } = await import("@/lib/task-service");
 
 // A real ObjectId shape resolves without hitting Project.findOne, so the project gate
 // itself needs no mocking here — only the `check` grant it calls
@@ -367,5 +368,59 @@ describe("GET /api/projects/:projectId/tasks — the status filter", () => {
 
     const invented = await GET(request("?status=no-such-column"), ctx());
     expect(invented.status).toBe(400);
+  });
+});
+
+// BP-326: the board list must not publish a run id or a refused change's patch
+describe("GET /api/projects/:projectId/tasks — what a card publishes", () => {
+  it("projects execution and drops decision on every task", async () => {
+    const stored = {
+      _id: "t1",
+      title: "Held by a run",
+      execution: { runId: "run-secret-123", workerId: "w1", attempts: 2, phaseSeq: 9, lastError: "boom" },
+      decision: { patchSha256: "patch-hash-abc" },
+    };
+    taskFind.mockReturnValue({
+      sort: () => ({
+        populate: () => Promise.resolve([{ ...stored, toObject: () => ({ ...stored }) }]),
+      }),
+    });
+    workerFind.mockReturnValue({ select: () => ({ lean: async () => [{ _id: "w1", name: "mac" }] }) });
+
+    const text = await (await GET(request(), ctx())).text();
+
+    expect(text).toContain("Held by a run");
+    expect(text).not.toContain("run-secret-123");
+    expect(text).not.toContain("patch-hash-abc");
+  });
+});
+
+describe("POST /api/projects/:projectId/tasks — what the created task publishes", () => {
+  it("projects execution and drops decision", async () => {
+    vi.mocked(createTask).mockResolvedValue({
+      ok: true,
+      data: {
+        _id: "t2",
+        title: "Just created",
+        execution: { runId: "run-secret-456", workerId: "w1", attempts: 0, phaseSeq: 0 },
+        decision: { patchSha256: "patch-hash-def" },
+      },
+    } as never);
+    workerFind.mockReturnValue({ select: () => ({ lean: async () => [{ _id: "w1", name: "mac" }] }) });
+
+    const res = await POST(
+      new Request("http://localhost/api/projects/CP/tasks", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "Just created" }),
+      }),
+      ctx()
+    );
+    const text = await res.text();
+
+    expect(res.status).toBe(201);
+    expect(text).toContain("Just created");
+    expect(text).not.toContain("run-secret-456");
+    expect(text).not.toContain("patch-hash-def");
   });
 });

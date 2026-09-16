@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { ADMIN_USERNAME, seed, wipe } from "./seed";
+import { BOOTSTRAP_TOKEN, ADMIN_USERNAME, seed, wipe } from "./seed";
 
 /**
  * BP-268. The login page rendered "First time? Create Account" with no condition on it, so every
@@ -43,6 +43,7 @@ test.describe("an instance nobody has claimed", () => {
     await page.getByLabel("Username").fill("firstadmin");
     await page.getByLabel("Password").fill("test1234");
     await page.getByLabel("Full Name").fill("First Admin");
+    await page.getByLabel("Setup code").fill(BOOTSTRAP_TOKEN);
 
     const created = page.waitForResponse(
       (res) => res.url().endsWith("/api/users") && res.request().method() === "POST"
@@ -61,6 +62,29 @@ test.describe("an instance nobody has claimed", () => {
     expect(await (await request.get("/api/auth/instance")).json()).toEqual({ unclaimed: false });
   });
 
+  // BP-325: the instance is public before its operator registers, and the first account is an admin
+  test("refuses the first account to whoever reaches the form without the setup code", async ({
+    page,
+    request,
+  }) => {
+    await page.goto("/login");
+    await page.getByRole("button", { name: TOGGLE }).click();
+    await page.getByLabel("Username").fill("squatter");
+    await page.getByLabel("Password").fill("test1234");
+    await page.getByLabel("Full Name").fill("Squatter");
+    await page.getByLabel("Setup code").fill("a-plausible-guess");
+
+    const refused = page.waitForResponse(
+      (res) => res.url().endsWith("/api/users") && res.request().method() === "POST"
+    );
+    await page.getByRole("button", { name: "Create Account" }).click();
+    expect((await refused).status()).toBe(403);
+
+    await expect(page.getByText("The setup code is missing or wrong")).toBeVisible();
+    await expect(page).toHaveURL(/\/login/);
+    expect(await (await request.get("/api/auth/instance")).json()).toEqual({ unclaimed: true });
+  });
+
   test("stops offering it once the instance has been claimed", async ({ page, request }) => {
     await page.goto("/login");
     await expect(page.getByRole("button", { name: TOGGLE })).toBeVisible();
@@ -71,7 +95,12 @@ test.describe("an instance nobody has claimed", () => {
     // which would have made the assertion below pass for a reason it does not name.
     const claimed = await request.post("/api/users", {
       headers: { "sec-fetch-site": "none" },
-      data: { username: "someoneelse", password: "test1234", fullName: "Someone Else" },
+      data: {
+        username: "someoneelse",
+        password: "test1234",
+        fullName: "Someone Else",
+        setupCode: BOOTSTRAP_TOKEN,
+      },
     });
     expect(claimed.status()).toBe(201);
 

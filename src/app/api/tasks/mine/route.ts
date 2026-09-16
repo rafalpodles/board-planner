@@ -4,6 +4,7 @@ import { withAuth } from "@/lib/middleware";
 import { accessibleProjectIds } from "@/lib/grants";
 import { Task } from "@/models/task";
 import { columnFor } from "@/lib/columns";
+import { withApiExecutions } from "@/lib/task-execution-view";
 import "@/models/project";
 
 export const GET = withAuth(async (_request, { user }) => {
@@ -29,14 +30,15 @@ export const GET = withAuth(async (_request, { user }) => {
   //
   // The columns themselves are dropped again: they were loaded to answer one question per task,
   // and sending a board per row would be the same waste in the other direction.
+  const published = await withApiExecutions(tasks);
   return NextResponse.json(
-    tasks.map((task) => {
+    tasks.map((task, index) => {
       const project = task.project as { columns?: never } | null;
       const column = columnFor(project as never, task.status);
       const { columns: _columns, ...rest } = (project ?? {}) as Record<string, unknown>;
 
       return {
-        ...task,
+        ...published[index],
         project: project ? rest : project,
         // Absent when the task sits in a column the project no longer has, which is what happens
         // to work left behind by a deleted column. The page shows it rather than hiding it.

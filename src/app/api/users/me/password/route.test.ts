@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const getAuthUser = vi.fn();
 const compare = vi.fn();
 const userFindById = vi.fn();
-const revokeUserSessions = vi.fn();
+const revokeUserCredentials = vi.fn();
 const invalidateResetTokens = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -19,7 +19,7 @@ vi.mock("@/lib/auth", () => ({
   MIN_PASSWORD_LENGTH: 8,
 }));
 vi.mock("@/lib/session", () => ({
-  revokeUserSessions,
+  revokeUserCredentials,
   ProvenanceError: class ProvenanceError extends Error {},
 }));
 vi.mock("@/lib/password-reset", () => ({ invalidateResetTokens }));
@@ -62,7 +62,7 @@ beforeEach(async () => {
   userFindById.mockReturnValue({ select: () => Promise.resolve(record) });
   getAuthUser.mockResolvedValue(browserUser("changer"));
   compare.mockResolvedValue(true);
-  revokeUserSessions.mockResolvedValue(0);
+  revokeUserCredentials.mockResolvedValue(0);
 });
 
 describe("PUT /api/users/me/password", () => {
@@ -71,7 +71,7 @@ describe("PUT /api/users/me/password", () => {
 
     expect(res.status).toBe(200);
     expect(record.save).toHaveBeenCalled();
-    expect(revokeUserSessions).toHaveBeenCalledWith("u1-changer", SESSION_ID);
+    expect(revokeUserCredentials).toHaveBeenCalledWith("u1-changer", SESSION_ID);
   });
 
   it("revokes every session when the caller holds a machine token and has none", async () => {
@@ -80,7 +80,16 @@ describe("PUT /api/users/me/password", () => {
     const res = await PUT(put(), ctx());
 
     expect(res.status).toBe(200);
-    expect(revokeUserSessions).toHaveBeenCalledWith("u1-machine-caller", undefined);
+    expect(revokeUserCredentials).toHaveBeenCalledWith("u1-machine-caller", undefined);
+  });
+
+  // Saved first, a failed revoke would leave the old tokens alive behind a password that changed
+  it("keeps the old password when revoking the credentials fails", async () => {
+    revokeUserCredentials.mockRejectedValue(new Error("db down"));
+
+    await PUT(put(), ctx()).catch(() => undefined);
+
+    expect(record.save).not.toHaveBeenCalled();
   });
 
   it("revokes nothing when the current password is wrong", async () => {
@@ -91,7 +100,7 @@ describe("PUT /api/users/me/password", () => {
 
     expect(res.status).toBe(400);
     expect(record.save).not.toHaveBeenCalled();
-    expect(revokeUserSessions).not.toHaveBeenCalled();
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
   });
 
   it("stops comparing once the caller's own account has failed enough times", async () => {
@@ -115,7 +124,7 @@ describe("PUT /api/users/me/password", () => {
     expect(res.status).toBe(429);
     expect(compare).not.toHaveBeenCalled();
     expect(record.save).not.toHaveBeenCalled();
-    expect(revokeUserSessions).not.toHaveBeenCalled();
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
   });
 
   // BP-353. Not the exit for somebody already locked out — a lockout means no session — but it is

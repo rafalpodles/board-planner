@@ -3,6 +3,14 @@ import { Types } from "mongoose";
 import { connectDB } from "./db";
 import { randomToken, sha256 } from "./oauth";
 import { Session } from "@/models/session";
+import bcrypt from "bcryptjs";
+import crypto from "crypto";
+import { ApiToken } from "@/models/apiToken";
+import { DeviceEnrolment } from "@/models/deviceEnrolment";
+import { EnrolmentToken } from "@/models/enrolmentToken";
+import { OAuthCode } from "@/models/oauthCode";
+import { OAuthToken } from "@/models/oauthToken";
+import { Worker } from "@/models/worker";
 
 export const SESSION_TOKEN_PREFIX = "cps_";
 export const SESSION_IDLE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -186,9 +194,22 @@ export function checkProvenance(request: Request): ProvenanceVerdict {
   const origin = request.headers.get("origin");
   if (!origin) return { ok: false, reason: "no-provenance" };
 
-  return appOrigins().includes(normaliseOrigin(origin))
+  warnOnceSecFetchMissing();
+  const own = selfOrigin();
+  const allowed = own ? [...appOrigins(), own] : appOrigins();
+  return allowed.includes(normaliseOrigin(origin))
     ? { ok: true }
     : { ok: false, reason: "origin-mismatch" };
+}
+
+// Once, not per request: a browser always sends Sec-Fetch-Site, so its absence may mean a stripping proxy
+let warnedSecFetchMissing = false;
+function warnOnceSecFetchMissing(): void {
+  if (warnedSecFetchMissing) return;
+  warnedSecFetchMissing = true;
+  console.warn(
+    "A request arrived with an Origin header but no Sec-Fetch-Site. If a proxy or CDN strips Sec-Fetch-* headers, CSRF protection falls back to comparing Origin against APP_ORIGIN and PUBLIC_ORIGIN."
+  );
 }
 
 export function provenanceRefusal(request: Request): NextResponse | null {
@@ -260,6 +281,22 @@ export async function revokeSession(token: string): Promise<boolean> {
   await connectDB();
   const result = await Session.deleteOne({ tokenHash: sha256(token) });
   return (result?.deletedCount ?? 0) > 0;
+}
+
+// Everything a stolen password could have minted that outlives a session (BP-325)
+export async function revokeUserCredentials(
+  userId: Types.ObjectId | string,
+  exceptSessionId?: Types.ObjectId | string | null
+): Promise<void> {
+  await revokeUserSessions(userId, exceptSessionId);
+  await ApiToken.deleteMany({ user: userId });
+  await OAuthToken.deleteMany({ user: userId });
+  await OAuthCode.deleteMany({ user: userId });
+  await EnrolmentToken.deleteMany({ createdBy: userId, usedAt: null });
+  await DeviceEnrolment.deleteMany({ enrolledBy: userId, deliveredAt: null });
+  // A machine keeps its identity and owner; only the credential it holds stops matching
+  const unmatchable = await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10);
+  await Worker.updateMany({ owner: userId }, { $set: { credentialHash: unmatchable } });
 }
 
 export async function revokeUserSessions(

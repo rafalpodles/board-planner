@@ -39,6 +39,7 @@ function draftFrom(field?: ApiCustomField): FieldDraft {
 }
 
 interface CustomFieldFormProps {
+  canRemoveSavedOptions?: boolean;
   /** Absent when creating. Its presence is the only difference between the two modes. */
   field?: ApiCustomField;
   onSubmit: (draft: FieldDraft) => Promise<void>;
@@ -52,7 +53,13 @@ interface CustomFieldFormProps {
  * four flags existed only after the field had been created, and why the type had a
  * hardcoded `=== "dropdown"` branch that left multiselect impossible to make.
  */
-export function CustomFieldForm({ field, onSubmit, onCancel }: CustomFieldFormProps) {
+export function CustomFieldForm({
+  field,
+  onSubmit,
+  onCancel,
+  canRemoveSavedOptions = true,
+}: CustomFieldFormProps) {
+  const savedOptionIds = new Set((field?.options ?? []).map((o) => o.id));
   const [draft, setDraft] = useState<FieldDraft>(() => draftFrom(field));
   // The visible label is the name, pointed at the control rather than left beside it — the way
   // `Select` does it. Without this the field announced as "combo box, text" (BP-498).
@@ -169,14 +176,16 @@ export function CustomFieldForm({ field, onSubmit, onCancel }: CustomFieldFormPr
                   placeholder="Option name"
                   className="py-1.5"
                 />
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  aria-label={`Remove ${option.value || "option"}`}
-                  onClick={() => set("options", draft.options.filter((_, j) => j !== i))}
-                >
-                  ✕
-                </Button>
+                {(canRemoveSavedOptions || !savedOptionIds.has(option.id)) && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`Remove ${option.value || "option"}`}
+                    onClick={() => set("options", draft.options.filter((_, j) => j !== i))}
+                  >
+                    ✕
+                  </Button>
+                )}
               </div>
             ))}
             <Button

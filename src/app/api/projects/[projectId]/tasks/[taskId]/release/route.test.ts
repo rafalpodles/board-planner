@@ -3,7 +3,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const releaseTask = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
-vi.mock("@/lib/task-service", () => ({ releaseTask }));
+vi.mock("@/lib/task-service", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/task-service")>()),
+  releaseTask,
+}));
+vi.mock("@/models/worker", () => ({
+  Worker: { find: () => ({ select: () => ({ lean: async () => [] }) }) },
+}));
 // Models the real middleware rather than deriving one fact from another: the worker branch needs a
 // Bearer AND x-worker-id and yields a verified workerId; a cp_/cpat_ token is a machine credential
 // with NO verified worker id; a cookie session is a person. The old mock defined
@@ -93,5 +99,31 @@ describe("POST .../tasks/:taskId/release", () => {
     await POST(request({ workerId: "someone-else" }, "worker"), ctx());
 
     expect(releaseTask).toHaveBeenCalledWith("p1", "t1", { refund: true, workerId: "w1" });
+  });
+
+  // BP-326: the run id is what the release and phase routes authorise on
+  it("answers with the published execution, not the stored one", async () => {
+    releaseTask.mockResolvedValue({
+      _id: "t1",
+      title: "Held",
+      execution: {
+        runId: "run-secret-123",
+        workerId: "w1",
+        attempts: 2,
+        phaseSeq: 9,
+        lastError: "boom",
+        startedAt: new Date(),
+      },
+    });
+
+    const res = await POST(
+      new Request("http://localhost/api/projects/p1/tasks/t1/release", { method: "POST" }),
+      { params: Promise.resolve({ projectId: "p1", taskId: "t1" }) }
+    );
+    const text = await res.text();
+
+    expect(res.status).toBe(200);
+    expect(text).not.toContain("run-secret-123");
+    expect(text).not.toContain("phaseSeq");
   });
 });
