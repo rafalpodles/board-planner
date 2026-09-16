@@ -1,5 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
-import { E2E_MONGODB_URI } from "./e2e/seed";
+import { BOOTSTRAP_TOKEN, E2E_MONGODB_URI } from "./e2e/seed";
 import { GROUPS } from "./e2e/groups";
 
 // 3987, not the usual 3456: a developer's own dev server and other agents share this machine
@@ -231,6 +231,8 @@ export default defineConfig({
         // anonymous throttle bucket. A machine that happened to export this variable would
         // otherwise move those tests onto the per-address counter (BP-395).
         TRUSTED_PROXY_HOPS: "0",
+        // Known to day-zero.spec.ts, which claims an empty instance the way an operator does (BP-325)
+        BOOTSTRAP_TOKEN,
         // Presence alone is what isPmAvailable checks; the stub never looks at it
         OPENROUTER_API_KEY: "e2e-stub-key",
         OPENROUTER_BASE_URL: `${PM_STUB_URL}/v1`,

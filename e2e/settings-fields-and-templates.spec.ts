@@ -1,5 +1,5 @@
 import { test, expect, type APIRequestContext, type Locator, type Page } from "@playwright/test";
-import { ADMIN_AUTH } from "./api";
+import { ADMIN_AUTH, MEMBER_AUTH } from "./api";
 import { dragTo } from "./drag";
 import {
   FIELDS,
@@ -307,6 +307,51 @@ test.describe("custom fields", () => {
       expect((await storedProject(request)).estimateFieldId).toBe("");
       await expect(page.getByRole("combobox", { name: "Estimate field" })).toHaveValue("");
     });
+  });
+});
+
+// BP-326: removing an option a field already has erases it from every task that carries it, with
+// none of the cleanup the owner-gated DELETE performs. Members add and edit; project admins remove.
+test.describe("who may remove a saved option", () => {
+  test("a member can add an option, but sees no way to remove one the field already has", async ({
+    page,
+    request,
+  }) => {
+    await seedCustomFields();
+    await signIn(page, "member");
+    await page.goto(`${SETTINGS}?section=fields`);
+    await expect(page.getByRole("heading", { name: "Task fields", exact: true })).toBeVisible();
+
+    await fieldRow(page, "Difficulty").getByRole("button", { name: "Edit" }).click();
+    await expect(page.getByPlaceholder("Option name")).toHaveCount(2);
+    await expect(page.getByRole("button", { name: "Remove S" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Remove L" })).toHaveCount(0);
+
+    await page.getByRole("button", { name: "+ Add option" }).click();
+    await page.getByPlaceholder("Option name").last().fill("XL");
+    // A row the member added themselves can still be taken back before saving
+    await expect(page.getByRole("button", { name: "Remove XL" })).toBeVisible();
+
+    const saved = fieldWrite(page, "PATCH");
+    await page.getByRole("button", { name: "Save field" }).click();
+    expect((await saved).status()).toBe(200);
+    const difficulty = (await storedFields(request)) as unknown as { name: string; options: { value: string }[] }[];
+    expect(difficulty.find((f) => f.name === "Difficulty")?.options.map((o) => o.value)).toEqual(["S", "L", "XL"]);
+
+    // The screen is only what is offered; the route is the rule
+    const dropped = await request.patch(`/api/projects/${PROJECT_ID}/custom-fields/${FIELDS.difficulty._id}`, {
+      headers: MEMBER_AUTH,
+      data: { options: [FIELDS.difficulty.options[0]] },
+    });
+    expect(dropped.status()).toBe(403);
+  });
+
+  test("a project admin still sees the remove control on a saved option", async ({ page }) => {
+    await seedCustomFields();
+    await openFields(page);
+
+    await fieldRow(page, "Difficulty").getByRole("button", { name: "Edit" }).click();
+    await expect(page.getByRole("button", { name: "Remove S" })).toBeVisible();
   });
 });
 

@@ -7,6 +7,7 @@ import bcrypt from "bcryptjs";
 export const E2E_MONGODB_URI =
   process.env.E2E_MONGODB_URI ?? "mongodb://localhost:27017/boardplanner_e2e";
 
+export const BOOTSTRAP_TOKEN = "e2e-operator-setup-code";
 export const ADMIN_USERNAME = "admin";
 export const ADMIN_PASSWORD = "test1234";
 

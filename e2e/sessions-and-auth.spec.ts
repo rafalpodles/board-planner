@@ -8,6 +8,7 @@ import {
   ADMIN_PASSWORD,
   ADMIN_USERNAME,
   E2E_MONGODB_URI,
+  MEMBER_API_TOKEN,
   MEMBER_ID,
   MEMBER_PASSWORD,
   MEMBER_USERNAME,
@@ -582,6 +583,44 @@ test("changing your own password: the new one works, the old one stops, this dev
 
   await signIn(page, MEMBER_USERNAME, NEW_PASSWORD);
   await expect(page).toHaveURL(/\/projects/);
+});
+
+// BP-325: changing a password is how a person ejects whoever has it. An API token or an OAuth grant
+// minted with the stolen password used to survive it, because only sessions were revoked.
+test("changing your own password signs out its API tokens and connected apps too", async ({
+  page,
+  request,
+}) => {
+  const oauthAccess = `cpat_${randomBytes(24).toString("hex")}`;
+  const hash = (value: string) => createHash("sha256").update(value).digest("hex");
+  await (await db()).collection("oauthtokens").insertOne({
+    accessTokenHash: hash(oauthAccess),
+    refreshTokenHash: hash(`cprt_${randomBytes(24).toString("hex")}`),
+    clientId: "e2e-connected-app",
+    user: MEMBER_ID,
+    scope: "mcp",
+    allowedProjects: [],
+    accessExpiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    refreshExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    createdAt: new Date(),
+  });
+  const me = (bearer: string) =>
+    request.get("/api/auth/me", { headers: { authorization: `Bearer ${bearer}` } });
+
+  // The control: both credentials authenticate before anything changes
+  expect((await me(MEMBER_API_TOKEN)).status()).toBe(200);
+  expect((await me(oauthAccess)).status()).toBe(200);
+
+  await signInAsMember(page);
+  await page.goto("/settings/security");
+  await expect(page.getByText(/API token and connected app/)).toBeVisible();
+  await changeOwnPassword(page, MEMBER_PASSWORD, NEW_PASSWORD);
+  await expect(page.getByText("Password changed")).toBeVisible();
+
+  expect((await me(MEMBER_API_TOKEN)).status()).toBe(401);
+  expect((await me(oauthAccess)).status()).toBe(401);
+  // And the device that made the change is still the member's
+  await loadsAuthenticated(page, `/projects/${PROJECT_KEY}`);
 });
 
 test("the current password is what stands between a borrowed session and the account", async ({
