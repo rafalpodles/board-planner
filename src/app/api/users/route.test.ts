@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { isValidUsername } from "@/lib/identifiers";
 
 const create = vi.fn();
 const countDocuments = vi.fn();
@@ -115,9 +116,24 @@ describe("the username an account may be given", () => {
     expect(create.mock.calls[0][0].username).toBe("nowak");
   });
 
-  // The instance mints these itself, so a rule that refused them would break enrolment
-  it("accepts the shape of a machine account this instance creates", async () => {
-    const res = await post({ ...VALID, username: "worker-6a7309535eb49af333b85a04" });
+  // The pattern must still fit what enrolment mints; enrolment upserts directly, not through here
+  it("keeps the shape of a machine account inside the username rule", () => {
+    expect(isValidUsername("worker-6a7309535eb49af333b85a04")).toBe(true);
+  });
+
+  // BP-348: a person holding one of these would be taken for the identity the instance mints
+  it.each([["pm"], ["worker-6a7309535eb49af333b85a04"]])(
+    "refuses to create a person under the reserved name %s",
+    async (username) => {
+      const res = await post({ ...VALID, username });
+
+      expect(res.status).toBe(400);
+      expect(create).not.toHaveBeenCalled();
+    }
+  );
+
+  it("still lets a person be called something that merely starts like one", async () => {
+    const res = await post({ ...VALID, username: "worker-bee" });
 
     expect(res.status).toBe(201);
   });

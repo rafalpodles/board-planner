@@ -1,4 +1,5 @@
 import { PROJECT_KEY_MAX_LENGTH, PROJECT_KEY_PATTERN } from "@/lib/urls";
+import { PM_USERNAME } from "@/lib/pm/username";
 
 /**
  * A project key and a username are not free text. Both are interpolated into places that give
@@ -25,6 +26,11 @@ export const USERNAME_RULE =
 
 export function isValidProjectKey(key: string): boolean {
   return PROJECT_KEY_PATTERN.test(key);
+}
+
+// The identities this instance mints for itself; a person holding one would be taken for it
+export function isReservedUsername(username: string): boolean {
+  return username === PM_USERNAME || /^worker-[0-9a-f]{24}$/.test(username);
 }
 
 export function isValidUsername(username: string): boolean {

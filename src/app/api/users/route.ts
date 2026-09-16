@@ -3,7 +3,7 @@ import { readJsonBody } from "@/lib/request-body";
 import {
   FULL_NAME_RULE,
   isValidFullName,
-  isValidUsername,
+  isReservedUsername, isValidUsername,
   normaliseFullName,
   USERNAME_RULE,
 } from "@/lib/identifiers";
@@ -50,6 +50,9 @@ export async function POST(request: Request) {
   const storedUsername = String(username).trim().toLowerCase();
   if (!isValidUsername(storedUsername)) {
     return NextResponse.json({ error: USERNAME_RULE }, { status: 400 });
+  }
+  if (isReservedUsername(storedUsername)) {
+    return NextResponse.json({ error: "That username is reserved" }, { status: 400 });
   }
   // Same rule the account itself gets under Settings → Profile, and for the same sinks. The
   // truthiness check above passes a name of nothing but spaces, which the schema then trims to ""

@@ -22,7 +22,11 @@ export async function getPmUser(): Promise<IUser> {
   await connectDB();
 
   const existing = await User.findOne({ username: PM_USERNAME });
-  if (existing) return existing;
+  if (existing?.kind === "machine") return existing;
+  if (existing) {
+    existing.kind = "machine";
+    return existing.save();
+  }
 
   // Random hash makes the account not loginable; unique username index makes the upsert race-safe
   const password = bcrypt.hashSync(crypto.randomBytes(32).toString("hex"), 10);
@@ -35,6 +39,7 @@ export async function getPmUser(): Promise<IUser> {
         fullName: "PM Agent",
         email: "",
         role: "member",
+        kind: "machine",
       },
     },
     { upsert: true, returnDocument: "after" }
