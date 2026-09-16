@@ -176,7 +176,7 @@ export default function ProfilePage() {
         )}
 
         {pendingEmail && (
-          <div role="status" className="rounded-lg border border-border bg-surface-muted p-3 text-sm">
+          <div role="status" className="rounded-lg border border-border bg-surface-muted p-3 text-sm [overflow-wrap:anywhere]">
             <p>
               Waiting for <strong>{pendingEmail}</strong> to be confirmed. Open the link we sent there;
               {savedEmail ? ` until then, ${savedEmail} stays on your account.` : " until then, your account has no address."}
