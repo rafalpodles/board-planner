@@ -1,4 +1,4 @@
-import { test, expect, type Page, type TestInfo } from "@playwright/test";
+import { test, expect, type Page, type Request, type TestInfo } from "@playwright/test";
 import mongoose from "mongoose";
 import { MAIL_SERVER, SMTP_STUB_CONTROL_URL } from "../playwright.config";
 import { ADMIN_ID, ADMIN_USERNAME, E2E_MONGODB_URI, seed } from "./seed";
@@ -204,6 +204,13 @@ test("a 5xx that is this instance's own still raises the outage banner", async (
   page,
 }, testInfo) => {
   const ADDRESS = mailbox("the-instance-itself", testInfo);
+  const onTheWire = new Set<Request>();
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname.startsWith("/api/")) onTheWire.add(request);
+  });
+  const settled = (request: Request) => onTheWire.delete(request);
+  page.on("requestfinished", settled);
+  page.on("requestfailed", settled);
   await giveTheAdminTheAddress(ADDRESS);
   await openTheMailScreen(page);
 
@@ -217,6 +224,15 @@ test("a 5xx that is this instance's own still raises the outage banner", async (
         })
       : route.fallback()
   );
+  // Any answer below 500 clears the banner, so the shell's own polls answering 200 in the gap took
+  // it down before this could see it. New ones are left unanswered, and the ones already on the
+  // wire are let finish first.
+  await page.route(
+    (url) => url.pathname.startsWith("/api/") && url.pathname !== "/api/admin/email",
+    () => {}
+  );
+  const alreadySent = [...onTheWire];
+  await expect.poll(() => alreadySent.filter((request) => onTheWire.has(request)).length).toBe(0);
 
   await sendButton(page).click();
 
