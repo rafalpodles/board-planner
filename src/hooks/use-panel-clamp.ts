@@ -13,6 +13,9 @@ import {
 /** How close a panel may come to the edge of the screen before it is pulled back */
 const GUTTER = 12;
 
+/** What a 2px outline at 2px offset needs, plus the pixel `.scroll-ring-room` took for rounding */
+const RING_ROOM = 5;
+
 /**
  * Keeps an absolutely-positioned popover on the screen.
  *
@@ -90,6 +93,17 @@ export function usePanelClamp(open: boolean): {
 
   useEffect(() => {
     if (!open) return;
+    // A board scroll changes box.top every frame, and each measure re-renders the panel's owner —
+    // which rebuilds its assignee map and its status options over every task on the board. One
+    // measure per frame is all the position can actually change in.
+    let frame = 0;
+    const onScroll = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        measure();
+      });
+    };
     const anchor = ref.current?.offsetParent;
     const observer = anchor ? new ResizeObserver(measure) : null;
     if (anchor && observer) observer.observe(anchor);
@@ -99,12 +113,13 @@ export function usePanelClamp(open: boolean): {
     // room measured for it does not — and a stale height bound puts the panel back past the fold
     // with nothing to scroll, which is the defect this bound exists to remove. Capturing, because
     // the scroll happens on whichever ancestor owns it rather than on the window.
-    window.addEventListener("scroll", measure, { capture: true, passive: true });
+    window.addEventListener("scroll", onScroll, { capture: true, passive: true });
     return () => {
       observer?.disconnect();
       window.removeEventListener("resize", measure);
       window.removeEventListener("orientationchange", measure);
-      window.removeEventListener("scroll", measure, { capture: true });
+      window.removeEventListener("scroll", onScroll, { capture: true });
+      if (frame) cancelAnimationFrame(frame);
     };
   }, [open, measure]);
 
@@ -112,9 +127,12 @@ export function usePanelClamp(open: boolean): {
     ref,
     style: {
       ...(shiftX ? { transform: `translateX(${shiftX}px)` } : {}),
-      // scrollPadding: at a scroll boundary the panel's own padding is scrolled away, and the
-      // scrollport clips the focus ring with it — the case .scroll-ring-room covers elsewhere.
-      ...(maxHeight ? { maxHeight, overflowY: "auto" as const, scrollPaddingBlock: 4 } : {}),
+      // Keeps the browser's own scroll-into-view — the one that runs when focus moves — from
+      // parking a control flush against the boundary, where the scrollport would clip its ring.
+      // RING_ROOM, not 4: .scroll-ring-room took the extra pixel for sub-pixel rounding.
+      ...(maxHeight
+        ? { maxHeight, overflowY: "auto" as const, scrollPaddingBlock: RING_ROOM }
+        : {}),
     },
   };
 }

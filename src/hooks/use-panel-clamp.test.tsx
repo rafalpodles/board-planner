@@ -129,21 +129,41 @@ describe("usePanelClamp", () => {
     expect(screen.getByTestId("panel").style.overflowY).toBe("auto");
     // The app hides every scrollbar, so the focus ring is the only thing that reaches a
     // control scrolled to the boundary
-    expect(screen.getByTestId("panel").style.scrollPaddingBlock).toBe("4px");
+    expect(screen.getByTestId("panel").style.scrollPaddingBlock).toBe("5px");
   });
 
   // The toolbar is in normal flow below lg, so the room below it changes as the board scrolls
-  it("re-measures when the page scrolls under an open panel", () => {
+  it("re-measures when the page scrolls under an open panel", async () => {
     rect = { left: 12, right: 352, width: 340, top: 138 };
     render(<Panel open />);
     expect(maxHeightOf()).toBe("650px");
 
     rect = { left: 12, right: 352, width: 340, top: 500 };
-    act(() => {
+    // Non-bubbling on purpose: a scroll does not bubble from the element that owns it, so a
+    // listener that is not capturing never sees this at all
+    await act(async () => {
       document.body.dispatchEvent(new Event("scroll", { bubbles: false }));
+      // A board scroll moves the anchor every frame; the measure is throttled to one per frame
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
     });
 
     expect(maxHeightOf()).toBe("288px");
+  });
+
+  it("measures once for a burst of scroll events, not once each", async () => {
+    rect = { left: 12, right: 352, width: 340, top: 138 };
+    render(<Panel open />);
+    const measured = vi.spyOn(Element.prototype, "getBoundingClientRect");
+
+    await act(async () => {
+      for (let i = 0; i < 20; i++) {
+        document.body.dispatchEvent(new Event("scroll", { bubbles: false }));
+      }
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+    });
+
+    expect(measured).toHaveBeenCalledTimes(1);
+    measured.mockRestore();
   });
 
   it("measures the room from the anchor, not from a fraction of the viewport", () => {
