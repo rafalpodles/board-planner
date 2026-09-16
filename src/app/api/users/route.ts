@@ -11,7 +11,7 @@ import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
 import { getAuthUser, getClientIp, MIN_PASSWORD_LENGTH, PASSWORD_COST_FACTOR } from "@/lib/auth";
 import { anonymousMultiplier, isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
-import { setupCodeMatches } from "@/lib/setup-code";
+import { setupCodeIsConfigured, setupCodeMatches } from "@/lib/setup-code";
 import { isValidEmail, normaliseEmail } from "@/lib/email";
 import { duplicateKeyField } from "@/lib/mongo-errors";
 import { ProvenanceError, provenanceRefusal } from "@/lib/session";
@@ -95,16 +95,16 @@ export async function POST(request: Request) {
   if (isBootstrap) {
     const refusal = provenanceRefusal(request);
     if (refusal) return refusal;
-    // Checked before the throttle, so a stranger filling the shared bucket cannot lock the operator out
+    // A configured token is throttled before it is compared; a generated code is checked first, so a
+    // stranger filling the shared bucket cannot lock the operator out of an unguessable one
+    const clientIp = getClientIp(request);
+    const throttleKey = sourceKey(clientIp ?? "-", "bootstrap");
+    const throttled = () => isRateLimited(throttleKey, anonymousMultiplier(clientIp, 10));
+    const tooMany = () =>
+      NextResponse.json({ error: "Too many attempts. Try again in 15 minutes." }, { status: 429 });
+    if (setupCodeIsConfigured() && (await throttled())) return tooMany();
     if (!setupCodeMatches(body.setupCode)) {
-      const clientIp = getClientIp(request);
-      const throttleKey = sourceKey(clientIp ?? "-", "bootstrap");
-      if (await isRateLimited(throttleKey, anonymousMultiplier(clientIp, 10))) {
-        return NextResponse.json(
-          { error: "Too many attempts. Try again in 15 minutes." },
-          { status: 429 }
-        );
-      }
+      if (await throttled()) return tooMany();
       await recordFailedAttempt(throttleKey);
       return NextResponse.json({ error: "The setup code is missing or wrong." }, { status: 403 });
     }

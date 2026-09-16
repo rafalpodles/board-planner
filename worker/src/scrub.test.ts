@@ -317,11 +317,24 @@ describe("what sits in the checkout the agent works in (BP-324)", () => {
     ]);
   });
 
+  it("redacts the same line quoted in a diff or a list, and single-quoted values whole", () => {
+    const text = ["+API_KEY=sk_live_abc", "- SECRET=abc", "* DB_PASSWORD='two words'"].join("\n");
+
+    expect(scrub(text).split("\n")).toEqual([
+      "+API_KEY=[redacted]",
+      "- SECRET=[redacted]",
+      "* DB_PASSWORD=[redacted]",
+    ]);
+  });
+
   // The shape is a line of configuration, not a word: in code it is a comparison or an object key
   it("leaves code and settings that merely resemble it alone", () => {
     const text = [
       "PM_MAX_TOKENS=8192",
       "MONKEY_BUSINESS=true",
+      "BYPASS=true",
+      "COMPASS=north",
+      "X_TOKEN==expected",
       "if (SESSION_TOKEN === expected) {",
       "  PRIMARY_KEY: id,",
       "const API_KEY = process.env.API_KEY;",
@@ -357,11 +370,11 @@ describe("what sits in the checkout the agent works in (BP-324)", () => {
 // A diff shown for someone to accept is pushed as written, so it must be shown as written
 describe("scrubPatch", () => {
   it("keeps a line of code named like a secret visible", () => {
-    const patch = " PAYLOAD_KEY=eval(atob(ZXZpbA==));";
+    const patch = "+PAYLOAD_KEY=eval(atob(ZXZpbA==));";
 
     expect(scrubPatch(patch)).toBe(patch);
-    // The control: the same line outside a patch is redacted
-    expect(scrub(patch)).toBe(" PAYLOAD_KEY=[redacted]");
+    // The control: the same line outside a decision is redacted
+    expect(scrub(patch)).toBe("+PAYLOAD_KEY=[redacted]");
   });
 
   it("still redacts a token by its shape", () => {

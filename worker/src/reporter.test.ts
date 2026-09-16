@@ -484,4 +484,20 @@ describe("a refusal that withholds the branch carries the change itself", () => 
 
     expect(body(api)).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz0123456789");
   });
+
+  // A board comment is not pushed, so it gets the .env rule a decision diff does not (BP-324)
+  it("redacts a committed .env line in the patch", async () => {
+    const api = apiSpy();
+
+    await createReporter(api, statuses).gateRejected(
+      task,
+      "protected-paths",
+      "refused",
+      "",
+      "diff --git a/.env b/.env\n+SMTP_PASS=hunter2-in-a-diff\n"
+    );
+
+    expect(body(api)).toContain("+SMTP_PASS=[redacted]");
+    expect(body(api)).not.toContain("hunter2-in-a-diff");
+  });
 });

@@ -58,16 +58,20 @@ describe("getPmUser", () => {
 // The boot-time half: an instance upgraded from a release that stored pm as a person
 describe("markPmAsMachine", () => {
   it("flips a pm stored as a person, revokes what it held, and says so", async () => {
-    findOne.mockResolvedValue({ _id: "pm-1", username: "pm", kind: "human", role: "admin", email: "" });
+    findOne.mockResolvedValue({ _id: "pm-1", username: "pm", kind: "human", role: "admin", email: "a@b.c" });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await markPmAsMachine();
 
-    await markPmAsMachine();
-
-    expect(findOne).toHaveBeenCalledWith({ username: "pm", kind: { $ne: "machine" } });
-    expect(updateOne).toHaveBeenCalledWith({ _id: "pm-1" }, { $set: { kind: "machine" } });
-    expect(revokeUserCredentials).toHaveBeenCalledWith("pm-1");
-    expect(warn.mock.calls[0][0]).toContain("role admin");
-    warn.mockRestore();
+      expect(findOne).toHaveBeenCalledWith({ username: "pm", kind: { $ne: "machine" } });
+      expect(updateOne).toHaveBeenCalledWith({ _id: "pm-1" }, { $set: { kind: "machine" } });
+      expect(revokeUserCredentials).toHaveBeenCalledWith("pm-1");
+      expect(warn.mock.calls[0][0]).toContain("role admin");
+      // An address is a person's data, and the role is all an operator needs to act
+      expect(warn.mock.calls[0][0]).not.toContain("a@b.c");
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("does nothing on an instance where pm is already a machine or absent", async () => {

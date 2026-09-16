@@ -24,6 +24,11 @@ export function setupCode(): string {
   return store[GENERATED]!;
 }
 
+// An operator's own token can be guessable, where a generated code is 128 random bits
+export function setupCodeIsConfigured(): boolean {
+  return (process.env.BOOTSTRAP_TOKEN?.trim().length ?? 0) >= MIN_BOOTSTRAP_TOKEN_LENGTH;
+}
+
 export function setupCodeMatches(candidate: unknown): boolean {
   if (typeof candidate !== "string" || !candidate) return false;
   const expected = Buffer.from(setupCode());

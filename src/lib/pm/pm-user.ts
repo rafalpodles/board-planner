@@ -27,7 +27,7 @@ export async function markPmAsMachine(): Promise<void> {
   await User.updateOne({ _id: stored._id }, { $set: { kind: "machine" } });
   await revokeUserCredentials(stored._id);
   console.warn(
-    `The "${PM_USERNAME}" account was stored as a person (role ${stored.role}${stored.email ? `, email ${stored.email}` : ""}). It is now the PM's machine identity: it can no longer sign in, and its sessions, tokens and machines were revoked.`
+    `The "${PM_USERNAME}" account was stored as a person (role ${stored.role}). It is now the PM's machine identity: it can no longer sign in, and its sessions, tokens and machines were revoked.`
   );
 }
 

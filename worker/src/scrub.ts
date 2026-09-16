@@ -49,9 +49,9 @@ const SECRET = new RegExp(
   "g"
 );
 
-// Redacted by position like bp_session=, and only where a line starts with it: in code it is a comparison
+// By position like bp_session=, where a line (or a diff or list line) starts with it: mid-line it is code
 const ENV_ASSIGNMENT =
-  /^([ \t]*(?:export[ \t]+)?[A-Z0-9_]{0,64}(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|PASS|PWD|CREDENTIALS?))[ \t]*=(?!=)[ \t]*("[^"\n]*"|'[^'\n]*'|[^\s"']*)/gm;
+  /^([ \t]*(?:[-+*>][ \t]*)?(?:export[ \t]+)?(?:[A-Z0-9_]{0,64}_)?(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|PASS|PWD|CREDENTIALS?))[ \t]*=(?!=)[ \t]*("[^"\n]*"|'[^'\n]*'|[^\s"']*)/gm;
 
 // A private key is a block, not a token: redacting the header alone leaves the body, and the
 // body is the secret. Matched non-greedily so two keys in one text do not merge into one match.
@@ -61,7 +61,7 @@ export function scrub(text: string): string {
   return scrubPatch(text).replace(ENV_ASSIGNMENT, `$1=${REDACTED}`);
 }
 
-// Without the positional rule: a diff someone accepts is pushed as written, so it must be shown as written
+// For a diff someone accepts: it is pushed as written, so it must be shown as written
 export function scrubPatch(text: string): string {
   return text
     .replace(PEM_BLOCK, REDACTED)

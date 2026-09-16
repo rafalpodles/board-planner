@@ -218,13 +218,30 @@ describe("claiming an instance nobody has claimed", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
-  // The anonymous bucket is shared, so a stranger could otherwise fill it and lock the operator out
-  it("still lets the operator's own code through a throttled source", async () => {
+  // An operator-chosen token can be guessable, so a throttled source cannot keep trying it
+  it("throttles a configured token before comparing it", async () => {
     isRateLimited.mockResolvedValue(true);
 
     const res = await post({ ...VALID, username: "firstadmin", setupCode: "operator-held-setup-code" });
 
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(429);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  // A generated code is 128 random bits; a stranger filling the shared bucket must not lock it out
+  it("lets a generated code through a throttled source", async () => {
+    delete process.env.BOOTSTRAP_TOKEN;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { setupCode } = await import("@/lib/setup-code");
+      isRateLimited.mockResolvedValue(true);
+
+      const res = await post({ ...VALID, username: "firstadmin", setupCode: setupCode() });
+
+      expect(res.status).toBe(201);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("never asks an existing instance's admin for a setup code", async () => {
