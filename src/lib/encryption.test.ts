@@ -56,6 +56,23 @@ describe("assertEncryptionConfig", () => {
     await expect(load()).rejects.toThrowError(/not 32 bytes/);
   });
 
+  // BP-324: Node's base64 decoder drops what it does not recognise, so a memorable 43-character
+  // phrase decoded to exactly 32 bytes and was accepted as a key
+  it("refuses a passphrase that merely decodes to 32 bytes", async () => {
+    process.env.ENCRYPTION_KEY = "correct-horse-battery-staple-please-work-ok";
+    expect(Buffer.from(process.env.ENCRYPTION_KEY, "base64")).toHaveLength(32);
+
+    await expect(load()).rejects.toThrowError(/not 32 bytes of hex or base64/);
+  });
+
+  it("still accepts genuine base64, padded or not, and genuine hex", async () => {
+    for (const key of [KEY_A, KEY_B, KEY_B.replace(/=$/, "")]) {
+      process.env.ENCRYPTION_KEY = key;
+      const { encryptSecret, decryptSecret } = await load();
+      expect(decryptSecret(encryptSecret("ghp_supersecret"))).toBe("ghp_supersecret");
+    }
+  });
+
   it("refuses a retired key that does not parse", async () => {
     process.env.ENCRYPTION_KEY = KEY_A;
     process.env.ENCRYPTION_KEYS_OLD = "nonsense";

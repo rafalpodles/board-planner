@@ -18,11 +18,14 @@ interface EncryptionKey {
 
 function parseKeyMaterial(raw: string): Buffer | null {
   const trimmed = raw.trim();
-  if (!trimmed) return null;
-  const key = /^[0-9a-fA-F]{64}$/.test(trimmed)
-    ? Buffer.from(trimmed, "hex")
-    : Buffer.from(trimmed, "base64");
-  return key.length === 32 ? key : null;
+  if (/^[0-9a-fA-F]{64}$/.test(trimmed)) return Buffer.from(trimmed, "hex");
+  if (!/^[A-Za-z0-9+/]{43}=?$/.test(trimmed)) return null;
+  const key = Buffer.from(trimmed, "base64");
+  // Node's decoder is lenient, so only a value that re-encodes to itself was ever base64
+  if (key.length !== 32 || key.toString("base64").replace(/=$/, "") !== trimmed.replace(/=$/, "")) {
+    return null;
+  }
+  return key;
 }
 
 function keyIdOf(material: Buffer): string {
