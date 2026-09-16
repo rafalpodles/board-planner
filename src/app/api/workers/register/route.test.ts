@@ -183,4 +183,11 @@ describe("POST /api/workers/register", () => {
 
     expect(json.assignments).toEqual([]);
   });
+
+  // BP-323: the version is shown on the fleet screen and read back with every worker
+  it("stores at most 100 characters of the version it is sent", async () => {
+    await POST(request({ ...VALID, version: "v".repeat(5000) }, "cpe_good"));
+
+    expect(registerWorker.mock.calls[0][0].version).toHaveLength(100);
+  });
 });

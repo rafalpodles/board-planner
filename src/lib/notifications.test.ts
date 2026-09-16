@@ -182,3 +182,67 @@ describe("dispatchNotifications — markup in what members write", () => {
     expect(sentBody().embeds[0].description).toBe(`${"a".repeat(199)}\\*...`);
   });
 });
+
+describe("dispatchNotifications — every value and every event", () => {
+  const sentBody = (n = 0) => JSON.parse(String(safeFetch.mock.calls[n][1]?.body));
+
+  it("escapes the project, the old column, the author and the key on Slack", async () => {
+    channelsOf("slack", ["status_changed", "comment_added"], "https://hooks.slack.com/services/T/B/x");
+
+    await dispatchNotifications("p1", "status_changed", {
+      project: { key: "B|P", name: "<!channel> Board" },
+      task: { taskKey: "BP-1", title: "T", status: "todo" },
+      data: { oldStatus: "<@U123> column" },
+    });
+    await dispatchNotifications("p1", "comment_added", {
+      project: { key: "BP", name: "Board" },
+      task: { taskKey: "BP-1", title: "T", status: "todo" },
+      data: { commentBody: "x", author: "<https://phish.example|admin>" },
+    });
+
+    const status = JSON.stringify(sentBody(0));
+    expect(status).not.toContain("<!channel>");
+    expect(status).not.toContain("<@U123>");
+    expect(status).toContain("/projects/B%7CP/tasks/BP-1|BP-1>");
+    const comment = JSON.stringify(sentBody(1));
+    expect(comment).not.toContain("<https://phish.example");
+  });
+
+  it("escapes the author on Discord", async () => {
+    channelsOf("discord", ["comment_added"], "https://discord.com/api/webhooks/1/x");
+
+    await dispatchNotifications("p1", "comment_added", {
+      ...PAYLOAD,
+      data: { commentBody: "x", author: "**admin**" },
+    });
+
+    expect(sentBody().embeds[0].fields[0].value).toBe("\\*\\*admin\\*\\*");
+  });
+
+  it.each(["task_created", "status_changed", "comment_added"])(
+    "refuses mentions on a Discord %s message",
+    async (event) => {
+      channelsOf("discord", [event], "https://discord.com/api/webhooks/1/x");
+
+      await dispatchNotifications("p1", event as never, { ...PAYLOAD, data: { oldStatus: "todo", commentBody: "x" } });
+
+      expect(sentBody().allowed_mentions).toEqual({ parse: [] });
+    }
+  );
+
+  // BP-323: a project with many channels opened a request to every one at once
+  it("has at most four channel deliveries in flight at once", async () => {
+    const landers: ((r: Response) => void)[] = [];
+    safeFetch.mockImplementation(() => new Promise<Response>((resolve) => landers.push(resolve)));
+    channelsOf("slack", ["task_created"], ...Array.from({ length: 9 }, (_, i) => `https://hooks.slack.com/services/T/B/${i}`));
+
+    await dispatchNotifications("p1", "task_created", PAYLOAD);
+    await vi.waitFor(() => expect(safeFetch).toHaveBeenCalledTimes(4));
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(safeFetch).toHaveBeenCalledTimes(4);
+
+    landers.shift()!(new Response("ok"));
+    await vi.waitFor(() => expect(safeFetch).toHaveBeenCalledTimes(5));
+    safeFetch.mockImplementation(() => Promise.resolve(new Response("ok")));
+  });
+});

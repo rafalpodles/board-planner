@@ -91,3 +91,25 @@ describe("what the message may not do", () => {
     expect(body.content).not.toContain("**Assigned to you** look here");
   });
 });
+
+// BP-323: one event reaching many people opened a request to every personal webhook at once
+describe("personal chat fan-out", () => {
+  it("has at most four deliveries in flight at once", async () => {
+    safeFetch.mockClear();
+    const landers: ((v: unknown) => void)[] = [];
+    safeFetch.mockImplementation(() => new Promise((resolve) => landers.push(resolve)));
+
+    await sendPersonalChat({
+      users: Array.from({ length: 9 }, (_, i) => ({ ...slackUser, _id: `u${i}` })),
+      type: "mentioned",
+      title: "T",
+    });
+    await vi.waitFor(() => expect(safeFetch).toHaveBeenCalledTimes(4));
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(safeFetch).toHaveBeenCalledTimes(4);
+
+    landers.shift()!({ ok: true });
+    await vi.waitFor(() => expect(safeFetch).toHaveBeenCalledTimes(5));
+    safeFetch.mockImplementation(() => Promise.resolve({ ok: true }));
+  });
+});

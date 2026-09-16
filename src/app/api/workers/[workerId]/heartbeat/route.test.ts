@@ -480,6 +480,16 @@ describe("POST heartbeat — what one worker may store about itself", () => {
     expect((touched().preflight as { checks: unknown[] }).checks).toHaveLength(50);
   });
 
+  it("drops a preflight check whose name is past 200 characters", async () => {
+    const { req, ctx } = request({
+      preflight: { ok: true, account: "a", checks: [{ name: "n".repeat(201), ok: true }, { name: "git", ok: true }] },
+    });
+
+    await POST(req, ctx);
+
+    expect((touched().preflight as { checks: { name: string }[] }).checks.map((c) => c.name)).toEqual(["git"]);
+  });
+
   it("refuses a heartbeat body past 512 KB", async () => {
     const { req, ctx } = request({ bindingError: "e".repeat(600 * 1024) });
 
