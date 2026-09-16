@@ -59,11 +59,58 @@ export function stripSpoofedLabels(content: string): string {
 // turn in the thread rather than one.
 const IMAGE_WITHOUT_WORDS = "(an image, sent without a message)";
 
+/**
+ * How much earlier conversation a turn replays, in characters of text. The replay is re-sent on
+ * every call of the turn, so its size is multiplied by the calls a turn makes, the same multiplier
+ * that made the MCP tool catalogues expensive (BP-570). Thirty messages were a count, not a size:
+ * thirty one-line exchanges and thirty board reports cost an order of magnitude apart.
+ *
+ * 40,000 characters is roughly 10,000 tokens: a few long exchanges, or a dozen ordinary ones.
+ * A chat message is at most 10,000 characters and a reply at most `PM_MAX_TOKENS`, so the most
+ * recent exchange can be larger on its own, and it is kept whole whatever it weighs: an answer to
+ * "and the second one?" needs what came just before it. The message count (`HISTORY_LIMIT`) stays
+ * as a second bound on the query itself.
+ */
+export const HISTORY_CHAR_BUDGET = 40_000;
+const ALWAYS_REPLAYED = 2;
+
+function weightOf(entry: PmHistoryEntry): number {
+  const summaries = (entry.actions || []).reduce((sum, a) => sum + (a?.summary?.length ?? 0), 0);
+  return (entry.content?.length ?? 0) + summaries;
+}
+
+/** The newest entries that fit the budget, oldest dropped first, never fewer than the last exchange */
+export function boundHistory(
+  history: PmHistoryEntry[],
+  budget = HISTORY_CHAR_BUDGET
+): { kept: PmHistoryEntry[]; omitted: number } {
+  let used = 0;
+  let start = history.length;
+  while (start > 0) {
+    const weight = weightOf(history[start - 1]);
+    const mustKeep = history.length - start < ALWAYS_REPLAYED;
+    if (!mustKeep && used + weight > budget) break;
+    used += weight;
+    start--;
+  }
+  return { kept: history.slice(start), omitted: start };
+}
+
+/** Said to the model, so it does not answer from a record it cannot tell is incomplete */
+export function omittedHistoryNotice(omitted: number): string {
+  return `${omitted} earlier message${omitted === 1 ? " is" : "s are"} not included here, to keep this conversation within its size limit. If the answer depends on something said before them, say so rather than guessing.`;
+}
+
 export async function replayHistory(
   history: PmHistoryEntry[],
   projectId: string
 ): Promise<Record<string, unknown>[]> {
   const messages: Record<string, unknown>[] = [];
+  const bounded = boundHistory(history);
+  history = bounded.kept;
+  if (bounded.omitted > 0) {
+    messages.push({ role: "system", content: omittedHistoryNotice(bounded.omitted) });
+  }
 
   // Only the most recent images are re-sent: history replays on every turn, so without a
   // cap the same screenshots are billed again and again and the request grows unbounded

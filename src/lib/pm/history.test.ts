@@ -20,7 +20,7 @@ vi.mock("./attachments", () => ({
   },
 }));
 
-const { replayHistory, stripSpoofedLabels, HISTORY_AUTHOR_PREFIX } = await import("./history");
+const { replayHistory, stripSpoofedLabels, HISTORY_AUTHOR_PREFIX, HISTORY_CHAR_BUDGET, boundHistory } = await import("./history");
 
 const alice = { username: "alice", fullName: "Alice A" };
 const pm = { username: "pm", fullName: "PM Agent" };
@@ -316,5 +316,67 @@ describe("replayHistory", () => {
       ], "p1");
       expect(typeof out[0].content).toBe("string");
     });
+  });
+});
+
+// BP-570: thirty one-line exchanges and thirty board reports were the same number to the old bound
+describe("replayHistory keeps the replay within a size budget", () => {
+  const long = (i: number, role = i % 2 ? "assistant" : "user") => ({
+    role,
+    content: `${i}:${"x".repeat(9_000)}`,
+  });
+
+  it("trims a thread well under thirty messages that is over the budget, oldest first", async () => {
+    const thread = Array.from({ length: 10 }, (_, i) => long(i));
+
+    const out = await replayHistory(thread, "p1");
+    const replayedText = out.filter((m) => m.role !== "system").map((m) => String(m.content));
+
+    expect(replayedText.length).toBeLessThan(10);
+    expect(replayedText.join("").length).toBeLessThanOrEqual(HISTORY_CHAR_BUDGET);
+    // The newest survive and the oldest go
+    expect(replayedText.at(-1)).toContain("9:");
+    expect(replayedText.some((t) => t.startsWith("0:"))).toBe(false);
+  });
+
+  it("tells the model that earlier messages were left out, and how many", async () => {
+    const thread = Array.from({ length: 10 }, (_, i) => long(i));
+
+    const out = await replayHistory(thread, "p1");
+
+    expect(out[0].role).toBe("system");
+    const kept = out.filter((m) => m.role !== "system").length;
+    expect(String(out[0].content)).toContain(`${10 - kept} earlier messages are not included`);
+  });
+
+  it("says nothing when the whole thread fits", async () => {
+    const out = await replayHistory([{ role: "user", content: "hi" }, { role: "assistant", content: "hello" }], "p1");
+
+    expect(out.some((m) => m.role === "system")).toBe(false);
+    expect(out).toHaveLength(2);
+  });
+
+  it("replays the most recent exchange whole even when it alone is over the budget", async () => {
+    const huge = "y".repeat(HISTORY_CHAR_BUDGET);
+    const thread = [
+      { role: "user", content: "older" },
+      { role: "user", content: `question ${huge}` },
+      { role: "assistant", content: `answer ${huge}` },
+    ];
+
+    const out = await replayHistory(thread, "p1");
+
+    expect(out.map((m) => m.content)).toEqual([
+      expect.stringContaining("1 earlier message is not included"),
+      `question ${huge}`,
+      `answer ${huge}`,
+    ]);
+  });
+
+  it("counts what an entry's action record adds, not only its text", () => {
+    const withActions = { role: "assistant", content: "done", actions: [{ summary: "s".repeat(HISTORY_CHAR_BUDGET) }] };
+    const thread = [{ role: "user", content: "a" }, withActions, { role: "user", content: "b" }, { role: "assistant", content: "c" }];
+
+    expect(boundHistory(thread).omitted).toBe(2);
   });
 });
