@@ -1,6 +1,14 @@
 "use client";
 
-import { RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  CSSProperties,
+  RefObject,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 
 /** How close a panel may come to the edge of the screen before it is pulled back */
 const GUTTER = 12;
@@ -33,14 +41,21 @@ const GUTTER = 12;
  * The re-measure subtracts the shift already applied. Reading the transformed rect and clamping
  * that again compounds: each pass would move the panel by the amount the last pass had already
  * moved it.
+ *
+ * Height is bounded the same way, from the same measurement. `top-full` cannot know how much room
+ * is left below the anchor, so a tall panel simply ran off the bottom with nothing to scroll:
+ * measured at 812x375, the five-control Filters panel ended 40px below the fold and its last
+ * control was unreachable. The bound is the room actually there, not a fraction of the viewport,
+ * because the anchor sits at a different height on every page that uses one.
  */
 export function usePanelClamp(open: boolean): {
   ref: RefObject<HTMLDivElement | null>;
-  style: { transform: string } | undefined;
+  style: CSSProperties | undefined;
 } {
   const ref = useRef<HTMLDivElement>(null);
   const applied = useRef(0);
   const [shiftX, setShiftX] = useState(0);
+  const [maxHeight, setMaxHeight] = useState(0);
 
   const measure = useCallback(() => {
     const box = ref.current?.getBoundingClientRect();
@@ -56,12 +71,14 @@ export function usePanelClamp(open: boolean): {
     // to what runs off the right while nothing reaches what runs off the left.
     applied.current = short > 0 ? short : past > 0 ? -past : 0;
     setShiftX(applied.current);
+    setMaxHeight(Math.max(window.innerHeight - box.top - GUTTER, 0));
   }, []);
 
   useLayoutEffect(() => {
     if (!open) {
       applied.current = 0;
       setShiftX(0);
+      setMaxHeight(0);
       return;
     }
     measure();
@@ -81,5 +98,12 @@ export function usePanelClamp(open: boolean): {
     };
   }, [open, measure]);
 
-  return { ref, style: shiftX ? { transform: `translateX(${shiftX}px)` } : undefined };
+  if (!shiftX && !maxHeight) return { ref, style: undefined };
+  return {
+    ref,
+    style: {
+      ...(shiftX ? { transform: `translateX(${shiftX}px)` } : {}),
+      ...(maxHeight ? { maxHeight, overflowY: "auto" as const } : {}),
+    },
+  };
 }
