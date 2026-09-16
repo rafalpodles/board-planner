@@ -1,5 +1,4 @@
-import { isIP } from "node:net";
-import { Agent } from "undici";
+import type { Agent } from "undici";
 import { isPrivateAddress, isInternalName, isIpLiteral, unbracket } from "./private-address";
 
 export class BlockedDestinationError extends Error {
@@ -90,7 +89,7 @@ async function resolvePublic(host: string, loopbackIsFine: boolean): Promise<Vet
 
   return resolved.map((entry) => ({
     address: entry.address,
-    family: entry.family ?? (isIP(entry.address) || 4),
+    family: entry.family ?? (entry.address.includes(":") ? 6 : 4),
   }));
 }
 
@@ -118,10 +117,12 @@ function pinnedLookup(loopbackIsFine: boolean) {
 
 const dispatchers = new Map<boolean, Agent>();
 
-function dispatcherFor(options: DestinationOptions): Agent {
+// Imported here, like node:dns above: a client bundle reaches this module through shared helpers
+async function dispatcherFor(options: DestinationOptions): Promise<Agent> {
   const loopbackIsFine = options.allowLoopback === true;
   let agent = dispatchers.get(loopbackIsFine);
   if (!agent) {
+    const { Agent } = await import("undici");
     agent = new Agent({ connect: { lookup: pinnedLookup(loopbackIsFine) } });
     dispatchers.set(loopbackIsFine, agent);
   }
@@ -157,7 +158,7 @@ export async function safeFetch(
     try {
       // The dispatcher's lookup is the check that decides: it runs when the socket connects, on the
       // addresses that socket then uses. The assertion above only fails early with a clearer message.
-      response = await fetch(target, { ...request, dispatcher: dispatcherFor(options) } as RequestInit);
+      response = await fetch(target, { ...request, dispatcher: await dispatcherFor(options) } as RequestInit);
     } catch (error) {
       throw blockedCause(error) ?? error;
     }
