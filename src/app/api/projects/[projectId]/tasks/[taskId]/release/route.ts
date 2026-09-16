@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectAccessOrWorker } from "@/lib/middleware";
 import { releaseTask } from "@/lib/task-service";
+import { withApiExecution } from "@/lib/task-execution-view";
 
 export const POST = withProjectAccessOrWorker(async (request, { params, user, workerId }) => {
   const { projectId, taskId } = await params;
@@ -31,5 +32,5 @@ export const POST = withProjectAccessOrWorker(async (request, { params, user, wo
     return NextResponse.json({ error: "Task not found or not releasable" }, { status: 404 });
   }
 
-  return NextResponse.json(task);
+  return NextResponse.json(await withApiExecution(task));
 });

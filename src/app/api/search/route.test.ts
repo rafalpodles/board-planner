@@ -13,6 +13,9 @@ vi.mock("@/lib/auth", () => ({
 vi.mock("@/lib/grants", () => ({ accessibleProjectIds }));
 vi.mock("@/models/task", () => ({ Task: { find: taskFind } }));
 vi.mock("@/models/project", () => ({ Project: { find: projectFind } }));
+vi.mock("@/models/worker", () => ({
+  Worker: { find: () => ({ select: () => ({ lean: async () => [] }) }) },
+}));
 
 const { GET } = await import("./route");
 
@@ -246,4 +249,25 @@ describe("GET /api/search", () => {
 
     expect(body[0].priority).toBe("medium");
   });
+});
+
+// BP-326: a result carries the task, and the stored execution names the run that authorises writes
+describe("GET /api/search — what a hit publishes", () => {
+  const held = {
+    _id: "t1",
+    title: "Zeppelin mooring mast",
+    execution: { runId: "run-secret-123", workerId: "w1", attempts: 2, phaseSeq: 9, lastError: "" },
+  };
+
+  it.each([["a text search", "zeppelin"], ["a key lookup", "TP-1"]])(
+    "does not publish the run id on %s",
+    async (_label, q) => {
+      taskFind.mockImplementation(() => chain([held]));
+
+      const text = await (await search(q)).text();
+
+      expect(text).toContain("Zeppelin");
+      expect(text).not.toContain("run-secret-123");
+    }
+  );
 });
