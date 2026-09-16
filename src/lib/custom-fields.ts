@@ -191,11 +191,6 @@ export function orderedOptions(field: { options?: LegacyOption[] }): ICustomFiel
 export const MAX_FIELD_NAME_LENGTH = 100;
 export const MAX_OPTIONS = 100;
 
-/**
- * Turns whatever the editor posted into storable options. Strings are accepted so
- * the API keeps working for older clients; each one becomes its own id, matching
- * how pre-CP-211 options migrate.
- */
 export function optionIdsDropped(existing: ICustomFieldOption[], input: unknown): boolean {
   if (!Array.isArray(input)) return false;
   const kept = new Set(
@@ -204,6 +199,11 @@ export function optionIdsDropped(existing: ICustomFieldOption[], input: unknown)
   return existing.some((option) => !kept.has(option.id));
 }
 
+/**
+ * Turns whatever the editor posted into storable options. Strings are accepted so
+ * the API keeps working for older clients; each one becomes its own id, matching
+ * how pre-CP-211 options migrate.
+ */
 export function parseOptions(
   input: unknown,
   existing: ICustomFieldOption[] = []

@@ -370,8 +370,7 @@ describe("GET /api/projects/:projectId/tasks — the status filter", () => {
   });
 });
 
-// BP-326: the board loads every task for every member, and a stored execution names the run that
-// authorises release; a refused change carries the whole patch
+// BP-326: the board list must not publish a run id or a refused change's patch
 describe("GET /api/projects/:projectId/tasks — what a card publishes", () => {
   it("projects execution and drops decision on every task", async () => {
     const stored = {

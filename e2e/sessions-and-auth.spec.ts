@@ -587,8 +587,7 @@ test("changing your own password: the new one works, the old one stops, this dev
   await expect(page).toHaveURL(/\/projects/);
 });
 
-// BP-325: changing a password is how a person ejects whoever has it. An API token or an OAuth grant
-// minted with the stolen password used to survive it, because only sessions were revoked.
+// BP-325: tokens, OAuth grants and machines minted with a stolen password used to survive the change
 test("changing your own password signs out its API tokens, connected apps and machines too", async ({
   page,
   request,

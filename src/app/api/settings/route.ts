@@ -17,8 +17,7 @@ export const GET = withAuth(async () => {
 });
 
 export const PUT = withAdmin(async (request, { user }) => {
-  // The instance defaults behind every project's PM model and turn cap; /api/admin/agents already
-  // refuses a machine credential for one project's copy of the same two knobs (BP-306)
+  // /api/admin/agents already refuses a machine credential for one project's copy of these (BP-306)
   if (user.viaMachineCredential) {
     return NextResponse.json({ error: "Interactive admin session required" }, { status: 403 });
   }
@@ -28,8 +27,11 @@ export const PUT = withAdmin(async (request, { user }) => {
   const updates: Record<string, unknown> = {};
 
   if (body.aiModel !== undefined) {
-    if (typeof body.aiModel !== "string" || !body.aiModel.trim()) {
-      return NextResponse.json({ error: "aiModel is required" }, { status: 400 });
+    if (typeof body.aiModel !== "string" || !body.aiModel.trim() || body.aiModel.length > MAX_MODEL_LENGTH) {
+      return NextResponse.json(
+        { error: `aiModel is required, up to ${MAX_MODEL_LENGTH} chars` },
+        { status: 400 }
+      );
     }
     updates.aiModel = body.aiModel.trim();
   }

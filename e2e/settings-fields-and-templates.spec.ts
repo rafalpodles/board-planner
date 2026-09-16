@@ -310,8 +310,7 @@ test.describe("custom fields", () => {
   });
 });
 
-// BP-326: removing an option a field already has erases it from every task that carries it, with
-// none of the cleanup the owner-gated DELETE performs. Members add and edit; project admins remove.
+// BP-326: members add and edit options; only a project owner removes a saved one
 test.describe("who may remove a saved option", () => {
   test("a member can add an option, but sees no way to remove one the field already has", async ({
     page,

@@ -19,8 +19,7 @@ export async function pmUserId(): Promise<string | null> {
   return pm ? String(pm._id) : null;
 }
 
-// BP-348: releases before this stored the PM account as a person, so it was listed and could be given
-// a password. Run at boot, before anyone can act on it.
+// BP-348: older releases stored pm as a person; run at boot, before anyone can act on it
 export async function markPmAsMachine(): Promise<void> {
   await connectDB();
   const stored = await User.findOne({ username: PM_USERNAME, kind: { $ne: "machine" } });

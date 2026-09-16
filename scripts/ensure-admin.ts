@@ -45,7 +45,7 @@ async function main() {
   }
 
   // Find the oldest user
-  const oldest = await users.findOne({}, { sort: { createdAt: 1 } });
+  const oldest = await users.findOne({ kind: { $ne: "machine" } }, { sort: { createdAt: 1 } });
   if (!oldest) {
     console.error("Could not find oldest user");
     await mongoose.disconnect();

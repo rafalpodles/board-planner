@@ -47,9 +47,7 @@ export const PATCH = withProjectAccess(async (request, { params, user }) => {
     field.name = name;
   }
 
-  // Dropping a saved option erases it from every task that carries it, with none of the cleanup the
-  // owner-gated DELETE performs. Members add and edit; owners remove. Archiving is reversible and
-  // keeps every value, so it stays with members.
+  // Dropping a saved option erases it from every task, like the owner-gated DELETE; archiving keeps values
   if (
     body.options !== undefined &&
     isOptionField(field) &&
@@ -57,7 +55,7 @@ export const PATCH = withProjectAccess(async (request, { params, user }) => {
     !(await check(user, projectId, "admin"))
   ) {
     return NextResponse.json(
-      { error: "Only a project admin can remove an option a field already has" },
+      { error: "Only a project owner can remove an option a field already has" },
       { status: 403 }
     );
   }

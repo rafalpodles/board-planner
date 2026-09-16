@@ -3,11 +3,6 @@ import { ADMIN_AUTH } from "./api";
 import { seed } from "./seed";
 import { signIn } from "./session";
 
-/**
- * BP-348. The PM identity is looked up by the name `pm`, and a worker's by `worker-<id>`. A person
- * created under either would be taken for the identity the instance mints, so the names are held.
- */
-
 test.beforeEach(seed);
 
 async function openNewUser(page: import("@playwright/test").Page, username: string) {

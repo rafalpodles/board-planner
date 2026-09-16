@@ -1,7 +1,6 @@
 import crypto from "crypto";
 
-// On globalThis because instrumentation and the route handlers are separate module graphs in one
-// process, and they must agree on the same generated code
+// On globalThis: instrumentation and route handlers are separate module graphs in one process
 const GENERATED = Symbol.for("board-planner.setup-code");
 
 export const MIN_BOOTSTRAP_TOKEN_LENGTH = 16;

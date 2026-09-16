@@ -396,8 +396,7 @@ describe("verifyCredentials and the username oracle", () => {
     userFindOne.mockReturnValue({ select: () => Promise.resolve(user) });
   }
 
-  // BP-348: a machine identity is not loginable because it is a machine, not because nobody knows its
-  // password — the PM account could be handed one from Settings → Users before this
+  // BP-348: a machine account is refused even with the right password
   it("refuses a machine account even when the password matches", async () => {
     lookupReturns({ username: "pm", kind: "machine", password: "$2a$10$stored" });
     bcryptCompare.mockResolvedValue(true);

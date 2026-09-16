@@ -202,8 +202,7 @@ export function checkProvenance(request: Request): ProvenanceVerdict {
     : { ok: false, reason: "origin-mismatch" };
 }
 
-// Every current browser sends Sec-Fetch-Site and cannot forge it, so a browser request without it
-// means something in front of the app strips it — worth one line in the log, not one per request
+// Once, not per request: a browser always sends Sec-Fetch-Site, so its absence may mean a stripping proxy
 let warnedSecFetchMissing = false;
 function warnOnceSecFetchMissing(): void {
   if (warnedSecFetchMissing) return;

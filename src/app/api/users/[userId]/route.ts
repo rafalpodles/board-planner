@@ -84,10 +84,7 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
     target.role = body.role as "admin" | "member";
   }
 
-  // A worker's account is deliberately un-loginable, and both halves of that promise live here: a
-  // password makes it loginable, and an address makes it resettable. Refusing one and not the other
-  // only moves the escape a slice later. Note this keys on `kind`, so it does not cover the `pm`
-  // identity, which is stored as a person — BP-348.
+  // A machine account (a worker's, or pm) is un-loginable: a password or an address would undo that
   const wantsCredentialChange = body.email !== undefined || body.password !== undefined;
   if (wantsCredentialChange && target.kind === "machine") {
     return NextResponse.json(

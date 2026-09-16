@@ -99,8 +99,7 @@ export async function accessibleProjectIds(user: IdentifiedSubject): Promise<str
  * No `kind` check happens here, and none is implied: this asks the same question check() asks and
  * gets the same answer. In practice a worker identity holds no grant and is not an admin, so it is
  * refused — but by the ordinary rule, not by a special case. PUT /members does refuse to grant a
- * `kind: "machine"` account, which is why one never appears; the `pm` account is stored with the
- * default `kind: "human"` and is not covered by that refusal at all.
+ * `kind: "machine"` account, which is why one never appears; the `pm` account is one too.
  */
 export async function recipientsWithAccess(
   subjectIds: string[],

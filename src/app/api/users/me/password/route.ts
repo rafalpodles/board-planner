@@ -66,8 +66,7 @@ export const PUT = withAuth(async (request, { user }) => {
     return NextResponse.json({ error: "Current password is incorrect" }, { status: 400 });
   }
 
-  // Before the save: if the revoke fails the password is unchanged and the person retries, rather
-  // than holding a new password while whatever minted with the old one still works
+  // Before the save, so a failed revoke never leaves a new password beside the old credentials
   await revokeUserCredentials(user._id, user.sessionId);
   record.password = await bcrypt.hash(newPassword, PASSWORD_COST_FACTOR);
   await record.save();

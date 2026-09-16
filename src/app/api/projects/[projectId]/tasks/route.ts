@@ -166,5 +166,5 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
     return NextResponse.json({ error: result.error }, { status: result.status });
   }
 
-  return NextResponse.json(result.data, { status: 201 });
+  return NextResponse.json((await withApiExecutions([result.data]))[0], { status: 201 });
 });

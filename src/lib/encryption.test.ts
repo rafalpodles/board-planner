@@ -56,8 +56,7 @@ describe("assertEncryptionConfig", () => {
     await expect(load()).rejects.toThrowError(/not 32 bytes/);
   });
 
-  // BP-324: Node's base64 decoder is lenient, so a memorable 43-character phrase decoded to exactly
-  // 32 bytes and was accepted as a key
+  // BP-324: a 43-character phrase decodes to 32 bytes under Node's lenient decoder
   it("refuses a passphrase that merely decodes to 32 bytes", async () => {
     process.env.ENCRYPTION_KEY = "correct-horse-battery-staple-please-work-ok";
     expect(Buffer.from(process.env.ENCRYPTION_KEY, "base64")).toHaveLength(32);
@@ -65,8 +64,7 @@ describe("assertEncryptionConfig", () => {
     await expect(load()).rejects.toThrowError(/not 32 bytes of hex or base64/);
   });
 
-  // Every character is in the alphabet and it decodes to 32 bytes — only the unused trailing bits
-  // give it away as something that was never produced by encoding a key
+  // Valid alphabet and 32 bytes; only the set trailing bits show no key was ever encoded as this
   it("refuses base64 whose unused trailing bits are set", async () => {
     const canonical = KEY_B.replace(/=$/, "");
     const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
