@@ -240,7 +240,7 @@ Everything is optional except the database. Put overrides in a `.env` file next 
 | --- | --- | --- |
 | `MONGODB_URI` | `mongodb://mongo:27017/boardplanner` | Point the app at your own MongoDB instead of the bundled one |
 | `APP_PORT` | `3000` | Host port the app is published on |
-| `APP_ORIGIN` | `http://localhost:${APP_PORT}` | Comma-separated origins the app is served from, used to reject cross-site writes |
+| `APP_ORIGIN` | `http://localhost:${APP_PORT}` | Comma-separated origins the app is served from. Together with `PUBLIC_ORIGIN`, what a write's `Origin` is checked against when the browser sends no `Sec-Fetch-Site` |
 | `PUBLIC_ORIGIN` | compose default; otherwise `APP_ORIGIN` when it names exactly one origin | The one address this instance calls its own. Required for MCP and PM OAuth |
 | `NEXT_PUBLIC_APP_URL` | `http://localhost:${APP_PORT}` | Public URL used in notification and webhook links. **Build-time** |
 | `COOKIE_ALLOW_INSECURE` | `1` (compose only) | Issue the session cookie without `Secure` and without the `__Host-` prefix, for an instance served over plain HTTP |
@@ -267,9 +267,13 @@ variable turns that off.
 `APP_ORIGIN` is **required whenever `COOKIE_ALLOW_INSECURE=1`**, and the app refuses to start
 otherwise. Writes are rejected unless the browser proves the request came from the app's own origin,
 and over plain HTTP at anything other than `localhost` the browser sends no `Sec-Fetch-Site` header,
-so the only remaining proof is `Origin` matching this list. Set it to the URL users actually open —
-`https://board.example.com`, or `http://192.168.1.10:3000` for a LAN self-host — with no trailing
-path.
+so the only remaining proof is `Origin` matching this list or `PUBLIC_ORIGIN`. Set it to the URL
+users actually open — `https://board.example.com`, or `http://192.168.1.10:3000` for a LAN
+self-host — with no trailing path.
+
+The same fallback applies anywhere a proxy or CDN strips `Sec-Fetch-*` headers: writes, sign-in and
+the OAuth authorize step then pass only if `Origin` is one of `APP_ORIGIN` or `PUBLIC_ORIGIN`. The
+app logs one warning when it first sees a request that carries `Origin` but no `Sec-Fetch-Site`.
 
 </details>
 

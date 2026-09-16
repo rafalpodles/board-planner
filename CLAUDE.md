@@ -183,7 +183,8 @@ ENCRYPTION_KEY=           # 32 bytes (hex or base64) — without it integration 
                           # key stops the app from starting
 ENCRYPTION_KEYS_OLD=      # Optional — comma-separated retired keys, so a rotation can still decrypt
 NEXT_PUBLIC_APP_URL=      # Frontend URL for links — read at BUILD time, not runtime
-APP_ORIGIN=               # Comma-separated origins allowed to write — the CSRF allowlist
+APP_ORIGIN=               # Comma-separated origins allowed to write — the CSRF allowlist, together
+                          # with PUBLIC_ORIGIN, whenever a request carries no Sec-Fetch-Site (BP-361)
 TRUSTED_PROXY_HOPS=       # Proxies appending to X-Forwarded-For in front of the app; default 0,
                           # which ignores the header. The login throttle keys on it, so on a
                           # proxy-less deployment a forged header used to reset every counter (BP-318)

@@ -56,6 +56,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   delete process.env.COOKIE_ALLOW_INSECURE;
   delete process.env.APP_ORIGIN;
+  delete process.env.PUBLIC_ORIGIN;
   found(null);
   updateOne.mockResolvedValue({});
   deleteOne.mockResolvedValue({ deletedCount: 1 });
@@ -66,6 +67,7 @@ beforeEach(() => {
 afterEach(() => {
   delete process.env.COOKIE_ALLOW_INSECURE;
   delete process.env.APP_ORIGIN;
+  delete process.env.PUBLIC_ORIGIN;
 });
 
 describe("COOKIE_ALLOW_INSECURE parsing", () => {
@@ -230,6 +232,21 @@ describe("provenance", () => {
 
   it("refuses an Origin when APP_ORIGIN is unset", () => {
     expect(checkProvenance(mutating({ origin: "https://app.example.com" })).ok).toBe(false);
+  });
+
+  // BP-361: /oauth/authorize is advertised under PUBLIC_ORIGIN, so with only that set a proxy that
+  // strips Sec-Fetch-* took out sign-in and the OAuth flow together
+  it("falls back to Origin against PUBLIC_ORIGIN when APP_ORIGIN is unset", () => {
+    process.env.PUBLIC_ORIGIN = "https://app.example.com/";
+    expect(checkProvenance(mutating({ origin: "https://app.example.com" })).ok).toBe(true);
+  });
+
+  it("still refuses a cross-site Origin when only PUBLIC_ORIGIN is set", () => {
+    process.env.PUBLIC_ORIGIN = "https://app.example.com";
+    expect(checkProvenance(mutating({ origin: "https://evil.example.com" }))).toEqual({
+      ok: false,
+      reason: "origin-mismatch",
+    });
   });
 
   it("refuses when both signals are absent", () => {

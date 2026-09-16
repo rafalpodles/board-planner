@@ -186,9 +186,23 @@ export function checkProvenance(request: Request): ProvenanceVerdict {
   const origin = request.headers.get("origin");
   if (!origin) return { ok: false, reason: "no-provenance" };
 
-  return appOrigins().includes(normaliseOrigin(origin))
+  warnOnceSecFetchMissing();
+  const own = selfOrigin();
+  const allowed = own ? [...appOrigins(), own] : appOrigins();
+  return allowed.includes(normaliseOrigin(origin))
     ? { ok: true }
     : { ok: false, reason: "origin-mismatch" };
+}
+
+// Every current browser sends Sec-Fetch-Site and cannot forge it, so a browser request without it
+// means something in front of the app strips it — worth one line in the log, not one per request
+let warnedSecFetchMissing = false;
+function warnOnceSecFetchMissing(): void {
+  if (warnedSecFetchMissing) return;
+  warnedSecFetchMissing = true;
+  console.warn(
+    "A request arrived with an Origin header but no Sec-Fetch-Site. If a proxy or CDN strips Sec-Fetch-* headers, CSRF protection falls back to comparing Origin against APP_ORIGIN and PUBLIC_ORIGIN."
+  );
 }
 
 export function provenanceRefusal(request: Request): NextResponse | null {
