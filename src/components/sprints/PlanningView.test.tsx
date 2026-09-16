@@ -301,6 +301,23 @@ describe("PlanningView", () => {
     expect(within(screen.getByTestId("planning-pane-backlog")).getByText("Ship the header")).toBeTruthy();
   });
 
+  it("keeps a task dropped while the backlog had failed, once Retry loads it", async () => {
+    const answers: { ok: (tasks: ApiTask[]) => void; fail: (e: Error) => void }[] = [];
+    api.get.mockImplementation(() => new Promise((ok, fail) => answers.push({ ok, fail })));
+    api.put.mockImplementation(() => new Promise(() => {}));
+    render(<PlanningView projectId="p1" board={makeBoard()} sprintId="s1" />);
+
+    await act(async () => answers[0].fail(new Error("offline")));
+    fireEvent.drop(screen.getByTestId("planning-pane-backlog"), {
+      dataTransfer: dataTransferFor("t9"),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: /Retry/ }));
+    // The server read before the still-pending PUT reached it
+    await act(async () => answers[1].ok(backlogTasks.map((t) => ({ ...t }))));
+
+    expect(await screen.findByText("Backlog (3)")).toBeTruthy();
+  });
+
   // StrictMode runs the fetch effect twice; the first request's answer must not land last
   it("ignores a superseded backlog response that answers late", async () => {
     const answers: ((tasks: ApiTask[]) => void)[] = [];

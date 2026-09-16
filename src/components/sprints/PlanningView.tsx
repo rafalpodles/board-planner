@@ -38,20 +38,20 @@ export function PlanningView({ projectId, board, sprintId, onTasksChange }: Plan
   // Plain fetch into local state, not a second useProjectBoard — that would bring a second
   // 10s poll, a second held-move dialog and a second copy of every write handler for a list
   // that needs none of them.
-  const movesSinceFetch = useRef<{ task: ApiTask; toSprint: boolean }[]>([]);
+  const movesSinceLoad = useRef<{ task: ApiTask; toSprint: boolean }[]>([]);
 
   useEffect(() => {
     let current = true;
-    const from = movesSinceFetch.current.length;
     setBacklogLoading(true);
     setBacklogError(false);
     api
       .get(`/api/projects/${projectId}/tasks?sprint=backlog`)
       .then((list: ApiTask[]) => {
         if (!current) return;
-        // A drop made while this was in flight is not in the list the server read before it
-        const moves = movesSinceFetch.current.slice(from);
-        movesSinceFetch.current = [];
+        // Every move since the last good load, not only those after this request started: a PUT
+        // sent before a Retry can still land after the server read. Replaying one it already saw is a no-op
+        const moves = movesSinceLoad.current;
+        movesSinceLoad.current = [];
         setBacklog(moves.reduce(withMove, list));
       })
       .catch(() => current && setBacklogError(true))
@@ -88,7 +88,7 @@ export function PlanningView({ projectId, board, sprintId, onTasksChange }: Plan
   function applyLocally(task: ApiTask, targetSprintId: string | null) {
     const moved = { ...task, sprint: targetSprintId };
     const move = { task: moved, toSprint: targetSprintId === sprintId };
-    movesSinceFetch.current.push(move);
+    movesSinceLoad.current.push(move);
     setBacklog((prev) => withMove(prev, move));
     if (move.toSprint) {
       setSprintOverlay((prev) => [...prev.filter((t) => t._id !== task._id), moved]);

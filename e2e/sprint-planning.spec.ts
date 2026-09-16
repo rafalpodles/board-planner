@@ -198,8 +198,9 @@ test("dragging a task from the sprint pane back to the backlog removes it from t
   });
 });
 
-// next dev runs the backlog fetch twice; the late answer used to replace the list after the drop
-test("a backlog answer that lands after a drop does not undo it", async ({ page }) => {
+// next dev runs the backlog fetch twice; the late answer used to replace the list after the drop.
+// This pins that the superseded answer is ignored; replaying a drop made mid-fetch is unit-tested
+test("a superseded backlog answer that lands late does not undo a drop", async ({ page }) => {
   let backlogRequests = 0;
   await page.route(/\/tasks\?sprint=backlog/, async (route) => {
     const response = await route.fetch();
