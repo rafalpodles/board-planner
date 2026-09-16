@@ -49,6 +49,8 @@ describe("email change links", () => {
     const [filter, update] = findOneAndUpdate.mock.calls[0];
     expect(filter).toEqual({ tokenHash: sha256("cpe_x"), usedAt: null, expiresAt: { $gt: expect.any(Date) } });
     expect(update).toEqual({ $set: { usedAt: expect.any(Date) } });
+    // The release matches on this exact value, so it must be the one the claim wrote
+    expect(outcome.ok && outcome.claimedAt).toBe(update.$set.usedAt);
   });
 
   it("says why a link cannot be spent", async () => {
