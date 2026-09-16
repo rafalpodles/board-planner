@@ -93,7 +93,9 @@ test("a new address takes effect only once the link sent to it is confirmed", as
   const inbox = await browser.newPage();
   await inbox.goto(link);
   await expect(inbox.getByRole("heading", { name: "Confirm this email address" })).toBeVisible();
-  // Opening the link is not confirming it: a mail scanner fetching every link must not do this
+  // Opening the link is not confirming it: a mail scanner fetching every link must not do this.
+  // Read once the page has nothing left in flight, so a request it sent on its own has landed.
+  await inbox.waitForLoadState("networkidle");
   expect(await storedEmail()).toBe(old);
   // And the token has left the address bar
   await expect(inbox).toHaveURL(/\/confirm-email$/);
