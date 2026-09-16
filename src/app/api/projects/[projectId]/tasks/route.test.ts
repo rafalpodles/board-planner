@@ -406,6 +406,7 @@ describe("POST /api/projects/:projectId/tasks — what the created task publishe
         decision: { patchSha256: "patch-hash-def" },
       },
     } as never);
+    workerFind.mockReturnValue({ select: () => ({ lean: async () => [{ _id: "w1", name: "mac" }] }) });
 
     const res = await POST(
       new Request("http://localhost/api/projects/CP/tasks", {
