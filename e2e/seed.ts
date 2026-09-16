@@ -205,6 +205,25 @@ async function addTask(over: Record<string, unknown>, taskNumber: number) {
   await mongoose.disconnect();
 }
 
+/**
+ * BP-471: a board the review has something to say about — two tasks titled alike, one of them with
+ * no criteria and no description, and in progress for a month without moving.
+ */
+export const REVIEW_DUPLICATE_TITLES = ["Export invoice history as CSV", "Export the invoice history as CSV"] as const;
+export const REVIEW_TASK_NUMBERS = [471, 472] as const;
+
+export async function seedBoardForReview() {
+  const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  await addTask(
+    { _id: id("e2e00000000000000000d471"), title: REVIEW_DUPLICATE_TITLES[0], status: SOURCE_COLUMN.id, description: "", checklist: [], createdAt: monthAgo, updatedAt: monthAgo },
+    REVIEW_TASK_NUMBERS[0]
+  );
+  await addTask(
+    { _id: id("e2e00000000000000000d472"), title: REVIEW_DUPLICATE_TITLES[1], status: "todo", description: "Let customers download it.", checklist: [{ text: "A CSV downloads", done: false }] },
+    REVIEW_TASK_NUMBERS[1]
+  );
+}
+
 /** A second task under a live run, for the bulk move that has to name more than one refusal. */
 export async function seedSecondHeldTask() {
   const now = new Date();

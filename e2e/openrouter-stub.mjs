@@ -249,6 +249,38 @@ serve({
       return;
     }
 
+    // A board review, scheduled or started by hand, is prompted by the server too. It asks for the
+    // one thing the review is not allowed to do, so a spec can see the turn refuse it (BP-471).
+    const reviewing = /^Scheduled board review for (\S+)\./m.exec(text ?? "");
+    const flagged = /^- (\S+-\d+) \[/m.exec(text ?? "");
+    if (reviewing && flagged && !toolHasRun) {
+      // A task titled with this holds the review open, so a spec can ask for a second one meanwhile
+      if (/\(hold the review\)/.test(text)) await new Promise((resolve) => setTimeout(resolve, 5_000));
+      reply(res, {
+        usage: usageWith(false),
+        choices: [
+          {
+            finish_reason: "tool_calls",
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [
+                {
+                  id: "call_0",
+                  type: "function",
+                  function: {
+                    name: "change_status",
+                    arguments: JSON.stringify({ taskKey: flagged[1], status: "done" }),
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      });
+      return;
+    }
+
     const directive = /<<([\s\S]*?)>>/.exec(text ?? "");
     // NOT `raw`: the request body is already called that in this block, and a `const` shadowing
     // it puts the JSON.parse above into the temporal dead zone — swallowed by its own catch, so

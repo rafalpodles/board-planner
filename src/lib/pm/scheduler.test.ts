@@ -24,7 +24,7 @@ const { pmSchedulerTick, startBoardReview } = await import("./scheduler");
 const { isTurnRunning } = await import("./turn-lock");
 const { BOARD_REVIEW_DISALLOWED_TOOLS, currentReviewSlot } = await import("./autonomy");
 
-const PM = { enabled: true, dailyTurnCap: 100, autonomy: { dailyReview: true, reviewHour: 0, reviewIntervalHours: 24, timezone: "UTC", lastReviewSlot: "" } };
+const PM = { enabled: true, dailyTurnCap: 100, autonomy: { dailyReview: true, handleNeedsHumanReview: false, reviewHour: 0, reviewIntervalHours: 24, timezone: "UTC", lastReviewSlot: "" } };
 
 beforeEach(() => {
   vi.clearAllMocks();
