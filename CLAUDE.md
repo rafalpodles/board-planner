@@ -139,6 +139,8 @@ mcp-server/           # Standalone MCP server (stdio transport)
 ```
 MONGODB_URI=              # Required — MongoDB connection string
 OPENAI_API_KEY=           # Optional — AI task generation
+AI_DAILY_GENERATION_CAP=  # Optional — AI task generations per project per day (default 200); each
+                          # person is also held to 20 per 15 minutes, one at a time (BP-323)
 OPENROUTER_API_KEY=       # Optional — PM agent (chat-driven project manager)
 PM_MODEL=                 # Optional — PM agent model (default: moonshotai/kimi-k2.6)
 PM_MAX_TOKENS=            # Optional — PM agent max output tokens per call (default: 8192)

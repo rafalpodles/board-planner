@@ -185,4 +185,31 @@ describe("POST /api/projects/:projectId/notifications", () => {
     expect(project.notificationChannels).toHaveLength(1);
     expect(save).not.toHaveBeenCalled();
   });
+
+  // BP-323
+  it("refuses a channel past the cap of 20", async () => {
+    project.notificationChannels = Array.from({ length: 20 }, () => ({ ...channel }));
+
+    const res = await POST(
+      request("POST", { type: "slack", name: "One more", webhookUrl: "https://hooks.slack.com/new" }),
+      ctx()
+    );
+
+    expect(res.status).toBe(400);
+    expect(project.notificationChannels).toHaveLength(20);
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it("refuses a name longer than 100 characters, on create and on edit", async () => {
+    const created = await POST(
+      request("POST", { type: "slack", name: "n".repeat(101), webhookUrl: "https://hooks.slack.com/new" }),
+      ctx()
+    );
+    const edited = await PUT(request("PUT", { channelId: "c1", name: "n".repeat(101) }), ctx());
+
+    expect(created.status).toBe(400);
+    expect(edited.status).toBe(400);
+    expect(channel.name).toBe("Slack");
+    expect(save).not.toHaveBeenCalled();
+  });
 });

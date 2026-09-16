@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { readJsonBody } from "@/lib/request-body";
 import { connectDB } from "@/lib/db";
 import { withWorker, protocolOf } from "@/lib/middleware";
 import { Project } from "@/models/project";
@@ -7,16 +8,31 @@ import { RepoReport } from "@/lib/repo-match";
 import { WorkerPreflight, WorkerPreflightCheck } from "@/types";
 import { assignmentsFor, ownerReachableProjectIds, overriddenWorkerPolicy, touchWorker, usableRepos } from "@/lib/worker-service";
 
+/**
+ * Every other worker's claim and heartbeat read this inventory back, so one machine inflating its
+ * own report slowed the whole fleet (BP-323). Past a bound an entry is dropped rather than cut: a
+ * shortened remote would match a different repository, or none.
+ */
+export const MAX_REPORTED_REPOS = 200;
+export const MAX_REPO_REMOTE_LENGTH = 1000;
+export const MAX_REPO_PATH_LENGTH = 1000;
+export const MAX_PREFLIGHT_CHECKS = 50;
+export const MAX_VERSION_LENGTH = 100;
+export const MAX_BINDING_ERROR_LENGTH = 2000;
+const MAX_HEARTBEAT_BYTES = 512 * 1024;
+
 // A worker reports its own checkouts; anything else is discarded rather than trusted, since this
 // list decides which projects it is offered.
 function reportedRepos(value: unknown): RepoReport[] | null {
   if (!Array.isArray(value)) return null;
   const out: RepoReport[] = [];
   for (const entry of value) {
+    if (out.length >= MAX_REPORTED_REPOS) break;
     if (typeof entry !== "object" || entry === null) continue;
     const { remote, path } = entry as { remote?: unknown; path?: unknown };
     if (typeof remote !== "string" || typeof path !== "string") continue;
     if (!remote.trim() || !path.trim()) continue;
+    if (remote.trim().length > MAX_REPO_REMOTE_LENGTH || path.trim().length > MAX_REPO_PATH_LENGTH) continue;
     out.push({ remote: remote.trim(), path: path.trim() });
   }
   return out;
@@ -59,9 +75,10 @@ function reportedPreflight(value: unknown): WorkerPreflight | null {
 
   const cleaned: WorkerPreflightCheck[] = [];
   for (const entry of checks) {
+    if (cleaned.length >= MAX_PREFLIGHT_CHECKS) break;
     if (typeof entry !== "object" || entry === null) continue;
     const { name, ok: checkOk, warn, detail } = entry as Record<string, unknown>;
-    if (typeof name !== "string" || !name.trim() || typeof checkOk !== "boolean") continue;
+    if (typeof name !== "string" || !name.trim() || name.trim().length > 200 || typeof checkOk !== "boolean") continue;
     const text = typeof detail === "string" ? detail.trim().slice(0, 500) : "";
     cleaned.push({
       name: name.trim(),
@@ -84,7 +101,10 @@ function reportedPreflight(value: unknown): WorkerPreflight | null {
 // The only path guaranteed to survive SSE loss, so it carries both the abort
 // verdict and the command acknowledgement
 export const POST = withWorker(async (request, { worker }) => {
-  const body = await request.json().catch(() => ({}));
+  const read = await readJsonBody<Record<string, unknown>>(request, MAX_HEARTBEAT_BYTES);
+  // Oversized is refused; unreadable stays what it always was, a heartbeat with nothing to report
+  if (!read.ok && read.reason === "too-large") return read.response;
+  const body = read.ok ? read.value : {};
 
   if (!worker.enabled || worker.lockedByInstance) {
     return NextResponse.json({ error: "this worker may not run", abort: true }, { status: 403 });
@@ -97,10 +117,12 @@ export const POST = withWorker(async (request, { worker }) => {
   await touchWorker(String(worker._id), {
     // A missing/unparseable protocol header must not overwrite a valid stored version with NaN
     ...(Number.isFinite(protocolVersion) ? { protocolVersion } : {}),
-    version: typeof body.version === "string" ? body.version : worker.version,
+    version: typeof body.version === "string" ? body.version.slice(0, MAX_VERSION_LENGTH) : worker.version,
     // An ack for a command that is no longer current must not clear the newer one
     ...(body.acked && body.acked === worker.command ? { commandAckedAt: new Date() } : {}),
-    ...(typeof body.bindingError === "string" ? { bindingError: body.bindingError } : {}),
+    ...(typeof body.bindingError === "string"
+      ? { bindingError: body.bindingError.slice(0, MAX_BINDING_ERROR_LENGTH) }
+      : {}),
     // Absent means a worker that has not been taught to report it, not one that suddenly passes
     ...(preflight ? { preflight } : {}),
   });

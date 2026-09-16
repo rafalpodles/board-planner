@@ -88,10 +88,10 @@ export async function isRateLimited(key: string, threshold = MAX_ATTEMPTS): Prom
  * that leans on truthiness, and that a pipeline turns off Mongoose casting — every value here is
  * already a native Date or number.
  */
-export async function recordFailedAttempt(key: string): Promise<void> {
+export async function recordFailedAttempt(key: string, windowMs = WINDOW_MS): Promise<void> {
   await connectDB();
   const now = new Date();
-  const fresh = new Date(now.getTime() + WINDOW_MS);
+  const fresh = new Date(now.getTime() + windowMs);
 
   await RateLimit.updateOne(
     { _id: key },
@@ -111,6 +111,47 @@ export async function recordFailedAttempt(key: string): Promise<void> {
     // call, so only a request against a real database shows it.
     { upsert: true, updatePipeline: true }
   );
+}
+
+/**
+ * Counts one attempt and answers the count it made, in the same atomic write. A check followed by
+ * a record is two round trips, and every request arriving between them passes the check — so a
+ * budget that must hold under a burst compares this answer rather than asking first (BP-323).
+ */
+export async function countAttempt(key: string, windowMs = WINDOW_MS): Promise<number> {
+  await connectDB();
+  try {
+    return await incrementAttempt(key, windowMs);
+  } catch (err) {
+    // Two first attempts racing both try to insert the row; the loser finds it there on a retry
+    if ((err as { code?: number }).code !== 11000) throw err;
+    return incrementAttempt(key, windowMs);
+  }
+}
+
+async function incrementAttempt(key: string, windowMs: number): Promise<number> {
+  const now = new Date();
+  const fresh = new Date(now.getTime() + windowMs);
+
+  const counted = await RateLimit.findOneAndUpdate(
+    { _id: key },
+    [
+      {
+        $set: {
+          count: {
+            $cond: [{ $gt: ["$resetAt", now] }, { $add: [{ $ifNull: ["$count", 0] }, 1] }, 1],
+          },
+          resetAt: { $cond: [{ $gt: ["$resetAt", now] }, "$resetAt", fresh] },
+        },
+      },
+    ],
+    // updatePipeline, because the update is an aggregation pipeline and mongoose 9 refuses an array
+    // without it — which once made every failed login answer 500 and record nothing (BP-318)
+    { upsert: true, updatePipeline: true, returnDocument: "after" }
+  ).lean();
+  const count = (counted as { count?: number } | null)?.count;
+  if (typeof count !== "number") throw new Error(`rate limit row ${key} came back without a count`);
+  return count;
 }
 
 export async function clearAttempts(key: string): Promise<void> {

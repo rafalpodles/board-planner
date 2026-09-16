@@ -181,6 +181,19 @@ describe("dispatchWebhooks", () => {
   // Deliberately not "the failure is caught": dispatchWebhooks does not await its own fetch, so a
   // resolved call says nothing about the `.catch()` being there, and vitest has already handled a
   // mocked rejection. What this does establish is that the caller is not made to wait.
+  // BP-323: a project with many webhooks used to open a request to every one at once
+  it("has at most four deliveries in flight at once, and sends the rest as those finish", async () => {
+    const landers: ((r: Response) => void)[] = [];
+    safeFetch.mockImplementation(() => new Promise<Response>((resolve) => landers.push(resolve)));
+    project(Array.from({ length: 10 }, (_, i) => hook({ _id: `w${i}`, url: `https://example.com/hook${i}` })));
+
+    await dispatchWebhooks("p1", "task_created", PAYLOAD);
+
+    expect(safeFetch).toHaveBeenCalledTimes(4);
+    landers.shift()!(new Response("{}", { status: 200 }));
+    await vi.waitFor(() => expect(safeFetch).toHaveBeenCalledTimes(5));
+  });
+
   it("does not wait for the receiver", async () => {
     project([hook()]);
     let land!: (value: Response) => void;

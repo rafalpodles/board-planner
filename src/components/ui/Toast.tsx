@@ -255,7 +255,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
             <div
               key={t.id}
               data-testid="toast"
-              className={`px-4 py-3 rounded-lg shadow-lg text-sm font-medium
+              className={`px-4 py-3 rounded-lg shadow-lg text-sm font-medium [overflow-wrap:anywhere]
                 animate-slide-in cursor-pointer
                 ${
                   t.type === "success"

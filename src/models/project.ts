@@ -102,7 +102,7 @@ const projectSchema = new Schema<IProject>(
     },
     webhooks: {
       type: [{
-        url: { type: String, required: true, trim: true },
+        url: { type: String, required: true, trim: true, maxlength: 2048 },
         events: { type: [{ type: String, enum: WEBHOOK_EVENTS }], default: WEBHOOK_EVENTS },
         enabled: { type: Boolean, default: true },
         // Single-shot delivery, deliberately (BP-407) — the same fire-and-forget choice the
@@ -118,8 +118,9 @@ const projectSchema = new Schema<IProject>(
     notificationChannels: {
       type: [{
         type: { type: String, enum: NOTIFICATION_CHANNEL_TYPES, required: true },
-        name: { type: String, required: true, trim: true },
-        webhookUrl: { type: String, required: true, trim: true },
+        name: { type: String, required: true, trim: true, maxlength: 100 },
+        // Ciphertext of a URL of up to 2048 characters, each up to three bytes of UTF-8, base64-encoded
+        webhookUrl: { type: String, required: true, trim: true, maxlength: 12_000 },
         events: { type: [{ type: String, enum: WEBHOOK_EVENTS }], default: WEBHOOK_EVENTS },
         enabled: { type: Boolean, default: true },
       }],

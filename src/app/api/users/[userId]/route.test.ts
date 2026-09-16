@@ -28,6 +28,8 @@ vi.mock("@/lib/auth", () => ({
 vi.mock("@/lib/grants", () => ({ check, accessibleProjectIds: vi.fn() }));
 vi.mock("@/lib/session", () => ({ revokeUserSessions, revokeUserCredentials }));
 vi.mock("@/lib/password-reset", () => ({ invalidateResetTokens }));
+const cancelEmailChange = vi.fn();
+vi.mock("@/lib/email-change", () => ({ cancelEmailChange }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/lib/security-mail", () => ({ notifyPasswordChanged, notifyAddressChanged }));
 vi.mock("bcryptjs", () => ({ default: { hash } }));
@@ -102,6 +104,8 @@ describe("PUT /api/users/:id", () => {
     expect(target.email).toBe("new.address@example.com");
     expect(target.kind).toBe("human");
     expect(target.save).toHaveBeenCalled();
+    // BP-359 review: a change the account asked for itself would otherwise overwrite this one
+    expect(cancelEmailChange).toHaveBeenCalledWith("target-1");
   });
 
   it("leaves the address alone when the body does not carry one", async () => {
@@ -111,6 +115,7 @@ describe("PUT /api/users/:id", () => {
     await PUT(put({ role: "member" }), ctx());
 
     expect(target.email).toBe("target@example.com");
+    expect(cancelEmailChange).not.toHaveBeenCalled();
   });
 
   // The only way to undo a typo that took an address somebody else needs

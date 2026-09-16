@@ -22,9 +22,14 @@ vi.mock("@/lib/auth", () => ({
   PASSWORD_COST_FACTOR: 10,
   MIN_PASSWORD_LENGTH: 8,
 }));
+const selfOrigin = vi.fn();
 vi.mock("@/lib/session", () => ({
   ProvenanceError: class ProvenanceError extends Error {},
+  selfOrigin,
 }));
+const issueEmailChange = vi.fn();
+const cancelEmailChange = vi.fn();
+vi.mock("@/lib/email-change", () => ({ issueEmailChange, cancelEmailChange }));
 vi.mock("@/lib/password-reset", () => ({ invalidateResetTokens }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/lib/email", async () => {
@@ -74,7 +79,12 @@ beforeEach(async () => {
   userFindByIdAndUpdate.mockResolvedValue({ _id: "u1", email: "new@example.com" });
   compare.mockResolvedValue(true);
   isEmailConfigured.mockReturnValue(true);
+  issueEmailChange.mockResolvedValue("cpe_the-token");
+  selfOrigin.mockReturnValue("https://app.example.com");
 });
+
+/** The notices are deliberately not awaited by the handler */
+const settled = () => new Promise((resolve) => setImmediate(resolve));
 
 describe("PUT /api/users/me — changing the address that can reset the password", () => {
   it("refuses to move the address without the current password", async () => {
@@ -99,11 +109,71 @@ describe("PUT /api/users/me — changing the address that can reset the password
     expect(userFindByIdAndUpdate).not.toHaveBeenCalled();
   });
 
-  it("moves the address when the password is right", async () => {
+  // BP-359: stored straight away, an address let anybody make this instance mail a stranger
+  it("holds a new address until its inbox confirms it, and leaves the stored one in force", async () => {
     const response = await PUT(
       put({ email: "new@example.com", currentPassword: "right" }),
       context
     );
+    await settled();
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ email: "old@example.com", pendingEmail: "new@example.com" });
+    expect(userFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(issueEmailChange).toHaveBeenCalledWith("u1", "new@example.com");
+    expect(invalidateResetTokens).not.toHaveBeenCalled();
+    expect(logInstanceAudit).not.toHaveBeenCalled();
+  });
+
+  it("mails the confirmation link to the new address, and nothing to the old one yet", async () => {
+    await PUT(put({ email: "new@example.com", currentPassword: "right" }), context);
+    await settled();
+
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+    const sent = sendEmail.mock.calls[0][0];
+    expect(sent.to).toBe("new@example.com");
+    expect(sent.text).toContain("https://app.example.com/confirm-email#token=cpe_the-token");
+  });
+
+  it("sends at most three confirmations in the window, so it is not a way to mail strangers", async () => {
+    for (const n of [1, 2, 3]) {
+      const response = await PUT(put({ email: `new${n}@example.com`, currentPassword: "right" }), context);
+      expect(response.status).toBe(200);
+    }
+
+    const fourth = await PUT(put({ email: "new4@example.com", currentPassword: "right" }), context);
+    await settled();
+
+    expect(fourth.status).toBe(429);
+    expect(issueEmailChange).toHaveBeenCalledTimes(3);
+    expect(sendEmail).toHaveBeenCalledTimes(3);
+  });
+
+  it("holds the limit to a burst sent all at once", async () => {
+    const burst = await Promise.all(
+      Array.from({ length: 6 }, (_, n) => PUT(put({ email: `burst${n}@example.com`, currentPassword: "right" }), context))
+    );
+    await settled();
+
+    expect(burst.filter((r) => r.status === 200)).toHaveLength(3);
+    expect(sendEmail).toHaveBeenCalledTimes(3);
+  });
+
+  it("refuses to send a link it cannot address, rather than mailing a relative one", async () => {
+    selfOrigin.mockReturnValue(undefined);
+
+    const response = await PUT(put({ email: "new@example.com", currentPassword: "right" }), context);
+    await settled();
+
+    expect(response.status).toBe(503);
+    expect(issueEmailChange).not.toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("changes the address at once when this instance cannot send mail, and audits it", async () => {
+    isEmailConfigured.mockReturnValue(false);
+
+    const response = await PUT(put({ email: "new@example.com", currentPassword: "right" }), context);
 
     expect(response.status).toBe(200);
     expect(userFindByIdAndUpdate).toHaveBeenCalledWith(
@@ -111,38 +181,21 @@ describe("PUT /api/users/me — changing the address that can reset the password
       { $set: { email: "new@example.com" } },
       expect.anything()
     );
-  });
-
-  it("audits the change, because it signs nobody out and would otherwise leave no trace", async () => {
-    await PUT(put({ email: "new@example.com", currentPassword: "right" }), context);
-
+    expect(issueEmailChange).not.toHaveBeenCalled();
     expect(logInstanceAudit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        action: "user_email_changed_self",
-        target: "owner",
-        actorUsername: "owner",
-        detail: expect.stringContaining("old@example.com"),
-      })
+      expect.objectContaining({ action: "user_email_changed_self", detail: expect.stringContaining("old@example.com") })
     );
   });
 
-  it("tells the address that is losing the ability to recover the account", async () => {
-    await PUT(put({ email: "new@example.com", currentPassword: "right" }), context);
-    // The notification is deliberately not awaited by the handler
-    await new Promise((resolve) => setImmediate(resolve));
+  it("removes the address at once, drops any pending change, and tells the address removed", async () => {
+    const response = await PUT(put({ email: "", currentPassword: "right" }), context);
+    await settled();
 
-    expect(sendEmail).toHaveBeenCalledWith(
-      expect.objectContaining({ to: "old@example.com" })
-    );
-  });
-
-  it("says nothing to anybody when the account had no address to lose", async () => {
-    getAuthUser.mockResolvedValue(signedIn({ email: "" }));
-
-    await PUT(put({ email: "new@example.com", currentPassword: "right" }), context);
-    await new Promise((resolve) => setImmediate(resolve));
-
-    expect(sendEmail).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(userFindByIdAndUpdate).toHaveBeenCalledWith("u1", { $set: { email: "" } }, expect.anything());
+    expect(cancelEmailChange).toHaveBeenCalledWith("u1");
+    expect(issueEmailChange).not.toHaveBeenCalled();
+    expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: "old@example.com" }));
   });
 
   // The profile form submits the address alongside the notification toggle, so an unchanged value
@@ -261,6 +314,7 @@ describe("PUT /api/users/me — changing the address that can reset the password
 
   it("answers 404 when the account was deleted mid-request, and audits nothing", async () => {
     userFindByIdAndUpdate.mockResolvedValue(null);
+    isEmailConfigured.mockReturnValue(false);
 
     const response = await PUT(
       put({ email: "new@example.com", currentPassword: "right" }),
@@ -370,7 +424,7 @@ describe("PUT /api/users/me — changing your own display name", () => {
 
   // The form submits the whole profile, so the name arrives alongside the address on every save
   it("changes the name and the address in one request, each on its own terms", async () => {
-    userFindByIdAndUpdate.mockResolvedValue({ _id: "u1", email: "new@example.com" });
+    userFindByIdAndUpdate.mockResolvedValue({ _id: "u1", email: "old@example.com", fullName: "Ówner Nàme" });
 
     const response = await PUT(
       put({ fullName: "Ówner Nàme", email: "new@example.com", currentPassword: "right" }),
@@ -378,11 +432,14 @@ describe("PUT /api/users/me — changing your own display name", () => {
     );
 
     expect(response.status).toBe(200);
+    // The name at once; the address only once its inbox confirms it
     expect(userFindByIdAndUpdate).toHaveBeenCalledWith(
       "u1",
-      { $set: { fullName: "Ówner Nàme", email: "new@example.com" } },
+      { $set: { fullName: "Ówner Nàme" } },
       expect.anything()
     );
+    expect(issueEmailChange).toHaveBeenCalledWith("u1", "new@example.com");
+    expect(await response.json()).toMatchObject({ fullName: "Ówner Nàme", pendingEmail: "new@example.com" });
   });
 
   // A machine account is refused the address because an address makes it resettable. A name makes

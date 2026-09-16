@@ -139,7 +139,12 @@ export function rendersBlank(value: string): boolean {
  */
 export const TASK_TITLE_MAX_LENGTH = 200;
 export const CRITERION_TEXT_MAX_LENGTH = 500;
+export const MAX_CHECKLIST_ITEMS = 200;
+export const TASK_DESCRIPTION_MAX_LENGTH = 100_000;
+export const COMMENT_BODY_MAX_LENGTH = 20_000;
+export const AI_PROMPT_MAX_LENGTH = 10_000;
 
+export const COMMENT_BODY_RULE = `A comment must be at most ${COMMENT_BODY_MAX_LENGTH.toLocaleString("en-US")} characters`;
 export const TASK_TITLE_RULE = `A title must be at most ${TASK_TITLE_MAX_LENGTH} characters and cannot contain zero-width, bidi or other control characters`;
 export const CRITERION_TEXT_RULE = `An acceptance criterion must be at most ${CRITERION_TEXT_MAX_LENGTH} characters and cannot contain zero-width, bidi or other control characters`;
 

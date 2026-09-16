@@ -9,6 +9,7 @@ vi.mock("@/models/rateLimit", () => ({ RateLimit: store }));
 const {
   isRateLimited,
   recordFailedAttempt,
+  countAttempt,
   clearAttempts,
   clearAccountAttempts,
   resetRateLimits,
@@ -263,5 +264,43 @@ describe("clearing an account's counters", () => {
 
     expect(await isRateLimited(login, 10)).toBe(false);
     expect(await isRateLimited(profile, 10)).toBe(true);
+  });
+});
+
+// BP-323 review: a check followed by a record let a burst pass together
+describe("countAttempt", () => {
+  it("answers each of a burst with its own count", async () => {
+    const counts = await Promise.all(Array.from({ length: 5 }, () => countAttempt("burst")));
+
+    expect(counts.sort()).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it("retries once when two first attempts race to create the row", async () => {
+    const original = store.findOneAndUpdate.bind(store);
+    const once = vi
+      .spyOn(store, "findOneAndUpdate")
+      .mockImplementationOnce(() => {
+        const failed = Promise.reject(Object.assign(new Error("E11000"), { code: 11000 }));
+        return { lean: () => failed, then: failed.then.bind(failed) } as never;
+      })
+      .mockImplementation(original);
+    try {
+      expect(await countAttempt("raced")).toBe(1);
+      expect(once).toHaveBeenCalledTimes(2);
+    } finally {
+      once.mockRestore();
+    }
+  });
+
+  it("does not swallow any other failure", async () => {
+    const failing = vi.spyOn(store, "findOneAndUpdate").mockImplementationOnce(() => {
+      const failed = Promise.reject(new Error("db down"));
+      return { lean: () => failed, then: failed.then.bind(failed) } as never;
+    });
+    try {
+      await expect(countAttempt("down")).rejects.toThrow("db down");
+    } finally {
+      failing.mockRestore();
+    }
   });
 });

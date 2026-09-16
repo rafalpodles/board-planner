@@ -1414,6 +1414,24 @@ export const WEBHOOK_OK_ID = id("e2e00000000000000000f001");
 export const WEBHOOK_UNTRIED_ID = id("e2e00000000000000000ba03");
 export const WEBHOOK_FAILED_ID = id("e2e00000000000000000f002");
 
+/** BP-323: a project already holding as many webhooks as it may have */
+export async function seedWebhooksAtCap(count = 20) {
+  const db = (await connect()).db!;
+  await db.collection("projects").updateOne(
+    { _id: PROJECT_ID },
+    {
+      $set: {
+        webhooks: Array.from({ length: count }, (_, i) => ({
+          _id: new mongoose.Types.ObjectId(),
+          url: `https://e2e-receiver.example/at-cap-${i}`,
+          events: ["task_created"],
+          enabled: true,
+        })),
+      },
+    }
+  );
+}
+
 export async function seedWebhookDeliveryOutcomes() {
   const db = (await connect()).db!;
 

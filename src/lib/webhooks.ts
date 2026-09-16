@@ -2,6 +2,7 @@ import { Project } from "@/models/project";
 import { WebhookEvent } from "@/types";
 import { isAllowedWebhookUrl } from "./url-validation";
 import { safeFetch, BlockedDestinationError } from "./safe-fetch";
+import { OUTBOUND_CONCURRENCY, runBounded } from "./bounded";
 import { signatureHeaders } from "./webhook-signature";
 
 interface WebhookPayload {
@@ -95,8 +96,8 @@ export async function dispatchWebhooks(
       timestamp: new Date().toISOString(),
     });
 
-    // Fire-and-forget, don't block the main request
-    for (const webhook of activeWebhooks) {
+    // Fire-and-forget, don't block the main request; bounded, so one event is never a burst
+    void runBounded(activeWebhooks, OUTBOUND_CONCURRENCY, async (webhook) => {
       const webhookId = String(webhook._id);
       const attemptStartedAt = new Date();
 
@@ -104,10 +105,10 @@ export async function dispatchWebhooks(
       // recorded, or a URL that stops passing this check reads as "still delivering" forever.
       if (!isAllowedWebhookUrl(webhook.url)) {
         recordDelivery(projectId, webhookId, attemptStartedAt, "failed", "Blocked destination");
-        continue;
+        return;
       }
 
-      safeFetch(webhook.url, {
+      await safeFetch(webhook.url, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...signatureHeaders(body) },
         body,
@@ -126,7 +127,7 @@ export async function dispatchWebhooks(
           ),
         (err) => recordDelivery(projectId, webhookId, attemptStartedAt, "failed", messageFor(err))
       );
-    }
+    });
   } catch {
     // Webhook dispatch should never break the main operation
     console.warn("Failed to dispatch webhooks");

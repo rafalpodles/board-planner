@@ -22,6 +22,7 @@ export default function ProfilePage() {
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [pendingEmail, setPendingEmail] = useState("");
 
   // Trimmed and lowercased the way the server normalises it, so the password prompt does not
   // appear for a stray capital that will not change anything
@@ -57,18 +58,36 @@ export default function ProfilePage() {
         setLoadFailed(true);
         setLoaded(true);
       });
+    api
+      .get("/api/users/me/email-change")
+      .then((data: { pending: { email: string } | null }) => setPendingEmail(data.pending?.email ?? ""))
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function cancelPending() {
+    try {
+      await api.del("/api/users/me/email-change");
+      setPendingEmail("");
+    } catch (err) {
+      toast(err instanceof Error && err.message ? err.message : "Could not cancel the change", "error");
+    }
+  }
 
   async function handleSave() {
     setSaving(true);
     try {
-      await api.put("/api/users/me", {
+      const saved: { email?: string; pendingEmail?: string } = await api.put("/api/users/me", {
         email,
         fullName,
         ...(emailChanged ? { currentPassword } : {}),
       });
-      setSavedEmail(email.trim().toLowerCase());
+      // A new address waits for its inbox to confirm it, so the field goes back to the one in force
+      const inForce = saved.email ?? email.trim().toLowerCase();
+      setSavedEmail(inForce);
+      setEmail(inForce);
+      if (saved.pendingEmail) setPendingEmail(saved.pendingEmail);
+      else if (emailChanged) setPendingEmail("");
       setSavedFullName(fullName.trim());
       setFullName(fullName.trim());
       setCurrentPassword("");
@@ -76,7 +95,12 @@ export default function ProfilePage() {
       // The shell renders the name from the cached user, so without this it keeps showing the old
       // one until a full reload — on the one screen where somebody is watching for it to change
       if (nameChanged) await refreshUser();
-      toast("Profile updated", "success");
+      toast(
+        saved.pendingEmail
+          ? `We sent a confirmation link to ${saved.pendingEmail}`
+          : "Profile updated",
+        "success"
+      );
     } catch (err) {
       // The server's own words: "Current password is incorrect" is worth reading, where a generic
       // failure leaves somebody retyping a password that was right
@@ -145,8 +169,21 @@ export default function ProfilePage() {
             />
             <p className="text-xs text-text-muted">
               This address is where a password reset link is sent, so changing it needs your
-              password. The old address will be told it is no longer the recovery address.
+              password. The new address gets a link to confirm it, and the current one stays in
+              use until then.
             </p>
+          </div>
+        )}
+
+        {pendingEmail && (
+          <div role="status" className="rounded-lg border border-border bg-surface-muted p-3 text-sm [overflow-wrap:anywhere]">
+            <p>
+              Waiting for <strong>{pendingEmail}</strong> to be confirmed. Open the link we sent there;
+              {savedEmail ? ` until then, ${savedEmail} stays on your account.` : " until then, your account has no address."}
+            </p>
+            <button type="button" onClick={() => void cancelPending()} className="mt-2 text-xs underline">
+              Cancel this change
+            </button>
           </div>
         )}
 

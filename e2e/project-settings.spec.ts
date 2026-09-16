@@ -13,6 +13,7 @@ import {
   seed,
   seedSecondEscalationColumn,
   seedWebhookDeliveryOutcomes,
+  seedWebhooksAtCap,
 } from "./seed";
 import { signIn } from "./session";
 
@@ -851,6 +852,18 @@ test.describe("Integrations · the save bar", () => {
     // The toast carries the server's own message, not the fallback — `fail` prefers err.message
     await expect(page.getByText("nope")).toBeVisible();
     await expect(saveButton(page), "a failed save must keep the work on screen").toBeVisible();
+  });
+
+  // BP-323: one card move fires every webhook, so the count is capped where it is stored
+  test("a webhook past the cap is refused, and the page says why", async ({ page }) => {
+    await seedWebhooksAtCap();
+    await signIn(page);
+
+    await addWebhook(page, "https://example.com/one-too-many");
+    await saveButton(page).click();
+
+    await expect(page.getByText("A project can have at most 20 webhooks")).toBeVisible();
+    await expect(saveButton(page), "a refused save must keep the work on screen").toBeVisible();
   });
 
   /**

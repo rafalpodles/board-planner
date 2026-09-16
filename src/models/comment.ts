@@ -24,6 +24,9 @@ const commentSchema = new Schema<IComment>(
     body: {
       type: String,
       required: true,
+      // A backstop well above the route's cap, so a writer that forgets the cap is still bounded
+      // and a comment stored before the cap still saves
+      maxlength: 100_000,
     },
     reactions: {
       type: [reactionSchema],

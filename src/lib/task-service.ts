@@ -34,7 +34,11 @@ import { pillToneForRole } from "@/lib/email-template";
 import { parseChecklistString } from "@/lib/checklist";
 import { undoneChecklist } from "@/lib/task-duplicate";
 import {
+  COMMENT_BODY_MAX_LENGTH,
+  COMMENT_BODY_RULE,
   CRITERION_TEXT_RULE,
+  MAX_CHECKLIST_ITEMS,
+  TASK_DESCRIPTION_MAX_LENGTH,
   TASK_TITLE_RULE,
   isValidCriterionText,
   isValidTaskTitle,
@@ -420,6 +424,11 @@ function checklistOrRefusal(value: unknown): ChecklistInput[] | TaskServiceResul
   if (!Array.isArray(value)) {
     return { ok: false, error: "Checklist must be a list of criteria", status: 400 };
   }
+  // Every board load returns tasks whole, so one task grown towards the document ceiling slows the
+  // board for everybody on it (BP-323)
+  if (value.length > MAX_CHECKLIST_ITEMS) {
+    return { ok: false, error: `A task can have at most ${MAX_CHECKLIST_ITEMS} acceptance criteria`, status: 400 };
+  }
   const items: ChecklistInput[] = [];
   for (const raw of value) {
     const text = (raw as { text?: unknown } | null)?.text;
@@ -506,6 +515,13 @@ function schemaValuesOrRefusal(values: Body): TaskServiceResult | null {
   // default an absent one before they ask.
   if ("description" in values && !castsToSchema("description", values.description)) {
     return { ok: false, error: "Description must be text", status: 400 };
+  }
+  if (typeof values.description === "string" && values.description.length > TASK_DESCRIPTION_MAX_LENGTH) {
+    return {
+      ok: false,
+      error: `Description must be at most ${TASK_DESCRIPTION_MAX_LENGTH.toLocaleString("en-US")} characters`,
+      status: 400,
+    };
   }
 
   if ("order" in values && !castsToSchema("order", values.order)) {
@@ -1365,6 +1381,9 @@ export async function addComment(
 
   if (!bodyText || typeof bodyText !== "string" || !bodyText.trim()) {
     return { ok: false, error: "Comment body is required", status: 400 };
+  }
+  if (bodyText.trim().length > COMMENT_BODY_MAX_LENGTH) {
+    return { ok: false, error: COMMENT_BODY_RULE, status: 400 };
   }
 
   const comment = await Comment.create({

@@ -4,7 +4,7 @@ import { withProjectOwner } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { maskSecretUrl, sanitizeProjectSecrets } from "@/lib/project-secrets";
-import { parseWebhookUrl, parseWebhookEvents } from "@/lib/webhook-input";
+import { parseWebhookUrl, parseWebhookEvents, MAX_WEBHOOK_URL_LENGTH, MAX_WEBHOOKS } from "@/lib/webhook-input";
 import { WEBHOOK_EVENTS } from "@/types";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -35,7 +35,10 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
   const { url, events } = await request.json();
   const parsedUrl = parseWebhookUrl(url);
   if (!parsedUrl) {
-    return NextResponse.json({ error: "A valid URL is required" }, { status: 400 });
+    return NextResponse.json(
+      { error: `A valid URL of at most ${MAX_WEBHOOK_URL_LENGTH} characters is required` },
+      { status: 400 }
+    );
   }
 
   const parsedEvents = events === undefined ? [...WEBHOOK_EVENTS] : parseWebhookEvents(events);
@@ -46,12 +49,17 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
     );
   }
 
+  // The count is part of the match, so two requests racing cannot both slip past the cap: one card
+  // move fires every webhook, and a few thousand at one host is a flood sent from this instance
   const project = await Project.findOneAndUpdate(
-    { _id: projectId },
+    { _id: projectId, [`webhooks.${MAX_WEBHOOKS - 1}`]: { $exists: false } },
     { $push: { webhooks: { url: parsedUrl, events: parsedEvents, enabled: true } } },
     { returnDocument: "after" }
   );
   if (!project) {
+    if (await Project.exists({ _id: projectId })) {
+      return NextResponse.json({ error: `A project can have at most ${MAX_WEBHOOKS} webhooks` }, { status: 400 });
+    }
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 

@@ -184,6 +184,16 @@ export interface ISession {
   createdAt: Date;
 }
 
+export interface IEmailChangeToken {
+  _id: Types.ObjectId;
+  tokenHash: string;
+  user: Types.ObjectId | IUser;
+  email: string;
+  expiresAt: Date;
+  usedAt: Date | null;
+  createdAt: Date;
+}
+
 export interface IPasswordResetToken {
   _id: Types.ObjectId;
   tokenHash: string;

@@ -163,3 +163,28 @@ function tokensButton(): { label: string; url: string } | undefined {
   const origin = selfOrigin();
   return origin ? { label: "Review your tokens", url: `${origin}/settings/tokens` } : undefined;
 }
+
+export interface AddressConfirmationNotice {
+  email: string;
+  username: string;
+  confirmUrl: string;
+}
+
+/**
+ * The only mail sent to an address nobody has confirmed. It carries no text the requester chose
+ * beyond a username, which is constrained to a plain shape, and it is throttled per account.
+ */
+export async function sendAddressConfirmation(n: AddressConfirmationNotice): Promise<void> {
+  await deliver(n.email, `Confirm your email address for ${APP_NAME}`, () => ({
+    preheader: `Confirm this address to use it for the account ${n.username}.`,
+    kicker: "Account security",
+    heading: "Confirm this email address",
+    intro: [
+      `The account ${n.username} asked to use this address. It takes effect only once you confirm it here, and the link works for 24 hours.`,
+    ],
+    rows: [{ label: "Account", value: n.username }],
+    button: { label: "Confirm this address", url: n.confirmUrl },
+    outro: ["If you did not ask for this, ignore this message. Nothing changes unless the link is followed."],
+    footer: ["Sent once, to the address being confirmed."],
+  }));
+}

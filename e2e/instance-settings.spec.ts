@@ -15,6 +15,7 @@ import {
 } from "./seed";
 import { signIn as arriveSignedIn, signInThroughForm } from "./session";
 import { answerNoMailServer } from "./mail-screen";
+import { confirmLinkIn, mailFor } from "./mailbox";
 
 /**
  * BP-394. The settings a person changes about the instance and about themselves: the model the
@@ -578,7 +579,9 @@ test("the profile: the name lands in the shell, the address is guarded by the pa
     await expect(page.getByLabel("Email")).toHaveValue("");
   });
 
-  await test.step("with the right password it is stored", async () => {
+  // BP-359: with a mail server, the address waits for the link sent to it
+  await test.step("with the right password it is stored once its inbox confirms it", async () => {
+    const earlier = (await mailFor(ADDRESS)).length;
     const saved = page.waitForResponse(
       (r) =>
         r.request().method() === "PUT" &&
@@ -590,9 +593,15 @@ test("the profile: the name lands in the shell, the address is guarded by the pa
     await fillStably(page.getByLabel("Current password"), ADMIN_PASSWORD);
     await page.getByRole("button", { name: "Save" }).click();
     await saved;
-    await expectToast(page, "Profile updated");
+    await expectToast(page, `We sent a confirmation link to ${ADDRESS}`);
 
-    await reloadSettled(page);
+    await expect.poll(async () => (await mailFor(ADDRESS)).length, { timeout: 30_000 }).toBe(earlier + 1);
+    const link = confirmLinkIn((await mailFor(ADDRESS)).at(-1)!);
+    await page.goto(link);
+    await page.getByRole("button", { name: "Confirm this address" }).click();
+    await expect(page.getByRole("heading", { name: "Address confirmed" })).toBeVisible();
+
+    await openSettled(page, "/settings/profile");
     await expect(page.getByLabel("Email")).toHaveValue(ADDRESS);
   });
 

@@ -3,7 +3,10 @@ import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
 import { getClientIp } from "@/lib/auth";
 import { isValidEmail, normaliseEmail } from "@/lib/email";
-import { notifyAddressChanged } from "@/lib/security-mail";
+import { notifyAddressChanged, sendAddressConfirmation } from "@/lib/security-mail";
+import { cancelEmailChange, issueEmailChange } from "@/lib/email-change";
+import { isEmailConfigured } from "@/lib/email";
+import { selfOrigin } from "@/lib/session";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { withAuth } from "@/lib/middleware";
 import { FULL_NAME_RULE, isValidFullName, normaliseFullName } from "@/lib/identifiers";
@@ -12,11 +15,15 @@ import { invalidateResetTokens } from "@/lib/password-reset";
 import {
   clearAttempts,
   EXCLUSIVE_SOURCE_ATTEMPTS,
+  countAttempt,
   lockoutKey,
   sourceKey,
   withLockout,
 } from "@/lib/rate-limit";
 import { User } from "@/models/user";
+
+// Confirmation mails one account may send in the rate limiter's window
+const CONFIRMATIONS_PER_WINDOW = 3;
 
 export const PUT = withAuth(async (request, { user }) => {
   await connectDB();
@@ -35,6 +42,7 @@ export const PUT = withAuth(async (request, { user }) => {
 
   const updates: Record<string, unknown> = {};
   const previousEmail = user.email ?? "";
+  let pendingEmail: string | undefined;
 
   if (body.email !== undefined) {
     // The address is where a reset link will land, so a machine credential must not be able to
@@ -123,7 +131,16 @@ export const PUT = withAuth(async (request, { user }) => {
           );
         }
       }
-      updates.email = email;
+      if (email && isEmailConfigured()) {
+        // Held until the new inbox confirms it (BP-359). Stored straight away, an address let
+        // anybody make this instance mail a stranger — and a typo left the account unrecoverable.
+        pendingEmail = email;
+      } else {
+        // Clearing the address sends nothing new anywhere, and an instance that cannot send mail
+        // has no confirmation to offer
+        updates.email = email;
+        await cancelEmailChange(user._id);
+      }
     }
   }
 
@@ -155,11 +172,35 @@ export const PUT = withAuth(async (request, { user }) => {
     updates.collapseEmptyColumns = body.collapseEmptyColumns;
   }
 
+  if (pendingEmail) {
+    const origin = selfOrigin();
+    if (!origin) {
+      return NextResponse.json(
+        { error: "This instance does not know its own address, so it cannot send a confirmation link" },
+        { status: 503 }
+      );
+    }
+    // Counted and compared in one write: checked first, a burst of requests all passed the check
+    // before any of them was counted, and each one mailed a stranger
+    if ((await countAttempt(sourceKey(String(user._id), "email-confirm"))) > CONFIRMATIONS_PER_WINDOW) {
+      return NextResponse.json(
+        { error: "Too many confirmation emails. Try again in 15 minutes." },
+        { status: 429 }
+      );
+    }
+    const token = await issueEmailChange(user._id, pendingEmail);
+    void sendAddressConfirmation({
+      email: pendingEmail,
+      username: user.username,
+      confirmUrl: `${origin}/confirm-email#token=${encodeURIComponent(token)}`,
+    });
+  }
+
   if (Object.keys(updates).length === 0) {
     // Submitting the address or the name already on the account is a no-op, not a malformed
     // request: it is what a client sending the whole profile back does when neither was touched.
     if (body.email !== undefined || body.fullName !== undefined) {
-      return NextResponse.json(await User.findById(user._id));
+      return NextResponse.json(withPending(await User.findById(user._id), pendingEmail));
     }
     return NextResponse.json({ error: "No valid fields to update" }, { status: 400 });
   }
@@ -228,6 +269,12 @@ export const PUT = withAuth(async (request, { user }) => {
     });
   }
 
-  return NextResponse.json(updated);
+  return NextResponse.json(withPending(updated, pendingEmail));
 });
+
+function withPending(user: unknown, pendingEmail?: string) {
+  if (!user || !pendingEmail) return user;
+  const doc = user as { toJSON?: () => Record<string, unknown> };
+  return { ...(typeof doc.toJSON === "function" ? doc.toJSON() : doc), pendingEmail };
+}
 

@@ -3,9 +3,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const findById = vi.fn();
 const findOne = vi.fn();
 const findOneAndUpdate = vi.fn();
+const exists = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
-vi.mock("@/models/project", () => ({ Project: { findById, findOne, findOneAndUpdate } }));
+vi.mock("@/models/project", () => ({ Project: { findById, findOne, findOneAndUpdate, exists } }));
 vi.mock("@/lib/projectAudit", () => ({ logProjectAudit: vi.fn() }));
 vi.mock("@/lib/project-secrets", () => ({
   maskSecretUrl: (u: string) => u,
@@ -64,7 +65,7 @@ describe("POST /api/projects/:projectId/webhooks", () => {
 
     expect(res.status).toBe(201);
     expect(findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: "p1" },
+      { _id: "p1", "webhooks.19": { $exists: false } },
       {
         $push: {
           webhooks: { url: "https://hooks.example.com/b", events: expect.any(Array), enabled: true },
@@ -95,10 +96,31 @@ describe("POST /api/projects/:projectId/webhooks", () => {
 
   it("404s when the project does not exist", async () => {
     findOneAndUpdate.mockResolvedValue(null);
+    exists.mockResolvedValue(null);
 
     const res = await POST(request("POST", { url: "https://hooks.example.com/b" }), ctx());
 
     expect(res.status).toBe(404);
+  });
+
+  // BP-323: one card move fires every webhook, so thousands at one host are a flood from this instance
+  it("refuses a webhook past the cap, with the cap in the match so a race cannot pass it", async () => {
+    findOneAndUpdate.mockResolvedValue(null);
+    exists.mockResolvedValue({ _id: "p1" });
+
+    const res = await POST(request("POST", { url: "https://hooks.example.com/b" }), ctx());
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("A project can have at most 20 webhooks");
+  });
+
+  it("refuses a URL longer than 2048 characters", async () => {
+    const url = `https://hooks.example.com/${"a".repeat(2048)}`;
+
+    const res = await POST(request("POST", { url }), ctx());
+
+    expect(res.status).toBe(400);
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 });
 

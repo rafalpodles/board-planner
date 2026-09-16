@@ -3,20 +3,22 @@ import { IWorker } from "@/types";
 
 const workerSchema = new Schema<IWorker>(
   {
-    name: { type: String, required: true, trim: true },
-    host: { type: String, default: "" },
-    platform: { type: String, default: "" },
-    version: { type: String, default: "" },
+    // maxlengths are backstops above the routes' own bounds, so a writer that forgets one is still bounded
+    name: { type: String, required: true, trim: true, maxlength: 500 },
+    host: { type: String, default: "", maxlength: 500 },
+    platform: { type: String, default: "", maxlength: 200 },
+    version: { type: String, default: "", maxlength: 200 },
     protocolVersion: { type: Number, required: true },
     credentialHash: { type: String, required: true, select: false },
     // Reported by the worker, never set from the server: this is what that machine says it has
     // on disk. The path is here only so an operator can see which checkout was used.
     repos: {
       type: [{
-        remote: { type: String, required: true, trim: true },
-        path: { type: String, required: true, trim: true },
+        remote: { type: String, required: true, trim: true, maxlength: 2000 },
+        path: { type: String, required: true, trim: true, maxlength: 2000 },
       }],
       default: [],
+      validate: { validator: (repos: unknown[]) => repos.length <= 1000, message: "Too many reported repositories" },
     },
     // The person this machine belongs to, set from the account that enrolled it. Distinct from
     // `identity` below: identity is which machine acted, owner is whose machine it is. It is also
@@ -39,7 +41,7 @@ const workerSchema = new Schema<IWorker>(
     // The user record this machine acts as: comment author, assignee, and the name in history.
     // Null only for a worker registered before CP-241 and not seen since.
     identity: { type: Schema.Types.ObjectId, ref: "User", default: null },
-    bindingError: { type: String, default: "" },
+    bindingError: { type: String, default: "", maxlength: 5000 },
     // Null, not an empty pass: a worker too old to report this has not told us it is fine, and a
     // console that showed it green would be the exact "healthy, fails every task" this closes.
     preflight: {
@@ -51,12 +53,12 @@ const workerSchema = new Schema<IWorker>(
             type: [
               new Schema(
                 {
-                  name: { type: String, required: true, trim: true },
+                  name: { type: String, required: true, trim: true, maxlength: 500 },
                   ok: { type: Boolean, required: true },
                   // Passed, at a cost somebody chose. Absent on every check that has none, so an
                   // older worker's report stays exactly what it was (BP-606).
                   warn: { type: Boolean, default: false },
-                  detail: { type: String, default: "", trim: true },
+                  detail: { type: String, default: "", trim: true, maxlength: 2000 },
                 },
                 { _id: false }
               ),

@@ -223,6 +223,24 @@ test("a category the project does not have falls back rather than being stored",
   expect(stored.category).toBe("user-story");
 });
 
+// BP-323: a refusal from the new limits is something to act on, so the form says which one
+test("a spent budget is named in the form, not reported as a failure", async ({ page }) => {
+  await signIn(page);
+  const modal = await openNewTaskForm(page);
+  const message = "This project has used its 200 AI generations for the day.";
+  await page.route("**/ai/generate-task", (route) =>
+    route.request().method() === "POST"
+      ? route.fulfill({ status: 429, contentType: "application/json", body: JSON.stringify({ error: message }) })
+      : route.fallback()
+  );
+
+  await modal.getByPlaceholder("Describe what you need").fill("add a toggle");
+  await modal.getByRole("button", { name: "Generate" }).click();
+
+  await expectToast(page, message);
+  await expect(modal.getByLabel("Title")).toHaveValue("");
+});
+
 test("an answer the app cannot read leaves the form alone and says so", async ({ page }) => {
   await signIn(page);
   const modal = await openNewTaskForm(page);
@@ -234,7 +252,8 @@ test("an answer the app cannot read leaves the form alone and says so", async ({
   await modal.getByRole("button", { name: "Generate" }).click();
   expect((await failed).status()).toBe(500);
 
-  await expectToast(page, "AI generation failed");
+  // The server's own words, which the form now shows rather than a fixed line of its own
+  await expectToast(page, "AI generation failed. Please try again.");
   // The 500 also arrives when OPENAI_BASE_URL is wrong and the key goes to the real api.openai.com;
   // this is what says the failure came from the answer rather than from the wiring
   expect((await lastPromptSent()).user).toContain("this is not JSON");
