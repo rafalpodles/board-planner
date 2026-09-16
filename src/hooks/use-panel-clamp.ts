@@ -108,7 +108,6 @@ export function usePanelClamp(open: boolean): {
     };
   }, [open, measure]);
 
-  if (!shiftX && !maxHeight) return { ref, style: undefined };
   return {
     ref,
     style: {

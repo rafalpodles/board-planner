@@ -31,14 +31,24 @@ beforeEach(() => {
   );
   // Reported in viewport coordinates, the way a browser does: the transform this hook applies is
   // part of what the next read sees, which is exactly the compounding the hook has to undo.
+  //
+  // Every field is present, because the cast is the dangerous part. While `top` was missing the
+  // hook read `undefined`, every height arithmetic became NaN, the bound silently produced no
+  // style at all, and seven tests stayed green over an implementation that did nothing. A field
+  // this literal omits is a field the next reader gets `undefined` for, and NaN never reddens.
   Element.prototype.getBoundingClientRect = function () {
     const shift = parseFloat(/translateX\((-?[\d.]+)px\)/.exec((this as HTMLElement).style.transform ?? "")?.[1] ?? "0");
-    return {
+    const box = {
+      x: rect.left + shift,
+      y: rect.top,
       left: rect.left + shift,
       right: rect.right + shift,
-      width: rect.width,
       top: rect.top,
-    } as DOMRect;
+      bottom: rect.top,
+      width: rect.width,
+      height: 0,
+    };
+    return { ...box, toJSON: () => box } as DOMRect;
   };
 });
 
@@ -152,10 +162,17 @@ describe("usePanelClamp", () => {
     expect(maxHeightOf()).toBe("788px");
   });
 
+  /**
+   * The horizontal shift is the positive control, and it is what makes the assertion mean
+   * anything: an empty maxHeight is otherwise indistinguishable from a hook that measured
+   * nothing at all. An early return for a below-the-fold anchor would pass without it, while
+   * silently disabling the left-edge clamp for every panel on a phone in landscape.
+   */
   it("never offers a negative height to a panel below the fold", () => {
-    rect = { left: 12, right: 352, width: 340, top: 900 };
+    rect = { left: -242, right: 98, width: 340, top: 900 };
     render(<Panel open />);
 
+    expect(shiftOf()).toBe("translateX(254px)");
     expect(maxHeightOf()).toBe("");
   });
 });
