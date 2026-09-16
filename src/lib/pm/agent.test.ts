@@ -279,6 +279,27 @@ describe("an unattended turn and a project's MCP server", () => {
     expect(offered()).toEqual(expect.arrayContaining(["mcp_acme_create_ticket", "mcp_acme_list_tickets"]));
   });
 
+  // BP-476: a step can carry many calls, and the cap is what bounds a turn's reach into a server
+  it("stops calling MCP tools once the turn has made its limit of calls", async () => {
+    const { callMcpTool } = await import("./mcp-tools");
+    vi.mocked(callMcpTool).mockResolvedValue({ result: "ok", isError: false });
+    chatCompletion
+      .mockResolvedValueOnce({
+        type: "tools" as const,
+        assistantMessage: { role: "assistant" as const, content: "", tool_calls: [] },
+        calls: Array.from({ length: 7 }, (_, i) => ({ id: `c${i}`, name: "mcp_acme_list_tickets", args: {} })),
+      })
+      .mockResolvedValueOnce({ type: "text", content: "done" });
+
+    await turn([], false);
+
+    expect(callMcpTool).toHaveBeenCalledTimes(5);
+    // Read from the last request only: every request re-sends the replies before it
+    const lastRequest = chatCompletion.mock.calls.at(-1)![0].messages as { role: string; content: string }[];
+    const refused = lastRequest.filter((m) => m.role === "tool" && m.content.includes("MCP call limit (5) reached"));
+    expect(refused).toHaveLength(2);
+  });
+
   it("refuses the withheld MCP tool at dispatch, not only in the list it offers", async () => {
     chatCompletion
       .mockResolvedValueOnce(toolCall("mcp_acme_create_ticket", {}))
