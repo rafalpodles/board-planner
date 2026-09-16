@@ -14,7 +14,12 @@ let port = 0;
 let hits = 0;
 
 beforeAll(async () => {
-  server = createServer((_req, res) => {
+  server = createServer((req, res) => {
+    if (req.url?.startsWith("/hop")) {
+      res.writeHead(302, { location: `http://rebind.example:${port}/` });
+      res.end();
+      return;
+    }
     hits++;
     res.end("internal");
   });
@@ -60,5 +65,23 @@ describe("safeFetch connects only to the addresses it vetted", () => {
     expect(await response.text()).toBe("internal");
     expect(hits).toBe(1);
     expect(lookup).toHaveBeenCalledWith("rebind.localhost", expect.objectContaining({ all: true }));
+  });
+
+  it("pins a redirect hop the same way as the first request", async () => {
+    lookup.mockImplementation(async (host: string) =>
+      host === "rebind.example" && lookup.mock.calls.filter(([h]) => h === host).length === 1
+        ? [{ address: "93.184.216.34", family: 4 }]
+        : [{ address: "127.0.0.1", family: 4 }]
+    );
+
+    const attempt = safeFetch(
+      `http://start.localhost:${port}/hop`,
+      { signal: AbortSignal.timeout(5_000) },
+      { allowLoopback: true }
+    );
+
+    await expect(attempt).rejects.toBeInstanceOf(BlockedDestinationError);
+    expect(hits).toBe(0);
+    expect(lookup).toHaveBeenCalledWith("rebind.example", expect.anything());
   });
 });
