@@ -91,14 +91,18 @@ test("a new address takes effect only once the link sent to it is confirmed", as
 
   // Opened somewhere with no session, the way an inbox on another device opens it
   const inbox = await browser.newPage();
+  const confirmations: string[] = [];
+  inbox.on("request", (request) => {
+    if (request.url().includes("/api/auth/confirm-email")) confirmations.push(request.method());
+  });
   await inbox.goto(link);
   await expect(inbox.getByRole("heading", { name: "Confirm this email address" })).toBeVisible();
-  // Opening the link is not confirming it: a mail scanner fetching every link must not do this.
-  // Read once the page has nothing left in flight, so a request it sent on its own has landed.
-  await inbox.waitForLoadState("networkidle");
-  expect(await storedEmail()).toBe(old);
-  // And the token has left the address bar
+  // The token has left the address bar — which is also the page's effect having run, the one
+  // place a request sent on opening would start
   await expect(inbox).toHaveURL(/\/confirm-email$/);
+  // Opening the link is not confirming it: a mail scanner fetching every link must not do this
+  expect(confirmations).toEqual([]);
+  expect(await storedEmail()).toBe(old);
 
   await inbox.getByRole("button", { name: "Confirm this address" }).click();
 
