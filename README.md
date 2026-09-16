@@ -178,12 +178,11 @@ docker compose up -d --build
 Open <http://localhost:3000>. The first account created on the sign-in page becomes the instance
 administrator; every account after that is made from **Settings → Users**.
 
-> [!WARNING]
-> **Create that first account before anyone else can reach the address.** An instance with no users
-> offers "First time? Create Account" to whoever asks, and there is no invitation and no setup
-> token. Two requests inside that window can both be answered before either account is written, and
-> both are then administrators. On a deployment that goes live the moment it builds, the window
-> opens before you have opened the page.
+Creating that first account asks for a **setup code**, so whoever reaches a fresh instance before you
+cannot claim it. Unless you set `BOOTSTRAP_TOKEN`, the app generates one and prints it to the server
+log when it starts with no accounts — `docker compose logs app | grep "setup code"`. The code is
+held in memory, so a restart prints a new one, and on more than one replica each prints its own:
+set `BOOTSTRAP_TOKEN` there instead.
 
 Stop it with `docker compose down`. The database lives in the `mongo-data` volume and survives that;
 `docker compose down -v` deletes it.
@@ -243,6 +242,7 @@ Everything is optional except the database. Put overrides in a `.env` file next 
 | `APP_ORIGIN` | `http://localhost:${APP_PORT}` | Comma-separated origins the app is served from. Together with `PUBLIC_ORIGIN`, what a write's `Origin` is checked against when the browser sends no `Sec-Fetch-Site` |
 | `PUBLIC_ORIGIN` | compose default; otherwise `APP_ORIGIN` when it names exactly one origin | The one address this instance calls its own. Required for MCP and PM OAuth |
 | `NEXT_PUBLIC_APP_URL` | `http://localhost:${APP_PORT}` | Public URL used in notification and webhook links. **Build-time** |
+| `BOOTSTRAP_TOKEN` | generated, printed to the log | The setup code the first account is created with. Set a long value when the log is not where you can read it |
 | `COOKIE_ALLOW_INSECURE` | `1` (compose only) | Issue the session cookie without `Secure` and without the `__Host-` prefix, for an instance served over plain HTTP |
 | `TRUSTED_PROXY_HOPS` | `0` | How many proxies append to `X-Forwarded-For` in front of this app |
 | `ENCRYPTION_KEY` | — | 32 bytes (hex or base64) encrypting stored integration tokens and chat webhook URLs at rest |
