@@ -437,3 +437,67 @@ describe("the preflight report a worker sends", () => {
     expect(preflightPatch()?.checks[0].detail).toHaveLength(500);
   });
 });
+
+// BP-323: every other worker's claim and heartbeat read this inventory back
+describe("POST heartbeat — what one worker may store about itself", () => {
+  const storedRepos = () => workerUpdateOne.mock.calls[0][1].$set.repos as { remote: string }[];
+  const touched = () => touchWorker.mock.calls[0][1] as Record<string, unknown>;
+
+  it("keeps at most 200 reported checkouts", async () => {
+    const repos = Array.from({ length: 250 }, (_, i) => ({ remote: `git@github.com:o/r${i}.git`, path: `/r${i}` }));
+    const { req, ctx } = request({ repos });
+
+    expect((await POST(req, ctx)).status).toBe(200);
+    expect(storedRepos()).toHaveLength(200);
+  });
+
+  it("drops a checkout whose remote or path is past its bound, rather than storing a cut one", async () => {
+    const { req, ctx } = request({
+      repos: [
+        { remote: `git@github.com:o/${"r".repeat(1000)}.git`, path: "/long-remote" },
+        { remote: REMOTE, path: `/${"p".repeat(1000)}` },
+        { remote: REMOTE, path: "/fine" },
+      ],
+    });
+
+    await POST(req, ctx);
+
+    expect(storedRepos()).toEqual([{ remote: REMOTE, path: "/fine" }]);
+  });
+
+  it("bounds the version, the binding error and the preflight checks", async () => {
+    const checks = Array.from({ length: 80 }, (_, i) => ({ name: `c${i}`, ok: true, detail: "" }));
+    const { req, ctx } = request({
+      version: "v".repeat(5000),
+      bindingError: "e".repeat(10_000),
+      preflight: { ok: true, account: "a", checks },
+    });
+
+    await POST(req, ctx);
+
+    expect(String(touched().version)).toHaveLength(100);
+    expect(String(touched().bindingError)).toHaveLength(2000);
+    expect((touched().preflight as { checks: unknown[] }).checks).toHaveLength(50);
+  });
+
+  it("refuses a heartbeat body past 512 KB", async () => {
+    const { req, ctx } = request({ bindingError: "e".repeat(600 * 1024) });
+
+    const response = await POST(req, ctx);
+
+    expect(response.status).toBe(413);
+    expect(touchWorker).not.toHaveBeenCalled();
+  });
+
+  it("still treats an unreadable body as a heartbeat with nothing to report", async () => {
+    const req = new Request(`http://localhost/api/workers/${WORKER_ID}/heartbeat`, {
+      method: "POST",
+      headers: { authorization: "Bearer cpw_secret", "x-worker-id": WORKER_ID, "x-cp-protocol": "1" },
+      body: "",
+    });
+
+    const response = await POST(req, { params: Promise.resolve({ workerId: WORKER_ID }) });
+
+    expect(response.status).toBe(200);
+  });
+});
