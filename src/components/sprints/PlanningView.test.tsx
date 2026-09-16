@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor, act, within } from "@testing-library/react";
+import { StrictMode } from "react";
 import { PlanningView } from "./PlanningView";
 import { ProjectBoard } from "@/hooks/use-project-board";
 import { ApiProject, ApiSprint, ApiTask } from "@/types";
@@ -282,6 +283,40 @@ describe("PlanningView", () => {
       dataTransfer: dataTransferFor("t9"),
     });
     expect(api.put).toHaveBeenCalledWith("/api/projects/p1/tasks/t9", { sprint: null });
+  });
+
+  it("keeps a task dropped into the backlog while the backlog is still loading", async () => {
+    let answer: (tasks: ApiTask[]) => void = () => {};
+    api.get.mockImplementation(() => new Promise((resolve) => (answer = resolve)));
+    api.put.mockResolvedValue({});
+    render(<PlanningView projectId="p1" board={makeBoard()} sprintId="s1" />);
+
+    fireEvent.drop(screen.getByTestId("planning-pane-backlog"), {
+      dataTransfer: dataTransferFor("t9"),
+    });
+    // What the server read before the move reached it
+    await act(async () => answer(backlogTasks.map((t) => ({ ...t }))));
+
+    expect(await screen.findByText("Backlog (3)")).toBeTruthy();
+    expect(within(screen.getByTestId("planning-pane-backlog")).getByText("Ship the header")).toBeTruthy();
+  });
+
+  // StrictMode runs the fetch effect twice; the first request's answer must not land last
+  it("ignores a superseded backlog response that answers late", async () => {
+    const answers: ((tasks: ApiTask[]) => void)[] = [];
+    api.get.mockImplementation(() => new Promise((resolve) => answers.push(resolve)));
+    render(
+      <StrictMode>
+        <PlanningView projectId="p1" board={makeBoard()} sprintId="s1" />
+      </StrictMode>
+    );
+    expect(answers).toHaveLength(2);
+
+    await act(async () => answers[1](backlogTasks.map((t) => ({ ...t }))));
+    expect(await screen.findByText("Backlog (2)")).toBeTruthy();
+
+    await act(async () => answers[0]([]));
+    expect(screen.getByText("Backlog (2)")).toBeTruthy();
   });
 
   it("writes nothing when a task is dropped back onto the pane it is already in", async () => {
