@@ -15,8 +15,7 @@ import { invalidateResetTokens } from "@/lib/password-reset";
 import {
   clearAttempts,
   EXCLUSIVE_SOURCE_ATTEMPTS,
-  isRateLimited,
-  recordFailedAttempt,
+  countAttempt,
   lockoutKey,
   sourceKey,
   withLockout,
@@ -174,13 +173,6 @@ export const PUT = withAuth(async (request, { user }) => {
   }
 
   if (pendingEmail) {
-    const throttleKey = sourceKey(String(user._id), "email-confirm");
-    if (await isRateLimited(throttleKey, CONFIRMATIONS_PER_WINDOW)) {
-      return NextResponse.json(
-        { error: "Too many confirmation emails. Try again in 15 minutes." },
-        { status: 429 }
-      );
-    }
     const origin = selfOrigin();
     if (!origin) {
       return NextResponse.json(
@@ -188,7 +180,14 @@ export const PUT = withAuth(async (request, { user }) => {
         { status: 503 }
       );
     }
-    await recordFailedAttempt(throttleKey);
+    // Counted and compared in one write: checked first, a burst of requests all passed the check
+    // before any of them was counted, and each one mailed a stranger
+    if ((await countAttempt(sourceKey(String(user._id), "email-confirm"))) > CONFIRMATIONS_PER_WINDOW) {
+      return NextResponse.json(
+        { error: "Too many confirmation emails. Try again in 15 minutes." },
+        { status: 429 }
+      );
+    }
     const token = await issueEmailChange(user._id, pendingEmail);
     void sendAddressConfirmation({
       email: pendingEmail,

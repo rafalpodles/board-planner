@@ -94,6 +94,16 @@ export function inMemoryRateLimitModel() {
       }
       return { matchedCount: 0, upsertedCount: 0 };
     },
+    // The row is read in the same synchronous step as the write, the way Mongo answers with the
+    // document its own update produced — reading it after an await would hand every concurrent
+    // caller the final count and hide exactly the race `countAttempt` exists to close
+    findOneAndUpdate(filter: Filter, update: Update, options?: { upsert?: boolean }) {
+      const written = this.updateOne(filter, update, options);
+      const row = rows.get(filter._id as string);
+      const snapshot = row ? { ...row } : null;
+      const result = written.then(() => snapshot);
+      return { lean: () => result, then: result.then.bind(result) };
+    },
     async deleteOne(filter: Filter) {
       if (filter._id !== undefined) rows.delete(filter._id);
       return { deletedCount: 1 };

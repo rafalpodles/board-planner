@@ -104,4 +104,45 @@ describe("POST generate-task", () => {
     expect((await first).status).toBe(200);
     expect((await generate("a third")).status).toBe(200);
   });
+
+  it("lets one of a burst from the same person through, not all of them", async () => {
+    let finish!: (v: unknown) => void;
+    generateTask.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
+
+    const burst = Array.from({ length: 5 }, () => generate("a task"));
+    await vi.waitFor(() => expect(generateTask).toHaveBeenCalledTimes(1));
+    finish({ title: "T", fields: {} });
+    const statuses = (await Promise.all(burst)).map((r) => r.status).sort();
+
+    expect(statuses).toEqual([200, 409, 409, 409, 409]);
+    expect(generateTask).toHaveBeenCalledTimes(1);
+  });
+
+  it("holds a daily cap to a burst from many people at once", async () => {
+    process.env.AI_DAILY_GENERATION_CAP = "3";
+
+    const statuses = (await Promise.all(["a", "b", "c", "d", "e", "f"].map((who) => generate("a task", who)))).map(
+      (r) => r.status
+    );
+
+    expect(statuses.filter((s) => s === 200), JSON.stringify(statuses)).toHaveLength(3);
+    expect(generateTask).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps the project's cap for a day, not for the throttle's fifteen minutes", async () => {
+    process.env.AI_DAILY_GENERATION_CAP = "1";
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-09-16T08:00:00Z"));
+      expect((await generate("a task", "u1")).status).toBe(200);
+
+      vi.setSystemTime(new Date("2026-09-16T09:00:00Z"));
+      expect((await generate("a task", "u2")).status).toBe(429);
+
+      vi.setSystemTime(new Date("2026-09-17T08:01:00Z"));
+      expect((await generate("a task", "u3")).status).toBe(200);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

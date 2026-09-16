@@ -9,7 +9,7 @@ import { isAIEnabled, generateTask, ExistingTaskSummary } from "@/lib/ai";
 import { choiceFieldsForPrompt, resolveGeneratedFields } from "@/lib/ai-fields";
 import { getSettings } from "@/models/settings";
 import { bareHost, hostOf, projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
-import { isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
+import { countAttempt, sourceKey } from "@/lib/rate-limit";
 import { readJsonBody } from "@/lib/request-body";
 
 export const MAX_PROMPT_LENGTH = 10_000;
@@ -105,37 +105,34 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
     );
   }
 
-  // Every generation is spent on the instance's own key, so each one counts whether or not it
-  // succeeds (BP-323)
-  const userKey = sourceKey(`user:${String(user._id)}`, "ai-generate");
-  if (await isRateLimited(userKey, GENERATIONS_PER_USER_WINDOW)) {
-    return NextResponse.json(
-      { error: "Too many generations. Try again in 15 minutes." },
-      { status: 429 }
-    );
-  }
-  const projectKey = `ai-generate:day:${projectId}`;
-  const cap = dailyGenerationCap();
-  if (await isRateLimited(projectKey, cap)) {
-    return NextResponse.json(
-      { error: `This project has used its ${cap} AI generations for the day.` },
-      { status: 429 }
-    );
-  }
+  // Taken with no await between the check and the claim, or a burst all passes the check at once
   const holder = String(user._id);
   if (inFlight.has(holder)) {
     return NextResponse.json({ error: "A generation is already running." }, { status: 409 });
   }
-
-  const project = await Project.findById(projectId);
-  if (!project) {
-    return NextResponse.json({ error: "Project not found" }, { status: 404 });
-  }
-
-  await recordFailedAttempt(userKey);
-  await recordFailedAttempt(projectKey, DAY_MS);
   inFlight.add(holder);
   try {
+    // Every generation is spent on the instance's own key, so each one counts whether or not it
+    // succeeds — and is counted in the same write that is compared, so a burst cannot slip past
+    // the budget between a check and a record (BP-323)
+    if ((await countAttempt(sourceKey(`user:${holder}`, "ai-generate"))) > GENERATIONS_PER_USER_WINDOW) {
+      return NextResponse.json(
+        { error: "Too many generations. Try again in 15 minutes." },
+        { status: 429 }
+      );
+    }
+    const cap = dailyGenerationCap();
+    if ((await countAttempt(`ai-generate:day:${projectId}`, DAY_MS)) > cap) {
+      return NextResponse.json(
+        { error: `This project has used its ${cap} AI generations for the day.` },
+        { status: 429 }
+      );
+    }
+
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
     return await generate(project, projectId, prompt);
   } finally {
     inFlight.delete(holder);

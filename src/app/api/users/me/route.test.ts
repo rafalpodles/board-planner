@@ -22,9 +22,10 @@ vi.mock("@/lib/auth", () => ({
   PASSWORD_COST_FACTOR: 10,
   MIN_PASSWORD_LENGTH: 8,
 }));
+const selfOrigin = vi.fn();
 vi.mock("@/lib/session", () => ({
   ProvenanceError: class ProvenanceError extends Error {},
-  selfOrigin: () => "https://app.example.com",
+  selfOrigin,
 }));
 const issueEmailChange = vi.fn();
 const cancelEmailChange = vi.fn();
@@ -79,6 +80,7 @@ beforeEach(async () => {
   compare.mockResolvedValue(true);
   isEmailConfigured.mockReturnValue(true);
   issueEmailChange.mockResolvedValue("cpe_the-token");
+  selfOrigin.mockReturnValue("https://app.example.com");
 });
 
 /** The notices are deliberately not awaited by the handler */
@@ -145,6 +147,27 @@ describe("PUT /api/users/me — changing the address that can reset the password
     expect(fourth.status).toBe(429);
     expect(issueEmailChange).toHaveBeenCalledTimes(3);
     expect(sendEmail).toHaveBeenCalledTimes(3);
+  });
+
+  it("holds the limit to a burst sent all at once", async () => {
+    const burst = await Promise.all(
+      Array.from({ length: 6 }, (_, n) => PUT(put({ email: `burst${n}@example.com`, currentPassword: "right" }), context))
+    );
+    await settled();
+
+    expect(burst.filter((r) => r.status === 200)).toHaveLength(3);
+    expect(sendEmail).toHaveBeenCalledTimes(3);
+  });
+
+  it("refuses to send a link it cannot address, rather than mailing a relative one", async () => {
+    selfOrigin.mockReturnValue(undefined);
+
+    const response = await PUT(put({ email: "new@example.com", currentPassword: "right" }), context);
+    await settled();
+
+    expect(response.status).toBe(503);
+    expect(issueEmailChange).not.toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
   });
 
   it("changes the address at once when this instance cannot send mail, and audits it", async () => {
