@@ -95,22 +95,18 @@ export async function POST(request: Request) {
   if (isBootstrap) {
     const refusal = provenanceRefusal(request);
     if (refusal) return refusal;
-    // BP-325: an instance is publicly reachable before its operator registers, so the first admin
-    // needs something only the operator holds — the code in the server log, or BOOTSTRAP_TOKEN
-    const clientIp = getClientIp(request);
-    const throttleKey = sourceKey(clientIp ?? "-", "bootstrap");
-    if (await isRateLimited(throttleKey, anonymousMultiplier(clientIp, 10))) {
-      return NextResponse.json(
-        { error: "Too many attempts. Try again in 15 minutes." },
-        { status: 429 }
-      );
-    }
+    // Checked before the throttle, so a stranger filling the shared bucket cannot lock the operator out
     if (!setupCodeMatches(body.setupCode)) {
+      const clientIp = getClientIp(request);
+      const throttleKey = sourceKey(clientIp ?? "-", "bootstrap");
+      if (await isRateLimited(throttleKey, anonymousMultiplier(clientIp, 10))) {
+        return NextResponse.json(
+          { error: "Too many attempts. Try again in 15 minutes." },
+          { status: 429 }
+        );
+      }
       await recordFailedAttempt(throttleKey);
-      return NextResponse.json(
-        { error: "The setup code is missing or wrong. It is printed in the server log." },
-        { status: 403 }
-      );
+      return NextResponse.json({ error: "The setup code is missing or wrong." }, { status: 403 });
     }
   } else {
     try {

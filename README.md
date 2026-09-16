@@ -242,7 +242,7 @@ Everything is optional except the database. Put overrides in a `.env` file next 
 | `APP_ORIGIN` | `http://localhost:${APP_PORT}` | Comma-separated origins the app is served from. Together with `PUBLIC_ORIGIN`, what a write's `Origin` is checked against when the browser sends no `Sec-Fetch-Site` |
 | `PUBLIC_ORIGIN` | compose default; otherwise `APP_ORIGIN` when it names exactly one origin | The one address this instance calls its own. Required for MCP and PM OAuth |
 | `NEXT_PUBLIC_APP_URL` | `http://localhost:${APP_PORT}` | Public URL used in notification and webhook links. **Build-time** |
-| `BOOTSTRAP_TOKEN` | generated, printed to the log | The setup code the first account is created with. Set a long value when the log is not where you can read it |
+| `BOOTSTRAP_TOKEN` | generated, printed to the log | The setup code the first account is created with, 16 characters or more. Set it when the log is not where you can read it |
 | `COOKIE_ALLOW_INSECURE` | `1` (compose only) | Issue the session cookie without `Secure` and without the `__Host-` prefix, for an instance served over plain HTTP |
 | `TRUSTED_PROXY_HOPS` | `0` | How many proxies append to `X-Forwarded-For` in front of this app |
 | `ENCRYPTION_KEY` | — | 32 bytes (hex or base64) encrypting stored integration tokens and chat webhook URLs at rest |

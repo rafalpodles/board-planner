@@ -34,6 +34,8 @@ services:
       # This instance's own address. Behind a proxy, set it to the public one — APP_ORIGIN is a
       # list and cannot say which entry that is, and NEXT_PUBLIC_APP_URL is baked into the image
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:${APP_PORT:-3000}}
+      # The setup code for the first account; empty means one is generated and printed to the log
+      BOOTSTRAP_TOKEN: ${BOOTSTRAP_TOKEN:-}
       # Everything below is optional — leave it empty and the feature stays off
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}

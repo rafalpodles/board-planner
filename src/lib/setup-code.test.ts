@@ -35,6 +35,16 @@ describe("setupCode", () => {
     expect(setupCodeMatches(first)).toBe(true);
   });
 
+  it("ignores a BOOTSTRAP_TOKEN too short to stand in for the generated code, and says so", async () => {
+    process.env.BOOTSTRAP_TOKEN = "admin";
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { setupCode, setupCodeMatches } = await load();
+
+    expect(setupCodeMatches("admin")).toBe(false);
+    expect(setupCode()).toMatch(/^[0-9a-f]{32}$/);
+    expect(warn.mock.calls[0][0]).toContain("shorter than 16");
+  });
+
   it.each([[""], [undefined], [42], ["nearly-but-not"]])("refuses %j", async (candidate) => {
     process.env.BOOTSTRAP_TOKEN = "chosen-by-the-operator";
     const { setupCodeMatches } = await load();

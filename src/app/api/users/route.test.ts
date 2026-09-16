@@ -212,10 +212,19 @@ describe("claiming an instance nobody has claimed", () => {
   it("stops listening to guesses once the source is throttled", async () => {
     isRateLimited.mockResolvedValue(true);
 
-    const res = await post({ ...VALID, username: "firstadmin", setupCode: "operator-held-setup-code" });
+    const res = await post({ ...VALID, username: "firstadmin", setupCode: "a-guess" });
 
     expect(res.status).toBe(429);
     expect(create).not.toHaveBeenCalled();
+  });
+
+  // The anonymous bucket is shared, so a stranger could otherwise fill it and lock the operator out
+  it("still lets the operator's own code through a throttled source", async () => {
+    isRateLimited.mockResolvedValue(true);
+
+    const res = await post({ ...VALID, username: "firstadmin", setupCode: "operator-held-setup-code" });
+
+    expect(res.status).toBe(201);
   });
 
   it("never asks an existing instance's admin for a setup code", async () => {
