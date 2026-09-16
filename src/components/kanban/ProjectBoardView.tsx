@@ -10,7 +10,7 @@ import { effectiveColumns } from "@/lib/columns";
 import { ListColumnId } from "@/lib/list-columns";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Board } from "@/components/kanban/Board";
-import { BoardFilters } from "@/components/kanban/BoardFilters";
+import { BoardFilters, FilterMeta } from "@/components/kanban/BoardFilters";
 import { TaskContextMenu } from "@/components/kanban/TaskContextMenu";
 import { ListView } from "@/components/kanban/ListView";
 import { Button } from "@/components/ui/Button";
@@ -90,6 +90,7 @@ export function ProjectBoardView({
   const viewMode = pinViewMode ?? boardViewMode;
 
   const [filteredTasks, setFilteredTasks] = useState<ApiTask[]>([]);
+  const [filterMeta, setFilterMeta] = useState<FilterMeta | null>(null);
   const [contextMenu, setContextMenu] = useState<{ taskId: string; x: number; y: number } | null>(null);
   // One owner for both views: the filter bar's dropdown and the list's column
   // headers set the same value, and it survives switching between them
@@ -224,6 +225,7 @@ export function ProjectBoardView({
         }}
         sortFields={viewMode === "list" ? LIST_SORT_FIELDS : BOARD_SORT_FIELDS}
         sortContext={sortContext}
+        columns={project.columns}
         hiddenColumns={hiddenColumns}
         onHiddenColumnsChange={setHiddenColumns}
         showColumnPicker={viewMode === "list"}
@@ -245,7 +247,10 @@ export function ProjectBoardView({
             </button>
           )
         }
-        onFilter={setFilteredTasks}
+        onFilter={(filtered, meta) => {
+          setFilteredTasks(filtered);
+          setFilterMeta(meta);
+        }}
       />
 
       {/* board.tasks still holds the previous scope's list until its own request lands —
@@ -296,6 +301,15 @@ export function ProjectBoardView({
               onTaskContextMenu={readOnly ? undefined : (taskId, x, y) => setContextMenu({ taskId, x, y })}
               readOnly={readOnly}
             />
+          ) : filterMeta && filteredTasks.length === 0 ? (
+            /* ListView renders nothing when it has no rows, which left a filter that
+               matched nothing looking like a board that had lost its tasks */
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <h2 className="mb-2 text-lg font-medium text-text-muted">No tasks match the filters</h2>
+              <Button size="sm" variant="secondary" onClick={filterMeta.clearAll}>
+                Clear filters
+              </Button>
+            </div>
           ) : (
             <ListView
               tasks={filteredTasks}

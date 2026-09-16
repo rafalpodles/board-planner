@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, act, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, act, fireEvent, waitFor } from "@testing-library/react";
 import { BoardFilters } from "./BoardFilters";
 import { ApiCustomField, ApiTask } from "@/types";
 
@@ -76,13 +76,13 @@ describe("BoardFilters", () => {
     expect(searchBox.className).toContain("min-w-0");
   });
 
-  it("holds exactly four controls in the popover", async () => {
+  it("holds exactly five controls in the popover", async () => {
     renderFilters();
     await openPopover();
     const popover = screen.getByRole("dialog", { name: "Filters" });
     const labels = [...popover.querySelectorAll("label > span")].map((s) => s.textContent);
-    expect(labels).toEqual(["Assignee", "Category", "Priority", "Updated"]);
-    expect(popover.querySelectorAll("select").length).toBe(4);
+    expect(labels).toEqual(["Assignee", "Category", "Priority", "Status", "Updated"]);
+    expect(popover.querySelectorAll("select").length).toBe(5);
   });
 
   // Sprint is scope and lives in the board header — it must not reappear here
@@ -118,6 +118,95 @@ describe("BoardFilters", () => {
       screen.getByText("Clear all").click();
     });
     expect(screen.queryByText("Clear all")).toBeNull();
+  });
+
+  describe("the status filter", () => {
+    // Renamed ids on purpose: a filter that reached for "in_progress" would match nothing here
+    const columns = [
+      { id: "parked", label: "Parked", color: "#000", role: "backlog" as const, order: 0 },
+      { id: "cooking", label: "Cooking", color: "#000", role: "active" as const, order: 1 },
+      { id: "checking", label: "Checking", color: "#000", role: "review" as const, order: 2 },
+      { id: "signed-off", label: "Signed off", color: "#000", role: "review" as const, order: 3 },
+    ];
+    const board = [
+      task({ _id: "a", taskNumber: 1, title: "Being worked on", status: "cooking" }),
+      task({ _id: "b", taskNumber: 2, title: "First review", status: "checking" }),
+      task({ _id: "c", taskNumber: 3, title: "Second review", status: "signed-off" }),
+      task({ _id: "d", taskNumber: 4, title: "Parked idea", status: "parked" }),
+    ];
+
+    async function chooseStatus(value: string) {
+      const status = screen.getByRole("dialog").querySelectorAll("select")[3];
+      await act(async () => {
+        status.value = value;
+        status.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+    }
+
+    it("narrows the board to the chosen role, across every column carrying it", async () => {
+      const { onFilter } = renderFilters({ tasks: board, columns });
+      await openPopover();
+      await chooseStatus("review");
+
+      const last = onFilter.mock.calls.at(-1)![0] as ApiTask[];
+      expect(last.map((t) => t._id)).toEqual(["b", "c"]);
+    });
+
+    it("offers the board's own roles, labelled for a human", async () => {
+      renderFilters({ tasks: board, columns });
+      await openPopover();
+      const status = screen.getByRole("dialog").querySelectorAll("select")[3];
+      expect([...status.options].map((o) => o.textContent)).toEqual([
+        "All statuses",
+        "Ideas & backlog",
+        "In progress",
+        "Awaiting review",
+      ]);
+    });
+
+    it("shows a removable chip naming the role", async () => {
+      renderFilters({ tasks: board, columns });
+      await openPopover();
+      await chooseStatus("active");
+
+      expect(screen.getByLabelText("Remove In progress filter")).toBeTruthy();
+      await act(async () => {
+        screen.getByLabelText("Remove In progress filter").click();
+      });
+      expect(screen.queryByLabelText("Remove In progress filter")).toBeNull();
+    });
+
+    it("composes with the search box rather than replacing it", async () => {
+      const { onFilter, container } = renderFilters({ tasks: board, columns });
+      const search = container.querySelector("input[type=text]") as HTMLInputElement;
+      await act(async () => {
+        fireEvent.change(search, { target: { value: "Second" } });
+      });
+      await openPopover();
+      await chooseStatus("review");
+
+      const last = onFilter.mock.calls.at(-1)![0] as ApiTask[];
+      expect(last.map((t) => t._id)).toEqual(["c"]);
+    });
+
+    it("hands the host a way to clear everything, search included", async () => {
+      const { onFilter, container } = renderFilters({ tasks: board, columns });
+      const search = container.querySelector("input[type=text]") as HTMLInputElement;
+      await act(async () => {
+        fireEvent.change(search, { target: { value: "nothing matches this" } });
+      });
+      await openPopover();
+      await chooseStatus("review");
+      expect((onFilter.mock.calls.at(-1)![0] as ApiTask[]).length).toBe(0);
+
+      await act(async () => {
+        onFilter.mock.calls.at(-1)![1].clearAll();
+      });
+
+      const last = onFilter.mock.calls.at(-1)!;
+      expect((last[0] as ApiTask[]).length).toBe(board.length);
+      expect(last[1].activeCount).toBe(0);
+    });
   });
 
   it("shows a removable chip per set filter", async () => {

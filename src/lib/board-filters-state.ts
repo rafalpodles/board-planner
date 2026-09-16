@@ -1,4 +1,5 @@
-import { ApiCustomField, SortDir, SortField, SortKey } from "@/types";
+import { ApiCustomField, COLUMN_ROLES, ColumnRole, ROLE_LABELS, SortDir, SortField, SortKey } from "@/types";
+import { AnyColumn, effectiveColumns } from "./columns";
 import { ListColumnId, defaultHidden, sanitizeHidden } from "./list-columns";
 
 /** Range for number and date fields; `value` carries every other type */
@@ -14,6 +15,8 @@ export interface BoardFilterValues {
   assignee: string;
   category: string;
   priority: string;
+  /** A ColumnRole, or UNFILED. Never a column id — see statusOptions */
+  status: string;
   dateRange: string;
 }
 
@@ -31,11 +34,19 @@ export interface PersistedBoardFilters {
  */
 export const UNASSIGNED = "@none";
 
+/**
+ * Sentinel for "sitting in a column this board no longer has", which a task keeps on
+ * indefinitely once somebody deletes the column it was in. It has no role to match, so
+ * every role filter would hide it and no filter would ever show it on its own.
+ */
+export const UNFILED = "@unfiled";
+
 export const EMPTY_FILTERS: BoardFilterValues = {
   fields: {},
   assignee: "",
   category: "",
   priority: "",
+  status: "",
   dateRange: "",
 };
 
@@ -62,6 +73,43 @@ export function sanitizeFieldFilters(
     if (live.has(id) && isFieldFilterSet(filter)) result[id] = filter;
   }
   return result;
+}
+
+/**
+ * What the status filter offers. Roles, not column ids: two boards agree on roles and on
+ * nothing else (BP-128), so a board whose columns were renamed or rebuilt still filters.
+ * Ordered by the board rather than by the enum, so the list reads down the columns.
+ *
+ * Several columns commonly share one role — the default board has three review columns —
+ * so an option names the role and covers all of them.
+ */
+export function statusOptions(
+  columns: AnyColumn[] | null | undefined,
+  tasks: { status: string }[] = []
+): { value: string; label: string }[] {
+  const live = effectiveColumns(columns);
+  const seen = new Set<ColumnRole>();
+  const options: { value: string; label: string }[] = [];
+  for (const column of live) {
+    if (seen.has(column.role)) continue;
+    seen.add(column.role);
+    options.push({ value: column.role, label: ROLE_LABELS[column.role].label });
+  }
+  const ids = new Set(live.map((c) => c.id));
+  if (tasks.some((t) => !ids.has(t.status))) {
+    options.push({ value: UNFILED, label: "No column" });
+  }
+  return options;
+}
+
+export function matchesStatusFilter(
+  status: string,
+  filter: string,
+  columns: AnyColumn[] | null | undefined
+): boolean {
+  if (!filter) return true;
+  const column = effectiveColumns(columns).find((c) => c.id === status);
+  return column ? column.role === filter : filter === UNFILED;
 }
 
 const DEFAULTS: PersistedBoardFilters = {
@@ -99,6 +147,12 @@ export function migratePersistedFilters(
 
   if (categories && filters.category && !categories.includes(filters.category)) {
     filters.category = "";
+  }
+
+  // A stored value from a build that spelled roles differently would filter every task away
+  // with no option in the picker to clear it
+  if (filters.status !== UNFILED && !COLUMN_ROLES.includes(filters.status as ColumnRole)) {
+    filters.status = "";
   }
 
   // An explicit assignee is a later, more specific choice than the legacy toggle

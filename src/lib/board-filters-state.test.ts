@@ -5,6 +5,9 @@ import {
   countActiveFilters,
   EMPTY_FILTERS,
   sanitizeFieldFilters,
+  matchesStatusFilter,
+  statusOptions,
+  UNFILED,
 } from "./board-filters-state";
 
 describe("migratePersistedFilters — category renames", () => {
@@ -165,5 +168,77 @@ describe("project field filters", () => {
       fields
     );
     expect(state.filters.fields).toEqual({ f1: { from: "3", to: "8" } });
+  });
+});
+
+describe("the status filter reads roles, not column ids", () => {
+  // A board that renamed every column: the ids are this project's alone, the roles are
+  // the only thing anything outside the project can compare (BP-128)
+  const renamed = [
+    { id: "parked", label: "Parked", color: "#000", role: "backlog" as const, order: 0 },
+    { id: "cooking", label: "Cooking", color: "#000", role: "active" as const, order: 1 },
+    { id: "checking", label: "Checking", color: "#000", role: "review" as const, order: 2 },
+    { id: "double-checking", label: "Double checking", color: "#000", role: "review" as const, order: 3 },
+  ];
+
+  it("matches a task by the role of the column it sits in", () => {
+    expect(matchesStatusFilter("cooking", "active", renamed)).toBe(true);
+    expect(matchesStatusFilter("cooking", "review", renamed)).toBe(false);
+  });
+
+  it("covers every column sharing the role, not just the first", () => {
+    expect(matchesStatusFilter("checking", "review", renamed)).toBe(true);
+    expect(matchesStatusFilter("double-checking", "review", renamed)).toBe(true);
+  });
+
+  it("offers each role once, in board order", () => {
+    expect(statusOptions(renamed).map((o) => o.value)).toEqual(["backlog", "active", "review"]);
+  });
+
+  it("matches nothing away when no status is chosen", () => {
+    expect(matchesStatusFilter("anything at all", "", renamed)).toBe(true);
+  });
+
+  // A deleted column leaves its tasks behind with a status naming nothing
+  it("puts a task whose column is gone under UNFILED and nowhere else", () => {
+    expect(matchesStatusFilter("deleted_column", UNFILED, renamed)).toBe(true);
+    expect(matchesStatusFilter("deleted_column", "backlog", renamed)).toBe(false);
+  });
+
+  it("offers UNFILED only when a task actually needs it", () => {
+    expect(statusOptions(renamed, [{ status: "cooking" }]).map((o) => o.value)).not.toContain(
+      UNFILED
+    );
+    expect(statusOptions(renamed, [{ status: "gone" }]).map((o) => o.value)).toContain(UNFILED);
+  });
+
+  it("falls back to the built-in columns for a project that stored none", () => {
+    expect(matchesStatusFilter("in_review", "review", [])).toBe(true);
+    expect(statusOptions([]).map((o) => o.value)).toEqual([
+      "backlog",
+      "approved",
+      "active",
+      "review",
+      "done",
+    ]);
+  });
+});
+
+describe("migratePersistedFilters — status", () => {
+  it("keeps a stored role", () => {
+    expect(migratePersistedFilters({ filters: { status: "review" } }).filters.status).toBe("review");
+  });
+
+  it("keeps the UNFILED sentinel", () => {
+    expect(migratePersistedFilters({ filters: { status: UNFILED } }).filters.status).toBe(UNFILED);
+  });
+
+  // Otherwise it filters every task away with nothing in the picker to clear it by
+  it("drops a stored value that is not a role", () => {
+    expect(migratePersistedFilters({ filters: { status: "in_progress" } }).filters.status).toBe("");
+  });
+
+  it("counts as an active filter", () => {
+    expect(countActiveFilters({ ...EMPTY_FILTERS, status: "active" })).toBe(1);
   });
 });

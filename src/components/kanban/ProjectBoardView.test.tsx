@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { ProjectBoardView } from "./ProjectBoardView";
 import { ProjectBoard } from "@/hooks/use-project-board";
@@ -287,5 +287,62 @@ describe("ProjectBoardView's emptyState prop", () => {
 
     expect(screen.getByRole("button", { name: "Moving..." })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Deleting..." })).toBeNull();
+  });
+});
+
+/**
+ * ListView renders nothing at all when it has no rows, so a filter that matched nothing
+ * left the list view looking like a board that had lost its tasks.
+ */
+describe("The list view with a filter that matches nothing", () => {
+  const twoColumns = {
+    ...project,
+    columns: [
+      { id: "todo", label: "To Do", color: "#3b82f6", role: "approved", order: 0 },
+      { id: "shipped", label: "Shipped", color: "#22c55e", role: "done", order: 1 },
+    ],
+  } as unknown as ApiProject;
+
+  // BoardFilters persists its open/closed state and its filters per project, so without this
+  // the second test arrives with the first one's popover already open and the click closes it
+  beforeEach(() => localStorage.clear());
+
+  function renderList() {
+    return render(
+      <ProjectBoardView
+        board={makeBoard({ project: twoColumns, tasks, viewMode: "list" })}
+        pinViewMode="list"
+      />
+    );
+  }
+
+  function filterToNothing() {
+    fireEvent.click(screen.getByText("Filters"));
+    const status = screen.getByRole("dialog", { name: "Filters" }).querySelectorAll("select")[3];
+    fireEvent.change(status, { target: { value: "done" } });
+  }
+
+  it("shows the rows while nothing is filtered", () => {
+    renderList();
+    expect(screen.getByText("A bug")).toBeTruthy();
+    expect(screen.queryByText("No tasks match the filters")).toBeNull();
+  });
+
+  it("says so instead of rendering a blank page", () => {
+    renderList();
+    filterToNothing();
+
+    expect(screen.queryByText("A bug")).toBeNull();
+    expect(screen.getByText("No tasks match the filters")).toBeTruthy();
+  });
+
+  it("offers a way back that actually brings the rows back", () => {
+    renderList();
+    filterToNothing();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+
+    expect(screen.getByText("A bug")).toBeTruthy();
+    expect(screen.queryByText("No tasks match the filters")).toBeNull();
   });
 });
