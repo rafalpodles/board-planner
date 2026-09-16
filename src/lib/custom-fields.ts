@@ -196,6 +196,14 @@ export const MAX_OPTIONS = 100;
  * the API keeps working for older clients; each one becomes its own id, matching
  * how pre-CP-211 options migrate.
  */
+export function optionIdsDropped(existing: ICustomFieldOption[], input: unknown): boolean {
+  if (!Array.isArray(input)) return false;
+  const kept = new Set(
+    input.map((raw) => (raw && typeof raw === "object" ? (raw as Partial<ICustomFieldOption>).id : undefined))
+  );
+  return existing.some((option) => !kept.has(option.id));
+}
+
 export function parseOptions(
   input: unknown,
   existing: ICustomFieldOption[] = []

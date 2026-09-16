@@ -3,14 +3,16 @@ import { connectDB } from "@/lib/db";
 import { withProjectAccess, withProjectOwner } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { Task } from "@/models/task";
+import { check } from "@/lib/grants";
 import {
   isOptionField,
   normalizeOptions,
+  optionIdsDropped,
   parseOptions,
   MAX_FIELD_NAME_LENGTH,
 } from "@/lib/custom-fields";
 
-export const PATCH = withProjectAccess(async (request, { params }) => {
+export const PATCH = withProjectAccess(async (request, { params, user }) => {
   const { projectId, fieldId } = await params;
   await connectDB();
 
@@ -43,6 +45,21 @@ export const PATCH = withProjectAccess(async (request, { params }) => {
       return NextResponse.json({ error: "Field with this name already exists" }, { status: 409 });
     }
     field.name = name;
+  }
+
+  // Dropping a saved option erases it from every task that carries it, with none of the cleanup the
+  // owner-gated DELETE performs. Members add and edit; owners remove. Archiving is reversible and
+  // keeps every value, so it stays with members.
+  if (
+    body.options !== undefined &&
+    isOptionField(field) &&
+    optionIdsDropped(normalizeOptions(field.options), body.options) &&
+    !(await check(user, projectId, "admin"))
+  ) {
+    return NextResponse.json(
+      { error: "Only a project admin can remove an option a field already has" },
+      { status: 403 }
+    );
   }
 
   if (body.options !== undefined && isOptionField(field)) {
