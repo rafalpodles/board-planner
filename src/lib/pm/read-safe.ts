@@ -8,14 +8,18 @@ const READ_SAFE_NAME_RE = /^(search|list|get|read|fetch|query|describe|find)/i;
  * with no way for an admin to get them back, because `toolAllowlist` only narrows. Token equality
  * keeps `find_and_merge_duplicates` caught while letting `get_merged_pull_requests` through.
  *
- * `run` and `grant` are deliberately absent. They are ambiguous even as tokens
- * (`get_run_status`, `get_grant`), and the read-prefix requirement below is what actually stops a
- * mutation being called: `run_script` never starts with a read verb, so it never reaches this list.
+ * `run`, `grant`, `commit`, `push`, `import`, `deploy`, `sync` and `restore` are deliberately absent.
+ * Each is a real read's noun as often as a verb (`get_run_status`, `get_grant`, `get_commit`,
+ * `list_push_rules`, `get_import_status`, `list_deploy_keys`, `get_sync_status`,
+ * `list_restore_points`), and the read-prefix requirement below is what actually stops a mutation
+ * being called: `push_files` never starts with a read verb, so it never reaches this list.
  */
 const WRITE_VERBS = new Set([
   "create", "update", "delete", "write", "append", "replace", "insert", "remove", "set", "patch",
   "post", "send", "move", "archive", "upload", "edit", "destroy", "drop", "purge", "clear",
   "reset", "rename", "assign", "close", "merge", "approve", "revoke", "execute", "invoke", "trigger",
+  // BP-476: each of these passed as a read inside a read-prefixed name (`get_or_add_label`)
+  "add", "save", "publish", "cancel", "disable", "enable", "upsert", "submit",
 ]);
 
 /** `getWorkflowRun` and `get_workflow-run` are the same name to anyone reading it */

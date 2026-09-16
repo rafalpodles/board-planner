@@ -48,6 +48,15 @@ describe("isReadSafe", () => {
       "find_and_merge_duplicates",
       "read_and_execute_script",
       "query_then_revoke_tokens",
+      // BP-476: verbs the list did not know, each passing as a read before
+      "get_or_add_label",
+      "find_and_save_draft",
+      "list_and_publish_posts",
+      "find_and_cancel_jobs",
+      "get_then_disable_rule",
+      "get_or_enable_feature",
+      "listAndUpsert",
+      "fetch_and_submit_form",
     ]) {
       expect(isReadSafe(tool(name, true)), name).toBe(false);
     }
@@ -72,6 +81,17 @@ describe("isReadSafe", () => {
       "list_workflow_runs",
       "get_run_status",
       "get_grant",
+      // Nouns as often as verbs, left off the list on purpose
+      "get_commit",
+      "list_commits",
+      "list_push_rules",
+      "get_import_status",
+      "list_deploy_keys",
+      "get_sync_status",
+      "get_address",           // "add", token is "address"
+      "list_enabled_features", // "enable", token is "enabled"
+      "list_published_packages",
+      "get_saved_searches",
     ]) {
       expect(isReadSafe(tool(name)), name).toBe(true);
     }
