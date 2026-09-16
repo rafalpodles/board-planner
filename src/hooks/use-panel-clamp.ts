@@ -71,7 +71,11 @@ export function usePanelClamp(open: boolean): {
     // to what runs off the right while nothing reaches what runs off the left.
     applied.current = short > 0 ? short : past > 0 ? -past : 0;
     setShiftX(applied.current);
-    setMaxHeight(Math.max(window.innerHeight - box.top - GUTTER, 0));
+    // Floor and ceiling. A toolbar scrolled above the top of its own scroller reports a NEGATIVE
+    // top, and the room below it then computes as MORE than the screen — the bound stops binding,
+    // overflow never engages, and the panel runs past the fold again.
+    const room = window.innerHeight - box.top - GUTTER;
+    setMaxHeight(Math.min(Math.max(room, 0), window.innerHeight - GUTTER));
   }, []);
 
   useLayoutEffect(() => {
@@ -91,10 +95,16 @@ export function usePanelClamp(open: boolean): {
     if (anchor && observer) observer.observe(anchor);
     window.addEventListener("resize", measure);
     window.addEventListener("orientationchange", measure);
+    // Below lg the toolbar is in normal flow, so scrolling the board moves the anchor while the
+    // room measured for it does not — and a stale height bound puts the panel back past the fold
+    // with nothing to scroll, which is the defect this bound exists to remove. Capturing, because
+    // the scroll happens on whichever ancestor owns it rather than on the window.
+    window.addEventListener("scroll", measure, { capture: true, passive: true });
     return () => {
       observer?.disconnect();
       window.removeEventListener("resize", measure);
       window.removeEventListener("orientationchange", measure);
+      window.removeEventListener("scroll", measure, { capture: true });
     };
   }, [open, measure]);
 
@@ -103,7 +113,9 @@ export function usePanelClamp(open: boolean): {
     ref,
     style: {
       ...(shiftX ? { transform: `translateX(${shiftX}px)` } : {}),
-      ...(maxHeight ? { maxHeight, overflowY: "auto" as const } : {}),
+      // scrollPadding: at a scroll boundary the panel's own padding is scrolled away, and the
+      // scrollport clips the focus ring with it — the case .scroll-ring-room covers elsewhere.
+      ...(maxHeight ? { maxHeight, overflowY: "auto" as const, scrollPaddingBlock: 4 } : {}),
     },
   };
 }

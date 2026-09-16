@@ -117,6 +117,23 @@ describe("usePanelClamp", () => {
 
     expect(maxHeightOf()).toBe("650px");
     expect(screen.getByTestId("panel").style.overflowY).toBe("auto");
+    // The app hides every scrollbar, so the focus ring is the only thing that reaches a
+    // control scrolled to the boundary
+    expect(screen.getByTestId("panel").style.scrollPaddingBlock).toBe("4px");
+  });
+
+  // The toolbar is in normal flow below lg, so the room below it changes as the board scrolls
+  it("re-measures when the page scrolls under an open panel", () => {
+    rect = { left: 12, right: 352, width: 340, top: 138 };
+    render(<Panel open />);
+    expect(maxHeightOf()).toBe("650px");
+
+    rect = { left: 12, right: 352, width: 340, top: 500 };
+    act(() => {
+      document.body.dispatchEvent(new Event("scroll", { bubbles: false }));
+    });
+
+    expect(maxHeightOf()).toBe("288px");
   });
 
   it("measures the room from the anchor, not from a fraction of the viewport", () => {
@@ -124,6 +141,15 @@ describe("usePanelClamp", () => {
     render(<Panel open />);
 
     expect(maxHeightOf()).toBe("188px");
+  });
+
+  // A toolbar scrolled above the top of its scroller reports a negative top, and the room below
+  // it then computes as taller than the screen — a bound that no longer bounds anything
+  it("never offers more height than the screen has", () => {
+    rect = { left: 12, right: 352, width: 340, top: -200 };
+    render(<Panel open />);
+
+    expect(maxHeightOf()).toBe("788px");
   });
 
   it("never offers a negative height to a panel below the fold", () => {
