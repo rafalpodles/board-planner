@@ -245,7 +245,7 @@ Everything is optional except the database. Put overrides in a `.env` file next 
 | `BOOTSTRAP_TOKEN` | generated, printed to the log | The setup code the first account is created with, 16 characters or more. Set it when the log is not where you can read it |
 | `COOKIE_ALLOW_INSECURE` | `1` (compose only) | Issue the session cookie without `Secure` and without the `__Host-` prefix, for an instance served over plain HTTP |
 | `TRUSTED_PROXY_HOPS` | `0` | How many proxies append to `X-Forwarded-For` in front of this app |
-| `ENCRYPTION_KEY` | — | 32 bytes (hex or base64) encrypting stored integration tokens and chat webhook URLs at rest |
+| `ENCRYPTION_KEY` | — | 32 bytes, hex or standard base64 (not base64url), encrypting stored integration tokens and chat webhook URLs at rest |
 | `ENCRYPTION_KEYS_OLD` | — | Comma-separated retired keys, so a rotation can still read what they wrote |
 | `WEBHOOK_SIGNING_SECRET` | — | Signs outgoing webhook deliveries |
 | `OPENAI_API_KEY` | — | AI task generation in the task form |
@@ -308,8 +308,12 @@ the save with an error rather than writing the secret in cleartext, and says so 
 board that used team channels before this instance had a key still has those URLs in cleartext:
 `npx tsx scripts/migrate-channel-webhooks.ts` rewrites them, and they are worth rotating in Slack
 or Discord either way.** A key that is set
-but is not 32 bytes **stops the app from starting**: a fumbled variable is not the same as an absent
-one and must not be treated as one.
+but is not 32 bytes of hex or standard base64 **stops the app from starting**: a fumbled variable is
+not the same as an absent one and must not be treated as one. That includes base64url and a
+passphrase that happens to decode to 32 bytes. If secrets were already saved with such a value, do not
+generate a new key — convert the same bytes to hex with
+`node -e 'console.log(Buffer.from(process.env.ENCRYPTION_KEY.trim(), "base64").toString("hex"))'`
+and set that.
 
 To rotate: put the new key in `ENCRYPTION_KEY` and move the old one to `ENCRYPTION_KEYS_OLD`
 (comma-separated, so several generations can coexist). Each stored value names the key that wrote
