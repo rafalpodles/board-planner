@@ -83,6 +83,12 @@ export function sanitizeFieldFilters(
  * Several columns commonly share one role — the default board has three review columns —
  * so an option names the role and covers all of them.
  */
+/** The UNFILED option's name, and the fallback for a value the picker no longer offers */
+export function statusLabel(value: string): string {
+  if (value === UNFILED) return "No column";
+  return ROLE_LABELS[value as ColumnRole]?.label ?? value;
+}
+
 export function statusOptions(
   columns: AnyColumn[] | null | undefined,
   tasks: { status: string }[] = []
@@ -93,23 +99,28 @@ export function statusOptions(
   for (const column of live) {
     if (seen.has(column.role)) continue;
     seen.add(column.role);
-    options.push({ value: column.role, label: ROLE_LABELS[column.role].label });
+    options.push({ value: column.role, label: statusLabel(column.role) });
   }
   const ids = new Set(live.map((c) => c.id));
   if (tasks.some((t) => !ids.has(t.status))) {
-    options.push({ value: UNFILED, label: "No column" });
+    options.push({ value: UNFILED, label: statusLabel(UNFILED) });
   }
   return options;
+}
+
+/** Built once per filter pass: effectiveColumns copies and sorts, and this runs per task */
+export function statusRoleMap(columns: AnyColumn[] | null | undefined): Map<string, ColumnRole> {
+  return new Map(effectiveColumns(columns).map((c) => [c.id, c.role]));
 }
 
 export function matchesStatusFilter(
   status: string,
   filter: string,
-  columns: AnyColumn[] | null | undefined
+  roles: Map<string, ColumnRole>
 ): boolean {
   if (!filter) return true;
-  const column = effectiveColumns(columns).find((c) => c.id === status);
-  return column ? column.role === filter : filter === UNFILED;
+  const role = roles.get(status);
+  return role ? role === filter : filter === UNFILED;
 }
 
 const DEFAULTS: PersistedBoardFilters = {

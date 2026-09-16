@@ -99,6 +99,7 @@ test("it still filters on a board that renamed the column", async ({ page, reque
   });
 
   await openList(page);
+  await expect(rows(page)).toHaveCount(4);
 
   await test.step("the picker names the role, never the column", async () => {
     const options = (await openPanel(page)).getByLabel("Status");

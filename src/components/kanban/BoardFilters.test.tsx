@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, act, fireEvent, waitFor } from "@testing-library/react";
 import { BoardFilters } from "./BoardFilters";
 import { ApiCustomField, ApiTask } from "@/types";
+import { UNFILED } from "@/lib/board-filters-state";
 
 function task(over: Partial<ApiTask> & { _id: string }): ApiTask {
   return {
@@ -140,8 +141,10 @@ describe("BoardFilters", () => {
       task({ _id: "e", taskNumber: 5, title: "Second thoughts", status: on("cooking") }),
     ];
 
+    const statusSelect = () => screen.getByLabelText("Status") as HTMLSelectElement;
+
     async function chooseStatus(value: string) {
-      const status = screen.getByRole("dialog").querySelectorAll("select")[3];
+      const status = statusSelect();
       await act(async () => {
         status.value = value;
         status.dispatchEvent(new Event("change", { bubbles: true }));
@@ -160,7 +163,7 @@ describe("BoardFilters", () => {
     it("offers the board's own roles, labelled for a human", async () => {
       renderFilters({ tasks: board, columns });
       await openPopover();
-      const status = screen.getByRole("dialog").querySelectorAll("select")[3];
+      const status = statusSelect();
       expect([...status.options].map((o) => o.textContent)).toEqual([
         "All statuses",
         "Ideas & backlog",
@@ -170,15 +173,71 @@ describe("BoardFilters", () => {
     });
 
     it("shows a removable chip naming the role", async () => {
-      renderFilters({ tasks: board, columns });
+      const { onFilter } = renderFilters({ tasks: board, columns });
       await openPopover();
       await chooseStatus("active");
 
       expect(screen.getByLabelText("Remove In progress filter")).toBeTruthy();
+      expect((onFilter.mock.calls.at(-1)![0] as ApiTask[]).length).toBe(2);
+
       await act(async () => {
         screen.getByLabelText("Remove In progress filter").click();
       });
+
       expect(screen.queryByLabelText("Remove In progress filter")).toBeNull();
+      // Removing the chip has to clear the filter, not merely stop drawing it
+      expect((onFilter.mock.calls.at(-1)![0] as ApiTask[]).length).toBe(board.length);
+    });
+
+    /**
+     * The value outlives the option: a role whose last column is deleted, or UNFILED once the
+     * last orphaned task is filed. The select then rendered with no matching option — blank,
+     * as if nothing were chosen — while the badge still said 1 and the board stayed empty.
+     */
+    it("keeps a chosen status in the picker after the board stops offering it", async () => {
+      const { rerender } = renderFilters({ tasks: board, columns });
+      await openPopover();
+      await chooseStatus("backlog");
+      expect(statusSelect().value).toBe("backlog");
+
+      rerender(
+        <BoardFilters
+          tasks={board.filter((t) => t.status !== on("parked"))}
+          columns={columns.filter((c) => c.role !== "backlog")}
+          categories={["bug", "doc"]}
+          projectKey="TP"
+          projectId="TP"
+          currentUsername="owner"
+          sortField="manual"
+          sortDir="asc"
+          onSortChange={vi.fn()}
+          onFilter={vi.fn()}
+        />
+      );
+
+      expect(statusSelect().value).toBe("backlog");
+      expect([...statusSelect().options].map((o) => o.textContent)).toContain("Ideas & backlog");
+      expect(screen.getByLabelText("Remove Ideas & backlog filter")).toBeTruthy();
+    });
+
+    it("offers No column, and only to a board that has an orphaned task", async () => {
+      const orphan = task({ _id: "x", taskNumber: 9, title: "Column deleted", status: on("gone") });
+
+      renderFilters({ tasks: board, columns });
+      await openPopover();
+      expect([...statusSelect().options].map((o) => o.textContent)).not.toContain("No column");
+      cleanup();
+      // The panel's open state is persisted, so the next render would arrive already open
+      // and openPopover would close it
+      localStorage.clear();
+
+      const { onFilter } = renderFilters({ tasks: [...board, orphan], columns });
+      await openPopover();
+      expect([...statusSelect().options].map((o) => o.textContent)).toContain("No column");
+
+      await chooseStatus(UNFILED);
+      expect((onFilter.mock.calls.at(-1)![0] as ApiTask[]).map((t) => t._id)).toEqual(["x"]);
+      expect(screen.getByLabelText("Remove No column filter")).toBeTruthy();
     });
 
     it("composes with the search box rather than replacing it", async () => {

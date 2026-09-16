@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   ApiTask, ApiCustomField,
   ApiProjectCategory,
@@ -30,7 +30,9 @@ import {
   migratePersistedFilters,
   isFieldFilterSet,
   matchesStatusFilter,
+  statusLabel,
   statusOptions,
+  statusRoleMap,
   UNASSIGNED,
   type FieldFilter,
   type BuiltInFilterKey,
@@ -97,6 +99,8 @@ interface BoardFiltersProps {
 /** What the host page needs to explain an empty result and offer a way out of it */
 export interface FilterMeta {
   activeCount: number;
+  /** Separate from activeCount: the search box lives outside the popover and its chips */
+  searching: boolean;
   /** Clears the search box too, so pressing it always brings the tasks back */
   clearAll: () => void;
 }
@@ -194,7 +198,15 @@ export function BoardFilters({
     ).values()
   );
 
+  const roleByColumn = useMemo(() => statusRoleMap(columns), [columns]);
+
+  // A role whose last column was deleted, or UNFILED once the last orphaned task was filed,
+  // drops out of the options while the filter stays set: a blank select, a chip reading
+  // "@unfiled", and a board hiding everything with nothing to clear it by
   const statusChoices = statusOptions(columns, tasks);
+  if (filters.status && !statusChoices.some((o) => o.value === filters.status)) {
+    statusChoices.push({ value: filters.status, label: statusLabel(filters.status) });
+  }
 
   const activeCount = countActiveFilters(filters);
   const hasActiveFilters = activeCount > 0;
@@ -228,7 +240,7 @@ export function BoardFilters({
       result = result.filter((t) => t.priority === filters.priority);
     }
     if (filters.status) {
-      result = result.filter((t) => matchesStatusFilter(t.status, filters.status, columns));
+      result = result.filter((t) => matchesStatusFilter(t.status, filters.status, roleByColumn));
     }
     if (Object.keys(filters.fields || {}).length) {
       result = result.filter((t) =>
@@ -266,9 +278,9 @@ export function BoardFilters({
 
     result = sortTasks(result, sortField, sortDir, sortContext);
 
-    onFilter(result, { activeCount, clearAll });
+    onFilter(result, { activeCount, searching: !!filters.search, clearAll });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters, tasks, sortField, sortDir, sortContext, currentUsername, projectKey, columns]);
+  }, [filters, tasks, sortField, sortDir, sortContext, currentUsername, projectKey, roleByColumn]);
 
   function clearFilters() {
     setFilters((f) => ({ ...EMPTY_FILTERS, search: f.search }));
@@ -340,7 +352,7 @@ export function BoardFilters({
   if (filters.status) {
     chips.push({
       key: "status",
-      label: statusChoices.find((o) => o.value === filters.status)?.label ?? filters.status,
+      label: statusLabel(filters.status),
     });
   }
   if (filters.dateRange) {

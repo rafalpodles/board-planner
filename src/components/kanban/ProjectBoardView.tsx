@@ -301,11 +301,19 @@ export function ProjectBoardView({
               onTaskContextMenu={readOnly ? undefined : (taskId, x, y) => setContextMenu({ taskId, x, y })}
               readOnly={readOnly}
             />
-          ) : filterMeta && filteredTasks.length === 0 ? (
+          ) : filterMeta &&
+            (filterMeta.activeCount > 0 || filterMeta.searching) &&
+            filteredTasks.length === 0 ? (
             /* ListView renders nothing when it has no rows, which left a filter that
-               matched nothing looking like a board that had lost its tasks */
+               matched nothing looking like a board that had lost its tasks. Gated on
+               something actually being set: filteredTasks lags the tasks prop by a frame,
+               so an unfiltered board switching scope would otherwise flash this. */
             <div className="flex flex-col items-center justify-center py-16 text-center">
-              <h2 className="mb-2 text-lg font-medium text-text-muted">No tasks match the filters</h2>
+              <h2 className="mb-2 text-lg font-medium text-text-muted">
+                {filterMeta.activeCount > 0
+                  ? "No tasks match the filters"
+                  : "No tasks match the search"}
+              </h2>
               <Button size="sm" variant="secondary" onClick={filterMeta.clearAll}>
                 Clear filters
               </Button>

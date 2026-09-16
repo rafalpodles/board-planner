@@ -294,15 +294,16 @@ describe("ProjectBoardView's emptyState prop", () => {
  * ListView renders nothing at all when it has no rows, so a filter that matched nothing
  * left the list view looking like a board that had lost its tasks.
  */
-describe("The list view with a filter that matches nothing", () => {
-  const twoColumns = {
-    ...project,
-    columns: [
-      { id: "todo", label: "To Do", color: "#3b82f6", role: "approved", order: 0 },
-      { id: "shipped", label: "Shipped", color: "#22c55e", role: "done", order: 1 },
-    ],
-  } as unknown as ApiProject;
+/** Two roles, so a status the seeded task does not hold is still an option the picker offers */
+const twoColumns = {
+  ...project,
+  columns: [
+    { id: "todo", label: "To Do", color: "#3b82f6", role: "approved", order: 0 },
+    { id: "shipped", label: "Shipped", color: "#22c55e", role: "done", order: 1 },
+  ],
+} as unknown as ApiProject;
 
+describe("The list view with a filter that matches nothing", () => {
   // BoardFilters persists its open/closed state and its filters per project, so without this
   // the second test arrives with the first one's popover already open and the click closes it
   beforeEach(() => localStorage.clear());
@@ -318,8 +319,7 @@ describe("The list view with a filter that matches nothing", () => {
 
   function filterToNothing() {
     fireEvent.click(screen.getByText("Filters"));
-    const status = screen.getByRole("dialog", { name: "Filters" }).querySelectorAll("select")[3];
-    fireEvent.change(status, { target: { value: "done" } });
+    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "done" } });
   }
 
   it("shows the rows while nothing is filtered", () => {
@@ -336,13 +336,57 @@ describe("The list view with a filter that matches nothing", () => {
     expect(screen.getByText("No tasks match the filters")).toBeTruthy();
   });
 
+  it("says search when a search is all that narrowed it", () => {
+    renderList();
+    fireEvent.change(screen.getByPlaceholderText(/Search tasks/), {
+      target: { value: "nothing here matches" },
+    });
+
+    expect(screen.getByText("No tasks match the search")).toBeTruthy();
+    expect(screen.queryByText("No tasks match the filters")).toBeNull();
+  });
+
+  // filteredTasks is written from a child effect, so it lags the tasks prop by a frame: an
+  // unfiltered board arriving with tasks would otherwise paint this for one paint
+  it("stays out of the way when nothing is set at all", () => {
+    renderList();
+
+    expect(screen.queryByText(/No tasks match/)).toBeNull();
+    expect(screen.getByText("A bug")).toBeTruthy();
+  });
+
   it("offers a way back that actually brings the rows back", () => {
     renderList();
+    // A search as well as a filter: clearFilters() keeps the search, so without this the
+    // button could be wired to the wrong one of the two and still look right
+    fireEvent.change(screen.getByPlaceholderText(/Search tasks/), {
+      target: { value: "nothing here matches" },
+    });
     filterToNothing();
 
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
 
     expect(screen.getByText("A bug")).toBeTruthy();
     expect(screen.queryByText("No tasks match the filters")).toBeNull();
+  });
+});
+
+/**
+ * The board view takes the same filter and deliberately does NOT get the empty state: its
+ * columns stand where they are and simply hold nothing, which is the board's own answer.
+ */
+describe("The board view with a filter that matches nothing", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("filters the cards away without the list's empty state", () => {
+    render(<ProjectBoardView board={makeBoard({ project: twoColumns, tasks, viewMode: "board" })} />);
+    expect(screen.getByText("A bug")).toBeTruthy();
+
+    fireEvent.click(screen.getByText("Filters"));
+    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "done" } });
+
+    expect(screen.queryByText("A bug")).toBeNull();
+    expect(screen.queryByText(/No tasks match/)).toBeNull();
+    expect(screen.getByText("To Do")).toBeTruthy();
   });
 });

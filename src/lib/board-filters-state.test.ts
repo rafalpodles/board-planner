@@ -6,7 +6,9 @@ import {
   EMPTY_FILTERS,
   sanitizeFieldFilters,
   matchesStatusFilter,
+  statusLabel,
   statusOptions,
+  statusRoleMap,
   UNFILED,
 } from "./board-filters-state";
 
@@ -182,13 +184,13 @@ describe("the status filter reads roles, not column ids", () => {
   ];
 
   it("matches a task by the role of the column it sits in", () => {
-    expect(matchesStatusFilter("cooking", "active", renamed)).toBe(true);
-    expect(matchesStatusFilter("cooking", "review", renamed)).toBe(false);
+    expect(matchesStatusFilter("cooking", "active", statusRoleMap(renamed))).toBe(true);
+    expect(matchesStatusFilter("cooking", "review", statusRoleMap(renamed))).toBe(false);
   });
 
   it("covers every column sharing the role, not just the first", () => {
-    expect(matchesStatusFilter("checking", "review", renamed)).toBe(true);
-    expect(matchesStatusFilter("double-checking", "review", renamed)).toBe(true);
+    expect(matchesStatusFilter("checking", "review", statusRoleMap(renamed))).toBe(true);
+    expect(matchesStatusFilter("double-checking", "review", statusRoleMap(renamed))).toBe(true);
   });
 
   it("offers each role once, in board order", () => {
@@ -196,13 +198,13 @@ describe("the status filter reads roles, not column ids", () => {
   });
 
   it("matches nothing away when no status is chosen", () => {
-    expect(matchesStatusFilter("anything at all", "", renamed)).toBe(true);
+    expect(matchesStatusFilter("anything at all", "", statusRoleMap(renamed))).toBe(true);
   });
 
   // A deleted column leaves its tasks behind with a status naming nothing
   it("puts a task whose column is gone under UNFILED and nowhere else", () => {
-    expect(matchesStatusFilter("deleted_column", UNFILED, renamed)).toBe(true);
-    expect(matchesStatusFilter("deleted_column", "backlog", renamed)).toBe(false);
+    expect(matchesStatusFilter("deleted_column", UNFILED, statusRoleMap(renamed))).toBe(true);
+    expect(matchesStatusFilter("deleted_column", "backlog", statusRoleMap(renamed))).toBe(false);
   });
 
   it("offers UNFILED only when a task actually needs it", () => {
@@ -213,7 +215,7 @@ describe("the status filter reads roles, not column ids", () => {
   });
 
   it("falls back to the built-in columns for a project that stored none", () => {
-    expect(matchesStatusFilter("in_review", "review", [])).toBe(true);
+    expect(matchesStatusFilter("in_review", "review", statusRoleMap([]))).toBe(true);
     expect(statusOptions([]).map((o) => o.value)).toEqual([
       "backlog",
       "approved",
@@ -221,6 +223,19 @@ describe("the status filter reads roles, not column ids", () => {
       "review",
       "done",
     ]);
+  });
+});
+
+describe("statusLabel", () => {
+  it("names a role the way the board settings name it", () => {
+    expect(statusLabel("backlog")).toBe("Ideas & backlog");
+    expect(statusLabel("review")).toBe("Awaiting review");
+  });
+
+  // The chip fell back to the raw value, so a dropped option read "Remove @unfiled filter"
+  it("names the sentinel rather than leaking it", () => {
+    expect(statusLabel(UNFILED)).toBe("No column");
+    expect(statusLabel(UNFILED)).not.toContain("@");
   });
 });
 
