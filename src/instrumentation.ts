@@ -85,18 +85,13 @@ export async function register() {
       //
       // Projects it already reached keep what it wrote; removing it unsets nothing.
 
-      // BP-348: the PM account was stored as a person, so it was listed and could be given a password
       const { User } = await import("@/models/user");
       // Printed now rather than on the first visit, so the operator finds it in the startup log
       const { setupCode } = await import("@/lib/setup-code");
       if ((await User.countDocuments()) === 0) setupCode();
 
-      const { PM_USERNAME } = await import("@/lib/pm/username");
-      const pmFixed = await User.updateMany(
-        { username: PM_USERNAME, kind: { $ne: "machine" } },
-        { $set: { kind: "machine" } }
-      );
-      if (pmFixed.modifiedCount > 0) console.log("Marked the PM account as a machine identity");
+      const { markPmAsMachine } = await import("@/lib/pm/pm-user");
+      await markPmAsMachine();
 
       const { startPmScheduler } = await import("@/lib/pm/scheduler");
       startPmScheduler();

@@ -396,6 +396,22 @@ describe("verifyCredentials and the username oracle", () => {
     userFindOne.mockReturnValue({ select: () => Promise.resolve(user) });
   }
 
+  // BP-348: a machine identity is not loginable because it is a machine, not because nobody knows its
+  // password — the PM account could be handed one from Settings → Users before this
+  it("refuses a machine account even when the password matches", async () => {
+    lookupReturns({ username: "pm", kind: "machine", password: "$2a$10$stored" });
+    bcryptCompare.mockResolvedValue(true);
+
+    expect(await verifyCredentials("pm", "the-password-it-was-given")).toBeNull();
+  });
+
+  it("still signs in a person whose password matches", async () => {
+    lookupReturns({ username: "owner", kind: "human", password: "$2a$10$stored" });
+    bcryptCompare.mockResolvedValue(true);
+
+    expect(await verifyCredentials("owner", "hunter2")).toMatchObject({ username: "owner" });
+  });
+
   it("compares against a hash even when no such user exists", async () => {
     lookupReturns(null);
 
