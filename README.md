@@ -249,6 +249,7 @@ Everything is optional except the database. Put overrides in a `.env` file next 
 | `ENCRYPTION_KEYS_OLD` | — | Comma-separated retired keys, so a rotation can still read what they wrote |
 | `WEBHOOK_SIGNING_SECRET` | — | Signs outgoing webhook deliveries |
 | `OPENAI_API_KEY` | — | AI task generation in the task form |
+| `AI_DAILY_GENERATION_CAP` | `200` | AI task generations one project may run per day, on the instance's key. Each person may also start 20 per 15 minutes, one at a time |
 | `OPENROUTER_API_KEY`, `PM_MODEL`, `PM_MAX_TOKENS`, `PM_DAILY_TURN_CAP`, `PM_DAILY_TOKEN_CAP`, `PM_SCHEDULER_TICK_MS` | — | PM agent |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | — | Email notifications |
 | `DIGEST_HOUR`, `DIGEST_TIMEZONE`, `DIGEST_TICK_MS` | `7`, `Europe/Warsaw`, `300000` | When the opt-in daily digest goes out |
