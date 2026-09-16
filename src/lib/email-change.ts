@@ -24,7 +24,7 @@ export async function issueEmailChange(
 }
 
 export type EmailChangeOutcome =
-  | { ok: true; userId: Types.ObjectId; email: string }
+  | { ok: true; userId: Types.ObjectId; email: string; claimedAt: Date }
   | { ok: false; reason: "unknown" | "expired" | "used" };
 
 /** Claimed atomically, like a reset link: two clicks arriving together cannot both win. */
@@ -38,16 +38,17 @@ export async function consumeEmailChange(token: string): Promise<EmailChangeOutc
     { $set: { usedAt: now } },
     { returnDocument: "after" }
   );
-  if (claimed) return { ok: true, userId: claimed.user as Types.ObjectId, email: claimed.email };
+  if (claimed) return { ok: true, userId: claimed.user as Types.ObjectId, email: claimed.email, claimedAt: now };
 
   const existing = await EmailChangeToken.findOne({ tokenHash }).lean();
   if (!existing) return { ok: false, reason: "unknown" };
   return { ok: false, reason: existing.usedAt ? "used" : "expired" };
 }
 
-export async function releaseEmailChange(token: string): Promise<void> {
+/** Gives back only this request's own claim: a link cancelled or replaced meanwhile stays gone */
+export async function releaseEmailChange(token: string, claimedAt: Date): Promise<void> {
   await connectDB();
-  await EmailChangeToken.updateOne({ tokenHash: sha256(token) }, { $set: { usedAt: null } });
+  await EmailChangeToken.updateOne({ tokenHash: sha256(token), usedAt: claimedAt }, { $set: { usedAt: null } });
 }
 
 export async function pendingEmailChange(

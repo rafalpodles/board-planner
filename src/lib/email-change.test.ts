@@ -11,7 +11,7 @@ vi.mock("@/models/emailChangeToken", () => ({
   EmailChangeToken: { deleteMany, create, findOneAndUpdate, findOne, updateOne },
 }));
 
-const { issueEmailChange, consumeEmailChange, pendingEmailChange, cancelEmailChange } = await import("./email-change");
+const { issueEmailChange, consumeEmailChange, pendingEmailChange, cancelEmailChange, releaseEmailChange } = await import("./email-change");
 const { sha256 } = await import("./oauth");
 
 beforeEach(() => {
@@ -45,7 +45,7 @@ describe("email change links", () => {
 
     const outcome = await consumeEmailChange("cpe_x");
 
-    expect(outcome).toEqual({ ok: true, userId: "u1", email: "new@example.com" });
+    expect(outcome).toEqual({ ok: true, userId: "u1", email: "new@example.com", claimedAt: expect.any(Date) });
     const [filter, update] = findOneAndUpdate.mock.calls[0];
     expect(filter).toEqual({ tokenHash: sha256("cpe_x"), usedAt: null, expiresAt: { $gt: expect.any(Date) } });
     expect(update).toEqual({ $set: { usedAt: expect.any(Date) } });
@@ -76,5 +76,13 @@ describe("email change links", () => {
     await cancelEmailChange("u1");
 
     expect(deleteMany).toHaveBeenCalledWith({ user: "u1", usedAt: null });
+  });
+
+  it("gives back only its own claim, so a link cancelled meanwhile is not revived", async () => {
+    const claimedAt = new Date("2026-09-16T10:00:00Z");
+
+    await releaseEmailChange("cpe_x", claimedAt);
+
+    expect(updateOne).toHaveBeenCalledWith({ tokenHash: sha256("cpe_x"), usedAt: claimedAt }, { $set: { usedAt: null } });
   });
 });

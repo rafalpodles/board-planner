@@ -55,13 +55,13 @@ export async function POST(request: Request) {
     const taken = await User.exists({ email: outcome.email, _id: { $ne: user._id } });
     if (taken) {
       // Nothing changed, so the link stays good for when the address is free again
-      await releaseEmailChange(token).catch(() => {});
+      await releaseEmailChange(token, outcome.claimedAt).catch(() => {});
       return NextResponse.json({ error: "That email is already on another account" }, { status: 409 });
     }
     try {
       await User.updateOne({ _id: user._id }, { $set: { email: outcome.email } });
     } catch (err) {
-      await releaseEmailChange(token).catch(() => {});
+      await releaseEmailChange(token, outcome.claimedAt).catch(() => {});
       if (duplicateKeyField(err) === "email") {
         return NextResponse.json({ error: "That email is already on another account" }, { status: 409 });
       }

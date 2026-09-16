@@ -26,6 +26,7 @@ vi.mock("@/models/user", () => ({
 }));
 
 const { POST } = await import("./route");
+const CLAIMED = new Date("2026-09-16T10:00:00Z");
 const { resetRateLimits } = await import("@/lib/rate-limit");
 const { NextResponse } = await import("next/server");
 
@@ -40,7 +41,7 @@ function post(body: unknown = { token: "cpe_good" }) {
 beforeEach(async () => {
   vi.clearAllMocks();
   await resetRateLimits();
-  consumeEmailChange.mockResolvedValue({ ok: true, userId: "u1", email: "new@example.com" });
+  consumeEmailChange.mockResolvedValue({ ok: true, userId: "u1", email: "new@example.com", claimedAt: CLAIMED });
   userFindById.mockReturnValue({
     select: () => Promise.resolve({ _id: "u1", username: "owner", kind: "human", email: "old@example.com" }),
   });
@@ -104,7 +105,7 @@ describe("POST /api/auth/confirm-email", () => {
     userUpdateOne.mockRejectedValue(new Error("db down"));
 
     await expect(POST(post())).rejects.toThrow("db down");
-    expect(releaseEmailChange).toHaveBeenCalledWith("cpe_good");
+    expect(releaseEmailChange).toHaveBeenCalledWith("cpe_good", CLAIMED);
   });
 
   it("refuses a machine account", async () => {
@@ -150,7 +151,7 @@ describe("POST /api/auth/confirm-email", () => {
     const response = await POST(post());
 
     expect(response.status).toBe(409);
-    expect(releaseEmailChange).toHaveBeenCalledWith("cpe_good");
+    expect(releaseEmailChange).toHaveBeenCalledWith("cpe_good", CLAIMED);
     expect(notifyAddressChanged).not.toHaveBeenCalled();
   });
 
@@ -159,7 +160,7 @@ describe("POST /api/auth/confirm-email", () => {
 
     await POST(post());
 
-    expect(releaseEmailChange).toHaveBeenCalledWith("cpe_good");
+    expect(releaseEmailChange).toHaveBeenCalledWith("cpe_good", CLAIMED);
   });
 
   it("writes, audits and mails nothing when the address is already the one on the account", async () => {
