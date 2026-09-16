@@ -1,6 +1,7 @@
 import { NotificationType, PersonalChatKind } from "@/types";
 import { isAllowedWebhookUrl } from "./url-validation";
 import { safeFetch } from "./safe-fetch";
+import { OUTBOUND_CONCURRENCY, runBounded } from "./bounded";
 import { decryptSecret } from "./encryption";
 import { selfOrigin } from "./session";
 import { taskPath } from "./urls";
@@ -60,10 +61,12 @@ export async function sendPersonalChat(n: {
 }): Promise<void> {
   const url = urlFor(n.email);
 
-  for (const user of n.users) {
-    const kind = user.notifications?.chat?.kind;
-    const stored = user.notifications?.chat?.webhookUrl;
-    if (!kind || !stored) continue;
+  const recipients = n.users.filter(
+    (user) => user.notifications?.chat?.kind && user.notifications?.chat?.webhookUrl
+  );
+  void runBounded(recipients, OUTBOUND_CONCURRENCY, async (user) => {
+    const kind = user.notifications!.chat!.kind as PersonalChatKind;
+    const stored = user.notifications!.chat!.webhookUrl!;
 
     let webhookUrl: string;
     try {
@@ -72,11 +75,11 @@ export async function sendPersonalChat(n: {
       // A key rotation that lost the old key leaves an undecryptable value. Skipping is the only
       // safe answer: the alternative is posting the ciphertext at some URL.
       console.error("Personal chat webhook could not be decrypted");
-      continue;
+      return;
     }
-    if (!isAllowedWebhookUrl(webhookUrl)) continue;
+    if (!isAllowedWebhookUrl(webhookUrl)) return;
 
-    safeFetch(webhookUrl, {
+    await safeFetch(webhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: bodyFor(kind, n.type, n.title, url),
@@ -84,5 +87,5 @@ export async function sendPersonalChat(n: {
     }).catch(() => {
       // Delivery failures are not the notification's problem, same as the project channels
     });
-  }
+  });
 }

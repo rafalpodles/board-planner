@@ -2,6 +2,7 @@ import { Project } from "@/models/project";
 import { WebhookEvent, NotificationChannelType, STATUS_LABELS } from "@/types";
 import { isAllowedWebhookUrl } from "./url-validation";
 import { safeFetch } from "./safe-fetch";
+import { OUTBOUND_CONCURRENCY, runBounded } from "./bounded";
 import { decryptSecret } from "./encryption";
 import { DISCORD_NO_MENTIONS, escapeDiscord, escapeSlack, excerpt } from "./chat-markup";
 
@@ -233,7 +234,7 @@ export async function dispatchNotifications(
     const appUrl = process.env.NEXT_PUBLIC_APP_URL
       || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : "http://localhost:3000");
 
-    for (const channel of active) {
+    void runBounded(active, OUTBOUND_CONCURRENCY, async (channel) => {
       let webhookUrl: string;
       try {
         webhookUrl = decryptSecret(channel.webhookUrl);
@@ -244,12 +245,12 @@ export async function dispatchNotifications(
         console.error(
           `Project chat webhook could not be decrypted: project ${projectId}, channel "${channel.name}"`
         );
-        continue;
+        return;
       }
-      if (!isAllowedWebhookUrl(webhookUrl)) continue;
+      if (!isAllowedWebhookUrl(webhookUrl)) return;
       const body = JSON.stringify(formatPayload(channel.type, event, payload, appUrl));
 
-      safeFetch(webhookUrl, {
+      await safeFetch(webhookUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body,
@@ -257,7 +258,7 @@ export async function dispatchNotifications(
       }).catch(() => {
         // Notification delivery failures are silently ignored
       });
-    }
+    });
   } catch {
     console.warn("Failed to dispatch notifications");
   }

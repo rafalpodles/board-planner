@@ -5,7 +5,7 @@ import { Project } from "@/models/project";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { NOTIFICATION_CHANNEL_TYPES, WEBHOOK_EVENTS, NotificationChannelType } from "@/types";
 import { sanitizeProjectSecrets } from "@/lib/project-secrets";
-import { parseWebhookUrl, parseWebhookEvents } from "@/lib/webhook-input";
+import { parseWebhookUrl, parseWebhookEvents, MAX_CHANNEL_NAME_LENGTH, MAX_NOTIFICATION_CHANNELS } from "@/lib/webhook-input";
 import { encryptSecret, isEncryptedSecret, isEncryptionConfigured } from "@/lib/encryption";
 
 // Built per call: a Response's body is a one-shot stream, so one shared instance answers the
@@ -54,6 +54,9 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
   if (!name || typeof name !== "string" || !name.trim()) {
     return NextResponse.json({ error: "Name is required" }, { status: 400 });
   }
+  if (name.trim().length > MAX_CHANNEL_NAME_LENGTH) {
+    return NextResponse.json({ error: `Name must be at most ${MAX_CHANNEL_NAME_LENGTH} characters` }, { status: 400 });
+  }
 
   const parsedEvents = events === undefined ? [...WEBHOOK_EVENTS] : parseWebhookEvents(events);
   if (!parsedEvents) {
@@ -71,6 +74,12 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
   }
 
   const channels = project.notificationChannels || [];
+  if (channels.length >= MAX_NOTIFICATION_CHANNELS) {
+    return NextResponse.json(
+      { error: `A project can have at most ${MAX_NOTIFICATION_CHANNELS} chat channels` },
+      { status: 400 }
+    );
+  }
   channels.push({
     type: type as NotificationChannelType,
     name: name.trim(),
@@ -110,6 +119,9 @@ export const PUT = withProjectOwner(async (request, { params }) => {
   if (updates.name !== undefined) {
     if (typeof updates.name !== "string" || !updates.name.trim()) {
       return NextResponse.json({ error: "Name is required" }, { status: 400 });
+    }
+    if (updates.name.trim().length > MAX_CHANNEL_NAME_LENGTH) {
+      return NextResponse.json({ error: `Name must be at most ${MAX_CHANNEL_NAME_LENGTH} characters` }, { status: 400 });
     }
     channel.name = updates.name.trim();
   }
