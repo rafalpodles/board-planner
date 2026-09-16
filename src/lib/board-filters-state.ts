@@ -1,4 +1,5 @@
-import { ApiCustomField, SortDir, SortField, SortKey } from "@/types";
+import { ApiCustomField, COLUMN_ROLES, ColumnRole, ROLE_LABELS, SortDir, SortField, SortKey } from "@/types";
+import { AnyColumn, effectiveColumns } from "./columns";
 import { ListColumnId, defaultHidden, sanitizeHidden } from "./list-columns";
 
 /** Range for number and date fields; `value` carries every other type */
@@ -14,6 +15,7 @@ export interface BoardFilterValues {
   assignee: string;
   category: string;
   priority: string;
+  status: string;
   dateRange: string;
 }
 
@@ -31,11 +33,14 @@ export interface PersistedBoardFilters {
  */
 export const UNASSIGNED = "@none";
 
+export const UNFILED = "@unfiled";
+
 export const EMPTY_FILTERS: BoardFilterValues = {
   fields: {},
   assignee: "",
   category: "",
   priority: "",
+  status: "",
   dateRange: "",
 };
 
@@ -62,6 +67,44 @@ export function sanitizeFieldFilters(
     if (live.has(id) && isFieldFilterSet(filter)) result[id] = filter;
   }
   return result;
+}
+
+export function statusLabel(value: string): string {
+  if (value === UNFILED) return "No column";
+  return ROLE_LABELS[value as ColumnRole]?.label ?? value;
+}
+
+export function statusOptions(
+  columns: AnyColumn[] | null | undefined,
+  tasks: { status: string }[] = []
+): { value: string; label: string }[] {
+  const live = effectiveColumns(columns);
+  const seen = new Set<ColumnRole>();
+  const options: { value: string; label: string }[] = [];
+  for (const column of live) {
+    if (seen.has(column.role)) continue;
+    seen.add(column.role);
+    options.push({ value: column.role, label: statusLabel(column.role) });
+  }
+  const ids = new Set(live.map((c) => c.id));
+  if (tasks.some((t) => !ids.has(t.status))) {
+    options.push({ value: UNFILED, label: statusLabel(UNFILED) });
+  }
+  return options;
+}
+
+export function statusRoleMap(columns: AnyColumn[] | null | undefined): Map<string, ColumnRole> {
+  return new Map(effectiveColumns(columns).map((c) => [c.id, c.role]));
+}
+
+export function matchesStatusFilter(
+  status: string,
+  filter: string,
+  roles: Map<string, ColumnRole>
+): boolean {
+  if (!filter) return true;
+  const role = roles.get(status);
+  return role ? role === filter : filter === UNFILED;
 }
 
 const DEFAULTS: PersistedBoardFilters = {
@@ -99,6 +142,10 @@ export function migratePersistedFilters(
 
   if (categories && filters.category && !categories.includes(filters.category)) {
     filters.category = "";
+  }
+
+  if (filters.status !== UNFILED && !COLUMN_ROLES.includes(filters.status as ColumnRole)) {
+    filters.status = "";
   }
 
   // An explicit assignee is a later, more specific choice than the legacy toggle

@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { ProjectBoardView } from "./ProjectBoardView";
 import { ProjectBoard } from "@/hooks/use-project-board";
@@ -287,5 +287,86 @@ describe("ProjectBoardView's emptyState prop", () => {
 
     expect(screen.getByRole("button", { name: "Moving..." })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Deleting..." })).toBeNull();
+  });
+});
+
+const twoColumns = {
+  ...project,
+  columns: [
+    { id: "todo", label: "To Do", color: "#3b82f6", role: "approved", order: 0 },
+    { id: "shipped", label: "Shipped", color: "#22c55e", role: "done", order: 1 },
+  ],
+} as unknown as ApiProject;
+
+describe("The list view with a filter that matches nothing", () => {
+  // The panel's open state is persisted; without this the next click closes it
+  beforeEach(() => localStorage.clear());
+
+  function renderList() {
+    return render(
+      <ProjectBoardView
+        board={makeBoard({ project: twoColumns, tasks, viewMode: "list" })}
+        pinViewMode="list"
+      />
+    );
+  }
+
+  function filterToNothing() {
+    fireEvent.click(screen.getByText("Filters"));
+    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "done" } });
+  }
+
+  it("shows the rows while nothing is filtered", () => {
+    renderList();
+    expect(screen.getByText("A bug")).toBeTruthy();
+    expect(screen.queryByText("No tasks match the filters")).toBeNull();
+  });
+
+  it("says so instead of rendering a blank page", () => {
+    renderList();
+    filterToNothing();
+
+    expect(screen.queryByText("A bug")).toBeNull();
+    expect(screen.getByText("No tasks match the filters")).toBeTruthy();
+  });
+
+  it("says search when a search is all that narrowed it", () => {
+    renderList();
+    fireEvent.change(screen.getByPlaceholderText(/Search tasks/), {
+      target: { value: "nothing here matches" },
+    });
+
+    expect(screen.getByText("No tasks match the search")).toBeTruthy();
+    expect(screen.queryByText("No tasks match the filters")).toBeNull();
+    expect(screen.getByRole("button", { name: "Clear search" })).toBeTruthy();
+  });
+
+  it("offers a way back that actually brings the rows back", () => {
+    renderList();
+    fireEvent.change(screen.getByPlaceholderText(/Search tasks/), {
+      target: { value: "nothing here matches" },
+    });
+    filterToNothing();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+
+    expect(screen.getByText("A bug")).toBeTruthy();
+    expect(screen.queryByText("No tasks match the filters")).toBeNull();
+  });
+});
+
+describe("The board view with a filter that matches nothing", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("filters the cards away without the list's empty state", () => {
+    render(<ProjectBoardView board={makeBoard({ project: twoColumns, tasks, viewMode: "board" })} />);
+    expect(screen.getByText("A bug")).toBeTruthy();
+
+    fireEvent.click(screen.getByText("Filters"));
+    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "done" } });
+
+    expect(screen.queryByText("A bug")).toBeNull();
+    expect(screen.queryByText(/No tasks match/)).toBeNull();
+    expect(screen.getByText("To Do")).toBeTruthy();
   });
 });

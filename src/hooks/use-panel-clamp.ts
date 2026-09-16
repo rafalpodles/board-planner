@@ -1,9 +1,48 @@
 "use client";
 
-import { RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  CSSProperties,
+  RefObject,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 
 /** How close a panel may come to the edge of the screen before it is pulled back */
 const GUTTER = 12;
+
+// Matches .scroll-ring-room: a 2px outline at 2px offset, plus a pixel for rounding
+const RING_ROOM = 5;
+
+const FADE = "linear-gradient(to bottom, #000 calc(100% - 28px), transparent)";
+
+const CLIPS = new Set(["auto", "scroll", "hidden", "clip"]);
+
+function hasMoreBelow(panel: HTMLElement): boolean {
+  return panel.scrollHeight - panel.scrollTop - panel.clientHeight > 1;
+}
+
+type Bounds = { left: number; right: number; bottom: number };
+
+// The panel is clipped by its nearest clipping ancestor, not only by the screen: <main> scrolls
+// beside the sidebar, and the board wrappers clip above main's bottom padding from lg up
+function clippingBounds(panel: HTMLElement): Bounds {
+  const screen = { left: 0, right: window.innerWidth, bottom: window.innerHeight };
+  for (let node = panel.parentElement; node && node !== document.body; node = node.parentElement) {
+    const style = getComputedStyle(node);
+    // Either axis: auto/scroll/hidden on one axis force the other off visible
+    if (!CLIPS.has(style.overflowX) && !CLIPS.has(style.overflowY)) continue;
+    const rect = node.getBoundingClientRect();
+    return {
+      left: Math.max(rect.left, screen.left),
+      right: Math.min(rect.right, screen.right),
+      bottom: Math.min(rect.bottom, screen.bottom),
+    };
+  }
+  return screen;
+}
 
 /**
  * Keeps an absolutely-positioned popover on the screen.
@@ -36,50 +75,91 @@ const GUTTER = 12;
  */
 export function usePanelClamp(open: boolean): {
   ref: RefObject<HTMLDivElement | null>;
-  style: { transform: string } | undefined;
+  style: CSSProperties;
 } {
   const ref = useRef<HTMLDivElement>(null);
   const applied = useRef(0);
   const [shiftX, setShiftX] = useState(0);
+  const [maxHeight, setMaxHeight] = useState(0);
+  const [moreBelow, setMoreBelow] = useState(false);
 
   const measure = useCallback(() => {
-    const box = ref.current?.getBoundingClientRect();
+    const panel = ref.current;
+    const box = panel?.getBoundingClientRect();
     // No layout to read — a test environment without one, or a panel not yet painted. A zero rect
     // would otherwise read as "12px past the left edge" and shift a panel that is nowhere.
     if (!box || box.width === 0) return;
 
+    const bounds = clippingBounds(panel!);
     const left = box.left - applied.current;
     const right = box.right - applied.current;
-    const past = right - (window.innerWidth - GUTTER);
-    const short = GUTTER - left;
+    const past = right - (bounds.right - GUTTER);
+    const short = bounds.left + GUTTER - left;
     // Left edge first: a panel wider than the screen cannot satisfy both, and a reader can scroll
     // to what runs off the right while nothing reaches what runs off the left.
     applied.current = short > 0 ? short : past > 0 ? -past : 0;
     setShiftX(applied.current);
+    const room = bounds.bottom - box.top - GUTTER;
+    setMaxHeight(Math.min(Math.max(room, 0), bounds.bottom - GUTTER));
+    setMoreBelow(hasMoreBelow(panel!));
   }, []);
 
   useLayoutEffect(() => {
     if (!open) {
       applied.current = 0;
       setShiftX(0);
+      setMaxHeight(0);
+      setMoreBelow(false);
       return;
     }
     measure();
   }, [open, measure]);
 
+  // Overflow only exists once the bound is applied, so read it again after that render
+  useLayoutEffect(() => {
+    if (open && maxHeight) measure();
+  }, [open, maxHeight, measure]);
+
+  // The panel's content changes without anything the listeners watch — a chip removed unwraps a row
+  useLayoutEffect(() => {
+    if (open && ref.current) setMoreBelow(hasMoreBelow(ref.current));
+  });
+
   useEffect(() => {
     if (!open) return;
+    let frame = 0;
+    const onScroll = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        measure();
+      });
+    };
     const anchor = ref.current?.offsetParent;
     const observer = anchor ? new ResizeObserver(measure) : null;
     if (anchor && observer) observer.observe(anchor);
     window.addEventListener("resize", measure);
     window.addEventListener("orientationchange", measure);
+    // Capturing: the scroll that moves the anchor is on the layout's scroller, not the window
+    window.addEventListener("scroll", onScroll, { capture: true, passive: true });
     return () => {
       observer?.disconnect();
       window.removeEventListener("resize", measure);
       window.removeEventListener("orientationchange", measure);
+      window.removeEventListener("scroll", onScroll, { capture: true });
+      if (frame) cancelAnimationFrame(frame);
     };
   }, [open, measure]);
 
-  return { ref, style: shiftX ? { transform: `translateX(${shiftX}px)` } : undefined };
+  return {
+    ref,
+    style: {
+      ...(shiftX ? { transform: `translateX(${shiftX}px)` } : {}),
+      ...(maxHeight
+        ? { maxHeight, overflowY: "auto" as const, scrollPaddingBlock: RING_ROOM }
+        : {}),
+      // Scrollbars are hidden app-wide, so the fade is what says the panel continues
+      ...(moreBelow ? { maskImage: FADE, WebkitMaskImage: FADE } : {}),
+    },
+  };
 }

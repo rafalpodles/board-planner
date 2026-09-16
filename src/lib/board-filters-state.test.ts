@@ -5,6 +5,11 @@ import {
   countActiveFilters,
   EMPTY_FILTERS,
   sanitizeFieldFilters,
+  matchesStatusFilter,
+  statusLabel,
+  statusOptions,
+  statusRoleMap,
+  UNFILED,
 } from "./board-filters-state";
 
 describe("migratePersistedFilters — category renames", () => {
@@ -165,5 +170,85 @@ describe("project field filters", () => {
       fields
     );
     expect(state.filters.fields).toEqual({ f1: { from: "3", to: "8" } });
+  });
+});
+
+describe("the status filter reads roles, not column ids", () => {
+  const renamed = [
+    { id: "parked", label: "Parked", color: "#000", role: "backlog" as const, order: 0 },
+    { id: "cooking", label: "Cooking", color: "#000", role: "active" as const, order: 1 },
+    { id: "checking", label: "Checking", color: "#000", role: "review" as const, order: 2 },
+    { id: "double-checking", label: "Double checking", color: "#000", role: "review" as const, order: 3 },
+  ];
+
+  it("matches a task by the role of the column it sits in", () => {
+    expect(matchesStatusFilter("cooking", "active", statusRoleMap(renamed))).toBe(true);
+    expect(matchesStatusFilter("cooking", "review", statusRoleMap(renamed))).toBe(false);
+  });
+
+  it("covers every column sharing the role, not just the first", () => {
+    expect(matchesStatusFilter("checking", "review", statusRoleMap(renamed))).toBe(true);
+    expect(matchesStatusFilter("double-checking", "review", statusRoleMap(renamed))).toBe(true);
+  });
+
+  it("offers each role once, in board order", () => {
+    expect(statusOptions(renamed).map((o) => o.value)).toEqual(["backlog", "active", "review"]);
+  });
+
+  it("matches nothing away when no status is chosen", () => {
+    expect(matchesStatusFilter("anything at all", "", statusRoleMap(renamed))).toBe(true);
+  });
+
+  it("puts a task whose column is gone under UNFILED and nowhere else", () => {
+    expect(matchesStatusFilter("deleted_column", UNFILED, statusRoleMap(renamed))).toBe(true);
+    expect(matchesStatusFilter("deleted_column", "backlog", statusRoleMap(renamed))).toBe(false);
+  });
+
+  it("offers UNFILED only when a task actually needs it", () => {
+    expect(statusOptions(renamed, [{ status: "cooking" }]).map((o) => o.value)).not.toContain(
+      UNFILED
+    );
+    expect(statusOptions(renamed, [{ status: "gone" }]).map((o) => o.value)).toContain(UNFILED);
+  });
+
+  it("falls back to the built-in columns for a project that stored none", () => {
+    expect(matchesStatusFilter("in_review", "review", statusRoleMap([]))).toBe(true);
+    expect(statusOptions([]).map((o) => o.value)).toEqual([
+      "backlog",
+      "approved",
+      "active",
+      "review",
+      "done",
+    ]);
+  });
+});
+
+describe("statusLabel", () => {
+  it("names a role the way the board settings name it", () => {
+    expect(statusLabel("backlog")).toBe("Ideas & backlog");
+    expect(statusLabel("review")).toBe("Awaiting review");
+  });
+
+  it("names the sentinel rather than leaking it", () => {
+    expect(statusLabel(UNFILED)).toBe("No column");
+    expect(statusLabel(UNFILED)).not.toContain("@");
+  });
+});
+
+describe("migratePersistedFilters — status", () => {
+  it("keeps a stored role", () => {
+    expect(migratePersistedFilters({ filters: { status: "review" } }).filters.status).toBe("review");
+  });
+
+  it("keeps the UNFILED sentinel", () => {
+    expect(migratePersistedFilters({ filters: { status: UNFILED } }).filters.status).toBe(UNFILED);
+  });
+
+  it("drops a stored value that is not a role", () => {
+    expect(migratePersistedFilters({ filters: { status: "in_progress" } }).filters.status).toBe("");
+  });
+
+  it("counts as an active filter", () => {
+    expect(countActiveFilters({ ...EMPTY_FILTERS, status: "active" })).toBe(1);
   });
 });

@@ -197,3 +197,31 @@ test("dragging a task from the sprint pane back to the backlog removes it from t
     expect(task.sprint).toBeNull();
   });
 });
+
+// next dev runs the backlog fetch twice; the late answer used to replace the list after the drop.
+// This pins that the superseded answer is ignored; replaying a drop made mid-fetch is unit-tested
+test("a superseded backlog answer that lands late does not undo a drop", async ({ page }) => {
+  let backlogRequests = 0;
+  await page.route(/\/tasks\?sprint=backlog/, async (route) => {
+    const response = await route.fetch();
+    if (++backlogRequests === 2) await new Promise((resolve) => setTimeout(resolve, 4000));
+    await route.fulfill({ response });
+  });
+
+  await signIn(page);
+  await page.goto(planningUrl);
+
+  const backlog = backlogPane(page);
+  const sprint = sprintPane(page);
+  await expect(cardsIn(sprint)).toHaveCount(2);
+  await expect(backlog.getByText("Loading…")).toHaveCount(0);
+  const backlogCountBefore = await cardsIn(backlog).count();
+
+  const sprintCard = sprint.locator(`a[href="${cardHref(PLANNING_SPRINT_TASK_NUMBER)}"]`);
+  await dragAndWatchTheWrite(page, sprintCard, backlog, String(PLANNING_SPRINT_TASK_ID));
+
+  await expect(cardsIn(backlog)).toHaveCount(backlogCountBefore + 1);
+  await page.waitForTimeout(4500);
+  await expect(cardsIn(backlog)).toHaveCount(backlogCountBefore + 1);
+  expect(backlogRequests).toBe(2);
+});

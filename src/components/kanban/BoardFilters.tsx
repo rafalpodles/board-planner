@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   ApiTask, ApiCustomField,
   ApiProjectCategory,
@@ -17,6 +17,7 @@ import {
   defaultSortDir
 } from "@/types";
 import { categoryColor } from "@/lib/category-colors";
+import { AnyColumn } from "@/lib/columns";
 import { SortContext, sortTasks } from "@/lib/task-sort";
 import { ListColumnId } from "@/lib/list-columns";
 import { ColumnPicker } from "./ColumnPicker";
@@ -28,6 +29,10 @@ import {
   countActiveFilters,
   migratePersistedFilters,
   isFieldFilterSet,
+  matchesStatusFilter,
+  statusLabel,
+  statusOptions,
+  statusRoleMap,
   UNASSIGNED,
   type FieldFilter,
   type BuiltInFilterKey,
@@ -80,13 +85,20 @@ interface BoardFiltersProps {
   /** Which fields the dropdown offers; the current value is always included */
   sortFields?: SortField[];
   sortContext?: SortContext;
+  columns?: AnyColumn[];
   hiddenColumns?: ListColumnId[];
   customFields?: ApiCustomField[];
   onHiddenColumnsChange?: (hidden: ListColumnId[]) => void;
   /** Separate from the handler above: the board has no columns to pick, but it still
       has to hydrate the stored set, or the next load writes an empty one back */
   showColumnPicker?: boolean;
-  onFilter: (filtered: ApiTask[]) => void;
+  onFilter: (filtered: ApiTask[], meta: FilterMeta) => void;
+}
+
+export interface FilterMeta {
+  activeCount: number;
+  searching: boolean;
+  clearAll: () => void;
 }
 
 export function BoardFilters({
@@ -102,6 +114,7 @@ export function BoardFilters({
   onSortChange,
   sortFields = BOARD_SORT_FIELDS,
   sortContext,
+  columns,
   hiddenColumns,
   onHiddenColumnsChange,
   showColumnPicker,
@@ -181,6 +194,13 @@ export function BoardFilters({
     ).values()
   );
 
+  const roleByColumn = useMemo(() => statusRoleMap(columns), [columns]);
+
+  const statusChoices = statusOptions(columns, tasks);
+  if (filters.status && !statusChoices.some((o) => o.value === filters.status)) {
+    statusChoices.push({ value: filters.status, label: statusLabel(filters.status) });
+  }
+
   const activeCount = countActiveFilters(filters);
   const hasActiveFilters = activeCount > 0;
 
@@ -211,6 +231,9 @@ export function BoardFilters({
     }
     if (filters.priority) {
       result = result.filter((t) => t.priority === filters.priority);
+    }
+    if (filters.status) {
+      result = result.filter((t) => matchesStatusFilter(t.status, filters.status, roleByColumn));
     }
     if (Object.keys(filters.fields || {}).length) {
       result = result.filter((t) =>
@@ -248,13 +271,17 @@ export function BoardFilters({
 
     result = sortTasks(result, sortField, sortDir, sortContext);
 
-    onFilter(result);
+    onFilter(result, { activeCount, searching: !!filters.search, clearAll });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters, tasks, sortField, sortDir, sortContext, currentUsername, projectKey]);
+  }, [filters, tasks, sortField, sortDir, sortContext, currentUsername, projectKey, roleByColumn]);
 
   function clearFilters() {
     setFilters((f) => ({ ...EMPTY_FILTERS, search: f.search }));
   }
+
+  const clearAll = useCallback(() => {
+    setFilters({ ...EMPTY_FILTERS, search: "" });
+  }, []);
 
   function unset(key: BuiltInFilterKey) {
     setFilters((f) => ({ ...f, [key]: "" }));
@@ -314,6 +341,12 @@ export function BoardFilters({
   }
   if (filters.priority) {
     chips.push({ key: "priority", label: PRIORITY_LABELS[filters.priority as Priority] });
+  }
+  if (filters.status) {
+    chips.push({
+      key: "status",
+      label: statusLabel(filters.status),
+    });
   }
   if (filters.dateRange) {
     chips.push({
@@ -491,6 +524,21 @@ export function BoardFilters({
                 </select>
               </Field>
 
+
+              <Field label="Status">
+                <select
+                  value={filters.status}
+                  onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))}
+                  className={selectClass}
+                >
+                  <option value="">All statuses</option>
+                  {statusChoices.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
 
               <Field label="Updated">
                 <select

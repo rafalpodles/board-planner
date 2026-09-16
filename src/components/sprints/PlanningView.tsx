@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { ApiTask } from "@/types";
 import { ProjectBoard } from "@/hooks/use-project-board";
@@ -18,6 +18,11 @@ interface PlanningViewProps {
   onTasksChange?: (tasks: ApiTask[]) => void;
 }
 
+function withMove(backlog: ApiTask[], move: { task: ApiTask; toSprint: boolean }): ApiTask[] {
+  if (move.toSprint) return backlog.filter((t) => t._id !== move.task._id);
+  return backlog.some((t) => t._id === move.task._id) ? backlog : [...backlog, move.task];
+}
+
 export function PlanningView({ projectId, board, sprintId, onTasksChange }: PlanningViewProps) {
   const api = useApi();
   const { toast } = useToast();
@@ -33,14 +38,27 @@ export function PlanningView({ projectId, board, sprintId, onTasksChange }: Plan
   // Plain fetch into local state, not a second useProjectBoard — that would bring a second
   // 10s poll, a second held-move dialog and a second copy of every write handler for a list
   // that needs none of them.
+  const movesSinceLoad = useRef<{ task: ApiTask; toSprint: boolean }[]>([]);
+
   useEffect(() => {
+    let current = true;
     setBacklogLoading(true);
     setBacklogError(false);
     api
       .get(`/api/projects/${projectId}/tasks?sprint=backlog`)
-      .then(setBacklog)
-      .catch(() => setBacklogError(true))
-      .finally(() => setBacklogLoading(false));
+      .then((list: ApiTask[]) => {
+        if (!current) return;
+        // Every move since the last good load, not only those after this request started: a PUT
+        // sent before a Retry can still land after the server read. Replaying one it already saw is a no-op
+        const moves = movesSinceLoad.current;
+        movesSinceLoad.current = [];
+        setBacklog(moves.reduce(withMove, list));
+      })
+      .catch(() => current && setBacklogError(true))
+      .finally(() => current && setBacklogLoading(false));
+    return () => {
+      current = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, backlogReloadToken]);
 
@@ -69,12 +87,13 @@ export function PlanningView({ projectId, board, sprintId, onTasksChange }: Plan
 
   function applyLocally(task: ApiTask, targetSprintId: string | null) {
     const moved = { ...task, sprint: targetSprintId };
-    if (targetSprintId === sprintId) {
-      setBacklog((prev) => prev.filter((t) => t._id !== task._id));
+    const move = { task: moved, toSprint: targetSprintId === sprintId };
+    movesSinceLoad.current.push(move);
+    setBacklog((prev) => withMove(prev, move));
+    if (move.toSprint) {
       setSprintOverlay((prev) => [...prev.filter((t) => t._id !== task._id), moved]);
     } else {
       setSprintOverlay((prev) => prev.filter((t) => t._id !== task._id));
-      setBacklog((prev) => (prev.some((t) => t._id === task._id) ? prev : [...prev, moved]));
     }
     board.applySprintChange([task._id], targetSprintId);
   }
