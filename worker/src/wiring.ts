@@ -72,7 +72,7 @@ import {
   Telemetry,
   TelemetryUpdate,
 } from "./telemetry.js";
-import { scrub } from "./scrub.js";
+import { scrubPatch } from "./scrub.js";
 import { ClaimedTask } from "./types.js";
 import { createWorkspace, reapOrphans } from "./workspace.js";
 
@@ -593,7 +593,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
           gateFor: gateFromEntry,
           recordRun: (project, record) => outbox.add({ kind: "run", projectId: project, record }),
           logError: deps.logError,
-          openDecision: (input) => openDecision({ markers, api, scrub }, input),
+          openDecision: (input) => openDecision({ markers, api, scrub: scrubPatch }, input),
           quarantineProject,
           runner: deps.runner,
           signal,

@@ -49,24 +49,22 @@ const SECRET = new RegExp(
   "g"
 );
 
-// A .env line is redacted by position, like bp_session=, so a variable this deploy adds tomorrow is
-// covered without anyone knowing the shape of its value
+// Redacted by position like bp_session=, and only where a line starts with it: in code it is a comparison
 const ENV_ASSIGNMENT =
-  /\b([A-Z][A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIALS?)[A-Z0-9_]*)([ \t]*[=:][ \t]*)("[^"\n]*"|'[^'\n]*'|[^\s"']+)/g;
-
-function redactAssignment(_match: string, name: string, separator: string, value: string): string {
-  const quote = value[0] === '"' || value[0] === "'" ? value[0] : "";
-  return `${name}${separator}${quote}${REDACTED}${quote}`;
-}
+  /^([ \t]*(?:export[ \t]+)?[A-Z0-9_]{0,64}(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|PASS|PWD|CREDENTIALS?))[ \t]*=(?!=)[ \t]*("[^"\n]*"|'[^'\n]*'|[^\s"']*)/gm;
 
 // A private key is a block, not a token: redacting the header alone leaves the body, and the
 // body is the secret. Matched non-greedily so two keys in one text do not merge into one match.
 const PEM_BLOCK = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g;
 
 export function scrub(text: string): string {
+  return scrubPatch(text).replace(ENV_ASSIGNMENT, `$1=${REDACTED}`);
+}
+
+// Without the positional rule: a diff someone accepts is pushed as written, so it must be shown as written
+export function scrubPatch(text: string): string {
   return text
     .replace(PEM_BLOCK, REDACTED)
     .replace(URL_USERINFO, `$1${REDACTED}@`)
-    .replace(ENV_ASSIGNMENT, redactAssignment)
     .replace(SECRET, REDACTED);
 }

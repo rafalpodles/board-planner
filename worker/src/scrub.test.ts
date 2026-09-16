@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { scrub } from "./scrub.js";
+import { scrubPatch, scrub } from "./scrub.js";
 
 // Shapes taken from what this system actually mints: src/app/api/tokens/route.ts:56 is
 // `cp_` + 40 hex, src/lib/worker-service.ts:50 is `cpw_` + 64 hex.
@@ -300,21 +300,44 @@ describe("what sits in the checkout the agent works in (BP-324)", () => {
       "ENCRYPTION_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
       "WEBHOOK_SIGNING_SECRET=whsec-anything-at-all",
       'SMTP_PASSWORD="hunter2 is not it"',
-      "STRIPE_API_KEY: rk_live_somethingnew",
+      "SMTP_PASS=hunter2",
+      "PASSWORD=bare-names-count-too",
+      "export GITHUB_TOKEN=exported-one",
       "NEXT_PUBLIC_APP_URL=http://localhost:3000",
     ].join("\n");
 
     expect(scrub(env).split("\n")).toEqual([
       "ENCRYPTION_KEY=[redacted]",
       "WEBHOOK_SIGNING_SECRET=[redacted]",
-      'SMTP_PASSWORD="[redacted]"',
-      "STRIPE_API_KEY: [redacted]",
+      "SMTP_PASSWORD=[redacted]",
+      "SMTP_PASS=[redacted]",
+      "PASSWORD=[redacted]",
+      "export GITHUB_TOKEN=[redacted]",
       "NEXT_PUBLIC_APP_URL=http://localhost:3000",
     ]);
   });
 
+  // The shape is a line of configuration, not a word: in code it is a comparison or an object key
+  it("leaves code and settings that merely resemble it alone", () => {
+    const text = [
+      "PM_MAX_TOKENS=8192",
+      "MONKEY_BUSINESS=true",
+      "if (SESSION_TOKEN === expected) {",
+      "  PRIMARY_KEY: id,",
+      "const API_KEY = process.env.API_KEY;",
+    ].join("\n");
+
+    expect(scrub(text)).toBe(text);
+  });
+
   it("does not reach past the end of the line for a value", () => {
-    expect(scrub("API_TOKEN:\nthe next line stays")).toBe("API_TOKEN:\nthe next line stays");
+    expect(scrub("API_TOKEN=\nthe next line stays")).toBe("API_TOKEN=[redacted]\nthe next line stays");
+  });
+
+  it("takes the value and leaves the rest of the line to read", () => {
+    expect(scrub("GH_TOKEN=abc123 was rejected by the remote")).toBe(
+      "GH_TOKEN=[redacted] was rejected by the remote"
+    );
   });
 
   it("redacts an OpenAI project key, a Slack webhook and a Discord webhook", () => {
@@ -328,5 +351,20 @@ describe("what sits in the checkout the agent works in (BP-324)", () => {
     expect(scrubbed).not.toMatch(/sk-proj-AbCd|T0000000\/B0000000|abcdefghijklmnop/);
     expect(scrubbed).toContain("https://[redacted]");
     expect(scrub(scrubbed)).toBe(scrubbed);
+  });
+});
+
+// A diff shown for someone to accept is pushed as written, so it must be shown as written
+describe("scrubPatch", () => {
+  it("keeps a line of code named like a secret visible", () => {
+    const patch = " PAYLOAD_KEY=eval(atob(ZXZpbA==));";
+
+    expect(scrubPatch(patch)).toBe(patch);
+    // The control: the same line outside a patch is redacted
+    expect(scrub(patch)).toBe(" PAYLOAD_KEY=[redacted]");
+  });
+
+  it("still redacts a token by its shape", () => {
+    expect(scrubPatch("+const t = 'ghp_0123456789abcdefghijklmnopqrstuvwxyz';")).not.toContain("ghp_0123");
   });
 });

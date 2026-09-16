@@ -1,6 +1,6 @@
 import { ApiClient, StatusIds } from "./api.js";
 import { Outbox, OutboxOp } from "./outbox.js";
-import { scrub } from "./scrub.js";
+import { scrub, scrubPatch } from "./scrub.js";
 import { ClaimedTask } from "./types.js";
 
 const MAX_REASON_CHARS = 2000;
@@ -51,7 +51,7 @@ function safeText(text: string): string {
 // Same redaction as every other agent-authored string, a different bound. Scrubbed before the cut
 // for the reason safeText gives: a secret straddling the cut would survive as an unmatched prefix.
 function safePatch(patch: string): string {
-  const safe = scrub(patch);
+  const safe = scrubPatch(patch);
   if (safe.length <= MAX_PATCH_COMMENT_CHARS) return safe;
   const cut = safe.lastIndexOf("\n", MAX_PATCH_COMMENT_CHARS);
   return `${safe.slice(0, cut > 0 ? cut : MAX_PATCH_COMMENT_CHARS)}\n[patch truncated]`;
