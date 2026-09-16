@@ -128,14 +128,16 @@ describe("BoardFilters", () => {
       { id: "checking", label: "Checking", color: "#000", role: "review" as const, order: 2 },
       { id: "signed-off", label: "Signed off", color: "#000", role: "review" as const, order: 3 },
     ];
+    // `status` is typed as the built-in union, but a project's column ids are its own (BP-128)
+    const on = (column: string) => column as ApiTask["status"];
     const board = [
-      task({ _id: "a", taskNumber: 1, title: "Being worked on", status: "cooking" }),
-      task({ _id: "b", taskNumber: 2, title: "First review", status: "checking" }),
-      task({ _id: "c", taskNumber: 3, title: "Second review", status: "signed-off" }),
-      task({ _id: "d", taskNumber: 4, title: "Parked idea", status: "parked" }),
+      task({ _id: "a", taskNumber: 1, title: "Being worked on", status: on("cooking") }),
+      task({ _id: "b", taskNumber: 2, title: "First review", status: on("checking") }),
+      task({ _id: "c", taskNumber: 3, title: "Second review", status: on("signed-off") }),
+      task({ _id: "d", taskNumber: 4, title: "Parked idea", status: on("parked") }),
       // Shares a search term with "Second review" and sits in a different role, so the
       // composition test below cannot pass on the search alone
-      task({ _id: "e", taskNumber: 5, title: "Second thoughts", status: "cooking" }),
+      task({ _id: "e", taskNumber: 5, title: "Second thoughts", status: on("cooking") }),
     ];
 
     async function chooseStatus(value: string) {
