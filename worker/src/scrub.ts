@@ -41,9 +41,23 @@ const SECRET = new RegExp(
     "AKIA[0-9A-Z]{16}",
     "ASIA[0-9A-Z]{16}",
     "glpat-[A-Za-z0-9_-]{20,}",
+    // What sits in the checkout the agent is told to work in, not only on the disk around it (BP-324)
+    "sk-proj-[A-Za-z0-9_-]{20,}",
+    "hooks\\.slack\\.com/(?:services|workflows|triggers)/[A-Za-z0-9/_-]{20,}",
+    "(?:discord|discordapp)\\.com/api/webhooks/\\d+/[A-Za-z0-9_-]{20,}",
   ].join("|"),
   "g"
 );
+
+// A .env line is redacted by position, like bp_session=, so a variable this deploy adds tomorrow is
+// covered without anyone knowing the shape of its value
+const ENV_ASSIGNMENT =
+  /\b([A-Z][A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIALS?)[A-Z0-9_]*)([ \t]*[=:][ \t]*)("[^"\n]*"|'[^'\n]*'|[^\s"']+)/g;
+
+function redactAssignment(_match: string, name: string, separator: string, value: string): string {
+  const quote = value[0] === '"' || value[0] === "'" ? value[0] : "";
+  return `${name}${separator}${quote}${REDACTED}${quote}`;
+}
 
 // A private key is a block, not a token: redacting the header alone leaves the body, and the
 // body is the secret. Matched non-greedily so two keys in one text do not merge into one match.
@@ -53,5 +67,6 @@ export function scrub(text: string): string {
   return text
     .replace(PEM_BLOCK, REDACTED)
     .replace(URL_USERINFO, `$1${REDACTED}@`)
+    .replace(ENV_ASSIGNMENT, redactAssignment)
     .replace(SECRET, REDACTED);
 }

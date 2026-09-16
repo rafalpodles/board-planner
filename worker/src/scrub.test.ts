@@ -293,3 +293,40 @@ describe("credentials an agent reads off a disk", () => {
     expect(scrub(text)).toBe(text);
   });
 });
+
+describe("what sits in the checkout the agent works in (BP-324)", () => {
+  it("redacts a .env line whatever the variable is called, keeping the name", () => {
+    const env = [
+      "ENCRYPTION_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "WEBHOOK_SIGNING_SECRET=whsec-anything-at-all",
+      'SMTP_PASSWORD="hunter2 is not it"',
+      "STRIPE_API_KEY: rk_live_somethingnew",
+      "NEXT_PUBLIC_APP_URL=http://localhost:3000",
+    ].join("\n");
+
+    expect(scrub(env).split("\n")).toEqual([
+      "ENCRYPTION_KEY=[redacted]",
+      "WEBHOOK_SIGNING_SECRET=[redacted]",
+      'SMTP_PASSWORD="[redacted]"',
+      "STRIPE_API_KEY: [redacted]",
+      "NEXT_PUBLIC_APP_URL=http://localhost:3000",
+    ]);
+  });
+
+  it("does not reach past the end of the line for a value", () => {
+    expect(scrub("API_TOKEN:\nthe next line stays")).toBe("API_TOKEN:\nthe next line stays");
+  });
+
+  it("redacts an OpenAI project key, a Slack webhook and a Discord webhook", () => {
+    const text = [
+      "key sk-proj-AbCdEf0123456789_AbCdEf0123456789-xyz",
+      "posting to https://hooks.slack.com/services/T0000000/B0000000/XXXXXXXXXXXXXXXXXXXXXXXX",
+      "and https://discord.com/api/webhooks/123456789012345678/abcdefghijklmnopqrstuvwxyz_0123",
+    ].join("\n");
+
+    const scrubbed = scrub(text);
+    expect(scrubbed).not.toMatch(/sk-proj-AbCd|T0000000\/B0000000|abcdefghijklmnop/);
+    expect(scrubbed).toContain("https://[redacted]");
+    expect(scrub(scrubbed)).toBe(scrubbed);
+  });
+});
