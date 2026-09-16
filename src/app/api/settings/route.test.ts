@@ -49,6 +49,15 @@ describe("PUT /api/settings", () => {
     expect(logInstanceAudit).not.toHaveBeenCalled();
   });
 
+  it("refuses an oversized AI model name", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+
+    const res = await put({ aiModel: "m".repeat(10_000) });
+
+    expect(res.status).toBe(400);
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
   it("writes the change for an interactive admin and records who made it", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
 

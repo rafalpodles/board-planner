@@ -83,6 +83,15 @@ describe("PUT /api/users/me/password", () => {
     expect(revokeUserCredentials).toHaveBeenCalledWith("u1-machine-caller", undefined);
   });
 
+  // Saved first, a failed revoke would leave the old tokens alive behind a password that changed
+  it("keeps the old password when revoking the credentials fails", async () => {
+    revokeUserCredentials.mockRejectedValue(new Error("db down"));
+
+    await PUT(put(), ctx()).catch(() => undefined);
+
+    expect(record.save).not.toHaveBeenCalled();
+  });
+
   it("revokes nothing when the current password is wrong", async () => {
     getAuthUser.mockResolvedValue(browserUser("wrong-pass"));
     compare.mockResolvedValue(false);

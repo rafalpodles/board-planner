@@ -593,5 +593,7 @@ describe("revokeUserCredentials", () => {
     const [filter, update] = workerUpdateMany.mock.calls[0];
     expect(filter).toEqual({ owner: "user-1" });
     expect(update.$set.credentialHash).toMatch(/^\$2[aby]\$/);
+    const bcrypt = (await vi.importActual<typeof import("bcryptjs")>("bcryptjs")).default;
+    expect(await bcrypt.compare("", update.$set.credentialHash)).toBe(false);
   });
 });
