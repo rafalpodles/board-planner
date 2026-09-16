@@ -149,7 +149,9 @@ async function incrementAttempt(key: string, windowMs: number): Promise<number> 
     // without it — which once made every failed login answer 500 and record nothing (BP-318)
     { upsert: true, updatePipeline: true, returnDocument: "after" }
   ).lean();
-  return (counted as { count?: number } | null)?.count ?? 1;
+  const count = (counted as { count?: number } | null)?.count;
+  if (typeof count !== "number") throw new Error(`rate limit row ${key} came back without a count`);
+  return count;
 }
 
 export async function clearAttempts(key: string): Promise<void> {

@@ -97,10 +97,13 @@ export function inMemoryRateLimitModel() {
     // The row is read in the same synchronous step as the write, the way Mongo answers with the
     // document its own update produced — reading it after an await would hand every concurrent
     // caller the final count and hide exactly the race `countAttempt` exists to close
-    findOneAndUpdate(filter: Filter, update: Update, options?: { upsert?: boolean }) {
+    findOneAndUpdate(filter: Filter, update: Update, options?: { upsert?: boolean; returnDocument?: "before" | "after" }) {
+      const prior = rows.get(filter._id as string);
+      const before = prior ? { ...prior } : null;
       const written = this.updateOne(filter, update, options);
       const row = rows.get(filter._id as string);
-      const snapshot = row ? { ...row } : null;
+      // Mongo's default is the document as it was, and an upsert that created it has none
+      const snapshot = options?.returnDocument === "after" ? (row ? { ...row } : null) : before;
       const result = written.then(() => snapshot);
       return { lean: () => result, then: result.then.bind(result) };
     },
