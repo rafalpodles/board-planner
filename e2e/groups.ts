@@ -121,6 +121,7 @@ export const GROUPS = {
     "pm-assignment-is-a-handover.spec.ts",
     "pm-autonomy.spec.ts",
     "pm-board-review.spec.ts",
+    "pm-governance.spec.ts",
     "pm-what-a-turn-costs.spec.ts",
     "pm-mcp-tool-picker.spec.ts",
     "stub-survives-a-throw.spec.ts",
