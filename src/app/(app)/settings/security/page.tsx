@@ -49,8 +49,8 @@ export default function SecurityPage() {
     <div className="max-w-md">
       <h2 className="text-lg font-semibold mb-1">Change password</h2>
       <p className="text-sm text-text-muted mb-6">
-        You stay signed in on this device. Every other device, API token and connected app — Claude
-        Code included — is signed out and has to be set up again.
+        You stay signed in on this device. Every other device, API token, connected app such as
+        Claude Code, and machine you enrolled is signed out and has to be set up again.
       </p>
 
       <form onSubmit={handleSubmit} className="space-y-4">

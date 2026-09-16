@@ -183,7 +183,7 @@ export default function UsersPage() {
     // password was changed should not wait on a slow list to be re-read.
     toast(
       passwordWasSet
-        ? `Password set for ${username}. They were signed out everywhere, API tokens and connected apps included.`
+        ? `Password set for ${username}. They were signed out everywhere, API tokens, connected apps and enrolled machines included.`
         : "Saved",
       "success"
     );
@@ -392,8 +392,8 @@ export default function UsersPage() {
                   <p id="newUserPasswordHelp" className="text-sm text-text-muted">
                     The password itself is never emailed — tell {editUser.fullName} yourself.{" "}
                     {mailWorks && editUser.email
-                      ? `${editUser.email} is told that it changed, and saving signs them out everywhere, API tokens and connected apps included.`
-                      : "Nothing reaches them either, so this is the only way they will know. Saving signs them out everywhere, API tokens and connected apps included."}
+                      ? `${editUser.email} is told that it changed, and saving signs them out everywhere, API tokens, connected apps and enrolled machines included.`
+                      : "Nothing reaches them either, so this is the only way they will know. Saving signs them out everywhere, API tokens, connected apps and enrolled machines included."}
                   </p>
                   <div className="flex items-start gap-2">
                     <Input

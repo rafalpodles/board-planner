@@ -79,10 +79,9 @@ function ResetForm() {
         <h1 className="text-2xl font-bold mb-2">Your password is set</h1>
         {/* "Every other session" would be wrong here — nobody is signed in on this screen, and
             whoever knew the old password has just been signed out too, which is usually the point */}
-        {/* "Signed out on every device" and not "everywhere": API tokens are a separate credential
-            and survive this, which the documentation says plainly rather than this screen */}
         <p className="text-sm text-text-muted mb-6">
-          You have been signed out on every device. Sign in with your new password.
+          You have been signed out everywhere — every device, API token, connected app such as Claude
+          Code, and machine you enrolled. Sign in with your new password and set those up again.
         </p>
         <Button onClick={() => router.push("/login")} className="w-full">
           Sign In

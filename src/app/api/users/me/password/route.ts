@@ -66,6 +66,9 @@ export const PUT = withAuth(async (request, { user }) => {
     return NextResponse.json({ error: "Current password is incorrect" }, { status: 400 });
   }
 
+  // Before the save: if the revoke fails the password is unchanged and the person retries, rather
+  // than holding a new password while whatever minted with the old one still works
+  await revokeUserCredentials(user._id, user.sessionId);
   record.password = await bcrypt.hash(newPassword, PASSWORD_COST_FACTOR);
   await record.save();
 
@@ -77,7 +80,6 @@ export const PUT = withAuth(async (request, { user }) => {
   // Somebody who changes their password after asking for a reset link has answered the question
   // themselves; the link in their inbox must not still be able to overwrite this
   await invalidateResetTokens(user._id);
-  await revokeUserCredentials(user._id, user.sessionId);
 
   return NextResponse.json({ ok: true });
 });

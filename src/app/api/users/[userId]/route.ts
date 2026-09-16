@@ -165,9 +165,7 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
     // A link already in the target's inbox would otherwise still work, and overwrite the password
     // the admin has just handed them
     await invalidateResetTokens(target._id);
-    // Before the save, not after: a revoke that throws here leaves the account exactly as it was,
-    // and the admin retries. The other order commits the new password, answers 500, and leaves the
-    // old holder signed in — a failure that reads to the admin as "nothing happened".
+    // Before the save: a failure revokes too much rather than leaving the old holder a way in
     await revokeUserCredentials(target._id);
   }
 

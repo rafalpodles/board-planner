@@ -622,7 +622,7 @@ test("changing your own password signs out its API tokens, connected apps and ma
 
   await signInAsMember(page);
   await page.goto("/settings/security");
-  await expect(page.getByText(/API token and connected app/)).toBeVisible();
+  await expect(page.getByText(/API token, connected app such as/)).toBeVisible();
   await changeOwnPassword(page, MEMBER_PASSWORD, NEW_PASSWORD);
   await expect(page.getByText("Password changed")).toBeVisible();
 
