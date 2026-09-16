@@ -31,12 +31,6 @@ beforeEach(() => {
   );
   // Reported in viewport coordinates, the way a browser does: the transform this hook applies is
   // part of what the next read sees, which is exactly the compounding the hook has to undo.
-  //
-  // Every field is present AND derived, because the cast is the dangerous part. While `top` was
-  // missing the hook read `undefined`, every height arithmetic became NaN, the bound silently
-  // produced no style at all, and seven tests stayed green over an implementation that did
-  // nothing. A field this literal omits reads `undefined` and NaN never reddens; a field it
-  // hard-codes is worse, because it reddens nothing while looking present.
   Element.prototype.getBoundingClientRect = function () {
     const shift = parseFloat(/translateX\((-?[\d.]+)px\)/.exec((this as HTMLElement).style.transform ?? "")?.[1] ?? "0");
     const box = {
@@ -112,8 +106,6 @@ describe("usePanelClamp", () => {
     expect(shiftOf()).toBe("translateX(232px)");
   });
 
-  // A rect of all zeros, the way an unpainted element reports one — not a 277-tall box that
-  // happens to be zero wide
   it("does not shift a panel it cannot measure", () => {
     rect = { left: 0, right: 0, width: 0, top: 0, height: 0 };
     render(<Panel open />);
@@ -121,33 +113,24 @@ describe("usePanelClamp", () => {
     expect(maxHeightOf()).toBe("");
   });
 
-  /**
-   * `top-full` cannot know how much room is below the anchor. Five controls tipped the Filters
-   * panel 40px past the fold at 812x375 with nothing to scroll, so the last one was unreachable.
-   */
   it("bounds the panel to the room below its anchor, and lets it scroll", () => {
     rect = { left: 12, right: 352, width: 340, top: 138, height: 277 };
     render(<Panel open />);
 
     expect(maxHeightOf()).toBe("650px");
     expect(screen.getByTestId("panel").style.overflowY).toBe("auto");
-    // The app hides every scrollbar, so the focus ring is the only thing that reaches a
-    // control scrolled to the boundary
     expect(screen.getByTestId("panel").style.scrollPaddingBlock).toBe("5px");
   });
 
-  // The toolbar is in normal flow below lg, so the room below it changes as the board scrolls
   it("re-measures when the page scrolls under an open panel", async () => {
     rect = { left: 12, right: 352, width: 340, top: 138, height: 277 };
     render(<Panel open />);
     expect(maxHeightOf()).toBe("650px");
 
     rect = { left: 12, right: 352, width: 340, top: 500, height: 277 };
-    // Non-bubbling on purpose: a scroll does not bubble from the element that owns it, so a
-    // listener that is not capturing never sees this at all
     await act(async () => {
+      // Non-bubbling: only a capturing listener sees it
       document.body.dispatchEvent(new Event("scroll", { bubbles: false }));
-      // A board scroll moves the anchor every frame; the measure is throttled to one per frame
       await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
     });
 
@@ -177,8 +160,6 @@ describe("usePanelClamp", () => {
     expect(maxHeightOf()).toBe("188px");
   });
 
-  // A toolbar scrolled above the top of its scroller reports a negative top, and the room below
-  // it then computes as taller than the screen — a bound that no longer bounds anything
   it("never offers more height than the screen has", () => {
     rect = { left: 12, right: 352, width: 340, top: -200, height: 277 };
     render(<Panel open />);
@@ -186,16 +167,11 @@ describe("usePanelClamp", () => {
     expect(maxHeightOf()).toBe("788px");
   });
 
-  /**
-   * The horizontal shift is the positive control, and it is what makes the assertion mean
-   * anything: an empty maxHeight is otherwise indistinguishable from a hook that measured
-   * nothing at all. An early return for a below-the-fold anchor would pass without it, while
-   * silently disabling the left-edge clamp for every panel on a phone in landscape.
-   */
   it("never offers a negative height to a panel below the fold", () => {
     rect = { left: -242, right: 98, width: 340, top: 900, height: 277 };
     render(<Panel open />);
 
+    // Positive control: an empty maxHeight alone cannot tell a floored bound from no measure
     expect(shiftOf()).toBe("translateX(254px)");
     expect(maxHeightOf()).toBe("");
   });

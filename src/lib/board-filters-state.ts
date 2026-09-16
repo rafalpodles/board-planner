@@ -15,7 +15,6 @@ export interface BoardFilterValues {
   assignee: string;
   category: string;
   priority: string;
-  /** A ColumnRole, or UNFILED. Never a column id — see statusOptions */
   status: string;
   dateRange: string;
 }
@@ -34,11 +33,6 @@ export interface PersistedBoardFilters {
  */
 export const UNASSIGNED = "@none";
 
-/**
- * Sentinel for "sitting in a column this board no longer has", which a task keeps on
- * indefinitely once somebody deletes the column it was in. It has no role to match, so
- * every role filter would hide it and no filter would ever show it on its own.
- */
 export const UNFILED = "@unfiled";
 
 export const EMPTY_FILTERS: BoardFilterValues = {
@@ -75,20 +69,11 @@ export function sanitizeFieldFilters(
   return result;
 }
 
-/** The UNFILED option's name, and the fallback for a value the picker no longer offers */
 export function statusLabel(value: string): string {
   if (value === UNFILED) return "No column";
   return ROLE_LABELS[value as ColumnRole]?.label ?? value;
 }
 
-/**
- * What the status filter offers. Roles, not column ids: two boards agree on roles and on
- * nothing else (BP-128), so a board whose columns were renamed or rebuilt still filters.
- * Ordered by the board rather than by the enum, so the list reads down the columns.
- *
- * Several columns commonly share one role — the default board has three review columns —
- * so an option names the role and covers all of them.
- */
 export function statusOptions(
   columns: AnyColumn[] | null | undefined,
   tasks: { status: string }[] = []
@@ -108,7 +93,6 @@ export function statusOptions(
   return options;
 }
 
-/** Built once per filter pass: effectiveColumns copies and sorts, and this runs per task */
 export function statusRoleMap(columns: AnyColumn[] | null | undefined): Map<string, ColumnRole> {
   return new Map(effectiveColumns(columns).map((c) => [c.id, c.role]));
 }
@@ -160,8 +144,6 @@ export function migratePersistedFilters(
     filters.category = "";
   }
 
-  // A stored value from a build that spelled roles differently would filter every task away
-  // with no option in the picker to clear it
   if (filters.status !== UNFILED && !COLUMN_ROLES.includes(filters.status as ColumnRole)) {
     filters.status = "";
   }

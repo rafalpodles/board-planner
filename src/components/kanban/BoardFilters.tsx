@@ -85,7 +85,6 @@ interface BoardFiltersProps {
   /** Which fields the dropdown offers; the current value is always included */
   sortFields?: SortField[];
   sortContext?: SortContext;
-  /** The project's board columns, which the status filter reads roles from */
   columns?: AnyColumn[];
   hiddenColumns?: ListColumnId[];
   customFields?: ApiCustomField[];
@@ -96,12 +95,9 @@ interface BoardFiltersProps {
   onFilter: (filtered: ApiTask[], meta: FilterMeta) => void;
 }
 
-/** What the host page needs to explain an empty result and offer a way out of it */
 export interface FilterMeta {
   activeCount: number;
-  /** Separate from activeCount: the search box lives outside the popover and its chips */
   searching: boolean;
-  /** Clears the search box too, so pressing it always brings the tasks back */
   clearAll: () => void;
 }
 
@@ -200,9 +196,6 @@ export function BoardFilters({
 
   const roleByColumn = useMemo(() => statusRoleMap(columns), [columns]);
 
-  // A role whose last column was deleted, or UNFILED once the last orphaned task was filed,
-  // drops out of the options while the filter stays set: a blank select, a chip reading
-  // "@unfiled", and a board hiding everything with nothing to clear it by
   const statusChoices = statusOptions(columns, tasks);
   if (filters.status && !statusChoices.some((o) => o.value === filters.status)) {
     statusChoices.push({ value: filters.status, label: statusLabel(filters.status) });

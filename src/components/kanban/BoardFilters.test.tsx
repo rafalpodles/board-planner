@@ -122,22 +122,19 @@ describe("BoardFilters", () => {
   });
 
   describe("the status filter", () => {
-    // Renamed ids on purpose: a filter that reached for "in_progress" would match nothing here
     const columns = [
       { id: "parked", label: "Parked", color: "#000", role: "backlog" as const, order: 0 },
       { id: "cooking", label: "Cooking", color: "#000", role: "active" as const, order: 1 },
       { id: "checking", label: "Checking", color: "#000", role: "review" as const, order: 2 },
       { id: "signed-off", label: "Signed off", color: "#000", role: "review" as const, order: 3 },
     ];
-    // `status` is typed as the built-in union, but a project's column ids are its own (BP-128)
     const on = (column: string) => column as ApiTask["status"];
     const board = [
       task({ _id: "a", taskNumber: 1, title: "Being worked on", status: on("cooking") }),
       task({ _id: "b", taskNumber: 2, title: "First review", status: on("checking") }),
       task({ _id: "c", taskNumber: 3, title: "Second review", status: on("signed-off") }),
       task({ _id: "d", taskNumber: 4, title: "Parked idea", status: on("parked") }),
-      // Shares a search term with "Second review" and sits in a different role, so the
-      // composition test below cannot pass on the search alone
+      // Shares "Second" with a review task, so composition cannot pass on the search alone
       task({ _id: "e", taskNumber: 5, title: "Second thoughts", status: on("cooking") }),
     ];
 
@@ -185,15 +182,9 @@ describe("BoardFilters", () => {
       });
 
       expect(screen.queryByLabelText("Remove In progress filter")).toBeNull();
-      // Removing the chip has to clear the filter, not merely stop drawing it
       expect((onFilter.mock.calls.at(-1)![0] as ApiTask[]).length).toBe(board.length);
     });
 
-    /**
-     * The value outlives the option: a role whose last column is deleted, or UNFILED once the
-     * last orphaned task is filed. The select then rendered with no matching option — blank,
-     * as if nothing were chosen — while the badge still said 1 and the board stayed empty.
-     */
     it("keeps a chosen status in the picker after the board stops offering it", async () => {
       const { rerender } = renderFilters({ tasks: board, columns });
       await openPopover();
@@ -227,8 +218,7 @@ describe("BoardFilters", () => {
       await openPopover();
       expect([...statusSelect().options].map((o) => o.textContent)).not.toContain("No column");
       cleanup();
-      // The panel's open state is persisted, so the next render would arrive already open
-      // and openPopover would close it
+      // The panel's open state is persisted; without this the next click closes it
       localStorage.clear();
 
       const { onFilter } = renderFilters({ tasks: [...board, orphan], columns });

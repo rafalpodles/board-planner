@@ -290,11 +290,6 @@ describe("ProjectBoardView's emptyState prop", () => {
   });
 });
 
-/**
- * ListView renders nothing at all when it has no rows, so a filter that matched nothing
- * left the list view looking like a board that had lost its tasks.
- */
-/** Two roles, so a status the seeded task does not hold is still an option the picker offers */
 const twoColumns = {
   ...project,
   columns: [
@@ -304,8 +299,7 @@ const twoColumns = {
 } as unknown as ApiProject;
 
 describe("The list view with a filter that matches nothing", () => {
-  // BoardFilters persists its open/closed state and its filters per project, so without this
-  // the second test arrives with the first one's popover already open and the click closes it
+  // The panel's open state is persisted; without this the next click closes it
   beforeEach(() => localStorage.clear());
 
   function renderList() {
@@ -344,14 +338,11 @@ describe("The list view with a filter that matches nothing", () => {
 
     expect(screen.getByText("No tasks match the search")).toBeTruthy();
     expect(screen.queryByText("No tasks match the filters")).toBeNull();
-    // The button clears both, but offering to clear filters nobody set reads as a mistake
     expect(screen.getByRole("button", { name: "Clear search" })).toBeTruthy();
   });
 
   it("offers a way back that actually brings the rows back", () => {
     renderList();
-    // A search as well as a filter: clearFilters() keeps the search, so without this the
-    // button could be wired to the wrong one of the two and still look right
     fireEvent.change(screen.getByPlaceholderText(/Search tasks/), {
       target: { value: "nothing here matches" },
     });
@@ -364,10 +355,6 @@ describe("The list view with a filter that matches nothing", () => {
   });
 });
 
-/**
- * The board view takes the same filter and deliberately does NOT get the empty state: its
- * columns stand where they are and simply hold nothing, which is the board's own answer.
- */
 describe("The board view with a filter that matches nothing", () => {
   beforeEach(() => localStorage.clear());
 

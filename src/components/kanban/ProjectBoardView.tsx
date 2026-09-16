@@ -304,12 +304,7 @@ export function ProjectBoardView({
           ) : filterMeta &&
             (filterMeta.activeCount > 0 || filterMeta.searching) &&
             filteredTasks.length === 0 ? (
-            /* ListView renders nothing when it has no rows, which left a filter that
-               matched nothing looking like a board that had lost its tasks. Gated on
-               something actually being set: filteredTasks lags the tasks prop by a frame,
-               so an unfiltered board switching scope would otherwise flash this — a
-               transient no assertion in the suite can observe. Each half of the gate is
-               pinned by one of the two copy tests. */
+            // Gated on a set filter: filteredTasks lags the tasks prop by a frame
             <div className="flex flex-col items-center justify-center py-16 text-center">
               <h2 className="mb-2 text-lg font-medium text-text-muted">
                 {filterMeta.activeCount > 0 ? "No tasks match the filters" : "No tasks match the search"}

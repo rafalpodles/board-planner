@@ -13,7 +13,7 @@ import {
 /** How close a panel may come to the edge of the screen before it is pulled back */
 const GUTTER = 12;
 
-/** What a 2px outline at 2px offset needs, plus the pixel `.scroll-ring-room` took for rounding */
+// Matches .scroll-ring-room: a 2px outline at 2px offset, plus a pixel for rounding
 const RING_ROOM = 5;
 
 /**
@@ -44,12 +44,6 @@ const RING_ROOM = 5;
  * The re-measure subtracts the shift already applied. Reading the transformed rect and clamping
  * that again compounds: each pass would move the panel by the amount the last pass had already
  * moved it.
- *
- * Height is bounded the same way, from the same measurement. `top-full` cannot know how much room
- * is left below the anchor, so a tall panel simply ran off the bottom with nothing to scroll:
- * measured at 812x375, the five-control Filters panel ended 40px below the fold and its last
- * control was unreachable. The bound is the room actually there, not a fraction of the viewport,
- * because the anchor sits at a different height on every page that uses one.
  */
 export function usePanelClamp(open: boolean): {
   ref: RefObject<HTMLDivElement | null>;
@@ -74,9 +68,6 @@ export function usePanelClamp(open: boolean): {
     // to what runs off the right while nothing reaches what runs off the left.
     applied.current = short > 0 ? short : past > 0 ? -past : 0;
     setShiftX(applied.current);
-    // Floor and ceiling. A toolbar scrolled above the top of its own scroller reports a NEGATIVE
-    // top, and the room below it then computes as MORE than the screen — the bound stops binding,
-    // overflow never engages, and the panel runs past the fold again.
     const room = window.innerHeight - box.top - GUTTER;
     setMaxHeight(Math.min(Math.max(room, 0), window.innerHeight - GUTTER));
   }, []);
@@ -93,9 +84,6 @@ export function usePanelClamp(open: boolean): {
 
   useEffect(() => {
     if (!open) return;
-    // A board scroll changes box.top every frame, and each measure re-renders the panel's owner —
-    // which rebuilds its assignee map and its status options over every task on the board. One
-    // measure per frame is all the position can actually change in.
     let frame = 0;
     const onScroll = () => {
       if (frame) return;
@@ -109,10 +97,7 @@ export function usePanelClamp(open: boolean): {
     if (anchor && observer) observer.observe(anchor);
     window.addEventListener("resize", measure);
     window.addEventListener("orientationchange", measure);
-    // Below lg the toolbar is in normal flow, so scrolling the board moves the anchor while the
-    // room measured for it does not — and a stale height bound puts the panel back past the fold
-    // with nothing to scroll, which is the defect this bound exists to remove. Capturing, because
-    // the scroll happens on whichever ancestor owns it rather than on the window.
+    // Capturing: the scroll that moves the anchor is on the layout's scroller, not the window
     window.addEventListener("scroll", onScroll, { capture: true, passive: true });
     return () => {
       observer?.disconnect();
@@ -127,9 +112,6 @@ export function usePanelClamp(open: boolean): {
     ref,
     style: {
       ...(shiftX ? { transform: `translateX(${shiftX}px)` } : {}),
-      // Keeps the browser's own scroll-into-view — the one that runs when focus moves — from
-      // parking a control flush against the boundary, where the scrollport would clip its ring.
-      // RING_ROOM, not 4: .scroll-ring-room took the extra pixel for sub-pixel rounding.
       ...(maxHeight
         ? { maxHeight, overflowY: "auto" as const, scrollPaddingBlock: RING_ROOM }
         : {}),

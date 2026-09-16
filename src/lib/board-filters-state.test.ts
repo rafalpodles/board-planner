@@ -174,8 +174,6 @@ describe("project field filters", () => {
 });
 
 describe("the status filter reads roles, not column ids", () => {
-  // A board that renamed every column: the ids are this project's alone, the roles are
-  // the only thing anything outside the project can compare (BP-128)
   const renamed = [
     { id: "parked", label: "Parked", color: "#000", role: "backlog" as const, order: 0 },
     { id: "cooking", label: "Cooking", color: "#000", role: "active" as const, order: 1 },
@@ -201,7 +199,6 @@ describe("the status filter reads roles, not column ids", () => {
     expect(matchesStatusFilter("anything at all", "", statusRoleMap(renamed))).toBe(true);
   });
 
-  // A deleted column leaves its tasks behind with a status naming nothing
   it("puts a task whose column is gone under UNFILED and nowhere else", () => {
     expect(matchesStatusFilter("deleted_column", UNFILED, statusRoleMap(renamed))).toBe(true);
     expect(matchesStatusFilter("deleted_column", "backlog", statusRoleMap(renamed))).toBe(false);
@@ -232,7 +229,6 @@ describe("statusLabel", () => {
     expect(statusLabel("review")).toBe("Awaiting review");
   });
 
-  // The chip fell back to the raw value, so a dropped option read "Remove @unfiled filter"
   it("names the sentinel rather than leaking it", () => {
     expect(statusLabel(UNFILED)).toBe("No column");
     expect(statusLabel(UNFILED)).not.toContain("@");
@@ -248,7 +244,6 @@ describe("migratePersistedFilters — status", () => {
     expect(migratePersistedFilters({ filters: { status: UNFILED } }).filters.status).toBe(UNFILED);
   });
 
-  // Otherwise it filters every task away with nothing in the picker to clear it by
   it("drops a stored value that is not a role", () => {
     expect(migratePersistedFilters({ filters: { status: "in_progress" } }).filters.status).toBe("");
   });

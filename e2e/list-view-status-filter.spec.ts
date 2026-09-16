@@ -13,14 +13,6 @@ import {
 } from "./seed";
 import { signIn } from "./session";
 
-/**
- * BP-566. The list view had no way to narrow by status, and the filter it now has keys on the
- * column's ROLE rather than its id — column ids are the project's own (BP-128), so a board whose
- * columns were renamed has ids nothing outside it can name.
- *
- * Driven through the browser because the filter is client-side: the API returns the whole board
- * and the narrowing happens in BoardFilters, so a request-level test would assert nothing.
- */
 
 test.beforeEach(seed);
 
@@ -36,7 +28,6 @@ async function openList(page: Page) {
 
 async function openPanel(page: Page) {
   const panel = page.getByRole("dialog", { name: "Filters" });
-  // The panel is a toggle and BoardFilters remembers it was open, so clicking blind closes it
   if (!(await panel.isVisible())) {
     await page.getByRole("button", { name: /^Filters/ }).click();
   }
@@ -47,7 +38,6 @@ async function openPanel(page: Page) {
 async function chooseStatus(page: Page, label: string) {
   const panel = await openPanel(page);
   await panel.getByLabel("Status").selectOption({ label });
-  // Left open it covers the list, and every click on what the filter produced times out
   await page.getByRole("button", { name: /^Filters/ }).click();
   await expect(panel).toBeHidden();
 }
@@ -70,10 +60,8 @@ test("the list narrows to a status role and says so when nothing matches", async
   });
 
   await test.step("a role no task on this board carries empties the list explicitly", async () => {
-    // The seed leaves nothing finished, so this is a role the board offers and no task holds
     await chooseStatus(page, "Done");
 
-    // The list renders nothing at all when it has no rows, which is what this replaces
     await expect(page.getByText("No tasks match the filters")).toBeVisible();
     await expect(page.locator("table")).toHaveCount(0);
   });
@@ -87,7 +75,6 @@ test("the list narrows to a status role and says so when nothing matches", async
 });
 
 test("it still filters on a board that renamed the column", async ({ page, request }) => {
-  // `planned` becomes `parked`, keeping its backlog role. Nothing may reach for the id.
   await seedRenamedColumn();
 
   await test.step("park a task in the renamed column", async () => {
