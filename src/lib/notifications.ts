@@ -3,11 +3,23 @@ import { WebhookEvent, NotificationChannelType, STATUS_LABELS } from "@/types";
 import { isAllowedWebhookUrl } from "./url-validation";
 import { safeFetch } from "./safe-fetch";
 import { decryptSecret } from "./encryption";
+import { DISCORD_NO_MENTIONS, escapeDiscord, escapeSlack, excerpt } from "./chat-markup";
 
 interface NotificationPayload {
   project: { key: string; name: string };
   task?: { taskKey: string; title: string; status: string };
   data?: Record<string, unknown>;
+}
+
+// Encoded, because a key is not constrained to a format: a `|` in it would end Slack's link target
+function taskUrlFor(appUrl: string, projectKey: string, taskKey?: string): string {
+  if (!taskKey) return "";
+  return `${appUrl}/projects/${encodeURIComponent(projectKey)}/tasks/${encodeURIComponent(taskKey)}`;
+}
+
+function labelOf(status: unknown): string {
+  if (!status) return "";
+  return STATUS_LABELS[status as keyof typeof STATUS_LABELS] || String(status);
 }
 
 function formatSlackPayload(
@@ -16,8 +28,14 @@ function formatSlackPayload(
   appUrl: string
 ): Record<string, unknown> {
   const { project, task, data } = payload;
-  const taskUrl = task ? `${appUrl}/projects/${project.key}/tasks/${task.taskKey}` : "";
-  const statusLabel = task ? STATUS_LABELS[task.status as keyof typeof STATUS_LABELS] || task.status : "";
+  const e = escapeSlack;
+  const taskUrl = e(taskUrlFor(appUrl, project.key, task?.taskKey));
+  const statusLabel = e(labelOf(task?.status));
+  const oldStatus = e(labelOf(data?.oldStatus));
+  const name = e(project.name);
+  const key = e(project.key);
+  const taskKey = e(task?.taskKey ?? "");
+  const title = e(task?.title ?? "");
 
   switch (event) {
     case "task_created":
@@ -27,13 +45,13 @@ function formatSlackPayload(
             type: "section",
             text: {
               type: "mrkdwn",
-              text: `*New task created in ${project.name}*\n<${taskUrl}|${task?.taskKey}> ${task?.title}`,
+              text: `*New task created in ${name}*\n<${taskUrl}|${taskKey}> ${title}`,
             },
           },
           {
             type: "context",
             elements: [
-              { type: "mrkdwn", text: `*Status:* ${statusLabel} | *Project:* ${project.key}` },
+              { type: "mrkdwn", text: `*Status:* ${statusLabel} | *Project:* ${key}` },
             ],
           },
         ],
@@ -46,7 +64,7 @@ function formatSlackPayload(
             type: "section",
             text: {
               type: "mrkdwn",
-              text: `*Task status changed in ${project.name}*\n<${taskUrl}|${task?.taskKey}> ${task?.title}`,
+              text: `*Task status changed in ${name}*\n<${taskUrl}|${taskKey}> ${title}`,
             },
           },
           {
@@ -54,7 +72,7 @@ function formatSlackPayload(
             elements: [
               {
                 type: "mrkdwn",
-                text: `*${data?.oldStatus ? STATUS_LABELS[data.oldStatus as keyof typeof STATUS_LABELS] || data.oldStatus : ""}* → *${statusLabel}*`,
+                text: `*${oldStatus}* → *${statusLabel}*`,
               },
             ],
           },
@@ -68,7 +86,7 @@ function formatSlackPayload(
             type: "section",
             text: {
               type: "mrkdwn",
-              text: `*New comment in ${project.name}*\n<${taskUrl}|${task?.taskKey}> ${task?.title}`,
+              text: `*New comment in ${name}*\n<${taskUrl}|${taskKey}> ${title}`,
             },
           },
           ...(data?.commentBody
@@ -77,9 +95,7 @@ function formatSlackPayload(
                   type: "section",
                   text: {
                     type: "mrkdwn",
-                    text: String(data.commentBody).length > 200
-                      ? String(data.commentBody).substring(0, 200) + "..."
-                      : String(data.commentBody),
+                    text: e(excerpt(String(data.commentBody), 200)),
                   },
                 },
               ]
@@ -89,7 +105,7 @@ function formatSlackPayload(
             elements: [
               {
                 type: "mrkdwn",
-                text: `*By:* ${data?.author || "unknown"} | *Project:* ${project.key}`,
+                text: `*By:* ${e(String(data?.author || "unknown"))} | *Project:* ${key}`,
               },
             ],
           },
@@ -97,7 +113,7 @@ function formatSlackPayload(
       };
 
     default:
-      return { text: `[${project.key}] ${event}: ${task?.taskKey || ""} ${task?.title || ""}` };
+      return { text: `[${key}] ${event}: ${taskKey} ${title}` };
   }
 }
 
@@ -107,8 +123,13 @@ function formatDiscordPayload(
   appUrl: string
 ): Record<string, unknown> {
   const { project, task, data } = payload;
-  const taskUrl = task ? `${appUrl}/projects/${project.key}/tasks/${task.taskKey}` : "";
-  const statusLabel = task ? STATUS_LABELS[task.status as keyof typeof STATUS_LABELS] || task.status : "";
+  const d = escapeDiscord;
+  const taskUrl = taskUrlFor(appUrl, project.key, task?.taskKey);
+  const statusLabel = d(labelOf(task?.status));
+  const oldStatus = d(labelOf(data?.oldStatus));
+  const name = d(project.name);
+  const taskKey = d(task?.taskKey ?? "");
+  const title = d(task?.title ?? "");
 
   const colors: Record<WebhookEvent, number> = {
     task_created: 0x22c55e, // green
@@ -121,62 +142,61 @@ function formatDiscordPayload(
       return {
         embeds: [
           {
-            title: `New task: ${task?.taskKey}`,
-            description: task?.title || "",
+            title: `New task: ${taskKey}`,
+            description: title,
             url: taskUrl,
             color: colors.task_created,
             fields: [
               { name: "Status", value: statusLabel, inline: true },
-              { name: "Project", value: project.name, inline: true },
+              { name: "Project", value: name, inline: true },
             ],
           },
         ],
+        allowed_mentions: DISCORD_NO_MENTIONS,
       };
 
     case "status_changed":
       return {
         embeds: [
           {
-            title: `Status changed: ${task?.taskKey}`,
-            description: task?.title || "",
+            title: `Status changed: ${taskKey}`,
+            description: title,
             url: taskUrl,
             color: colors.status_changed,
             fields: [
               {
                 name: "Change",
-                value: `${data?.oldStatus ? STATUS_LABELS[data.oldStatus as keyof typeof STATUS_LABELS] || data.oldStatus : ""} → ${statusLabel}`,
+                value: `${oldStatus} → ${statusLabel}`,
                 inline: true,
               },
-              { name: "Project", value: project.name, inline: true },
+              { name: "Project", value: name, inline: true },
             ],
           },
         ],
+        allowed_mentions: DISCORD_NO_MENTIONS,
       };
 
     case "comment_added": {
-      const body = data?.commentBody
-        ? String(data.commentBody).length > 200
-          ? String(data.commentBody).substring(0, 200) + "..."
-          : String(data.commentBody)
-        : "";
+      const body = data?.commentBody ? d(excerpt(String(data.commentBody), 200)) : "";
       return {
         embeds: [
           {
-            title: `New comment on ${task?.taskKey}`,
+            title: `New comment on ${taskKey}`,
             description: body,
             url: taskUrl,
             color: colors.comment_added,
             fields: [
-              { name: "Author", value: String(data?.author || "unknown"), inline: true },
-              { name: "Project", value: project.name, inline: true },
+              { name: "Author", value: d(String(data?.author || "unknown")), inline: true },
+              { name: "Project", value: name, inline: true },
             ],
           },
         ],
+        allowed_mentions: DISCORD_NO_MENTIONS,
       };
     }
 
     default:
-      return { content: `[${project.key}] ${event}: ${task?.taskKey || ""} ${task?.title || ""}` };
+      return { content: `[${d(project.key)}] ${event}: ${taskKey} ${title}`, allowed_mentions: DISCORD_NO_MENTIONS };
   }
 }
 
