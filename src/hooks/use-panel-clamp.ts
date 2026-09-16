@@ -45,6 +45,21 @@ const RING_ROOM = 5;
  * that again compounds: each pass would move the panel by the amount the last pass had already
  * moved it.
  */
+// The panel is clipped by its nearest scrolling ancestor, not only by the screen: the app's <main>
+// scrolls, so beside a sidebar a panel can be on screen and still cut off at main's edge
+const CLIPS = new Set(["auto", "scroll", "hidden", "clip"]);
+
+function clippingBounds(panel: HTMLElement): { left: number; right: number } {
+  for (let node = panel.parentElement; node && node !== document.body; node = node.parentElement) {
+    const style = getComputedStyle(node);
+    // Either axis: a non-visible overflow on one forces the other off visible too
+    if (!CLIPS.has(style.overflowX) && !CLIPS.has(style.overflowY)) continue;
+    const rect = node.getBoundingClientRect();
+    return { left: Math.max(rect.left, 0), right: Math.min(rect.right, window.innerWidth) };
+  }
+  return { left: 0, right: window.innerWidth };
+}
+
 export function usePanelClamp(open: boolean): {
   ref: RefObject<HTMLDivElement | null>;
   style: CSSProperties;
@@ -55,15 +70,17 @@ export function usePanelClamp(open: boolean): {
   const [maxHeight, setMaxHeight] = useState(0);
 
   const measure = useCallback(() => {
-    const box = ref.current?.getBoundingClientRect();
+    const panel = ref.current;
+    const box = panel?.getBoundingClientRect();
     // No layout to read — a test environment without one, or a panel not yet painted. A zero rect
     // would otherwise read as "12px past the left edge" and shift a panel that is nowhere.
     if (!box || box.width === 0) return;
 
+    const bounds = clippingBounds(panel!);
     const left = box.left - applied.current;
     const right = box.right - applied.current;
-    const past = right - (window.innerWidth - GUTTER);
-    const short = GUTTER - left;
+    const past = right - (bounds.right - GUTTER);
+    const short = bounds.left + GUTTER - left;
     // Left edge first: a panel wider than the screen cannot satisfy both, and a reader can scroll
     // to what runs off the right while nothing reaches what runs off the left.
     applied.current = short > 0 ? short : past > 0 ? -past : 0;

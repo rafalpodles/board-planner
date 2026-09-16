@@ -32,6 +32,10 @@ beforeEach(() => {
   // Reported in viewport coordinates, the way a browser does: the transform this hook applies is
   // part of what the next read sees, which is exactly the compounding the hook has to undo.
   Element.prototype.getBoundingClientRect = function () {
+    if ((this as HTMLElement).dataset.testid === "scroller") {
+      const box = { x: 260, y: 0, left: 260, right: 400, top: 0, bottom: 800, width: 140, height: 800 };
+      return { ...box, toJSON: () => box } as DOMRect;
+    }
     const shift = parseFloat(/translateX\((-?[\d.]+)px\)/.exec((this as HTMLElement).style.transform ?? "")?.[1] ?? "0");
     const box = {
       x: rect.left + shift,
@@ -174,5 +178,17 @@ describe("usePanelClamp", () => {
     // Positive control: an empty maxHeight alone cannot tell a floored bound from no measure
     expect(shiftOf()).toBe("translateX(254px)");
     expect(maxHeightOf()).toBe("");
+  });
+
+  // BP-637: <main> scrolls, so beside the sidebar a panel on screen was still clipped at main's edge
+  it("pulls a panel inside the scroller that clips it, not only inside the screen", () => {
+    rect = { left: 188, right: 412, width: 224, top: 0, height: 277 };
+    render(
+      <div data-testid="scroller" style={{ overflowY: "auto" }}>
+        <Panel open />
+      </div>
+    );
+
+    expect(shiftOf()).toBe("translateX(84px)");
   });
 });
