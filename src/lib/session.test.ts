@@ -10,6 +10,10 @@ vi.mock("./db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/session", () => ({
   Session: { findOne, updateOne, create, deleteOne, deleteMany },
 }));
+const apiTokenDeleteMany = vi.fn();
+const oauthTokenDeleteMany = vi.fn();
+vi.mock("@/models/apiToken", () => ({ ApiToken: { deleteMany: apiTokenDeleteMany } }));
+vi.mock("@/models/oauthToken", () => ({ OAuthToken: { deleteMany: oauthTokenDeleteMany } }));
 
 const {
   allowsInsecureCookie,
@@ -24,6 +28,7 @@ const {
   readSessionCookie,
   resolveSession,
   revokeSession,
+  revokeUserCredentials,
   revokeUserSessions,
   sessionCookieName,
   SESSION_IDLE_TTL_MS,
@@ -556,5 +561,17 @@ describe("selfOrigin", () => {
     process.env.APP_ORIGIN = "https://board.example.com";
 
     expect(selfOrigin()).toBe("https://board.example.com");
+  });
+});
+
+// BP-325: changing a password is how a person ejects whoever has it, and a token minted with it
+// outlived every session
+describe("revokeUserCredentials", () => {
+  it("ends the sessions, the API tokens and the OAuth grants, sparing only the caller's session", async () => {
+    await revokeUserCredentials("user-1", "session-keep");
+
+    expect(deleteMany).toHaveBeenCalledWith({ user: "user-1", _id: { $ne: "session-keep" } });
+    expect(apiTokenDeleteMany).toHaveBeenCalledWith({ user: "user-1" });
+    expect(oauthTokenDeleteMany).toHaveBeenCalledWith({ user: "user-1" });
   });
 });

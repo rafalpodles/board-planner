@@ -17,7 +17,7 @@ import {
   invalidateResetTokens,
   releaseResetToken,
 } from "@/lib/password-reset";
-import { provenanceRefusal, revokeUserSessions } from "@/lib/session";
+import { provenanceRefusal, revokeUserCredentials } from "@/lib/session";
 import { User } from "@/models/user";
 
 const ATTEMPTS_PER_SOURCE = 20;
@@ -89,7 +89,7 @@ export async function POST(request: Request) {
 
   // Every session, including whoever is signed in on the old password — which is the case somebody
   // resetting a password they believe was stolen is trying to end
-  await revokeUserSessions(user._id);
+  await revokeUserCredentials(user._id);
 
   try {
     await User.updateOne({ _id: user._id }, { $set: { password: hashed } });

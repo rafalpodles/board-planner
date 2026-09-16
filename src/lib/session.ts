@@ -3,6 +3,8 @@ import { Types } from "mongoose";
 import { connectDB } from "./db";
 import { randomToken, sha256 } from "./oauth";
 import { Session } from "@/models/session";
+import { ApiToken } from "@/models/apiToken";
+import { OAuthToken } from "@/models/oauthToken";
 
 export const SESSION_TOKEN_PREFIX = "cps_";
 export const SESSION_IDLE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -274,6 +276,17 @@ export async function revokeSession(token: string): Promise<boolean> {
   await connectDB();
   const result = await Session.deleteOne({ tokenHash: sha256(token) });
   return (result?.deletedCount ?? 0) > 0;
+}
+
+// A password change is how a person ejects whoever has their password, and an API token or an OAuth
+// grant minted by that person outlives every session. So all three go together (BP-325).
+export async function revokeUserCredentials(
+  userId: Types.ObjectId | string,
+  exceptSessionId?: Types.ObjectId | string | null
+): Promise<void> {
+  await revokeUserSessions(userId, exceptSessionId);
+  await ApiToken.deleteMany({ user: userId });
+  await OAuthToken.deleteMany({ user: userId });
 }
 
 export async function revokeUserSessions(

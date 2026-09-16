@@ -6,6 +6,7 @@ const userFindById = vi.fn();
 const userCountDocuments = vi.fn();
 const userExists = vi.fn();
 const revokeUserSessions = vi.fn();
+const revokeUserCredentials = vi.fn();
 const invalidateResetTokens = vi.fn();
 const logInstanceAudit = vi.fn();
 const notifyPasswordChanged = vi.fn();
@@ -25,7 +26,7 @@ vi.mock("@/lib/auth", () => ({
   MIN_PASSWORD_LENGTH: 8,
 }));
 vi.mock("@/lib/grants", () => ({ check, accessibleProjectIds: vi.fn() }));
-vi.mock("@/lib/session", () => ({ revokeUserSessions }));
+vi.mock("@/lib/session", () => ({ revokeUserSessions, revokeUserCredentials }));
 vi.mock("@/lib/password-reset", () => ({ invalidateResetTokens }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/lib/security-mail", () => ({ notifyPasswordChanged, notifyAddressChanged }));
@@ -157,7 +158,7 @@ describe("PUT /api/users/:id", () => {
     const res = await PUT(put({ email: "taken@example.com", password: "a-fresh-password" }), ctx());
 
     expect(res.status).toBe(409);
-    expect(revokeUserSessions).not.toHaveBeenCalled();
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
     expect(target.save).not.toHaveBeenCalled();
   });
 
@@ -263,7 +264,7 @@ describe("PUT /api/users/:id — an admin sets a password", () => {
     expect(target.save).toHaveBeenCalled();
     // No exception argument: the admin holds none of the target's sessions, and whoever knew the
     // old password must not stay signed in on one
-    expect(revokeUserSessions).toHaveBeenCalledWith("target-1");
+    expect(revokeUserCredentials).toHaveBeenCalledWith("target-1");
     // A reset link already in their inbox would otherwise still overwrite what the admin just set
     expect(invalidateResetTokens).toHaveBeenCalledWith("target-1");
     // The actor, not just the subject: a log naming the target as the one who acted is worse than
@@ -330,7 +331,7 @@ describe("PUT /api/users/:id — an admin sets a password", () => {
 
     expect(res.status).toBe(403);
     expect(target.save).not.toHaveBeenCalled();
-    expect(revokeUserSessions).not.toHaveBeenCalled();
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
   });
 
   // Otherwise this is the way around the current-password check that guards Settings → Security
@@ -356,7 +357,7 @@ describe("PUT /api/users/:id — an admin sets a password", () => {
     expect(res.status).toBe(400);
     expect(target.password).toBe("old-hash");
     expect(target.save).not.toHaveBeenCalled();
-    expect(revokeUserSessions).not.toHaveBeenCalled();
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
   });
 
   // A worker's hash is random so that nobody can sign in as it, and the account is filtered out of
@@ -389,7 +390,7 @@ describe("PUT /api/users/:id — an admin sets a password", () => {
   it("does not change the password when the sessions cannot be revoked", async () => {
     const target = targetDoc({ role: "member" });
     found(target);
-    revokeUserSessions.mockRejectedValueOnce(new Error("mongo is having a moment"));
+    revokeUserCredentials.mockRejectedValueOnce(new Error("mongo is having a moment"));
 
     await expect(PUT(put({ password: "a-fresh-password" }), ctx())).rejects.toThrow();
 
@@ -419,7 +420,7 @@ describe("PUT /api/users/:id — an admin sets a password", () => {
     const res = await PUT(put({ role: "admin" }), ctx());
 
     expect(res.status).toBe(200);
-    expect(revokeUserSessions).not.toHaveBeenCalled();
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
     expect(logInstanceAudit).toHaveBeenCalledTimes(1);
     expect(logInstanceAudit).toHaveBeenCalledWith({
       action: "user_role_changed",

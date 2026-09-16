@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const consumeResetToken = vi.fn();
 const invalidateResetTokens = vi.fn();
 const releaseResetToken = vi.fn();
-const revokeUserSessions = vi.fn();
+const revokeUserCredentials = vi.fn();
 const logInstanceAudit = vi.fn();
 const userFindById = vi.fn();
 const userUpdateOne = vi.fn();
@@ -25,7 +25,7 @@ vi.mock("@/lib/password-reset", () => ({
   releaseResetToken,
 }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
-vi.mock("@/lib/session", () => ({ provenanceRefusal: () => null, revokeUserSessions }));
+vi.mock("@/lib/session", () => ({ provenanceRefusal: () => null, revokeUserCredentials }));
 vi.mock("bcryptjs", () => ({ default: { hash } }));
 vi.mock("@/models/user", () => ({
   User: { findById: userFindById, updateOne: userUpdateOne },
@@ -106,7 +106,7 @@ describe("POST /api/auth/reset", () => {
       { $set: { password: "new-hash" } }
     );
     // Whoever knew the old password is signed out — usually the reason somebody is resetting
-    expect(revokeUserSessions).toHaveBeenCalledWith("u1");
+    expect(revokeUserCredentials).toHaveBeenCalledWith("u1");
     expect(logInstanceAudit).toHaveBeenCalledWith(
       expect.objectContaining({ action: "user_password_reset_by_email", target: "owner" })
     );
@@ -124,7 +124,7 @@ describe("POST /api/auth/reset", () => {
     expect(res.status).toBe(400);
     expect((await res.json()).error).toContain(wording);
     expect(userUpdateOne).not.toHaveBeenCalled();
-    expect(revokeUserSessions).not.toHaveBeenCalled();
+    expect(revokeUserCredentials).not.toHaveBeenCalled();
   });
 
   // Spending the link on a password the server was always going to refuse would send somebody

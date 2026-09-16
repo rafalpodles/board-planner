@@ -10,7 +10,7 @@ import { invalidateResetTokens } from "@/lib/password-reset";
 import { clearAccountAttempts } from "@/lib/rate-limit";
 import { duplicateKeyField } from "@/lib/mongo-errors";
 import { withAdmin } from "@/lib/middleware";
-import { revokeUserSessions } from "@/lib/session";
+import { revokeUserCredentials, revokeUserSessions } from "@/lib/session";
 import { User } from "@/models/user";
 
 export const GET = withAdmin(async (_request, { params }) => {
@@ -168,7 +168,7 @@ export const PUT = withAdmin(async (request, { params, user: admin }) => {
     // Before the save, not after: a revoke that throws here leaves the account exactly as it was,
     // and the admin retries. The other order commits the new password, answers 500, and leaves the
     // old holder signed in — a failure that reads to the admin as "nothing happened".
-    await revokeUserSessions(target._id);
+    await revokeUserCredentials(target._id);
   }
 
   try {
