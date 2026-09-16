@@ -125,7 +125,7 @@ registering fresh, reads its current policy and assignments back from `GET /api/
 
 When the owner's password changes — by themselves, by an admin, or through a reset — every machine
 they enrolled loses its credential along with their sessions and tokens. The worker then gets 401
-and needs a fresh enrolment token to register again.
+and must be enrolled again — from the machine, or with a fresh enrolment token.
 
 Registration settles which projects are offered, but not a filesystem. The repository behind each
 offered project must still be approved on this machine, by listing its checkout in
