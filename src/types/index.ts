@@ -1451,6 +1451,7 @@ export const INSTANCE_AUDIT_ACTIONS = [
   "worker_decision_accepted",
   "worker_decision_declined",
   "worker_decision_abandoned",
+  "instance_settings_changed",
 ] as const;
 
 export type InstanceAuditAction = (typeof INSTANCE_AUDIT_ACTIONS)[number];
