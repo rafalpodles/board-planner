@@ -14,6 +14,14 @@ const apiTokenDeleteMany = vi.fn();
 const oauthTokenDeleteMany = vi.fn();
 vi.mock("@/models/apiToken", () => ({ ApiToken: { deleteMany: apiTokenDeleteMany } }));
 vi.mock("@/models/oauthToken", () => ({ OAuthToken: { deleteMany: oauthTokenDeleteMany } }));
+const oauthCodeDeleteMany = vi.fn();
+const enrolmentTokenDeleteMany = vi.fn();
+const deviceEnrolmentDeleteMany = vi.fn();
+const workerUpdateMany = vi.fn();
+vi.mock("@/models/oauthCode", () => ({ OAuthCode: { deleteMany: oauthCodeDeleteMany } }));
+vi.mock("@/models/enrolmentToken", () => ({ EnrolmentToken: { deleteMany: enrolmentTokenDeleteMany } }));
+vi.mock("@/models/deviceEnrolment", () => ({ DeviceEnrolment: { deleteMany: deviceEnrolmentDeleteMany } }));
+vi.mock("@/models/worker", () => ({ Worker: { updateMany: workerUpdateMany } }));
 
 const {
   allowsInsecureCookie,
@@ -573,5 +581,17 @@ describe("revokeUserCredentials", () => {
     expect(deleteMany).toHaveBeenCalledWith({ user: "user-1", _id: { $ne: "session-keep" } });
     expect(apiTokenDeleteMany).toHaveBeenCalledWith({ user: "user-1" });
     expect(oauthTokenDeleteMany).toHaveBeenCalledWith({ user: "user-1" });
+    expect(oauthCodeDeleteMany).toHaveBeenCalledWith({ user: "user-1" });
+  });
+
+  // An enrolled machine reaches every project its owner reaches, on a credential of its own
+  it("leaves no machine the person enrolled able to authenticate", async () => {
+    await revokeUserCredentials("user-1");
+
+    expect(enrolmentTokenDeleteMany).toHaveBeenCalledWith({ createdBy: "user-1", usedAt: null });
+    expect(deviceEnrolmentDeleteMany).toHaveBeenCalledWith({ enrolledBy: "user-1", deliveredAt: null });
+    const [filter, update] = workerUpdateMany.mock.calls[0];
+    expect(filter).toEqual({ owner: "user-1" });
+    expect(update.$set.credentialHash).toMatch(/^\$2[aby]\$/);
   });
 });

@@ -3,8 +3,14 @@ import { Types } from "mongoose";
 import { connectDB } from "./db";
 import { randomToken, sha256 } from "./oauth";
 import { Session } from "@/models/session";
+import bcrypt from "bcryptjs";
+import crypto from "crypto";
 import { ApiToken } from "@/models/apiToken";
+import { DeviceEnrolment } from "@/models/deviceEnrolment";
+import { EnrolmentToken } from "@/models/enrolmentToken";
+import { OAuthCode } from "@/models/oauthCode";
 import { OAuthToken } from "@/models/oauthToken";
+import { Worker } from "@/models/worker";
 
 export const SESSION_TOKEN_PREFIX = "cps_";
 export const SESSION_IDLE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -278,8 +284,7 @@ export async function revokeSession(token: string): Promise<boolean> {
   return (result?.deletedCount ?? 0) > 0;
 }
 
-// A password change is how a person ejects whoever has their password, and an API token or an OAuth
-// grant minted by that person outlives every session. So all three go together (BP-325).
+// Everything a stolen password could have minted that outlives a session (BP-325)
 export async function revokeUserCredentials(
   userId: Types.ObjectId | string,
   exceptSessionId?: Types.ObjectId | string | null
@@ -287,6 +292,12 @@ export async function revokeUserCredentials(
   await revokeUserSessions(userId, exceptSessionId);
   await ApiToken.deleteMany({ user: userId });
   await OAuthToken.deleteMany({ user: userId });
+  await OAuthCode.deleteMany({ user: userId });
+  await EnrolmentToken.deleteMany({ createdBy: userId, usedAt: null });
+  await DeviceEnrolment.deleteMany({ enrolledBy: userId, deliveredAt: null });
+  // A machine keeps its identity and owner; only the credential it holds stops matching
+  const unmatchable = await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10);
+  await Worker.updateMany({ owner: userId }, { $set: { credentialHash: unmatchable } });
 }
 
 export async function revokeUserSessions(

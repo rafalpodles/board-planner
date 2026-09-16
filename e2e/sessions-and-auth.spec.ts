@@ -15,6 +15,8 @@ import {
   PROJECT_KEY,
   SIBLING_TASK_NUMBER,
   SIBLING_TASK_TITLE,
+  WORKER_CREDENTIAL,
+  WORKER_ID,
   seedWithoutSessions,
 } from "./seed";
 
@@ -587,7 +589,7 @@ test("changing your own password: the new one works, the old one stops, this dev
 
 // BP-325: changing a password is how a person ejects whoever has it. An API token or an OAuth grant
 // minted with the stolen password used to survive it, because only sessions were revoked.
-test("changing your own password signs out its API tokens and connected apps too", async ({
+test("changing your own password signs out its API tokens, connected apps and machines too", async ({
   page,
   request,
 }) => {
@@ -606,10 +608,17 @@ test("changing your own password signs out its API tokens and connected apps too
   });
   const me = (bearer: string) =>
     request.get("/api/auth/me", { headers: { authorization: `Bearer ${bearer}` } });
+  // A machine the member enrolled reaches every project they reach, on a credential of its own
+  await (await db()).collection("workers").updateOne({ _id: WORKER_ID }, { $set: { owner: MEMBER_ID } });
+  const machine = () =>
+    request.get(`/api/workers/${WORKER_ID}`, {
+      headers: { authorization: `Bearer ${WORKER_CREDENTIAL}`, "x-worker-id": String(WORKER_ID) },
+    });
 
-  // The control: both credentials authenticate before anything changes
+  // The control: every credential authenticates before anything changes
   expect((await me(MEMBER_API_TOKEN)).status()).toBe(200);
   expect((await me(oauthAccess)).status()).toBe(200);
+  expect((await machine()).status()).toBe(200);
 
   await signInAsMember(page);
   await page.goto("/settings/security");
@@ -619,6 +628,7 @@ test("changing your own password signs out its API tokens and connected apps too
 
   expect((await me(MEMBER_API_TOKEN)).status()).toBe(401);
   expect((await me(oauthAccess)).status()).toBe(401);
+  expect((await machine()).status()).toBe(401);
   // And the device that made the change is still the member's
   await loadsAuthenticated(page, `/projects/${PROJECT_KEY}`);
 });
