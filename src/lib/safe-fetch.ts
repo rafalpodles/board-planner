@@ -1,3 +1,5 @@
+import { isIP } from "node:net";
+import { Agent } from "undici";
 import { isPrivateAddress, isInternalName, isIpLiteral, unbracket } from "./private-address";
 
 export class BlockedDestinationError extends Error {
@@ -37,7 +39,7 @@ export async function assertPublicDestination(
   const loopbackIsFine = options.allowLoopback === true;
 
   if (isInternalName(host)) {
-    if (loopbackIsFine && (host === "localhost" || host.endsWith(".localhost"))) return url;
+    if (loopbackIsFine && isLoopbackName(host)) return url;
     throw new BlockedDestinationError(`Refusing internal hostname ${host}`);
   }
 
@@ -49,7 +51,26 @@ export async function assertPublicDestination(
 
   // A public name is the interesting case: localtest.me resolves to 127.0.0.1 and needs
   // no redirect at all to reach inward
-  let resolved: { address: string }[];
+  await resolvePublic(host, loopbackIsFine);
+  return url;
+}
+
+function isLoopbackName(host: string): boolean {
+  return host === "localhost" || host.endsWith(".localhost");
+}
+
+interface VettedAddress {
+  address: string;
+  family: number;
+}
+
+/**
+ * The one place a name becomes addresses. The check above and the connection below both come
+ * through here, and the connection uses the answer it was handed rather than asking DNS again —
+ * so a name that answers public for the check and private for the socket has nothing to exploit.
+ */
+async function resolvePublic(host: string, loopbackIsFine: boolean): Promise<VettedAddress[]> {
+  let resolved: { address: string; family?: number }[];
   try {
     // Imported here so the module graph does not drag node:dns into a non-node runtime
     const { lookup } = await import("node:dns/promises");
@@ -59,12 +80,60 @@ export async function assertPublicDestination(
   }
   if (resolved.length === 0) throw new BlockedDestinationError(`Could not resolve ${host}`);
 
-  const inward = resolved.find((entry) => isPrivateAddress(entry.address));
+  const loopbackAllowed = loopbackIsFine && isLoopbackName(host);
+  const inward = resolved.find(
+    (entry) => isPrivateAddress(entry.address) && !(loopbackAllowed && isLoopbackAddress(entry.address))
+  );
   if (inward) {
     throw new BlockedDestinationError(`${host} resolves to the private address ${inward.address}`);
   }
 
-  return url;
+  return resolved.map((entry) => ({
+    address: entry.address,
+    family: entry.family ?? (isIP(entry.address) || 4),
+  }));
+}
+
+function isLoopbackAddress(address: string): boolean {
+  return address === "::1" || address.startsWith("127.");
+}
+
+type LookupCallback = (
+  error: Error | null,
+  address: string | VettedAddress[],
+  family?: number
+) => void;
+
+function pinnedLookup(loopbackIsFine: boolean) {
+  return (hostname: string, options: { all?: boolean }, callback: LookupCallback) => {
+    resolvePublic(unbracket(hostname), loopbackIsFine).then(
+      (addresses) =>
+        options.all
+          ? callback(null, addresses)
+          : callback(null, addresses[0].address, addresses[0].family),
+      (error: Error) => callback(error, "")
+    );
+  };
+}
+
+const dispatchers = new Map<boolean, Agent>();
+
+function dispatcherFor(options: DestinationOptions): Agent {
+  const loopbackIsFine = options.allowLoopback === true;
+  let agent = dispatchers.get(loopbackIsFine);
+  if (!agent) {
+    agent = new Agent({ connect: { lookup: pinnedLookup(loopbackIsFine) } });
+    dispatchers.set(loopbackIsFine, agent);
+  }
+  return agent;
+}
+
+/** The refusal is buried in the `cause` chain of fetch's TypeError; it is the error worth throwing */
+function blockedCause(error: unknown): BlockedDestinationError | undefined {
+  for (let current = error; current instanceof Error; current = current.cause) {
+    if (current instanceof BlockedDestinationError) return current;
+  }
+  return undefined;
 }
 
 /**
@@ -72,7 +141,7 @@ export async function assertPublicDestination(
  *
  * Node follows redirects itself, so a guard applied only to the configured URL sees
  * the one address the attacker is happy for it to see. Every caller of an outbound
- * fetch goes through here (BP-303).
+ * fetch goes through here (BP-303), and every hop connects only to addresses it vetted (BP-344).
  */
 export async function safeFetch(
   rawUrl: string,
@@ -84,7 +153,14 @@ export async function safeFetch(
   const origin = new URL(target).origin;
 
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    const response = await fetch(target, request);
+    let response: Response;
+    try {
+      // The dispatcher's lookup is the check that decides: it runs when the socket connects, on the
+      // addresses that socket then uses. The assertion above only fails early with a clearer message.
+      response = await fetch(target, { ...request, dispatcher: dispatcherFor(options) } as RequestInit);
+    } catch (error) {
+      throw blockedCause(error) ?? error;
+    }
     if (!REDIRECT_STATUSES.has(response.status)) return response;
 
     const location = response.headers.get("location");
