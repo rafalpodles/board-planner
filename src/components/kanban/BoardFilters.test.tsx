@@ -133,6 +133,9 @@ describe("BoardFilters", () => {
       task({ _id: "b", taskNumber: 2, title: "First review", status: "checking" }),
       task({ _id: "c", taskNumber: 3, title: "Second review", status: "signed-off" }),
       task({ _id: "d", taskNumber: 4, title: "Parked idea", status: "parked" }),
+      // Shares a search term with "Second review" and sits in a different role, so the
+      // composition test below cannot pass on the search alone
+      task({ _id: "e", taskNumber: 5, title: "Second thoughts", status: "cooking" }),
     ];
 
     async function chooseStatus(value: string) {
