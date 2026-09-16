@@ -1,12 +1,30 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
+import type { HydratedDocument } from "mongoose";
+import type { IProject } from "@/types";
 import { Project } from "@/models/project";
 import { Task } from "@/models/task";
 import { isAIEnabled, generateTask, ExistingTaskSummary } from "@/lib/ai";
 import { choiceFieldsForPrompt, resolveGeneratedFields } from "@/lib/ai-fields";
 import { getSettings } from "@/models/settings";
 import { bareHost, hostOf, projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
+import { isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
+import { readJsonBody } from "@/lib/request-body";
+
+export const MAX_PROMPT_LENGTH = 10_000;
+/** Generations one person may start in the rate limiter's 15-minute window */
+export const GENERATIONS_PER_USER_WINDOW = 20;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Generations one project may run in a day, on the instance's own OpenAI key */
+export function dailyGenerationCap(): number {
+  const configured = Number(process.env.AI_DAILY_GENERATION_CAP);
+  return Number.isInteger(configured) && configured > 0 ? configured : 200;
+}
+
+// One generation at a time per person: nothing else stops a loop from queueing hundreds in parallel
+const inFlight = new Set<string>();
 
 export async function fetchReadme(githubRepo: string): Promise<string | undefined> {
   if (!githubRepo) return undefined;
@@ -58,7 +76,7 @@ export const GET = withProjectAccess(async () => {
   return NextResponse.json({ enabled: isAIEnabled() });
 });
 
-export const POST = withProjectAccess(async (request, { params }) => {
+export const POST = withProjectAccess(async (request, { params, user }) => {
   const { projectId } = await params;
 
   if (!isAIEnabled()) {
@@ -70,7 +88,9 @@ export const POST = withProjectAccess(async (request, { params }) => {
 
   await connectDB();
 
-  const { prompt } = await request.json();
+  const read = await readJsonBody<{ prompt?: unknown }>(request);
+  if (!read.ok) return read.response;
+  const { prompt } = read.value;
 
   if (!prompt || typeof prompt !== "string" || prompt.trim().length === 0) {
     return NextResponse.json(
@@ -78,12 +98,51 @@ export const POST = withProjectAccess(async (request, { params }) => {
       { status: 400 }
     );
   }
+  if (prompt.trim().length > MAX_PROMPT_LENGTH) {
+    return NextResponse.json(
+      { error: `That prompt is too long — ${MAX_PROMPT_LENGTH.toLocaleString("en-US")} characters at most.` },
+      { status: 400 }
+    );
+  }
+
+  // Every generation is spent on the instance's own key, so each one counts whether or not it
+  // succeeds (BP-323)
+  const userKey = sourceKey(`user:${String(user._id)}`, "ai-generate");
+  if (await isRateLimited(userKey, GENERATIONS_PER_USER_WINDOW)) {
+    return NextResponse.json(
+      { error: "Too many generations. Try again in 15 minutes." },
+      { status: 429 }
+    );
+  }
+  const projectKey = `ai-generate:day:${projectId}`;
+  const cap = dailyGenerationCap();
+  if (await isRateLimited(projectKey, cap)) {
+    return NextResponse.json(
+      { error: `This project has used its ${cap} AI generations for the day.` },
+      { status: 429 }
+    );
+  }
+  const holder = String(user._id);
+  if (inFlight.has(holder)) {
+    return NextResponse.json({ error: "A generation is already running." }, { status: 409 });
+  }
 
   const project = await Project.findById(projectId);
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
+  await recordFailedAttempt(userKey);
+  await recordFailedAttempt(projectKey, DAY_MS);
+  inFlight.add(holder);
+  try {
+    return await generate(project, projectId, prompt);
+  } finally {
+    inFlight.delete(holder);
+  }
+});
+
+async function generate(project: HydratedDocument<IProject>, projectId: string, prompt: string) {
   const [readme, tasks] = await Promise.all([
     // raw.githubusercontent.com only serves github.com, so a project hosted anywhere else — and
     // that now includes this instance's own GitHub Enterprise — gets no README rather than a
@@ -134,4 +193,4 @@ export const POST = withProjectAccess(async (request, { params }) => {
       { status: 500 }
     );
   }
-});
+}

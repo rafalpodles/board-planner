@@ -88,10 +88,10 @@ export async function isRateLimited(key: string, threshold = MAX_ATTEMPTS): Prom
  * that leans on truthiness, and that a pipeline turns off Mongoose casting — every value here is
  * already a native Date or number.
  */
-export async function recordFailedAttempt(key: string): Promise<void> {
+export async function recordFailedAttempt(key: string, windowMs = WINDOW_MS): Promise<void> {
   await connectDB();
   const now = new Date();
-  const fresh = new Date(now.getTime() + WINDOW_MS);
+  const fresh = new Date(now.getTime() + windowMs);
 
   await RateLimit.updateOne(
     { _id: key },
