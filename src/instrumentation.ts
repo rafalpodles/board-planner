@@ -87,6 +87,10 @@ export async function register() {
 
       // BP-348: the PM account was stored as a person, so it was listed and could be given a password
       const { User } = await import("@/models/user");
+      // Printed now rather than on the first visit, so the operator finds it in the startup log
+      const { setupCode } = await import("@/lib/setup-code");
+      if ((await User.countDocuments()) === 0) setupCode();
+
       const { PM_USERNAME } = await import("@/lib/pm/username");
       const pmFixed = await User.updateMany(
         { username: PM_USERNAME, kind: { $ne: "machine" } },

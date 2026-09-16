@@ -16,8 +16,17 @@ vi.mock("@/models/user", () => ({
 }));
 vi.mock("@/lib/auth", () => ({
   getAuthUser: (...a: unknown[]) => getAuthUser(...a),
+  getClientIp: () => "203.0.113.9",
   MIN_PASSWORD_LENGTH: 8,
   PASSWORD_COST_FACTOR: 4,
+}));
+const isRateLimited = vi.fn();
+const recordFailedAttempt = vi.fn();
+vi.mock("@/lib/rate-limit", () => ({
+  anonymousMultiplier: (_ip: unknown, n: number) => n,
+  isRateLimited: (...a: unknown[]) => isRateLimited(...a),
+  recordFailedAttempt: (...a: unknown[]) => recordFailedAttempt(...a),
+  sourceKey: (ip: string, scope: string) => `${scope}:${ip}`,
 }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
 vi.mock("@/lib/session", () => ({
@@ -41,6 +50,9 @@ beforeEach(() => {
   create.mockResolvedValue({ _id: "u1", username: "newcomer" });
   countDocuments.mockResolvedValue(5);
   getAuthUser.mockResolvedValue({ _id: "a1", role: "admin", username: "owner" });
+  isRateLimited.mockReset().mockResolvedValue(false);
+  recordFailedAttempt.mockReset();
+  process.env.BOOTSTRAP_TOKEN = "operator-held-setup-code";
 });
 
 /**
@@ -67,7 +79,7 @@ describe("the row an account's creation leaves", () => {
     countDocuments.mockResolvedValue(0);
     getAuthUser.mockResolvedValue(null);
 
-    await post({ ...VALID, username: "firstadmin" });
+    await post({ ...VALID, username: "firstadmin", setupCode: "operator-held-setup-code" });
 
     expect(logInstanceAudit).toHaveBeenCalledWith({
       action: "user_created",
@@ -169,5 +181,50 @@ describe("the display name an account may be given", () => {
 
     expect(res.status).toBe(201);
     expect(create.mock.calls[0][0].fullName).toBe("Owner Name-O'Brien");
+  });
+});
+
+// BP-325: an instance is reachable before its operator registers, and the first account is an admin
+describe("claiming an instance nobody has claimed", () => {
+  beforeEach(() => {
+    countDocuments.mockResolvedValue(0);
+    getAuthUser.mockResolvedValue(null);
+  });
+
+  it.each([
+    ["no setup code", {}],
+    ["the wrong one", { setupCode: "a-guess" }],
+  ])("refuses a first account with %s, and counts the attempt", async (_label, extra) => {
+    const res = await post({ ...VALID, username: "firstadmin", ...extra });
+
+    expect(res.status).toBe(403);
+    expect(create).not.toHaveBeenCalled();
+    expect(recordFailedAttempt).toHaveBeenCalledWith("bootstrap:203.0.113.9");
+  });
+
+  it("creates the administrator when the operator's code is given", async () => {
+    const res = await post({ ...VALID, username: "firstadmin", setupCode: "operator-held-setup-code" });
+
+    expect(res.status).toBe(201);
+    expect(create.mock.calls[0][0].role).toBe("admin");
+  });
+
+  it("stops listening to guesses once the source is throttled", async () => {
+    isRateLimited.mockResolvedValue(true);
+
+    const res = await post({ ...VALID, username: "firstadmin", setupCode: "operator-held-setup-code" });
+
+    expect(res.status).toBe(429);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("never asks an existing instance's admin for a setup code", async () => {
+    countDocuments.mockResolvedValue(5);
+    getAuthUser.mockResolvedValue({ _id: "a1", role: "admin", username: "owner" });
+
+    const res = await post({ ...VALID, username: "newcomer" });
+
+    expect(res.status).toBe(201);
+    expect(create.mock.calls[0][0].role).toBe("member");
   });
 });

@@ -9,7 +9,9 @@ import {
 } from "@/lib/identifiers";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
-import { getAuthUser, MIN_PASSWORD_LENGTH, PASSWORD_COST_FACTOR } from "@/lib/auth";
+import { getAuthUser, getClientIp, MIN_PASSWORD_LENGTH, PASSWORD_COST_FACTOR } from "@/lib/auth";
+import { anonymousMultiplier, isRateLimited, recordFailedAttempt, sourceKey } from "@/lib/rate-limit";
+import { setupCodeMatches } from "@/lib/setup-code";
 import { isValidEmail, normaliseEmail } from "@/lib/email";
 import { duplicateKeyField } from "@/lib/mongo-errors";
 import { ProvenanceError, provenanceRefusal } from "@/lib/session";
@@ -30,9 +32,13 @@ export const GET = withAdmin(async () => {
 export async function POST(request: Request) {
   await connectDB();
 
-  const read = await readJsonBody<{ username?: string; password?: string; fullName?: string; email?: string }>(
-    request
-  );
+  const read = await readJsonBody<{
+    username?: string;
+    password?: string;
+    fullName?: string;
+    email?: string;
+    setupCode?: string;
+  }>(request);
   if (!read.ok) return read.response;
   const body = read.value;
   const { username, password, fullName } = body;
@@ -89,6 +95,23 @@ export async function POST(request: Request) {
   if (isBootstrap) {
     const refusal = provenanceRefusal(request);
     if (refusal) return refusal;
+    // BP-325: an instance is publicly reachable before its operator registers, so the first admin
+    // needs something only the operator holds — the code in the server log, or BOOTSTRAP_TOKEN
+    const clientIp = getClientIp(request);
+    const throttleKey = sourceKey(clientIp ?? "-", "bootstrap");
+    if (await isRateLimited(throttleKey, anonymousMultiplier(clientIp, 10))) {
+      return NextResponse.json(
+        { error: "Too many attempts. Try again in 15 minutes." },
+        { status: 429 }
+      );
+    }
+    if (!setupCodeMatches(body.setupCode)) {
+      await recordFailedAttempt(throttleKey);
+      return NextResponse.json(
+        { error: "The setup code is missing or wrong. It is printed in the server log." },
+        { status: 403 }
+      );
+    }
   } else {
     try {
       authUser = await getAuthUser(request);
