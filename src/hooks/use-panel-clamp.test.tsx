@@ -10,7 +10,7 @@ import { usePanelClamp } from "./use-panel-clamp";
  * through the product — it is the arm BP-491's abandoned `left-0` fix needed, and it stays because
  * the next panel to use this hook may be anchored the other way.
  */
-let rect = { left: 0, right: 0, width: 0, top: 0 };
+let rect = { left: 0, right: 0, width: 0, top: 0, height: 0 };
 
 function Panel({ open }: { open: boolean }) {
   const panel = usePanelClamp(open);
@@ -32,10 +32,11 @@ beforeEach(() => {
   // Reported in viewport coordinates, the way a browser does: the transform this hook applies is
   // part of what the next read sees, which is exactly the compounding the hook has to undo.
   //
-  // Every field is present, because the cast is the dangerous part. While `top` was missing the
-  // hook read `undefined`, every height arithmetic became NaN, the bound silently produced no
-  // style at all, and seven tests stayed green over an implementation that did nothing. A field
-  // this literal omits is a field the next reader gets `undefined` for, and NaN never reddens.
+  // Every field is present AND derived, because the cast is the dangerous part. While `top` was
+  // missing the hook read `undefined`, every height arithmetic became NaN, the bound silently
+  // produced no style at all, and seven tests stayed green over an implementation that did
+  // nothing. A field this literal omits reads `undefined` and NaN never reddens; a field it
+  // hard-codes is worse, because it reddens nothing while looking present.
   Element.prototype.getBoundingClientRect = function () {
     const shift = parseFloat(/translateX\((-?[\d.]+)px\)/.exec((this as HTMLElement).style.transform ?? "")?.[1] ?? "0");
     const box = {
@@ -44,9 +45,9 @@ beforeEach(() => {
       left: rect.left + shift,
       right: rect.right + shift,
       top: rect.top,
-      bottom: rect.top,
+      bottom: rect.top + rect.height,
       width: rect.width,
-      height: 0,
+      height: rect.height,
     };
     return { ...box, toJSON: () => box } as DOMRect;
   };
@@ -57,13 +58,13 @@ const maxHeightOf = () => screen.getByTestId("panel").style.maxHeight;
 
 describe("usePanelClamp", () => {
   it("pulls a panel back from the left edge", () => {
-    rect = { left: -242, right: 98, width: 340, top: 0 };
+    rect = { left: -242, right: 98, width: 340, top: 0, height: 277 };
     render(<Panel open />);
     expect(shiftOf()).toBe("translateX(254px)");
   });
 
   it("pulls a panel back from the right edge", () => {
-    rect = { left: 300, right: 640, width: 340, top: 0 };
+    rect = { left: 300, right: 640, width: 340, top: 0, height: 277 };
     render(<Panel open />);
     expect(shiftOf()).toBe("translateX(-252px)");
   });
@@ -71,13 +72,13 @@ describe("usePanelClamp", () => {
   // The control: a panel that is already where it should be must not be moved at all, or a desktop
   // popover is torn off its button by a clamp that thinks it is helping.
   it("leaves a panel that already fits exactly where it is", () => {
-    rect = { left: 40, right: 380, width: 340, top: 0 };
+    rect = { left: 40, right: 380, width: 340, top: 0, height: 277 };
     render(<Panel open />);
     expect(shiftOf()).toBe("");
   });
 
   it("prefers the left edge when the panel is wider than the screen", () => {
-    rect = { left: -50, right: 450, width: 500, top: 0 };
+    rect = { left: -50, right: 450, width: 500, top: 0, height: 277 };
     render(<Panel open />);
     // Left satisfied (12), right deliberately not: what runs off the right can be scrolled to.
     expect(shiftOf()).toBe("translateX(62px)");
@@ -88,7 +89,7 @@ describe("usePanelClamp", () => {
    * that does not subtract what it already moved compounds — here it would answer 254 and then 508.
    */
   it("re-measures from the un-shifted position rather than compounding", () => {
-    rect = { left: -242, right: 98, width: 340, top: 0 };
+    rect = { left: -242, right: 98, width: 340, top: 0, height: 277 };
     render(<Panel open />);
     expect(shiftOf()).toBe("translateX(254px)");
 
@@ -99,22 +100,25 @@ describe("usePanelClamp", () => {
   });
 
   it("follows an anchor that moves while the panel is open", () => {
-    rect = { left: -242, right: 98, width: 340, top: 0 };
+    rect = { left: -242, right: 98, width: 340, top: 0, height: 277 };
     render(<Panel open />);
     expect(shiftOf()).toBe("translateX(254px)");
 
     // The count badge appears and the button's right edge goes 98 -> 120
-    rect = { left: -220, right: 120, width: 340, top: 0 };
+    rect = { left: -220, right: 120, width: 340, top: 0, height: 277 };
     act(() => {
       window.dispatchEvent(new Event("resize"));
     });
     expect(shiftOf()).toBe("translateX(232px)");
   });
 
+  // A rect of all zeros, the way an unpainted element reports one — not a 277-tall box that
+  // happens to be zero wide
   it("does not shift a panel it cannot measure", () => {
-    rect = { left: 0, right: 0, width: 0, top: 0 };
+    rect = { left: 0, right: 0, width: 0, top: 0, height: 0 };
     render(<Panel open />);
     expect(shiftOf()).toBe("");
+    expect(maxHeightOf()).toBe("");
   });
 
   /**
@@ -122,7 +126,7 @@ describe("usePanelClamp", () => {
    * panel 40px past the fold at 812x375 with nothing to scroll, so the last one was unreachable.
    */
   it("bounds the panel to the room below its anchor, and lets it scroll", () => {
-    rect = { left: 12, right: 352, width: 340, top: 138 };
+    rect = { left: 12, right: 352, width: 340, top: 138, height: 277 };
     render(<Panel open />);
 
     expect(maxHeightOf()).toBe("650px");
@@ -134,11 +138,11 @@ describe("usePanelClamp", () => {
 
   // The toolbar is in normal flow below lg, so the room below it changes as the board scrolls
   it("re-measures when the page scrolls under an open panel", async () => {
-    rect = { left: 12, right: 352, width: 340, top: 138 };
+    rect = { left: 12, right: 352, width: 340, top: 138, height: 277 };
     render(<Panel open />);
     expect(maxHeightOf()).toBe("650px");
 
-    rect = { left: 12, right: 352, width: 340, top: 500 };
+    rect = { left: 12, right: 352, width: 340, top: 500, height: 277 };
     // Non-bubbling on purpose: a scroll does not bubble from the element that owns it, so a
     // listener that is not capturing never sees this at all
     await act(async () => {
@@ -151,7 +155,7 @@ describe("usePanelClamp", () => {
   });
 
   it("measures once for a burst of scroll events, not once each", async () => {
-    rect = { left: 12, right: 352, width: 340, top: 138 };
+    rect = { left: 12, right: 352, width: 340, top: 138, height: 277 };
     render(<Panel open />);
     const measured = vi.spyOn(Element.prototype, "getBoundingClientRect");
 
@@ -167,7 +171,7 @@ describe("usePanelClamp", () => {
   });
 
   it("measures the room from the anchor, not from a fraction of the viewport", () => {
-    rect = { left: 12, right: 352, width: 340, top: 600 };
+    rect = { left: 12, right: 352, width: 340, top: 600, height: 277 };
     render(<Panel open />);
 
     expect(maxHeightOf()).toBe("188px");
@@ -176,7 +180,7 @@ describe("usePanelClamp", () => {
   // A toolbar scrolled above the top of its scroller reports a negative top, and the room below
   // it then computes as taller than the screen — a bound that no longer bounds anything
   it("never offers more height than the screen has", () => {
-    rect = { left: 12, right: 352, width: 340, top: -200 };
+    rect = { left: 12, right: 352, width: 340, top: -200, height: 277 };
     render(<Panel open />);
 
     expect(maxHeightOf()).toBe("788px");
@@ -189,7 +193,7 @@ describe("usePanelClamp", () => {
    * silently disabling the left-edge clamp for every panel on a phone in landscape.
    */
   it("never offers a negative height to a panel below the fold", () => {
-    rect = { left: -242, right: 98, width: 340, top: 900 };
+    rect = { left: -242, right: 98, width: 340, top: 900, height: 277 };
     render(<Panel open />);
 
     expect(shiftOf()).toBe("translateX(254px)");

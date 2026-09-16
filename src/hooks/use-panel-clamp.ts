@@ -53,7 +53,7 @@ const RING_ROOM = 5;
  */
 export function usePanelClamp(open: boolean): {
   ref: RefObject<HTMLDivElement | null>;
-  style: CSSProperties | undefined;
+  style: CSSProperties;
 } {
   const ref = useRef<HTMLDivElement>(null);
   const applied = useRef(0);
