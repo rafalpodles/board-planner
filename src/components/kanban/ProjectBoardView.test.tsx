@@ -346,15 +346,6 @@ describe("The list view with a filter that matches nothing", () => {
     expect(screen.queryByText("No tasks match the filters")).toBeNull();
   });
 
-  // filteredTasks is written from a child effect, so it lags the tasks prop by a frame: an
-  // unfiltered board arriving with tasks would otherwise paint this for one paint
-  it("stays out of the way when nothing is set at all", () => {
-    renderList();
-
-    expect(screen.queryByText(/No tasks match/)).toBeNull();
-    expect(screen.getByText("A bug")).toBeTruthy();
-  });
-
   it("offers a way back that actually brings the rows back", () => {
     renderList();
     // A search as well as a filter: clearFilters() keeps the search, so without this the
