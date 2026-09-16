@@ -11,6 +11,7 @@ import { usePanelClamp } from "./use-panel-clamp";
  * the next panel to use this hook may be anchored the other way.
  */
 let rect = { left: 0, right: 0, width: 0, top: 0, height: 0 };
+let scrollerBottom = 800;
 
 function Panel({ open }: { open: boolean }) {
   const panel = usePanelClamp(open);
@@ -20,6 +21,7 @@ function Panel({ open }: { open: boolean }) {
 beforeEach(() => {
   // Each case renders its own panel; without this they accumulate in one document
   cleanup();
+  scrollerBottom = 800;
   Object.defineProperty(window, "innerWidth", { value: 400, configurable: true, writable: true });
   Object.defineProperty(window, "innerHeight", { value: 800, configurable: true, writable: true });
   vi.stubGlobal(
@@ -33,7 +35,7 @@ beforeEach(() => {
   // part of what the next read sees, which is exactly the compounding the hook has to undo.
   Element.prototype.getBoundingClientRect = function () {
     if ((this as HTMLElement).dataset.testid === "scroller") {
-      const box = { x: 260, y: 0, left: 260, right: 400, top: 0, bottom: 800, width: 140, height: 800 };
+      const box = { x: 260, y: 0, left: 260, right: 400, top: 0, bottom: scrollerBottom, width: 140, height: scrollerBottom };
       return { ...box, toJSON: () => box } as DOMRect;
     }
     const shift = parseFloat(/translateX\((-?[\d.]+)px\)/.exec((this as HTMLElement).style.transform ?? "")?.[1] ?? "0");
@@ -192,6 +194,19 @@ describe("usePanelClamp", () => {
     expect(shiftOf()).toBe("translateX(84px)");
   });
 
+  // From lg up the board wrapper clips 24px above the screen's bottom, below main's padding
+  it("bounds the height by the clipper's bottom, not the screen's", () => {
+    scrollerBottom = 776;
+    rect = { left: 272, right: 400, width: 128, top: 138, height: 277 };
+    render(
+      <div data-testid="scroller" style={{ overflowY: "hidden" }}>
+        <Panel open />
+      </div>
+    );
+
+    expect(maxHeightOf()).toBe("626px");
+  });
+
   // BP-636: every scrollbar in the app is hidden, so nothing else says a bounded panel continues
   describe("the fade that says there is more", () => {
     let scroll = { height: 0, top: 0, client: 0 };
@@ -223,6 +238,19 @@ describe("usePanelClamp", () => {
         screen.getByTestId("panel").dispatchEvent(new Event("scroll", { bubbles: false }));
         await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
       });
+
+      expect(maskOf()).toBe("");
+    });
+
+    // A chip removed unwraps a row: nothing the listeners watch changes, but the overflow does
+    it("re-reads the fade when the panel's own content changes", () => {
+      scroll = { height: 717, top: 0, client: 171 };
+      rect = { left: 12, right: 352, width: 340, top: 600, height: 171 };
+      const { rerender } = render(<Panel open />);
+      expect(maskOf()).toContain("transparent");
+
+      scroll = { height: 171, top: 0, client: 171 };
+      rerender(<Panel open />);
 
       expect(maskOf()).toBe("");
     });

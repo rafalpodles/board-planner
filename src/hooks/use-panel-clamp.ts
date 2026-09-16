@@ -16,6 +16,34 @@ const GUTTER = 12;
 // Matches .scroll-ring-room: a 2px outline at 2px offset, plus a pixel for rounding
 const RING_ROOM = 5;
 
+const FADE = "linear-gradient(to bottom, #000 calc(100% - 28px), transparent)";
+
+const CLIPS = new Set(["auto", "scroll", "hidden", "clip"]);
+
+function hasMoreBelow(panel: HTMLElement): boolean {
+  return panel.scrollHeight - panel.scrollTop - panel.clientHeight > 1;
+}
+
+type Bounds = { left: number; right: number; bottom: number };
+
+// The panel is clipped by its nearest clipping ancestor, not only by the screen: <main> scrolls
+// beside the sidebar, and the board wrappers clip above main's bottom padding from lg up
+function clippingBounds(panel: HTMLElement): Bounds {
+  const screen = { left: 0, right: window.innerWidth, bottom: window.innerHeight };
+  for (let node = panel.parentElement; node && node !== document.body; node = node.parentElement) {
+    const style = getComputedStyle(node);
+    // Either axis: auto/scroll/hidden on one axis force the other off visible
+    if (!CLIPS.has(style.overflowX) && !CLIPS.has(style.overflowY)) continue;
+    const rect = node.getBoundingClientRect();
+    return {
+      left: Math.max(rect.left, screen.left),
+      right: Math.min(rect.right, screen.right),
+      bottom: Math.min(rect.bottom, screen.bottom),
+    };
+  }
+  return screen;
+}
+
 /**
  * Keeps an absolutely-positioned popover on the screen.
  *
@@ -45,23 +73,6 @@ const RING_ROOM = 5;
  * that again compounds: each pass would move the panel by the amount the last pass had already
  * moved it.
  */
-// The panel is clipped by its nearest scrolling ancestor, not only by the screen: the app's <main>
-// scrolls, so beside a sidebar a panel can be on screen and still cut off at main's edge
-const FADE = "linear-gradient(to bottom, #000 calc(100% - 28px), transparent)";
-
-const CLIPS = new Set(["auto", "scroll", "hidden", "clip"]);
-
-function clippingBounds(panel: HTMLElement): { left: number; right: number } {
-  for (let node = panel.parentElement; node && node !== document.body; node = node.parentElement) {
-    const style = getComputedStyle(node);
-    // Either axis: a non-visible overflow on one forces the other off visible too
-    if (!CLIPS.has(style.overflowX) && !CLIPS.has(style.overflowY)) continue;
-    const rect = node.getBoundingClientRect();
-    return { left: Math.max(rect.left, 0), right: Math.min(rect.right, window.innerWidth) };
-  }
-  return { left: 0, right: window.innerWidth };
-}
-
 export function usePanelClamp(open: boolean): {
   ref: RefObject<HTMLDivElement | null>;
   style: CSSProperties;
@@ -88,9 +99,9 @@ export function usePanelClamp(open: boolean): {
     // to what runs off the right while nothing reaches what runs off the left.
     applied.current = short > 0 ? short : past > 0 ? -past : 0;
     setShiftX(applied.current);
-    const room = window.innerHeight - box.top - GUTTER;
-    setMaxHeight(Math.min(Math.max(room, 0), window.innerHeight - GUTTER));
-    setMoreBelow(panel!.scrollHeight - panel!.scrollTop - panel!.clientHeight > 1);
+    const room = bounds.bottom - box.top - GUTTER;
+    setMaxHeight(Math.min(Math.max(room, 0), bounds.bottom - GUTTER));
+    setMoreBelow(hasMoreBelow(panel!));
   }, []);
 
   useLayoutEffect(() => {
@@ -108,6 +119,11 @@ export function usePanelClamp(open: boolean): {
   useLayoutEffect(() => {
     if (open && maxHeight) measure();
   }, [open, maxHeight, measure]);
+
+  // The panel's content changes without anything the listeners watch — a chip removed unwraps a row
+  useLayoutEffect(() => {
+    if (open && ref.current) setMoreBelow(hasMoreBelow(ref.current));
+  });
 
   useEffect(() => {
     if (!open) return;
