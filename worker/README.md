@@ -123,6 +123,10 @@ later run reuses that file; the worker registers again only if the file is missi
 rejects its stored credential with 401. A run that reuses a stored identity, rather than
 registering fresh, reads its current policy and assignments back from `GET /api/workers/:id`.
 
+When the owner's password changes — by themselves, by an admin, or through a reset — every machine
+they enrolled loses its credential along with their sessions and tokens. The worker then gets 401
+and needs a fresh enrolment token to register again.
+
 Registration settles which projects are offered, but not a filesystem. The repository behind each
 offered project must still be approved on this machine, by listing its checkout in
 `<CP_STATE_DIR>/repos.json`. A worker with no entry for a project leaves that one unbound and idle,
