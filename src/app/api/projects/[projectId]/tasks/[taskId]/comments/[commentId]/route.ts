@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { COMMENT_BODY_MAX_LENGTH, COMMENT_BODY_RULE } from "@/lib/identifiers";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { Comment } from "@/models/comment";
@@ -29,6 +30,10 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
       { error: "Comment body is required" },
       { status: 400 }
     );
+  }
+
+  if (body.trim().length > COMMENT_BODY_MAX_LENGTH) {
+    return NextResponse.json({ error: COMMENT_BODY_RULE }, { status: 400 });
   }
 
   comment.body = body.trim();

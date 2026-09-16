@@ -12,14 +12,18 @@ const taskSchema = new Schema<ITask>(
       type: Number,
       required: true,
     },
+    // Backstops well above the service's caps (identifiers.ts): a writer that forgets a cap is still
+    // bounded, and a task stored before the caps existed still saves
     title: {
       type: String,
       required: true,
       trim: true,
+      maxlength: 2_000,
     },
     description: {
       type: String,
       default: "",
+      maxlength: 500_000,
     },
     priority: {
       type: String,
@@ -60,10 +64,14 @@ const taskSchema = new Schema<ITask>(
     },
     checklist: {
       type: [{
-        text: { type: String, required: true },
+        text: { type: String, required: true, maxlength: 5_000 },
         done: { type: Boolean, default: false },
       }],
       default: [],
+      validate: {
+        validator: (items: unknown[]) => items.length <= 2_000,
+        message: "A task can hold at most 2000 acceptance criteria",
+      },
     },
     linkedPRs: {
       type: [{

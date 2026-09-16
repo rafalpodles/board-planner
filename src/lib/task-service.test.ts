@@ -3,7 +3,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // by a hand-rolled reading of them
 import sift from "sift";
 import { Types } from "mongoose";
-import { CRITERION_TEXT_MAX_LENGTH, TASK_TITLE_MAX_LENGTH } from "@/lib/identifiers";
+import {
+  COMMENT_BODY_MAX_LENGTH,
+  CRITERION_TEXT_MAX_LENGTH,
+  MAX_CHECKLIST_ITEMS,
+  TASK_DESCRIPTION_MAX_LENGTH,
+  TASK_TITLE_MAX_LENGTH,
+} from "@/lib/identifiers";
 import { BoardCannotClaim } from "@/lib/claim-refusal";
 
 // MongoDB's $cond treats only false, null, 0 and missing as false. An **empty string is true** —
@@ -4330,6 +4336,16 @@ describe("a comment mentioning a watcher", () => {
     expect(byType.mentioned.recipientIds).toEqual([MENTIONED_WATCHER]);
   });
 
+  // BP-323
+  it("refuses a comment past the length cap and stores nothing", async () => {
+    setup([], [WATCHER]);
+
+    const result = await addComment("p1", "t1", "c".repeat(COMMENT_BODY_MAX_LENGTH + 1), { id: "actor", username: "owner" });
+
+    expect(result).toMatchObject({ ok: false, status: 400 });
+    expect(commentCreate).not.toHaveBeenCalled();
+  });
+
   it("gives the mail the column's label and a link, not the raw status id", async () => {
     setup([], [WATCHER]);
     await addComment("p1", "t1", "no mentions here", { id: "actor", username: "owner" });
@@ -4621,6 +4637,8 @@ describe("an acceptance criterion neither writer will store", () => {
     ["one of zero-width spaces", [{ _id: "c1", text: codePoints(0x200b, 0x200b), done: false }]],
     ["one carrying a bidi override", [{ text: `Approve${codePoints(0x202e)}the payout`, done: false }]],
     ["one past the length cap", [{ text: "a".repeat(CRITERION_TEXT_MAX_LENGTH + 1), done: false }]],
+    // BP-323
+    ["one criterion past the count cap", Array.from({ length: MAX_CHECKLIST_ITEMS + 1 }, (_, i) => ({ text: `c${i}` }))],
   ])("%s", (_label, checklist) => {
     it("is refused by updateTask, and nothing is written", async () => {
       const result = await updateTask("p1", "t1", { checklist } as never, WHO);
@@ -4646,6 +4664,27 @@ describe("an acceptance criterion neither writer will store", () => {
    * fixture was the shape of the bug.
    */
   const A_ROW_ID = "507f1f77bcf86cd799439011";
+
+  it("accepts exactly as many criteria as the cap allows", async () => {
+    const checklist = Array.from({ length: MAX_CHECKLIST_ITEMS }, (_, i) => ({ text: `c${i}` }));
+
+    const result = await updateTask("p1", "t1", { checklist } as never, WHO);
+
+    expect(result.ok).toBe(true);
+  });
+
+  // BP-323: every board load returns tasks whole
+  it("refuses a description past the cap, on update and before create spends a number", async () => {
+    const description = "d".repeat(TASK_DESCRIPTION_MAX_LENGTH + 1);
+
+    expect(await updateTask("p1", "t1", { description } as never, WHO)).toMatchObject({ ok: false, status: 400 });
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+    expect(await createTask("p1", WHO, { title: "New", description } as never)).toMatchObject({ ok: false, status: 400 });
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
+
+    const atCap = await updateTask("p1", "t1", { description: "d".repeat(TASK_DESCRIPTION_MAX_LENGTH) } as never, WHO);
+    expect(atCap.ok).toBe(true);
+  });
 
   it("stores ordinary criteria, trimmed, keeping the row's own id and done flag", async () => {
     const result = await updateTask(
