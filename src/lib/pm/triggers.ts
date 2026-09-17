@@ -12,6 +12,7 @@ import { acquireTurnLock, releaseTurnLock } from "./turn-lock";
 import { NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS, buildNeedsHumanReviewPrompt } from "./autonomy";
 import { getProjectColumns } from "@/lib/columns";
 import { isPmRunnable } from "./availability";
+import { isPmAvailable } from "./config";
 
 const MAX_TRIGGER_ATTEMPTS = 3;
 
@@ -116,6 +117,12 @@ export async function runPmTrigger(trigger: IPmTrigger): Promise<PmTriggerOutcom
   const project = await Project.findById(projectId, "pm").lean();
   if (!isPmRunnable(project?.pm) || !project?.pm?.autonomy?.handleNeedsHumanReview) {
     await settleTrigger(trigger, "done");
+    return "ran";
+  }
+  // Settled, not retried: without a model every attempt is a turn from the cap spent posting the
+  // same warning into every thread
+  if (!isPmAvailable()) {
+    await settleTrigger(trigger, "failed", "The PM agent is not configured on this instance");
     return "ran";
   }
 
