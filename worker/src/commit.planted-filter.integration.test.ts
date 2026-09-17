@@ -175,6 +175,35 @@ describe("commitAll against a planted filter", () => {
       expect(git(work, "rev-parse", "HEAD").trim()).toBe(sha);
     });
 
+    /**
+     * The other half of what that file could decide, and the one that costs an operator something:
+     * `core.excludesFile` hides a path from `git status` and from `git add --all` alike. Measured —
+     * a file it names is invisible to both, so the worktree reads clean, the change never reaches a
+     * diff or a gate, and `npm test` runs it all the same. With the global config out of the
+     * picture the file is ordinary work again: staged, committed, reviewable.
+     *
+     * What it costs is the same sentence read the other way: a `.DS_Store` an operator ignores
+     * globally is now committed by the worker, because the repository's own `.gitignore` is the
+     * only ignore list left. Stated in worker/README.md rather than worked around — an ignore list
+     * that lives outside the repository cannot decide what a machine commits into it.
+     */
+    it("stages a file the operator's global excludes would have hidden", async () => {
+      writeFileSync(join(home, "ignore"), "hidden.ts\n");
+      writeFileSync(join(home, ".gitconfig"), `[core]\n\texcludesFile = ${join(home, "ignore")}\n`);
+      writeFileSync(join(work, "hidden.ts"), "what the agent wrote\n");
+
+      // The premise: plain git, reading that file, says the tree is clean apart from the edit
+      const seen = execFileSync("git", ["status", "--porcelain"], {
+        cwd: work,
+        env: { ...process.env, HOME: home },
+      }).toString();
+      expect(seen).not.toContain("hidden.ts");
+
+      await commitAll(createRunner(), work, "BP-516: staged work");
+
+      expect(git(work, "show", "--pretty=format:", "--name-only", "HEAD")).toContain("hidden.ts");
+    });
+
     // And what it committed is the file as the agent left it. A `clean` filter rewrites content on
     // the way into the index, so "the program did not run" and "the content is what was written"
     // are two claims, and the second is the one a reviewer of the pull request depends on.
