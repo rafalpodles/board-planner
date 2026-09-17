@@ -223,8 +223,10 @@ and `SIGINT` both finish the task in flight before the loop exits.
   The scan reads the repository's own scopes, so the calls that make the checkout also drop
   `~/.gitconfig` — without that a filter defined there ran on a checkout with **nothing planted in
   the repository at all**, and no scan of the repository could ever have seen it. Measured. Since
-  BP-516 that is true of every git call this worker makes, not only the ones that create a
-  worktree, which is what lets the scan and the call it guards read the same config.
+  BP-516 that is true of every git call this worker makes but one — the read of the commit identity
+  before the agent starts, which is the whole of what that file is still asked for — and not only of
+  the calls that create a worktree, which is what lets the scan and the call it guards read the same
+  config.
 
   The same scan runs at **bind time**, against the shared checkout, before anything is claimed
   (BP-517). It used to be a narrower list of its own: `--local --list`, which cannot see a
@@ -376,15 +378,31 @@ and `SIGINT` both finish the task in flight before the loop exits.
 
   Since BP-516 that cost is the same on the local calls, and two lines of it are worth naming.
 
-  **Git-LFS is out.** `git lfs install` writes `filter.lfs.clean` into a checkout's config, which is
-  a program git runs, so `bindRepository` has always refused such a checkout; with the global file
-  gone, an LFS setup that lives only in `~/.gitconfig` no longer applies either, and the worker
-  would commit working-tree bytes over a pointer rather than failing loudly. Neither is a repository
-  this worker can serve.
+  **Git-LFS is out, both ways round.** `git lfs install --local` writes `filter.lfs.clean` into the
+  checkout's config, which is a program git runs, so `bindRepository` refuses that checkout and names
+  the key. `git lfs install` on its own — the ordinary setup — writes the same keys into
+  `~/.gitconfig`, which nothing refuses and which the worker no longer reads: the checkout produces
+  pointer text and the commit puts working-tree bytes where a pointer belongs, quietly. Neither is a
+  repository this worker can serve.
 
   **The ignore list is the repository's own.** `core.excludesFile` no longer decides what gets
   staged — and neither does `~/.config/git/ignore`, which git reads with no config file at all and
-  which `SAFE_CONFIG` pins to `/dev/null` for that reason. A `.DS_Store` an operator ignores
+  which `SAFE_CONFIG` pins to `/dev/null` for that reason. What that stages is wider than a
+  `.DS_Store`: the gates run `npm ci` and the build inside the worktree, so a `node_modules` or a
+  `dist` the repository's own `.gitignore` does not name is committed by the next edit step, where
+  the diff-size gates are what make it loud. One list is left and it is the agent's own —
+  `.git/info/exclude`, untracked and reaching no diff, which is BP-640.
+
+  **Nothing this worker commits is signed.** `commit.gpgSign=false` and `push.gpgSign=false` ride on
+  every call, because signing runs a program the checkout names (`gpg.program`, or ssh's key
+  command) and that is the sink the scan exists to guard. A repository whose branch protection
+  requires signed commits will reject what a worker pushes.
+
+  **An ownership refusal reads as an unreadable config.** `GIT_CONFIG_NOSYSTEM` and the null global
+  file take `safe.directory` with them, so a checkout whose `.git` belongs to another uid answers
+  `fatal: detected dubious ownership`, which this reports as "could not read git config in <path>".
+  `bindRepository`'s own uid check catches the ordinary case first; the message is worth knowing for
+  the one it does not. A `.DS_Store` an operator ignores
   globally is committed by the worker, because the repository's own `.gitignore` is the only ignore
   list left — and that is the direction worth paying for. Measured: a path named in that file is
   invisible to `git status --porcelain` and to `git add --all` alike, so a file written into the
@@ -393,12 +411,18 @@ and `SIGINT` both finish the task in flight before the loop exits.
   commits into it.
   The worker's own commits are made in the same environment since BP-516, and the one thing they
   genuinely need from that file — who the commits are by — is asked of git itself before the agent
-  runs (`git var GIT_AUTHOR_IDENT`, in the worktree, so a per-repository identity still holds) and
-  carried in `GIT_AUTHOR_*`/`GIT_COMMITTER_*`. A machine git will not name one for is refused at
-  `workspace.create`: released with the attempt refunded, the loop told to stop claiming, and git's
-  own sentence as the reason — either the two commands to run or the config file it could not
-  parse. Asked before the run rather than at the commit, because the answer is the same for every
-  task and finding it out at the commit costs the whole run.
+  runs (`git var GIT_AUTHOR_IDENT`, in the shared checkout, which is the local config a linked
+  worktree reads) and carried in `GIT_AUTHOR_*`/`GIT_COMMITTER_*`. Asked before the fetch and before
+  `worktree add`, because the answer is the same for every task, finding it out at the commit costs
+  the whole run, and raising it later left an orphan worktree behind on every faulted claim.
+
+  Two faults, two settlements. **The machine** names nobody, or its config file will not parse: the
+  run is released with the attempt refunded and the loop stops claiming for the rest of the pass,
+  carrying git's own whole answer — which is where the two commands to run are. **The checkout**
+  leaves no identity while the machine is fine — a `user.name = ""` in the shared `.git/config` does
+  it, well-formed and carrying no program, so no scan refuses it: the attempt is charged and the
+  task escalates, and no other project on the machine is touched. Undistinguished, the least capable
+  key an agent can plant cost a whole worker's pass.
 
   What that identity is worth is worth stating too: an earlier run's agent can write `user.email`
   into that file or into the shared `.git/config`, and neither is a key git *runs*, so no scan
