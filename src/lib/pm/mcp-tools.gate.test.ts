@@ -78,6 +78,15 @@ describe("discoverMcpTools — the gate", () => {
     expect(runtime.tools.get("mcp_acme_list_tickets")!.write).toBe(false);
   });
 
+  // The server's own name is what lets `acme-search` read as a search, so it has to be handed over
+  it("judges a tool named after its server by what follows the name", async () => {
+    serving([{ name: "acme-search" }]);
+
+    const runtime = await discoverMcpTools("p1", [server()]);
+
+    expect(runtime.tools.get("mcp_acme_acme-search")?.write).toBe(false);
+  });
+
   it("exposes the write tool once writes are on, marked as a write", async () => {
     const runtime = await discoverMcpTools("p1", [server({ allowWrites: true })]);
 

@@ -45,7 +45,11 @@ vi.mock("@/models/pmMessage", () => ({
       return doc;
     }),
     find: () => ({
-      sort: () => ({ limit: () => ({ populate: () => ({ lean: () => historyDocsMock() }) }) }),
+      // Honours the limit, as the database would: a double that ignored it let the query go back to
+      // fetching only what it replays, and the test for "older messages exist" stayed green
+      sort: () => ({
+        limit: (n: number) => ({ populate: () => ({ lean: async () => (await historyDocsMock()).slice(0, n) }) }),
+      }),
     }),
   },
 }));

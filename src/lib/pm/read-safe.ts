@@ -33,8 +33,15 @@ const WRITE_VERBS = new Set([
   "add", "save", "publish", "cancel", "disable", "enable", "upsert", "submit",
   // A read verb at the END reads `mark_all_notifications_read` as a read unless these are known
   "mark", "unpublish", "dismiss", "resolve", "reopen", "lock", "unlock", "star", "unstar",
-  "subscribe", "unsubscribe",
+  "subscribe", "unsubscribe", "toggle", "flag", "ack", "acknowledge", "modify", "put",
 ]);
+
+/**
+ * `query` reads only when it names what it queries: `query_prometheus`, `notion-query-data-sources`.
+ * Alone, or followed by a query language, it runs whatever it is sent — `mysql_query` on a server
+ * named `mysql` is arbitrary SQL, and stripping the server's name must not make it a read (BP-476).
+ */
+const QUERY_LANGUAGES = new Set(["sql", "graphql", "cypher", "sparql", "gql", "promql", "kql"]);
 
 /** `getWorkflowRun` and `get_workflow-run` are the same name to anyone reading it */
 function tokensOf(name: string): string[] {
@@ -58,13 +65,17 @@ function tokensOf(name: string): string[] {
  * the tokens of the server's name are taken off the front before the read verb is looked for.
  */
 export function isReadSafe(tool: McpToolDef, serverName = ""): boolean {
-  let tokens = tokensOf(tool.name);
+  const allTokens = tokensOf(tool.name);
+  let tokens = allTokens;
   const prefix = tokensOf(serverName);
   if (prefix.length > 0 && prefix.length < tokens.length && prefix.every((t, i) => tokens[i] === t)) {
     tokens = tokens.slice(prefix.length);
   }
-  const readShaped =
-    tokens.length > 0 && (READ_VERBS.has(tokens[0]) || tokens[tokens.length - 1] === TRAILING_READ_VERB);
-  const nameLooksReadOnly = readShaped && !tokens.some((t) => WRITE_VERBS.has(t));
+  const first = tokens[0];
+  const leadingRead =
+    READ_VERBS.has(first) && (first !== "query" || (tokens.length > 1 && !QUERY_LANGUAGES.has(tokens[1])));
+  const readShaped = tokens.length > 0 && (leadingRead || tokens[tokens.length - 1] === TRAILING_READ_VERB);
+  // Every token, the server's name included: a server named `delete` must not lend its tools a pass
+  const nameLooksReadOnly = readShaped && !allTokens.some((t) => WRITE_VERBS.has(t));
   return nameLooksReadOnly && tool.annotations?.readOnlyHint !== false;
 }

@@ -127,8 +127,35 @@ describe("isReadSafe", () => {
     }
   });
 
+  it("does not take a bare query, or a query in a query language, as a read — even past the server's name", () => {
+    for (const [name, server] of [
+      ["mysql_query", "mysql"],
+      ["postgres_query", "postgres"],
+      ["query", ""],
+      ["query-graphql", ""],
+      ["run_query_sql", ""],
+    ]) {
+      expect(isReadSafe(tool(name), server), name).toBe(false);
+    }
+    expect(isReadSafe(tool("query_prometheus"))).toBe(true);
+    expect(isReadSafe(tool("notion-query-data-sources"), "notion")).toBe(true);
+  });
+
+  it("does not let a server named after a write verb lend its tools a pass", () => {
+    expect(isReadSafe(tool("delete_list_items"), "delete")).toBe(false);
+    expect(isReadSafe(tool("mark_read"), "mark")).toBe(false);
+  });
+
   it("does not take a read verb at the end as a read unless it is `read`, or a mutation marks it", () => {
-    for (const name of ["export_to_search", "rebuild_list", "mark_all_notifications_read", "mark_read"]) {
+    for (const name of [
+      "export_to_search",
+      "rebuild_list",
+      "mark_all_notifications_read",
+      "mark_read",
+      "toggle_read",
+      "flag_as_read",
+      "acknowledge_read",
+    ]) {
       expect(isReadSafe(tool(name)), name).toBe(false);
     }
   });
