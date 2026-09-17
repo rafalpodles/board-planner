@@ -393,6 +393,13 @@ describe("the base lookup runs with the environment production gives it", () => 
   it("does not execute a program named by the remote URL either", async () => {
     const clean = join(dir, "clean");
     execFileSync("git", ["clone", "--quiet", remoteUrl, clean], { stdio: "pipe" });
+    // A checkout a worker serves has an identity, and since BP-516 `create` resolves one before it
+    // looks up the base — so without this the run is refused for having nobody to commit as, and
+    // the transport under test is never reached. It passed here and failed on CI, whose runners
+    // configure no global identity at all; the fixture above sets the same two keys for the same
+    // reason.
+    execFileSync("git", ["config", "user.email", "worker@example.com"], { cwd: clean, stdio: "pipe" });
+    execFileSync("git", ["config", "user.name", "worker"], { cwd: clean, stdio: "pipe" });
     const program = join(dir, "payload.sh");
 
     const workspace = createWorkspace(
