@@ -72,8 +72,8 @@ function marked(message: OrChatMessage): OrChatMessage {
  * next turn needs the replay window still to be growing AND the person to come back within five
  * minutes; treat it as a bonus, never as the reason for a mark.
  *
- * The replay window is the other bound: past `HISTORY_LIMIT` it slides, so the next turn's request
- * diverges one message in, and `MAX_REPLAYED_IMAGES` rotates pictures out the same way without
+ * The replay window is the other bound: past `HISTORY_LIMIT` messages or `HISTORY_CHAR_BUDGET`
+ * characters it slides, so the next turn's request diverges near its start, and `MAX_REPLAYED_IMAGES` rotates pictures out the same way without
  * changing the row count at all.
  *
  * **The system prompt is the steadier of the two marks, not a constant.** It survives the window

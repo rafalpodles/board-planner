@@ -55,6 +55,8 @@ vi.mock("./turn-lock", () => ({
   releaseTurnLock: vi.fn(),
 }));
 vi.mock("./availability", () => ({ isPmRunnable: () => true }));
+const isPmAvailable = vi.fn(() => true);
+vi.mock("./config", () => ({ isPmAvailable: () => isPmAvailable() }));
 
 const { runPmTrigger } = await import("./triggers");
 const { NEEDS_HUMAN_REVIEW_DISALLOWED_TOOLS } = await import("./autonomy");
@@ -77,6 +79,18 @@ beforeEach(() => {
 // BP-301: this turn is unattended and its prompt is built from board text, so it must
 // run with the same withholding the scheduled review uses.
 describe("runPmTrigger", () => {
+  // BP-476 review: retried three times, each attempt a turn from the cap and a warning in every thread
+  it("settles the trigger as failed without a turn when no model is configured", async () => {
+    isPmAvailable.mockReturnValueOnce(false);
+
+    await runPmTrigger(trigger);
+
+    expect(runPmTurn).not.toHaveBeenCalled();
+    expect(findByIdAndUpdate).toHaveBeenCalledWith("t1", {
+      $set: { state: "failed", lastError: "The PM agent is not configured on this instance", active: false },
+    });
+  });
+
   it("withholds assign_task and change_status from the turn", async () => {
     await runPmTrigger(trigger);
 

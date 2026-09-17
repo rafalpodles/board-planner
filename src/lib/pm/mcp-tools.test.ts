@@ -48,6 +48,15 @@ describe("isReadSafe", () => {
       "find_and_merge_duplicates",
       "read_and_execute_script",
       "query_then_revoke_tokens",
+      // BP-476: verbs the list did not know, each passing as a read before
+      "get_or_add_label",
+      "find_and_save_draft",
+      "list_and_publish_posts",
+      "find_and_cancel_jobs",
+      "get_then_disable_rule",
+      "get_or_enable_feature",
+      "listAndUpsert",
+      "fetch_and_submit_form",
     ]) {
       expect(isReadSafe(tool(name, true)), name).toBe(false);
     }
@@ -72,6 +81,18 @@ describe("isReadSafe", () => {
       "list_workflow_runs",
       "get_run_status",
       "get_grant",
+      // Nouns as often as verbs, left off the list on purpose
+      "get_commit",
+      "list_commits",
+      "list_push_rules",
+      "get_import_status",
+      "list_deploy_keys",
+      "get_sync_status",
+      "list_restore_points",
+      "get_address",           // "add", token is "address"
+      "list_enabled_features", // "enable", token is "enabled"
+      "list_published_packages",
+      "get_saved_searches",
     ]) {
       expect(isReadSafe(tool(name)), name).toBe(true);
     }
@@ -82,6 +103,90 @@ describe("isReadSafe", () => {
   it("refuses a name that does not start as a read, whatever it contains", () => {
     for (const name of ["run_script", "grant_access", "do_the_thing", "trigger_deploy"]) {
       expect(isReadSafe(tool(name, true)), name).toBe(false);
+    }
+  });
+
+  // BP-476 review: real read tools the prefix rule refused, and near-misses it let through
+  it("accepts the official GitHub server's noun-first reads", () => {
+    for (const name of ["issue_read", "pull_request_read"]) {
+      expect(isReadSafe(tool(name)), name).toBe(true);
+    }
+  });
+
+  it("looks past the server's own name at the front of a tool's name", () => {
+    expect(isReadSafe(tool("notion-search"), "notion")).toBe(true);
+    expect(isReadSafe(tool("slack_list_channels"), "slack")).toBe(true);
+    // Only the server's own name: another word in front is not a prefix to skip
+    expect(isReadSafe(tool("notion-search"), "github")).toBe(false);
+    expect(isReadSafe(tool("notion-create-pages"), "notion")).toBe(false);
+  });
+
+  it("wants a read verb as a whole word, not the start of a longer one", () => {
+    for (const name of ["readjust_budget", "listen_for_webhooks", "getaway_plan"]) {
+      expect(isReadSafe(tool(name)), name).toBe(false);
+    }
+  });
+
+  it("does not take a bare query, or a query in a query language, as a read — even past the server's name", () => {
+    for (const [name, server] of [
+      ["mysql_query", "mysql"],
+      ["postgres_query", "postgres"],
+      ["query", ""],
+      ["query-graphql", ""],
+      ["run_query_sql", ""],
+    ]) {
+      expect(isReadSafe(tool(name), server), name).toBe(false);
+    }
+    for (const name of [
+      "queryGraphQL",
+      "QueryGraphQL",
+      "query_raw_sql",
+      "query_neo4j_cypher",
+      // A database named after its language runs that language too
+      "query_mysql",
+      "query_sqlite",
+      "query_mssql",
+      "query_postgresql",
+    ]) {
+      expect(isReadSafe(tool(name)), name).toBe(false);
+    }
+    // Languages that can only read stay reads: PostHog's HogQL generator returns a query string
+    for (const name of ["query_logql", "query_soql", "query_traceql"]) {
+      expect(isReadSafe(tool(name)), name).toBe(true);
+    }
+    expect(isReadSafe(tool("query-generate-hogql-from-question"), "posthog")).toBe(true);
+    // The connection's own name is part of what the tool runs
+    expect(isReadSafe(tool("sql_query_tables"), "sql")).toBe(false);
+    expect(isReadSafe(tool("query_prometheus"))).toBe(true);
+    expect(isReadSafe(tool("notion-query-data-sources"), "notion")).toBe(true);
+  });
+
+  // Nouns in feature-flag tools: refusing them would withhold LaunchDarkly's reads with writes off
+  it("reads a flag or a toggle, and refuses toggling or flagging something read", () => {
+    for (const name of ["get-flag", "get-flag-status-across-environments", "get_feature_toggle", "getFeatureFlag", "get_ack_deadline"]) {
+      expect(isReadSafe(tool(name)), name).toBe(true);
+    }
+    for (const name of ["toggle_read", "flag_as_read", "ack_read", "put_read"]) {
+      expect(isReadSafe(tool(name)), name).toBe(false);
+    }
+  });
+
+  it("does not let a server named after a write verb lend its tools a pass", () => {
+    expect(isReadSafe(tool("delete_list_items"), "delete")).toBe(false);
+    expect(isReadSafe(tool("mark_read"), "mark")).toBe(false);
+  });
+
+  it("does not take a read verb at the end as a read unless it is `read`, or a mutation marks it", () => {
+    for (const name of [
+      "export_to_search",
+      "rebuild_list",
+      "mark_all_notifications_read",
+      "mark_read",
+      "toggle_read",
+      "flag_as_read",
+      "acknowledge_read",
+    ]) {
+      expect(isReadSafe(tool(name)), name).toBe(false);
     }
   });
 });

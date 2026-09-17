@@ -134,7 +134,7 @@ export async function discoverMcpTools(projectId: string, servers: IPmMcpServer[
     const allowlist = new Set(server.toolAllowlist);
     for (const tool of tools) {
       if (allowlist.size > 0 && !allowlist.has(tool.name)) continue;
-      const readSafe = isReadSafe(tool);
+      const readSafe = isReadSafe(tool, server.name);
       if (!readSafe && !server.allowWrites) continue;
 
       const base = sanitizeName(`mcp_${server.name}_${tool.name}`).slice(0, 64);

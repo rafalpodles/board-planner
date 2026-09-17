@@ -45,7 +45,11 @@ vi.mock("@/models/pmMessage", () => ({
       return doc;
     }),
     find: () => ({
-      sort: () => ({ limit: () => ({ populate: () => ({ lean: () => historyDocsMock() }) }) }),
+      // Honours the limit, as the database would: a double that ignored it let the query go back to
+      // fetching only what it replays, and the test for "older messages exist" stayed green
+      sort: () => ({
+        limit: (n: number) => ({ populate: () => ({ lean: async () => (await historyDocsMock()).slice(0, n) }) }),
+      }),
     }),
   },
 }));
@@ -72,9 +76,9 @@ vi.mock("./mcp-tools", () => ({
 }));
 // A function, not a constant: what the cache breakpoint marks is the END of the replayed history,
 // so a mock that can only answer "no history" cannot tell the right boundary from the wrong one
-const replayHistoryMock = vi.fn(async () => [] as { role: string; content: string }[]);
+const replayHistoryMock = vi.fn(async (..._args: unknown[]) => [] as { role: string; content: string }[]);
 vi.mock("./history", () => ({
-  replayHistory: () => replayHistoryMock(),
+  replayHistory: (...args: unknown[]) => replayHistoryMock(...args),
   stripSpoofedLabels: (s: string) => s,
   HISTORY_AUTHOR_PREFIX: "",
 }));
@@ -277,6 +281,51 @@ describe("an unattended turn and a project's MCP server", () => {
     await turn([], false);
 
     expect(offered()).toEqual(expect.arrayContaining(["mcp_acme_create_ticket", "mcp_acme_list_tickets"]));
+  });
+
+  // BP-476: a step can carry many calls, and the cap is what bounds a turn's reach into a server
+  it("stops calling MCP tools once the turn has made its limit of calls", async () => {
+    const { callMcpTool } = await import("./mcp-tools");
+    vi.mocked(callMcpTool).mockResolvedValue({ result: "ok", isError: false });
+    chatCompletion
+      .mockResolvedValueOnce({
+        type: "tools" as const,
+        assistantMessage: { role: "assistant" as const, content: "", tool_calls: [] },
+        calls: Array.from({ length: 7 }, (_, i) => ({ id: `c${i}`, name: "mcp_acme_list_tickets", args: {} })),
+      })
+      .mockResolvedValueOnce({ type: "text", content: "done" });
+
+    await turn([], false);
+
+    expect(callMcpTool).toHaveBeenCalledTimes(5);
+    // Read from the last request only: every request re-sends the replies before it
+    const lastRequest = chatCompletion.mock.calls.at(-1)![0].messages as { role: string; content: string }[];
+    const refused = lastRequest.filter((m) => m.role === "tool" && m.content.includes("MCP call limit (5) reached"));
+    expect(refused).toHaveLength(2);
+  });
+
+  // A cap reset each step would allow MAX_STEPS times as many; a cap counting only successes would
+  // let a server that errors on purpose be called without end
+  it("counts calls across the whole turn, the failed ones included", async () => {
+    const { callMcpTool } = await import("./mcp-tools");
+    vi.mocked(callMcpTool).mockReset();
+    vi.mocked(callMcpTool)
+      .mockRejectedValueOnce(new Error("server down"))
+      .mockResolvedValueOnce({ result: "boom", isError: true })
+      .mockResolvedValue({ result: "ok", isError: false });
+    const step = (n: number, from: number) => ({
+      type: "tools" as const,
+      assistantMessage: { role: "assistant" as const, content: "", tool_calls: [] },
+      calls: Array.from({ length: n }, (_, i) => ({ id: `c${from + i}`, name: "mcp_acme_list_tickets", args: {} })),
+    });
+    chatCompletion
+      .mockResolvedValueOnce(step(3, 0))
+      .mockResolvedValueOnce(step(4, 3))
+      .mockResolvedValueOnce({ type: "text", content: "done" });
+
+    await turn([], false);
+
+    expect(callMcpTool).toHaveBeenCalledTimes(5);
   });
 
   it("refuses the withheld MCP tool at dispatch, not only in the list it offers", async () => {
@@ -580,5 +629,36 @@ describe("the prefix a turn asks to be cached", () => {
 
     expect(sent[0].sessionId).toBe(pmSessionId(PROJECT._id, "pm-user-id"));
     expect(sent[1].sessionId).toBe(sent[0].sessionId);
+  });
+});
+
+// BP-570 review: the query caps the thread, so the replay has to be told when it did
+describe("the history a turn replays", () => {
+  afterEach(() => historyDocsMock.mockImplementation(async () => []));
+
+  const docs = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ role: i % 2 ? "assistant" : "user", content: `m${n - 1 - i}` }));
+
+  it("tells the replay that older messages exist when the query returned more than it replays", async () => {
+    historyDocsMock.mockResolvedValue(docs(31));
+    chatCompletion.mockResolvedValue({ type: "text", content: "done" });
+
+    await turn([]);
+
+    const [history, , opts] = replayHistoryMock.mock.calls.at(-1)!;
+    expect(history).toHaveLength(30);
+    expect(opts).toEqual({ olderExist: true });
+    // Newest thirty, oldest first: the extra row fetched is the one dropped
+    expect((history as { content: string }[])[29].content).toBe("m30");
+    expect((history as { content: string }[])[0].content).toBe("m1");
+  });
+
+  it("says nothing of older messages when the whole thread was returned", async () => {
+    historyDocsMock.mockResolvedValue(docs(30));
+    chatCompletion.mockResolvedValue({ type: "text", content: "done" });
+
+    await turn([]);
+
+    expect(replayHistoryMock.mock.calls.at(-1)![2]).toEqual({ olderExist: false });
   });
 });

@@ -157,6 +157,19 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
    */
   const [transient, setTransient] = useState<Record<string, McpTransient>>({});
   const [newLinkLabel, setNewLinkLabel] = useState("");
+  const [reviewStarting, setReviewStarting] = useState(false);
+
+  async function runReviewNow() {
+    setReviewStarting(true);
+    try {
+      await api.post(`/api/projects/${projectId}/pm/review`, {});
+      toast("Review started — its report will appear in the PM chat", "success");
+    } catch (err) {
+      toast(err instanceof Error && err.message ? err.message : "The review could not start", "error");
+    } finally {
+      setReviewStarting(false);
+    }
+  }
   const [newLinkUrl, setNewLinkUrl] = useState("");
 
   const servers = draft.value.mcpServers;
@@ -736,6 +749,14 @@ export function PmAgentSection({ projectId, project, replaceProject, isAdmin }: 
             </p>
           </div>
         )}
+        <div className="flex flex-wrap items-center gap-3">
+          <Button variant="secondary" onClick={() => void runReviewNow()} disabled={reviewStarting}>
+            {reviewStarting ? "Starting…" : "Run a review now"}
+          </Button>
+          <p className="text-xs text-text-muted">
+            One review of the board as it is, without waiting for the schedule. It uses a turn from the daily cap.
+          </p>
+        </div>
         <Switch
           checked={draft.value.handleNhr}
           onChange={(v) => draft.set("handleNhr", v)}
