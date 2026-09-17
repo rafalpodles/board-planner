@@ -216,25 +216,52 @@ describe("the commit identity", () => {
   // Asked of git rather than assembled from two `--get`s: with an address configured and no name,
   // git fills the name from the account itself and commits — measured — where reading the keys one
   // at a time finds half an identity and has to invent a rule for it (BP-516 review).
+  const CONFIGURED = { code: 0, stdout: "worker@example.com\n" };
+
   it("takes the identity git says it would use", async () => {
-    const { runner } = runnerFor({ code: 0, stdout: "Worker <worker@example.com> 1789000000 +0200\n" });
+    const { runner } = runnerFor(
+      { code: 0, stdout: "Worker <worker@example.com> 1789000000 +0200\n" },
+      CONFIGURED,
+    );
 
     expect(await resolveCommitIdentity(runner, "/repo")).toEqual({ ok: true, identity: IDENTITY });
   });
 
-  it("asks git once, for the whole answer", async () => {
-    const { runner, run } = runnerFor({ code: 0, stdout: "Worker <worker@example.com> 1 +0000\n" });
+  // One question for who, one for whether anybody chose the address — git answers the first with a
+  // guess when nothing is configured, and only on a host whose name has a dot in it.
+  it("asks git for the whole answer, then whether the address was configured at all", async () => {
+    const { runner, run } = runnerFor({ code: 0, stdout: "Worker <worker@example.com> 1 +0000\n" }, CONFIGURED);
 
     await resolveCommitIdentity(runner, "/repo");
 
-    expect(run).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledTimes(2);
     expect(run.mock.calls[0][1]).toEqual(expect.arrayContaining(["var", "GIT_AUTHOR_IDENT"]));
+    expect(run.mock.calls[1][1]).toEqual(expect.arrayContaining(["config", "--get", "user.email"]));
+  });
+
+  /**
+   * The failure CI found and no laptop could: with nothing configured, git builds
+   * `<unix user>@<hostname>` and refuses it only when that address has no dot — so the same empty
+   * configuration answered "Author identity unknown" here and `runner@fv-az….cloudapp.net` on the
+   * GitHub runner, where the worker would have committed under a person who does not exist.
+   */
+  it("refuses an address git guessed from the hostname, however dotted that hostname is", async () => {
+    const { runner } = runnerFor(
+      { code: 0, stdout: "runner <runner@fv-az1234.internal.cloudapp.net> 1 +0000\n" },
+      { code: 1, stdout: "" },
+    );
+
+    const resolved = await resolveCommitIdentity(runner, "/repo");
+
+    expect(resolved).toMatchObject({ ok: false });
+    expect((resolved as { reason: string }).reason).toContain("fv-az1234");
+    expect((resolved as { reason: string }).reason).toContain("git config --global user.email");
   });
 
   // Read where the commits are made, with the global config still readable: this is the one call
   // in the worker that is *supposed* to see ~/.gitconfig, because that is where the answer is.
   it("reads it with the operator's own config in place", async () => {
-    const { runner, run } = runnerFor({ code: 0, stdout: "Worker <w@e> 1 +0000\n" });
+    const { runner, run } = runnerFor({ code: 0, stdout: "Worker <w@e> 1 +0000\n" }, CONFIGURED);
 
     await resolveCommitIdentity(runner, "/repo");
 
@@ -267,13 +294,13 @@ describe("the commit identity", () => {
   // `Name <> …`, and a commit made with GIT_AUTHOR_EMAIL="" lands with no address at all — pushed,
   // in the pull request, merged. Refused here instead (BP-516 review).
   it("refuses an identity git filled only half of", async () => {
-    const { runner } = runnerFor({ code: 0, stdout: "The Operator <> 1789000000 +0200\n" });
+    const { runner } = runnerFor({ code: 0, stdout: "The Operator <> 1789000000 +0200\n" }, CONFIGURED);
 
     expect(await resolveCommitIdentity(runner, "/repo")).toMatchObject({ ok: false });
   });
 
   it("refuses an answer that is not an identity, rather than committing as half of one", async () => {
-    const { runner } = runnerFor({ code: 0, stdout: "no angle brackets here\n" });
+    const { runner } = runnerFor({ code: 0, stdout: "no angle brackets here\n" }, CONFIGURED);
 
     expect(await resolveCommitIdentity(runner, "/repo")).toMatchObject({ ok: false });
   });

@@ -159,7 +159,10 @@ describe("every git invocation is hardened", () => {
       sites.forEach((match, nth) => {
         const window = source.slice(match.index, sites[nth + 1]?.index ?? match.index + 800);
         if (!/operatorGitEnv\(/.test(window)) return;
-        if (window.includes("GIT_AUTHOR_IDENT")) return;
+        // Two calls, one question: who git would commit as, and whether anybody chose the address
+        // rather than git guessing it from the hostname. Both read the operator's own config
+        // because that is where the answer is; nothing else may.
+        if (/GIT_AUTHOR_IDENT|"user\.email"/.test(window)) return;
         offenders.push(`${file}: the git call at ${match.index} reads the operator's own config`);
       });
     }

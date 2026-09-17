@@ -420,12 +420,20 @@ and `SIGINT` both finish the task in flight before the loop exits.
   the whole run, and asking after the fetch and the checkout spends both on a question that could
   have been asked first.
 
+  Asked in two parts, and the second is not decoration: `git var` answers with a *guess* when nothing
+  is configured — `<unix user>@<hostname>` — and refuses that guess only where the hostname has no
+  dot in it. So the same empty configuration says "Author identity unknown" on a laptop and
+  `runner@fv-az…cloudapp.net` on a CI box, where the worker would push commits authored by somebody
+  who does not exist. The address has to be one somebody configured (`config --get user.email`); the
+  name is not held to that, because git fills it from the account and a name routes nowhere. CI is
+  what found this, and no machine of ours could have.
+
   Two faults, one settlement and two blast radii. Both release the run with its attempt refunded and
   end the pass — the task did nothing and nothing it could do would help. What differs is what is
   latched off and how it is cleared. **The machine** names nobody, or its config file will not
-  parse: nothing is quarantined, git's own whole answer travels as the reason — which is where the
-  two commands to run are — and the next poll tries again, so a machine that is still broken says so
-  again. **The checkout** leaves no identity while the machine is fine — a `user.name = ""` in the
+  parse: nothing is quarantined, the reason carries git's own whole answer — or, where git would
+  have guessed, the two commands to run and the address it would have used — and the next poll tries
+  again, so a machine that is still broken says so again. **The checkout** leaves no identity while the machine is fine — a `user.name = ""` in the
   shared `.git/config` does it, well-formed and carrying no program, so no scan refuses it: that
   checkout is quarantined, exactly as a planted key quarantines it and for the same reason, because
   the file belongs to the path and every project bound to it shares it. Charging the attempt instead

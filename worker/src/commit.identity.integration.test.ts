@@ -53,8 +53,12 @@ describe("who the worker's commits are by", () => {
 
     const resolved = await resolveCommitIdentity(createRunner(), work);
 
+    // On this machine git refuses outright ("Author identity unknown"); on a host whose name has a
+    // dot in it — every CI runner — it answers with `<unix user>@<hostname>` and exit 0 instead.
+    // The refusal has to be the same on both, which is why the address has to be *configured*
+    // rather than merely answered. This case is what CI found and no laptop could.
     expect(resolved.ok).toBe(false);
-    expect((resolved as { reason: string }).reason).toMatch(/identity|email/i);
+    expect((resolved as { reason: string }).reason).toMatch(/identity|user\.email/i);
   });
 
   // The half the resolver would have to invent a rule for, and git already has one: the name comes

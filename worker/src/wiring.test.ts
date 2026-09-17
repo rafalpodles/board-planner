@@ -330,6 +330,11 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         if (command === "git" && args.includes("GIT_AUTHOR_IDENT")) {
           return { code: 0, stdout: "The Operator <operator@example.com> 1789000000 +0200\n", stderr: "", timedOut: false };
         }
+        // …and whether anybody chose that address, rather than git guessing it from
+        // the hostname — which is what a CI runner's dotted name makes it do (BP-516).
+        if (command === "git" && args.includes("user.email")) {
+          return { code: 0, stdout: "operator@example.com\\n", stderr: "", timedOut: false };
+        }
         if (command === "git" && args.includes("--show-toplevel")) binding.add(opts.cwd ?? "");
         if (command === "git" && args.includes("--show-scope")) {
           return { code: 0, stdout: scopedFor(opts.cwd), stderr: "", timedOut: false };
@@ -356,6 +361,11 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
             stderr: "",
             timedOut: false,
           };
+        }
+        // …and whether anybody chose that address, rather than git guessing it from
+        // the hostname — which is what a CI runner's dotted name makes it do (BP-516).
+        if (command === "git" && args.includes("user.email")) {
+          return { code: 0, stdout: "operator@example.com\\n", stderr: "", timedOut: false };
         }
         // git is stubbed here, so the directory `git worktree add` would have made is made here:
         // the agent cannot be confined to a worktree that does not exist (BP-349).
@@ -661,6 +671,11 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
             timedOut: false,
           };
         }
+        // …and whether anybody chose that address, rather than git guessing it from
+        // the hostname — which is what a CI runner's dotted name makes it do (BP-516).
+        if (command === "git" && args.includes("user.email")) {
+          return { code: 0, stdout: "operator@example.com\\n", stderr: "", timedOut: false };
+        }
         if (command === "git" && args.includes("worktree") && args.includes("add")) {
           const separator = args.indexOf("--");
           if (separator !== -1 && args[separator + 1]) {
@@ -763,8 +778,8 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         answerSandboxProbe(args);
         return { code: 0, stdout: "", stderr: "", timedOut: false };
       }
-      // The identity is resolved before the base is, so this machine has to be able to answer —
-      // otherwise the fault under test is not the one that ends the pass (BP-516).
+      // The identity is resolved before the base is, so this machine has to be able to answer both
+      // of its questions — otherwise the fault under test is not the one that ends the pass (BP-516).
       if (args.includes("GIT_AUTHOR_IDENT")) {
         return {
           code: 0,
@@ -772,6 +787,9 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
           stderr: "",
           timedOut: false,
         };
+      }
+      if (args.includes("user.email")) {
+        return { code: 0, stdout: "operator@example.com\n", stderr: "", timedOut: false };
       }
       if (args[0] === "ls-remote") {
         return { code: 1, stdout: "", stderr: "unreachable", timedOut: false };

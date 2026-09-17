@@ -126,9 +126,35 @@ export async function resolveCommitIdentity(
   }
 
   const identity = parseIdent(result.stdout.trim());
-  return identity
-    ? { ok: true, identity }
-    : { ok: false, reason: `git answered ${JSON.stringify(result.stdout.trim())}, which is not an identity` };
+  if (!identity) {
+    return { ok: false, reason: `git answered ${JSON.stringify(result.stdout.trim())}, which is not an identity` };
+  }
+
+  // The address has to be one somebody chose. Asked of git alone this is host-dependent: with
+  // nothing configured git builds `<unix user>@<hostname>` and refuses it only when that address
+  // has no dot in it — so the same empty configuration answers "Author identity unknown" on a
+  // laptop and `runner@fv-az…cloudapp.net` on a CI box, and the worker would push commits authored
+  // by somebody who does not exist. Measured on both; the CI runner is what found it.
+  //
+  // The name is deliberately not held to this. git fills it from the account when only the address
+  // is configured, and a name nobody can route mail to or link to an account is not the same claim
+  // as an address.
+  const configured = await runner.run("git", gitArgs(["config", "--get", "user.email"]), {
+    cwd,
+    timeoutMs: TIMEOUT_MS,
+    env: operatorGitEnv(extraEnv),
+  });
+  if (configured.code !== 0 || !configured.stdout.trim()) {
+    return {
+      ok: false,
+      reason:
+        `no user.email is configured, so git would commit as ${identity.email}, which it guessed ` +
+        `from this machine's hostname. Run \`git config --global user.email "you@example.com"\` ` +
+        `and \`git config --global user.name "Your Name"\`.`,
+    };
+  }
+
+  return { ok: true, identity };
 }
 
 // The agent used to do this, which is the only reason Bash was in its tool list.

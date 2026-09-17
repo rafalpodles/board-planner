@@ -40,6 +40,9 @@ const CONFIG_LIST = "config --list -z --show-scope --no-includes";
 // to answer it — which is also what makes the wiring testable at all.
 const IDENT = "var GIT_AUTHOR_IDENT";
 const IDENT_LINE = "The Operator <operator@example.com> 1789000000 +0200\n";
+// …and whether anybody chose that address. git guesses one from the hostname otherwise, and only
+// refuses the guess where the hostname has no dot in it, so asking git alone is host-dependent.
+const IDENT_EMAIL = "config --get user.email";
 
 function fakeGit(responses: Record<string, Partial<CommandResult>>) {
   const run = vi.fn(async (_command: string, args: string[], _opts: RunOpts): Promise<CommandResult> => {
@@ -59,6 +62,7 @@ function baseFromRemote(sha: string, extra: Record<string, Partial<CommandResult
     [`rev-parse --verify ${sha}^{commit}`]: { stdout: `${sha}\n` },
     "worktree list --porcelain": { stdout: "" },
     [IDENT]: { stdout: IDENT_LINE },
+    [IDENT_EMAIL]: { stdout: "operator@example.com\n" },
     ...extra,
   };
 }
@@ -550,6 +554,7 @@ describe("createWorkspace", () => {
           return answer(listings === 1 ? "" : scopedConfigListZ("filter.z.smudge=touch /tmp/pwned"));
         }
         if (key === IDENT) return answer(IDENT_LINE);
+        if (key === IDENT_EMAIL) return answer("operator@example.com\n");
         if (key === "worktree list --porcelain") return answer("");
         if (args.join(" ") === LS_REMOTE) return answer("base1\trefs/heads/main\n");
         if (args.join(" ") === FETCH) return answer();
@@ -635,6 +640,9 @@ describe("createWorkspace", () => {
       }
       if (args[0] === "var") {
         return { code: 0, stdout: IDENT_LINE, stderr: "", timedOut: false };
+      }
+      if (args.includes("user.email")) {
+        return { code: 0, stdout: "operator@example.com\n", stderr: "", timedOut: false };
       }
       if (args[0] === "worktree" && args[1] === "list") {
         return {
