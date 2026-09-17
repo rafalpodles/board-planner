@@ -374,8 +374,17 @@ and `SIGINT` both finish the task in flight before the loop exits.
   rewrite pointing at a mirror, or an https credential helper other than `gh`'s. Delivery
   authenticates over ssh with the agent socket, or over https through `gh auth git-credential`.
 
-  Since BP-516 that cost is the same on the local calls, and one line of it is worth naming:
-  `core.excludesFile` no longer decides what gets staged. A `.DS_Store` an operator ignores
+  Since BP-516 that cost is the same on the local calls, and two lines of it are worth naming.
+
+  **Git-LFS is out.** `git lfs install` writes `filter.lfs.clean` into a checkout's config, which is
+  a program git runs, so `bindRepository` has always refused such a checkout; with the global file
+  gone, an LFS setup that lives only in `~/.gitconfig` no longer applies either, and the worker
+  would commit working-tree bytes over a pointer rather than failing loudly. Neither is a repository
+  this worker can serve.
+
+  **The ignore list is the repository's own.** `core.excludesFile` no longer decides what gets
+  staged — and neither does `~/.config/git/ignore`, which git reads with no config file at all and
+  which `SAFE_CONFIG` pins to `/dev/null` for that reason. A `.DS_Store` an operator ignores
   globally is committed by the worker, because the repository's own `.gitignore` is the only ignore
   list left — and that is the direction worth paying for. Measured: a path named in that file is
   invisible to `git status --porcelain` and to `git add --all` alike, so a file written into the
@@ -383,10 +392,18 @@ and `SIGINT` both finish the task in flight before the loop exits.
   `npm test`. An ignore list outside the repository cannot be allowed to decide what a machine
   commits into it.
   The worker's own commits are made in the same environment since BP-516, and the one thing they
-  genuinely need from that file — `user.name` and `user.email` — is read out of the checkout before
-  the agent runs and carried in `GIT_AUTHOR_*`/`GIT_COMMITTER_*`. So a per-repository identity still
-  holds, and a machine with none configured anywhere cannot commit at all: git's own "Author
-  identity unknown", which says what to run.
+  genuinely need from that file — who the commits are by — is asked of git itself before the agent
+  runs (`git var GIT_AUTHOR_IDENT`, in the worktree, so a per-repository identity still holds) and
+  carried in `GIT_AUTHOR_*`/`GIT_COMMITTER_*`. A machine git will not name one for is refused at
+  `workspace.create`: released with the attempt refunded, the loop told to stop claiming, and git's
+  own sentence as the reason — either the two commands to run or the config file it could not
+  parse. Asked before the run rather than at the commit, because the answer is the same for every
+  task and finding it out at the commit costs the whole run.
+
+  What that identity is worth is worth stating too: an earlier run's agent can write `user.email`
+  into that file or into the shared `.git/config`, and neither is a key git *runs*, so no scan
+  refuses it. A commit's author is as trustworthy as the machine's own configuration. The account a
+  push acts as is pinned separately (BP-373), and that one is not writable from the checkout.
 - **Nothing the server sends becomes a path or an option.** Everything below arrives over HTTP from
   whichever server this worker is enrolled with, and everything past that boundary runs on somebody's
   laptop at their uid. Two of these were live: a `workerId` of `../../../../Users/owner/Library/LaunchAgents`
