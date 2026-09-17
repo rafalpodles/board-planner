@@ -130,6 +130,18 @@ describe("confine", () => {
     expect(profile).toContain('(allow file-write-data (literal "/dev/null"))');
     expect(profile).not.toContain('(subpath "/dev")');
   });
+
+  // The write `file-write*` cannot see, because this process never performs it: `defaults write`
+  // asks cfprefsd, which runs outside the profile. Both service names — the per-user agent answers
+  // where the daemon does not. sandbox.integration.test.ts is what proves the kernel honours it;
+  // this is what a Linux runner, which skips that suite, still gets to assert (BP-630).
+  it("denies the preference daemon, so a write it would perform is not available either", () => {
+    const profile = profileOf(confined(["/work/bp-1"]));
+
+    expect(profile).toContain(
+      '(deny mach-lookup (global-name "com.apple.cfprefsd.daemon") (global-name "com.apple.cfprefsd.agent"))'
+    );
+  });
 });
 
 describe("the operator's escape hatch", () => {

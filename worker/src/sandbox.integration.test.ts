@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { confine } from "./sandbox.js";
+import { UNCONFINED_ESCAPE_HATCH } from "./env.js";
 import { createRunner } from "./exec.js";
 
 /**
@@ -109,5 +110,66 @@ describe.skipIf(!onMac)("confine against the real sandbox", () => {
 
     expect(result.code).toBe(0);
     expect(readFileSync(join(worktree, "through.txt"), "utf8")).toBe("via-link\n");
+  });
+
+  /**
+   * The write this process never performs: `defaults write` hands the domain to cfprefsd, which
+   * runs outside the profile and wrote the plist under `~/Library/Preferences` on its behalf —
+   * exit 0, with `file-write*` denied (BP-630).
+   *
+   * Asserted on the domain rather than on the exit code, and that is not a preference: measured,
+   * a `defaults write` of a domain this machine has seen and deleted before exits **0 under the
+   * deny while writing nothing at all**. Only asking cfprefsd what it holds tells the two apart,
+   * and a test that watched the exit code would have called that pass a failure.
+   *
+   * The control runs the same command with the operator's escape hatch set, which is what makes
+   * this pair capable of failing: without it a `defaults` that could not write for any other
+   * reason reads exactly like a confinement that works. Each takes its own domain, because the
+   * first one's write is what changes the second one's exit code.
+   */
+  describe("a write performed by a daemon on the process's behalf", () => {
+    const domains: string[] = [];
+
+    // Unique per test: two suites on one machine share ~/Library/Preferences, and a domain left
+    // behind by a crashed earlier run must not decide this one.
+    function probeDomain(): string {
+      const domain = `com.board-planner.worker.sandbox-probe.${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+      domains.push(domain);
+      return domain;
+    }
+
+    const readDomain = (domain: string) =>
+      runner.run("/usr/bin/defaults", ["read", domain], { cwd: worktree, timeoutMs: 30_000 });
+
+    function writeAs(domain: string, env: NodeJS.ProcessEnv) {
+      const spawn = confine("/usr/bin/defaults", ["write", domain, "planted", "yes"], {
+        writable: [worktree],
+        env,
+      });
+      if (!("command" in spawn)) throw new Error(`refused: ${spawn.refusal}`);
+      return runner.run(spawn.command, spawn.args, { cwd: worktree, timeoutMs: 30_000 });
+    }
+
+    afterEach(async () => {
+      for (const domain of domains.splice(0)) {
+        await runner.run("/usr/bin/defaults", ["delete", domain], { cwd: worktree, timeoutMs: 30_000 });
+      }
+    });
+
+    it("writes the preference when nothing confines it — the control", async () => {
+      const domain = probeDomain();
+
+      await writeAs(domain, { [UNCONFINED_ESCAPE_HATCH]: "1" });
+
+      expect((await readDomain(domain)).stdout).toContain("planted");
+    });
+
+    it("leaves no preference behind under the profile", async () => {
+      const domain = probeDomain();
+
+      await writeAs(domain, {});
+
+      expect((await readDomain(domain)).stdout).not.toContain("planted");
+    });
   });
 });

@@ -265,17 +265,15 @@ and `SIGINT` both finish the task in flight before the loop exits.
   against the lockfile, which bounds it, and your own cache is out of reach either way. A machine
   that cannot confine refuses the gate rather than running it unconfined.
 
-  **What it does not close.** Writes a *daemon* performs on a spawned process's behalf: `(allow default)` leaves
-  `process-exec` and `mach-lookup` open, and `defaults write` makes cfprefsd write a plist under
-  `~/Library/Preferences`, outside the worktree, measured. The tool allowlist used to close it by
-  giving the agent no shell — and then the gates above moved inside the profile, where they run
-  agent-written code, so it is open: a test file that spawns `defaults` gets there. What it buys is
-  a preference domain and nothing more: `defaults write <absolute path>` is refused, because that
-  one `defaults` writes itself rather than asking cfprefsd, so `~/Library/LaunchAgents/*.plist` is
-  not reachable this way. Denying `mach-lookup` on `com.apple.cfprefsd.daemon` closes it and still
-  leaves the worktree writable, measured; what nobody has measured is which parts of a run read a
-  preference through that same daemon, and that is **BP-630**. And reads, and the network, neither
-  of which this touches at all.
+  **A write a daemon performs on the process's behalf** was the way out that `file-write*` could not
+  see (**BP-630**): `(allow default)` leaves `process-exec` and `mach-lookup` open, so a test file
+  that spawned `defaults write` had cfprefsd write a plist under `~/Library/Preferences` for it,
+  outside the worktree, exit 0. The profile now denies `mach-lookup` on cfprefsd's daemon and agent
+  service names, and the same command writes nothing. What that costs was measured rather than
+  assumed — `defaults read` still answers, `npm ci`/`npm run build`/`npm test` still pass, git still
+  commits, and the agent CLI still runs under both tool lists — because denying a lookup is not a
+  write-only deny. Every other daemon reachable the same way is still open, and no list of service
+  names closes that; so are reads, and the network, neither of which this touches at all.
 
   **A file git will not print** (**BP-603**). Four things take a file's contents out of a patch: a
   bare `-diff` attribute, a `diff=<name>` driver declared binary in the config, a file git decides
