@@ -222,7 +222,16 @@ and `SIGINT` both finish the task in flight before the loop exits.
 
   The scan reads the repository's own scopes, so the calls that make the checkout also drop
   `~/.gitconfig` — without that a filter defined there ran on a checkout with **nothing planted in
-  the repository at all**, and no scan of the repository could ever have seen it. Measured.
+  the repository at all**, and no scan of the repository could ever have seen it. Measured. Since
+  BP-516 that is true of every git call this worker makes, not only the ones that create a
+  worktree, which is what lets the scan and the call it guards read the same config.
+
+  The same scan runs at **bind time**, against the shared checkout, before anything is claimed
+  (BP-517). It used to be a narrower list of its own: `--local --list`, which cannot see a
+  per-worktree config, judged by a rule that did not refuse `include.path`. A checkout carrying
+  either bound cleanly and was refused by the first run instead — which quarantines the project and
+  every sibling on that path. Judging it once, with one function, is what keeps the two answers the
+  same as the rules change.
 
   Refusing alone would only hand the same clone to the next attempt, so the checkout is
   **quarantined**: this machine stops claiming for every project bound to it — the poison is in the
@@ -238,6 +247,12 @@ and `SIGINT` both finish the task in flight before the loop exits.
 
   The key is **not** cleared for you. Writing to a config an attacker also writes is a race, and it
   destroys the evidence of what was planted.
+
+  Neither is the worktree. A refusal at staging time keeps it, with what the agent wrote and the
+  planted config still in it, and parks the task rather than requeueing it at the same checkout
+  (BP-506) — the comment names the key and the path. That holds for an ordinary commit failure too:
+  whichever call failed, the agent's work is in that tree and in no history, and the `finally` that
+  tidies up is the only thing between it and `worktree remove --force`.
 - **The agent's own writes cannot leave its worktree.** Both calls to the CLI — the step that
   writes the change and the review gate — run under `sandbox-exec` with a profile that denies every
   write and allows back exactly one directory: the worktree for the step, the throwaway checkout for
@@ -358,8 +373,11 @@ and `SIGINT` both finish the task in flight before the loop exits.
   no longer applies to delivery: a deploy key set through `core.sshCommand`, a `url.*.insteadOf`
   rewrite pointing at a mirror, or an https credential helper other than `gh`'s. Delivery
   authenticates over ssh with the agent socket, or over https through `gh auth git-credential`.
-  Nothing here touches the agent's own commits, which are made in a different environment that does
-  read your config.
+  The worker's own commits are made in the same environment since BP-516, and the one thing they
+  genuinely need from that file — `user.name` and `user.email` — is read out of the checkout before
+  the agent runs and carried in `GIT_AUTHOR_*`/`GIT_COMMITTER_*`. So a per-repository identity still
+  holds, and a machine with none configured anywhere cannot commit at all: git's own "Author
+  identity unknown", which says what to run.
 - **Nothing the server sends becomes a path or an option.** Everything below arrives over HTTP from
   whichever server this worker is enrolled with, and everything past that boundary runs on somebody's
   laptop at their uid. Two of these were live: a `workerId` of `../../../../Users/owner/Library/LaunchAgents`

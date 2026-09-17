@@ -1225,10 +1225,10 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     });
 
     /**
-     * BP-504. A key git runs on checkout, planted in a scope `bindRepository`'s own scan does not
-     * read — the permanent window BP-346 records. The run refuses before `git worktree add` checks
-     * anything out, and the project is then quarantined, because refusing alone leaves the loop
-     * claiming the same clone on the next pass for ever.
+     * BP-504. The same key, planted after the checkout was bound — minutes pass between binding one
+     * and claiming against it, and the agent of an earlier run is what writes it. The run refuses
+     * before `git worktree add` checks anything out, and the project is then quarantined, because
+     * refusing alone leaves the loop claiming the same clone on the next pass for ever.
      */
     /**
      * BP-517. The same key, seen at binding time, where an operator is watching and nothing has
