@@ -3,6 +3,7 @@ import { connectDB } from "@/lib/db";
 import { withProjectOwner } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { isPmRunnable, pmDisabledReason } from "@/lib/pm/gate";
+import { isPmAvailable } from "@/lib/pm/config";
 import { getPmUser } from "@/lib/pm/pm-user";
 import { startBoardReview } from "@/lib/pm/scheduler";
 
@@ -19,6 +20,11 @@ export const POST = withProjectOwner(async (_request, { params, user }) => {
   // It spends the project's turn and token budget, which a person should decide to do
   if (user.viaMachineCredential) {
     return NextResponse.json({ error: "This action requires an interactive session" }, { status: 403 });
+  }
+  // Without a model key a review would still take a turn from the cap and post a warning to the
+  // thread; the chat route refuses the same way for the same reason
+  if (!isPmAvailable()) {
+    return NextResponse.json({ error: "The PM agent is not configured on this instance" }, { status: 503 });
   }
   const { projectId } = await params;
   await connectDB();

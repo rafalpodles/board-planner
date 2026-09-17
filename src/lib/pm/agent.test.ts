@@ -72,9 +72,9 @@ vi.mock("./mcp-tools", () => ({
 }));
 // A function, not a constant: what the cache breakpoint marks is the END of the replayed history,
 // so a mock that can only answer "no history" cannot tell the right boundary from the wrong one
-const replayHistoryMock = vi.fn(async () => [] as { role: string; content: string }[]);
+const replayHistoryMock = vi.fn(async (..._args: unknown[]) => [] as { role: string; content: string }[]);
 vi.mock("./history", () => ({
-  replayHistory: () => replayHistoryMock(),
+  replayHistory: (...args: unknown[]) => replayHistoryMock(...args),
   stripSpoofedLabels: (s: string) => s,
   HISTORY_AUTHOR_PREFIX: "",
 }));
@@ -601,5 +601,36 @@ describe("the prefix a turn asks to be cached", () => {
 
     expect(sent[0].sessionId).toBe(pmSessionId(PROJECT._id, "pm-user-id"));
     expect(sent[1].sessionId).toBe(sent[0].sessionId);
+  });
+});
+
+// BP-570 review: the query caps the thread, so the replay has to be told when it did
+describe("the history a turn replays", () => {
+  afterEach(() => historyDocsMock.mockImplementation(async () => []));
+
+  const docs = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ role: i % 2 ? "assistant" : "user", content: `m${n - 1 - i}` }));
+
+  it("tells the replay that older messages exist when the query returned more than it replays", async () => {
+    historyDocsMock.mockResolvedValue(docs(31));
+    chatCompletion.mockResolvedValue({ type: "text", content: "done" });
+
+    await turn([]);
+
+    const [history, , opts] = replayHistoryMock.mock.calls.at(-1)!;
+    expect(history).toHaveLength(30);
+    expect(opts).toEqual({ olderExist: true });
+    // Newest thirty, oldest first: the extra row fetched is the one dropped
+    expect((history as { content: string }[])[29].content).toBe("m30");
+    expect((history as { content: string }[])[0].content).toBe("m1");
+  });
+
+  it("says nothing of older messages when the whole thread was returned", async () => {
+    historyDocsMock.mockResolvedValue(docs(30));
+    chatCompletion.mockResolvedValue({ type: "text", content: "done" });
+
+    await turn([]);
+
+    expect(replayHistoryMock.mock.calls.at(-1)![2]).toEqual({ olderExist: false });
   });
 });

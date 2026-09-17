@@ -193,12 +193,14 @@ export async function runPmTurn(opts: {
 
   const actor = await resolveActor(opts.triggeredByUserId);
 
-  const history = await PmMessage.find(pmThreadFilter(opts.projectId, opts.triggeredByUserId))
+  // One more than is replayed, so the replay knows whether the thread goes back further than it shows
+  const fetched = await PmMessage.find(pmThreadFilter(opts.projectId, opts.triggeredByUserId))
     .sort({ createdAt: -1 })
-    .limit(HISTORY_LIMIT)
+    .limit(HISTORY_LIMIT + 1)
     .populate("triggeredBy", "username fullName")
     .lean();
-  history.reverse();
+  const olderExist = fetched.length > HISTORY_LIMIT;
+  const history = fetched.slice(0, HISTORY_LIMIT).reverse();
 
   await PmMessage.create({
     project: opts.projectId,
@@ -291,7 +293,7 @@ export async function runPmTurn(opts: {
     return finalize("⚠️ That image could not be read, so there was nothing to send.");
   }
 
-  const replayed = await replayHistory(history, opts.projectId);
+  const replayed = await replayHistory(history, opts.projectId, { olderExist });
   const messages: OrChatMessage[] = [
     { role: "system", content: buildSystemPrompt(project, mcp, disallowedTools, actor) },
     ...replayed,

@@ -10,6 +10,8 @@ vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/project", () => ({ Project: { findById } }));
 vi.mock("@/lib/pm/pm-user", () => ({ getPmUser: async () => ({ _id: "pm-user" }) }));
 vi.mock("@/lib/pm/scheduler", () => ({ startBoardReview }));
+const isPmAvailable = vi.fn();
+vi.mock("@/lib/pm/config", () => ({ isPmAvailable }));
 vi.mock("@/lib/middleware", () => ({
   withProjectOwner:
     (handler: (req: Request, ctx: unknown) => Promise<Response>) =>
@@ -27,6 +29,7 @@ beforeEach(() => {
   user = { _id: "owner", viaMachineCredential: false };
   findById.mockReturnValue({ lean: async () => ({ _id: "p1", key: "BP", pm: { enabled: true } }) });
   startBoardReview.mockResolvedValue({ status: "started", done: Promise.resolve() });
+  isPmAvailable.mockReturnValue(true);
 });
 
 // BP-471
@@ -43,6 +46,15 @@ describe("POST /api/projects/:projectId/pm/review", () => {
     user = { _id: "owner", viaMachineCredential: true };
 
     expect((await run()).status).toBe(403);
+    expect(startBoardReview).not.toHaveBeenCalled();
+  });
+
+  it("refuses without a model key, rather than spending a turn on a warning", async () => {
+    isPmAvailable.mockReturnValue(false);
+
+    const res = await run();
+
+    expect(res.status).toBe(503);
     expect(startBoardReview).not.toHaveBeenCalled();
   });
 

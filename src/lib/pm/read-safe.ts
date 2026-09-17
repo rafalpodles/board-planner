@@ -11,8 +11,9 @@ const READ_SAFE_NAME_RE = /^(search|list|get|read|fetch|query|describe|find)/i;
  * `run`, `grant`, `commit`, `push`, `import`, `deploy`, `sync` and `restore` are deliberately absent.
  * Each is a real read's noun as often as a verb (`get_run_status`, `get_grant`, `get_commit`,
  * `list_push_rules`, `get_import_status`, `list_deploy_keys`, `get_sync_status`,
- * `list_restore_points`), and the read-prefix requirement below is what actually stops a mutation
- * being called: `push_files` never starts with a read verb, so it never reaches this list.
+ * `list_restore_points`). Leaving them out means a read-prefixed name that uses one as a verb —
+ * `fetch_and_sync_repo` — still passes; the read prefix only turns away names that start with the
+ * mutation, like `push_files`. A server that marks such a tool `readOnlyHint: false` still vetoes it.
  */
 const WRITE_VERBS = new Set([
   "create", "update", "delete", "write", "append", "replace", "insert", "remove", "set", "patch",

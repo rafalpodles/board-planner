@@ -2,7 +2,7 @@ import { connectDB } from "@/lib/db";
 import { Project } from "@/models/project";
 import { runPmTurn } from "./agent";
 import { dailyPmSpend, isOverDailyTurnCap } from "./turn-cap";
-import { acquireTurnLock, releaseTurnLock } from "./turn-lock";
+import { acquireTurnLock, isTurnRunning, releaseTurnLock } from "./turn-lock";
 import { drainPmTriggers } from "./triggers";
 import { getPmUser } from "./pm-user";
 import { BOARD_REVIEW_DISALLOWED_TOOLS, buildBoardReviewPrompt, dueReviewSlot } from "./autonomy";
@@ -37,6 +37,8 @@ export async function pmSchedulerTick(): Promise<void> {
   for (const project of projects) {
     const slot = dueReviewSlot(now, project.pm?.autonomy);
     if (!slot) continue;
+    // Not claimed while a turn holds the project: a review refused for the lock would spend the slot
+    if (isTurnRunning(String(project._id))) continue;
 
     // Claim the slot before running: a crash costs one review instead of a spend loop
     const claimed = await Project.findOneAndUpdate(

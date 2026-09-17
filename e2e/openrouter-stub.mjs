@@ -255,7 +255,7 @@ serve({
     const flagged = /^- (\S+-\d+) \[/m.exec(text ?? "");
     if (reviewing && flagged && !toolHasRun) {
       // A task titled with this holds the review open, so a spec can ask for a second one meanwhile
-      if (/\(hold the review\)/.test(text)) await new Promise((resolve) => setTimeout(resolve, 5_000));
+      if (/\(hold the review\)/.test(text)) await new Promise((resolve) => setTimeout(resolve, 15_000));
       reply(res, {
         usage: usageWith(false),
         choices: [

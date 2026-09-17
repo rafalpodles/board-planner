@@ -56,6 +56,19 @@ describe("pmSchedulerTick", () => {
     expect(BOARD_REVIEW_DISALLOWED_TOOLS).toEqual(expect.arrayContaining(["change_status", "create_task"]));
   });
 
+  it("leaves the slot unclaimed while another turn holds the project, so the next tick can still run it", async () => {
+    const { acquireTurnLock, releaseTurnLock } = await import("./turn-lock");
+    acquireTurnLock("p1", "someone");
+    try {
+      await pmSchedulerTick();
+    } finally {
+      releaseTurnLock("p1");
+    }
+
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
+    expect(runPmTurn).not.toHaveBeenCalled();
+  });
+
   it("runs nothing when another tick already claimed the slot", async () => {
     findOneAndUpdate.mockResolvedValue(null);
 

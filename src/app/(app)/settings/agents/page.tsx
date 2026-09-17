@@ -79,8 +79,11 @@ export default function AdminAgentsPage() {
       const updated = await api.patch(`/api/admin/agents/${row._id}`, changes);
       // Only the fields this request changed: the answer also carries the row's other fields as
       // they were stored when it left, and taking those overwrote a field typed into meanwhile
+      const answer = updated as Record<string, unknown>;
       const confirmed = Object.fromEntries(
-        Object.keys(changes).map((field) => [field, (updated as Record<string, unknown>)[field]])
+        Object.keys(changes)
+          .filter((field) => field in answer)
+          .map((field) => [field, answer[field]])
       );
       setData((prev) =>
         prev

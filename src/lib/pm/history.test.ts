@@ -20,7 +20,7 @@ vi.mock("./attachments", () => ({
   },
 }));
 
-const { replayHistory, stripSpoofedLabels, HISTORY_AUTHOR_PREFIX, HISTORY_CHAR_BUDGET, boundHistory } = await import("./history");
+const { replayHistory, stripSpoofedLabels, HISTORY_AUTHOR_PREFIX, HISTORY_CHAR_BUDGET, OMITTED_HISTORY_NOTICE, boundHistory } = await import("./history");
 
 const alice = { username: "alice", fullName: "Alice A" };
 const pm = { username: "pm", fullName: "PM Agent" };
@@ -339,14 +339,37 @@ describe("replayHistory keeps the replay within a size budget", () => {
     expect(replayedText.some((t) => t.startsWith("0:"))).toBe(false);
   });
 
-  it("tells the model that earlier messages were left out, and how many", async () => {
+  it("tells the model that earlier messages were left out", async () => {
     const thread = Array.from({ length: 10 }, (_, i) => long(i));
 
     const out = await replayHistory(thread, "p1");
 
-    expect(out[0].role).toBe("system");
-    const kept = out.filter((m) => m.role !== "system").length;
-    expect(String(out[0].content)).toContain(`${10 - kept} earlier messages are not included`);
+    expect(out[0]).toEqual({ role: "system", content: OMITTED_HISTORY_NOTICE });
+  });
+
+  // The query takes the newest thirty, so a thread longer than that is cut before any budget is
+  // applied — and a replay that fits said nothing about the messages the query never returned
+  it("says so too when the thread goes back further than the query fetched", async () => {
+    const out = await replayHistory([{ role: "user", content: "hi" }, { role: "assistant", content: "hello" }], "p1", {
+      olderExist: true,
+    });
+
+    expect(out[0]).toEqual({ role: "system", content: OMITTED_HISTORY_NOTICE });
+    expect(out).toHaveLength(3);
+  });
+
+  it("never opens the replay on an answer whose question was cut", async () => {
+    const thread = [
+      { role: "user", content: "a short question" },
+      { role: "assistant", content: "x".repeat(HISTORY_CHAR_BUDGET - 10) },
+      { role: "user", content: "thanks" },
+      { role: "assistant", content: "you are welcome" },
+    ];
+
+    const out = await replayHistory(thread, "p1");
+
+    expect(out.map((m) => m.role)).toEqual(["system", "user", "assistant"]);
+    expect(out[1].content).toBe("thanks");
   });
 
   it("says nothing when the whole thread fits", async () => {
@@ -367,7 +390,7 @@ describe("replayHistory keeps the replay within a size budget", () => {
     const out = await replayHistory(thread, "p1");
 
     expect(out.map((m) => m.content)).toEqual([
-      expect.stringContaining("1 earlier message is not included"),
+      OMITTED_HISTORY_NOTICE,
       `question ${huge}`,
       `answer ${huge}`,
     ]);

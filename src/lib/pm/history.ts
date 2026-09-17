@@ -93,23 +93,29 @@ export function boundHistory(
     used += weight;
     start--;
   }
+  // Never open on an answer whose question was cut: that is the dangling reply BP-451 removed
+  while (start > 0 && start < history.length - ALWAYS_REPLAYED && history[start].role !== "user") start++;
   return { kept: history.slice(start), omitted: start };
 }
 
-/** Said to the model, so it does not answer from a record it cannot tell is incomplete */
-export function omittedHistoryNotice(omitted: number): string {
-  return `${omitted} earlier message${omitted === 1 ? " is" : "s are"} not included here, to keep this conversation within its size limit. If the answer depends on something said before them, say so rather than guessing.`;
-}
+/**
+ * Said to the model, so it does not answer from a record it cannot tell is incomplete. No count:
+ * the query caps the thread before this sees it, so any number here would be a guess, and the same
+ * words on every turn keep the replayed prefix the same too.
+ */
+export const OMITTED_HISTORY_NOTICE =
+  "Earlier messages in this thread are not included here, to keep the conversation within its size limit. If the answer depends on something said before them, say so rather than guessing.";
 
 export async function replayHistory(
   history: PmHistoryEntry[],
-  projectId: string
+  projectId: string,
+  opts: { olderExist?: boolean } = {}
 ): Promise<Record<string, unknown>[]> {
   const messages: Record<string, unknown>[] = [];
   const bounded = boundHistory(history);
   history = bounded.kept;
-  if (bounded.omitted > 0) {
-    messages.push({ role: "system", content: omittedHistoryNotice(bounded.omitted) });
+  if (bounded.omitted > 0 || opts.olderExist) {
+    messages.push({ role: "system", content: OMITTED_HISTORY_NOTICE });
   }
 
   // Only the most recent images are re-sent: history replays on every turn, so without a
