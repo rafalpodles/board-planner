@@ -137,9 +137,23 @@ describe("isReadSafe", () => {
     ]) {
       expect(isReadSafe(tool(name), server), name).toBe(false);
     }
-    for (const name of ["queryGraphQL", "QueryGraphQL", "query_raw_sql", "query_neo4j_cypher"]) {
+    for (const name of [
+      "queryGraphQL",
+      "QueryGraphQL",
+      "query_raw_sql",
+      "query_neo4j_cypher",
+      // A database named after its language runs that language too
+      "query_mysql",
+      "query_sqlite",
+      "query_mssql",
+      "query_postgresql",
+      "query_soql",
+      "query_logql",
+    ]) {
       expect(isReadSafe(tool(name)), name).toBe(false);
     }
+    // The connection's own name is part of what the tool runs
+    expect(isReadSafe(tool("sql_query_tables"), "sql")).toBe(false);
     expect(isReadSafe(tool("query_prometheus"))).toBe(true);
     expect(isReadSafe(tool("notion-query-data-sources"), "notion")).toBe(true);
   });

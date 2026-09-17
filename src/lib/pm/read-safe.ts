@@ -47,11 +47,17 @@ const WRITE_VERBS_BEFORE_A_TRAILING_READ = new Set(["toggle", "flag", "ack", "pu
  * Alone, or naming a query language anywhere after it, it runs whatever it is sent — `mysql_query`
  * on a server named `mysql` is arbitrary SQL, and stripping the server's name must not make it a read.
  */
-const QUERY_LANGUAGES = new Set(["sql", "graphql", "cypher", "sparql", "gql", "promql", "kql"]);
+const QUERY_LANGUAGES_NOT_ENDING_IN_QL = new Set(["cypher", "sqlite", "gremlin"]);
 
-/** Word by word, and each word run into the next: `queryGraphQL` tokenises as `graph` + `ql` */
+/**
+ * A query language, or a database named after one: every word ending in `ql` (`sql`, `mysql`,
+ * `postgresql`, `graphql`, `logql`, `soql`) plus the few that do not. Checked on the whole name,
+ * the connection's own name included — `sql_query_tables` on a connection named `sql` is still SQL —
+ * word by word and each word run into the next, since `queryGraphQL` tokenises as `graph` + `ql`.
+ */
 function namesAQueryLanguage(tokens: string[]): boolean {
-  return tokens.some((t, i) => QUERY_LANGUAGES.has(t) || QUERY_LANGUAGES.has(t + (tokens[i + 1] ?? "")));
+  const isLanguage = (word: string) => word.endsWith("ql") || QUERY_LANGUAGES_NOT_ENDING_IN_QL.has(word);
+  return tokens.some((t, i) => isLanguage(t) || isLanguage(t + (tokens[i + 1] ?? "")));
 }
 
 /** `getWorkflowRun` and `get_workflow-run` are the same name to anyone reading it */
@@ -84,7 +90,7 @@ export function isReadSafe(tool: McpToolDef, serverName = ""): boolean {
   }
   const first = tokens[0];
   const leadingRead =
-    READ_VERBS.has(first) && (first !== "query" || (tokens.length > 1 && !namesAQueryLanguage(tokens.slice(1))));
+    READ_VERBS.has(first) && (first !== "query" || (tokens.length > 1 && !namesAQueryLanguage(allTokens)));
   const trailingRead = tokens.length > 1 && tokens[tokens.length - 1] === TRAILING_READ_VERB;
   const readShaped = leadingRead || trailingRead;
   // Every token, the server's name included: a server named `delete` must not lend its tools a pass
