@@ -9,10 +9,9 @@ import { recordFor, RunRecord } from "./run-record.js";
 import { isResultEvent, StreamEvent } from "./stream.js";
 import { branchFor, OpenDecisionInput, WORKER_BRANCH_SLUG } from "./decisions.js";
 import { Delivery } from "./delivery.js";
-import { childEnv } from "./env.js";
 import { Runner } from "./exec.js";
 import { Executor } from "./executor.js";
-import { gitArgs, GIT_SAFE_ENV } from "./git-safety.js";
+import { gitArgs, localGitEnv } from "./git-safety.js";
 import { Reporter } from "./reporter.js";
 import { SHUTDOWN_SIGNAL } from "./commands.js";
 import { scrub } from "./scrub.js";
@@ -258,7 +257,7 @@ async function unfinishedWork(
   const result = await runner.run("git", gitArgs(["status", "--porcelain"]), {
     cwd: worktreePath,
     timeoutMs: GIT_TIMEOUT_MS,
-    env: { ...childEnv(), ...GIT_SAFE_ENV },
+    env: localGitEnv(),
   });
   if (result.timedOut)
     return `\`git status\` timed out after ${GIT_TIMEOUT_MS}ms`;
@@ -278,7 +277,6 @@ async function pushFailure(
   worktreePath: string,
   branch: string,
   commit: string,
-  configBaseline?: readonly string[] | null,
 ): Promise<string | null> {
   const wrong = await unexpectedHistory(
     runner,
@@ -288,7 +286,7 @@ async function pushFailure(
   );
   if (wrong) return `refusing to push: ${wrong}`;
   try {
-    await delivery.push(worktreePath, branch, commit, configBaseline);
+    await delivery.push(worktreePath, branch, commit);
     return null;
   } catch (error) {
     return String(error);
@@ -498,6 +496,7 @@ export async function runTask(
   let keepWorktree = false;
   const state: RunState = {
     committed: false,
+    uncommittedWork: false,
     commits: [],
     pushed: false,
     prUrl: "",
@@ -539,13 +538,12 @@ export async function runTask(
           executor,
           delivery,
           commit: (message) =>
-            commitAll(runner, worktree.path, message, worktree.configBaseline),
+            commitAll(runner, worktree.path, message, worktree.commitIdentity),
           state,
           timeoutMs: budget.forEntry(config.taskTimeoutMs),
           signal: deps.signal,
           onEvent,
           baseSha: worktree.baseSha,
-          configBaseline: worktree.configBaseline,
           runner,
         });
         // Never once the merge has landed — see the same guard after the loop. gh pr merge runs
@@ -566,7 +564,13 @@ export async function runTask(
         // Only when this step ends the run. An earlier step may already have committed, and exiting
         // without keeping the worktree destroys the only copy of that work: nothing is pushed, and
         // the branch ref the parent clone holds is reset by the next attempt's `git worktree add -B`.
-        if (outcome.kind !== "ok" && state.committed) keepWorktree = true;
+        //
+        // `uncommittedWork` is the same sentence one step earlier: a commit that was attempted and
+        // did not happen leaves what the agent wrote in the tree and in no history at all, so an
+        // agent whose sequence has a single edit step used to lose everything it had written the
+        // moment `commitAll` threw (BP-506).
+        if (outcome.kind !== "ok" && (state.committed || state.uncommittedWork))
+          keepWorktree = true;
 
         if (outcome.kind === "usage_limit") {
           settle("released", "usage limit reached");
@@ -599,6 +603,18 @@ export async function runTask(
           await reporter.blocked(
             task,
             `${outcome.reason}${unpushedWork(state, worktree.path)}`,
+          );
+          return;
+        }
+        // The tree is evidence, not just work: the config the agent planted is inside it, and the
+        // refusal that found it names a key somebody now has to look at. Parked rather than
+        // requeued for the same reason — a requeue sends the next attempt at the same checkout,
+        // and `worktree add -B` would have taken the evidence with it (BP-506).
+        if (outcome.kind === "tampered") {
+          settle("failed", outcome.message);
+          await reporter.failed(
+            task,
+            `${outcome.message}\n\nNothing was staged and nothing was pushed. The worktree is kept at \`${worktree.path}\` on the worker host, with what the agent wrote and the config that was found still in it.`,
           );
           return;
         }
@@ -647,7 +663,6 @@ export async function runTask(
         );
         const verdict = await gate.run({
           worktreePath: worktree.path,
-          configBaseline: worktree.configBaseline,
           task,
           result: state.lastResult,
           diff,
@@ -735,7 +750,6 @@ export async function runTask(
                 worktree.path,
                 branch,
                 state.commits[state.commits.length - 1] ?? "",
-                worktree.configBaseline,
               );
           if (withholdsPush || pushFailed) keepWorktree = true;
 

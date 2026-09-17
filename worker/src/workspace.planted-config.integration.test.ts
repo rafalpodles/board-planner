@@ -146,21 +146,19 @@ describe("workspace.create against a planted config", () => {
   });
 
   /**
-   * The scan has to be judged against the config the checkout will actually use, or it answers a
-   * different question. `git worktree add` runs with `GIT_CONFIG_GLOBAL=/dev/null`; a scan that
-   * still read `~/.gitconfig` inherited every failure of a file the checkout never opens — and one
-   * malformed line there makes `--local --list` exit 128, which the scan reads as "unreadable" and
-   * refuses. Not for this project: for every project on the machine, with the board told the
-   * checkout could not be vouched for.
+   * An operator's own broken `~/.gitconfig` must not be reported as a compromised checkout — the
+   * scan judging a config the checkout never opens inherited every failure of that file, and one
+   * malformed line in it makes `--local --list` exit 128, which the scan reads as "unreadable" and
+   * refuses. Not for this project: for every project on the machine.
    *
-   * What it must be instead is the fault it is. `resolveBase` still shells out to a remote and
-   * that call does read the operator's global file, so the run is still refused here — as a base
-   * that could not be resolved, which the pipeline already charges and reports as a transport
-   * fault. The point of this test is the class, not the success: an operator's broken file must
-   * not be reported as a compromised checkout.
+   * It used to be refused all the same, one step later — `resolveBase` shells out to the remote,
+   * and that call still read the operator's global file. Since BP-516 every git call the worker
+   * makes has it neutralised, remote ones included, so the file cannot decide anything at all and
+   * the run simply proceeds. That is the property worth pinning: the machine is not broken by a
+   * file the worker does not read.
    */
   it(
-    "calls a malformed global config a base it could not resolve, not a poisoned checkout",
+    "is unaffected by a malformed global config, rather than calling the checkout poisoned",
     async () => {
       const home = join(dir, "home");
       mkdirSync(home, { recursive: true });
@@ -170,12 +168,12 @@ describe("workspace.create against a planted config", () => {
 
       try {
         // The premise: git really does refuse to answer at all with that file in place, so the
-        // scan below has something to survive
+        // calls below have something to survive
         expect(() => git(main, "config", "--local", "--list")).toThrow();
 
-        await expect(workspaceFor(main).create("BP-1", "worker")).rejects.toMatchObject({
-          name: "BaseUnavailableError",
-        });
+        const worktree = await workspaceFor(main).create("BP-1", "worker");
+
+        expect(existsSync(worktree.path)).toBe(true);
       } finally {
         if (realHome === undefined) delete process.env.HOME;
         else process.env.HOME = realHome;

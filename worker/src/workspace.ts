@@ -1,11 +1,11 @@
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join, resolve, sep } from "path";
+import { CommitIdentity, resolveCommitIdentity } from "./commit.js";
 import { WorkerConfig } from "./config.js";
-import { childEnv } from "./env.js";
-import { configBaseline, plantedConfig, UNREADABLE_CONFIG } from "./repos.js";
+import { plantedConfig, UNREADABLE_CONFIG } from "./repos.js";
 import { CommandResult, Runner } from "./exec.js";
-import { gitArgs, GIT_SAFE_ENV } from "./git-safety.js";
+import { gitArgs, localGitEnv } from "./git-safety.js";
 
 const GIT_TIMEOUT_MS = 60_000;
 
@@ -75,14 +75,16 @@ export interface Worktree {
   /** Resolved before the agent runs and held in this process: a ref name is rewritable by the run. */
   baseSha: string;
   /**
-   * What the effective git config said before the agent ran, held in this process for the same
-   * reason `baseSha` is. A baseline on disk is one the agent can edit — it runs as this uid, and
-   * the sandbox that confines it to the worktree since BP-349 is the operator's to switch off — and
-   * this is what lets a scan tell `~/.gitconfig`'s ordinary credential
-   * helper from one that appeared during the run (BP-346). `null` when git would not answer, which
-   * leaves the machine scopes unjudged rather than refusing the machine.
+   * Who this run's commits are by, resolved before the agent ran and held in this process for the
+   * same reason `baseSha` is. Every git call inside the checkout has `~/.gitconfig` out of the
+   * picture (BP-516), so the identity that file holds has to travel with the run rather than be
+   * read back at the commit — and reading it before the agent runs is also what keeps the agent,
+   * whose Write reaches `$HOME`, from choosing whose name the work lands under.
+   *
+   * `null` when the operator has configured none anywhere, which is the state git itself refuses to
+   * commit in, with a message that says what to run.
    */
-  configBaseline: string[] | null;
+  commitIdentity: CommitIdentity | null;
 }
 
 export interface Workspace {
@@ -138,15 +140,7 @@ export function createWorkspace(
     const result = await runner.run("git", gitArgs(args), {
       cwd: config.repoPath,
       timeoutMs: GIT_TIMEOUT_MS,
-      // `~/.gitconfig` is out of the picture on these calls, the way delivery.ts already puts it
-      // out of the picture on its own. Without this the scan below is close to decorative: it
-      // judges the repository's scopes, `childEnv()` allowlists HOME because the CLI authenticates
-      // from its session there, and BP-349 says the agent's Write reaches HOME — so a
-      // `[filter "z"] smudge` in ~/.gitconfig plus `* filter=z` in ~/.config/git/attributes made
-      // `git worktree add` run the payload with nothing planted inside the repository at all.
-      // Measured on git 2.50.1, against this branch. A filter still has to be DEFINED somewhere,
-      // and with the global file gone the only place left is a scope the scan reads.
-      env: { ...childEnv(), ...GIT_SAFE_ENV, GIT_CONFIG_GLOBAL: "/dev/null" },
+      env: localGitEnv(),
     });
     if (result.timedOut) {
       throw new Error(`git ${args[0]} timed out after ${GIT_TIMEOUT_MS}ms`);
@@ -196,7 +190,7 @@ export function createWorkspace(
       cwd,
       timeoutMs: GIT_TIMEOUT_MS,
       env: {
-        ...childEnv([
+        ...localGitEnv([
           "SSH_AUTH_SOCK",
           "GH_TOKEN",
           "GITHUB_TOKEN",
@@ -204,7 +198,6 @@ export function createWorkspace(
           "XDG_CONFIG_HOME",
         ]),
         ...env(),
-        ...GIT_SAFE_ENV,
         ...extraEnv,
       },
     });
@@ -335,14 +328,12 @@ export function createWorkspace(
    * date, and the machine scopes it would unlock are neutralised on these calls instead.
    */
   async function refuseIfPoisoned(): Promise<void> {
-    // The same neutralised global config the checkout below runs with. A scan judging a config git
-    // will not read answers a different question from the one asked, in both directions: it would
-    // refuse over an operator's own credential helper, and — measured — one malformed line in
-    // `~/.gitconfig` makes `--local --list` exit 128, which is read as unreadable and refuses
-    // every project on the machine until somebody notices.
-    const planted = await plantedConfig(runner, config.repoPath, undefined, {
-      GIT_CONFIG_GLOBAL: "/dev/null",
-    });
+    // The scan and the checkout read the same config, because both go through `localGitEnv`. A scan
+    // judging a config git will not read answers a different question from the one asked, in both
+    // directions: it would refuse over an operator's own credential helper, and — measured — one
+    // malformed line in `~/.gitconfig` makes `--local --list` exit 128, which is read as unreadable
+    // and refuses every project on the machine until somebody notices.
+    const planted = await plantedConfig(runner, config.repoPath);
     if (planted) throw new PoisonedCheckoutError(planted);
   }
 
@@ -389,7 +380,10 @@ export function createWorkspace(
       await refuseIfPoisoned();
       // -B resets the branch instead of failing if a crashed previous attempt already created it
       await git(["worktree", "add", "-B", branch, "--", path, baseSha]);
-      return { path, baseSha, configBaseline: await configBaseline(runner, path) };
+      // Read in the checkout the commits will be made in, so an operator who keeps a different
+      // name in this repository still gets it, and read here rather than at the commit because by
+      // then the agent has run and `~/.gitconfig` is a file it can write.
+      return { path, baseSha, commitIdentity: await resolveCommitIdentity(runner, path) };
     },
 
     async destroy(taskKey) {

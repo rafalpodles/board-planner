@@ -297,17 +297,30 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     onAgentStart?: (nth: number) => void,
     everyCall: string[][] = [],
     remoteCalls: RemoteCall[] = [],
-    // What `config --list --show-scope` answers. Only that listing: `--local --list` is what
-    // bindRepository scans, and a key visible to both would be refused at binding time instead —
-    // which is the path BP-346 records as the one an include.path or worktree-scope key evades.
+    // What `config --list --show-scope` answers — the listing both `bindRepository` and the run
+    // judge, because since BP-517 they are the same scan. `plantAfterBind` is what lets a test put
+    // a key where only the run can find it: the first scan of a checkout is the bind, and a key
+    // planted after it is the reachable case — minutes pass between binding a checkout and
+    // claiming against it, and the agent of an earlier run is what writes the key.
     scopedConfig: string | Record<string, string> = "",
-    sandboxBroken = false
+    sandboxBroken = false,
+    plantAfterBind = false
   ): Runner {
-    const scopedFor = (cwd?: string) =>
-      typeof scopedConfig === "string" ? scopedConfig : (scopedConfig[cwd ?? ""] ?? "");
+    // `bindRepository` asks `rev-parse --show-toplevel` first and scans second, so the scan that
+    // follows one in the same directory is the bind's. Nothing else tells the two apart: since
+    // BP-517 they are the same call, in the same place, judging the same listing.
+    const binding = new Set<string>();
+    const scopedFor = (cwd?: string) => {
+      const planted =
+        typeof scopedConfig === "string" ? scopedConfig : (scopedConfig[cwd ?? ""] ?? "");
+      if (!plantAfterBind) return planted;
+      if (!binding.delete(cwd ?? "")) return planted;
+      return "";
+    };
     return {
       async run(command, args, opts) {
         everyCall.push([command, ...args]);
+        if (command === "git" && args.includes("--show-toplevel")) binding.add(opts.cwd ?? "");
         if (command === "git" && args.includes("--show-scope")) {
           return { code: 0, stdout: scopedFor(opts.cwd), stderr: "", timedOut: false };
         }
@@ -394,6 +407,8 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       onAgentStart?: (nth: number) => void;
       // What the checkout's scoped git config says, for the tests about a planted key
       scopedConfig?: string | Record<string, string>;
+      // Hide it from the first scan of each checkout, which is the one `bindRepository` makes
+      plantAfterBind?: boolean;
       // Written into repos.json; defaults to the single REPO every other test uses
       repos?: string[];
       // Replaces the single p1 assignment; each entry binds by remote the way the server's do
@@ -473,7 +488,8 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         everyCall,
         remoteCalls,
         opts.scopedConfig,
-        opts.sandboxBroken
+        opts.sandboxBroken,
+        opts.plantAfterBind
       ),
       hostname: () => "host-1",
       // the loop only sleeps once it has nothing left to claim, which is one pass after the run
@@ -1214,12 +1230,33 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
      * anything out, and the project is then quarantined, because refusing alone leaves the loop
      * claiming the same clone on the next pass for ever.
      */
+    /**
+     * BP-517. The same key, seen at binding time, where an operator is watching and nothing has
+     * been claimed. Before this, `bindRepository` judged the checkout by a list of its own that
+     * could not see the worktree scope and did not judge `include.path`, so a checkout carrying
+     * either bound cleanly and was refused by the run instead — which since BP-504 quarantines the
+     * project and every sibling bound to the same path until the worker is restarted.
+     */
+    it("refuses to bind a checkout whose config carries a key git would run", async () => {
+      const run = await runOneTask(undefined, undefined, {
+        scopedConfig: scopedConfigListZ("filter.z.smudge=touch /tmp/pwned", "worktree"),
+      });
+
+      expect(run.api.claim).not.toHaveBeenCalled();
+      expect(run.bindingErrors.join(" ")).toContain("filter.z.smudge");
+      expect(
+        run.everyCall.some((call) => call.join(" ").includes("worktree add")),
+        "the worktree was created anyway"
+      ).toBe(false);
+    });
+
     describe("a checkout carrying a key git would run on checkout", () => {
       const PLANTED = scopedConfigListZ("filter.z.smudge=touch /tmp/pwned", "worktree");
 
       it("does not claim for that project again on the next pass", async () => {
         const run = await runOneTask(undefined, undefined, {
           scopedConfig: PLANTED,
+          plantAfterBind: true,
           tasks: [CLAIMED, CLAIMED],
           passes: 2,
         });
@@ -1249,6 +1286,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       it("stays quarantined across a rebind", async () => {
         const run = await runOneTask(undefined, undefined, {
           scopedConfig: PLANTED,
+          plantAfterBind: true,
           tasks: [CLAIMED, CLAIMED],
           passes: 2,
           // Past MIN_REFRESH_INTERVAL_MS, so a later pass genuinely re-binds rather than returning
@@ -1279,7 +1317,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       });
 
       it("never checks anything out of the poisoned clone", async () => {
-        const run = await runOneTask(undefined, undefined, { scopedConfig: PLANTED });
+        const run = await runOneTask(undefined, undefined, { scopedConfig: PLANTED, plantAfterBind: true });
 
         expect(
           run.everyCall.some((call) => call.join(" ").includes("worktree add")),
@@ -1296,6 +1334,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       it("covers every project bound to the same checkout, not only the one that hit it", async () => {
         const run = await runOneTask(undefined, undefined, {
           scopedConfig: PLANTED,
+          plantAfterBind: true,
           assignments: [
             { project: "p1", remote: REMOTE },
             { project: "p2", remote: REMOTE },
@@ -1326,6 +1365,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
             { project: "p2", remote: OTHER_REMOTE },
           ],
           scopedConfig: { [REPO]: PLANTED },
+          plantAfterBind: true,
           tasks: [CLAIMED, { ...CLAIMED, projectId: "p2", taskId: "t2" }],
           passes: 2,
         });
@@ -1352,6 +1392,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
             { project: "p2", remote: OTHER_REMOTE },
           ],
           scopedConfig: { [REPO]: PLANTED, [OTHER_REPO]: PLANTED },
+          plantAfterBind: true,
           tasks: [CLAIMED, { ...CLAIMED, projectId: "p2", taskId: "t2" }],
           passes: 2,
         });
@@ -1372,7 +1413,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
        * reported itself through this list since BP-379.
        */
       it("reports itself as a failed check, so the console says the machine stopped on purpose", async () => {
-        const run = await runOneTask(undefined, undefined, { scopedConfig: PLANTED });
+        const run = await runOneTask(undefined, undefined, { scopedConfig: PLANTED, plantAfterBind: true });
 
         const report = run.heartbeatDeps?.preflight?.();
         expect(report?.ok).toBe(false);
@@ -1409,7 +1450,10 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       });
 
       it("says on the socket why the project is not being worked on", async () => {
-        const run = await runOneTask(undefined, undefined, { scopedConfig: PLANTED });
+        const run = await runOneTask(undefined, undefined, {
+          scopedConfig: PLANTED,
+          plantAfterBind: true,
+        });
 
         const blocked = run.localConfig?.().projects[0].blocked;
         expect(blocked).toContain("filter.z.smudge");
@@ -1434,6 +1478,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       it("shows the quarantine over a sibling's older board refusal, which outlives it", async () => {
         const run = await runOneTask(undefined, undefined, {
           scopedConfig: PLANTED,
+          plantAfterBind: true,
           // p2 first: a machine fault ends the pass, so p1 has to be claimed after p2 has been
           // refused, or the refusal is never recorded and this passes for the wrong reason.
           assignments: [
@@ -1485,6 +1530,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       it("says it once, however many passes go by", async () => {
         const run = await runOneTask(undefined, undefined, {
           scopedConfig: PLANTED,
+          plantAfterBind: true,
           tasks: [CLAIMED, CLAIMED],
           passes: 3,
           clockJumpOnSleepMs: 60_000,
@@ -1498,7 +1544,10 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       });
 
       it("says it in the worker's own log too, with the finding and what an operator has to do", async () => {
-        const run = await runOneTask(undefined, undefined, { scopedConfig: PLANTED });
+        const run = await runOneTask(undefined, undefined, {
+          scopedConfig: PLANTED,
+          plantAfterBind: true,
+        });
 
         const said = run.logError.mock.calls.map((call) => String(call[0]));
         const line = said.find((message) => message.startsWith("quarantining "));
@@ -1518,7 +1567,10 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
        * option is what says the attempt came back.
        */
       it("hands the task back rather than charging it for the machine's compromise", async () => {
-        const run = await runOneTask(undefined, undefined, { scopedConfig: PLANTED });
+        const run = await runOneTask(undefined, undefined, {
+          scopedConfig: PLANTED,
+          plantAfterBind: true,
+        });
 
         expect(run.api.release).toHaveBeenCalled();
         expect(run.api.release).not.toHaveBeenCalledWith(

@@ -1,6 +1,5 @@
-import { childEnv } from "./env.js";
 import { Runner } from "./exec.js";
-import { GIT_SAFE_ENV, gitArgs } from "./git-safety.js";
+import { gitArgs, localGitEnv } from "./git-safety.js";
 
 const GIT_TIMEOUT_MS = 60_000;
 
@@ -16,7 +15,7 @@ export async function unexpectedHistory(
     runner.run("git", gitArgs(args), {
       cwd: worktreePath,
       timeoutMs: GIT_TIMEOUT_MS,
-      env: { ...childEnv(), ...GIT_SAFE_ENV },
+      env: localGitEnv(),
     });
 
   const range = await git(["rev-list", `${baseSha}..HEAD`]);

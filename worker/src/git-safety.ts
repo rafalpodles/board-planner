@@ -1,3 +1,5 @@
+import { childEnv } from "./env.js";
+
 // A linked worktree shares .git with the main clone, and the agent holds Write, so it can drop a
 // pre-commit hook or set core.hooksPath and have a later git call execute it. protected-paths
 // cannot see any of that: git never tracks anything under .git, so it never reaches a diff.
@@ -34,6 +36,45 @@ export const GIT_SAFE_ENV: Record<string, string> = {
   GIT_CONFIG_NOSYSTEM: "1",
   GIT_NO_REPLACE_OBJECTS: "1",
 };
+
+// One spelling of "read no global config at all", shared with delivery.ts so the two cannot drift.
+export const NO_GLOBAL_CONFIG = "/dev/null";
+
+/**
+ * The environment for every git call this worker makes inside a checkout.
+ *
+ * `~/.gitconfig` is the agent's file as much as the repository's own: `childEnv()` forwards HOME
+ * because the CLI authenticates from its session there, and BP-349 says the agent's Write reaches
+ * it. A `filter.<name>.clean` defined there runs on `git status` and `git add`, and a
+ * `diff.<name>.textconv` runs while a gate collects the diff — with nothing planted inside the
+ * repository at all, which is what makes the local-scope scan close to decorative on its own.
+ * Measured on git 2.50.1 (BP-504 for the checkout, BP-516 for the rest).
+ *
+ * It takes `user.email` with it, which is why `commitAll` is handed an identity resolved before the
+ * agent ran rather than reading one at commit time.
+ */
+export function localGitEnv(
+  alsoAllow: string[] = [],
+  extra: NodeJS.ProcessEnv = {},
+): NodeJS.ProcessEnv {
+  return {
+    ...childEnv(alsoAllow),
+    ...GIT_SAFE_ENV,
+    GIT_CONFIG_GLOBAL: NO_GLOBAL_CONFIG,
+    ...extra,
+  };
+}
+
+/**
+ * The one environment that still reads the operator's own config, for the one question only they
+ * can answer: which name and address their commits carry. It reads a value and never runs one —
+ * `git config --get` executes nothing, and `gitArgs` pins the pager at the command line, where it
+ * outranks any config file. Every other call goes through `localGitEnv`, and
+ * git-config-global.contract.test.ts is what keeps that true.
+ */
+export function operatorGitEnv(): NodeJS.ProcessEnv {
+  return { ...childEnv(), ...GIT_SAFE_ENV };
+}
 
 function withConfig(config: string[], args: string[]): string[] {
   return [...config.flatMap((entry) => ["-c", entry]), ...args];

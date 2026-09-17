@@ -1,6 +1,5 @@
-import { childEnv } from "./env.js";
 import { Runner, RunOpts } from "./exec.js";
-import { gitArgs, GIT_SAFE_ENV } from "./git-safety.js";
+import { gitArgs, localGitEnv } from "./git-safety.js";
 import { DiffStats } from "./types.js";
 
 const GIT_TIMEOUT_MS = 60_000;
@@ -14,7 +13,10 @@ async function git(
 ): Promise<string> {
   const result = await runner.run("git", gitArgs(args), {
     ...opts,
-    env: { ...childEnv(), ...opts.env, ...GIT_SAFE_ENV },
+    // A `diff.<name>.textconv` or a `diff.external` in `~/.gitconfig` runs right here, on the call
+    // that collects what a gate is about to judge — the same hazard as the staging path, and this
+    // is the same answer (BP-516).
+    env: localGitEnv([], opts.env),
   });
   if (result.timedOut) {
     throw new Error(`git ${args[0]} timed out after ${opts.timeoutMs}ms`);
