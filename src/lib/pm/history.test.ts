@@ -359,11 +359,17 @@ describe("replayHistory keeps the replay within a size budget", () => {
   });
 
   it("never opens the replay on an answer whose question was cut", async () => {
-    const thread = [
-      { role: "user", content: "a short question" },
-      { role: "assistant", content: "x".repeat(HISTORY_CHAR_BUDGET - 10) },
+    const lastExchange = [
       { role: "user", content: "thanks" },
       { role: "assistant", content: "you are welcome" },
+    ];
+    const used = lastExchange.reduce((n, e) => n + e.content.length, 0);
+    // The long answer fits beside the last exchange with five characters to spare, and its
+    // question does not: the cut falls between a question and its answer
+    const thread = [
+      { role: "user", content: "a short question" },
+      { role: "assistant", content: "x".repeat(HISTORY_CHAR_BUDGET - used - 5) },
+      ...lastExchange,
     ];
 
     const out = await replayHistory(thread, "p1");
