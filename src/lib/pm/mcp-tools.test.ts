@@ -88,6 +88,7 @@ describe("isReadSafe", () => {
       "get_import_status",
       "list_deploy_keys",
       "get_sync_status",
+      "list_restore_points",
       "get_address",           // "add", token is "address"
       "list_enabled_features", // "enable", token is "enabled"
       "list_published_packages",

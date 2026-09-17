@@ -5,8 +5,10 @@ const updateOne = vi.fn();
 const refreshTokens = vi.fn();
 
 vi.mock("@/models/project", () => ({ Project: { updateOne } }));
+// As lenient as the real one: an absent value comes back absent rather than throwing, or a test of
+// the missing-refresh-token guard passes because this double threw first (BP-476 review)
 vi.mock("@/lib/encryption", () => ({
-  decryptSecret: (v: string) => v.replace(/^enc:/, ""),
+  decryptSecret: (v: unknown) => (typeof v === "string" ? v.replace(/^enc:/, "") : v),
   encryptSecret: (v: string) => `enc:${v}`,
 }));
 vi.mock("./mcp-oauth", () => ({ refreshTokens }));
@@ -120,19 +122,38 @@ describe("discoverMcpTools — an OAuth server's token", () => {
   });
 
   it("refreshes an expired token, stores the new one encrypted, and uses it", async () => {
-    refreshTokens.mockResolvedValue({ accessToken: "new-access", refreshToken: "new-refresh", expiresAt: new Date(Date.now() + hour) });
+    const expiresAt = new Date(Date.now() + hour);
+    refreshTokens.mockResolvedValue({ accessToken: "new-access", refreshToken: "new-refresh", expiresAt });
 
     await discoverMcpTools("p1", [oauthServer({})]);
 
     expect(refreshTokens).toHaveBeenCalledWith(expect.objectContaining({ refreshToken: "the-refresh", resource: "https://acme.example/mcp" }));
     const [filter, update] = updateOne.mock.calls[0];
     expect(filter).toEqual({ _id: "p1", "pm.mcpServers.name": "acme" });
-    expect(update.$set).toMatchObject({
+    // The expiry too: without it every later turn would refresh again
+    expect(update.$set).toEqual({
       "pm.mcpServers.$.oauth.accessToken": "enc:new-access",
       "pm.mcpServers.$.oauth.refreshToken": "enc:new-refresh",
+      "pm.mcpServers.$.oauth.expiresAt": expiresAt,
       "pm.mcpServers.$.oauth.status": "connected",
     });
     expect(McpClientMock).toHaveBeenCalledWith("https://acme.example/mcp", "new-access");
+  });
+
+  it("keeps the stored refresh token when the provider does not issue a new one", async () => {
+    refreshTokens.mockResolvedValue({ accessToken: "new-access", expiresAt: new Date(Date.now() + hour) });
+
+    await discoverMcpTools("p1", [oauthServer({})]);
+
+    expect(updateOne.mock.calls[0][1].$set["pm.mcpServers.$.oauth.refreshToken"]).toBe("enc:the-refresh");
+  });
+
+  it("refreshes a token that is about to expire, not only one that has", async () => {
+    refreshTokens.mockResolvedValue({ accessToken: "new-access", expiresAt: new Date(Date.now() + hour) });
+
+    await discoverMcpTools("p1", [oauthServer({ expiresAt: new Date(Date.now() + 30_000) })]);
+
+    expect(refreshTokens).toHaveBeenCalledTimes(1);
   });
 
   it("marks the server as needing re-authorisation when the refresh fails, and skips it", async () => {

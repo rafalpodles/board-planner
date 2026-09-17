@@ -34,12 +34,25 @@ beforeEach(() => {
 
 // BP-471
 describe("POST /api/projects/:projectId/pm/review", () => {
-  it("starts a review and lets it finish after the answer", async () => {
+  it("answers before the review finishes, and hands the review itself to after()", async () => {
+    // Never settles: a route that waited for the review would never answer
+    const done = new Promise<void>(() => {});
+    startBoardReview.mockResolvedValue({ status: "started", done });
+
     const res = await run();
 
     expect(res.status).toBe(202);
     expect(startBoardReview).toHaveBeenCalledWith("p1", "BP", { enabled: true }, "pm-user");
     expect(after).toHaveBeenCalledTimes(1);
+    // What after() keeps alive is the review, not some other promise
+    expect(after.mock.calls[0][0]()).toBe(done);
+  });
+
+  it("answers 404 for a project that does not exist", async () => {
+    findById.mockReturnValue({ lean: async () => null });
+
+    expect((await run()).status).toBe(404);
+    expect(startBoardReview).not.toHaveBeenCalled();
   });
 
   it("refuses a machine credential, which should not spend the project's budget on its own", async () => {

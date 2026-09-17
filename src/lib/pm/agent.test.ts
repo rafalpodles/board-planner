@@ -300,6 +300,30 @@ describe("an unattended turn and a project's MCP server", () => {
     expect(refused).toHaveLength(2);
   });
 
+  // A cap reset each step would allow MAX_STEPS times as many; a cap counting only successes would
+  // let a server that errors on purpose be called without end
+  it("counts calls across the whole turn, the failed ones included", async () => {
+    const { callMcpTool } = await import("./mcp-tools");
+    vi.mocked(callMcpTool).mockReset();
+    vi.mocked(callMcpTool)
+      .mockRejectedValueOnce(new Error("server down"))
+      .mockResolvedValueOnce({ result: "boom", isError: true })
+      .mockResolvedValue({ result: "ok", isError: false });
+    const step = (n: number, from: number) => ({
+      type: "tools" as const,
+      assistantMessage: { role: "assistant" as const, content: "", tool_calls: [] },
+      calls: Array.from({ length: n }, (_, i) => ({ id: `c${from + i}`, name: "mcp_acme_list_tickets", args: {} })),
+    });
+    chatCompletion
+      .mockResolvedValueOnce(step(3, 0))
+      .mockResolvedValueOnce(step(4, 3))
+      .mockResolvedValueOnce({ type: "text", content: "done" });
+
+    await turn([], false);
+
+    expect(callMcpTool).toHaveBeenCalledTimes(5);
+  });
+
   it("refuses the withheld MCP tool at dispatch, not only in the list it offers", async () => {
     chatCompletion
       .mockResolvedValueOnce(toolCall("mcp_acme_create_ticket", {}))

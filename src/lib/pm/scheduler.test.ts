@@ -51,9 +51,33 @@ describe("pmSchedulerTick", () => {
         storedMessage: "Board review: 2 findings",
         trigger: { type: "daily_review" },
         disallowedTools: BOARD_REVIEW_DISALLOWED_TOOLS,
+        // The turn lock's controller: without it an interrupt could not stop a review
+        signal: expect.any(AbortSignal),
       })
     );
     expect(BOARD_REVIEW_DISALLOWED_TOOLS).toEqual(expect.arrayContaining(["change_status", "create_task"]));
+  });
+
+  it("runs one project's review at a time", async () => {
+    projectFind.mockReturnValue({
+      lean: async () => [
+        { _id: "p1", key: "BP", pm: PM },
+        { _id: "p2", key: "OT", pm: PM },
+      ],
+    });
+    let finishFirst!: (v: unknown) => void;
+    runPmTurn.mockReturnValueOnce(new Promise((resolve) => (finishFirst = resolve)));
+
+    const tick = pmSchedulerTick();
+    await vi.waitFor(() => expect(runPmTurn).toHaveBeenCalledTimes(1));
+    // Given time to start the second, it must not have
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(runPmTurn).toHaveBeenCalledTimes(1);
+
+    finishFirst({ ok: true });
+    await tick;
+    expect(runPmTurn).toHaveBeenCalledTimes(2);
+    expect(runPmTurn.mock.calls[1][0].projectId).toBe("p2");
   });
 
   it("leaves the slot unclaimed while another turn holds the project, so the next tick can still run it", async () => {
@@ -96,13 +120,30 @@ describe("startBoardReview", () => {
 
     expect(start).toEqual({ status: "skipped", reason: "the daily turn cap (3) is reached" });
     expect(runPmTurn).not.toHaveBeenCalled();
+    // A refusal takes nothing it would have to give back
+    expect(isTurnRunning("p1")).toBe(false);
   });
 
   it("refuses at once when the token cap is reached", async () => {
     dailyPmSpend.mockResolvedValue({ over: true, tokens: 900, cap: 800, calls: 4 });
 
-    expect((await startBoardReview("p1", "BP", PM, "pm-user")).status).toBe("skipped");
+    expect(await startBoardReview("p1", "BP", PM, "pm-user")).toEqual({
+      status: "skipped",
+      reason: "the daily token cap is reached (900 of 800 across 4 calls)",
+    });
     expect(runPmTurn).not.toHaveBeenCalled();
+    expect(isTurnRunning("p1")).toBe(false);
+  });
+
+  it("gives the turn back when the board has nothing to review, without a turn", async () => {
+    buildBoardDigest.mockResolvedValue(null);
+
+    const start = await startBoardReview("p1", "BP", PM, "pm-user");
+    expect(start.status).toBe("started");
+    if (start.status === "started") await start.done;
+
+    expect(runPmTurn).not.toHaveBeenCalled();
+    expect(isTurnRunning("p1")).toBe(false);
   });
 
   it("refuses a second review while the first holds the project's turn", async () => {
@@ -124,8 +165,11 @@ describe("startBoardReview", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const start = await startBoardReview("p1", "BP", PM, "pm-user");
+    expect(start.status).toBe("started");
+    expect(isTurnRunning("p1")).toBe(true);
     if (start.status === "started") await start.done;
 
+    expect(runPmTurn).toHaveBeenCalledTimes(1);
     expect(isTurnRunning("p1")).toBe(false);
     error.mockRestore();
   });
