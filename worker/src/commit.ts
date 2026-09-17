@@ -112,7 +112,7 @@ export async function resolveCommitIdentity(
   const result = await runner.run("git", gitArgs(["var", "GIT_AUTHOR_IDENT"]), {
     cwd,
     timeoutMs: TIMEOUT_MS,
-    env: { ...operatorGitEnv(), ...extraEnv },
+    env: operatorGitEnv(extraEnv),
   });
   if (result.timedOut) return { ok: false, reason: `git var timed out after ${TIMEOUT_MS}ms` };
   if (result.code !== 0) {

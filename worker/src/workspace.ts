@@ -326,16 +326,6 @@ export function createWorkspace(
   }
 
   /**
-   * `git worktree add` checks files **out**, and a checkout is where a `filter.<name>.smudge`
-   * runs — so a key an earlier run's agent planted in the shared `<main>/.git/config` executes
-   * inside this module, on every later attempt, before any gate has seen anything. BP-403's guard
-   * is in `commitAll`, downstream of the run this one would already have started. Measured on git
-   * 2.50.1: workspace.planted-config.integration.test.ts plants one and watches git run it.
-   *
-   * No baseline is passed, and none would help: this runs before the run a baseline exists to
-   * date, and the machine scopes it would unlock are neutralised on these calls instead.
-   */
-  /**
    * Whether the machine has nobody to commit as, or this checkout is what broke the answer.
    *
    * Asked in a directory with no repository in it, so the answer is the machine's own config and
@@ -353,6 +343,13 @@ export function createWorkspace(
     return onTheMachine.ok ? "checkout" : "machine";
   }
 
+  /**
+   * `git worktree add` checks files **out**, and a checkout is where a `filter.<name>.smudge`
+   * runs — so a key an earlier run's agent planted in the shared `<main>/.git/config` executes
+   * inside this module, on every later attempt, before any gate has seen anything. BP-403's guard
+   * is in `commitAll`, downstream of the run this one would already have started. Measured on git
+   * 2.50.1: workspace.planted-config.integration.test.ts plants one and watches git run it.
+   */
   async function refuseIfPoisoned(): Promise<void> {
     // The scan and the checkout read the same config, because both go through `localGitEnv`. A scan
     // judging a config git will not read answers a different question from the one asked, in both
@@ -376,11 +373,13 @@ export function createWorkspace(
       // workspace.planted-config.integration.test.ts plants one and watches git run it.
       await refuseIfPoisoned();
 
-      // Before the fetch and before the worktree: a machine git will not name an identity for
-      // fails every task it takes, and raising it after `worktree add` left an orphan worktree
-      // behind on every faulted claim, one per poll (BP-516 review). Read in the shared checkout,
-      // which is the config a linked worktree has — the per-worktree scope is the only thing that
-      // could differ, and a key in it is refused above.
+      // Before the fetch and before the worktree, because nothing about the answer needs either:
+      // a machine git will not name an identity for fails every task it takes, and finding that
+      // out after two network round-trips and a checkout spends a claim on a question that could
+      // have been asked first. (The pipeline's own catch destroys the worktree either way — the
+      // saving is the work not done, not a leak avoided.) Read in the shared checkout, which is
+      // the config a linked worktree has: the per-worktree scope is the only thing that could
+      // differ, and a key in it is refused above.
       const identity = await resolveCommitIdentity(runner, config.repoPath);
       if (!identity.ok) throw new MissingIdentityError(identity.reason, await whoseFault(identity));
 

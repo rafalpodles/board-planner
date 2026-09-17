@@ -174,7 +174,10 @@ describe("every git invocation is hardened", () => {
       .filter(
         ({ file, source }) =>
           !MAY_COMPOSE_A_GIT_ENVIRONMENT.includes(file) &&
-          /GIT_CONFIG_(NOSYSTEM|GLOBAL)\s*[:=]/.test(source),
+          // The quotes are not optional decoration: `"GIT_CONFIG_GLOBAL": "…"` is a key an object
+          // literal can carry past a rule that expects the name to touch its colon, and the spread
+          // that carries it wins over the helper it spreads (BP-516 review).
+          /GIT_CONFIG_(NOSYSTEM|GLOBAL)["']?\s*[:=]/.test(source),
       )
       .map(({ file }) => file);
 

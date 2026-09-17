@@ -28,8 +28,10 @@ const SAFE_CONFIG = [
   // forwards HOME for and which the agent can write. A path named there is invisible to
   // `git status --porcelain` AND to `git add --all`, so a file written into the worktree and
   // ignored there reads as a clean tree, reaches no diff and no gate, and is still run by the test
-  // gate. The repository's own `.gitignore` and `.git/info/exclude` are separate lists and are
-  // untouched by this.
+  // gate. The repository's own `.gitignore` is a separate list and is untouched. So is
+  // `.git/info/exclude` — and that one is the same hazard with the same owner as `.git/config`:
+  // untracked, shared with the main clone, writable by the agent, and reaching no diff. Telling it
+  // from the repository's own list needs `check-ignore -v`, which is BP-640.
   "core.excludesFile=/dev/null",
 ];
 
@@ -62,12 +64,16 @@ export const NO_GLOBAL_CONFIG = "/dev/null";
  * `~/.gitconfig` is the agent's file as much as the repository's own: `childEnv()` forwards HOME
  * because the CLI authenticates from its session there, and BP-349 says the agent's Write reaches
  * it. A `filter.<name>.clean` defined there runs on `git status` and `git add`, and a
- * `diff.<name>.textconv` runs while a gate collects the diff — with nothing planted inside the
- * repository at all, which is what makes the local-scope scan close to decorative on its own.
- * Measured on git 2.50.1 (BP-504 for the checkout, BP-516 for the rest).
+ * `filter.<name>.smudge` runs when the review gate checks the change out — with nothing planted
+ * inside the repository at all, which is what makes the local-scope scan close to decorative on its
+ * own. Measured on git 2.50.1 (BP-504 for the checkout, BP-516 for the rest).
+ *
+ * The diff is defence in depth rather than a hole this closes: every `git diff` in diff.ts already
+ * passes `--no-ext-diff --no-textconv`, so neither a global driver nor a global textconv could
+ * substitute a patch. Those are flags a call added later has to remember; this environment is not.
  *
  * It takes the commit identity with it, which is why `commitAll` is handed one resolved before the
- * agent ran rather than reading `user.name`/`user.email` at commit time.
+ * agent ran rather than reading it at commit time.
  */
 export function localGitEnv(
   alsoAllow: string[] = [],
@@ -86,14 +92,17 @@ export function localGitEnv(
 }
 
 /**
- * The one environment that still reads the operator's own config, for the one question only they
- * can answer: which name and address their commits carry. It reads a value and never runs one —
- * `git config --get` executes nothing, and `gitArgs` pins the pager at the command line, where it
- * outranks any config file. Every other call goes through `localGitEnv`, and
- * git-config-global.contract.test.ts is what keeps that true.
+ * The one environment that still reads the operator's own config, for the one question only that
+ * file can answer: which name and address their commits carry. It resolves a value and never runs
+ * one — `git var GIT_AUTHOR_IDENT` reads config and prints an ident, `gitArgs` pins the pager at
+ * the command line where it outranks any config file, and signing is off there too. Every other
+ * call goes through `localGitEnv`, and the tripwire in git-safety.test.ts is what keeps that true —
+ * it checks the call, not just the file.
  */
-export function operatorGitEnv(): NodeJS.ProcessEnv {
-  return { ...childEnv(), ...GIT_SAFE_ENV };
+export function operatorGitEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  // Caller's own in the middle, hardening last — the same discipline as `localGitEnv`, so the one
+  // call that is allowed to read that file still cannot decide anything else about what git does.
+  return { ...childEnv(), ...extra, ...GIT_SAFE_ENV };
 }
 
 function withConfig(config: string[], args: string[]): string[] {

@@ -459,14 +459,19 @@ export async function runTask(
     // the same split, and for the same reason, as BaseUnavailableError's `kind` below.
     if (error instanceof MissingIdentityError) {
       deps.logError?.(`${task.taskKey}: ${String(error)}`);
-      // The repository's own config leaves no identity — a `user.name = ""` in the shared
-      // `.git/config` does it. That belongs to the project, it repeats until a human changes
-      // something, and no other project on this machine is affected: the attempt is charged so the
-      // task escalates rather than cycling.
+      // The checkout's own config leaves no identity — a `user.name = ""` in the shared
+      // `.git/config` does it, well-formed and carrying no program, so no scan refuses it. Handled
+      // exactly as a poisoned checkout is, and for the same reason: the fault is in a file shared
+      // by every project bound to that path, and it repeats until a human edits it. The first
+      // version of this charged the attempt and returned, which let the loop claim task after task
+      // at spawn speed and charge each one — emptying the approved column of every project on that
+      // checkout into escalation, where round two's undistinguished behaviour had cost one idled
+      // pass (BP-516 review).
       if (error.kind === "checkout") {
-        settle("requeued", "this checkout's git config leaves no identity to commit as");
-        await reporter.requeued(task, String(error));
-        return;
+        deps.quarantineProject(task.projectId, "no identity to commit as");
+        settle("machineFault", "this checkout's git config leaves no identity to commit as");
+        await reporter.released(task, String(error));
+        return "machine-fault";
       }
       // Nothing on this machine will change while the worker runs, and every task it claims meets
       // the same wall — so the attempt comes back and the loop stops claiming for the rest of the

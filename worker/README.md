@@ -289,7 +289,9 @@ and `SIGINT` both finish the task in flight before the loop exits.
   service names, and the same command writes nothing. What that costs was measured rather than
   assumed — `defaults read` still answers, `npm ci`/`npm run build`/`npm test` still pass, git still
   commits, and the agent CLI still runs under both tool lists — because denying a lookup is not a
-  write-only deny. Every other daemon reachable the same way is still open, and no list of service
+  write-only deny. What no measurement here covers is a program that reads a preference *only*
+  through that daemon: it sees the default instead, which for a run is the answer a fresh account
+  would give. Every other daemon reachable the same way is still open, and no list of service
   names closes that; so are reads, and the network, neither of which this touches at all.
 
   **A file git will not print** (**BP-603**). Four things take a file's contents out of a patch: a

@@ -93,8 +93,8 @@ describe("createWorkspace", () => {
         email: "operator@example.com",
       });
       // Asked in the shared checkout, before the worktree exists: the local config a linked
-      // worktree reads is that same file, and raising the refusal after `worktree add` left an
-      // orphan worktree behind on every faulted claim.
+      // worktree reads is that same file, and asking first is what keeps a machine that cannot
+      // answer from spending a fetch and a checkout to find out.
       expect(run).toHaveBeenCalledWith(
         "git",
         [...HARDENING_PREFIX, "var", "GIT_AUTHOR_IDENT"],

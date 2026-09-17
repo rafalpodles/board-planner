@@ -740,16 +740,29 @@ describe("runTask", () => {
       expect(h.reporter.requeued).not.toHaveBeenCalled();
     });
 
-    // Charged, so the task escalates instead of cycling: no other project on this machine is
-    // affected, and it repeats until a human edits that checkout's config.
-    it("charges the task and leaves the machine claiming when the checkout is", async () => {
+    // Quarantines the checkout when the checkout is what has none, the way a planted key does: the
+    // file is shared by every project bound to that path, so a plain requeue let the loop claim
+    // task after task and charge each one until the column was empty.
+    it("quarantines the checkout when the checkout is what has none", async () => {
       const h = refusing("checkout");
 
       const outcome = await runTask(h.deps, task);
 
-      expect(outcome).toBeUndefined();
-      expect(h.reporter.requeued).toHaveBeenCalled();
-      expect(h.reporter.released).not.toHaveBeenCalled();
+      expect(h.quarantineProject).toHaveBeenCalled();
+      expect(outcome).toBe("machine-fault");
+      // Refunded: the task did nothing, and nothing it could do would help
+      expect(h.reporter.released).toHaveBeenCalled();
+      expect(h.reporter.requeued).not.toHaveBeenCalled();
+    });
+
+    // And not when the machine is: there is no checkout to quarantine, and doing it anyway would
+    // latch off a project whose own config is fine.
+    it("quarantines nothing when the machine is what has none", async () => {
+      const h = refusing("machine");
+
+      await runTask(h.deps, task);
+
+      expect(h.quarantineProject).not.toHaveBeenCalled();
     });
   });
 
@@ -1236,6 +1249,9 @@ describe("runTask", () => {
 
     expect(h.reporter.requeued.mock.calls[0][1]).toMatch(/boom/);
     expect(h.workspace.destroy).not.toHaveBeenCalled();
+    // And says where, the same as the step path: this branch keeps a tree too, and a kept tree
+    // nobody is told about is a directory on a machine rather than a copy of anybody's work.
+    expect(h.reporter.requeued.mock.calls[0][1]).toContain("/wt");
   });
 
   // The control: nothing committed and nothing written, so there is nothing to keep and the tree
