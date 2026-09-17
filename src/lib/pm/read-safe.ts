@@ -33,15 +33,26 @@ const WRITE_VERBS = new Set([
   "add", "save", "publish", "cancel", "disable", "enable", "upsert", "submit",
   // A read verb at the END reads `mark_all_notifications_read` as a read unless these are known
   "mark", "unpublish", "dismiss", "resolve", "reopen", "lock", "unlock", "star", "unstar",
-  "subscribe", "unsubscribe", "toggle", "flag", "ack", "acknowledge", "modify", "put",
+  "subscribe", "unsubscribe", "acknowledge", "modify",
 ]);
 
 /**
+ * Verbs that only mean a mutation in front of a trailing `read` — `toggle_read`, `flag_as_read`.
+ * Anywhere else they are ordinary nouns of real reads: LaunchDarkly's `get-flag`, `get_feature_toggle`.
+ */
+const WRITE_VERBS_BEFORE_A_TRAILING_READ = new Set(["toggle", "flag", "ack", "put"]);
+
+/**
  * `query` reads only when it names what it queries: `query_prometheus`, `notion-query-data-sources`.
- * Alone, or followed by a query language, it runs whatever it is sent — `mysql_query` on a server
- * named `mysql` is arbitrary SQL, and stripping the server's name must not make it a read (BP-476).
+ * Alone, or naming a query language anywhere after it, it runs whatever it is sent — `mysql_query`
+ * on a server named `mysql` is arbitrary SQL, and stripping the server's name must not make it a read.
  */
 const QUERY_LANGUAGES = new Set(["sql", "graphql", "cypher", "sparql", "gql", "promql", "kql"]);
+
+/** Word by word, and each word run into the next: `queryGraphQL` tokenises as `graph` + `ql` */
+function namesAQueryLanguage(tokens: string[]): boolean {
+  return tokens.some((t, i) => QUERY_LANGUAGES.has(t) || QUERY_LANGUAGES.has(t + (tokens[i + 1] ?? "")));
+}
 
 /** `getWorkflowRun` and `get_workflow-run` are the same name to anyone reading it */
 function tokensOf(name: string): string[] {
@@ -73,9 +84,12 @@ export function isReadSafe(tool: McpToolDef, serverName = ""): boolean {
   }
   const first = tokens[0];
   const leadingRead =
-    READ_VERBS.has(first) && (first !== "query" || (tokens.length > 1 && !QUERY_LANGUAGES.has(tokens[1])));
-  const readShaped = tokens.length > 0 && (leadingRead || tokens[tokens.length - 1] === TRAILING_READ_VERB);
+    READ_VERBS.has(first) && (first !== "query" || (tokens.length > 1 && !namesAQueryLanguage(tokens.slice(1))));
+  const trailingRead = tokens.length > 1 && tokens[tokens.length - 1] === TRAILING_READ_VERB;
+  const readShaped = leadingRead || trailingRead;
   // Every token, the server's name included: a server named `delete` must not lend its tools a pass
-  const nameLooksReadOnly = readShaped && !allTokens.some((t) => WRITE_VERBS.has(t));
-  return nameLooksReadOnly && tool.annotations?.readOnlyHint !== false;
+  const mutates = allTokens.some(
+    (t) => WRITE_VERBS.has(t) || (!leadingRead && WRITE_VERBS_BEFORE_A_TRAILING_READ.has(t))
+  );
+  return readShaped && !mutates && tool.annotations?.readOnlyHint !== false;
 }

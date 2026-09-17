@@ -137,8 +137,21 @@ describe("isReadSafe", () => {
     ]) {
       expect(isReadSafe(tool(name), server), name).toBe(false);
     }
+    for (const name of ["queryGraphQL", "QueryGraphQL", "query_raw_sql", "query_neo4j_cypher"]) {
+      expect(isReadSafe(tool(name)), name).toBe(false);
+    }
     expect(isReadSafe(tool("query_prometheus"))).toBe(true);
     expect(isReadSafe(tool("notion-query-data-sources"), "notion")).toBe(true);
+  });
+
+  // Nouns in feature-flag tools: refusing them would withhold LaunchDarkly's reads with writes off
+  it("reads a flag or a toggle, and refuses toggling or flagging something read", () => {
+    for (const name of ["get-flag", "get-flag-status-across-environments", "get_feature_toggle", "getFeatureFlag", "get_ack_deadline"]) {
+      expect(isReadSafe(tool(name)), name).toBe(true);
+    }
+    for (const name of ["toggle_read", "flag_as_read", "ack_read", "put_read"]) {
+      expect(isReadSafe(tool(name)), name).toBe(false);
+    }
   });
 
   it("does not let a server named after a write verb lend its tools a pass", () => {
