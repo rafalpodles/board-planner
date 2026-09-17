@@ -261,11 +261,11 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     // The repair is the caller's because the finding is: "remove the key" is the answer for a key
     // somebody planted and the wrong one for a config that names no identity at all, where there is
     // nothing to remove and something to set (BP-516 review).
-    quarantined.set(checkout, `${checkout}: its git config ${reason}. ${repair}, then restart this worker.`);
+    const instruction = `${repair}, then restart this worker.`;
+    quarantined.set(checkout, `${checkout}: its git config ${reason}. ${instruction}`);
     deps.logError(
-      `quarantining ${checkout}: its git config ${reason}. ` +
-        `Nothing on this machine will claim for any project on that checkout again until you ` +
-        `${repair.charAt(0).toLowerCase()}${repair.slice(1)} and this worker is restarted.`
+      `quarantining ${checkout}: its git config ${reason}. Nothing on this machine will claim for ` +
+        `any project on that checkout again. ${instruction}`
     );
   }
 

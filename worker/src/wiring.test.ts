@@ -1594,7 +1594,9 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         expect(line, `no quarantine line among ${JSON.stringify(said)}`).toBeDefined();
         expect(line).toContain(REPO);
         expect(line).toContain("filter.z.smudge");
-        expect(line).toContain("restarted");
+        // The way out, in whatever words the repair took: "remove the key" for a planted one,
+        // "set user.name and user.email" for a config that names no identity (BP-516).
+        expect(line).toContain("restart this worker");
       });
 
       /**

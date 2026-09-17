@@ -252,11 +252,15 @@ and `SIGINT` both finish the task in flight before the loop exits.
   The key is **not** cleared for you. Writing to a config an attacker also writes is a race, and it
   destroys the evidence of what was planted.
 
-  Neither is the worktree. A refusal at staging time keeps it, with what the agent wrote and the
-  planted config still in it, and parks the task rather than requeueing it at the same checkout
-  (BP-506) — the comment names the key and the path. That holds for an ordinary commit failure too:
-  whichever call failed, the agent's work is in that tree and in no history, and the `finally` that
-  tidies up is the only thing between it and `worktree remove --force`.
+  Neither is the worktree. A **tampered-checkout** refusal keeps it, with what the agent wrote and
+  the planted config still in it, and parks the task rather than requeueing it at the same checkout
+  (BP-506) — the comment names the key and the path. A config this cannot *read* is not that: it
+  refuses the same staging, but as an ordinary failure, so the task requeues and the comment names
+  the path alone, because there is no key to name. Every ordinary commit failure keeps the tree the
+  same way — whichever call threw, the agent's work is in it and in no history, and the `finally`
+  that tidies up is the only thing between it and `worktree remove --force` — but only until the
+  next attempt rebuilds the worktree. Where it stops: a step that never reaches its commit, on a
+  timeout, a usage limit or a block, does not set the flag that keeps it, and the tree goes.
 - **The agent's own writes cannot leave its worktree.** Both calls to the CLI — the step that
   writes the change and the review gate — run under `sandbox-exec` with a profile that denies every
   write and allows back exactly one directory: the worktree for the step, the throwaway checkout for
