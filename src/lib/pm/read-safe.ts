@@ -48,6 +48,10 @@ const WRITE_VERBS_BEFORE_A_TRAILING_READ = new Set(["toggle", "flag", "ack", "pu
  * on a server named `mysql` is arbitrary SQL, and stripping the server's name must not make it a read.
  */
 const QUERY_LANGUAGES_NOT_ENDING_IN_QL = new Set(["cypher", "sqlite", "gremlin"]);
+/** Languages that end in `ql` and can only read: a tool that queries logs or metrics in one is a read */
+const READ_ONLY_QUERY_LANGUAGES = new Set([
+  "hogql", "logql", "promql", "traceql", "metricsql", "jql", "soql", "nrql", "kql", "esql",
+]);
 
 /**
  * A query language, or a database named after one: every word ending in `ql` (`sql`, `mysql`,
@@ -56,7 +60,8 @@ const QUERY_LANGUAGES_NOT_ENDING_IN_QL = new Set(["cypher", "sqlite", "gremlin"]
  * word by word and each word run into the next, since `queryGraphQL` tokenises as `graph` + `ql`.
  */
 function namesAQueryLanguage(tokens: string[]): boolean {
-  const isLanguage = (word: string) => word.endsWith("ql") || QUERY_LANGUAGES_NOT_ENDING_IN_QL.has(word);
+  const isLanguage = (word: string) =>
+    (word.endsWith("ql") && !READ_ONLY_QUERY_LANGUAGES.has(word)) || QUERY_LANGUAGES_NOT_ENDING_IN_QL.has(word);
   return tokens.some((t, i) => isLanguage(t) || isLanguage(t + (tokens[i + 1] ?? "")));
 }
 

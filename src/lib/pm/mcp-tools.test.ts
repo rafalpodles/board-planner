@@ -147,11 +147,14 @@ describe("isReadSafe", () => {
       "query_sqlite",
       "query_mssql",
       "query_postgresql",
-      "query_soql",
-      "query_logql",
     ]) {
       expect(isReadSafe(tool(name)), name).toBe(false);
     }
+    // Languages that can only read stay reads: PostHog's HogQL generator returns a query string
+    for (const name of ["query_logql", "query_soql", "query_traceql"]) {
+      expect(isReadSafe(tool(name)), name).toBe(true);
+    }
+    expect(isReadSafe(tool("query-generate-hogql-from-question"), "posthog")).toBe(true);
     // The connection's own name is part of what the tool runs
     expect(isReadSafe(tool("sql_query_tables"), "sql")).toBe(false);
     expect(isReadSafe(tool("query_prometheus"))).toBe(true);
