@@ -243,9 +243,11 @@ and `SIGINT` both finish the task in flight before the loop exits.
   because a re-scan reading clean thirty seconds later is exactly what re-planting produces. Remove
   the key, then restart the worker.
 
-  Only a key somebody planted quarantines anything. A config git would not read at all — a checkout
-  being re-cloned, a machine under load — still refuses the run, because a config this cannot read
-  is one it cannot vouch for, but it does not latch the project off until the process restarts.
+  Two things quarantine a checkout, and both are a file that path's projects share: a key somebody
+  planted, and a config that leaves no identity to commit as (BP-516). A config git would not read at
+  all — a checkout being re-cloned, a machine under load — still refuses the run, because a config
+  this cannot read is one it cannot vouch for, but it does not latch the project off until the
+  process restarts.
 
   The key is **not** cleared for you. Writing to a config an attacker also writes is a race, and it
   destroys the evidence of what was planted.
@@ -404,27 +406,27 @@ and `SIGINT` both finish the task in flight before the loop exits.
   file take `safe.directory` with them, so a checkout whose `.git` belongs to another uid answers
   `fatal: detected dubious ownership`, which this reports as "could not read git config in <path>".
   `bindRepository`'s own uid check catches the ordinary case first; the message is worth knowing for
-  the one it does not. A `.DS_Store` an operator ignores
-  globally is committed by the worker, because the repository's own `.gitignore` is the only ignore
-  list left — and that is the direction worth paying for. Measured: a path named in that file is
-  invisible to `git status --porcelain` and to `git add --all` alike, so a file written into the
-  worktree and ignored there reads as a clean tree, reaches no diff and no gate, and is still run by
-  `npm test`. An ignore list outside the repository cannot be allowed to decide what a machine
-  commits into it.
+  the one it does not.
+
   The worker's own commits are made in the same environment since BP-516, and the one thing they
   genuinely need from that file — who the commits are by — is asked of git itself before the agent
   runs (`git var GIT_AUTHOR_IDENT`, in the shared checkout, which is the local config a linked
   worktree reads) and carried in `GIT_AUTHOR_*`/`GIT_COMMITTER_*`. Asked before the fetch and before
   `worktree add`, because the answer is the same for every task, finding it out at the commit costs
-  the whole run, and raising it later left an orphan worktree behind on every faulted claim.
+  the whole run, and asking after the fetch and the checkout spends both on a question that could
+  have been asked first.
 
-  Two faults, two settlements. **The machine** names nobody, or its config file will not parse: the
-  run is released with the attempt refunded and the loop stops claiming for the rest of the pass,
-  carrying git's own whole answer — which is where the two commands to run are. **The checkout**
-  leaves no identity while the machine is fine — a `user.name = ""` in the shared `.git/config` does
-  it, well-formed and carrying no program, so no scan refuses it: the attempt is charged and the
-  task escalates, and no other project on the machine is touched. Undistinguished, the least capable
-  key an agent can plant cost a whole worker's pass.
+  Two faults, one settlement and two blast radii. Both release the run with its attempt refunded and
+  end the pass — the task did nothing and nothing it could do would help. What differs is what is
+  latched off and how it is cleared. **The machine** names nobody, or its config file will not
+  parse: nothing is quarantined, git's own whole answer travels as the reason — which is where the
+  two commands to run are — and the next poll tries again, so a machine that is still broken says so
+  again. **The checkout** leaves no identity while the machine is fine — a `user.name = ""` in the
+  shared `.git/config` does it, well-formed and carrying no program, so no scan refuses it: that
+  checkout is quarantined, exactly as a planted key quarantines it and for the same reason, because
+  the file belongs to the path and every project bound to it shares it. Charging the attempt instead
+  was tried and is worse than doing nothing: the loop claims the next task immediately, so the
+  approved column of every project on that checkout empties into escalation one attempt at a time.
 
   What that identity is worth is worth stating too: an earlier run's agent can write `user.email`
   into that file or into the shared `.git/config`, and neither is a key git *runs*, so no scan

@@ -245,24 +245,27 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   const checkoutOf = (projectId: string): string =>
     bound.get(projectId)?.path ?? `project:${projectId}`;
 
+  const REMOVE_THE_KEY = "Remove the key";
+
   const quarantineReasonFor = (projectId: string): string | undefined =>
     quarantined.get(checkoutOf(projectId));
 
-  function quarantineProject(projectId: string, reason: string): void {
+  function quarantineProject(projectId: string, reason: string, repair = REMOVE_THE_KEY): void {
     const checkout = checkoutOf(projectId);
     if (quarantined.has(checkout)) return;
     // Stored as the sentence, not as the bare finding. This map answers the cockpit's `blocked`
     // field as well as the preflight check, and next to the gates' detail sentences and the
     // board's own refusal a bare `filter.z.smudge (local)` says neither that the machine stopped
     // on purpose nor what to do about it.
-    quarantined.set(
-      checkout,
-      `${checkout}: its git config carries ${reason}. Remove the key, then restart this worker.`
-    );
+    //
+    // The repair is the caller's because the finding is: "remove the key" is the answer for a key
+    // somebody planted and the wrong one for a config that names no identity at all, where there is
+    // nothing to remove and something to set (BP-516 review).
+    quarantined.set(checkout, `${checkout}: its git config ${reason}. ${repair}, then restart this worker.`);
     deps.logError(
-      `quarantining ${checkout}: its git config carries ${reason}. ` +
-        `Nothing on this machine will claim for any project on that checkout again until the key ` +
-        `is gone and this worker is restarted.`
+      `quarantining ${checkout}: its git config ${reason}. ` +
+        `Nothing on this machine will claim for any project on that checkout again until you ` +
+        `${repair.charAt(0).toLowerCase()}${repair.slice(1)} and this worker is restarted.`
     );
   }
 

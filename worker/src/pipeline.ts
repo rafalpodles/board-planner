@@ -73,7 +73,12 @@ export interface PipelineDeps {
    * again for ever — the exact loop the quarantine exists to end — and would do it without
    * anything failing to compile.
    */
-  quarantineProject: (projectId: string, reason: string) => void;
+  /**
+   * Stops this machine claiming for every project bound to that checkout. `reason` completes "its
+   * git config …" and `repair` is the sentence that follows it, because what to do about a planted
+   * key and about a config that names no identity are different instructions (BP-516).
+   */
+  quarantineProject: (projectId: string, reason: string, repair?: string) => void;
   /** Injected only so a test can move the run's clock; the run itself reads the wall clock. */
   now?: () => number;
   // Where the run says what it is doing. Left out entirely, the run behaves exactly as it did
@@ -441,7 +446,7 @@ export async function runTask(
       // turn an ordinary transient into an outage nothing on the machine can lift. The run is
       // refused either way, and a transient one is refused again next time if it persists.
       if (error.kind === "planted") {
-        deps.quarantineProject(task.projectId, error.finding);
+        deps.quarantineProject(task.projectId, `carries ${error.finding}`);
       }
       // Said separately for each kind. The detail is what the AgentRun record keeps and what the
       // menubar's notification shows, and it outlives the run — so it must not claim a key was
@@ -468,7 +473,11 @@ export async function runTask(
       // checkout into escalation, where round two's undistinguished behaviour had cost one idled
       // pass (BP-516 review).
       if (error.kind === "checkout") {
-        deps.quarantineProject(task.projectId, "no identity to commit as");
+        deps.quarantineProject(
+          task.projectId,
+          "leaves no identity to commit as",
+          "Set user.name and user.email there, or remove the empty ones",
+        );
         settle("machineFault", "this checkout's git config leaves no identity to commit as");
         await reporter.released(task, String(error));
         return "machine-fault";
