@@ -366,6 +366,10 @@ describe("reviewGate", () => {
     const [, addArgs] = gitCall(run, "worktree");
     expect(addArgs).toEqual(expect.arrayContaining(["-c", "core.hooksPath=/dev/null"]));
     expect(gitCall(run, "worktree")[2].env?.GIT_CONFIG_NOSYSTEM).toBe("1");
+    // And the operator's own file with it: this call checks files OUT, which is where a
+    // `filter.<name>.smudge` runs — and `~/.gitconfig` is a file the agent can write, so a filter
+    // defined there ran here with nothing planted in the repository at all (BP-516).
+    expect(gitCall(run, "worktree")[2].env?.GIT_CONFIG_GLOBAL).toBe("/dev/null");
   });
 
   // A stop has to reach the checkout too: it is a git process of unbounded duration on a large repo

@@ -146,19 +146,20 @@ describe("workspace.create against a planted config", () => {
   });
 
   /**
-   * An operator's own broken `~/.gitconfig` must not be reported as a compromised checkout — the
+   * An operator's own broken `~/.gitconfig` must not be reported as a compromised checkout. The
    * scan judging a config the checkout never opens inherited every failure of that file, and one
    * malformed line in it makes `--local --list` exit 128, which the scan reads as "unreadable" and
-   * refuses. Not for this project: for every project on the machine.
+   * refuses — not for this project: for every project on the machine, with the board told the
+   * checkout could not be vouched for.
    *
-   * It used to be refused all the same, one step later — `resolveBase` shells out to the remote,
-   * and that call still read the operator's global file. Since BP-516 every git call the worker
-   * makes has it neutralised, remote ones included, so the file cannot decide anything at all and
-   * the run simply proceeds. That is the property worth pinning: the machine is not broken by a
-   * file the worker does not read.
+   * It is still refused, and that is not a compromise: the one thing the worker still asks that
+   * file is who its commits are by, and a file git will not parse cannot answer. What changes is
+   * what the machine is told — `MissingIdentityError`, carrying git's own sentence naming the file
+   * and the line, released as a machine fault with the attempt refunded (BP-516). A person reading
+   * it goes and looks at their own config, rather than at a checkout nobody planted anything in.
    */
   it(
-    "is unaffected by a malformed global config, rather than calling the checkout poisoned",
+    "calls a malformed global config a machine's own fault, not a poisoned checkout",
     async () => {
       const home = join(dir, "home");
       mkdirSync(home, { recursive: true });
@@ -167,13 +168,13 @@ describe("workspace.create against a planted config", () => {
       process.env.HOME = home;
 
       try {
-        // The premise: git really does refuse to answer at all with that file in place, so the
-        // calls below have something to survive
+        // The premise: git really does refuse to answer at all with that file in place
         expect(() => git(main, "config", "--local", "--list")).toThrow();
 
-        const worktree = await workspaceFor(main).create("BP-1", "worker");
-
-        expect(existsSync(worktree.path)).toBe(true);
+        await expect(workspaceFor(main).create("BP-1", "worker")).rejects.toMatchObject({
+          name: "MissingIdentityError",
+          message: expect.stringContaining(".gitconfig"),
+        });
       } finally {
         if (realHome === undefined) delete process.env.HOME;
         else process.env.HOME = realHome;

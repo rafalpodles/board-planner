@@ -309,6 +309,11 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     // `bindRepository` asks `rev-parse --show-toplevel` first and scans second, so the scan that
     // follows one in the same directory is the bind's. Nothing else tells the two apart: since
     // BP-517 they are the same call, in the same place, judging the same listing.
+    //
+    // It holds because bind always reaches its scan. A test that made `bindRepository` return
+    // between the two — a toplevel that does not match the path — would leave the mark set, and
+    // the next scan in that directory is the *run's*: it would read clean and quietly disarm every
+    // assertion after it. No test does that today; one that wants to must not use plantAfterBind.
     const binding = new Set<string>();
     const scopedFor = (cwd?: string) => {
       const planted =
@@ -320,6 +325,11 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     return {
       async run(command, args, opts) {
         everyCall.push([command, ...args]);
+        // Who the run commits as, asked once before the agent starts (BP-516). A machine git will
+        // not name one for is refused at `create`, so the fake has to answer it.
+        if (command === "git" && args.includes("GIT_AUTHOR_IDENT")) {
+          return { code: 0, stdout: "The Operator <operator@example.com> 1789000000 +0200\n", stderr: "", timedOut: false };
+        }
         if (command === "git" && args.includes("--show-toplevel")) binding.add(opts.cwd ?? "");
         if (command === "git" && args.includes("--show-scope")) {
           return { code: 0, stdout: scopedFor(opts.cwd), stderr: "", timedOut: false };
@@ -336,6 +346,16 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
           // "the probe never ran" — a machine with no working sandbox.
           if (!sandboxBroken) answerSandboxProbe(args);
           return { code: sandboxBroken ? 65 : 0, stdout: "", stderr: "", timedOut: false };
+        }
+        // Who the run commits as, asked once before the agent starts (BP-516). A machine git will
+        // not name one for is refused at `create`, so the fake has to answer it.
+        if (command === "git" && args.includes("GIT_AUTHOR_IDENT")) {
+          return {
+            code: 0,
+            stdout: "The Operator <operator@example.com> 1789000000 +0200\n",
+            stderr: "",
+            timedOut: false,
+          };
         }
         // git is stubbed here, so the directory `git worktree add` would have made is made here:
         // the agent cannot be confined to a worktree that does not exist (BP-349).
@@ -632,6 +652,14 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         if (isSandboxProbe(command, args)) {
           answerSandboxProbe(args);
           return { code: 0, stdout: "", stderr: "", timedOut: false };
+        }
+        if (command === "git" && args.includes("GIT_AUTHOR_IDENT")) {
+          return {
+            code: 0,
+            stdout: "The Operator <operator@example.com> 1789000000 +0200\n",
+            stderr: "",
+            timedOut: false,
+          };
         }
         if (command === "git" && args.includes("worktree") && args.includes("add")) {
           const separator = args.indexOf("--");

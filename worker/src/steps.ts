@@ -28,6 +28,11 @@ export interface RunState {
    * between that work and `worktree remove --force`, so this keeps it — for a refusal, where the
    * tree is also the evidence, and for the ordinary failures of `status`, `add`, `commit` and
    * `rev-parse`, where it is simply the one copy (BP-506).
+   *
+   * Where it stops, said rather than left to be discovered: a step that never reaches its commit —
+   * a timeout, a usage limit, a block — does not set this, and the tree goes, as it did before.
+   * Those are the agent failing rather than the commit failing, and the usage-limit case is
+   * deliberately kept that way (the same machine runs the task again).
    */
   uncommittedWork: boolean;
   /** Every sha this run created, oldest first. The only thing that commits here is commitAll. */

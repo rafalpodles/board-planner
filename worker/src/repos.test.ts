@@ -3,7 +3,7 @@ import { homedir, tmpdir } from "os";
 import { join } from "path";
 import { describe, it, expect, vi, afterAll } from "vitest";
 import { bindRepository, createAllowlistReader, RepoDeps, repoInventory } from "./repos.js";
-import { configListZ, scopedConfigListZ } from "./config-list.fixtures.js";
+import { scopedConfigListZ } from "./config-list.fixtures.js";
 
 // The scan bindRepository makes is the one a run makes (BP-517), and it asks git twice: once for
 // `--local --list`, whose exit code says the checkout can be read at all, and once for the scoped,
@@ -20,7 +20,10 @@ function depsWith(over: Partial<{
   fileUid: number;
   workerId: string;
 }> = {}): RepoDeps {
-  const readable = configListZ(over.gitConfig ?? "");
+  // `--local --list` without `-z` prints `key=value` lines; only its exit code is read, but a
+  // fixture that answers in the other call's wire format is the fixture lying about which call it
+  // is (config-list.fixtures.ts's own rule).
+  const readable = over.gitConfig ?? "";
   const scoped = scopedConfigListZ(over.gitConfig ?? "", over.scope ?? "local");
   const toplevel = over.toplevel;
   return {
@@ -123,6 +126,11 @@ describe("bindRepository", () => {
     "protocol.ext.allow=user",
     "remote.origin.url=ext::/tmp/x",
     "alias.st=!/tmp/x",
+    // What git runs to SIGN a commit. Neither a hook nor a filter, so every other rule here missed
+    // it, and `git commit` ran it — measured on git 2.50.1 (BP-516 review).
+    "gpg.program=/tmp/x",
+    "gpg.openpgp.program=/tmp/x",
+    "gpg.ssh.defaultKeyCommand=/tmp/x",
   ])("refuses a repository whose git config sets %s", async (line) => {
     const result = await bindRepository(depsWith({ gitConfig: `${line}\n` }), "/repo");
 

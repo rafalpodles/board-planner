@@ -1,6 +1,6 @@
 import { Runner } from "./exec.js";
 import { gitArgs, localGitEnv, operatorGitEnv } from "./git-safety.js";
-import { plantedConfig } from "./repos.js";
+import { plantedConfig, UNREADABLE_CONFIG } from "./repos.js";
 
 const TIMEOUT_MS = 60_000;
 
@@ -32,29 +32,76 @@ export class TamperedCheckoutError extends Error {
 }
 
 /**
+ * This machine has nobody to commit as, or git would not say who.
+ *
+ * A machine fault rather than the task's failure: every task it claims meets the same wall, and the
+ * one thing to do about it is on the machine. Raised before the agent runs rather than at the
+ * commit, so nothing is spent finding out. It carries git's own answer, because the two causes need
+ * different repairs — nothing configured, or a config file git will not parse.
+ */
+export class MissingIdentityError extends Error {
+  constructor(reason: string) {
+    super(`this machine has no git identity to commit as: ${reason}`);
+    this.name = "MissingIdentityError";
+  }
+}
+
+/**
  * The name and address the commits of this run carry.
+ *
+ * Asked of git rather than assembled from two `--get`s, because the two are not the same question:
+ * with `user.email` set and no `user.name`, git fills the name from the account's GECOS field and
+ * commits — measured — while reading the keys one at a time finds half an identity and has to
+ * decide what to do with it. `git var GIT_AUTHOR_IDENT` is that decision, made by the thing that
+ * would otherwise make it at the commit.
  *
  * Read where the run will commit, so a per-repository identity is still honoured, and read *before*
  * the agent runs for the same reason `baseSha` is resolved early: `~/.gitconfig` is a file the agent
- * can write. `null` when the operator has configured none, which is the state git itself refuses to
- * commit in — with a message that says exactly what to run, so this does not invent one over the top
- * of it.
+ * can write.
+ *
+ * What it is not: proof of who ran anything. An earlier run's agent can put a `user.email` in that
+ * file or in the shared `.git/config` — neither is a key git *runs*, so no scan refuses it — and
+ * every later commit then carries that name. The push identity is pinned separately (BP-373); this
+ * is only what the commit object says.
  */
+export type ResolvedIdentity =
+  | { ok: true; identity: CommitIdentity }
+  | { ok: false; reason: string };
+
+// `Name <address> <unix time> <zone>`, and git strips `<`, `>` and newlines out of both halves
+// before printing, so the first `<` and the last `>` frame the address unambiguously.
+function parseIdent(line: string): CommitIdentity | null {
+  const opened = line.indexOf("<");
+  const closed = line.lastIndexOf(">");
+  if (opened === -1 || closed < opened) return null;
+  const name = line.slice(0, opened).trim();
+  const email = line.slice(opened + 1, closed).trim();
+  return name && email ? { name, email } : null;
+}
+
 export async function resolveCommitIdentity(
   runner: Runner,
   cwd: string,
-): Promise<CommitIdentity | null> {
-  const read = async (key: string): Promise<string> => {
-    const result = await runner.run("git", gitArgs(["config", "--get", key]), {
-      cwd,
-      timeoutMs: TIMEOUT_MS,
-      env: operatorGitEnv(),
-    });
-    return result.code === 0 && !result.timedOut ? result.stdout.trim() : "";
-  };
+): Promise<ResolvedIdentity> {
+  const result = await runner.run("git", gitArgs(["var", "GIT_AUTHOR_IDENT"]), {
+    cwd,
+    timeoutMs: TIMEOUT_MS,
+    env: operatorGitEnv(),
+  });
+  if (result.timedOut) return { ok: false, reason: `git var timed out after ${TIMEOUT_MS}ms` };
+  if (result.code !== 0) {
+    // git's own sentence, which says which of the two this is: "Author identity unknown" with the
+    // two commands to run, or "fatal: bad config line 4 in file …" naming the file to repair. A
+    // fixed message of ours in its place sent an operator looking for an unset key while the real
+    // fault was a config git could not parse at all (BP-516 review).
+    const said = (result.stderr || result.stdout).trim().split("\n").filter(Boolean);
+    return { ok: false, reason: said[said.length - 1] || "git would not say who this machine commits as" };
+  }
 
-  const [name, email] = [await read("user.name"), await read("user.email")];
-  return name && email ? { name, email } : null;
+  const identity = parseIdent(result.stdout.trim());
+  return identity
+    ? { ok: true, identity }
+    : { ok: false, reason: `git answered ${JSON.stringify(result.stdout.trim())}, which is not an identity` };
 }
 
 // The agent used to do this, which is the only reason Bash was in its tool list.
@@ -62,7 +109,7 @@ export async function commitAll(
   runner: Runner,
   worktreePath: string,
   message: string,
-  identity?: CommitIdentity | null,
+  identity: CommitIdentity,
 ): Promise<string> {
   const git = (args: string[]) =>
     runner.run("git", gitArgs(args), {
@@ -71,17 +118,12 @@ export async function commitAll(
       // The identity in the environment rather than as `-c user.email=…`: these variables are what
       // git reads last, they are the only knob for the committer as distinct from the author, and
       // localGitEnv has just taken the file the values would otherwise have come from.
-      env: localGitEnv(
-        [],
-        identity
-          ? {
-              GIT_AUTHOR_NAME: identity.name,
-              GIT_AUTHOR_EMAIL: identity.email,
-              GIT_COMMITTER_NAME: identity.name,
-              GIT_COMMITTER_EMAIL: identity.email,
-            }
-          : {},
-      ),
+      env: localGitEnv([], {
+        GIT_AUTHOR_NAME: identity.name,
+        GIT_AUTHOR_EMAIL: identity.email,
+        GIT_COMMITTER_NAME: identity.name,
+        GIT_COMMITTER_EMAIL: identity.email,
+      }),
     });
 
   // The agent holds Write under .git in a linked worktree, so between bindRepository's scan and
@@ -110,6 +152,16 @@ export async function commitAll(
   // `include.path` is refused as the indirection it is rather than followed. That leaves the
   // repository's own scopes, which is where a filter now has to be defined to run at all.
   const planted = await plantedConfig(runner, worktreePath);
+  // Only a key somebody planted is a refusal a person has to look at. A config git would not read
+  // at all is a checkout being re-cloned or a machine under load — it still stops the commit,
+  // because a config this cannot read is one it cannot vouch for, but as an ordinary failure that
+  // requeues rather than one that parks the task and keeps a worktree as evidence of nothing
+  // (BP-516 review; UNREADABLE_CONFIG's own docstring says the two are owed different treatment).
+  if (planted === UNREADABLE_CONFIG) {
+    throw new Error(
+      "refusing to stage: the checkout's git config could not be read, so nothing can vouch for what a commit would run",
+    );
+  }
   if (planted) throw new TamperedCheckoutError(planted);
 
   const status = await git(["status", "--porcelain"]);

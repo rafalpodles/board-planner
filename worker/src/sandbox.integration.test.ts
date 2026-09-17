@@ -141,13 +141,20 @@ describe.skipIf(!onMac)("confine against the real sandbox", () => {
     const readDomain = (domain: string) =>
       runner.run("/usr/bin/defaults", ["read", domain], { cwd: worktree, timeoutMs: 30_000 });
 
-    function writeAs(domain: string, env: NodeJS.ProcessEnv) {
-      const spawn = confine("/usr/bin/defaults", ["write", domain, "planted", "yes"], {
-        writable: [worktree],
-        env,
-      });
+    // Through a shell that also writes inside the worktree, which is the liveness half: a profile
+    // that failed to compile, or a `defaults` that never started, writes no preference either.
+    // Measured, that case cannot be told apart by the exit code or by stderr — a `defaults write`
+    // of a domain this machine has seen and deleted before exits 0 and says nothing at all, while
+    // writing nothing.
+    async function writeAs(domain: string, env: NodeJS.ProcessEnv, ran: string) {
+      const spawn = confine(
+        "/bin/sh",
+        ["-c", `/usr/bin/defaults write ${domain} planted yes; echo ran > ${join(worktree, ran)}`],
+        { writable: [worktree], env },
+      );
       if (!("command" in spawn)) throw new Error(`refused: ${spawn.refusal}`);
-      return runner.run(spawn.command, spawn.args, { cwd: worktree, timeoutMs: 30_000 });
+      await runner.run(spawn.command, spawn.args, { cwd: worktree, timeoutMs: 30_000 });
+      return existsSync(join(worktree, ran));
     }
 
     afterEach(async () => {
@@ -159,16 +166,18 @@ describe.skipIf(!onMac)("confine against the real sandbox", () => {
     it("writes the preference when nothing confines it — the control", async () => {
       const domain = probeDomain();
 
-      await writeAs(domain, { [UNCONFINED_ESCAPE_HATCH]: "1" });
+      const ran = await writeAs(domain, { [UNCONFINED_ESCAPE_HATCH]: "1" }, "unconfined.txt");
 
+      expect(ran, "the command never ran, so this proves nothing").toBe(true);
       expect((await readDomain(domain)).stdout).toContain("planted");
     });
 
     it("leaves no preference behind under the profile", async () => {
       const domain = probeDomain();
 
-      await writeAs(domain, {});
+      const ran = await writeAs(domain, {}, "confined.txt");
 
+      expect(ran, "the command never ran, so this proves nothing").toBe(true);
       expect((await readDomain(domain)).stdout).not.toContain("planted");
     });
   });

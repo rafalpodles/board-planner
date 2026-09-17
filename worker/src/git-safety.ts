@@ -16,6 +16,21 @@ const SAFE_CONFIG = [
   // trailing one. GitHub runs the file all the same. Here rather than at the one call site,
   // because a path a rule cannot read is the same hazard wherever it is read (BP-381).
   "core.quotePath=false",
+  // `commit.gpgSign=true` plus `gpg.program` in the checkout's own config makes `git commit` run
+  // that program — measured on git 2.50.1 under exactly this environment, and it is neither a hook
+  // nor a filter, so nothing above catches it. `gpg.format=ssh` reaches the same place through
+  // `gpg.ssh.defaultKeyCommand`. Signing is not something this worker does, so the mechanism is
+  // turned off rather than the programs enumerated: the key list in repos.ts names them too, but
+  // that list is a scan and this is the sink (BP-516 review).
+  "commit.gpgSign=false",
+  // git's user-level ignore list is `core.excludesFile`, and with no config file to set it git
+  // still reads `$XDG_CONFIG_HOME/git/ignore` — `$HOME/.config/git/ignore` — which `childEnv()`
+  // forwards HOME for and which the agent can write. A path named there is invisible to
+  // `git status --porcelain` AND to `git add --all`, so a file written into the worktree and
+  // ignored there reads as a clean tree, reaches no diff and no gate, and is still run by the test
+  // gate. The repository's own `.gitignore` and `.git/info/exclude` are separate lists and are
+  // untouched by this.
+  "core.excludesFile=/dev/null",
 ];
 
 // Delivery does not go through here: it carries GH_TOKEN and has to reach the remote, so it
@@ -41,7 +56,8 @@ export const GIT_SAFE_ENV: Record<string, string> = {
 export const NO_GLOBAL_CONFIG = "/dev/null";
 
 /**
- * The environment for every git call this worker makes inside a checkout.
+ * The environment for every git call this worker makes, with one exception named below: the read
+ * of the operator's own identity, which is the one question only that file can answer.
  *
  * `~/.gitconfig` is the agent's file as much as the repository's own: `childEnv()` forwards HOME
  * because the CLI authenticates from its session there, and BP-349 says the agent's Write reaches
@@ -59,9 +75,12 @@ export function localGitEnv(
 ): NodeJS.ProcessEnv {
   return {
     ...childEnv(alsoAllow),
+    // The caller's own variables go in the middle: a call site that needs one (the commit identity,
+    // a neutral GIT_DIR) must not be able to reach the hardening on its way past, and the tripwire
+    // over the source cannot see a key that arrives inside an object.
+    ...extra,
     ...GIT_SAFE_ENV,
     GIT_CONFIG_GLOBAL: NO_GLOBAL_CONFIG,
-    ...extra,
   };
 }
 

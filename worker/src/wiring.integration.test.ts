@@ -429,6 +429,11 @@ async function runWorkerAgainstTheBoard(opts: { takeTheTask: boolean }): Promise
       }
       // git is stubbed here, so the directory `git worktree add` would have made is made here —
       // the agent cannot be confined to a worktree that does not exist (BP-349).
+      // Who the run commits as, asked once before the agent starts (BP-516). A machine git will
+      // not name one for is refused at `create`, so the fake has to answer it.
+      if (command === "git" && args.includes("GIT_AUTHOR_IDENT")) {
+        return { code: 0, stdout: "The Operator <operator@example.com> 1789000000 +0200\n", stderr: "", timedOut: false };
+      }
       if (command === "git" && args.includes("worktree") && args.includes("add")) {
         const separator = args.indexOf("--");
         if (separator !== -1 && args[separator + 1]) mkdirSync(args[separator + 1], { recursive: true });

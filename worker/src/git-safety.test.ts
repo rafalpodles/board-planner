@@ -56,10 +56,12 @@ describe("gitArgs", () => {
  * behaviour. When it fails, build the environment with `localGitEnv()` and name whatever extra
  * variable that one call genuinely needs.
  *
- * Read from the source with its comments stripped. The previous version of this test read them,
- * and a paragraph explaining what `GIT_CONFIG_NOSYSTEM` does was enough to fail a file that had
- * stopped naming it in code at all — a scanner that reads prose as readily as code reports both,
- * and the one it is for is the code.
+ * It reads the source as it is, comments and all. The version before this stripped comments first,
+ * and a `//` line in repos.ts carrying `/private/*` opened a block comment the regex closed 183
+ * lines later — taking the config scan, the one module this whole change is about, out of the scan
+ * entirely. Measured: an unhardened git call added there was invisible to all four assertions. A
+ * comment that happens to contain `run("git"` now fails this test instead, which is the direction
+ * to fail in.
  */
 const MAY_COMPOSE_A_GIT_ENVIRONMENT = ["delivery.ts", "git-safety.ts"];
 
@@ -67,19 +69,45 @@ const MAY_COMPOSE_A_GIT_ENVIRONMENT = ["delivery.ts", "git-safety.ts"];
 // is nothing else it could be for: a second user would mean a git call the scan cannot vouch for.
 const MAY_READ_THE_OPERATORS_CONFIG = ["commit.ts"];
 
-function code(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/.*$/gm, "$1");
-}
+/**
+ * Every file that spawns git, pinned by name. A scan that stops seeing one of them is a scan that
+ * has stopped working, and that failure is silent in every other assertion here — the rules below
+ * all iterate over what the scan found. Adding a call site to a new file is a deliberate act;
+ * adding it to this list is how you say so.
+ */
+const FILES_THAT_RUN_GIT = [
+  "commit.ts",
+  "decisions.ts",
+  // The push, through its own helper — exempt from the rule below and not from this one: a file
+  // that stops spawning git is as much a change as one that starts.
+  "delivery.ts",
+  "diff.ts",
+  "gates/review.ts",
+  "pipeline.ts",
+  "provenance.ts",
+  "repos.ts",
+  "workspace.ts",
+];
+
+const RUNS_GIT = /run\(\s*"git"/g;
 
 function sources(): { file: string; source: string }[] {
   const dir = join(import.meta.dirname, ".");
   return (readdirSync(dir, { recursive: true }) as string[])
     .filter((file) => file.endsWith(".ts") && !file.includes(".test."))
-    .map((file) => ({ file, source: code(readFileSync(join(dir, file), "utf8")) }))
+    .map((file) => ({ file, source: readFileSync(join(dir, file), "utf8") }))
     .sort((a, b) => a.file.localeCompare(b.file));
 }
 
 describe("every git invocation is hardened", () => {
+  it("still finds every file that spawns git", () => {
+    const found = sources()
+      .filter(({ source }) => [...source.matchAll(RUNS_GIT)].length > 0)
+      .map(({ file }) => file);
+
+    expect(found).toEqual(FILES_THAT_RUN_GIT);
+  });
+
   it("builds the environment of every git call from the shared helpers", () => {
     const offenders: string[] = [];
 
@@ -88,27 +116,18 @@ describe("every git invocation is hardened", () => {
       // through it — it is the only path carrying GH_TOKEN, and hardenedGitConfig is what that
       // helper builds. Exempted by name rather than by a window that would have to reach it.
       if (MAY_COMPOSE_A_GIT_ENVIRONMENT.includes(file)) continue;
-      // The window is the options object that follows the command, which is where the env is
-      for (const match of source.matchAll(/run\(\s*"git"/g)) {
-        const window = source.slice(match.index, match.index + 600);
-        if (/localGitEnv\(|operatorGitEnv\(|hardenedGitConfig\(/.test(window)) continue;
-        offenders.push(`${file}: a git call builds its own environment`);
-      }
+
+      const sites = [...source.matchAll(RUNS_GIT)];
+      sites.forEach((match, nth) => {
+        // Up to the NEXT call site, never past it: a window measured in characters made one call's
+        // environment vouch for the one above it, and in commit.ts the two are 535 characters
+        // apart. Measured — an unhardened call inserted above a hardened one passed.
+        const ends = sites[nth + 1]?.index ?? match.index + 800;
+        const window = source.slice(match.index, ends);
+        if (/localGitEnv\(|operatorGitEnv\(|hardenedGitConfig\(/.test(window)) return;
+        offenders.push(`${file}: the git call at ${match.index} builds its own environment`);
+      });
     }
-
-    expect(offenders).toEqual([]);
-  });
-
-  // The variables are the helpers' to set. A call site that names one is a call site deciding for
-  // itself what git reads, which is how the commit and the diff ended up reading ~/.gitconfig for
-  // as long as they did (BP-516).
-  it("leaves GIT_CONFIG_NOSYSTEM and GIT_CONFIG_GLOBAL to the helpers", () => {
-    const offenders = sources()
-      .filter(({ file, source }) =>
-        !MAY_COMPOSE_A_GIT_ENVIRONMENT.includes(file) &&
-        /GIT_CONFIG_NOSYSTEM|GIT_CONFIG_GLOBAL/.test(source)
-      )
-      .map(({ file }) => file);
 
     expect(offenders).toEqual([]);
   });
@@ -123,7 +142,7 @@ describe("every git invocation is hardened", () => {
 
   it("never passes -c core.* inline instead of gitArgs", () => {
     const offenders = sources()
-      .filter(({ file, source }) => !file.includes("git-safety") && /["\']-c["\']\s*,\s*["\']core\./.test(source))
+      .filter(({ file, source }) => !file.includes("git-safety") && /["']-c["']\s*,\s*["']core\./.test(source))
       .map(({ file }) => file);
 
     expect(offenders).toEqual([]);
@@ -139,6 +158,19 @@ describe("localGitEnv", () => {
   // The commit identity rides here, because `~/.gitconfig` no longer answers for it
   it("lets the caller add variables of its own", () => {
     expect(localGitEnv([], { GIT_AUTHOR_EMAIL: "a@b" }).GIT_AUTHOR_EMAIL).toBe("a@b");
+  });
+
+  // And cannot let it reach past them. A caller's env used to be spread last, which put the whole
+  // hardening at the mercy of any call site that passed one — and the tripwire above cannot see a
+  // key that arrives inside an object (BP-516 review).
+  it("does not let a caller's own variables turn the hardening off", () => {
+    const env = localGitEnv([], {
+      GIT_CONFIG_GLOBAL: "/Users/someone/.gitconfig",
+      GIT_CONFIG_NOSYSTEM: "0",
+    });
+
+    expect(env.GIT_CONFIG_GLOBAL).toBe(NO_GLOBAL_CONFIG);
+    expect(env.GIT_CONFIG_NOSYSTEM).toBe("1");
   });
 
   // The one environment that must NOT neutralise it: `user.email` is the operator's to keep there

@@ -61,7 +61,20 @@ const EXACT_DANGEROUS_KEYS = [
   "core.gitproxy",
   "sequence.editor",
   "diff.external",
+  // What git runs to SIGN a commit, which it does when `commit.gpgsign` is on. Neither a hook nor
+  // a filter, so nothing else here matched it, and it runs inside the worker's own `git commit`:
+  // measured on git 2.50.1 (BP-516 review). `gitArgs` turns the mechanism off at the command line,
+  // which is the sink; these are here because bind time reads this list as an approval.
+  "gpg.program",
+  "gpg.ssh.defaultkeycommand",
 ];
+
+// `gpg.<format>.program` — openpgp, x509, ssh — is the same key once per signing backend.
+const DANGEROUS_KEY_SUFFIXES = ["gpg.", ".program"] as const;
+
+function dangerousSectionLeaf(key: string): boolean {
+  return key.startsWith(DANGEROUS_KEY_SUFFIXES[0]) && key.endsWith(DANGEROUS_KEY_SUFFIXES[1]);
+}
 
 // <family>.<name>.<leaf> keys whose value git runs as a command. Everything else under these
 // sections (filter.*.required, diff.*.binary/xfuncname/algorithm, merge.*.name, ...) is inert and
@@ -133,11 +146,11 @@ function git(runner: Runner, cwd: string, args: string[]) {
 const CONFIG_LIST_ARGS = ["config", "--list", "-z", "--show-scope", "--no-includes"];
 
 // The scopes the agent writes *inside the repository*, which this pipeline created for the run —
-// anything executable there is the agent's by construction. `global`, `system` and the `unknown`
-// scope git reports for command-line and environment values are the operator's machine, where a
-// credential helper is ordinary: measured on a normally-configured Mac, the effective config
-// carries five executable keys, every one of them legitimate and every one of them a match for
-// the rules below. Judging those without a baseline refuses the machine, not the attacker.
+// anything executable there is the agent's by construction. Nothing else can appear under
+// `localGitEnv`: global and system are not read at all, and the `command` scope git reports is this
+// module's own `-c` flags. Measured on a normally-configured Mac, the effective config with that
+// file readable carries five executable keys, every one of them the operator's own — which is why
+// not reading it is the answer rather than judging it.
 const REPO_SCOPES = ["local", "worktree"];
 
 // include.path and includeIf.* carry no program themselves; they carry the file that does.
@@ -195,6 +208,7 @@ function isIndirection(key: string): boolean {
 
 function executes(key: string, value: string): boolean {
   if (EXACT_DANGEROUS_KEYS.includes(key)) return true;
+  if (dangerousSectionLeaf(key)) return true;
   if (key.startsWith("alias.")) return true;
   if (dangerousFamilyLeaf(key)) return true;
   if (isPermissiveProtocolAllow(key, value)) return true;
@@ -212,7 +226,12 @@ function executes(key: string, value: string): boolean {
 export const UNREADABLE_CONFIG = "an unreadable git config";
 
 /**
- * The key git would run, or "" if the config holds none.
+ * A key git would run, named, or "" if this found none.
+ *
+ * "None it knows about": the list below is hand-maintained and the module's own comment above is
+ * candid that it cannot be completed — `gpg.program` was the third key found this way. What bounds
+ * the damage is the allowlist an operator approved and the `-c` flags in `gitArgs`, which turn the
+ * mechanisms off at the sink rather than hoping to have named them all here.
  *
  * One rule, for one question: of the scopes the worker's own git reads, does any carry a value it
  * would execute, or an `include.path` pointing at a file this cannot vouch for? `localGitEnv` puts
@@ -230,10 +249,11 @@ export const UNREADABLE_CONFIG = "an unreadable git config";
  * checkout that bound under one and was refused by the other cost the project (BP-517).
  */
 export async function plantedConfig(runner: Runner, cwd: string): Promise<string> {
-  // Two questions, two calls. `--local --list` fails outside a checkout and `--list` does not — it
-  // answers with the machine's global config instead — so widening the scan would have turned
-  // "this is not a repository" into "this repository is clean" without anything going red.
-  // Measured: exit 128 became exit 0 (BP-346).
+  // Two questions, two calls. `--local --list` fails outside a checkout and `--list` does not:
+  // measured, with the global and system files out of the picture it exits 0 and prints this
+  // module's own `-c` flags, which read as a repository with nothing planted in it. So widening the
+  // scan would turn "this is not a repository" into "this repository is clean" without anything
+  // going red — exit 128 became exit 0 (BP-346), and still does.
   const readable = await git(runner, cwd, ["config", "--local", "--list"]);
   if (readable.code !== 0 || readable.timedOut) return UNREADABLE_CONFIG;
 

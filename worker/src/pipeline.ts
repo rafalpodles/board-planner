@@ -1,6 +1,6 @@
 import { ApiClient, BoardColumnRole, StatusIds } from "./api.js";
 import { createBudget } from "./budget.js";
-import { commitAll } from "./commit.js";
+import { commitAll, MissingIdentityError } from "./commit.js";
 import { WorkerConfig } from "./config.js";
 import { GateFallbacks } from "./gates/from-entry.js";
 import { unexpectedHistory } from "./provenance.js";
@@ -449,6 +449,16 @@ export async function runTask(
       await reporter.released(task, String(error));
       return "machine-fault";
     }
+    // Nothing on this machine will change while the worker runs, and every task it claims meets
+    // the same wall — so the attempt comes back and the loop stops claiming, the way an unreachable
+    // remote does below. The message carries the two commands to run, because the fault is on the
+    // machine and the person who can fix it is the one reading the fleet console.
+    if (error instanceof MissingIdentityError) {
+      deps.logError?.(`${task.taskKey}: ${String(error)}`);
+      settle("machineFault", "this machine has no git identity to commit as");
+      await reporter.released(task, String(error));
+      return "machine-fault";
+    }
     if (error instanceof BaseUnavailableError) {
       deps.logError?.(`${task.taskKey}: ${String(error)}`);
       // The remote answered and this repository has no such base branch — a default branch of
@@ -546,6 +556,19 @@ export async function runTask(
           baseSha: worktree.baseSha,
           runner,
         });
+        // Before the abort check, not after it. An earlier step may already have committed, and
+        // exiting without keeping the worktree destroys the only copy of that work: nothing is
+        // pushed, and the branch ref the parent clone holds is reset by the next attempt's
+        // `git worktree add -B`. A stop pressed while this step was finishing takes the `return`
+        // below, so a keep computed after it is a keep that never happens (BP-516 review).
+        //
+        // `uncommittedWork` is the same sentence one step earlier: a commit that was attempted and
+        // did not happen leaves what the agent wrote in the tree and in no history at all, so an
+        // agent whose sequence has a single edit step used to lose everything it had written the
+        // moment `commitAll` threw (BP-506).
+        if (outcome.kind !== "ok" && (state.committed || state.uncommittedWork))
+          keepWorktree = true;
+
         // Never once the merge has landed — see the same guard after the loop. gh pr merge runs
         // without a signal, so the stop is only ever observed after the change is on the base
         // branch, and releasing there queues a second full run over work that has already landed.
@@ -560,17 +583,6 @@ export async function runTask(
         ) {
           return;
         }
-
-        // Only when this step ends the run. An earlier step may already have committed, and exiting
-        // without keeping the worktree destroys the only copy of that work: nothing is pushed, and
-        // the branch ref the parent clone holds is reset by the next attempt's `git worktree add -B`.
-        //
-        // `uncommittedWork` is the same sentence one step earlier: a commit that was attempted and
-        // did not happen leaves what the agent wrote in the tree and in no history at all, so an
-        // agent whose sequence has a single edit step used to lose everything it had written the
-        // moment `commitAll` threw (BP-506).
-        if (outcome.kind !== "ok" && (state.committed || state.uncommittedWork))
-          keepWorktree = true;
 
         if (outcome.kind === "usage_limit") {
           settle("released", "usage limit reached");
@@ -633,7 +645,15 @@ export async function runTask(
             settle("requeued", outcome.message);
             await reporter.requeued(
               task,
-              `${entry.name} failed: ${outcome.message}`,
+              // The path only where there is something at it. A commit that did not happen leaves
+              // the agent's work in the worktree and in no history, and this run keeps it — until
+              // the next attempt, whose `worktree add -B` rebuilds it. Saying where it is, is the
+              // whole of what that window is worth to a person (BP-506).
+              `${entry.name} failed: ${outcome.message}${
+                state.uncommittedWork
+                  ? `\n\nNothing was committed. What the agent wrote is in the worktree at \`${worktree.path}\` on the worker host, until the next attempt on this task rebuilds it.`
+                  : ""
+              }`,
             );
           }
           return;
@@ -814,6 +834,10 @@ export async function runTask(
       await reporter.delivered(task, state.prUrl, state.summary);
     }
   } catch (error) {
+    // Whatever threw, the work is still in the tree: a `git diff` that timed out and a gate that
+    // threw both land here, and both used to take the run's commits with them on the way out
+    // (BP-516 review).
+    if (state.committed || state.uncommittedWork) keepWorktree = true;
     settle("requeued", "the worker hit an unexpected error");
     await reporter.requeued(
       task,

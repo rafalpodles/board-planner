@@ -13,9 +13,10 @@ async function git(
 ): Promise<string> {
   const result = await runner.run("git", gitArgs(args), {
     ...opts,
-    // A `diff.<name>.textconv` or a `diff.external` in `~/.gitconfig` runs right here, on the call
-    // that collects what a gate is about to judge — the same hazard as the staging path, and this
-    // is the same answer (BP-516).
+    // Defence in depth rather than a hole this closes: every diff below already passes
+    // `--no-ext-diff --no-textconv`, so neither a global driver nor a global textconv can
+    // substitute the patch. The environment is what holds for a call added later without those
+    // flags, and what keeps this module's answer the same as the staging path's (BP-516).
     env: localGitEnv([], opts.env),
   });
   if (result.timedOut) {

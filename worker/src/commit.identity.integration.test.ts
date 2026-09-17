@@ -45,15 +45,37 @@ describe("who the worker's commits are by", () => {
   });
 
   // The premise for all of it, and the reason this is not "a tidy-up we could skip": with the
-  // global file out of the picture and no identity handed over, there is nobody to commit as.
-  it("cannot commit at all when nobody was named", async () => {
-    await expect(commitAll(createRunner(), work, "BP-516: work")).rejects.toThrow(
-      /git commit failed[\s\S]*identity/i
-    );
+  // global file out of the picture there is nobody to commit as, and git says so rather than
+  // guessing. Asserted through `git var`, which is the question `resolveCommitIdentity` asks and
+  // the same one `git commit` answers for itself.
+  it("has nobody to commit as when the machine names nobody", async () => {
+    writeFileSync(join(home, ".gitconfig"), "");
+
+    const resolved = await resolveCommitIdentity(createRunner(), work);
+
+    expect(resolved.ok).toBe(false);
+    expect((resolved as { reason: string }).reason).toMatch(/identity|email/i);
+  });
+
+  // The half the resolver would have to invent a rule for, and git already has one: the name comes
+  // from the account. Reading `user.name` and `user.email` separately found half an identity here
+  // and committed nothing at all (BP-516 review).
+  it("takes git's own answer when only the address is configured", async () => {
+    writeFileSync(join(home, ".gitconfig"), "[user]\n\temail = operator@example.com\n");
+
+    const resolved = await resolveCommitIdentity(createRunner(), work);
+    expect(resolved.ok).toBe(true);
+    const identity = (resolved as { identity: { name: string; email: string } }).identity;
+
+    await commitAll(createRunner(), work, "BP-516: work", identity);
+
+    expect(git(work, "log", "-1", "--format=%ae").trim()).toBe("operator@example.com");
+    expect(git(work, "log", "-1", "--format=%an").trim()).not.toBe("");
   });
 
   it("commits as the identity the operator configured", async () => {
-    const identity = await resolveCommitIdentity(createRunner(), work);
+    const resolved = await resolveCommitIdentity(createRunner(), work);
+    const identity = (resolved as { identity: { name: string; email: string } }).identity;
 
     const sha = await commitAll(createRunner(), work, "BP-516: work", identity);
 
@@ -71,7 +93,8 @@ describe("who the worker's commits are by", () => {
     git(work, "config", "user.name", "Repo Name");
     git(work, "config", "user.email", "repo@example.com");
 
-    const identity = await resolveCommitIdentity(createRunner(), work);
+    const resolved = await resolveCommitIdentity(createRunner(), work);
+    const identity = (resolved as { identity: { name: string; email: string } }).identity;
     await commitAll(createRunner(), work, "BP-516: work", identity);
 
     // Both halves: what was resolved, and what the commit carries. The local config would supply

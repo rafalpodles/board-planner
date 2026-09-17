@@ -10,7 +10,6 @@ import {
 import { join, resolve, sep } from "node:path";
 import { ApiClient, DecisionSettlement } from "./api.js";
 import { Delivery } from "./delivery.js";
-import { childEnv } from "./env.js";
 import { Runner } from "./exec.js";
 import { gitArgs, localGitEnv } from "./git-safety.js";
 import { protectedPaths, workflowPaths } from "./gates/protected-paths.js";

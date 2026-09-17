@@ -27,6 +27,8 @@ const BASE = "aaaa\n";
 const EDITED = "bbbb\n";
 // A file the agent newly wrote — the ordinary case in this pipeline. `git status` runs the filter
 // for an untracked file whatever its size, so this pins the ordering without depending on a length.
+// Required since BP-516; what this file is about is the config, so the identity is a constant.
+const IDENTITY = { name: "worker", email: "worker@example.com" };
 const NEW_FILE = "something the agent wrote, of a length nobody has to keep equal to anything\n";
 
 function git(cwd: string, ...args: string[]): string {
@@ -96,7 +98,7 @@ describe("commitAll against a planted filter", () => {
       it("makes commitAll refuse, and no commit is created", async () => {
         const head = git(work, "rev-parse", "HEAD").trim();
 
-        await expect(commitAll(createRunner(), work, "BP-403: staged work")).rejects.toThrow(
+        await expect(commitAll(createRunner(), work, "BP-403: staged work", IDENTITY)).rejects.toThrow(
           new RegExp(`refusing to stage.*filter\\.z\\.${leaf}`)
         );
 
@@ -105,7 +107,7 @@ describe("commitAll against a planted filter", () => {
 
       if (RUNS_WHEN_STAGING[leaf]) {
         it("never runs the program — not at add, and not at the status before it", async () => {
-          await expect(commitAll(createRunner(), work, "BP-403: staged work")).rejects.toThrow();
+          await expect(commitAll(createRunner(), work, "BP-403: staged work", IDENTITY)).rejects.toThrow();
           expect(existsSync(marker)).toBe(false);
         });
 
@@ -116,7 +118,7 @@ describe("commitAll against a planted filter", () => {
           writeFileSync(join(work, "a.txt"), BASE);
           writeFileSync(join(work, "new.ts"), NEW_FILE);
 
-          await expect(commitAll(createRunner(), work, "BP-403: staged work")).rejects.toThrow();
+          await expect(commitAll(createRunner(), work, "BP-403: staged work", IDENTITY)).rejects.toThrow();
           expect(existsSync(marker)).toBe(false);
         });
       }
@@ -168,7 +170,7 @@ describe("commitAll against a planted filter", () => {
     });
 
     it("never runs it when the worker stages, and still commits", async () => {
-      const sha = await commitAll(createRunner(), work, "BP-516: staged work");
+      const sha = await commitAll(createRunner(), work, "BP-516: staged work", IDENTITY);
 
       expect(existsSync(marker), "the global filter ran anyway").toBe(false);
       expect(sha).toMatch(/^[0-9a-f]{40}$/);
@@ -199,7 +201,7 @@ describe("commitAll against a planted filter", () => {
       }).toString();
       expect(seen).not.toContain("hidden.ts");
 
-      await commitAll(createRunner(), work, "BP-516: staged work");
+      await commitAll(createRunner(), work, "BP-516: staged work", IDENTITY);
 
       expect(git(work, "show", "--pretty=format:", "--name-only", "HEAD")).toContain("hidden.ts");
     });
@@ -208,9 +210,79 @@ describe("commitAll against a planted filter", () => {
     // the way into the index, so "the program did not run" and "the content is what was written"
     // are two claims, and the second is the one a reviewer of the pull request depends on.
     it("commits what the agent wrote, not what the filter would have made of it", async () => {
-      await commitAll(createRunner(), work, "BP-516: staged work");
+      await commitAll(createRunner(), work, "BP-516: staged work", IDENTITY);
 
       expect(git(work, "show", "HEAD:a.txt")).toBe(EDITED);
+    });
+  });
+
+  /**
+   * The other way a checkout makes `git commit` run a program, and it is not a filter: with
+   * `commit.gpgsign` on, git runs `gpg.program` to sign — measured on git 2.50.1 under exactly the
+   * worker's environment, and neither key was in any list this module scans (BP-516 review).
+   *
+   * Two answers, and they cover different halves. The scan names the key when it is in the
+   * checkout, which is what bind time reads as an approval since BP-517. `gitArgs` turns signing
+   * off at the command line, which is what holds when the key is somewhere the scan does not read —
+   * the operator's own `~/.gitconfig` — and for a key nobody has thought of yet.
+   */
+  describe("and a signing program", () => {
+    beforeEach(() => {
+      writeFileSync(payload, `#!/bin/sh\ntouch "${marker}"\nexit 1\n`);
+      chmodSync(payload, 0o755);
+      // Nothing to do with filters: this checkout has no attributes file of its own
+      writeFileSync(join(work, ".git", "info", "attributes"), "");
+      git(work, "config", "commit.gpgsign", "true");
+    });
+
+    it("is live: an unguarded git commit runs the program", () => {
+      git(work, "config", "gpg.program", payload);
+      execFileSync("git", ["add", "--all", "--"], { cwd: work, stdio: "pipe" });
+
+      expect(() =>
+        execFileSync("git", ["commit", "-m", "signed"], { cwd: work, stdio: "pipe" }),
+      ).toThrow();
+      expect(existsSync(marker)).toBe(true);
+    });
+
+    it("is named by the scan when it is in the checkout, the way a filter is", async () => {
+      git(work, "config", "gpg.program", payload);
+
+      await expect(commitAll(createRunner(), work, "BP-516: staged work", IDENTITY)).rejects.toThrow(
+        /refusing to stage.*gpg\.program/,
+      );
+      expect(existsSync(marker)).toBe(false);
+    });
+
+    // Where the scan cannot see it — the operator's own file — the commit is what holds: signing is
+    // off at the command line, so there is nothing for a signing program to be run by.
+    it("is not run from the operator's own config either, and the commit lands", async () => {
+      const home = join(dir, "gpg-home");
+      mkdirSync(home, { recursive: true });
+      writeFileSync(join(home, ".gitconfig"), `[gpg]\n\tprogram = ${payload}\n`);
+      const realHome = process.env.HOME;
+      process.env.HOME = home;
+
+      try {
+        // The premise: with that file readable, git really does run it
+        expect(() =>
+          execFileSync("git", ["commit", "--allow-empty", "-m", "signed"], {
+            cwd: work,
+            stdio: "pipe",
+            env: { ...process.env, HOME: home },
+          }),
+        ).toThrow();
+        expect(existsSync(marker)).toBe(true);
+        rmSync(marker, { force: true });
+
+        const sha = await commitAll(createRunner(), work, "BP-516: staged work", IDENTITY);
+
+        expect(existsSync(marker), "the signing program ran anyway").toBe(false);
+        expect(sha).toMatch(/^[0-9a-f]{40}$/);
+      } finally {
+        if (realHome === undefined) delete process.env.HOME;
+        else process.env.HOME = realHome;
+      }
     });
   });
 
@@ -218,7 +290,7 @@ describe("commitAll against a planted filter", () => {
   // worktree with nothing staged — would read exactly like a refusal that worked.
   describe("a checkout the agent left alone", () => {
     it("commits, and returns the sha it created", async () => {
-      const sha = await commitAll(createRunner(), work, "BP-403: ordinary work");
+      const sha = await commitAll(createRunner(), work, "BP-403: ordinary work", IDENTITY);
 
       expect(sha).toMatch(/^[0-9a-f]{40}$/);
       expect(git(work, "rev-parse", "HEAD").trim()).toBe(sha);
@@ -231,7 +303,7 @@ describe("commitAll against a planted filter", () => {
       // config defines is inert, and refusing it would break every ordinary repository.
       git(work, "config", "filter.z.required", "false");
 
-      expect(await commitAll(createRunner(), work, "BP-403: ordinary work")).toMatch(/^[0-9a-f]{40}$/);
+      expect(await commitAll(createRunner(), work, "BP-403: ordinary work", IDENTITY)).toMatch(/^[0-9a-f]{40}$/);
       expect(existsSync(marker)).toBe(false);
     });
   });

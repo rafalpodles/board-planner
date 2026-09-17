@@ -270,6 +270,15 @@ function makeRunner(seen: GitCall[], registeredWorktree = ""): Runner {
       // worktree that exists only in this stub's answers cannot be confined to, and the run fails
       // for that instead of for the reason under test. git is stubbed here, so the directory it
       // would have made is made here.
+      // Who the run commits as, resolved before the agent starts (BP-516)
+      if (command === "git" && args.includes("GIT_AUTHOR_IDENT")) {
+        return {
+          code: 0,
+          stdout: "The Operator <operator@example.com> 1789000000 +0200\n",
+          stderr: "",
+          timedOut: false,
+        };
+      }
       if (command === "git" && args.includes("worktree") && args.includes("add")) {
         const separator = args.indexOf("--");
         if (separator !== -1 && args[separator + 1]) mkdirSync(args[separator + 1], { recursive: true });

@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join, resolve, sep } from "path";
-import { CommitIdentity, resolveCommitIdentity } from "./commit.js";
+import { CommitIdentity, MissingIdentityError, resolveCommitIdentity } from "./commit.js";
 import { WorkerConfig } from "./config.js";
 import { plantedConfig, UNREADABLE_CONFIG } from "./repos.js";
 import { CommandResult, Runner } from "./exec.js";
@@ -78,13 +78,18 @@ export interface Worktree {
    * Who this run's commits are by, resolved before the agent ran and held in this process for the
    * same reason `baseSha` is. Every git call inside the checkout has `~/.gitconfig` out of the
    * picture (BP-516), so the identity that file holds has to travel with the run rather than be
-   * read back at the commit — and reading it before the agent runs is also what keeps the agent,
-   * whose Write reaches `$HOME`, from choosing whose name the work lands under.
+   * read back at the commit.
    *
-   * `null` when the operator has configured none anywhere, which is the state git itself refuses to
-   * commit in, with a message that says what to run.
+   * It is not evidence of who ran anything, and reading it early does not make it so: an earlier
+   * run's agent can put a `user.email` in that file or in the shared `.git/config`, and neither is
+   * a key git *runs*, so no scan refuses it. What a commit says about its author is worth exactly
+   * what the machine's own configuration is worth. The identity a push acts under is pinned
+   * separately (BP-373).
+   *
+   * Never absent: a machine git will not name an identity for is refused at `create`, before the
+   * agent runs, rather than at the commit an hour of somebody's subscription later.
    */
-  commitIdentity: CommitIdentity | null;
+  commitIdentity: CommitIdentity;
 }
 
 export interface Workspace {
@@ -348,9 +353,6 @@ export function createWorkspace(
       // every later attempt, before any gate has seen anything. BP-403's guard is in `commitAll`,
       // downstream of the run this one would already have started. Measured on git 2.50.1:
       // workspace.planted-config.integration.test.ts plants one and watches git run it.
-      //
-      // No baseline is passed and none is wanted: the repository's own scopes are judged on their
-      // own, and this runs before the run whose changes a baseline would exist to date.
       await refuseIfPoisoned();
 
       let baseSha: string;
@@ -383,7 +385,11 @@ export function createWorkspace(
       // Read in the checkout the commits will be made in, so an operator who keeps a different
       // name in this repository still gets it, and read here rather than at the commit because by
       // then the agent has run and `~/.gitconfig` is a file it can write.
-      return { path, baseSha, commitIdentity: await resolveCommitIdentity(runner, path) };
+      const resolved = await resolveCommitIdentity(runner, path);
+      // Before the agent, not after it: a machine with nobody to commit as fails every task it
+      // takes, and finding that out at the commit costs a whole run of somebody's subscription.
+      if (!resolved.ok) throw new MissingIdentityError(resolved.reason);
+      return { path, baseSha, commitIdentity: resolved.identity };
     },
 
     async destroy(taskKey) {

@@ -35,6 +35,11 @@ const LS_REMOTE = `ls-remote -- ${REMOTE_URL} refs/heads/main`;
 const FETCH = `fetch --no-tags -- ${REMOTE_URL} main`;
 const LOCAL_REF = "rev-parse --verify main^{commit}";
 const CONFIG_LIST = "config --list -z --show-scope --no-includes";
+// Who the run's commits will be by, asked of git once before the agent starts (BP-516). A machine
+// git will not name one for is refused at `create`, so every fixture that expects a worktree has
+// to answer it — which is also what makes the wiring testable at all.
+const IDENT = "var GIT_AUTHOR_IDENT";
+const IDENT_LINE = "The Operator <operator@example.com> 1789000000 +0200\n";
 
 function fakeGit(responses: Record<string, Partial<CommandResult>>) {
   const run = vi.fn(async (_command: string, args: string[], _opts: RunOpts): Promise<CommandResult> => {
@@ -53,6 +58,7 @@ function baseFromRemote(sha: string, extra: Record<string, Partial<CommandResult
     [FETCH]: { stdout: "" },
     [`rev-parse --verify ${sha}^{commit}`]: { stdout: `${sha}\n` },
     "worktree list --porcelain": { stdout: "" },
+    [IDENT]: { stdout: IDENT_LINE },
     ...extra,
   };
 }
@@ -70,6 +76,47 @@ function readsLocalRef(run: { mock: { calls: unknown[][] } }): boolean {
 }
 
 describe("createWorkspace", () => {
+  /**
+   * BP-516. `~/.gitconfig` is out of the picture on every call that stages or commits, so the
+   * identity has to travel with the run — and the seam that carries it had no test at all:
+   * returning `commitIdentity: null` from here left the whole suite green while every task on the
+   * machine would have failed at its commit (BP-516 review).
+   */
+  describe("who the run's commits will be by", () => {
+    it("carries the identity git names for the checkout it will commit in", async () => {
+      const { runner, run } = fakeGit(baseFromRemote("base1"));
+
+      const result = await withRemote(runner).create("CP-158", "worker");
+
+      expect(result.commitIdentity).toEqual({
+        name: "The Operator",
+        email: "operator@example.com",
+      });
+      // Asked in the worktree, not in the shared checkout: an operator who keeps a different
+      // address in this repository keeps it, and a linked worktree answers for its own config.
+      expect(run).toHaveBeenCalledWith(
+        "git",
+        [...HARDENING_PREFIX, "var", "GIT_AUTHOR_IDENT"],
+        expect.objectContaining({ cwd: "/worktrees/CP-158" }),
+      );
+    });
+
+    // Before the agent, not at the commit: every task this machine takes meets the same wall, and
+    // finding out at the commit costs a whole run of somebody's subscription.
+    it("refuses to make a worktree at all when git names nobody", async () => {
+      const { runner } = fakeGit(
+        baseFromRemote("base1", {
+          [IDENT]: { code: 128, stderr: "fatal: unable to auto-detect email address" },
+        }),
+      );
+
+      await expect(withRemote(runner).create("CP-158", "worker")).rejects.toMatchObject({
+        name: "MissingIdentityError",
+        message: expect.stringContaining("auto-detect email address"),
+      });
+    });
+  });
+
   it("creates a worktree on a task-keyed branch", async () => {
     const { runner, run } = fakeGit(baseFromRemote("base1"));
     const result = await withRemote(runner).create("CP-158", "worker");
@@ -552,6 +599,9 @@ describe("createWorkspace", () => {
       const args = rawArgs.slice(HARDENING_PREFIX.length);
       if (args[0] === "rev-parse") {
         return { code: 0, stdout: "base9\n", stderr: "", timedOut: false };
+      }
+      if (args[0] === "var") {
+        return { code: 0, stdout: IDENT_LINE, stderr: "", timedOut: false };
       }
       if (args[0] === "worktree" && args[1] === "list") {
         return {
