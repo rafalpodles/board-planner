@@ -62,7 +62,7 @@ const READ_ONLY_QUERY_LANGUAGES = new Set([
 function namesAQueryLanguage(tokens: string[]): boolean {
   const isLanguage = (word: string) =>
     (word.endsWith("ql") && !READ_ONLY_QUERY_LANGUAGES.has(word)) || QUERY_LANGUAGES_NOT_ENDING_IN_QL.has(word);
-  return tokens.some((t, i) => isLanguage(t) || isLanguage(t + (tokens[i + 1] ?? "")));
+  return tokens.some((t, i) => isLanguage(t) || (tokens[i + 1] === "ql" && isLanguage(`${t}ql`)));
 }
 
 /** `getWorkflowRun` and `get_workflow-run` are the same name to anyone reading it */
