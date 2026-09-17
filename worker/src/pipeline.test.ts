@@ -748,7 +748,14 @@ describe("runTask", () => {
 
       const outcome = await runTask(h.deps, task);
 
-      expect(h.quarantineProject).toHaveBeenCalled();
+      // The words, not just the call: the reason and the repair are what an operator reads in
+      // Settings → Workers, and this branch is the one the `repair` argument exists for — without
+      // it the sentence tells them to remove a key that does not exist (BP-516 review).
+      expect(h.quarantineProject).toHaveBeenCalledWith(
+        task.projectId,
+        expect.stringContaining("identity"),
+        expect.stringContaining("user.email"),
+      );
       expect(outcome).toBe("machine-fault");
       // Refunded: the task did nothing, and nothing it could do would help
       expect(h.reporter.released).toHaveBeenCalled();

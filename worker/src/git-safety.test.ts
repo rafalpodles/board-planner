@@ -217,9 +217,16 @@ describe("localGitEnv", () => {
     expect(env.GIT_CONFIG_NOSYSTEM).toBe("1");
   });
 
-  // The one environment that must NOT neutralise it: `user.email` is the operator's to keep there
+  // The one environment that must NOT neutralise it: the identity is the operator's to keep there
   it("leaves the global config readable where the identity is read", () => {
     expect(operatorGitEnv().GIT_CONFIG_GLOBAL).toBeUndefined();
     expect(operatorGitEnv().GIT_CONFIG_NOSYSTEM).toBe("1");
+  });
+
+  // The same discipline, asserted the same way: it grew an `extra` parameter for the neutral
+  // GIT_DIR, and a parameter that can reach the hardening is the hole the one above closed.
+  it("does not let that caller's variables turn the rest of the hardening off either", () => {
+    expect(operatorGitEnv({ GIT_CONFIG_NOSYSTEM: "0" }).GIT_CONFIG_NOSYSTEM).toBe("1");
+    expect(operatorGitEnv({ GIT_DIR: "/tmp/nothing" }).GIT_DIR).toBe("/tmp/nothing");
   });
 });
