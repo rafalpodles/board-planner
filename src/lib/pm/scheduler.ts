@@ -8,6 +8,7 @@ import { getPmUser } from "./pm-user";
 import { BOARD_REVIEW_DISALLOWED_TOOLS, buildBoardReviewPrompt, dueReviewSlot } from "./autonomy";
 import { buildBoardDigest, digestHeadline, renderBoardDigest } from "./board-review";
 import { PM_RUNNABLE_QUERY } from "./availability";
+import { isPmAvailable } from "./config";
 
 const TICK_MS = Number(process.env.PM_SCHEDULER_TICK_MS) || 5 * 60 * 1000;
 
@@ -71,6 +72,9 @@ export async function startBoardReview(
   pm: { dailyTurnCap?: number; autonomy?: { timezone?: string } },
   pmUserId: string
 ): Promise<BoardReviewStart> {
+  // The scheduler starts whether or not a model is configured, and a review without one spent a
+  // turn to post a warning into every thread on the board
+  if (!isPmAvailable()) return { status: "skipped", reason: "the PM agent is not configured on this instance" };
   const { over, cap } = await isOverDailyTurnCap(projectId, pm);
   if (over) return { status: "skipped", reason: `the daily turn cap (${cap}) is reached` };
 

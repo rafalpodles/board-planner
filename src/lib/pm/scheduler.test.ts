@@ -14,6 +14,8 @@ vi.mock("./agent", () => ({ runPmTurn }));
 vi.mock("./turn-cap", () => ({ isOverDailyTurnCap, dailyPmSpend }));
 vi.mock("./triggers", () => ({ drainPmTriggers }));
 vi.mock("./pm-user", () => ({ getPmUser: async () => ({ _id: "pm-user" }) }));
+const isPmAvailable = vi.fn(() => true);
+vi.mock("./config", () => ({ isPmAvailable: () => isPmAvailable() }));
 vi.mock("./board-review", () => ({
   buildBoardDigest,
   digestHeadline: () => "Board review: 2 findings",
@@ -113,6 +115,16 @@ describe("pmSchedulerTick", () => {
 });
 
 describe("startBoardReview", () => {
+  it("refuses without a model, rather than spending a turn on a warning", async () => {
+    isPmAvailable.mockReturnValueOnce(false);
+
+    const start = await startBoardReview("p1", "BP", PM, "pm-user");
+
+    expect(start).toEqual({ status: "skipped", reason: "the PM agent is not configured on this instance" });
+    expect(runPmTurn).not.toHaveBeenCalled();
+    expect(isTurnRunning("p1")).toBe(false);
+  });
+
   it("refuses at once when the turn cap is reached, and spends nothing", async () => {
     isOverDailyTurnCap.mockResolvedValue({ over: true, cap: 3 });
 
