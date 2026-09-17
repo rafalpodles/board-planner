@@ -55,14 +55,15 @@ const READ_ONLY_QUERY_LANGUAGES = new Set([
 
 /**
  * A query language, or a database named after one: every word ending in `ql` (`sql`, `mysql`,
- * `postgresql`, `graphql`, `logql`, `soql`) plus the few that do not. Checked on the whole name,
- * the connection's own name included — `sql_query_tables` on a connection named `sql` is still SQL —
- * word by word and each word run into the next, since `queryGraphQL` tokenises as `graph` + `ql`.
+ * `postgresql`, `graphql`) other than the read-only ones, plus the few that do not end in `ql`.
+ * Checked on the whole name, the connection's own name included — `sql_query_tables` on a
+ * connection named `sql` is still SQL. `queryGraphQL` tokenises as `graph` + `ql`, and a lone `ql`
+ * ends in `ql` too.
  */
 function namesAQueryLanguage(tokens: string[]): boolean {
   const isLanguage = (word: string) =>
     (word.endsWith("ql") && !READ_ONLY_QUERY_LANGUAGES.has(word)) || QUERY_LANGUAGES_NOT_ENDING_IN_QL.has(word);
-  return tokens.some((t, i) => isLanguage(t) || (tokens[i + 1] === "ql" && isLanguage(`${t}ql`)));
+  return tokens.some(isLanguage);
 }
 
 /** `getWorkflowRun` and `get_workflow-run` are the same name to anyone reading it */
