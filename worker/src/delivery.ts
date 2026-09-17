@@ -1,7 +1,7 @@
 import { isGitRefName } from "./config.js";
 import { childEnv } from "./env.js";
 import { CommandResult, Runner } from "./exec.js";
-import { GIT_SAFE_ENV, refuseOptionShapedPositionals } from "./git-safety.js";
+import { GIT_SAFE_ENV, refuseOptionShapedPositionals, NO_GLOBAL_CONFIG } from "./git-safety.js";
 import { plantedConfig } from "./repos.js";
 import { ClaimedTask } from "./types.js";
 import { scrub } from "./scrub.js";
@@ -14,12 +14,7 @@ const MAX_OUTPUT_CHARS = 2000;
 const PR_URL = /https?:\/\/[^\s"'<>]*\/pull\/\d+/g;
 
 export interface Delivery {
-  push(
-    worktreePath: string,
-    branch: string,
-    commit: string,
-    configBaseline?: readonly string[] | null,
-  ): Promise<void>;
+  push(worktreePath: string, branch: string, commit: string): Promise<void>;
   openPr(
     worktreePath: string,
     // Only what the title is built from. A run hands over the whole claimed task; a settlement two
@@ -116,6 +111,12 @@ const HARDENED_CONFIG: ReadonlyArray<readonly [string, string]> = [
   // assumed here once and the test written to confirm it failed instead.
   ["protocol.ext.allow", "never"],
   ["protocol.file.allow", "never"],
+  // Signing runs a program the checkout gets to name — `gpg.program`, or ssh's key command — and
+  // `push.gpgSign` reaches it on the push the same way `commit.gpgsign` reaches it on the commit.
+  // The scan in front of the push refuses those keys since BP-516, so this is the second line; it
+  // is here because the commit path has both and the push had only the scan.
+  ["commit.gpgSign", "false"],
+  ["push.gpgSign", "false"],
 ];
 
 // `remote.<name>.receivepack` is deliberately not in the list above: git keeps the **first** value
@@ -139,7 +140,7 @@ const RECEIVE_PACK = "--receive-pack=git-receive-pack";
 export function hardenedGitConfig(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...GIT_SAFE_ENV,
-    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_GLOBAL: NO_GLOBAL_CONFIG,
     GIT_PROXY_COMMAND: "",
     GIT_CONFIG_COUNT: String(HARDENED_CONFIG.length),
   };
@@ -209,11 +210,8 @@ export function createDelivery(
   // the push outright if the agent wrote an executable key at all — including one the list does
   // not name. Push is where it is worth paying for, being the call that hands the checkout's own
   // config a credential; gh carries its token in the environment, so openPr and merge do not.
-  async function refuseIfPlanted(
-    worktreePath: string,
-    configBaseline?: readonly string[] | null,
-  ): Promise<void> {
-    const planted = await plantedConfig(runner, worktreePath, configBaseline);
+  async function refuseIfPlanted(worktreePath: string): Promise<void> {
+    const planted = await plantedConfig(runner, worktreePath);
     if (planted) {
       throw new Error(
         `refusing to push: the checkout's git config sets ${planted}, which was not there when the repository was approved`,
@@ -242,7 +240,7 @@ export function createDelivery(
   }
 
   return {
-    async push(worktreePath, branch, commit, configBaseline) {
+    async push(worktreePath, branch, commit) {
       // Refused rather than falling back to the branch name: the worktree's ref store is exactly
       // what an agent running inside it can rewrite, so a push that trusts the branch name sends
       // whatever that store now says HEAD is, not what a reviewer approved (BP-382).

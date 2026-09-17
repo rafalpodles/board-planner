@@ -1,10 +1,9 @@
 import { readFileSync, statSync } from "fs";
 import { homedir } from "os";
 import { dirname, isAbsolute, join, resolve, sep } from "path";
-import { childEnv } from "./env.js";
 import { RepoInventory } from "./config.js";
 import { Runner } from "./exec.js";
-import { gitArgs, GIT_SAFE_ENV } from "./git-safety.js";
+import { gitArgs, localGitEnv } from "./git-safety.js";
 
 // A repository path is a capability grant, not configuration: a .git/config the operator didn't
 // write can make `git status` alone run an attacker's command via core.fsmonitor, core.pager,
@@ -64,6 +63,15 @@ const EXACT_DANGEROUS_KEYS = [
   "diff.external",
 ];
 
+// What git runs to SIGN a commit, which it does when `commit.gpgsign` is on: `gpg.program`,
+// `gpg.<format>.program` once per backend (openpgp, x509, ssh), and ssh's own key command. Neither
+// a hook nor a filter, so nothing else here matched it, and it runs inside the worker's own
+// `git commit` — measured on git 2.50.1 (BP-516 review). `gitArgs` turns the mechanism off at the
+// command line, which is the sink; this is here because bind time reads these rules as an approval.
+function signsWithAProgram(key: string): boolean {
+  return key.startsWith("gpg.") && (key.endsWith(".program") || key === "gpg.ssh.defaultkeycommand");
+}
+
 // <family>.<name>.<leaf> keys whose value git runs as a command. Everything else under these
 // sections (filter.*.required, diff.*.binary/xfuncname/algorithm, merge.*.name, ...) is inert and
 // must be allowed. remote.*.receivepack/uploadpack fire on this module's own push/fetch.
@@ -112,22 +120,11 @@ function usesExtTransport(value: string): boolean {
   return value.trim().toLowerCase().startsWith("ext::");
 }
 
-function dangerousConfigEntry(listOutput: string): string | null {
-  for (const { key, value } of nulRecords(listOutput)) {
-    if (EXACT_DANGEROUS_KEYS.includes(key)) return key;
-    if (key.startsWith("alias.")) return key;
-    if (dangerousFamilyLeaf(key)) return key;
-    if (isPermissiveProtocolAllow(key, value)) return key;
-    if (usesExtTransport(value)) return key;
-  }
-  return null;
-}
-
-function git(runner: Runner, cwd: string, args: string[], extraEnv?: NodeJS.ProcessEnv) {
+function git(runner: Runner, cwd: string, args: string[]) {
   return runner.run("git", gitArgs(args), {
     cwd,
     timeoutMs: GIT_TIMEOUT_MS,
-    env: { ...childEnv(), ...GIT_SAFE_ENV, ...extraEnv },
+    env: localGitEnv(),
   });
 }
 
@@ -145,11 +142,11 @@ function git(runner: Runner, cwd: string, args: string[], extraEnv?: NodeJS.Proc
 const CONFIG_LIST_ARGS = ["config", "--list", "-z", "--show-scope", "--no-includes"];
 
 // The scopes the agent writes *inside the repository*, which this pipeline created for the run —
-// anything executable there is the agent's by construction. `global`, `system` and the `unknown`
-// scope git reports for command-line and environment values are the operator's machine, where a
-// credential helper is ordinary: measured on a normally-configured Mac, the effective config
-// carries five executable keys, every one of them legitimate and every one of them a match for
-// the rules below. Judging those without a baseline refuses the machine, not the attacker.
+// anything executable there is the agent's by construction. Nothing else can appear under
+// `localGitEnv`: global and system are not read at all, and the `command` scope git reports is this
+// module's own `-c` flags. Measured on a normally-configured Mac, the effective config with that
+// file readable carries five executable keys, every one of them the operator's own — which is why
+// not reading it is the answer rather than judging it.
 const REPO_SCOPES = ["local", "worktree"];
 
 // include.path and includeIf.* carry no program themselves; they carry the file that does.
@@ -207,6 +204,7 @@ function isIndirection(key: string): boolean {
 
 function executes(key: string, value: string): boolean {
   if (EXACT_DANGEROUS_KEYS.includes(key)) return true;
+  if (signsWithAProgram(key)) return true;
   if (key.startsWith("alias.")) return true;
   if (dangerousFamilyLeaf(key)) return true;
   if (isPermissiveProtocolAllow(key, value)) return true;
@@ -214,38 +212,6 @@ function executes(key: string, value: string): boolean {
   return false;
 }
 
-/**
- * Everything the effective config says before the agent has touched the checkout, as raw
- * NUL-framed `scope\0key\nvalue` records. Held in this process and never written down: the agent runs as this
- * uid, and BP-349's confinement is the operator's to switch off, so a baseline on disk is a
- * baseline it can edit. Same reason
- * `Worktree.baseSha` is carried rather than re-read.
- *
- * `null` when git could not answer. That is not "clean" and not "everything is new" — it means the
- * scan falls back to judging the repository's own scopes, which it can always judge on their own.
- */
-export async function configBaseline(
-  runner: Runner,
-  cwd: string,
-): Promise<string[] | null> {
-  const result = await git(runner, cwd, CONFIG_LIST_ARGS);
-  if (result.code !== 0 || result.timedOut) return null;
-  return parseConfigList(result.stdout).map((entry) => entry.raw);
-}
-
-/**
- * The key the agent planted, or "" if it planted none.
- *
- * Two rules, because two questions. Inside the repository — `local` and `worktree`, both of which
- * this pipeline created for this run — anything that executes is the agent's, and so is any
- * `include.path` pointing somewhere this cannot vouch for. Outside it, on the operator's own
- * machine, only what *appeared since* `baseline` counts: a `gh` credential helper in `~/.gitconfig`
- * is why the guard exists at all, not evidence against the run.
- *
- * Without a baseline the machine scopes are not judged. That is deliberate and it is still
- * strictly more than the local-only scan it replaces — it adds the worktree scope and the
- * indirection — but a caller that can pass one closes `~/.gitconfig` too (BP-346).
- */
 /**
  * What `plantedConfig` answers when git would not tell it. Named because the two answers are owed
  * different treatment by a caller that acts on the finding: a key somebody planted repeats until a
@@ -256,38 +222,43 @@ export async function configBaseline(
 export const UNREADABLE_CONFIG = "an unreadable git config";
 
 /**
- * `extraEnv` exists so a caller can be judged against the config git will actually use. The
- * checkout in `workspace.create` runs with `GIT_CONFIG_GLOBAL=/dev/null`, and a scan that reads
- * `~/.gitconfig` when the command it guards does not is answering a different question: measured,
- * a single malformed line in the operator's global config makes `--local --list` exit 128, which
- * this reads as unreadable and refuses — for every project on the machine, for ever, against
- * checkouts `git worktree add` would have handled without complaint. Callers that DO pass a
- * baseline want the machine scopes read, and pass nothing here.
+ * A key git would run, named, or "" if this found none.
+ *
+ * "None it knows about": the list below is hand-maintained and the module's own comment above is
+ * candid that it cannot be completed — `gpg.program` was the third key found this way. What bounds
+ * the damage is the allowlist an operator approved and the `-c` flags in `gitArgs`, which turn the
+ * mechanisms off at the sink rather than hoping to have named them all here.
+ *
+ * One rule, for one question: of the scopes the worker's own git reads, does any carry a value it
+ * would execute, or an `include.path` pointing at a file this cannot vouch for? `localGitEnv` puts
+ * the operator's global config outside every one of those calls, so what remains is the repository
+ * itself — `local` and `worktree`, the scopes the run can write — and the `-c` flags this module
+ * passes, which are its own.
+ *
+ * There used to be a baseline, dating each machine-scope entry so an operator's `gh` credential
+ * helper in `~/.gitconfig` was not read as evidence against the run (BP-346). It is gone with the
+ * scan's reach: a key planted in that file *before* the run was inside the baseline and every later
+ * scan waved it through, and the answer is not a cleverer baseline — nothing in `$HOME` is out of
+ * the agent's reach to date it against — but a git that does not read the file at all (BP-516).
+ *
+ * The same function at bind time and at run time, deliberately: they used to be two lists, and the
+ * checkout that bound under one and was refused by the other cost the project (BP-517).
  */
-export async function plantedConfig(
-  runner: Runner,
-  cwd: string,
-  baseline?: readonly string[] | null,
-  extraEnv?: NodeJS.ProcessEnv,
-): Promise<string> {
-  // Two questions, two calls. `--local --list` fails outside a checkout and `--list` does not — it
-  // answers with the machine's global config instead — so widening the scan would have turned
-  // "this is not a repository" into "this repository is clean" without anything going red.
-  // Measured: exit 128 became exit 0 (BP-346).
-  const readable = await git(runner, cwd, ["config", "--local", "--list"], extraEnv);
-  if (readable.code !== 0 || readable.timedOut)
-    return UNREADABLE_CONFIG;
+export async function plantedConfig(runner: Runner, cwd: string): Promise<string> {
+  // Two questions, two calls. `--local --list` fails outside a checkout and `--list` does not:
+  // measured, with the global and system files out of the picture it exits 0 and prints this
+  // module's own `-c` flags, which read as a repository with nothing planted in it. So widening the
+  // scan would turn "this is not a repository" into "this repository is clean" without anything
+  // going red — exit 128 became exit 0 (BP-346), and still does.
+  const readable = await git(runner, cwd, ["config", "--local", "--list"]);
+  if (readable.code !== 0 || readable.timedOut) return UNREADABLE_CONFIG;
 
-  const result = await git(runner, cwd, CONFIG_LIST_ARGS, extraEnv);
+  const result = await git(runner, cwd, CONFIG_LIST_ARGS);
   // Unreadable is not the same as clean: a config this cannot read is one it cannot clear either.
   if (result.code !== 0 || result.timedOut) return UNREADABLE_CONFIG;
 
-  const entries = parseConfigList(result.stdout);
-  const known = new Set(baseline ?? []);
-  for (const entry of entries) {
-    const insideTheRepo = REPO_SCOPES.includes(entry.scope);
-    const appearedSince = baseline != null && !known.has(entry.raw);
-    if (!insideTheRepo && !appearedSince) continue;
+  for (const entry of parseConfigList(result.stdout)) {
+    if (!REPO_SCOPES.includes(entry.scope)) continue;
 
     if (isIndirection(entry.key)) {
       return `${entry.key} (${entry.scope}), which points at a file this cannot vouch for`;
@@ -365,28 +336,20 @@ export async function bindRepository(
     return { ok: false, reason: `${proposedPath} is not its own git toplevel` };
   }
 
-  const config = await git(deps.runner, proposedPath, [
-    "config",
-    "--local",
-    "--list",
-    "-z",
-  ]);
-  if (config.code !== 0 || config.timedOut) {
-    return {
-      ok: false,
-      reason: `could not read git config in ${proposedPath}`,
-    };
+  // The scan a run makes, not a narrower one of its own. `--local --list` could not see the
+  // worktree scope and the old rule did not judge `include.path`, so a checkout carrying either
+  // bound here and was refused at run time instead — where, since BP-504, it quarantines the
+  // project and every other project bound to that path with it. Bind time is where it belongs:
+  // the operator is watching, nothing has been claimed, and the reason reaches them as a refusal
+  // to approve rather than as a comment on a task (BP-517).
+  const planted = await plantedConfig(deps.runner, proposedPath);
+  if (planted === UNREADABLE_CONFIG) {
+    return { ok: false, reason: `could not read git config in ${proposedPath}` };
   }
-  // Narrower than the scan `workspace.create` makes: `--local --list` cannot see the worktree
-  // scope and this rule does not judge `include.path`, so a checkout carrying either binds here
-  // and is refused at run time instead — where, since BP-504, it quarantines the project. Aligning
-  // the two is its own ticket: it would refuse checkouts that bind today, so it needs its own
-  // sweep rather than a corner of this one.
-  const dangerous = dangerousConfigEntry(config.stdout);
-  if (dangerous) {
+  if (planted) {
     return {
       ok: false,
-      reason: `${proposedPath}'s git config sets ${dangerous}, which can make git run an attacker's command`,
+      reason: `${proposedPath}'s git config sets ${planted}, which can make git run an attacker's command`,
     };
   }
 

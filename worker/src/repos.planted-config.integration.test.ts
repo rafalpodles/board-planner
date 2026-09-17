@@ -3,8 +3,9 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { configBaseline, plantedConfig } from "./repos.js";
+import { plantedConfig } from "./repos.js";
 import { createRunner } from "./exec.js";
+import { gitArgs, localGitEnv, operatorGitEnv } from "./git-safety.js";
 
 /**
  * BP-346. `plantedConfig` read `--local --list`, and three things live outside that scope: an
@@ -30,7 +31,7 @@ describe("plantedConfig against a real repository", () => {
   let home: string;
   let realHome: string | undefined;
 
-  const scan = (baseline?: string[] | null) => plantedConfig(createRunner(), work, baseline);
+  const scan = (cwd = work) => plantedConfig(createRunner(), cwd);
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "bp346-"));
@@ -83,21 +84,21 @@ describe("plantedConfig against a real repository", () => {
   // The control that matters most, and the one that caught the naive fix: a repository with
   // nothing planted, on a machine whose global config is whatever it is, is not refused.
   it("says nothing about an ordinary checkout", async () => {
-    expect(await scan(await configBaseline(createRunner(), work))).toBe("");
+    expect(await scan()).toBe("");
   });
 
   /**
-   * The control the naive version of this fix failed, and the reason the baseline exists. Run
-   * against this machine's own `~/.gitconfig` rather than the empty one the other cases use:
-   * measured while designing this, a normally-configured Mac carries five executable keys in the
-   * effective config — an osxkeychain helper and gh's, every one of them legitimate and every one
-   * of them a match for the rules below. A scan that judged them would refuse the machine.
+   * The control the naive version of this fix failed. Run against this machine's own
+   * `~/.gitconfig` rather than the empty one the other cases use: measured while designing this, a
+   * normally-configured Mac carries five executable keys in the effective config — an osxkeychain
+   * helper and gh's, every one of them legitimate and every one of them a match for the rules
+   * below. A scan that judged them would refuse the machine.
    */
   it("says nothing about an ordinary checkout on this machine's real configuration", async () => {
     if (realHome === undefined) return;
     process.env.HOME = realHome;
 
-    expect(await scan(await configBaseline(createRunner(), work))).toBe("");
+    expect(await scan()).toBe("");
   });
 
   it("refuses an include.path as itself, without reading what it points at", async () => {
@@ -105,7 +106,7 @@ describe("plantedConfig against a real repository", () => {
     writeFileSync(payload, `[credential]\n\thelper = "!sh -c 'touch ${join(dir, "PWNED")}'"\n`);
     git(work, "config", "include.path", payload);
 
-    const said = await scan(await configBaseline(createRunner(), work));
+    const said = await scan();
 
     expect(said).toContain("include.path");
     // Named for what it is, not for what following it would have found — the file's content can be
@@ -123,30 +124,39 @@ describe("plantedConfig against a real repository", () => {
     const local = execFileSync("git", ["config", "--local", "--list"], { cwd: linked, encoding: "utf8" });
     expect(local).not.toContain("sshcommand");
 
-    // The baseline is taken AFTER the key is planted, so "it appeared since" cannot be what refuses
-    // it — only the scope being one the agent writes can. Without this the case passes with the
-    // worktree scope removed from that list entirely
-    const said = await plantedConfig(createRunner(), linked, await configBaseline(createRunner(), linked));
+    const said = await scan(linked);
     expect(said).toContain("core.sshcommand");
     expect(said).toContain("worktree");
   });
 
-  it("refuses a global key that appeared after the baseline, and not one that was already there", async () => {
-    writeFileSync(join(home, ".gitconfig"), "[credential]\n\thelper = /usr/bin/true\n");
-    const baseline = await configBaseline(createRunner(), work);
-
-    // The control, and it is the whole reason this is a baseline and not a scope list: the helper
-    // that was already on the machine is the operator's, and refusing it would refuse the machine
-    expect(await scan(baseline)).toBe("");
-
+  /**
+   * The scan does not judge `~/.gitconfig`, and this is the half that makes that safe: the git the
+   * worker runs does not read it either (BP-516).
+   *
+   * There used to be a baseline here, dating each machine-scope entry so an operator's own
+   * credential helper was not read as evidence while a key that appeared during the run was. It
+   * could not see a key planted BEFORE the run — that one was inside the baseline, and every later
+   * scan waved it through — and no file in `$HOME` is out of the agent's reach to date it against.
+   *
+   * The two environments below are the same `git config --get`, and the difference between them is
+   * the whole fix. `operatorGitEnv` is the control: without it, "the key is not there" and "git
+   * cannot see the key" are indistinguishable, and a typo in the planted config would pass.
+   */
+  it("neither judges the operator's global config nor lets the worker's git read it", async () => {
     writeFileSync(
       join(home, ".gitconfig"),
       `[credential]\n\thelper = /usr/bin/true\n[core]\n\tsshCommand = touch ${join(dir, "SSH")}\n`
     );
 
-    const said = await scan(baseline);
-    expect(said).toContain("core.sshcommand");
-    expect(said).toContain("global");
+    expect(await scan(), "the machine's own configuration was read as an attack").toBe("");
+
+    const read = (env: NodeJS.ProcessEnv) =>
+      createRunner()
+        .run("git", gitArgs(["config", "--get", "core.sshCommand"]), { cwd: work, timeoutMs: 30_000, env })
+        .then((result) => result.stdout.trim());
+
+    expect(await read(operatorGitEnv()), "the key was never planted").toContain("touch");
+    expect(await read(localGitEnv()), "the worker's own git still reads ~/.gitconfig").toBe("");
   });
 
   // Not "so a Git-LFS checkout still commits" — it does not, and has not since bindRepository:
@@ -154,20 +164,16 @@ describe("plantedConfig against a real repository", () => {
   it("lets Git-LFS's inert keys through and still refuses its executable one", async () => {
     git(work, "config", "filter.lfs.required", "true");
     git(work, "config", "diff.lfs.cachetextconv", "false");
-    const baseline = await configBaseline(createRunner(), work);
-    expect(await scan(baseline)).toBe("");
+    expect(await scan()).toBe("");
 
     git(work, "config", "filter.lfs.clean", "git-lfs clean -- %f");
-    expect(await scan(baseline)).toContain("filter.lfs.clean");
+    expect(await scan()).toContain("filter.lfs.clean");
   });
 
+  // `--list` alone answers with the machine's config outside a checkout and exits 0, so the
+  // readability probe is the only thing that can tell "this is not a repository" from "this
+  // repository is clean" (BP-346).
   it("refuses a directory that is not a checkout, rather than reading the machine as clean", async () => {
-    // The baseline is the machine's own config, taken from the same non-repository directory, so
-    // nothing here can be "new" and only the readability probe can refuse. With `[]` instead, the
-    // machine's own global keys count as planted and the case passes without the probe at all —
-    // the right verdict for the wrong reason.
-    const baseline = await configBaseline(createRunner(), dir);
-
-    expect(await plantedConfig(createRunner(), dir, baseline)).toBe("an unreadable git config");
+    expect(await scan(dir)).toBe("an unreadable git config");
   });
 });

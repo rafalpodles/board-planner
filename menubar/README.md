@@ -41,7 +41,7 @@ where it does not.
 and by `protocol.file.allow`. That was a development case — a local bare repository — and it is the
 same case the push probe already said it could not really check.
 
-**What it does not claim.** `~/.gitconfig` is still read, unlike the worker's delivery path. This
+**What it does not claim.** `~/.gitconfig` is still read, unlike every git call the worker makes. This
 runs during onboarding, and dropping it would take the operator's credential helper and any
 `core.sshCommand` deploy key with it, at the moment a failure is hardest to tell from a typo.
 

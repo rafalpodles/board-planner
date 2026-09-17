@@ -222,7 +222,18 @@ and `SIGINT` both finish the task in flight before the loop exits.
 
   The scan reads the repository's own scopes, so the calls that make the checkout also drop
   `~/.gitconfig` — without that a filter defined there ran on a checkout with **nothing planted in
-  the repository at all**, and no scan of the repository could ever have seen it. Measured.
+  the repository at all**, and no scan of the repository could ever have seen it. Measured. Since
+  BP-516 that is true of every git call this worker makes but one — the read of the commit identity
+  before the agent starts, which is the whole of what that file is still asked for — and not only of
+  the calls that create a worktree, which is what lets the scan and the call it guards read the same
+  config.
+
+  The same scan runs at **bind time**, against the shared checkout, before anything is claimed
+  (BP-517). It used to be a narrower list of its own: `--local --list`, which cannot see a
+  per-worktree config, judged by a rule that did not refuse `include.path`. A checkout carrying
+  either bound cleanly and was refused by the first run instead — which quarantines the project and
+  every sibling on that path. Judging it once, with one function, is what keeps the two answers the
+  same as the rules change.
 
   Refusing alone would only hand the same clone to the next attempt, so the checkout is
   **quarantined**: this machine stops claiming for every project bound to it — the poison is in the
@@ -232,12 +243,24 @@ and `SIGINT` both finish the task in flight before the loop exits.
   because a re-scan reading clean thirty seconds later is exactly what re-planting produces. Remove
   the key, then restart the worker.
 
-  Only a key somebody planted quarantines anything. A config git would not read at all — a checkout
-  being re-cloned, a machine under load — still refuses the run, because a config this cannot read
-  is one it cannot vouch for, but it does not latch the project off until the process restarts.
+  Two things quarantine a checkout, and both are a file that path's projects share: a key somebody
+  planted, and a config that leaves no identity to commit as (BP-516). A config git would not read at
+  all — a checkout being re-cloned, a machine under load — still refuses the run, because a config
+  this cannot read is one it cannot vouch for, but it does not latch the project off until the
+  process restarts.
 
   The key is **not** cleared for you. Writing to a config an attacker also writes is a race, and it
   destroys the evidence of what was planted.
+
+  Neither is the worktree. A **tampered-checkout** refusal keeps it, with what the agent wrote and
+  the planted config still in it, and parks the task rather than requeueing it at the same checkout
+  (BP-506) — the comment names the key and the path. A config this cannot *read* is not that: it
+  refuses the same staging, but as an ordinary failure, so the task requeues and the comment names
+  the path alone, because there is no key to name. Every ordinary commit failure keeps the tree the
+  same way — whichever call threw, the agent's work is in it and in no history, and the `finally`
+  that tidies up is the only thing between it and `worktree remove --force` — but only until the
+  next attempt rebuilds the worktree. Where it stops: a step that never reaches its commit, on a
+  timeout, a usage limit or a block, does not set the flag that keeps it, and the tree goes.
 - **The agent's own writes cannot leave its worktree.** Both calls to the CLI — the step that
   writes the change and the review gate — run under `sandbox-exec` with a profile that denies every
   write and allows back exactly one directory: the worktree for the step, the throwaway checkout for
@@ -265,17 +288,17 @@ and `SIGINT` both finish the task in flight before the loop exits.
   against the lockfile, which bounds it, and your own cache is out of reach either way. A machine
   that cannot confine refuses the gate rather than running it unconfined.
 
-  **What it does not close.** Writes a *daemon* performs on a spawned process's behalf: `(allow default)` leaves
-  `process-exec` and `mach-lookup` open, and `defaults write` makes cfprefsd write a plist under
-  `~/Library/Preferences`, outside the worktree, measured. The tool allowlist used to close it by
-  giving the agent no shell — and then the gates above moved inside the profile, where they run
-  agent-written code, so it is open: a test file that spawns `defaults` gets there. What it buys is
-  a preference domain and nothing more: `defaults write <absolute path>` is refused, because that
-  one `defaults` writes itself rather than asking cfprefsd, so `~/Library/LaunchAgents/*.plist` is
-  not reachable this way. Denying `mach-lookup` on `com.apple.cfprefsd.daemon` closes it and still
-  leaves the worktree writable, measured; what nobody has measured is which parts of a run read a
-  preference through that same daemon, and that is **BP-630**. And reads, and the network, neither
-  of which this touches at all.
+  **A write a daemon performs on the process's behalf** was the way out that `file-write*` could not
+  see (**BP-630**): `(allow default)` leaves `process-exec` and `mach-lookup` open, so a test file
+  that spawned `defaults write` had cfprefsd write a plist under `~/Library/Preferences` for it,
+  outside the worktree, exit 0. The profile now denies `mach-lookup` on cfprefsd's daemon and agent
+  service names, and the same command writes nothing. What that costs was measured rather than
+  assumed — `defaults read` still answers, `npm ci`/`npm run build`/`npm test` still pass, git still
+  commits, and the agent CLI still runs under both tool lists — because denying a lookup is not a
+  write-only deny. What no measurement here covers is a program that reads a preference *only*
+  through that daemon: it sees the default instead, which for a run is the answer a fresh account
+  would give. Every other daemon reachable the same way is still open, and no list of service
+  names closes that; so are reads, and the network, neither of which this touches at all.
 
   **A file git will not print** (**BP-603**). Four things take a file's contents out of a patch: a
   bare `-diff` attribute, a `diff=<name>` driver declared binary in the config, a file git decides
@@ -360,8 +383,67 @@ and `SIGINT` both finish the task in flight before the loop exits.
   no longer applies to delivery: a deploy key set through `core.sshCommand`, a `url.*.insteadOf`
   rewrite pointing at a mirror, or an https credential helper other than `gh`'s. Delivery
   authenticates over ssh with the agent socket, or over https through `gh auth git-credential`.
-  Nothing here touches the agent's own commits, which are made in a different environment that does
-  read your config.
+
+  Since BP-516 that cost is the same on the local calls, and two lines of it are worth naming.
+
+  **Git-LFS is out, both ways round.** `git lfs install --local` writes `filter.lfs.clean` into the
+  checkout's config, which is a program git runs, so `bindRepository` refuses that checkout and names
+  the key. `git lfs install` on its own — the ordinary setup — writes the same keys into
+  `~/.gitconfig`, which nothing refuses and which the worker no longer reads: the checkout produces
+  pointer text and the commit puts working-tree bytes where a pointer belongs, quietly. Neither is a
+  repository this worker can serve.
+
+  **The ignore list is the repository's own.** `core.excludesFile` no longer decides what gets
+  staged — and neither does `~/.config/git/ignore`, which git reads with no config file at all and
+  which `SAFE_CONFIG` pins to `/dev/null` for that reason. What that stages is wider than a
+  `.DS_Store`: the gates run `npm ci` and the build inside the worktree, so a `node_modules` or a
+  `dist` the repository's own `.gitignore` does not name is committed by the next edit step, where
+  the diff-size gates are what make it loud. One list is left and it is the agent's own —
+  `.git/info/exclude`, untracked and reaching no diff, which is BP-640.
+
+  **Nothing this worker commits is signed.** `commit.gpgSign=false` and `push.gpgSign=false` ride on
+  every call, because signing runs a program the checkout names (`gpg.program`, or ssh's key
+  command) and that is the sink the scan exists to guard. A repository whose branch protection
+  requires signed commits will reject what a worker pushes.
+
+  **An ownership refusal reads as an unreadable config.** `GIT_CONFIG_NOSYSTEM` and the null global
+  file take `safe.directory` with them, so a checkout whose `.git` belongs to another uid answers
+  `fatal: detected dubious ownership`, which this reports as "could not read git config in <path>".
+  `bindRepository`'s own uid check catches the ordinary case first; the message is worth knowing for
+  the one it does not.
+
+  The worker's own commits are made in the same environment since BP-516, and the one thing they
+  genuinely need from that file — who the commits are by — is asked of git itself before the agent
+  runs (`git var GIT_AUTHOR_IDENT`, in the shared checkout, which is the local config a linked
+  worktree reads) and carried in `GIT_AUTHOR_*`/`GIT_COMMITTER_*`. Asked before the fetch and before
+  `worktree add`, because the answer is the same for every task, finding it out at the commit costs
+  the whole run, and asking after the fetch and the checkout spends both on a question that could
+  have been asked first.
+
+  Asked in two parts, and the second is not decoration: `git var` answers with a *guess* when nothing
+  is configured — `<unix user>@<hostname>` — and refuses that guess only where the hostname has no
+  dot in it. So the same empty configuration says "Author identity unknown" on a laptop and
+  `runner@fv-az…cloudapp.net` on a CI box, where the worker would push commits authored by somebody
+  who does not exist. The address has to be one somebody configured (`config --get user.email`); the
+  name is not held to that, because git fills it from the account and a name routes nowhere. CI is
+  what found this, and no machine of ours could have.
+
+  Two faults, one settlement and two blast radii. Both release the run with its attempt refunded and
+  end the pass — the task did nothing and nothing it could do would help. What differs is what is
+  latched off and how it is cleared. **The machine** names nobody, or its config file will not
+  parse: nothing is quarantined, the reason carries git's own whole answer — or, where git would
+  have guessed, the two commands to run and the address it would have used — and the next poll tries
+  again, so a machine that is still broken says so again. **The checkout** leaves no identity while the machine is fine — a `user.name = ""` in the
+  shared `.git/config` does it, well-formed and carrying no program, so no scan refuses it: that
+  checkout is quarantined, exactly as a planted key quarantines it and for the same reason, because
+  the file belongs to the path and every project bound to it shares it. Charging the attempt instead
+  was tried and is worse than doing nothing: the loop claims the next task immediately, so the
+  approved column of every project on that checkout empties into escalation one attempt at a time.
+
+  What that identity is worth is worth stating too: an earlier run's agent can write `user.email`
+  into that file or into the shared `.git/config`, and neither is a key git *runs*, so no scan
+  refuses it. A commit's author is as trustworthy as the machine's own configuration. The account a
+  push acts as is pinned separately (BP-373), and that one is not writable from the checkout.
 - **Nothing the server sends becomes a path or an option.** Everything below arrives over HTTP from
   whichever server this worker is enrolled with, and everything past that boundary runs on somebody's
   laptop at their uid. Two of these were live: a `workerId` of `../../../../Users/owner/Library/LaunchAgents`

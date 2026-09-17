@@ -18,18 +18,27 @@ import { UNCONFINED_ESCAPE_HATCH, unconfinedAgentAllowed } from "./env.js";
  * enough either — moving `HOME` does not stop `/Users/<operator>/.claude/settings.json` being
  * written by name, and `USER` is on the same allowlist that forwards `HOME`.
  *
- * What this does not reach — writes a *daemon* performs on the process's behalf. `(allow default)`
- * leaves `process-exec` and `mach-lookup` open, and measured under this exact profile,
- * `defaults write <domain> <key> <value>` returns 0 and cfprefsd writes the plist under
- * `~/Library/Preferences`, outside the worktree. That gap is **open**, and BP-608 is what opened
- * it: the tool allowlist used to close it by giving the agent no shell, but the npm gates below run
- * agent-written code inside this same profile, so a test file that spawns `defaults` is executed by
- * the Test gate. Narrow, and the narrowness is measured too — the channel is preference domains
- * only. `defaults write <absolute path>` is refused, because that one `defaults` writes itself
- * instead of asking cfprefsd, so `~/Library/LaunchAgents/*.plist` stays out of reach. Adding
- * `(deny mach-lookup (global-name "com.apple.cfprefsd.daemon"))` closes it, also measured — what is
- * not measured is what else in a run reads a preference through the same daemon, which is why it is
- * BP-630 rather than a line above.
+ * Writes a *daemon* performs on the process's behalf are the other half, and `file-write*` cannot
+ * see them: `(allow default)` leaves `process-exec` and `mach-lookup` open, so `defaults write
+ * <domain> <key> <value>` returned 0 under this profile and cfprefsd wrote the plist under
+ * `~/Library/Preferences`, outside the worktree. BP-608 is what opened it — the tool allowlist used
+ * to close it by giving the agent no shell, and then the npm gates moved inside this profile, where
+ * a test file that spawns `defaults` is run by the Test gate. The deny on cfprefsd's two service
+ * names closes it, measured on macOS 26.6: the same command answers "Could not write domain" and
+ * writes nothing, while the worktree stays writable.
+ *
+ * What that deny costs was measured rather than assumed, because a `mach-lookup` deny is not a
+ * write-only deny and the profile deliberately leaves reads alone: under it `defaults read -g` still
+ * answers, `npm ci`, `npm run build` and `npm test` all exit 0 on a real package, `git` commits, and
+ * `claude -p` exits 0 under both of executor.ts's `--tools` lists with no permission denial on
+ * stderr. Preferences a daemon *caches* for a client are the part no measurement here covers: a
+ * program that reads one only through cfprefsd sees the default instead, which for the run is the
+ * same class of answer as a fresh account.
+ *
+ * Still open, and it is the same shape: every other daemon reachable by `mach-lookup`. Naming
+ * cfprefsd closes the channel somebody measured, not the category — a denylist of service names
+ * cannot be completed, for the reason the comment above declines to denylist the instruction
+ * channels in the operator's home.
  *
  * The gates are inside it too, since BP-608: `npm ci`, `npm run build` and `npm test` run
  * agent-written code — a test file is exactly what an Implement step is asked to write — and they
@@ -117,6 +126,12 @@ function profileFor(names: string[]): string {
     // `(subpath "/dev")`, which would also permit whatever else the uid can open under there.
     '(allow file-write-data (literal "/dev/null"))',
     `(allow file-write* ${allowWrites})`,
+    // A write this process does not perform: `defaults write <domain> …` asks cfprefsd, which runs
+    // outside the profile, and the plist lands under `~/Library/Preferences` with `file-write*`
+    // denied and exit 0. Both names, because the per-user agent answers when the daemon does not.
+    // Denying the lookup rather than the exec: `defaults` is one of many clients, and a denylist of
+    // programs is the game sandbox.ts already refuses to play.
+    '(deny mach-lookup (global-name "com.apple.cfprefsd.daemon") (global-name "com.apple.cfprefsd.agent"))',
   ].join("\n");
 }
 

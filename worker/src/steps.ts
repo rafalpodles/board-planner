@@ -1,3 +1,4 @@
+import { TamperedCheckoutError } from "./commit.js";
 import { Delivery } from "./delivery.js";
 import { Executor } from "./executor.js";
 import { Runner } from "./exec.js";
@@ -11,11 +12,29 @@ export type StepOutcome =
   | { kind: "usage_limit" }
   | { kind: "timeout" }
   | { kind: "machine_fault"; message: string }
+  // The checkout carries a key git would run, found by the scan in front of the staging. Its own
+  // kind rather than an `error` carrying a sentence, because the pipeline owes it a different
+  // answer: a person has to look at the tree, so the run is parked and the worktree is kept, where
+  // an `error` from a model step is requeued and the tree destroyed (BP-506).
+  | { kind: "tampered"; finding: string; message: string }
   | { kind: "error"; message: string };
 
 export interface RunState {
   /** Whether any step has committed yet — an exit after one must not destroy the worktree. */
   committed: boolean;
+  /**
+   * Whether a commit was attempted and did not happen, which means work the agent wrote is in the
+   * worktree and in no history. The `finally` that destroys the worktree is then the only thing
+   * between that work and `worktree remove --force`, so this keeps it — for a refusal, where the
+   * tree is also the evidence, and for the ordinary failures of `status`, `add`, `commit` and
+   * `rev-parse`, where it is simply the one copy (BP-506).
+   *
+   * Where it stops, said rather than left to be discovered: a step that never reaches its commit —
+   * a timeout, a usage limit, a block — does not set this, and the tree goes, as it did before.
+   * Those are the agent failing rather than the commit failing, and the usage-limit case is
+   * deliberately kept that way (the same machine runs the task again).
+   */
+  uncommittedWork: boolean;
   /** Every sha this run created, oldest first. The only thing that commits here is commitAll. */
   commits: string[];
   /** What has already reached the remote, so an interrupted run can say where the work is. */
@@ -39,8 +58,6 @@ export interface StepContext {
   signal?: AbortSignal;
   onEvent?: (event: StreamEvent) => void;
   baseSha: string;
-  /** See Worktree.configBaseline — what the config said before the agent ran (BP-346). */
-  configBaseline?: readonly string[] | null;
   runner: Runner;
 }
 
@@ -75,7 +92,6 @@ async function deliver(
         ctx.worktreePath,
         ctx.branch,
         ctx.state.commits[ctx.state.commits.length - 1] ?? "",
-        ctx.configBaseline,
       );
       ctx.state.pushed = true;
       return { kind: "ok" };
@@ -157,6 +173,12 @@ export async function runStep(
       // an earlier one already did.
       ctx.state.committed = ctx.state.committed || sha !== "";
     } catch (error) {
+      // Set before anything is returned, and for every failure rather than the refusal alone: what
+      // the agent wrote is in the worktree and in no history, whichever call threw.
+      ctx.state.uncommittedWork = true;
+      if (error instanceof TamperedCheckoutError) {
+        return { kind: "tampered", finding: error.finding, message: error.message };
+      }
       return { kind: "error", message: String(error) };
     }
   }

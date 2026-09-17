@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import { TamperedCheckoutError } from "./commit.js";
 import { runStep, StepContext } from "./steps.js";
 import { ExecutionResult, SnapshotEntry } from "./types.js";
 
@@ -15,6 +16,7 @@ const completed: ExecutionResult = {
 function ctx(over: Partial<StepContext> = {}) {
   const state = over.state ?? {
     committed: false,
+    uncommittedWork: false,
     commits: [],
     pushed: false,
     prUrl: "",
@@ -144,6 +146,48 @@ describe("runStep — a model step", () => {
     expect(c.state.committed).toBe(false);
   });
 
+  // What the pipeline reads to keep the worktree: whichever call threw, the agent's work is in the
+  // tree and in no history, and the `finally` is the only thing between it and `remove --force`
+  // (BP-506).
+  it("records that work was written which no commit captured", async () => {
+    const c = ctx({
+      commit: vi.fn(async () => {
+        throw new Error("git add failed: pathspec");
+      }),
+    });
+
+    await runStep(entry({ capability: "edit" }), c);
+
+    expect(c.state.uncommittedWork).toBe(true);
+  });
+
+  it("leaves that flag alone when the commit went through", async () => {
+    const c = ctx();
+
+    await runStep(entry({ capability: "edit" }), c);
+
+    expect(c.state.uncommittedWork).toBe(false);
+  });
+
+  // The refusal is its own outcome rather than an error carrying a sentence: the pipeline parks the
+  // task and keeps the tree as evidence, where an error from a model step is requeued.
+  it("tells a tampered checkout from a git failure", async () => {
+    const c = ctx({
+      commit: vi.fn(async () => {
+        throw new TamperedCheckoutError("filter.z.clean (local)");
+      }),
+    });
+
+    const outcome = await runStep(entry({ capability: "edit" }), c);
+
+    expect(outcome).toEqual({
+      kind: "tampered",
+      finding: "filter.z.clean (local)",
+      message: expect.stringContaining("filter.z.clean"),
+    });
+    expect(c.state.uncommittedWork).toBe(true);
+  });
+
   it("records that it committed, so an exit after it keeps the worktree", async () => {
     const c = ctx();
 
@@ -201,10 +245,10 @@ describe("runStep — a model step", () => {
 
 describe("runStep — a worker action", () => {
   it("pushes on the push step and calls no model", async () => {
-    const c = ctx({ state: { committed: true, commits: ["sha1"], pushed: false, prUrl: "", merged: false, summary: "", lastResult: completed } });
+    const c = ctx({ state: { committed: true, uncommittedWork: false, commits: ["sha1"], pushed: false, prUrl: "", merged: false, summary: "", lastResult: completed } });
     await runStep(entry({ key: "push", deterministic: true }), c);
 
-    expect(c.delivery.push).toHaveBeenCalledWith("/wt", "cp-1/x", "sha1", undefined);
+    expect(c.delivery.push).toHaveBeenCalledWith("/wt", "cp-1/x", "sha1");
     expect(c.executor.execute).not.toHaveBeenCalled();
   });
 
@@ -212,7 +256,7 @@ describe("runStep — a worker action", () => {
     const c = ctx();
     await runStep(entry({ key: "push", deterministic: true }), c);
 
-    expect(c.delivery.push).toHaveBeenCalledWith("/wt", "cp-1/x", "", undefined);
+    expect(c.delivery.push).toHaveBeenCalledWith("/wt", "cp-1/x", "");
   });
 
   // RunState.commits is documented "oldest first", and the push step reads its *last* element —
@@ -226,7 +270,7 @@ describe("runStep — a worker action", () => {
 
     await runStep(entry({ key: "push", deterministic: true }), c);
 
-    expect(c.delivery.push).toHaveBeenCalledWith("/wt", "cp-1/x", "sha2", undefined);
+    expect(c.delivery.push).toHaveBeenCalledWith("/wt", "cp-1/x", "sha2");
   });
 
   it("remembers the pull request url, and that a merge happened", async () => {
@@ -255,7 +299,7 @@ describe("runStep — a worker action", () => {
 
   it("refuses to push a history it did not write", async () => {
     const c = ctx({
-      state: { committed: true, commits: ["sha1"], pushed: false, prUrl: "", merged: false, summary: "", lastResult: completed },
+      state: { committed: true, uncommittedWork: false, commits: ["sha1"], pushed: false, prUrl: "", merged: false, summary: "", lastResult: completed },
       runner: {
         run: vi.fn(async (_command: string, args: string[]) =>
           args.includes("rev-list")

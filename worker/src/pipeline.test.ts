@@ -8,8 +8,10 @@ import { Executor } from "./executor.js";
 import { gitArgs } from "./git-safety.js";
 import { Reporter } from "./reporter.js";
 import { createTelemetry, isOutcome, isQuota, Progress, TelemetryUpdate } from "./telemetry.js";
+import { MissingIdentityError } from "./commit.js";
 import { BaseUnavailableError, PoisonedCheckoutError, Workspace } from "./workspace.js";
 import { UNREADABLE_CONFIG } from "./repos.js";
+import { scopedConfigListZ } from "./config-list.fixtures.js";
 import { ClaimedTask, DiffStats, ExecutionResult, Gate, SnapshotEntry } from "./types.js";
 import { PipelineDeps, resolveStatusIds, runTask } from "./pipeline.js";
 
@@ -99,6 +101,10 @@ function shell(stdout = "", overrides: Partial<CommandResult> = {}): CommandResu
 
 const IMPLEMENT_COMMIT_SHA = "sha-implement001";
 
+// Resolved by workspace.create before the agent runs, and required from there on: the commit has
+// nowhere else to get one, with `~/.gitconfig` out of the picture (BP-516).
+const IDENTITY = { name: "The Operator", email: "operator@example.com" };
+
 // A worktree that starts dirty, the way the implement step actually leaves one, and goes clean the
 // moment commitAll's own `git commit` runs — so the sha it hands back is what reaches push, and the
 // unfinishedWork check right after it does not mistake the just-committed tree for leftover work.
@@ -162,7 +168,7 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
   const delivery = deliverySpy();
   const createDelivery = vi.fn<PipelineDeps["createDelivery"]>(() => delivery);
   const workspace = {
-    create: vi.fn<Workspace["create"]>().mockResolvedValue({ path: "/wt", baseSha: "base1" , configBaseline: [] }),
+    create: vi.fn<Workspace["create"]>().mockResolvedValue({ path: "/wt", baseSha: "base1", commitIdentity: IDENTITY }),
     destroy: vi.fn<Workspace["destroy"]>().mockResolvedValue(undefined),
     listWorktrees: vi.fn<Workspace["listWorktrees"]>().mockResolvedValue([]),
   };
@@ -209,7 +215,10 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
     gateFor,
     recordRun,
     quarantineProject,
-    runner,
+    // The one the pipeline was given, not the default this function built: with `runner` in the
+    // overrides those are different objects, and a test asserting on the default asserts on a spy
+    // nothing ever called.
+    runner: deps.runner,
   };
 }
 
@@ -294,7 +303,7 @@ describe("runTask", () => {
     const h = harness();
     await runTask(h.deps, merging);
 
-    expect(h.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker", IMPLEMENT_COMMIT_SHA, []);
+    expect(h.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker", IMPLEMENT_COMMIT_SHA);
     expect(h.delivery.openPr).toHaveBeenCalledWith("/wt", merging, "did it");
     expect(h.delivery.merge).toHaveBeenCalledWith("/wt", "https://x/pull/7");
     expect(h.reporter.merged).toHaveBeenCalledWith(merging, "https://x/pull/7", "did it");
@@ -310,7 +319,7 @@ describe("runTask", () => {
 
   it("diffs against the worktree's captured base sha, not the configured branch name", async () => {
     const h = harness({ config: { ...config, baseBranch: "develop" } });
-    h.workspace.create.mockResolvedValue({ path: "/wt", baseSha: "base111" , configBaseline: [] });
+    h.workspace.create.mockResolvedValue({ path: "/wt", baseSha: "base111", commitIdentity: IDENTITY });
     await runTask(h.deps, task);
 
     expect(h.collectDiff).toHaveBeenCalledWith(h.runner, "/wt", "base111");
@@ -709,6 +718,177 @@ describe("runTask", () => {
     expect(h.workspace.destroy).not.toHaveBeenCalled();
   });
 
+  /**
+   * BP-516 review. The two identity faults are owed opposite settlements, and the machine-wide one
+   * was being handed out for a key that belongs to one checkout.
+   */
+  describe("a run with nobody to commit as", () => {
+    function refusing(kind: "machine" | "checkout") {
+      const create = vi
+        .fn<Workspace["create"]>()
+        .mockRejectedValue(new MissingIdentityError("fatal: empty ident name", kind));
+      return harness({ workspace: { ...harness().workspace, create } });
+    }
+
+    it("stops the machine claiming when the machine is what has none", async () => {
+      const h = refusing("machine");
+
+      const outcome = await runTask(h.deps, task);
+
+      expect(outcome).toBe("machine-fault");
+      expect(h.reporter.released).toHaveBeenCalled();
+      expect(h.reporter.requeued).not.toHaveBeenCalled();
+    });
+
+    // Quarantines the checkout when the checkout is what has none, the way a planted key does: the
+    // file is shared by every project bound to that path, so a plain requeue let the loop claim
+    // task after task and charge each one until the column was empty.
+    it("quarantines the checkout when the checkout is what has none", async () => {
+      const h = refusing("checkout");
+
+      const outcome = await runTask(h.deps, task);
+
+      // The words, not just the call: the reason and the repair are what an operator reads in
+      // Settings → Workers, and this branch is the one the `repair` argument exists for — without
+      // it the sentence tells them to remove a key that does not exist (BP-516 review).
+      expect(h.quarantineProject).toHaveBeenCalledWith(
+        task.projectId,
+        expect.stringContaining("identity"),
+        expect.stringContaining("user.email"),
+      );
+      expect(outcome).toBe("machine-fault");
+      // Refunded: the task did nothing, and nothing it could do would help
+      expect(h.reporter.released).toHaveBeenCalled();
+      expect(h.reporter.requeued).not.toHaveBeenCalled();
+    });
+
+    // And not when the machine is: there is no checkout to quarantine, and doing it anyway would
+    // latch off a project whose own config is fine.
+    it("quarantines nothing when the machine is what has none", async () => {
+      const h = refusing("machine");
+
+      await runTask(h.deps, task);
+
+      expect(h.quarantineProject).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * BP-506. `keepWorktree` used to be set only once a commit existed, so an agent whose sequence
+   * has a single edit step lost everything it had written the moment `commitAll` threw: the
+   * `finally` runs `worktree remove --force`, nothing is pushed, and the branch the parent clone
+   * holds is reset by the next attempt.
+   */
+  describe("a commit that did not happen", () => {
+    // A worktree with work in it and a `git add` that fails: the ordinary half, where the tree is
+    // simply the one copy of what the agent wrote.
+    it("keeps the worktree when the commit fails on git's own account", async () => {
+      const runner = {
+        run: vi.fn<Runner["run"]>(async (_command, args) => {
+          if (args.includes("add")) return shell("", { code: 1, stderr: "fatal: pathspec" });
+          if (args.includes("status")) return shell(" M src/a.ts\n");
+          return shell();
+        }),
+      };
+      const h = harness({ runner });
+
+      await runTask(h.deps, running("implement"));
+
+      expect(h.workspace.destroy).not.toHaveBeenCalled();
+      expect(h.reporter.requeued).toHaveBeenCalled();
+      // And says where it is: a kept worktree nobody is told about is a directory on a machine,
+      // not a copy of anybody's work. The tampered path has the same assertion.
+      expect(h.reporter.requeued.mock.calls[0][1]).toContain("/wt");
+    });
+
+    /**
+     * The keep is computed before the abort check, and this is what says so: a stop pressed while
+     * the step that failed to commit was finishing takes the `return` inside `releaseIfAborted`,
+     * so a keep written after it never runs. Moving the two lines back makes this the only red
+     * test in the package (BP-516 review).
+     */
+    it("keeps it even when a stop lands in the same moment", async () => {
+      const controller = new AbortController();
+      const runner = {
+        run: vi.fn<Runner["run"]>(async (_command, args) => {
+          if (args.includes("add")) {
+            // The stop arrives while the commit is failing, which is the race the ordering is for
+            controller.abort();
+            return shell("", { code: 1, stderr: "fatal: pathspec" });
+          }
+          if (args.includes("status")) return shell(" M src/a.ts\n");
+          return shell();
+        }),
+      };
+      const h = harness({ runner, signal: controller.signal });
+
+      await runTask(h.deps, running("implement"));
+
+      expect(h.reporter.released, "the stop was not observed at all").toHaveBeenCalled();
+      expect(h.workspace.destroy).not.toHaveBeenCalled();
+    });
+
+    // And the half where the tree is evidence: the config the agent planted is inside it, and the
+    // refusal names a key somebody has to go and look at.
+    describe("because the checkout was tampered with", () => {
+      function tamperedHarness() {
+        const runner = {
+          run: vi.fn<Runner["run"]>(async (_command, args) => {
+            if (args.includes("--show-scope"))
+              return shell(scopedConfigListZ("filter.z.clean=/tmp/payload.sh"));
+            if (args.includes("status")) return shell(" M src/a.ts\n");
+            return shell();
+          }),
+        };
+        return harness({ runner });
+      }
+
+      // The keep itself is `uncommittedWork`'s, tested above; what this pins is that the refusal
+      // does not take a different path out that forgets it.
+      it("keeps the worktree, the way any commit that did not happen does", async () => {
+        const h = tamperedHarness();
+
+        await runTask(h.deps, running("implement"));
+
+        expect(h.workspace.destroy).not.toHaveBeenCalled();
+      });
+
+      // Parked rather than requeued: a requeue sends the next attempt at the same checkout, and
+      // `worktree add -B` would take the evidence with it on the way past.
+      it("parks the task instead of queueing another run against the same checkout", async () => {
+        const h = tamperedHarness();
+
+        await runTask(h.deps, running("implement"));
+
+        expect(h.reporter.failed).toHaveBeenCalled();
+        expect(h.reporter.requeued).not.toHaveBeenCalled();
+      });
+
+      it("names the key and the path a person has to look at", async () => {
+        const h = tamperedHarness();
+
+        await runTask(h.deps, running("implement"));
+
+        const said = h.reporter.failed.mock.calls[0][1];
+        expect(said).toContain("filter.z.clean");
+        expect(said).toContain("/wt");
+      });
+
+      // Nothing was staged, which is the ordering BP-403 exists for: `git status` reads a file's
+      // content for anything untracked, so a scan that ran after it would have run the filter.
+      it("stages nothing on the way to refusing", async () => {
+        const h = tamperedHarness();
+
+        await runTask(h.deps, running("implement"));
+
+        const staged = (h.runner.run as ReturnType<typeof vi.fn>).mock.calls.some(([, args]) =>
+          (args as string[]).includes("add")
+        );
+        expect(staged, "the worktree was staged before the refusal").toBe(false);
+      });
+    });
+  });
+
   // The agent has no Bash any more, so nothing but this puts its work in a commit
   it("commits what the agent wrote, under the task key", async () => {
     const runner = { run: vi.fn<Runner["run"]>().mockResolvedValue(shell(" M src/a.ts\n")) };
@@ -741,9 +921,6 @@ describe("runTask", () => {
 
     expect(gate.run).toHaveBeenCalledWith({
       worktreePath: "/wt",
-      // What the config said before the agent ran, handed to the gate rather than re-read: a gate
-      // that reads it now is reading the version the agent has had (BP-346)
-      configBaseline: [],
       task: merging,
       result: completed,
       diff,
@@ -938,7 +1115,7 @@ describe("runTask", () => {
     const h = harness({ gateFor: () => rejectingGate("diff-size", "too big") });
     await runTask(h.deps, running("implement", "diff-size"));
 
-    expect(h.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker", IMPLEMENT_COMMIT_SHA, []);
+    expect(h.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker", IMPLEMENT_COMMIT_SHA);
     expect(h.workspace.destroy).toHaveBeenCalledWith("CP-158");
   });
 
@@ -988,7 +1165,7 @@ describe("runTask", () => {
 
     await runTask(h.deps, twoWrites);
 
-    expect(h.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker", LAST, []);
+    expect(h.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker", LAST);
   });
 
   it("says so in the comment and keeps the worktree when the rejected branch will not push", async () => {
@@ -1068,12 +1245,33 @@ describe("runTask", () => {
     expect(h.reporter.released).not.toHaveBeenCalled();
   });
 
-  it("destroys the worktree and requeues when a gate throws", async () => {
+  // Requeued, and the tree kept: whatever threw, the run's commits are in it and in no remote. A
+  // gate that throws and a `git diff` that times out both land in the outer catch, which used to
+  // destroy them on the way past (BP-506 / BP-516 review). Kept until the next attempt, which
+  // rebuilds the worktree — the window is for a person, not durability.
+  it("requeues when a gate throws, and does not take the run's commits with it", async () => {
     const exploding = { name: "build", run: vi.fn<Gate["run"]>().mockRejectedValue(new Error("boom")) };
     const h = harness({ gateFor: () => exploding });
     await runTask(h.deps, running("implement", "build"));
 
     expect(h.reporter.requeued.mock.calls[0][1]).toMatch(/boom/);
+    expect(h.workspace.destroy).not.toHaveBeenCalled();
+    // And says where, the same as the step path: this branch keeps a tree too, and a kept tree
+    // nobody is told about is a directory on a machine rather than a copy of anybody's work.
+    expect(h.reporter.requeued.mock.calls[0][1]).toContain("/wt");
+  });
+
+  // The control: nothing committed and nothing written, so there is nothing to keep and the tree
+  // goes. Without it the assertion above passes against a pipeline that never destroys anything.
+  it("destroys the worktree when the run that threw had produced nothing", async () => {
+    const exploding = { name: "build", run: vi.fn<Gate["run"]>().mockRejectedValue(new Error("boom")) };
+    const h = harness({
+      gateFor: () => exploding,
+      runner: { run: vi.fn<Runner["run"]>(async () => shell("")) },
+    });
+
+    await runTask(h.deps, running("implement", "build"));
+
     expect(h.workspace.destroy).toHaveBeenCalledWith("CP-158");
   });
 
@@ -1106,7 +1304,7 @@ describe("runTask", () => {
 
   it("never rejects, even when the cleanup itself throws", async () => {
     const workspace = {
-      create: vi.fn<Workspace["create"]>().mockResolvedValue({ path: "/wt", baseSha: "base1" , configBaseline: [] }),
+      create: vi.fn<Workspace["create"]>().mockResolvedValue({ path: "/wt", baseSha: "base1", commitIdentity: IDENTITY }),
       destroy: vi.fn<Workspace["destroy"]>(() => {
         throw new Error("worktree is locked");
       }),

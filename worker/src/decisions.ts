@@ -10,9 +10,8 @@ import {
 import { join, resolve, sep } from "node:path";
 import { ApiClient, DecisionSettlement } from "./api.js";
 import { Delivery } from "./delivery.js";
-import { childEnv } from "./env.js";
 import { Runner } from "./exec.js";
-import { gitArgs, GIT_SAFE_ENV } from "./git-safety.js";
+import { gitArgs, localGitEnv } from "./git-safety.js";
 import { protectedPaths, workflowPaths } from "./gates/protected-paths.js";
 import { ClaimedTask, DiffStats } from "./types.js";
 import { scrub } from "./scrub.js";
@@ -479,7 +478,7 @@ async function whyNotPushable(
     {
       cwd: marker.worktreePath,
       timeoutMs: GIT_TIMEOUT_MS,
-      env: { ...childEnv(), ...GIT_SAFE_ENV },
+      env: localGitEnv(),
     }
   );
   if (head.code !== 0) {

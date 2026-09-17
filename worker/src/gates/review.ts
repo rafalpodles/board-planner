@@ -6,7 +6,7 @@ import { DEFAULT_REVIEW_MODEL, modelOr } from "../config.js";
 import { childEnv } from "../env.js";
 import { CommandResult, Runner } from "../exec.js";
 import { confine } from "../sandbox.js";
-import { gitArgs, GIT_SAFE_ENV } from "../git-safety.js";
+import { gitArgs, localGitEnv } from "../git-safety.js";
 import { plantedConfig } from "../repos.js";
 import { Gate, GateContext } from "../types.js";
 
@@ -172,7 +172,6 @@ async function reviewCheckout(
   runner: Runner,
   worktreePath: string,
   headSha: string,
-  configBaseline?: readonly string[] | null,
   signal?: AbortSignal,
 ): Promise<{ path: string } | { refusal: string }> {
   // A checkout runs smudge filters, so this is an execution point in the same sense staging is:
@@ -181,11 +180,11 @@ async function reviewCheckout(
   // Nothing under .git is ever tracked, so protected-paths cannot see it, and there is no key to
   // override because the filter's name is the agent's to choose. Same scan BP-403 put before
   // staging, for the same reason, before the checkout rather than after it.
-  // Since BP-346 the scan reads every scope the agent writes and refuses `include.path` rather
-  // than following it, and the baseline is what lets it judge `~/.gitconfig` without refusing the
-  // machine's own credential helper. This is the third caller of it, after delivery.push and
-  // commitAll, and the one that runs before an action the pipeline takes on its own behalf.
-  const planted = await plantedConfig(runner, worktreePath, configBaseline);
+  // The scan reads every scope the checkout below will read and refuses `include.path` rather than
+  // following it; `localGitEnv` is what puts `~/.gitconfig` outside both (BP-516). This is the
+  // third caller of it, after delivery.push and commitAll, and the one that runs before an action
+  // the pipeline takes on its own behalf.
+  const planted = await plantedConfig(runner, worktreePath);
   if (planted) {
     return {
       refusal: `the checkout's git config carries ${planted}, which git would run while checking the change out for review — a human has to look at this`,
@@ -208,7 +207,7 @@ async function reviewCheckout(
     {
       cwd: worktreePath,
       timeoutMs: CHECKOUT_TIMEOUT_MS,
-      env: { ...childEnv(), ...GIT_SAFE_ENV },
+      env: localGitEnv(),
       signal,
     },
   );
@@ -235,7 +234,7 @@ async function discardCheckout(
       {
         cwd: worktreePath,
         timeoutMs: CHECKOUT_TIMEOUT_MS,
-        env: { ...childEnv(), ...GIT_SAFE_ENV },
+        env: localGitEnv(),
       },
     )
     .catch(() => undefined);
@@ -289,7 +288,6 @@ export function reviewGate(
         runner,
         context.worktreePath,
         context.diff.headSha,
-        context.configBaseline,
         context.signal,
       );
       if ("refusal" in checkout) return { ok: false, reason: checkout.refusal };

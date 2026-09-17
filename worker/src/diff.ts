@@ -1,6 +1,5 @@
-import { childEnv } from "./env.js";
 import { Runner, RunOpts } from "./exec.js";
-import { gitArgs, GIT_SAFE_ENV } from "./git-safety.js";
+import { gitArgs, localGitEnv } from "./git-safety.js";
 import { DiffStats } from "./types.js";
 
 const GIT_TIMEOUT_MS = 60_000;
@@ -14,7 +13,11 @@ async function git(
 ): Promise<string> {
   const result = await runner.run("git", gitArgs(args), {
     ...opts,
-    env: { ...childEnv(), ...opts.env, ...GIT_SAFE_ENV },
+    // Defence in depth rather than a hole this closes: every diff below already passes
+    // `--no-ext-diff --no-textconv`, so neither a global driver nor a global textconv can
+    // substitute the patch. The environment is what holds for a call added later without those
+    // flags, and what keeps this module's answer the same as the staging path's (BP-516).
+    env: localGitEnv([], opts.env),
   });
   if (result.timedOut) {
     throw new Error(`git ${args[0]} timed out after ${opts.timeoutMs}ms`);

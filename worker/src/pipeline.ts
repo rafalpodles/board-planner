@@ -1,6 +1,6 @@
 import { ApiClient, BoardColumnRole, StatusIds } from "./api.js";
 import { createBudget } from "./budget.js";
-import { commitAll } from "./commit.js";
+import { commitAll, MissingIdentityError } from "./commit.js";
 import { WorkerConfig } from "./config.js";
 import { GateFallbacks } from "./gates/from-entry.js";
 import { unexpectedHistory } from "./provenance.js";
@@ -9,10 +9,9 @@ import { recordFor, RunRecord } from "./run-record.js";
 import { isResultEvent, StreamEvent } from "./stream.js";
 import { branchFor, OpenDecisionInput, WORKER_BRANCH_SLUG } from "./decisions.js";
 import { Delivery } from "./delivery.js";
-import { childEnv } from "./env.js";
 import { Runner } from "./exec.js";
 import { Executor } from "./executor.js";
-import { gitArgs, GIT_SAFE_ENV } from "./git-safety.js";
+import { gitArgs, localGitEnv } from "./git-safety.js";
 import { Reporter } from "./reporter.js";
 import { SHUTDOWN_SIGNAL } from "./commands.js";
 import { scrub } from "./scrub.js";
@@ -74,7 +73,12 @@ export interface PipelineDeps {
    * again for ever — the exact loop the quarantine exists to end — and would do it without
    * anything failing to compile.
    */
-  quarantineProject: (projectId: string, reason: string) => void;
+  /**
+   * Stops this machine claiming for every project bound to that checkout. `reason` completes "its
+   * git config …" and `repair` is the sentence that follows it, because what to do about a planted
+   * key and about a config that names no identity are different instructions (BP-516).
+   */
+  quarantineProject: (projectId: string, reason: string, repair?: string) => void;
   /** Injected only so a test can move the run's clock; the run itself reads the wall clock. */
   now?: () => number;
   // Where the run says what it is doing. Left out entirely, the run behaves exactly as it did
@@ -251,6 +255,12 @@ function whatLanded(state: RunState, branch: string): string {
   return "";
 }
 
+// What this run wrote is in the tree and nowhere else, so the comment that ends the run says where
+// it is. Kept until the next attempt rebuilds the worktree — a window for a person, not durability.
+function keptWorktree(path: string): string {
+  return `\n\nThe worktree is kept at \`${path}\` on the worker host, with what this run wrote, until the next attempt on this task rebuilds it.`;
+}
+
 async function unfinishedWork(
   runner: Runner,
   worktreePath: string,
@@ -258,7 +268,7 @@ async function unfinishedWork(
   const result = await runner.run("git", gitArgs(["status", "--porcelain"]), {
     cwd: worktreePath,
     timeoutMs: GIT_TIMEOUT_MS,
-    env: { ...childEnv(), ...GIT_SAFE_ENV },
+    env: localGitEnv(),
   });
   if (result.timedOut)
     return `\`git status\` timed out after ${GIT_TIMEOUT_MS}ms`;
@@ -278,7 +288,6 @@ async function pushFailure(
   worktreePath: string,
   branch: string,
   commit: string,
-  configBaseline?: readonly string[] | null,
 ): Promise<string | null> {
   const wrong = await unexpectedHistory(
     runner,
@@ -288,7 +297,7 @@ async function pushFailure(
   );
   if (wrong) return `refusing to push: ${wrong}`;
   try {
-    await delivery.push(worktreePath, branch, commit, configBaseline);
+    await delivery.push(worktreePath, branch, commit);
     return null;
   } catch (error) {
     return String(error);
@@ -437,7 +446,7 @@ export async function runTask(
       // turn an ordinary transient into an outage nothing on the machine can lift. The run is
       // refused either way, and a transient one is refused again next time if it persists.
       if (error.kind === "planted") {
-        deps.quarantineProject(task.projectId, error.finding);
+        deps.quarantineProject(task.projectId, `carries ${error.finding}`);
       }
       // Said separately for each kind. The detail is what the AgentRun record keeps and what the
       // menubar's notification shows, and it outlives the run — so it must not claim a key was
@@ -448,6 +457,36 @@ export async function runTask(
           ? "the checkout's git config carries an executable key"
           : "the checkout's git config could not be read"
       );
+      await reporter.released(task, String(error));
+      return "machine-fault";
+    }
+    // Two settlements, because the fault is one of two things and they are owed opposite answers —
+    // the same split, and for the same reason, as BaseUnavailableError's `kind` below.
+    if (error instanceof MissingIdentityError) {
+      deps.logError?.(`${task.taskKey}: ${String(error)}`);
+      // The checkout's own config leaves no identity — a `user.name = ""` in the shared
+      // `.git/config` does it, well-formed and carrying no program, so no scan refuses it. Handled
+      // exactly as a poisoned checkout is, and for the same reason: the fault is in a file shared
+      // by every project bound to that path, and it repeats until a human edits it. The first
+      // version of this charged the attempt and returned, which let the loop claim task after task
+      // at spawn speed and charge each one — emptying the approved column of every project on that
+      // checkout into escalation, where round two's undistinguished behaviour had cost one idled
+      // pass (BP-516 review).
+      if (error.kind === "checkout") {
+        deps.quarantineProject(
+          task.projectId,
+          "leaves no identity to commit as",
+          "Set user.name and user.email there, or remove the empty ones",
+        );
+        settle("machineFault", "this checkout's git config leaves no identity to commit as");
+        await reporter.released(task, String(error));
+        return "machine-fault";
+      }
+      // Nothing on this machine will change while the worker runs, and every task it claims meets
+      // the same wall — so the attempt comes back and the loop stops claiming for the rest of the
+      // pass, the way an unreachable remote does below. git's own answer travels with it, which is
+      // where the two commands to run are.
+      settle("machineFault", "this machine has no git identity to commit as");
       await reporter.released(task, String(error));
       return "machine-fault";
     }
@@ -498,6 +537,7 @@ export async function runTask(
   let keepWorktree = false;
   const state: RunState = {
     committed: false,
+    uncommittedWork: false,
     commits: [],
     pushed: false,
     prUrl: "",
@@ -539,15 +579,27 @@ export async function runTask(
           executor,
           delivery,
           commit: (message) =>
-            commitAll(runner, worktree.path, message, worktree.configBaseline),
+            commitAll(runner, worktree.path, message, worktree.commitIdentity),
           state,
           timeoutMs: budget.forEntry(config.taskTimeoutMs),
           signal: deps.signal,
           onEvent,
           baseSha: worktree.baseSha,
-          configBaseline: worktree.configBaseline,
           runner,
         });
+        // Before the abort check, not after it. An earlier step may already have committed, and
+        // exiting without keeping the worktree destroys the only copy of that work: nothing is
+        // pushed, and the branch ref the parent clone holds is reset by the next attempt's
+        // `git worktree add -B`. A stop pressed while this step was finishing takes the `return`
+        // below, so a keep computed after it is a keep that never happens (BP-516 review).
+        //
+        // `uncommittedWork` is the same sentence one step earlier: a commit that was attempted and
+        // did not happen leaves what the agent wrote in the tree and in no history at all, so an
+        // agent whose sequence has a single edit step used to lose everything it had written the
+        // moment `commitAll` threw (BP-506).
+        if (outcome.kind !== "ok" && (state.committed || state.uncommittedWork))
+          keepWorktree = true;
+
         // Never once the merge has landed — see the same guard after the loop. gh pr merge runs
         // without a signal, so the stop is only ever observed after the change is on the base
         // branch, and releasing there queues a second full run over work that has already landed.
@@ -562,11 +614,6 @@ export async function runTask(
         ) {
           return;
         }
-
-        // Only when this step ends the run. An earlier step may already have committed, and exiting
-        // without keeping the worktree destroys the only copy of that work: nothing is pushed, and
-        // the branch ref the parent clone holds is reset by the next attempt's `git worktree add -B`.
-        if (outcome.kind !== "ok" && state.committed) keepWorktree = true;
 
         if (outcome.kind === "usage_limit") {
           settle("released", "usage limit reached");
@@ -602,6 +649,18 @@ export async function runTask(
           );
           return;
         }
+        // The tree is evidence, not just work: the config the agent planted is inside it, and the
+        // refusal that found it names a key somebody now has to look at. Parked rather than
+        // requeued for the same reason — a requeue sends the next attempt at the same checkout,
+        // and `worktree add -B` would have taken the evidence with it (BP-506).
+        if (outcome.kind === "tampered") {
+          settle("failed", outcome.message);
+          await reporter.failed(
+            task,
+            `${outcome.message}\n\nNothing was staged and nothing was pushed. The worktree is kept at \`${worktree.path}\` on the worker host, with what the agent wrote and the config that was found still in it.`,
+          );
+          return;
+        }
         if (outcome.kind === "error") {
           // A delivery step failing is the run's failure — a human has to look at the remote. A
           // model step failing is usually the CLI flaking ("could not parse claude output"), which
@@ -617,7 +676,15 @@ export async function runTask(
             settle("requeued", outcome.message);
             await reporter.requeued(
               task,
-              `${entry.name} failed: ${outcome.message}`,
+              // The path only where there is something at it. A commit that did not happen leaves
+              // the agent's work in the worktree and in no history, and this run keeps it — until
+              // the next attempt, whose `worktree add -B` rebuilds it. Saying where it is, is the
+              // whole of what that window is worth to a person (BP-506). No claim about what was
+              // committed: `rev-parse` can fail after `commit` succeeded, and "nothing was
+              // committed" would then be the one sentence a person checks and finds untrue.
+              `${entry.name} failed: ${outcome.message}${
+                state.uncommittedWork ? keptWorktree(worktree.path) : ""
+              }`,
             );
           }
           return;
@@ -647,7 +714,6 @@ export async function runTask(
         );
         const verdict = await gate.run({
           worktreePath: worktree.path,
-          configBaseline: worktree.configBaseline,
           task,
           result: state.lastResult,
           diff,
@@ -735,7 +801,6 @@ export async function runTask(
                 worktree.path,
                 branch,
                 state.commits[state.commits.length - 1] ?? "",
-                worktree.configBaseline,
               );
           if (withholdsPush || pushFailed) keepWorktree = true;
 
@@ -800,10 +865,15 @@ export async function runTask(
       await reporter.delivered(task, state.prUrl, state.summary);
     }
   } catch (error) {
+    // Whatever threw, the work is still in the tree: a `git diff` that timed out and a gate that
+    // threw both land here, and both used to take the run's commits with them on the way out
+    // (BP-516 review).
+    const keeping = state.committed || state.uncommittedWork;
+    if (keeping) keepWorktree = true;
     settle("requeued", "the worker hit an unexpected error");
     await reporter.requeued(
       task,
-      `the worker hit an unexpected error: ${String(error)}`,
+      `the worker hit an unexpected error: ${String(error)}${keeping ? keptWorktree(worktree.path) : ""}`,
     );
   } finally {
     if (!keepWorktree) {

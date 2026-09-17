@@ -146,21 +146,20 @@ describe("workspace.create against a planted config", () => {
   });
 
   /**
-   * The scan has to be judged against the config the checkout will actually use, or it answers a
-   * different question. `git worktree add` runs with `GIT_CONFIG_GLOBAL=/dev/null`; a scan that
-   * still read `~/.gitconfig` inherited every failure of a file the checkout never opens — and one
-   * malformed line there makes `--local --list` exit 128, which the scan reads as "unreadable" and
-   * refuses. Not for this project: for every project on the machine, with the board told the
+   * An operator's own broken `~/.gitconfig` must not be reported as a compromised checkout. The
+   * scan judging a config the checkout never opens inherited every failure of that file, and one
+   * malformed line in it makes `--local --list` exit 128, which the scan reads as "unreadable" and
+   * refuses — not for this project: for every project on the machine, with the board told the
    * checkout could not be vouched for.
    *
-   * What it must be instead is the fault it is. `resolveBase` still shells out to a remote and
-   * that call does read the operator's global file, so the run is still refused here — as a base
-   * that could not be resolved, which the pipeline already charges and reports as a transport
-   * fault. The point of this test is the class, not the success: an operator's broken file must
-   * not be reported as a compromised checkout.
+   * It is still refused, and that is not a compromise: the one thing the worker still asks that
+   * file is who its commits are by, and a file git will not parse cannot answer. What changes is
+   * what the machine is told — `MissingIdentityError`, carrying git's own sentence naming the file
+   * and the line, released as a machine fault with the attempt refunded (BP-516). A person reading
+   * it goes and looks at their own config, rather than at a checkout nobody planted anything in.
    */
   it(
-    "calls a malformed global config a base it could not resolve, not a poisoned checkout",
+    "calls a malformed global config a machine's own fault, not a poisoned checkout",
     async () => {
       const home = join(dir, "home");
       mkdirSync(home, { recursive: true });
@@ -169,12 +168,12 @@ describe("workspace.create against a planted config", () => {
       process.env.HOME = home;
 
       try {
-        // The premise: git really does refuse to answer at all with that file in place, so the
-        // scan below has something to survive
+        // The premise: git really does refuse to answer at all with that file in place
         expect(() => git(main, "config", "--local", "--list")).toThrow();
 
         await expect(workspaceFor(main).create("BP-1", "worker")).rejects.toMatchObject({
-          name: "BaseUnavailableError",
+          name: "MissingIdentityError",
+          message: expect.stringContaining(".gitconfig"),
         });
       } finally {
         if (realHome === undefined) delete process.env.HOME;

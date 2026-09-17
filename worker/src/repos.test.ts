@@ -3,25 +3,38 @@ import { homedir, tmpdir } from "os";
 import { join } from "path";
 import { describe, it, expect, vi, afterAll } from "vitest";
 import { bindRepository, createAllowlistReader, RepoDeps, repoInventory } from "./repos.js";
-import { configListZ } from "./config-list.fixtures.js";
+import { scopedConfigListZ } from "./config-list.fixtures.js";
 
+// The scan bindRepository makes is the one a run makes (BP-517), and it asks git twice: once for
+// `--local --list`, whose exit code says the checkout can be read at all, and once for the scoped,
+// NUL-framed listing it judges. A fake that answered the second shape to both would hide the
+// first, so each call gets the output git gives it.
 function depsWith(over: Partial<{
   allowlist: string[];
   realpath: (p: string) => string;
   gitConfig: string;
+  scope: string;
   toplevel: string;
   uid: number;
   mode: number;
   fileUid: number;
   workerId: string;
 }> = {}): RepoDeps {
-  const gitConfig = configListZ(over.gitConfig ?? "");
+  // `--local --list` without `-z` prints `key=value` lines; only its exit code is read, but a
+  // fixture that answers in the other call's wire format is the fixture lying about which call it
+  // is (config-list.fixtures.ts's own rule).
+  const readable = over.gitConfig ?? "";
+  const scoped = scopedConfigListZ(over.gitConfig ?? "", over.scope ?? "local");
   const toplevel = over.toplevel;
   return {
     runner: {
       run: vi.fn(async (_cmd: string, args: string[]) => ({
         code: 0,
-        stdout: args.includes("--show-toplevel") ? (toplevel ?? "/repo") : gitConfig,
+        stdout: args.includes("--show-toplevel")
+          ? (toplevel ?? "/repo")
+          : args.includes("--show-scope")
+            ? scoped
+            : readable,
         stderr: "",
         timedOut: false,
       })),
@@ -113,6 +126,11 @@ describe("bindRepository", () => {
     "protocol.ext.allow=user",
     "remote.origin.url=ext::/tmp/x",
     "alias.st=!/tmp/x",
+    // What git runs to SIGN a commit. Neither a hook nor a filter, so every other rule here missed
+    // it, and `git commit` ran it — measured on git 2.50.1 (BP-516 review).
+    "gpg.program=/tmp/x",
+    "gpg.openpgp.program=/tmp/x",
+    "gpg.ssh.defaultKeyCommand=/tmp/x",
   ])("refuses a repository whose git config sets %s", async (line) => {
     const result = await bindRepository(depsWith({ gitConfig: `${line}\n` }), "/repo");
 
@@ -195,14 +213,67 @@ describe("bindRepository", () => {
     expect((result as { reason: string }).reason).toMatch(/readable by group or others/);
   });
 
-  // A hostile system-wide gitconfig would otherwise reach every invocation this module makes
-  it("neutralises system and repository git config on every call it makes", async () => {
+  // The two asymmetries BP-517 is about, and they are the reason bind time now runs the run's own
+  // scan rather than a list of its own. Both bound here and were refused at run time instead —
+  // where, since BP-504, the refusal quarantines the project rather than costing one task.
+  it("refuses a checkout that reaches a config through include.path", async () => {
+    const result = await bindRepository(
+      depsWith({ gitConfig: "include.path=/tmp/whatever\n" }),
+      "/repo"
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as { reason: string }).reason).toMatch(/include\.path/);
+  });
+
+  // `--local --list` cannot see this scope at all, which is how the old rule missed it
+  it("refuses an executable key in the per-worktree config", async () => {
+    const result = await bindRepository(
+      depsWith({ gitConfig: "core.pager=/tmp/x\n", scope: "worktree" }),
+      "/repo"
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as { reason: string }).reason).toMatch(/core\.pager \(worktree\)/);
+  });
+
+  // The operator's own machine is not judged here, and that is what makes the refusals above
+  // narrow enough to ship: a credential helper in ~/.gitconfig is ordinary, and localGitEnv means
+  // no call this worker makes reads it anyway (BP-516).
+  it("binds a checkout whose only executable key is the operator's own global one", async () => {
+    const result = await bindRepository(
+      depsWith({ gitConfig: "credential.helper=!gh auth git-credential\n", scope: "global" }),
+      "/repo"
+    );
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("refuses a checkout whose config git would not answer for", async () => {
+    const deps = depsWith();
+    deps.runner.run = vi.fn(async (_cmd: string, args: string[]) => ({
+      code: args.includes("--show-toplevel") ? 0 : 128,
+      stdout: args.includes("--show-toplevel") ? "/repo" : "",
+      stderr: "fatal: bad config line 1",
+      timedOut: false,
+    }));
+
+    const result = await bindRepository(deps, "/repo");
+
+    expect(result.ok).toBe(false);
+    expect((result as { reason: string }).reason).toMatch(/could not read git config/i);
+  });
+
+  // A hostile system-wide gitconfig would otherwise reach every invocation this module makes, and
+  // so would a filter in the operator's own ~/.gitconfig — which the agent's Write reaches (BP-516)
+  it("neutralises system, global and repository git config on every call it makes", async () => {
     const deps = depsWith();
     await bindRepository(deps, "/repo");
 
     for (const call of (deps.runner.run as ReturnType<typeof vi.fn>).mock.calls) {
       expect(call[1]).toEqual(expect.arrayContaining(["-c", "core.pager=cat"]));
       expect(call[2].env.GIT_CONFIG_NOSYSTEM).toBe("1");
+      expect(call[2].env.GIT_CONFIG_GLOBAL).toBe("/dev/null");
     }
   });
 });
