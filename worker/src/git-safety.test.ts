@@ -91,6 +91,13 @@ const FILES_THAT_RUN_GIT = [
 
 const RUNS_GIT = /run\(\s*"git"/g;
 
+// The helper has to be what the call's `env` is built FROM, not a name that happens to appear in
+// the window. Reading the source as it is means a comment inside a call's window would otherwise
+// vouch for it — measured, an unhardened call with `// Unlike localGitEnv(), this one is fine`
+// under it passed every assertion here (BP-516 review). Every call site today writes
+// `env: localGitEnv(` or `env: { ...localGitEnv(`, so anchoring costs nothing.
+const HARDENED_ENV = /env:\s*\{?\s*(\.\.\.)?\s*(localGitEnv|operatorGitEnv|hardenedGitConfig)\(/;
+
 function sources(): { file: string; source: string }[] {
   const dir = join(import.meta.dirname, ".");
   return (readdirSync(dir, { recursive: true }) as string[])
@@ -124,7 +131,7 @@ describe("every git invocation is hardened", () => {
         // apart. Measured — an unhardened call inserted above a hardened one passed.
         const ends = sites[nth + 1]?.index ?? match.index + 800;
         const window = source.slice(match.index, ends);
-        if (/localGitEnv\(|operatorGitEnv\(|hardenedGitConfig\(/.test(window)) return;
+        if (HARDENED_ENV.test(window)) return;
         offenders.push(`${file}: the git call at ${match.index} builds its own environment`);
       });
     }
@@ -138,6 +145,40 @@ describe("every git invocation is hardened", () => {
       .map(({ file }) => file);
 
     expect(readers).toEqual(MAY_READ_THE_OPERATORS_CONFIG);
+  });
+
+  // Per call, not per file: commit.ts holds two git calls, and pinning the file alone let the
+  // staging call take the identity read's exemption — putting `~/.gitconfig` back in front of the
+  // thing BP-403 guards, with every other assertion here still green (BP-516 review).
+  it("lets only the identity read use it, not every call in that file", () => {
+    const offenders: string[] = [];
+
+    for (const { file, source } of sources()) {
+      if (file === "git-safety.ts") continue;
+      const sites = [...source.matchAll(RUNS_GIT)];
+      sites.forEach((match, nth) => {
+        const window = source.slice(match.index, sites[nth + 1]?.index ?? match.index + 800);
+        if (!/operatorGitEnv\(/.test(window)) return;
+        if (window.includes("GIT_AUTHOR_IDENT")) return;
+        offenders.push(`${file}: the git call at ${match.index} reads the operator's own config`);
+      });
+    }
+
+    expect(offenders).toEqual([]);
+  });
+
+  // The variables are the helpers' to set, matched as an assignment so a paragraph explaining what
+  // they do is not read as a call site deciding for itself.
+  it("leaves the config variables to the helpers", () => {
+    const offenders = sources()
+      .filter(
+        ({ file, source }) =>
+          !MAY_COMPOSE_A_GIT_ENVIRONMENT.includes(file) &&
+          /GIT_CONFIG_(NOSYSTEM|GLOBAL)\s*[:=]/.test(source),
+      )
+      .map(({ file }) => file);
+
+    expect(offenders).toEqual([]);
   });
 
   it("never passes -c core.* inline instead of gitArgs", () => {

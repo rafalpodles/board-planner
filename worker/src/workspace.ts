@@ -1,7 +1,12 @@
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join, resolve, sep } from "path";
-import { CommitIdentity, MissingIdentityError, resolveCommitIdentity } from "./commit.js";
+import {
+  CommitIdentity,
+  MissingIdentityError,
+  ResolvedIdentity,
+  resolveCommitIdentity,
+} from "./commit.js";
 import { WorkerConfig } from "./config.js";
 import { plantedConfig, UNREADABLE_CONFIG } from "./repos.js";
 import { CommandResult, Runner } from "./exec.js";
@@ -75,8 +80,8 @@ export interface Worktree {
   /** Resolved before the agent runs and held in this process: a ref name is rewritable by the run. */
   baseSha: string;
   /**
-   * Who this run's commits are by, resolved before the agent ran and held in this process for the
-   * same reason `baseSha` is. Every git call inside the checkout has `~/.gitconfig` out of the
+   * Who this run's commits are by, resolved before the worktree exists and held in this process for
+   * the same reason `baseSha` is. Every git call inside the checkout has `~/.gitconfig` out of the
    * picture (BP-516), so the identity that file holds has to travel with the run rather than be
    * read back at the commit.
    *
@@ -195,15 +200,13 @@ export function createWorkspace(
       cwd,
       timeoutMs: GIT_TIMEOUT_MS,
       env: {
-        ...localGitEnv([
-          "SSH_AUTH_SOCK",
-          "GH_TOKEN",
-          "GITHUB_TOKEN",
-          "GH_CONFIG_DIR",
-          "XDG_CONFIG_HOME",
-        ]),
+        ...localGitEnv(
+          ["SSH_AUTH_SOCK", "GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR", "XDG_CONFIG_HOME"],
+          // The neutral GIT_DIR rides in the middle slot rather than after the hardening, so this
+          // call site cannot decide what git reads on its way past (BP-516 review).
+          extraEnv,
+        ),
         ...env(),
-        ...extraEnv,
       },
     });
     // A killed child contributes no stderr, so without this a 60 s hang and an instant refusal by
@@ -332,6 +335,24 @@ export function createWorkspace(
    * No baseline is passed, and none would help: this runs before the run a baseline exists to
    * date, and the machine scopes it would unlock are neutralised on these calls instead.
    */
+  /**
+   * Whether the machine has nobody to commit as, or this checkout is what broke the answer.
+   *
+   * Asked in a directory with no repository in it, so the answer is the machine's own config and
+   * nothing else. It matters because the two settlements are opposite, and the cheaper key is the
+   * one that used to cost more: `user.name = ""` in the shared `.git/config` is well-formed,
+   * carries no program, is invisible to every scan — and made `git var` refuse, which released the
+   * whole worker's pass. An executable key planted beside it only quarantines its own checkout
+   * (BP-516 review).
+   */
+  async function whoseFault(inTheCheckout: ResolvedIdentity): Promise<"machine" | "checkout"> {
+    if (inTheCheckout.ok) return "machine";
+    const onTheMachine = await withNeutralGitHome(({ cwd, env }) =>
+      resolveCommitIdentity(runner, cwd, env),
+    );
+    return onTheMachine.ok ? "checkout" : "machine";
+  }
+
   async function refuseIfPoisoned(): Promise<void> {
     // The scan and the checkout read the same config, because both go through `localGitEnv`. A scan
     // judging a config git will not read answers a different question from the one asked, in both
@@ -354,6 +375,14 @@ export function createWorkspace(
       // downstream of the run this one would already have started. Measured on git 2.50.1:
       // workspace.planted-config.integration.test.ts plants one and watches git run it.
       await refuseIfPoisoned();
+
+      // Before the fetch and before the worktree: a machine git will not name an identity for
+      // fails every task it takes, and raising it after `worktree add` left an orphan worktree
+      // behind on every faulted claim, one per poll (BP-516 review). Read in the shared checkout,
+      // which is the config a linked worktree has — the per-worktree scope is the only thing that
+      // could differ, and a key in it is refused above.
+      const identity = await resolveCommitIdentity(runner, config.repoPath);
+      if (!identity.ok) throw new MissingIdentityError(identity.reason, await whoseFault(identity));
 
       let baseSha: string;
       try {
@@ -382,14 +411,7 @@ export function createWorkspace(
       await refuseIfPoisoned();
       // -B resets the branch instead of failing if a crashed previous attempt already created it
       await git(["worktree", "add", "-B", branch, "--", path, baseSha]);
-      // Read in the checkout the commits will be made in, so an operator who keeps a different
-      // name in this repository still gets it, and read here rather than at the commit because by
-      // then the agent has run and `~/.gitconfig` is a file it can write.
-      const resolved = await resolveCommitIdentity(runner, path);
-      // Before the agent, not after it: a machine with nobody to commit as fails every task it
-      // takes, and finding that out at the commit costs a whole run of somebody's subscription.
-      if (!resolved.ok) throw new MissingIdentityError(resolved.reason);
-      return { path, baseSha, commitIdentity: resolved.identity };
+      return { path, baseSha, commitIdentity: identity.identity };
     },
 
     async destroy(taskKey) {

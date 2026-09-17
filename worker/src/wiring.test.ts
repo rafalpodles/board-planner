@@ -763,6 +763,16 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         answerSandboxProbe(args);
         return { code: 0, stdout: "", stderr: "", timedOut: false };
       }
+      // The identity is resolved before the base is, so this machine has to be able to answer —
+      // otherwise the fault under test is not the one that ends the pass (BP-516).
+      if (args.includes("GIT_AUTHOR_IDENT")) {
+        return {
+          code: 0,
+          stdout: "The Operator <operator@example.com> 1789000000 +0200\n",
+          stderr: "",
+          timedOut: false,
+        };
+      }
       if (args[0] === "ls-remote") {
         return { code: 1, stdout: "", stderr: "unreachable", timedOut: false };
       }

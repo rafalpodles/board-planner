@@ -92,19 +92,20 @@ describe("createWorkspace", () => {
         name: "The Operator",
         email: "operator@example.com",
       });
-      // Asked in the worktree, not in the shared checkout: an operator who keeps a different
-      // address in this repository keeps it, and a linked worktree answers for its own config.
+      // Asked in the shared checkout, before the worktree exists: the local config a linked
+      // worktree reads is that same file, and raising the refusal after `worktree add` left an
+      // orphan worktree behind on every faulted claim.
       expect(run).toHaveBeenCalledWith(
         "git",
         [...HARDENING_PREFIX, "var", "GIT_AUTHOR_IDENT"],
-        expect.objectContaining({ cwd: "/worktrees/CP-158" }),
+        expect.objectContaining({ cwd: REPO_PATH }),
       );
     });
 
     // Before the agent, not at the commit: every task this machine takes meets the same wall, and
     // finding out at the commit costs a whole run of somebody's subscription.
     it("refuses to make a worktree at all when git names nobody", async () => {
-      const { runner } = fakeGit(
+      const { runner, run } = fakeGit(
         baseFromRemote("base1", {
           [IDENT]: { code: 128, stderr: "fatal: unable to auto-detect email address" },
         }),
@@ -112,7 +113,38 @@ describe("createWorkspace", () => {
 
       await expect(withRemote(runner).create("CP-158", "worker")).rejects.toMatchObject({
         name: "MissingIdentityError",
+        kind: "machine",
         message: expect.stringContaining("auto-detect email address"),
+      });
+      expect(ranAny(run, "worktree add"), "a worktree was made anyway").toBe(false);
+    });
+
+    /**
+     * Whose fault it is decides the settlement, and the cheaper key is the one that used to cost
+     * more: `user.name = ""` in the shared `.git/config` is well-formed, carries no program and is
+     * invisible to every scan — and it made git refuse, which released the machine's whole pass.
+     * An executable key planted beside it only quarantines its own checkout (BP-516 review).
+     */
+    it("blames the checkout, not the machine, when only the checkout's config breaks the answer", async () => {
+      const responses = baseFromRemote("base1", {
+        [IDENT]: { code: 128, stderr: 'fatal: empty ident name (for <op@example.com>) not allowed' },
+      });
+      const { runner } = fakeGit({
+        ...responses,
+        // The same question asked where no repository can answer it: the machine itself is fine.
+        // fakeGit keys on the args, so the neutral probe is told apart by its own cwd below.
+      });
+      const inner = runner.run;
+      runner.run = vi.fn(async (command: string, args: string[], opts: RunOpts) => {
+        const neutral = opts.cwd !== REPO_PATH && args.includes("GIT_AUTHOR_IDENT");
+        if (neutral) return { code: 0, stdout: IDENT_LINE, stderr: "", timedOut: false };
+        return inner(command, args, opts);
+      }) as never;
+
+      await expect(withRemote(runner).create("CP-158", "worker")).rejects.toMatchObject({
+        name: "MissingIdentityError",
+        kind: "checkout",
+        message: expect.stringContaining("empty ident name"),
       });
     });
   });
@@ -517,6 +549,7 @@ describe("createWorkspace", () => {
           listings += 1;
           return answer(listings === 1 ? "" : scopedConfigListZ("filter.z.smudge=touch /tmp/pwned"));
         }
+        if (key === IDENT) return answer(IDENT_LINE);
         if (key === "worktree list --porcelain") return answer("");
         if (args.join(" ") === LS_REMOTE) return answer("base1\trefs/heads/main\n");
         if (args.join(" ") === FETCH) return answer();

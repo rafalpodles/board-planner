@@ -250,6 +250,12 @@ function whatLanded(state: RunState, branch: string): string {
   return "";
 }
 
+// What this run wrote is in the tree and nowhere else, so the comment that ends the run says where
+// it is. Kept until the next attempt rebuilds the worktree — a window for a person, not durability.
+function keptWorktree(path: string): string {
+  return `\n\nThe worktree is kept at \`${path}\` on the worker host, with what this run wrote, until the next attempt on this task rebuilds it.`;
+}
+
 async function unfinishedWork(
   runner: Runner,
   worktreePath: string,
@@ -449,12 +455,23 @@ export async function runTask(
       await reporter.released(task, String(error));
       return "machine-fault";
     }
-    // Nothing on this machine will change while the worker runs, and every task it claims meets
-    // the same wall — so the attempt comes back and the loop stops claiming, the way an unreachable
-    // remote does below. The message carries the two commands to run, because the fault is on the
-    // machine and the person who can fix it is the one reading the fleet console.
+    // Two settlements, because the fault is one of two things and they are owed opposite answers —
+    // the same split, and for the same reason, as BaseUnavailableError's `kind` below.
     if (error instanceof MissingIdentityError) {
       deps.logError?.(`${task.taskKey}: ${String(error)}`);
+      // The repository's own config leaves no identity — a `user.name = ""` in the shared
+      // `.git/config` does it. That belongs to the project, it repeats until a human changes
+      // something, and no other project on this machine is affected: the attempt is charged so the
+      // task escalates rather than cycling.
+      if (error.kind === "checkout") {
+        settle("requeued", "this checkout's git config leaves no identity to commit as");
+        await reporter.requeued(task, String(error));
+        return;
+      }
+      // Nothing on this machine will change while the worker runs, and every task it claims meets
+      // the same wall — so the attempt comes back and the loop stops claiming for the rest of the
+      // pass, the way an unreachable remote does below. git's own answer travels with it, which is
+      // where the two commands to run are.
       settle("machineFault", "this machine has no git identity to commit as");
       await reporter.released(task, String(error));
       return "machine-fault";
@@ -648,11 +665,11 @@ export async function runTask(
               // The path only where there is something at it. A commit that did not happen leaves
               // the agent's work in the worktree and in no history, and this run keeps it — until
               // the next attempt, whose `worktree add -B` rebuilds it. Saying where it is, is the
-              // whole of what that window is worth to a person (BP-506).
+              // whole of what that window is worth to a person (BP-506). No claim about what was
+              // committed: `rev-parse` can fail after `commit` succeeded, and "nothing was
+              // committed" would then be the one sentence a person checks and finds untrue.
               `${entry.name} failed: ${outcome.message}${
-                state.uncommittedWork
-                  ? `\n\nNothing was committed. What the agent wrote is in the worktree at \`${worktree.path}\` on the worker host, until the next attempt on this task rebuilds it.`
-                  : ""
+                state.uncommittedWork ? keptWorktree(worktree.path) : ""
               }`,
             );
           }
@@ -837,11 +854,12 @@ export async function runTask(
     // Whatever threw, the work is still in the tree: a `git diff` that timed out and a gate that
     // threw both land here, and both used to take the run's commits with them on the way out
     // (BP-516 review).
-    if (state.committed || state.uncommittedWork) keepWorktree = true;
+    const keeping = state.committed || state.uncommittedWork;
+    if (keeping) keepWorktree = true;
     settle("requeued", "the worker hit an unexpected error");
     await reporter.requeued(
       task,
-      `the worker hit an unexpected error: ${String(error)}`,
+      `the worker hit an unexpected error: ${String(error)}${keeping ? keptWorktree(worktree.path) : ""}`,
     );
   } finally {
     if (!keepWorktree) {

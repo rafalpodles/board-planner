@@ -111,6 +111,12 @@ const HARDENED_CONFIG: ReadonlyArray<readonly [string, string]> = [
   // assumed here once and the test written to confirm it failed instead.
   ["protocol.ext.allow", "never"],
   ["protocol.file.allow", "never"],
+  // Signing runs a program the checkout gets to name — `gpg.program`, or ssh's key command — and
+  // `push.gpgSign` reaches it on the push the same way `commit.gpgsign` reaches it on the commit.
+  // The scan in front of the push refuses those keys since BP-516, so this is the second line; it
+  // is here because the commit path has both and the push had only the scan.
+  ["commit.gpgSign", "false"],
+  ["push.gpgSign", "false"],
 ];
 
 // `remote.<name>.receivepack` is deliberately not in the list above: git keeps the **first** value

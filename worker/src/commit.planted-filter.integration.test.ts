@@ -189,9 +189,28 @@ describe("commitAll against a planted filter", () => {
      * only ignore list left. Stated in worker/README.md rather than worked around — an ignore list
      * that lives outside the repository cannot decide what a machine commits into it.
      */
-    it("stages a file the operator's global excludes would have hidden", async () => {
-      writeFileSync(join(home, "ignore"), "hidden.ts\n");
-      writeFileSync(join(home, ".gitconfig"), `[core]\n\texcludesFile = ${join(home, "ignore")}\n`);
+    // Two files, because git reads two: `core.excludesFile` when a config names one, and
+    // `$XDG_CONFIG_HOME/git/ignore` — `~/.config/git/ignore` — when none does. Nulling the global
+    // config closes the first and *opens* the second, which is why `core.excludesFile=/dev/null`
+    // is in SAFE_CONFIG and why the second case is the one that would have gone untested.
+    it.each([
+      [
+        "a config that names one",
+        (home: string) => {
+          writeFileSync(join(home, "ignore"), "hidden.ts\n");
+          writeFileSync(join(home, ".gitconfig"), `[core]\n\texcludesFile = ${join(home, "ignore")}\n`);
+        },
+      ],
+      [
+        "the default git reads with no config at all",
+        (home: string) => {
+          mkdirSync(join(home, ".config", "git"), { recursive: true });
+          writeFileSync(join(home, ".config", "git", "ignore"), "hidden.ts\n");
+          writeFileSync(join(home, ".gitconfig"), "");
+        },
+      ],
+    ])("stages a file hidden by %s", async (_case, plantIgnore) => {
+      plantIgnore(home);
       writeFileSync(join(work, "hidden.ts"), "what the agent wrote\n");
 
       // The premise: plain git, reading that file, says the tree is clean apart from the edit
@@ -199,7 +218,7 @@ describe("commitAll against a planted filter", () => {
         cwd: work,
         env: { ...process.env, HOME: home },
       }).toString();
-      expect(seen).not.toContain("hidden.ts");
+      expect(seen, "the ignore list was never live").not.toContain("hidden.ts");
 
       await commitAll(createRunner(), work, "BP-516: staged work", IDENTITY);
 

@@ -245,16 +245,31 @@ describe("the commit identity", () => {
 
   // git's own sentence, kept rather than replaced: it says which of the two faults this is, and
   // the two need different repairs — nothing configured, or a config file git will not parse.
+  // The whole block, not its last line: on an unconfigured machine git prints ten lines whose
+  // middle two are the commands to run, and keeping only the tail threw away the answer while the
+  // prose promised it (BP-516 review).
   it.each([
-    ["nothing is configured", "*** Please tell me who you are.\nfatal: unable to auto-detect email address"],
+    [
+      "nothing is configured",
+      '*** Please tell me who you are.\n\n  git config --global user.email "you@example.com"\n  git config --global user.name "Your Name"\n\nfatal: unable to auto-detect email address',
+    ],
     ["the config cannot be parsed", "fatal: bad config line 4 in file /Users/x/.gitconfig"],
-  ])("carries git's reason when %s", async (_case, stderr) => {
+  ])("carries git's whole answer when %s", async (_case, stderr) => {
     const { runner } = runnerFor({ code: 128, stderr });
 
     const resolved = await resolveCommitIdentity(runner, "/repo");
 
     expect(resolved.ok).toBe(false);
-    expect((resolved as { reason: string }).reason).toBe(stderr.split("\n").pop());
+    expect((resolved as { reason: string }).reason).toBe(stderr.trim());
+  });
+
+  // git answers, and the answer is half an identity: `user.email = ""` makes `git var` exit 0 with
+  // `Name <> …`, and a commit made with GIT_AUTHOR_EMAIL="" lands with no address at all — pushed,
+  // in the pull request, merged. Refused here instead (BP-516 review).
+  it("refuses an identity git filled only half of", async () => {
+    const { runner } = runnerFor({ code: 0, stdout: "The Operator <> 1789000000 +0200\n" });
+
+    expect(await resolveCommitIdentity(runner, "/repo")).toMatchObject({ ok: false });
   });
 
   it("refuses an answer that is not an identity, rather than committing as half of one", async () => {

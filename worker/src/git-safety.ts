@@ -66,8 +66,8 @@ export const NO_GLOBAL_CONFIG = "/dev/null";
  * repository at all, which is what makes the local-scope scan close to decorative on its own.
  * Measured on git 2.50.1 (BP-504 for the checkout, BP-516 for the rest).
  *
- * It takes `user.email` with it, which is why `commitAll` is handed an identity resolved before the
- * agent ran rather than reading one at commit time.
+ * It takes the commit identity with it, which is why `commitAll` is handed one resolved before the
+ * agent ran rather than reading `user.name`/`user.email` at commit time.
  */
 export function localGitEnv(
   alsoAllow: string[] = [],
@@ -75,9 +75,10 @@ export function localGitEnv(
 ): NodeJS.ProcessEnv {
   return {
     ...childEnv(alsoAllow),
-    // The caller's own variables go in the middle: a call site that needs one (the commit identity,
-    // a neutral GIT_DIR) must not be able to reach the hardening on its way past, and the tripwire
-    // over the source cannot see a key that arrives inside an object.
+    // The caller's own variables go in the middle: a call site that needs one — the commit
+    // identity, the GIT_DIR that keeps a base lookup out of every repository — must not be able to
+    // reach the hardening on its way past, and a tripwire over the source cannot see a key that
+    // arrives inside an object.
     ...extra,
     ...GIT_SAFE_ENV,
     GIT_CONFIG_GLOBAL: NO_GLOBAL_CONFIG,

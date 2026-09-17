@@ -40,10 +40,50 @@ export class TamperedCheckoutError extends Error {
  * different repairs — nothing configured, or a config file git will not parse.
  */
 export class MissingIdentityError extends Error {
-  constructor(reason: string) {
-    super(`this machine has no git identity to commit as: ${reason}`);
+  /**
+   * Whose fault it is, because the two are owed opposite treatment and one key tells them apart.
+   *
+   * `machine` — nothing on this machine names an identity, or its config file will not parse. Every
+   * task it claims meets the same wall, so the run is released with its attempt refunded and the
+   * loop stops claiming for the pass.
+   * `checkout` — the machine is fine and this repository's own config breaks the answer. A
+   * `user.name = ""` in the shared `.git/config` does it: well-formed, non-executable, invisible to
+   * every scan, and `git var` refuses. That belongs to the project, it repeats until a human
+   * changes something, and no other project on the machine is affected — so the attempt is charged
+   * and the task escalates, the way an unusable base branch does. Left undistinguished, the least
+   * capable key an agent can plant took a whole worker's pass, where an executable one only
+   * quarantines its own checkout (BP-516 review).
+   */
+  readonly kind: "machine" | "checkout";
+
+  constructor(reason: string, kind: "machine" | "checkout" = "machine") {
+    super(
+      kind === "machine"
+        ? `this machine has no git identity to commit as: ${reason}`
+        : `this checkout's own git config leaves no identity to commit as: ${reason}`,
+    );
     this.name = "MissingIdentityError";
+    this.kind = kind;
   }
+}
+
+/** What `resolveCommitIdentity` answers: an identity, or git's own account of why there is none. */
+export type ResolvedIdentity =
+  | { ok: true; identity: CommitIdentity }
+  | { ok: false; reason: string };
+
+// `Name <address> <unix time> <zone>`. git strips `<`, `>` and newlines out of both halves before
+// printing — measured, `user.name = "a<b>c"` prints as `abc` — so there is exactly one of each and
+// the address is framed unambiguously. An empty half is refused rather than passed on: `user.email
+// = ""` makes git answer `Name <> …` with exit 0, and a commit made with that lands with no author
+// address at all, pushed and merged (BP-516 review).
+function parseIdent(line: string): CommitIdentity | null {
+  const opened = line.indexOf("<");
+  const closed = line.lastIndexOf(">");
+  if (opened === -1 || closed < opened) return null;
+  const name = line.slice(0, opened).trim();
+  const email = line.slice(opened + 1, closed).trim();
+  return name && email ? { name, email } : null;
 }
 
 /**
@@ -64,38 +104,25 @@ export class MissingIdentityError extends Error {
  * every later commit then carries that name. The push identity is pinned separately (BP-373); this
  * is only what the commit object says.
  */
-export type ResolvedIdentity =
-  | { ok: true; identity: CommitIdentity }
-  | { ok: false; reason: string };
-
-// `Name <address> <unix time> <zone>`, and git strips `<`, `>` and newlines out of both halves
-// before printing, so the first `<` and the last `>` frame the address unambiguously.
-function parseIdent(line: string): CommitIdentity | null {
-  const opened = line.indexOf("<");
-  const closed = line.lastIndexOf(">");
-  if (opened === -1 || closed < opened) return null;
-  const name = line.slice(0, opened).trim();
-  const email = line.slice(opened + 1, closed).trim();
-  return name && email ? { name, email } : null;
-}
-
 export async function resolveCommitIdentity(
   runner: Runner,
   cwd: string,
+  extraEnv: NodeJS.ProcessEnv = {},
 ): Promise<ResolvedIdentity> {
   const result = await runner.run("git", gitArgs(["var", "GIT_AUTHOR_IDENT"]), {
     cwd,
     timeoutMs: TIMEOUT_MS,
-    env: operatorGitEnv(),
+    env: { ...operatorGitEnv(), ...extraEnv },
   });
   if (result.timedOut) return { ok: false, reason: `git var timed out after ${TIMEOUT_MS}ms` };
   if (result.code !== 0) {
-    // git's own sentence, which says which of the two this is: "Author identity unknown" with the
-    // two commands to run, or "fatal: bad config line 4 in file …" naming the file to repair. A
-    // fixed message of ours in its place sent an operator looking for an unset key while the real
-    // fault was a config git could not parse at all (BP-516 review).
-    const said = (result.stderr || result.stdout).trim().split("\n").filter(Boolean);
-    return { ok: false, reason: said[said.length - 1] || "git would not say who this machine commits as" };
+    // git's whole answer, not its last line. It says which of the two faults this is AND what to
+    // do: "Author identity unknown" is followed by the two commands to run, six lines down, and
+    // keeping only the tail threw them away while the prose promised them. "fatal: bad config line
+    // 4 in file …" is one line and survives either way. The reason reaches a board comment, where
+    // the budget is two thousand characters and this block is about three hundred (BP-516 review).
+    const said = (result.stderr || result.stdout).trim();
+    return { ok: false, reason: said || "git would not say who this machine commits as" };
   }
 
   const identity = parseIdent(result.stdout.trim());

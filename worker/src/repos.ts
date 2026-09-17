@@ -61,19 +61,15 @@ const EXACT_DANGEROUS_KEYS = [
   "core.gitproxy",
   "sequence.editor",
   "diff.external",
-  // What git runs to SIGN a commit, which it does when `commit.gpgsign` is on. Neither a hook nor
-  // a filter, so nothing else here matched it, and it runs inside the worker's own `git commit`:
-  // measured on git 2.50.1 (BP-516 review). `gitArgs` turns the mechanism off at the command line,
-  // which is the sink; these are here because bind time reads this list as an approval.
-  "gpg.program",
-  "gpg.ssh.defaultkeycommand",
 ];
 
-// `gpg.<format>.program` — openpgp, x509, ssh — is the same key once per signing backend.
-const DANGEROUS_KEY_SUFFIXES = ["gpg.", ".program"] as const;
-
-function dangerousSectionLeaf(key: string): boolean {
-  return key.startsWith(DANGEROUS_KEY_SUFFIXES[0]) && key.endsWith(DANGEROUS_KEY_SUFFIXES[1]);
+// What git runs to SIGN a commit, which it does when `commit.gpgsign` is on: `gpg.program`,
+// `gpg.<format>.program` once per backend (openpgp, x509, ssh), and ssh's own key command. Neither
+// a hook nor a filter, so nothing else here matched it, and it runs inside the worker's own
+// `git commit` — measured on git 2.50.1 (BP-516 review). `gitArgs` turns the mechanism off at the
+// command line, which is the sink; this is here because bind time reads these rules as an approval.
+function signsWithAProgram(key: string): boolean {
+  return key.startsWith("gpg.") && (key.endsWith(".program") || key === "gpg.ssh.defaultkeycommand");
 }
 
 // <family>.<name>.<leaf> keys whose value git runs as a command. Everything else under these
@@ -208,7 +204,7 @@ function isIndirection(key: string): boolean {
 
 function executes(key: string, value: string): boolean {
   if (EXACT_DANGEROUS_KEYS.includes(key)) return true;
-  if (dangerousSectionLeaf(key)) return true;
+  if (signsWithAProgram(key)) return true;
   if (key.startsWith("alias.")) return true;
   if (dangerousFamilyLeaf(key)) return true;
   if (isPermissiveProtocolAllow(key, value)) return true;

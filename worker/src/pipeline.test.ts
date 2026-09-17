@@ -8,6 +8,7 @@ import { Executor } from "./executor.js";
 import { gitArgs } from "./git-safety.js";
 import { Reporter } from "./reporter.js";
 import { createTelemetry, isOutcome, isQuota, Progress, TelemetryUpdate } from "./telemetry.js";
+import { MissingIdentityError } from "./commit.js";
 import { BaseUnavailableError, PoisonedCheckoutError, Workspace } from "./workspace.js";
 import { UNREADABLE_CONFIG } from "./repos.js";
 import { scopedConfigListZ } from "./config-list.fixtures.js";
@@ -718,6 +719,41 @@ describe("runTask", () => {
   });
 
   /**
+   * BP-516 review. The two identity faults are owed opposite settlements, and the machine-wide one
+   * was being handed out for a key that belongs to one checkout.
+   */
+  describe("a run with nobody to commit as", () => {
+    function refusing(kind: "machine" | "checkout") {
+      const create = vi
+        .fn<Workspace["create"]>()
+        .mockRejectedValue(new MissingIdentityError("fatal: empty ident name", kind));
+      return harness({ workspace: { ...harness().workspace, create } });
+    }
+
+    it("stops the machine claiming when the machine is what has none", async () => {
+      const h = refusing("machine");
+
+      const outcome = await runTask(h.deps, task);
+
+      expect(outcome).toBe("machine-fault");
+      expect(h.reporter.released).toHaveBeenCalled();
+      expect(h.reporter.requeued).not.toHaveBeenCalled();
+    });
+
+    // Charged, so the task escalates instead of cycling: no other project on this machine is
+    // affected, and it repeats until a human edits that checkout's config.
+    it("charges the task and leaves the machine claiming when the checkout is", async () => {
+      const h = refusing("checkout");
+
+      const outcome = await runTask(h.deps, task);
+
+      expect(outcome).toBeUndefined();
+      expect(h.reporter.requeued).toHaveBeenCalled();
+      expect(h.reporter.released).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
    * BP-506. `keepWorktree` used to be set only once a commit existed, so an agent whose sequence
    * has a single edit step lost everything it had written the moment `commitAll` threw: the
    * `finally` runs `worktree remove --force`, nothing is pushed, and the branch the parent clone
@@ -740,6 +776,36 @@ describe("runTask", () => {
 
       expect(h.workspace.destroy).not.toHaveBeenCalled();
       expect(h.reporter.requeued).toHaveBeenCalled();
+      // And says where it is: a kept worktree nobody is told about is a directory on a machine,
+      // not a copy of anybody's work. The tampered path has the same assertion.
+      expect(h.reporter.requeued.mock.calls[0][1]).toContain("/wt");
+    });
+
+    /**
+     * The keep is computed before the abort check, and this is what says so: a stop pressed while
+     * the step that failed to commit was finishing takes the `return` inside `releaseIfAborted`,
+     * so a keep written after it never runs. Moving the two lines back makes this the only red
+     * test in the package (BP-516 review).
+     */
+    it("keeps it even when a stop lands in the same moment", async () => {
+      const controller = new AbortController();
+      const runner = {
+        run: vi.fn<Runner["run"]>(async (_command, args) => {
+          if (args.includes("add")) {
+            // The stop arrives while the commit is failing, which is the race the ordering is for
+            controller.abort();
+            return shell("", { code: 1, stderr: "fatal: pathspec" });
+          }
+          if (args.includes("status")) return shell(" M src/a.ts\n");
+          return shell();
+        }),
+      };
+      const h = harness({ runner, signal: controller.signal });
+
+      await runTask(h.deps, running("implement"));
+
+      expect(h.reporter.released, "the stop was not observed at all").toHaveBeenCalled();
+      expect(h.workspace.destroy).not.toHaveBeenCalled();
     });
 
     // And the half where the tree is evidence: the config the agent planted is inside it, and the
