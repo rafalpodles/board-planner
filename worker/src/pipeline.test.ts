@@ -10,6 +10,7 @@ import { Reporter } from "./reporter.js";
 import { createTelemetry, isOutcome, isQuota, Progress, TelemetryUpdate } from "./telemetry.js";
 import { BaseUnavailableError, PoisonedCheckoutError, Workspace } from "./workspace.js";
 import { UNREADABLE_CONFIG } from "./repos.js";
+import { scopedConfigListZ } from "./config-list.fixtures.js";
 import { ClaimedTask, DiffStats, ExecutionResult, Gate, SnapshotEntry } from "./types.js";
 import { PipelineDeps, resolveStatusIds, runTask } from "./pipeline.js";
 
@@ -209,7 +210,10 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
     gateFor,
     recordRun,
     quarantineProject,
-    runner,
+    // The one the pipeline was given, not the default this function built: with `runner` in the
+    // overrides those are different objects, and a test asserting on the default asserts on a spy
+    // nothing ever called.
+    runner: deps.runner,
   };
 }
 
@@ -707,6 +711,90 @@ describe("runTask", () => {
     expect(h.collectDiff).not.toHaveBeenCalled();
     expect(h.reporter.failed.mock.calls[0][1]).toMatch(/not a git repository/);
     expect(h.workspace.destroy).not.toHaveBeenCalled();
+  });
+
+  /**
+   * BP-506. `keepWorktree` used to be set only once a commit existed, so an agent whose sequence
+   * has a single edit step lost everything it had written the moment `commitAll` threw: the
+   * `finally` runs `worktree remove --force`, nothing is pushed, and the branch the parent clone
+   * holds is reset by the next attempt.
+   */
+  describe("a commit that did not happen", () => {
+    // A worktree with work in it and a `git add` that fails: the ordinary half, where the tree is
+    // simply the one copy of what the agent wrote.
+    it("keeps the worktree when the commit fails on git's own account", async () => {
+      const runner = {
+        run: vi.fn<Runner["run"]>(async (_command, args) => {
+          if (args.includes("add")) return shell("", { code: 1, stderr: "fatal: pathspec" });
+          if (args.includes("status")) return shell(" M src/a.ts\n");
+          return shell();
+        }),
+      };
+      const h = harness({ runner });
+
+      await runTask(h.deps, running("implement"));
+
+      expect(h.workspace.destroy).not.toHaveBeenCalled();
+      expect(h.reporter.requeued).toHaveBeenCalled();
+    });
+
+    // And the half where the tree is evidence: the config the agent planted is inside it, and the
+    // refusal names a key somebody has to go and look at.
+    describe("because the checkout was tampered with", () => {
+      function tamperedHarness() {
+        const runner = {
+          run: vi.fn<Runner["run"]>(async (_command, args) => {
+            if (args.includes("--show-scope"))
+              return shell(scopedConfigListZ("filter.z.clean=/tmp/payload.sh"));
+            if (args.includes("status")) return shell(" M src/a.ts\n");
+            return shell();
+          }),
+        };
+        return harness({ runner });
+      }
+
+      it("keeps the worktree, with what the agent wrote and the config still in it", async () => {
+        const h = tamperedHarness();
+
+        await runTask(h.deps, running("implement"));
+
+        expect(h.workspace.destroy).not.toHaveBeenCalled();
+      });
+
+      // Parked rather than requeued: a requeue sends the next attempt at the same checkout, and
+      // `worktree add -B` would take the evidence with it on the way past.
+      it("parks the task instead of queueing another run against the same checkout", async () => {
+        const h = tamperedHarness();
+
+        await runTask(h.deps, running("implement"));
+
+        expect(h.reporter.failed).toHaveBeenCalled();
+        expect(h.reporter.requeued).not.toHaveBeenCalled();
+      });
+
+      it("names the key and the path a person has to look at", async () => {
+        const h = tamperedHarness();
+
+        await runTask(h.deps, running("implement"));
+
+        const said = h.reporter.failed.mock.calls[0][1];
+        expect(said).toContain("filter.z.clean");
+        expect(said).toContain("/wt");
+      });
+
+      // Nothing was staged, which is the ordering BP-403 exists for: `git status` reads a file's
+      // content for anything untracked, so a scan that ran after it would have run the filter.
+      it("stages nothing on the way to refusing", async () => {
+        const h = tamperedHarness();
+
+        await runTask(h.deps, running("implement"));
+
+        const staged = (h.runner.run as ReturnType<typeof vi.fn>).mock.calls.some(([, args]) =>
+          (args as string[]).includes("add")
+        );
+        expect(staged, "the worktree was staged before the refusal").toBe(false);
+      });
+    });
   });
 
   // The agent has no Bash any more, so nothing but this puts its work in a commit

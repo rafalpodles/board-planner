@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { commitAll } from "./commit.js";
+import { commitAll, resolveCommitIdentity, TamperedCheckoutError } from "./commit.js";
 import { configListZ, scopedConfigListZ } from "./config-list.fixtures.js";
 
 type Result = { code: number; stdout?: string; stderr?: string };
@@ -135,5 +135,101 @@ describe("commitAll against a planted config", () => {
   it("refuses filter.lfs.clean like any other, which is what bindRepository already did", async () => {
     const { runner } = runnerFor(readableConfig, { code: 0, stdout: local("filter.lfs.clean=git-lfs clean -- %f") });
     await expect(commitAll(runner, "/wt", "m")).rejects.toThrow(/refusing to stage.*filter\.lfs\.clean/);
+  });
+
+  // Its own class, and this is what the pipeline branches on: a refusal keeps the worktree and
+  // parks the task, where a failed `git add` requeues (BP-506). Stringified into a bare Error, the
+  // two were one thing and the tree holding the evidence was the one that got deleted.
+  it("throws a refusal that can be told from a git failure", async () => {
+    const { runner } = runnerFor(readableConfig, { code: 0, stdout: local("filter.z.clean=/tmp/payload.sh") });
+
+    await expect(commitAll(runner, "/wt", "m")).rejects.toBeInstanceOf(TamperedCheckoutError);
+    await expect(commitAll(runnerFor(readableConfig, noPlantedConfig, { code: 1, stderr: "boom" }).runner, "/wt", "m"))
+      .rejects.not.toBeInstanceOf(TamperedCheckoutError);
+  });
+
+  it("carries the finding, so a caller can report the key without parsing a sentence", async () => {
+    const { runner } = runnerFor(readableConfig, { code: 0, stdout: local("filter.z.clean=/tmp/payload.sh") });
+
+    await expect(commitAll(runner, "/wt", "m")).rejects.toMatchObject({
+      finding: expect.stringContaining("filter.z.clean"),
+    });
+  });
+});
+
+/**
+ * BP-516. `localGitEnv` takes `~/.gitconfig` out of every call this module makes, and `user.email`
+ * lives there on most machines — so the identity has to travel with the run rather than be read
+ * back at the commit, where the agent has already had a chance to write that file.
+ */
+describe("the commit identity", () => {
+  const IDENTITY = { name: "Worker", email: "worker@example.com" };
+
+  function envOf(run: ReturnType<typeof vi.fn>, subcommand: string): NodeJS.ProcessEnv {
+    const call = run.mock.calls.find(([, args]) => (args as string[]).includes(subcommand));
+    if (!call) throw new Error(`git ${subcommand} was never run`);
+    return (call[2] as { env: NodeJS.ProcessEnv }).env;
+  }
+
+  it("neutralises the operator's global config on every call that stages or commits", async () => {
+    const { runner, run } = runnerReturning(dirty, clean, clean, clean);
+
+    await commitAll(runner, "/wt", "m", IDENTITY);
+
+    for (const call of run.mock.calls) {
+      expect((call[2] as { env: NodeJS.ProcessEnv }).env.GIT_CONFIG_GLOBAL).toBe("/dev/null");
+    }
+  });
+
+  // Committer as well as author: the two are separate identities to git, and only the author's is
+  // what a pull request shows. A commit with no committer is refused just as loudly.
+  it("supplies the identity it was given, as both author and committer", async () => {
+    const { runner, run } = runnerReturning(dirty, clean, clean, clean);
+
+    await commitAll(runner, "/wt", "m", IDENTITY);
+
+    expect(envOf(run, "commit")).toMatchObject({
+      GIT_AUTHOR_NAME: "Worker",
+      GIT_AUTHOR_EMAIL: "worker@example.com",
+      GIT_COMMITTER_NAME: "Worker",
+      GIT_COMMITTER_EMAIL: "worker@example.com",
+    });
+  });
+
+  // Nothing invented in its place: git's own "Author identity unknown" says what to run, and a
+  // worker that committed as a name nobody chose would put it on every commit it ever makes.
+  it("names nobody when the run was given nobody", async () => {
+    const { runner, run } = runnerReturning(dirty, clean, clean, clean);
+
+    await commitAll(runner, "/wt", "m", null);
+
+    expect(envOf(run, "commit").GIT_AUTHOR_EMAIL).toBeUndefined();
+  });
+
+  it("reads the name and address the operator configured", async () => {
+    const { runner } = runnerFor({ code: 0, stdout: "Worker\n" }, { code: 0, stdout: "worker@example.com\n" });
+
+    expect(await resolveCommitIdentity(runner, "/repo")).toEqual(IDENTITY);
+  });
+
+  // Read where the commits are made, with the global config still readable: this is the one call
+  // in the worker that is *supposed* to see ~/.gitconfig, because that is where the answer is.
+  it("reads it with the operator's own config in place", async () => {
+    const { runner, run } = runnerFor({ code: 0, stdout: "Worker\n" }, { code: 0, stdout: "w@e\n" });
+
+    await resolveCommitIdentity(runner, "/repo");
+
+    for (const call of run.mock.calls) {
+      expect((call[2] as { env: NodeJS.ProcessEnv }).env.GIT_CONFIG_GLOBAL).toBeUndefined();
+    }
+  });
+
+  it.each([
+    ["no name", [{ code: 1, stdout: "" }, { code: 0, stdout: "w@e\n" }]],
+    ["no address", [{ code: 0, stdout: "Worker\n" }, { code: 1, stdout: "" }]],
+  ])("answers nobody when the machine has %s", async (_case, results) => {
+    const { runner } = runnerFor(...(results as Result[]));
+
+    expect(await resolveCommitIdentity(runner, "/repo")).toBeNull();
   });
 });

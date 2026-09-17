@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { commitAll } from "./commit.js";
@@ -122,6 +122,68 @@ describe("commitAll against a planted filter", () => {
       }
     });
   }
+
+  /**
+   * BP-516. The same filter, defined where BP-403's scan was never going to look: the operator's
+   * own `~/.gitconfig`. `childEnv()` forwards HOME because the agent CLI authenticates from its
+   * session there, and BP-349 says the agent's Write reaches it — so this needs nothing planted
+   * inside the repository at all, and the local-scope scan in front of the staging is looking at
+   * the wrong file.
+   *
+   * The answer is not a refusal: there is nothing here to refuse, and an operator's global config
+   * is their own. It is that the git doing the staging does not read that file, so the commit goes
+   * through with the filter never applied.
+   */
+  describe("and the filter defined in the operator's own HOME", () => {
+    let home: string;
+    let realHome: string | undefined;
+
+    beforeEach(() => {
+      home = join(dir, "home");
+      mkdirSync(home, { recursive: true });
+      // Rewrites the content instead of passing it through, so "the filter did not run" is
+      // asserted twice over: by the marker, and by what ends up in the commit. With `cat` the
+      // second assertion holds whether or not the filter ran, which is no assertion at all.
+      writeFileSync(payload, `#!/bin/sh\ntouch "${marker}"\necho FILTERED\n`);
+      chmodSync(payload, 0o755);
+      writeFileSync(join(home, ".gitconfig"), `[filter "z"]\n\tclean = ${payload}\n`);
+      realHome = process.env.HOME;
+      process.env.HOME = home;
+    });
+
+    afterEach(() => {
+      // Assigned back rather than deleted: assigning an undefined stores the string "undefined"
+      if (realHome === undefined) delete process.env.HOME;
+      else process.env.HOME = realHome;
+    });
+
+    // The premise. Without it the assertion below is "a filter that could never have run did not
+    // run", which is green against the unfixed code and against a typo in the fixture alike.
+    it("is live: an unguarded git add runs the program, with nothing in the repository", () => {
+      execFileSync("git", ["add", "--all", "--"], { cwd: work, stdio: "pipe", env: { ...process.env, HOME: home } });
+
+      expect(existsSync(marker)).toBe(true);
+      // And it decided what got staged, which is the half the marker does not show
+      expect(git(work, "show", ":a.txt")).toBe("FILTERED\n");
+    });
+
+    it("never runs it when the worker stages, and still commits", async () => {
+      const sha = await commitAll(createRunner(), work, "BP-516: staged work");
+
+      expect(existsSync(marker), "the global filter ran anyway").toBe(false);
+      expect(sha).toMatch(/^[0-9a-f]{40}$/);
+      expect(git(work, "rev-parse", "HEAD").trim()).toBe(sha);
+    });
+
+    // And what it committed is the file as the agent left it. A `clean` filter rewrites content on
+    // the way into the index, so "the program did not run" and "the content is what was written"
+    // are two claims, and the second is the one a reviewer of the pull request depends on.
+    it("commits what the agent wrote, not what the filter would have made of it", async () => {
+      await commitAll(createRunner(), work, "BP-516: staged work");
+
+      expect(git(work, "show", "HEAD:a.txt")).toBe(EDITED);
+    });
+  });
 
   // The control. Without it a mis-wired fixture — a payload that never had a chance to run, a
   // worktree with nothing staged — would read exactly like a refusal that worked.
