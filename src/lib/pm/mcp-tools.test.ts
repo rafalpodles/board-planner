@@ -104,4 +104,31 @@ describe("isReadSafe", () => {
       expect(isReadSafe(tool(name, true)), name).toBe(false);
     }
   });
+
+  // BP-476 review: real read tools the prefix rule refused, and near-misses it let through
+  it("accepts the official GitHub server's noun-first reads", () => {
+    for (const name of ["issue_read", "pull_request_read"]) {
+      expect(isReadSafe(tool(name)), name).toBe(true);
+    }
+  });
+
+  it("looks past the server's own name at the front of a tool's name", () => {
+    expect(isReadSafe(tool("notion-search"), "notion")).toBe(true);
+    expect(isReadSafe(tool("slack_list_channels"), "slack")).toBe(true);
+    // Only the server's own name: another word in front is not a prefix to skip
+    expect(isReadSafe(tool("notion-search"), "github")).toBe(false);
+    expect(isReadSafe(tool("notion-create-pages"), "notion")).toBe(false);
+  });
+
+  it("wants a read verb as a whole word, not the start of a longer one", () => {
+    for (const name of ["readjust_budget", "listen_for_webhooks", "getaway_plan"]) {
+      expect(isReadSafe(tool(name)), name).toBe(false);
+    }
+  });
+
+  it("does not take a read verb at the end as a read unless it is `read`, or a mutation marks it", () => {
+    for (const name of ["export_to_search", "rebuild_list", "mark_all_notifications_read", "mark_read"]) {
+      expect(isReadSafe(tool(name)), name).toBe(false);
+    }
+  });
 });

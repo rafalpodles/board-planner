@@ -1,6 +1,16 @@
 import type { McpToolDef } from "./mcp-client";
 
-const READ_SAFE_NAME_RE = /^(search|list|get|read|fetch|query|describe|find)/i;
+/**
+ * A read verb as the first whole token: `get_issue`. Matched as a token rather than a prefix: as a
+ * prefix `readjust_budget` and `listen_for_webhooks` counted as reads (BP-476).
+ */
+const READ_VERBS = new Set(["search", "list", "get", "read", "fetch", "query", "describe", "find"]);
+/**
+ * The one verb also accepted last, for the noun-first style the official GitHub server uses
+ * (`issue_read`, `pull_request_read`). Only this one: any read verb last would let
+ * `export_to_search` or `rebuild_list` through, whose first word is the one that acts.
+ */
+const TRAILING_READ_VERB = "read";
 /**
  * Verbs that make a read-prefixed name a mutation. Matched as whole **tokens**, not substrings:
  * as a substring this rejected `get_settings` ("set"), `list_presets` ("reset"),
@@ -21,6 +31,9 @@ const WRITE_VERBS = new Set([
   "reset", "rename", "assign", "close", "merge", "approve", "revoke", "execute", "invoke", "trigger",
   // BP-476: each of these passed as a read inside a read-prefixed name (`get_or_add_label`)
   "add", "save", "publish", "cancel", "disable", "enable", "upsert", "submit",
+  // A read verb at the END reads `mark_all_notifications_read` as a read unless these are known
+  "mark", "unpublish", "dismiss", "resolve", "reopen", "lock", "unlock", "star", "unstar",
+  "subscribe", "unsubscribe",
 ]);
 
 /** `getWorkflowRun` and `get_workflow-run` are the same name to anyone reading it */
@@ -40,10 +53,18 @@ function tokensOf(name: string): string[] {
  * had set `allowWrites: false`, and its calls never counted against the per-turn write cap. The
  * hint can now only make a tool *more* restricted, never less: the name decides, and a server may
  * veto its own tool by saying `false`.
+ *
+ * A server often prefixes its tools with its own name (`notion-search`, `slack_list_channels`), so
+ * the tokens of the server's name are taken off the front before the read verb is looked for.
  */
-export function isReadSafe(tool: McpToolDef): boolean {
-  const tokens = tokensOf(tool.name);
-  const nameLooksReadOnly =
-    READ_SAFE_NAME_RE.test(tool.name) && !tokens.some((t) => WRITE_VERBS.has(t));
+export function isReadSafe(tool: McpToolDef, serverName = ""): boolean {
+  let tokens = tokensOf(tool.name);
+  const prefix = tokensOf(serverName);
+  if (prefix.length > 0 && prefix.length < tokens.length && prefix.every((t, i) => tokens[i] === t)) {
+    tokens = tokens.slice(prefix.length);
+  }
+  const readShaped =
+    tokens.length > 0 && (READ_VERBS.has(tokens[0]) || tokens[tokens.length - 1] === TRAILING_READ_VERB);
+  const nameLooksReadOnly = readShaped && !tokens.some((t) => WRITE_VERBS.has(t));
   return nameLooksReadOnly && tool.annotations?.readOnlyHint !== false;
 }

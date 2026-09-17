@@ -50,7 +50,7 @@ export const POST = withProjectOwner(async (request, { params }) => {
       tools: tools.map((t) => ({
         name: t.name,
         description: t.description ?? "",
-        readSafe: isReadSafe(t),
+        readSafe: isReadSafe(t, typeof body.name === "string" ? body.name : ""),
       })),
     });
   } catch (err) {
