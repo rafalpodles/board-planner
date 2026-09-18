@@ -31,7 +31,9 @@ import { connectDB } from "./db";
 import { sha256 } from "./oauth";
 import { RateLimit } from "@/models/rateLimit";
 
-const MAX_ATTEMPTS = 10;
+// Exported for the same reason the thresholds below are: a spec imports the real number rather
+// than copying it, so the test cannot silently drift from the value it is pinning (BP-409).
+export const MAX_ATTEMPTS = 10;
 // A source key aggregates every account tried from one address, and addresses are shared — office
 // NAT, mobile carrier. At the per-account threshold one colleague's ten typos would refuse the
 // whole building, so the source dimension needs room for honest traffic before it bites.

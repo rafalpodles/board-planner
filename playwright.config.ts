@@ -69,6 +69,19 @@ export const MONGO_PROXY_CONTROL_URL = `http://127.0.0.1:${MONGO_PROXY_CONTROL_P
 const MCP_SERVER_STUB_PORT = Number(process.env.MCP_SERVER_STUB_PORT ?? PORT + 6);
 export const MCP_SERVER_STUB_URL = `http://127.0.0.1:${MCP_SERVER_STUB_PORT}`;
 
+// A second full app server, `TRUSTED_PROXY_HOPS` nonzero instead of pinned at 0, so
+// proxied-login-throttle.spec.ts can exercise the branch the suite-wide pin otherwise makes
+// unreachable (BP-409) without weakening that pin for anything else. The `PORT + 0..9` block above
+// is full (see the note at PORT+7), so this deliberately does not live in it — +10000 puts it far
+// outside any neighbouring task's own `30000 + N * 10` block instead of trying to fit one more
+// port into an already-exact spacing. `E2E_PROXIED_PORT` overrides it if that were ever to collide.
+const PROXIED_PORT = Number(process.env.E2E_PROXIED_PORT ?? PORT + 10000);
+export const PROXIED_BASE_URL = `http://localhost:${PROXIED_PORT}`;
+// Opt-in rather than on for every run: a second Turbopack cold start is real minutes, paid only by
+// the job that needs it. CI sets this for the `people` job; running the spec file alone without it
+// is what the file's own test.skip() at the top is for.
+export const RUN_PROXIED_SERVER = process.env.E2E_PROXIED_SERVER === "1";
+
 /** The seeded database's URI with its host swapped for the proxy's; credentials and options ride along. */
 function throughMongoProxy(uri: string): string {
   // One host, plain scheme: the proxy is a single TCP pipe, so a host list or an SRV record has
@@ -85,6 +98,87 @@ function throughMongoProxy(uri: string): string {
   // the hello's host list straight past the proxy, and the outage test would read 200.
   url.searchParams.set("directConnection", "true");
   return url.toString().replace(/^http:\/\//, "mongodb://");
+}
+
+/** Everything the app server needs, parameterised only by the origin it is told it runs at. */
+function devServerEnv(origin: string) {
+  return {
+    // Wins over .env.local, which points at the development database. The test asserts this
+    // before it writes anything — see the guard at the top of run-conflict.spec.ts. Through the
+    // proxy above, which is what lets mcp-tools.spec.ts take the database away mid-run.
+    MONGODB_URI: throughMongoProxy(E2E_MONGODB_URI),
+    NEXT_PUBLIC_APP_URL: origin,
+    // /api/mcp answers 500 without it and will not take NEXT_PUBLIC_APP_URL, which is a
+    // build-time literal. Setting it here is not a test convenience: this run is what proved
+    // a real deployment needs it too, by 500ing three MCP specs when it was missing (BP-316).
+    PUBLIC_ORIGIN: origin,
+    // The premise the session and throttle specs are written against, pinned rather than
+    // assumed: at 0 the app ignores X-Forwarded-For, so callers have no address and share the
+    // anonymous throttle bucket. A machine that happened to export this variable would
+    // otherwise move those tests onto the per-address counter (BP-395). The proxied server below
+    // overrides this one line — see BP-409 — and touches nothing else here.
+    TRUSTED_PROXY_HOPS: "0",
+    // Known to day-zero.spec.ts, which claims an empty instance the way an operator does (BP-325)
+    BOOTSTRAP_TOKEN,
+    // Presence alone is what isPmAvailable checks; the stub never looks at it
+    OPENROUTER_API_KEY: "e2e-stub-key",
+    OPENROUTER_BASE_URL: `${PM_STUB_URL}/v1`,
+    // Effectively never. The scheduler starts with the app (src/instrumentation.ts), and a
+    // spec that switches a project's daily review on leaves it on until the next seed() — so
+    // at the 5-minute default a tick can land mid-run and spend a real turn against the cap
+    // the turn-cap specs are counting.
+    PM_SCHEDULER_TICK_MS: String(24 * 60 * 60 * 1000),
+    // isAIEnabled() checks the key's presence and the form hides AI Assist without it; the
+    // base URL is what keeps the SDK off api.openai.com
+    OPENAI_API_KEY: "e2e-stub-key",
+    OPENAI_BASE_URL: `${AI_STUB_URL}/v1`,
+    WEBHOOK_SIGNING_SECRET: WEBHOOK_SECRET,
+    // The stub above. Without it the sync reaches the real api.github.com, which is why no
+    // spec drove one before BP-443.
+    GITHUB_API_BASE_URL: GITHUB_STUB_URL,
+    // Off, so a tick cannot re-sync a project mid-spec and overwrite what the spec set up.
+    // The specs drive the sync themselves, which is the half a person can see.
+    GITHUB_SYNC_TICK_MS: "0",
+    // The mail server above. `isEmailConfigured()` wants all three, and without them the whole
+    // e-mail column of the notification grid is unreachable from a browser (BP-465).
+    SMTP_HOST: MAIL_SERVER.host,
+    SMTP_PORT: String(MAIL_SERVER.port),
+    SMTP_USER: MAIL_SERVER.user,
+    SMTP_PASS: "e2e",
+    SMTP_FROM: MAIL_SERVER.from,
+    // Effectively never, for the reason PM_SCHEDULER_TICK_MS is. The digest scheduler starts
+    // with the app whenever mail is configured, which it has been for every run since BP-465,
+    // and at the 5-minute default it has been ticking all run long ever since — reaching the
+    // query on any run after 07:00 Europe/Warsaw, and stopping at `dueDigestDay` before it —
+    // unnoticed, because the message it sends carries each row's own title ("TP-7 assigned to
+    // you") and not the task title every mail assertion in the suite matches on. Measured at a
+    // 3-second tick: `notification-grid-delivery.spec.ts` stays green.
+    //
+    // `daily-digest.spec.ts` is the file that cannot live with it, and that too is measured:
+    // at a 3-second tick both its tests fail, because a background tick claims the day in
+    // `lastDigestDay` before the spec asks for one and the trigger then answers "sent 0".
+    // Pinned rather than worked around, so the suite has one digest and the spec asked for it.
+    DIGEST_TICK_MS: String(24 * 60 * 60 * 1000),
+    // Midnight, so a tick that is asked for is due whatever hour CI runs at. The default is
+    // 07:00 Europe/Warsaw and `dueDigestDay` answers null before it, which would make the
+    // digest spec pass or fail by the clock on the wall.
+    DIGEST_HOUR: "0",
+    // For the stub's throwaway certificate, and for nothing else: `email.ts` sets `requireTLS`
+    // on every port but 465, so the stub has to offer STARTTLS and this run has to accept a
+    // certificate no authority signed.
+    NODE_TLS_REJECT_UNAUTHORIZED: "0",
+    // Storing a project's chat webhook URL needs it (BP-372), and so does the personal one the
+    // notification grid offers. Without it those routes answer 503 and the specs that drive
+    // them assert a refusal instead of the encryption they exist to prove.
+    ENCRYPTION_KEY: "e2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee",
+    // Two things now, and the second is not cosmetic. It turns off Next's dev indicator, which
+    // paints over the bottom-left of every page and takes a real click meant for a bottom
+    // sheet's action row (BP-589) — and it mounts `POST /api/e2e/digest`, which runs a digest
+    // tick with nothing authenticating it (`src/lib/e2e-only.ts`, BP-605). So this is not a
+    // variable to set on a deployment to quieten the indicator: outside a production build it
+    // opens that route too. Only here; a developer running `next dev` by hand keeps both.
+    E2E: "1",
+  };
 }
 
 export default defineConfig({
@@ -216,82 +310,27 @@ export default defineConfig({
       timeout: 240_000,
       stdout: "pipe",
       stderr: "pipe",
-      env: {
-        // Wins over .env.local, which points at the development database. The test asserts this
-        // before it writes anything — see the guard at the top of run-conflict.spec.ts. Through the
-        // proxy above, which is what lets mcp-tools.spec.ts take the database away mid-run.
-        MONGODB_URI: throughMongoProxy(E2E_MONGODB_URI),
-        NEXT_PUBLIC_APP_URL: BASE_URL,
-        // /api/mcp answers 500 without it and will not take NEXT_PUBLIC_APP_URL, which is a
-        // build-time literal. Setting it here is not a test convenience: this run is what proved
-        // a real deployment needs it too, by 500ing three MCP specs when it was missing (BP-316).
-        PUBLIC_ORIGIN: BASE_URL,
-        // The premise the session and throttle specs are written against, pinned rather than
-        // assumed: at 0 the app ignores X-Forwarded-For, so callers have no address and share the
-        // anonymous throttle bucket. A machine that happened to export this variable would
-        // otherwise move those tests onto the per-address counter (BP-395).
-        TRUSTED_PROXY_HOPS: "0",
-        // Known to day-zero.spec.ts, which claims an empty instance the way an operator does (BP-325)
-        BOOTSTRAP_TOKEN,
-        // Presence alone is what isPmAvailable checks; the stub never looks at it
-        OPENROUTER_API_KEY: "e2e-stub-key",
-        OPENROUTER_BASE_URL: `${PM_STUB_URL}/v1`,
-        // Effectively never. The scheduler starts with the app (src/instrumentation.ts), and a
-        // spec that switches a project's daily review on leaves it on until the next seed() — so
-        // at the 5-minute default a tick can land mid-run and spend a real turn against the cap
-        // the turn-cap specs are counting.
-        PM_SCHEDULER_TICK_MS: String(24 * 60 * 60 * 1000),
-        // isAIEnabled() checks the key's presence and the form hides AI Assist without it; the
-        // base URL is what keeps the SDK off api.openai.com
-        OPENAI_API_KEY: "e2e-stub-key",
-        OPENAI_BASE_URL: `${AI_STUB_URL}/v1`,
-        WEBHOOK_SIGNING_SECRET: WEBHOOK_SECRET,
-        // The stub above. Without it the sync reaches the real api.github.com, which is why no
-        // spec drove one before BP-443.
-        GITHUB_API_BASE_URL: GITHUB_STUB_URL,
-        // Off, so a tick cannot re-sync a project mid-spec and overwrite what the spec set up.
-        // The specs drive the sync themselves, which is the half a person can see.
-        GITHUB_SYNC_TICK_MS: "0",
-        // The mail server above. `isEmailConfigured()` wants all three, and without them the whole
-        // e-mail column of the notification grid is unreachable from a browser (BP-465).
-        SMTP_HOST: MAIL_SERVER.host,
-        SMTP_PORT: String(MAIL_SERVER.port),
-        SMTP_USER: MAIL_SERVER.user,
-        SMTP_PASS: "e2e",
-        SMTP_FROM: MAIL_SERVER.from,
-        // Effectively never, for the reason PM_SCHEDULER_TICK_MS is. The digest scheduler starts
-        // with the app whenever mail is configured, which it has been for every run since BP-465,
-        // and at the 5-minute default it has been ticking all run long ever since — reaching the
-        // query on any run after 07:00 Europe/Warsaw, and stopping at `dueDigestDay` before it —
-        // unnoticed, because the message it sends carries each row's own title ("TP-7 assigned to
-        // you") and not the task title every mail assertion in the suite matches on. Measured at a
-        // 3-second tick: `notification-grid-delivery.spec.ts` stays green.
-        //
-        // `daily-digest.spec.ts` is the file that cannot live with it, and that too is measured:
-        // at a 3-second tick both its tests fail, because a background tick claims the day in
-        // `lastDigestDay` before the spec asks for one and the trigger then answers "sent 0".
-        // Pinned rather than worked around, so the suite has one digest and the spec asked for it.
-        DIGEST_TICK_MS: String(24 * 60 * 60 * 1000),
-        // Midnight, so a tick that is asked for is due whatever hour CI runs at. The default is
-        // 07:00 Europe/Warsaw and `dueDigestDay` answers null before it, which would make the
-        // digest spec pass or fail by the clock on the wall.
-        DIGEST_HOUR: "0",
-        // For the stub's throwaway certificate, and for nothing else: `email.ts` sets `requireTLS`
-        // on every port but 465, so the stub has to offer STARTTLS and this run has to accept a
-        // certificate no authority signed.
-        NODE_TLS_REJECT_UNAUTHORIZED: "0",
-        // Storing a project's chat webhook URL needs it (BP-372), and so does the personal one the
-        // notification grid offers. Without it those routes answer 503 and the specs that drive
-        // them assert a refusal instead of the encryption they exist to prove.
-        ENCRYPTION_KEY: "e2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee",
-        // Two things now, and the second is not cosmetic. It turns off Next's dev indicator, which
-        // paints over the bottom-left of every page and takes a real click meant for a bottom
-        // sheet's action row (BP-589) — and it mounts `POST /api/e2e/digest`, which runs a digest
-        // tick with nothing authenticating it (`src/lib/e2e-only.ts`, BP-605). So this is not a
-        // variable to set on a deployment to quieten the indicator: outside a production build it
-        // opens that route too. Only here; a developer running `next dev` by hand keeps both.
-        E2E: "1",
-      },
+      env: devServerEnv(BASE_URL),
     },
+    // Opt-in (RUN_PROXIED_SERVER): see the constant above. Same app, same seeded database, only
+    // TRUSTED_PROXY_HOPS, its own origin and its own `.next` output differ — a second `next dev`
+    // sharing the first one's build directory corrupts both (BP-409).
+    ...(RUN_PROXIED_SERVER
+      ? [
+          {
+            command: `npm run dev -- --port ${PROXIED_PORT}`,
+            url: PROXIED_BASE_URL,
+            reuseExistingServer: false,
+            timeout: 240_000,
+            stdout: "pipe" as const,
+            stderr: "pipe" as const,
+            env: {
+              ...devServerEnv(PROXIED_BASE_URL),
+              TRUSTED_PROXY_HOPS: "1",
+              NEXT_DIST_DIR: ".next-proxied",
+            },
+          },
+        ]
+      : []),
   ],
 });
