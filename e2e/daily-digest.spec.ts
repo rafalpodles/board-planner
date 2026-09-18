@@ -53,8 +53,10 @@ import {
  * dev server: `@/lib/email` captures `SMTP_*` at module load, and importing the digest into this
  * process would arm real mail for every other spec sharing the Playwright worker.
  *
- * Everything a person does is done on the screen — the grid cell, the digest box, the assignment,
- * and the row they open. The only thing not done through the browser is the passage of time.
+ * Every gesture is driven on the screen — the grid cell, the digest box, the assignment, and the
+ * row the reader opens. Three things are not, and each is setup rather than subject: the clock,
+ * the mailbox an account is given (a person sets that on /profile, which `email-on-account.spec.ts`
+ * drives), and the task number a key is read back from.
  */
 
 const MEMBER_MAILBOX = "member@e2e.invalid";
@@ -103,6 +105,9 @@ async function digestsFor(address: string): Promise<string[]> {
  * task's title is not in the message at all — so the key is the only thing that says which task a
  * line is about. `taskCounter` is per project and the seed already spends several numbers, so
  * guessing one here would pin this file to the seed's current size.
+ *
+ * Only the number is read back; the project part is this suite's one board, and the lookup is by
+ * title across the collection because there is no second board for a title to collide on.
  */
 async function keyOf(title: string): Promise<string> {
   const handle = await db();
@@ -154,7 +159,10 @@ test("the morning message carries the day the reader banked, and reaches only th
     await stored;
   });
 
-  const morning = ["Banked for the morning", "Banked for the morning as well"];
+  // Neither title contains the other. `dispatchHasRun` matches a row by substring, so a pair like
+  // "Banked" / "Banked as well" would let the second row satisfy the gate for the first — and the
+  // gate for a row that has not been written yet is no gate (BP-605 review).
+  const morning = ["Banked for the morning", "Left unread until sunrise"];
   const immediate = "Sent to the bystander straight away";
   await test.step("a day happens on the board", async () => {
     await assignANewTask(admin, morning[0], MEMBER_USERNAME);
@@ -185,19 +193,25 @@ test("the morning message carries the day the reader banked, and reaches only th
 
       const [body] = digests;
       // Counted, not merely non-empty: "2 updates" is the number the subject and the heading both
-      // print, and the line that would be wrong if the query stopped narrowing to this reader.
-      expect(body).toContain("2 updates on your tasks");
-      for (const key of keys) expect(mentions(body, key), `${key} is not in the digest`).toBe(true);
-      // Assembled from the stored rows, so each line carries that row's own title and a link back
-      expect(body).toContain("assigned to you");
+      // print, and the line that would be wrong if the query stopped narrowing to this reader. The
+      // boundary is not pedantry — a bare `toContain` here is also satisfied by "12 updates".
+      expect(body).toMatch(/(^|[^0-9])2 updates on your tasks/);
+      for (const key of keys) {
+        expect(mentions(body, key), `${key} is not in the digest`).toBe(true);
+        // The line as the text part composes it: the key labels the row, so `lineFor` takes the
+        // key off the front of the stored title rather than printing "TP-8: TP-8 assigned to you"
+        expect(body).toContain(`${key}: assigned to you`);
+      }
+      // Assembled from the stored rows, each of which keeps the link its own mail would have had
       expect(body).toContain(`/projects/${PROJECT_KEY}/tasks/`);
     }).toPass({ timeout: 30_000 });
   });
 
   // Read once rather than held over a window, and that is sound here where it would not be after an
-  // ordinary request: `digestTick` walks every subscriber inside the one POST above, and the
-  // member's digest — sent from that same pass — has already arrived. The decision about the
-  // bystander was therefore taken before the trigger answered, so there is nothing still in flight.
+  // ordinary request. `digestTick` awaits every send inside the one POST above, and the stub files
+  // a message before it answers 250 (`e2e/smtp-stub.mjs`) — so by the time the trigger has
+  // answered, everything this tick was ever going to deliver is already on the server. Nothing is
+  // in flight to wait for, and an absence read now is the tick's own decision.
   await test.step("and the reader who wanted their mail as it happened gets no digest", async () => {
     expect(await digestsFor(BYSTANDER_MAILBOX)).toHaveLength(0);
   });

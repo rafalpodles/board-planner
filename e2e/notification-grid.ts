@@ -138,6 +138,9 @@ export async function assignANewTask(admin: Page, title: string, assignee: strin
  *
  * It only ever **reads** the feed. Clicking a row marks it read, and the digest is assembled from
  * unread rows — so a gate that clicked would quietly empty the mail it is a precondition for.
+ *
+ * It matches by **substring**, as `getByText` does with a string. Two titles where one contains the
+ * other therefore share a gate, and the one for the row not yet written passes on the other's row.
  */
 export async function dispatchHasRun(page: Page, title: string) {
   await expect(async () => {
