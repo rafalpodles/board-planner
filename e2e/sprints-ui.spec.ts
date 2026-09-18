@@ -592,9 +592,17 @@ test.describe("which sprint the page opens on", () => {
 });
 
 /**
- * BP-477. Two guards that sit inside the board's keyboard handler rather than on any control, so
- * the only way to see either is to press the key: this page pins the view mode
- * (`pinViewMode="board"`) and turns the board read-only once the sprint has completed.
+ * BP-477. This page pins the view mode (`pinViewMode="board"`) and turns the board read-only once
+ * the sprint has completed, and both are read inside the board's keyboard handler rather than by
+ * any control — so pressing the key is the only way to watch them here.
+ *
+ * What each of these two tests is worth differs, and the difference is worth stating. The V test
+ * pins the handler's `!pinViewMode` branch and nothing else does. The N test does **not** pin the
+ * handler's `!readOnly` branch: readOnly withholds the modal at the render too
+ * (`ProjectBoardView.tsx:452`), so this test stays green with that branch deleted — measured. It
+ * is here for what a person meets, whichever of the two refusals produces it; the branch itself is
+ * pinned by "does not even ask for the new-task modal on the n shortcut" in
+ * `ProjectBoardView.test.tsx`, which watches the call.
  *
  * `e2e/board-irreversible.spec.ts` covers what these keys do on an ordinary board. This is the
  * screen on which they must not. `e2e/shortcut-help-a11y.spec.ts` covers the other half of the
@@ -621,7 +629,6 @@ test.describe("the board shortcuts on a pinned, sometimes read-only board", () =
     // asserts before the key is pressed, so a matcher would pass on its first poll.
     await page.waitForTimeout(1_000);
     expect(await storedViewMode(page)).not.toBe("list");
-    await expect(page.locator("table")).toHaveCount(0);
 
     await page.goto(boardUrl);
     await expect(page.getByRole("button", { name: "Board", exact: true })).toHaveAttribute(

@@ -961,36 +961,59 @@ test.describe("keyboard", () => {
   });
 
   /**
-   * BP-477. The handler's first line returns for an `INPUT`, `TEXTAREA` or `SELECT` target, and
-   * the search box is the field a person meets on this screen — type "review?" into it and every
-   * letter is a shortcut waiting to fire.
+   * BP-477. The handler's first line returns for an `INPUT`, `TEXTAREA` or `SELECT` target. Two of
+   * the three are reachable on this screen without opening anything, and both are driven here: the
+   * search box and the sort dropdown, drawn inline in the toolbar (`BoardFilters.tsx:397`, `:634`).
+   * The third appears only once a project has the PM chat enabled (`PmChatWidget.tsx:32`), which
+   * this fixture does not; it is pinned in `ProjectBoardView.test.tsx` with the other two.
    *
    * Nothing in the suite could have covered this by accident: `fill()` sets a value without
    * dispatching a key at all, and the three specs that do type character by character are nowhere
-   * near a board. The typed value is what proves the keys were delivered — without it a selector
-   * that found nothing would report the same silence as a working guard.
-   *
-   * Only one of the three tags is reachable on this screen: the board's other fields are inside
-   * layers, which the *next* line of the handler refuses anyway, so a test built on one would pass
-   * with the tag check deleted. The other two are pinned in `ProjectBoardView.test.tsx`.
+   * near a board.
    */
-  test("the shortcuts are inert while the search box has focus", async ({ page }) => {
+  test("the shortcuts are inert while a field has focus", async ({ page }) => {
     await openBoard(page);
-    const search = page.getByPlaceholder(/^Search tasks/);
 
-    for (const key of ["n", "v", "r", "?"]) await search.press(key);
-    await expect(search).toHaveValue("nvr?");
+    await test.step("typed into the search box, the letters type", async () => {
+      const search = page.getByPlaceholder(/^Search tasks/);
+      for (const key of ["n", "v", "r", "?"]) await search.press(key);
 
-    await expect(page.getByRole("dialog", { name: "New Task" })).toHaveCount(0);
-    await expect(page.getByRole("heading", { name: "Keyboard Shortcuts" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Board", exact: true })).toHaveAttribute(
-      "aria-current",
-      "true"
-    );
+      // The typed value is what proves the keys were delivered — without it a selector that found
+      // nothing would report the same silence as a working guard. It is also why nothing settles
+      // here: the box is React-controlled, so a value that has reached the DOM has been through
+      // the render pass a view switch would have been painted in.
+      await expect(search).toHaveValue("nvr?");
+      await expect(page.getByRole("dialog", { name: "New Task" })).toHaveCount(0);
+      await expect(page.getByRole("heading", { name: "Keyboard Shortcuts" })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Board", exact: true })).toHaveAttribute(
+        "aria-current",
+        "true"
+      );
+      await search.fill("");
+    });
 
-    // The control: the same key, once the field no longer has it
-    await search.fill("");
-    await search.blur();
+    await test.step("held by the sort dropdown, they do nothing at all", async () => {
+      const sortBy = page.getByLabel("Sort tasks by");
+      await sortBy.focus();
+      const before = await sortBy.inputValue();
+
+      for (const key of ["n", "v", "r", "?"]) await page.keyboard.press(key);
+
+      // A select has no typed value to watch, so this one settles instead. No option on this
+      // dropdown begins with any of those letters, so the browser's own type-ahead moves nothing
+      // either — the value is a control against the keys having gone somewhere else entirely.
+      await page.waitForTimeout(1_000);
+      expect(await sortBy.inputValue()).toBe(before);
+      await expect(page.getByRole("dialog", { name: "New Task" })).toHaveCount(0);
+      await expect(page.getByRole("heading", { name: "Keyboard Shortcuts" })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Board", exact: true })).toHaveAttribute(
+        "aria-current",
+        "true"
+      );
+    });
+
+    // The control for both: the same key, with no field holding it
+    await page.getByRole("heading", { name: PROJECT_NAME }).click();
     await page.keyboard.press("?");
     await expect(page.getByRole("heading", { name: "Keyboard Shortcuts" })).toBeVisible();
   });
