@@ -7,26 +7,33 @@ or "EE", is not licensed under the GNU Affero General Public License that
 covers the rest of this repository. The LICENSE file in the repository root
 does not apply to any file under src/ee/.
 
-1. Permitted use. Subject to these terms you may view, copy, modify and run
-   the EE source code, only as part of Board Planner and only for as long as
-   you, or the organisation whose Board Planner instance you run, hold a
+1. Source access. The EE source code is published alongside the rest of
+   Board Planner. You may view it, clone and copy it as part of the Board
+   Planner repository or a Board Planner build, and modify it. Nothing in
+   this licence requires a subscription to read or build the code.
+
+2. Production use. EE functionality may be run in production, or otherwise
+   used for its purpose, only by a person or organisation that holds a
    valid Board Planner subscription or licence key issued by the copyright
-   holder. Trial keys count as valid for their stated period.
+   holder, and only while it is valid. Trial keys count as valid for their
+   stated period. Any modification of the EE code may likewise be used,
+   run, distributed or otherwise exploited only under a valid subscription
+   or licence key.
 
-2. Not permitted. You may not run EE functionality without a valid
-   subscription or licence key; disable, bypass or alter the licence check
-   in order to enable EE functionality; remove or alter this notice or the
-   licence header of any EE file; or sublicense, sell, rent, lease, publish,
-   distribute or offer the EE source code or any modification of it to
-   third parties, including as a hosted service, except as the copyright
-   holder permits in writing.
+3. Not permitted. You may not disable, bypass or alter the licence check in
+   order to enable EE functionality without a valid subscription or licence
+   key; remove or alter this notice or the licence header of any EE source
+   file; distribute the EE source code or a modification of it other than
+   as part of Board Planner; or offer EE functionality to third parties,
+   including as a hosted service, without a subscription or licence key
+   that covers that use.
 
-3. Contributions. Changes to this directory are not accepted from outside
+4. Contributions. Changes to this directory are not accepted from outside
    contributors. See CONTRIBUTING.md.
 
-4. Third-party components used by EE code keep their own licences.
+5. Third-party components used by EE code keep their own licences.
 
-5. No warranty. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
+6. No warranty. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
    KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
    IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES
@@ -34,6 +41,6 @@ does not apply to any file under src/ee/.
    ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
    OTHER DEALINGS IN THE SOFTWARE.
 
-6. The version of this licence that accompanies a release governs that
+7. The version of this licence that accompanies a release governs that
    release. If any part of it is found unenforceable, the rest stays in
    force. Polish law applies.

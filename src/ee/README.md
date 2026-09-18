@@ -6,7 +6,7 @@ or licence key.
 
 The boundary is enforced two ways:
 
-- `src/ee/ee-boundary.test.ts` fails if any `.ts` or `.tsx` file here does not begin with the
+- `src/ee/ee-boundary.test.ts` fails if any `.ts` or `.tsx` source file here (tests excluded) does not begin with the
   header line below, or if either LICENSE file goes missing.
 - Outside pull requests that touch this directory are closed. See [CONTRIBUTING.md](../../CONTRIBUTING.md).
 

@@ -1,8 +1,9 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-const ROOT = process.cwd();
+const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const EE = join(ROOT, "src", "ee");
 const HEADER =
   "// Copyright (c) 2026 Rafał Podleś. Licensed under the Board Planner Enterprise Edition Licence, see src/ee/LICENSE.";
@@ -32,7 +33,7 @@ describe("the licence boundary", () => {
 
   it("every source file under src/ee opens with the EE header", () => {
     for (const file of sourceFiles(EE)) {
-      const firstLine = readFileSync(file, "utf8").split("\n", 1)[0];
+      const firstLine = readFileSync(file, "utf8").split(/\r?\n/, 1)[0];
       expect(firstLine, file).toBe(HEADER);
     }
   });

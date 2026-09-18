@@ -1,8 +1,8 @@
 name: Outside contributions
 
 # Two rules from CONTRIBUTING.md, checked only on pull requests from forks: the owner holds the
-# copyright already, so a sign-off from the owner certifies nothing, and the owner is the one
-# person allowed to change src/ee/
+# copyright already, so a sign-off from the owner certifies nothing, and pull requests from this
+# repository are the only ones that may change src/ee/
 on:
   pull_request:
 
@@ -15,11 +15,13 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      # Merge commits are skipped, as the DCO app does: GitHub's "Update branch" creates one in the
+      # contributor's name with no sign-off and no way to add one after the fact
       - name: Every commit carries a Developer Certificate of Origin sign-off
         run: |
-          git fetch --quiet origin "${{ github.event.pull_request.base.sha }}"
+          commits=$(git rev-list --no-merges "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}")
           unsigned=0
-          for commit in $(git rev-list "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"); do
+          for commit in $commits; do
             if ! git log -1 --format=%B "$commit" | grep -q '^Signed-off-by: .* <.*>$'; then
               echo "::error::commit $commit has no Signed-off-by line — commit with git commit -s (see CONTRIBUTING.md)"
               unsigned=1
