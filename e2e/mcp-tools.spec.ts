@@ -733,6 +733,19 @@ test("link_tasks builds a parent and its child, and unlink_tasks takes it apart"
   await expect(page.getByRole("heading", { name: "Parent", level: 4 })).toBeVisible();
   await expect(page.getByText(HELD_TASK_KEY, { exact: true })).toBeVisible();
 
+  // The link is stored on the parent, so asking from the child's end removes nothing — and the
+  // route would still answer "Dependency removed". The refusal is the tool's, and it has to leave
+  // the link standing.
+  const fromTheWrongEnd = await session.callTool("unlink_tasks", {
+    taskKey: SIBLING_TASK_KEY,
+    targetTaskKey: HELD_TASK_KEY,
+    type: "parent_of",
+  });
+  refused(fromTheWrongEnd);
+  expect(fromTheWrongEnd.text).toContain(`${HELD_TASK_KEY} holds that parent_of link`);
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Parent", level: 4 })).toBeVisible();
+
   const unlinked = await session.callTool("unlink_tasks", {
     taskKey: HELD_TASK_KEY,
     targetTaskKey: SIBLING_TASK_KEY,

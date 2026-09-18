@@ -298,7 +298,14 @@ describe("link_tasks and unlink_tasks", () => {
     expect(add).toHaveBeenCalledWith("p1", "epic", "child", "parent_of");
   });
 
-  it("removes the link the same way", async () => {
+  // The route's DELETE is a $pull that answers "Dependency removed" whether or not anything
+  // matched, so every one of these is about the tool refusing to relay a success it cannot see
+  function ends(task: Record<string, unknown>) {
+    vi.spyOn(PlannerClient.prototype, "getTask").mockResolvedValue(task);
+  }
+
+  it("removes the link the end really holds", async () => {
+    ends({ relations: [{ task: { _id: "child" }, type: "parent_of" }] });
     const remove = vi.spyOn(PlannerClient.prototype, "removeTaskLink").mockResolvedValue({});
 
     await registered()
@@ -306,6 +313,66 @@ describe("link_tasks and unlink_tasks", () => {
       .handler({ taskKey: "BP-644", targetTaskKey: "BP-649", type: "parent_of" }, extra);
 
     expect(remove).toHaveBeenCalledWith("p1", "epic", "child", "parent_of");
+  });
+
+  it("sends the caller to the other end when that is where the link is stored", async () => {
+    ends({ relatedFrom: [{ task: { _id: "child" }, type: "relates" }] });
+    const remove = vi.spyOn(PlannerClient.prototype, "removeTaskLink").mockResolvedValue({});
+
+    await expect(
+      registered()
+        .get("unlink_tasks")!
+        .handler({ taskKey: "BP-644", targetTaskKey: "BP-649", type: "relates" }, extra)
+    ).rejects.toThrow(/BP-649 holds that relates link, not BP-644/);
+
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("refuses a link neither end holds rather than reporting a removal", async () => {
+    ends({ relations: [], relatedFrom: [], blockedBy: [], blocking: [] });
+    const remove = vi.spyOn(PlannerClient.prototype, "removeTaskLink").mockResolvedValue({});
+
+    await expect(
+      registered()
+        .get("unlink_tasks")!
+        .handler({ taskKey: "BP-644", targetTaskKey: "BP-649", type: "duplicates" }, extra)
+    ).rejects.toThrow(/Neither BP-644 nor BP-649 holds a duplicates link/);
+
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  // blocked_by lives in its own array, so the near and far ends are different fields from the
+  // three that share `relations` — a helper that only read those would pass every test above
+  it("reads blocked_by from its own array, at both ends", async () => {
+    ends({ blockedBy: [{ _id: "child" }] });
+    const remove = vi.spyOn(PlannerClient.prototype, "removeTaskLink").mockResolvedValue({});
+
+    await registered()
+      .get("unlink_tasks")!
+      .handler({ taskKey: "BP-644", targetTaskKey: "BP-649", type: "blocked_by" }, extra);
+    expect(remove).toHaveBeenCalledWith("p1", "epic", "child", "blocked_by");
+
+    ends({ blocking: [{ _id: "child" }] });
+    await expect(
+      registered()
+        .get("unlink_tasks")!
+        .handler({ taskKey: "BP-644", targetTaskKey: "BP-649", type: "blocked_by" }, extra)
+    ).rejects.toThrow(/BP-649 holds that blocked_by link/);
+  });
+
+  // The types share the `relations` array, so a check that ignored the type would remove the wrong
+  // link and call it the right one
+  it("will not take a relates link off an end that holds a duplicates one", async () => {
+    ends({ relations: [{ task: { _id: "child" }, type: "duplicates" }] });
+    const remove = vi.spyOn(PlannerClient.prototype, "removeTaskLink").mockResolvedValue({});
+
+    await expect(
+      registered()
+        .get("unlink_tasks")!
+        .handler({ taskKey: "BP-644", targetTaskKey: "BP-649", type: "relates" }, extra)
+    ).rejects.toThrow(/Neither BP-644 nor BP-649 holds a relates link/);
+
+    expect(remove).not.toHaveBeenCalled();
   });
 
   // The route looks the far end up by `{ _id, project }`, so this pair would come back "Task not
@@ -342,6 +409,8 @@ describe("link_tasks and unlink_tasks", () => {
     const refusal = schema.safeParse({ taskKey: "BP-1", blockedBy: ["BP-2"] });
 
     expect(refusal.success).toBe(false);
-    expect(refusal.error!.issues[0].message).toContain('"blockedBy" — use the link_tasks tool');
+    expect(refusal.error!.issues[0].message).toContain(
+      '"blockedBy" — use the link_tasks tool on /api/mcp'
+    );
   });
 });
