@@ -6,6 +6,8 @@
 # next.js
 /.next/
 /out/
+# BP-409's proxied e2e server, a second `next dev` against a distDir of its own
+/.next-proxied/
 
 # production
 /build

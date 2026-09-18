@@ -203,6 +203,11 @@ jobs:
         if: steps.browser-cache.outputs.cache-hit == 'true'
 
       - name: Tests
+        env:
+          # Only the job that owns proxied-login-throttle.spec.ts pays for the second dev server —
+          # see RUN_PROXIED_SERVER in playwright.config.ts. Every other group leaves this unset and
+          # gets exactly the servers it already started (BP-409).
+          E2E_PROXIED_SERVER: ${{ matrix.group == 'people' && '1' || '' }}
         run: npx playwright test --project=${{ matrix.group }}
 
       # The trace is the only way to see what the page looked like when a run fails on a machine

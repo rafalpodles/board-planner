@@ -12,6 +12,11 @@ const nextConfig: NextConfig = {
   // Only the Docker build asks for the minimal server, and it runs it directly.
   output: process.env.BUILD_STANDALONE ? "standalone" : undefined,
 
+  // Lets a second `next dev` run against this same checkout without the two racing on one
+  // `.next` (BP-409: the proxied-throttle e2e server runs alongside the suite's main dev server).
+  // Unset, this is exactly Next's own default, so every other run is untouched.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
+
   // CP-160 moved these under /settings; the old paths are in bookmarks and browser history
   async redirects() {
     return [
