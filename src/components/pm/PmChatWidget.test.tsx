@@ -261,6 +261,15 @@ describe("the chat's own keyboard", () => {
     expect(screen.queryByTestId("pm-chat-panel")).not.toBeNull();
   });
 
+  // Mid-composition in an IME — Japanese, Chinese, Korean — Escape cancels the candidate window
+  // and belongs to the field. Without this the chat would close on a keystroke that was never
+  // about the chat, taking what was being composed with it.
+  it("ignores an Escape that is cancelling an IME composition", async () => {
+    const panel = await open();
+    fireEvent.keyDown(panel, { key: "Escape", isComposing: true });
+    expect(screen.queryByTestId("pm-chat-panel")).not.toBeNull();
+  });
+
   it("hands the focus back when the panel's own close button is used", async () => {
     await open();
     const closeButton = screen

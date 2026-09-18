@@ -43,12 +43,17 @@ export function PmChatWidget() {
     // Mid-composition — Japanese, Chinese, Korean — Escape cancels the IME's candidate window and
     // belongs to the field, not to the panel
     if (e.nativeEvent.isComposing) return;
-    // The board's handler listens on `document`, and so does React's delegate — so this key
-    // reaches the board after this handler has run, by which time `open` is false and the marker
-    // that would have told the board to keep its hands off is gone from the launcher. Measured as
-    // an outcome rather than reasoned about: without this line, Escape pressed on the launcher
-    // closed the chat AND cleared the board's selection behind it. `stopPropagation` is not enough
-    // — it does not stop another listener on the same node.
+    // keydown is a discrete event, so React flushes this state change synchronously inside its own
+    // listener — and the board's handler listens on `document`, the same node React delegates
+    // from, registered after it. By the time the board looks, `open` is false and the marker that
+    // would have told it to keep its hands off is gone from the launcher. Measured in a real
+    // browser on React 19: without this line, Escape on the launcher closed the chat AND cleared
+    // the board's selection behind it. `stopPropagation` would not help — the flush outruns the
+    // rest of the propagation too, and it does not stop a listener on the same node either.
+    //
+    // Do not try to pin this with a unit test: RTL sets `IS_REACT_ACT_ENVIRONMENT`, which defers
+    // the flush instead, so the probe comes out backwards and green on a false claim. The e2e is
+    // the only honest home for it.
     e.nativeEvent.stopImmediatePropagation();
     closePanel();
   };
@@ -92,7 +97,9 @@ export function PmChatWidget() {
           // panel, so anything clicked in here leaves the focus in here
           tabIndex={-1}
           // The keyboard inside the panel is the panel's, so the board's shortcuts do not fire
-          // behind it (BP-654)
+          // behind it (BP-654). On the panel itself rather than on a wrapper, deliberately: after
+          // Escape unmounts it, the board still reads `closest()` on the detached target and finds
+          // the marker there — from a wrapper it would find nothing.
           {...{ [OWNS_ITS_KEYS]: "" }}
           onKeyDown={dismissOnEscape}
           // Says the bottom-right corner is taken, the way the bars say the bottom strip is. The
