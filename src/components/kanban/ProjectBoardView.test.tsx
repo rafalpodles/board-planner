@@ -132,16 +132,12 @@ describe("A read-only ProjectBoardView's other write paths", () => {
     expect(screen.getByRole("button", { name: /^Select/ })).toBeTruthy();
   });
 
-  it("does not open the new-task modal on the n shortcut", () => {
-    render(<ProjectBoardView board={makeBoard({ tasks })} readOnly />);
-    fireEvent.keyDown(document, { key: "n" });
-    expect(screen.queryByRole("heading", { name: "New Task" })).toBeNull();
-  });
-
   /**
-   * Watching the modal is not enough: readOnly withholds it at the render as well, so this stays
-   * green with the handler's own `!readOnly` deleted — measured, not reasoned about. The call is
-   * the only thing that tells the two refusals apart.
+   * The call rather than the modal: readOnly withholds the modal at the render too, so an
+   * assertion that only looks for it stays green with the handler's own `!readOnly` deleted.
+   * A test that did exactly that stood here and was removed with this one's arrival — measured,
+   * not reasoned about: no single mutation could turn it red, the render gate included, which
+   * "never mounts the new-task modal, even if showNewTask is already true" pins on its own.
    */
   it("does not even ask for the new-task modal on the n shortcut", () => {
     const setShowNewTask = vi.fn();
