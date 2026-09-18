@@ -253,8 +253,9 @@ describe("ProjectBoardView and a surface that owns its keys", () => {
   it("fires no shortcut from inside one", () => {
     const setShowNewTask = vi.fn();
     const setViewMode = vi.fn();
+    const reload = vi.fn();
     const { container } = render(
-      <ProjectBoardView board={makeBoard({ tasks, setShowNewTask, setViewMode })} />
+      <ProjectBoardView board={makeBoard({ tasks, setShowNewTask, setViewMode, reload })} />
     );
     const panel = container.appendChild(document.createElement("div"));
     panel.setAttribute(OWNS_ITS_KEYS, "");
@@ -264,6 +265,8 @@ describe("ProjectBoardView and a surface that owns its keys", () => {
 
     expect(setShowNewTask).not.toHaveBeenCalled();
     expect(setViewMode).not.toHaveBeenCalled();
+    // `r` is in the loop above, so it is asserted here rather than left as a key nobody watches
+    expect(reload).not.toHaveBeenCalled();
     expect(screen.queryByRole("heading", { name: "Keyboard Shortcuts" })).toBeNull();
   });
 

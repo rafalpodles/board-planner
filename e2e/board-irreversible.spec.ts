@@ -1,4 +1,11 @@
-import { test, expect, type APIRequestContext, type Locator, type Page } from "@playwright/test";
+import {
+  test,
+  expect,
+  type APIRequestContext,
+  type Locator,
+  type Page,
+  type Response,
+} from "@playwright/test";
 import { ADMIN_AUTH } from "./api";
 import {
   DECOY_TASK_ID,
@@ -990,37 +997,34 @@ test.describe("keyboard", () => {
       await expect(page.getByRole("dialog", { name: "New Task" })).toHaveCount(0);
     });
 
-    await test.step("v and n do nothing after a click that lands on nothing focusable", async () => {
+    await test.step("v, r and n do nothing after a click that lands on nothing focusable", async () => {
       // The case the first version of this fix got wrong, and the one the bug was reported from:
       // the header is not focusable, so without the panel's own `tabIndex={-1}` this click leaves
       // the focus outside the panel and every key below is read as the board's again
       await page.locator("[data-corner-panel-header] p").click();
       await expect(panel).toBeFocused();
 
+      // `r` goes first, and the order is load-bearing: `n` opens NewTaskModal, which *is* a
+      // registered layer, and the layer rule one line further down would then swallow `r` in a
+      // broken build — so this assertion would pass for a reason that has nothing to do with the
+      // guard under test. The window opens on a poll that has just landed: `usePollWhileVisible`
+      // is a fixed 10s interval, so the next request is ~10s minus latency away, and 2s of
+      // silence inside that gap means the key did nothing.
+      const tasksRead = (res: Response) =>
+        res.request().method() === "GET" && /\/api\/projects\/[^/]+\/tasks(\?|$)/.test(res.url());
+      await page.waitForResponse(tasksRead);
+      const reloaded = page
+        .waitForResponse(tasksRead, { timeout: 2_000 })
+        .then(() => "read")
+        .catch(() => "silent");
+      await page.keyboard.press("r");
+      expect(await reloaded).toBe("silent");
+
       await page.keyboard.press("v");
       await page.keyboard.press("n");
       await page.waitForTimeout(1_000);
       await expect(page.locator("table")).toHaveCount(0);
       await expect(page.getByRole("dialog", { name: "New Task" })).toHaveCount(0);
-    });
-
-    await test.step("nor does r, measured against the poll rather than assumed", async () => {
-      // The board polls every 10s and a poll's GET is indistinguishable from the one `r` causes,
-      // so the window is opened immediately after a poll has just landed: the next one is ~8s
-      // away, and 2s of silence inside it means the key did nothing.
-      await page.waitForResponse(
-        (res) => res.request().method() === "GET" && /\/api\/projects\/[^/]+\/tasks$/.test(res.url())
-      );
-      const reloaded = page
-        .waitForResponse(
-          (res) =>
-            res.request().method() === "GET" && /\/api\/projects\/[^/]+\/tasks$/.test(res.url()),
-          { timeout: 2_000 }
-        )
-        .then(() => "read")
-        .catch(() => "silent");
-      await page.keyboard.press("r");
-      expect(await reloaded).toBe("silent");
     });
 
     await test.step("Escape closes the chat, and the selection survives it", async () => {

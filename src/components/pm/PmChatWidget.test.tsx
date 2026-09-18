@@ -161,9 +161,12 @@ describe("where the PM launcher is painted", () => {
  * what actually makes the subtree rule hold.
  */
 describe("the chat's own keyboard", () => {
-  /** Once the panel is open the launcher relabels itself, and the panel's own ✕ takes the name it
-   *  had — so it is read back by the attribute only it carries. */
-  const fab = () => document.querySelector("[data-corner-obstacle]") as HTMLElement;
+  /** The launcher relabels itself as the panel opens and closes, and the panel's own ✕ borrows the
+   *  same name while it is open — so it is the one of the two that is not inside the panel. */
+  const fab = () =>
+    screen
+      .getAllByRole("button", { name: /PM chat$/ })
+      .find((el) => !el.closest('[data-testid="pm-chat-panel"]'))!;
 
   async function open() {
     render(<PmChatWidget />);
