@@ -1004,10 +1004,11 @@ test.describe("keyboard", () => {
       await page.locator("[data-corner-panel-header] p").click();
       await expect(panel).toBeFocused();
 
-      // `r` goes first, and the order is load-bearing: `n` opens NewTaskModal, which *is* a
-      // registered layer, and the layer rule one line further down would then swallow `r` in a
-      // broken build — so this assertion would pass for a reason that has nothing to do with the
-      // guard under test. The window opens on a poll that has just landed: `usePollWhileVisible`
+      // `r` goes first so that no modal this step opens can be what silences it. What actually
+      // stops a broken build reaching here is the step above — its `n` opens NewTaskModal, and the
+      // click at the top of this step then times out on the overlay — so the order is insurance
+      // for the day that changes, not today's guard. Measured both ways by a reviewer.
+      // The window opens on a poll that has just landed: `usePollWhileVisible`
       // is a fixed 10s interval, so the next request is ~10s minus latency away, and 2s of
       // silence inside that gap means the key did nothing.
       const tasksRead = (res: Response) =>

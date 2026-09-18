@@ -241,11 +241,35 @@ describe("the chat's own keyboard", () => {
     expect(screen.queryByTestId("pm-chat-panel")).not.toBeNull();
   });
 
-  // Escape is the only key the chat answers; the page behind it is still a page, and what keeps
-  // the board's own handler off these is `ownsItsKeys`, not this component
-  it("answers no other key", async () => {
+  /**
+   * Escape is the only key the chat answers. What keeps the board's own handler off the others is
+   * `ownsItsKeys`, not this component — so they must still travel, and the panel must still be
+   * there afterwards. The stop this component does perform is asserted nowhere here on purpose:
+   * under RTL the React root is a div below `body`, so a test watching `document` would measure
+   * the environment rather than the app, which is how an earlier version of this test lied.
+   */
+  it("answers no key but Escape, and swallows none of them", async () => {
     const panel = await open();
+    const seen: string[] = [];
+    const listen = (e: KeyboardEvent) => seen.push(e.key);
+    document.addEventListener("keydown", listen);
+
     for (const key of ["v", "r", "n", "?"]) fireEvent.keyDown(panel, { key });
+
+    document.removeEventListener("keydown", listen);
+    expect(seen).toEqual(["v", "r", "n", "?"]);
     expect(screen.queryByTestId("pm-chat-panel")).not.toBeNull();
+  });
+
+  it("hands the focus back when the panel's own close button is used", async () => {
+    await open();
+    const closeButton = screen
+      .getAllByRole("button", { name: "Close PM chat" })
+      .find((el) => el.closest('[data-testid="pm-chat-panel"]'))!;
+
+    fireEvent.click(closeButton);
+
+    expect(screen.queryByTestId("pm-chat-panel")).toBeNull();
+    expect(document.activeElement).toBe(fab());
   });
 });
