@@ -34,8 +34,11 @@ describe("the standalone MCP client does not drift from PlannerClient", () => {
 
   // Guards the guard. A scan that stops seeing anything goes quiet rather than failing, which is
   // precisely how the check below was broken while looking healthy.
+  // The floor tracks what the file really has (23 at the time of writing, up from 11 when this was
+  // written against a smaller client). Left at 11 it would have gone on passing with the regex
+  // blind to two thirds of the paths — the exact failure the comment above describes.
   it("can actually see the interpolated segments", () => {
-    expect(pathExpressions().flatMap(interpolationsIn).length).toBeGreaterThanOrEqual(11);
+    expect(pathExpressions().flatMap(interpolationsIn).length).toBeGreaterThanOrEqual(23);
   });
 
   // `${query}` is an already-built query string appended after the path, not a segment

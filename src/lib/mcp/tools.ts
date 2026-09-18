@@ -364,9 +364,12 @@ export function registerPlannerTools(server: McpServer): void {
   const LINK_DIRECTION =
     "`type` reads from taskKey's side: blocked_by means taskKey is blocked by targetTaskKey; " +
     "parent_of means taskKey is the parent and targetTaskKey the child, which is how an epic gets " +
-    "sub-tasks instead of a checklist. relates and duplicates mean the same thing read either way, " +
-    "but they are still stored on one end, so which task you name decides which task's page can " +
-    "remove it again.";
+    "sub-tasks instead of a checklist; duplicates means taskKey is the duplicate of targetTaskKey, " +
+    "and the two ends read differently — the far task's page says Duplicated by and offers no way " +
+    "to remove it. Only relates means the same read either way, and even that is stored on one " +
+    "end, so which task you name decides whose page can remove it again.";
+
+  const LINK_TYPE_PARAM = "Which kind of link, read from taskKey's side — see the description.";
 
   server.registerTool(
     "link_tasks",
@@ -385,7 +388,7 @@ export function registerPlannerTools(server: McpServer): void {
       inputSchema: strictInput({
         taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
         targetTaskKey: z.string().describe("The task at the other end (e.g. 'CP-2')"),
-        type: z.enum(DEPENDENCY_TYPES).describe(LINK_DIRECTION),
+        type: z.enum(DEPENDENCY_TYPES).describe(LINK_TYPE_PARAM),
       }, { writes: true }),
     },
     async ({ taskKey, targetTaskKey, type }, extra) => {
@@ -402,11 +405,12 @@ export function registerPlannerTools(server: McpServer): void {
         "Remove a link between two tasks. It removes the link stored on taskKey's side, so the " +
         "arguments have to name the end that holds it and the type it holds — get_task lists " +
         "both. A call that names a link this end does not hold is refused rather than answered " +
-        "as a removal, and says which end holds it instead.",
+        "as a removal, and says which end holds it instead — so removing the same link twice " +
+        "refuses the second time rather than passing quietly.",
       inputSchema: strictInput({
         taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
         targetTaskKey: z.string().describe("The task at the other end (e.g. 'CP-2')"),
-        type: z.enum(DEPENDENCY_TYPES).describe(LINK_DIRECTION),
+        type: z.enum(DEPENDENCY_TYPES).describe(LINK_TYPE_PARAM),
       }, { writes: true }),
     },
     async ({ taskKey, targetTaskKey, type }, extra) => {
