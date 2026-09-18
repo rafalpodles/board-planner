@@ -2,6 +2,7 @@ import { expect, type Page } from "@playwright/test";
 import mongoose from "mongoose";
 import { SMTP_STUB_CONTROL_URL } from "../playwright.config";
 import { E2E_MONGODB_URI, PROJECT_KEY } from "./seed";
+import { type StubMessage } from "./mailbox";
 
 /**
  * What two specs need in common to drive the notification grid to a delivery: the mailbox the stub
@@ -11,12 +12,6 @@ import { E2E_MONGODB_URI, PROJECT_KEY } from "./seed";
  * exists in the shape it does to stop an assertion passing for the wrong reason, and a second copy
  * is a copy that can drift from the reason.
  */
-
-export interface StubMessage {
-  from: string;
-  to: string[];
-  data: string;
-}
 
 export async function db() {
   if (mongoose.connection.readyState === 0) await mongoose.connect(E2E_MONGODB_URI);
@@ -32,16 +27,6 @@ export async function mail(): Promise<StubMessage[]> {
 
 export async function clearTheMailbox() {
   await fetch(`${SMTP_STUB_CONTROL_URL}/reset`, { method: "POST" });
-}
-
-/**
- * A message's body as it was written, with quoted-printable's soft line breaks and `=3D` undone.
- *
- * Anything asserted against the raw `data` is asserted against the encoder: a line over 76
- * characters is folded with a trailing `=`, which can fall inside a task key or a URL.
- */
-export function bodyOf(message: StubMessage): string {
-  return message.data.replace(/=\r?\n/g, "").replace(/=3D/g, "=");
 }
 
 /**

@@ -24,7 +24,9 @@ const { POST } = await import("./route");
 describe("POST /api/e2e/digest", () => {
   beforeEach(() => {
     digestTick.mockClear();
-    mounted.mockClear();
+    // Reset rather than clear: a later test that forgets to set an answer should find `undefined`
+    // and fail loudly, not inherit the open gate from the test above it (BP-605 review).
+    mounted.mockReset();
   });
   afterEach(() => delete process.env.E2E);
 
@@ -59,6 +61,7 @@ describe("POST /api/e2e/digest", () => {
 
     await POST();
 
+    expect(mounted).toHaveBeenCalledTimes(1);
     expect(mounted).toHaveBeenCalledWith(process.env.E2E, process.env.NODE_ENV);
   });
 });

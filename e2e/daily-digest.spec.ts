@@ -12,9 +12,9 @@ import {
   seedBoardFeedBystander,
 } from "./seed";
 import { signIn as arriveSignedIn, signInThroughForm } from "./session";
+import { bodyOf, type StubMessage } from "./mailbox";
 import {
   assignANewTask,
-  bodyOf,
   clearTheMailbox,
   db,
   dispatchHasRun,
@@ -22,7 +22,6 @@ import {
   giveThemMailboxes,
   mail,
   setGlobalCell,
-  type StubMessage,
 } from "./notification-grid";
 
 /**
