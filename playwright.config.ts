@@ -259,6 +259,23 @@ export default defineConfig({
         SMTP_USER: MAIL_SERVER.user,
         SMTP_PASS: "e2e",
         SMTP_FROM: MAIL_SERVER.from,
+        // Effectively never, for the reason PM_SCHEDULER_TICK_MS is. The digest scheduler starts
+        // with the app whenever mail is configured, which it has been for every run since BP-465,
+        // and at the 5-minute default it has been ticking all run long ever since — reaching the
+        // query on any run after 07:00 Europe/Warsaw, and stopping at `dueDigestDay` before it —
+        // unnoticed, because the message it sends carries each row's own title ("TP-7 assigned to
+        // you") and not the task title every mail assertion in the suite matches on. Measured at a
+        // 3-second tick: `notification-grid-delivery.spec.ts` stays green.
+        //
+        // `daily-digest.spec.ts` is the file that cannot live with it, and that too is measured:
+        // at a 3-second tick both its tests fail, because a background tick claims the day in
+        // `lastDigestDay` before the spec asks for one and the trigger then answers "sent 0".
+        // Pinned rather than worked around, so the suite has one digest and the spec asked for it.
+        DIGEST_TICK_MS: String(24 * 60 * 60 * 1000),
+        // Midnight, so a tick that is asked for is due whatever hour CI runs at. The default is
+        // 07:00 Europe/Warsaw and `dueDigestDay` answers null before it, which would make the
+        // digest spec pass or fail by the clock on the wall.
+        DIGEST_HOUR: "0",
         // For the stub's throwaway certificate, and for nothing else: `email.ts` sets `requireTLS`
         // on every port but 465, so the stub has to offer STARTTLS and this run has to accept a
         // certificate no authority signed.
@@ -267,9 +284,12 @@ export default defineConfig({
         // notification grid offers. Without it those routes answer 503 and the specs that drive
         // them assert a refusal instead of the encryption they exist to prove.
         ENCRYPTION_KEY: "e2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee",
-        // Turns off Next's dev indicator, which paints over the bottom-left of every page and
-        // takes a real click meant for a bottom sheet's action row (BP-589). Only here: a
-        // developer running `next dev` by hand keeps it.
+        // Two things now, and the second is not cosmetic. It turns off Next's dev indicator, which
+        // paints over the bottom-left of every page and takes a real click meant for a bottom
+        // sheet's action row (BP-589) — and it mounts `POST /api/e2e/digest`, which runs a digest
+        // tick with nothing authenticating it (`src/lib/e2e-only.ts`, BP-605). So this is not a
+        // variable to set on a deployment to quieten the indicator: outside a production build it
+        // opens that route too. Only here; a developer running `next dev` by hand keeps both.
         E2E: "1",
       },
     },

@@ -5,6 +5,8 @@ const nextConfig: NextConfig = {
   // bottom sheet puts a left-aligned action row: a real click there lands on the indicator, and
   // the suite runs `next dev`, not `next start` (BP-589). Withheld from the suite only — a
   // developer keeps the indicator and the DevTools entry point it carries.
+  // `E2E` is not only cosmetic: outside a production build it also mounts POST /api/e2e/digest,
+  // which runs a digest tick with nothing authenticating it (`src/lib/e2e-only.ts`, BP-605)
   ...(process.env.E2E === "1" ? { devIndicators: false as const } : {}),
   // Next refuses to support `next start` against standalone output, and Railway deploys that way.
   // Only the Docker build asks for the minimal server, and it runs it directly.

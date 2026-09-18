@@ -116,6 +116,7 @@ export const GROUPS = {
     "in-app-notifications.spec.ts",
     "board-feed-notifications.spec.ts",
     "notification-grid-delivery.spec.ts",
+    "daily-digest.spec.ts",
     "pm-chat.spec.ts",
     "pm-trust-boundary.spec.ts",
     "pm-assignment-is-a-handover.spec.ts",
