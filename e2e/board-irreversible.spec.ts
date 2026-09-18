@@ -1,4 +1,11 @@
-import { test, expect, type APIRequestContext, type Locator, type Page } from "@playwright/test";
+import {
+  test,
+  expect,
+  type APIRequestContext,
+  type Locator,
+  type Page,
+  type Response,
+} from "@playwright/test";
 import { ADMIN_AUTH } from "./api";
 import {
   DECOY_TASK_ID,
@@ -958,6 +965,98 @@ test.describe("keyboard", () => {
     const focused = await focusedRowTaskNumber(page);
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(new RegExp(`${taskUrl(focused)}$`));
+  });
+
+  /**
+   * BP-654. The PM chat is on screen without being a layer — deliberately, so the board underneath
+   * stays usable — and `openLayerCount()` therefore does not see it. Measured before the fix, on
+   * production code: with the chat open, `n` opened New Task over it and Escape cleared the board's
+   * selection while the chat stayed put, which is a person losing a selection they cannot see go.
+   *
+   * The tag guard BP-477 pinned never applied here: the focus after clicking the launcher was on
+   * the launcher, and clicking the panel's header lands on nothing focusable at all. Two separate
+   * parts of the fix answer those two paths, so both are driven below — the first version of this
+   * test only drove one of them, and a mutation proved it by staying green.
+   */
+  test("the chat owns its keys, and Escape dismisses it rather than the board's selection", async ({
+    page,
+  }) => {
+    await openBoard(page);
+    await select(page, [SIBLING_TASK_NUMBER]);
+
+    await page.getByRole("button", { name: "Open PM chat" }).click();
+    const panel = page.getByTestId("pm-chat-panel");
+    await expect(panel).toBeVisible();
+
+    // Straight after opening, with nothing clicked inside it: this is the panel's focus-on-open,
+    // and without it the focus sits on the launcher, which is the board's
+    await test.step("the panel has the focus, and n does nothing there", async () => {
+      await expect(panel).toBeFocused();
+      await page.keyboard.press("n");
+      await page.waitForTimeout(1_000);
+      await expect(page.getByRole("dialog", { name: "New Task" })).toHaveCount(0);
+    });
+
+    await test.step("v, r and n do nothing after a click that lands on nothing focusable", async () => {
+      // The case the first version of this fix got wrong, and the one the bug was reported from:
+      // the header is not focusable, so without the panel's own `tabIndex={-1}` this click leaves
+      // the focus outside the panel and every key below is read as the board's again
+      await page.locator("[data-corner-panel-header] p").click();
+      await expect(panel).toBeFocused();
+
+      // `r` goes first so that no modal this step opens can be what silences it. What actually
+      // stops a broken build reaching here is the step above — its `n` opens NewTaskModal, and the
+      // click at the top of this step then times out on the overlay — so the order is insurance
+      // for the day that changes, not today's guard. Measured both ways by a reviewer.
+      // The window opens on a poll that has just landed: `usePollWhileVisible`
+      // is a fixed 10s interval, so the next request is ~10s minus latency away, and 2s of
+      // silence inside that gap means the key did nothing.
+      const tasksRead = (res: Response) =>
+        res.request().method() === "GET" && /\/api\/projects\/[^/]+\/tasks(\?|$)/.test(res.url());
+      await page.waitForResponse(tasksRead);
+      const reloaded = page
+        .waitForResponse(tasksRead, { timeout: 2_000 })
+        .then(() => "read")
+        .catch(() => "silent");
+      await page.keyboard.press("r");
+      expect(await reloaded).toBe("silent");
+
+      await page.keyboard.press("v");
+      await page.keyboard.press("n");
+      await page.waitForTimeout(1_000);
+      await expect(page.locator("table")).toHaveCount(0);
+      await expect(page.getByRole("dialog", { name: "New Task" })).toHaveCount(0);
+    });
+
+    // The keyboard way out of the panel, measured by a reviewer on the first version of this fix:
+    // the panel has no focus trap on purpose, so Tab walks out of it onto the launcher, which sits
+    // outside the panel. While the chat is open that button is still the chat's.
+    await test.step("and Tab out of the panel lands somewhere that is still the chat's", async () => {
+      const launcher = page.locator("[data-corner-obstacle]");
+      await expect(async () => {
+        await page.keyboard.press("Tab");
+        await expect(launcher).toBeFocused({ timeout: 250 });
+      }).toPass({ timeout: 5_000 });
+
+      await page.keyboard.press("n");
+      await page.waitForTimeout(1_000);
+      await expect(page.getByRole("dialog", { name: "New Task" })).toHaveCount(0);
+      await expect(panel).toBeVisible();
+    });
+
+    await test.step("Escape closes the chat from there too, and the selection survives it", async () => {
+      await page.keyboard.press("Escape");
+      await expect(panel).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Select (1)" })).toBeVisible();
+    });
+
+    // The control, and a regression the first version of this fix introduced: the focus comes back
+    // to the launcher, which is the board's page again — a shortcut pressed there must land
+    await test.step("and the board has its keys back, on the launcher the focus returned to", async () => {
+      await expect(page.locator("[data-corner-obstacle]")).toBeFocused();
+      await page.keyboard.press("n");
+      await expect(page.getByRole("dialog", { name: "New Task" })).toBeVisible();
+    });
   });
 
   /**

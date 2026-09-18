@@ -4,6 +4,7 @@ import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { ProjectBoardView } from "./ProjectBoardView";
 import { ProjectBoard } from "@/hooks/use-project-board";
 import { ApiProject, ApiTask } from "@/types";
+import { OWNS_ITS_KEYS } from "@/lib/keyboard-scope";
 
 vi.mock("@/hooks/use-api", () => ({
   useApi: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn() }),
@@ -243,6 +244,62 @@ describe("ProjectBoardView's pinViewMode prop", () => {
  * The tag test stands on its own rather than being folded into one shortcut's test: the handler
  * reads the three tags on a single line, and dropping one of them leaves the other two green.
  */
+/**
+ * BP-654. A non-modal panel is on screen without being a layer, so `openLayerCount()` does not see
+ * it and every board shortcut stayed live behind the PM chat. The rule is the subtree, not the
+ * component: the board asks `ownsItsKeys`, and whatever sets the attribute is answered for.
+ */
+describe("ProjectBoardView and a surface that owns its keys", () => {
+  it("fires no shortcut from inside one", () => {
+    const setShowNewTask = vi.fn();
+    const setViewMode = vi.fn();
+    const reload = vi.fn();
+    const { container } = render(
+      <ProjectBoardView board={makeBoard({ tasks, setShowNewTask, setViewMode, reload })} />
+    );
+    const panel = container.appendChild(document.createElement("div"));
+    panel.setAttribute(OWNS_ITS_KEYS, "");
+    const button = panel.appendChild(document.createElement("button"));
+
+    for (const key of ["v", "r", "n", "?"]) fireEvent.keyDown(button, { key });
+
+    expect(setShowNewTask).not.toHaveBeenCalled();
+    expect(setViewMode).not.toHaveBeenCalled();
+    // `r` is in the loop above, so it is asserted here rather than left as a key nobody watches
+    expect(reload).not.toHaveBeenCalled();
+    expect(screen.queryByRole("heading", { name: "Keyboard Shortcuts" })).toBeNull();
+  });
+
+  // The control, and the point of the whole design: the board keeps its keys while the panel is
+  // open, because the panel is not a layer
+  it("fires them from a button that is not inside one", () => {
+    const setShowNewTask = vi.fn();
+    const { container } = render(
+      <ProjectBoardView board={makeBoard({ tasks, setShowNewTask })} />
+    );
+    const elsewhere = container.appendChild(document.createElement("button"));
+
+    fireEvent.keyDown(elsewhere, { key: "n" });
+
+    expect(setShowNewTask).toHaveBeenCalledWith(true);
+  });
+
+  it("leaves Escape to the board when it was pressed outside one", () => {
+    const setSelectedTasks = vi.fn();
+    const { container } = render(
+      <ProjectBoardView board={makeBoard({ tasks, setSelectedTasks })} />
+    );
+    const panel = container.appendChild(document.createElement("div"));
+    panel.setAttribute(OWNS_ITS_KEYS, "");
+
+    fireEvent.keyDown(panel, { key: "Escape" });
+    expect(setSelectedTasks).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(setSelectedTasks).toHaveBeenCalled();
+  });
+});
+
 describe("ProjectBoardView's typed-field guard", () => {
   for (const tag of ["input", "textarea", "select"] as const) {
     it(`fires no shortcut from a ${tag}`, () => {

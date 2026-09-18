@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/Button";
 import { useToast } from "@/components/ui/Toast";
 import { ShortcutHelp } from "@/components/ui/ShortcutHelp";
 import { openLayerCount } from "@/lib/focus-trap";
+import { ownsItsKeys } from "@/lib/keyboard-scope";
 import { taskPath } from "@/lib/urls";
 import { NewTaskModal } from "@/components/tasks/NewTaskModal";
 
@@ -121,6 +122,12 @@ export function ProjectBoardView({
     function handleKeyDown(e: KeyboardEvent) {
       const tag = (e.target as HTMLElement).tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      // BP-654: a non-modal panel — the PM chat — is on screen without being a layer, so the check
+      // below does not see it. Its own keys are its own; the board's keys, pressed outside it,
+      // still belong to the board, which is the point of the panel not being a layer. Above the
+      // layer rule on purpose, so its `?` exemption does not apply either: the help dialog is the
+      // board's, and a key pressed inside the panel is not.
+      if (ownsItsKeys(e.target)) return;
       // BP-522/BP-543: an open layer owns every key but "?", Escape included — clearing the
       // selection under the bulk-delete confirm used to relabel it "delete 0 tasks" and report
       // success having deleted nothing
