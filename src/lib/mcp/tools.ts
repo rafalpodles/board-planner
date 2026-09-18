@@ -329,7 +329,7 @@ export function registerPlannerTools(server: McpServer): void {
     ]);
     if (from.projectId !== to.projectId) {
       throw new Error(
-        `${taskKey.toUpperCase()} and ${targetTaskKey.toUpperCase()} are on different boards, and a link is only stored within one.`
+        `${echo(taskKey.toUpperCase())} and ${echo(targetTaskKey.toUpperCase())} are on different boards, and a link is only stored within one.`
       );
     }
     return { projectId: from.projectId, taskId: from.taskId, targetTaskId: to.taskId };
@@ -364,7 +364,9 @@ export function registerPlannerTools(server: McpServer): void {
   const LINK_DIRECTION =
     "`type` reads from taskKey's side: blocked_by means taskKey is blocked by targetTaskKey; " +
     "parent_of means taskKey is the parent and targetTaskKey the child, which is how an epic gets " +
-    "sub-tasks instead of a checklist. relates and duplicates carry no direction.";
+    "sub-tasks instead of a checklist. relates and duplicates mean the same thing read either way, " +
+    "but they are still stored on one end, so which task you name decides which task's page can " +
+    "remove it again.";
 
   server.registerTool(
     "link_tasks",
@@ -379,7 +381,7 @@ export function registerPlannerTools(server: McpServer): void {
         "it is the CHILD that moves, and its previous parent loses it without being named in the " +
         "call. Cycles are refused for parent_of and blocked_by, the two types that carry an " +
         "ordering; relates and duplicates have no ordering to close. get_task reads the links " +
-        "back, by task number rather than by key.",
+        "back — as task numbers, not keys, so an agent rebuilds KEY-<n> from the key it already has.",
       inputSchema: strictInput({
         taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
         targetTaskKey: z.string().describe("The task at the other end (e.g. 'CP-2')"),
@@ -411,8 +413,8 @@ export function registerPlannerTools(server: McpServer): void {
       const client = clientFrom(extra);
       const { projectId, taskId, targetTaskId } = await bothEnds(client, taskKey, targetTaskKey);
 
-      const near = taskKey.toUpperCase();
-      const far = targetTaskKey.toUpperCase();
+      const near = echo(taskKey.toUpperCase());
+      const far = echo(targetTaskKey.toUpperCase());
       const held = endHolding(
         (await client.getTask(projectId, taskId)) as TaskEnds,
         targetTaskId,

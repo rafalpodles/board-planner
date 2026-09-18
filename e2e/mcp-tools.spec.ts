@@ -726,12 +726,31 @@ test("link_tasks builds a parent and its child, and unlink_tasks takes it apart"
   await expect(page.getByText(HELD_TASK_TITLE).first()).toBeVisible();
   const children = page.getByRole("heading", { name: "Children", level: 4 });
   await expect(children).toBeVisible();
-  await expect(page.getByText(SIBLING_TASK_KEY, { exact: true })).toBeVisible();
+  // Scoped to the section rather than the page: unscoped, this asserts the page mentions the key
+  // somewhere, which a breadcrumb or a card would satisfy without any link existing
+  await expect(children.locator("..").getByText(SIBLING_TASK_KEY, { exact: true })).toBeVisible();
+
+  // blocked_by is a different array reached down a different branch of the route, and the tool
+  // description promises it stacks with the relations rather than replacing them
+  const alsoBlocked = await session.callTool("link_tasks", {
+    taskKey: HELD_TASK_KEY,
+    targetTaskKey: SIBLING_TASK_KEY,
+    type: "blocked_by",
+  });
+  accepted(alsoBlocked);
+  await page.reload();
+  const blockedBy = page.getByRole("heading", { name: "Blocked by", level: 4 });
+  await expect(blockedBy).toBeVisible();
+  await expect(blockedBy.locator("..").getByText(SIBLING_TASK_KEY, { exact: true })).toBeVisible();
+  await expect(children).toBeVisible();
 
   // The child's page, which nothing wrote to: the parent arrives from the reverse lookup
   await page.goto(taskUrl(SIBLING_TASK_NUMBER));
-  await expect(page.getByRole("heading", { name: "Parent", level: 4 })).toBeVisible();
-  await expect(page.getByText(HELD_TASK_KEY, { exact: true })).toBeVisible();
+  const parent = page.getByRole("heading", { name: "Parent", level: 4 });
+  await expect(parent).toBeVisible();
+  // Scoped: the same key is also under "Is blocking" on this page, and an unscoped match would be
+  // satisfied by either — which is to say by neither in particular
+  await expect(parent.locator("..").getByText(HELD_TASK_KEY, { exact: true })).toBeVisible();
 
   // The link is stored on the parent, so asking from the child's end removes nothing — and the
   // route would still answer "Dependency removed". The refusal is the tool's, and it has to leave
@@ -787,4 +806,14 @@ test("link_tasks refuses a pair on two boards and names them", async ({ request 
     type: "relates",
   });
   accepted(within);
+
+  // Ends on what the board holds, not on the reply: an accepted call is the one thing a write that
+  // stored nothing can still get right
+  const readBack = await session.callTool("get_task", { taskKey: HELD_TASK_KEY });
+  expect(readBack.parsed.relations).toEqual([
+    expect.objectContaining({
+      type: "relates",
+      task: expect.objectContaining({ taskNumber: SIBLING_TASK_NUMBER }),
+    }),
+  ]);
 });

@@ -4,6 +4,7 @@ import { join } from "path";
 import { z } from "zod";
 import { registerPlannerTools } from "./tools";
 import { PlannerClient } from "./planner-client";
+import { DEPENDENCY_TYPES } from "@/types";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 type Handler = (args: Record<string, unknown>, extra: unknown) => Promise<unknown>;
@@ -391,6 +392,13 @@ describe("link_tasks and unlink_tasks", () => {
 
   it("takes the four kinds the board stores and nothing else", () => {
     const { schema } = registered().get("link_tasks")!;
+
+    // The board's own list, not four literals copied beside it: a fifth type added to
+    // DEPENDENCY_TYPES has to reach the tool rather than be silently refused here
+    expect((schema.shape.type as unknown as { options: readonly string[] }).options).toEqual(
+      DEPENDENCY_TYPES
+    );
+
     for (const type of ["blocked_by", "relates", "duplicates", "parent_of"]) {
       expect(
         schema.safeParse({ taskKey: "BP-1", targetTaskKey: "BP-2", type }).success
