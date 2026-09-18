@@ -961,6 +961,67 @@ test.describe("keyboard", () => {
   });
 
   /**
+   * BP-654. The PM chat is on screen without being a layer — deliberately, so the board underneath
+   * stays usable — and `openLayerCount()` therefore does not see it. Measured before the fix, on
+   * production code: with the chat open, `n` opened New Task over it and Escape cleared the board's
+   * selection while the chat stayed put, which is a person losing a selection they cannot see go.
+   *
+   * The focus after clicking the launcher is on the launcher, not in the panel, so the tag guard
+   * BP-477 pinned never applied here. That is the case this drives.
+   */
+  test("the chat owns its keys, and Escape dismisses it rather than the board's selection", async ({
+    page,
+  }) => {
+    await openBoard(page);
+    await select(page, [SIBLING_TASK_NUMBER]);
+
+    await page.getByRole("button", { name: "Open PM chat" }).click();
+    await expect(page.getByTestId("pm-chat-panel")).toBeVisible();
+
+    await test.step("v and n do nothing with the focus where the click left it", async () => {
+      await expect(page.locator("[data-corner-obstacle]")).toBeFocused();
+
+      await page.keyboard.press("v");
+      await page.keyboard.press("n");
+      await page.waitForTimeout(1_000);
+      await expect(page.locator("table")).toHaveCount(0);
+      await expect(page.getByRole("dialog", { name: "New Task" })).toHaveCount(0);
+    });
+
+    await test.step("nor does r, measured against the poll rather than assumed", async () => {
+      // The board polls every 10s and a poll's GET is indistinguishable from the one `r` causes,
+      // so the window is opened immediately after a poll has just landed: the next one is ~8s
+      // away, and 2s of silence inside it means the key did nothing.
+      await page.waitForResponse(
+        (res) => res.request().method() === "GET" && /\/api\/projects\/[^/]+\/tasks$/.test(res.url())
+      );
+      const reloaded = page
+        .waitForResponse(
+          (res) =>
+            res.request().method() === "GET" && /\/api\/projects\/[^/]+\/tasks$/.test(res.url()),
+          { timeout: 2_000 }
+        )
+        .then(() => "read")
+        .catch(() => "silent");
+      await page.keyboard.press("r");
+      expect(await reloaded).toBe("silent");
+    });
+
+    await test.step("Escape closes the chat and the selection survives it", async () => {
+      await page.keyboard.press("Escape");
+      await expect(page.getByTestId("pm-chat-panel")).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Select (1)" })).toBeVisible();
+    });
+
+    // The control: the same keys, with the chat gone, still drive the board
+    await test.step("and the board has its keys back", async () => {
+      await page.getByRole("heading", { name: PROJECT_NAME }).click();
+      await page.keyboard.press("v");
+      await expect(page.locator("table")).toHaveCount(1);
+    });
+  });
+
+  /**
    * BP-477. The handler's first line returns for an `INPUT`, `TEXTAREA` or `SELECT` target, and
    * all three are reachable on this board, so all three are driven here: the search box
    * (`BoardFilters.tsx:397`), the sort dropdown inline in the toolbar (`:634`) and the PM chat
