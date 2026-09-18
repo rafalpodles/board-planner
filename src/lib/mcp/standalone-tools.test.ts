@@ -67,6 +67,33 @@ describe("the standalone MCP server, driven rather than read", () => {
     expect(standaloneZod.z).not.toBe(appZod.z);
   });
 
+  /**
+   * Nothing counted the standalone server's tools, and that is the gap "It exposes the same tools"
+   * reached production through: the app's registry has a count guard, this one had none, so two
+   * tools were added on one side and every test on both sides stayed green.
+   *
+   * The number is deliberately NOT the app's. They are allowed to differ — new tools go to
+   * /api/mcp only — but the difference has to be a decision somebody wrote down, which is what
+   * failing here makes it.
+   */
+  it("registers the twelve it is frozen at, and neither of the link tools", async () => {
+    const { McpServer, Client, InMemoryTransport, registerTools } = await standalone();
+    const server = new McpServer({ name: "boardplanner", version: "1.0.0" });
+    registerTools(server, stubClient() as never);
+
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const mcp = new Client({ name: "test", version: "1.0.0" });
+    await Promise.all([server.connect(serverTransport), mcp.connect(clientTransport)]);
+
+    const names = ((await mcp.listTools()) as { tools: { name: string }[] }).tools.map(
+      (t) => t.name
+    );
+
+    expect(names).toHaveLength(12);
+    expect(names).not.toContain("link_tasks");
+    expect(names).not.toContain("unlink_tasks");
+  });
+
   it("refuses an undeclared parameter and keeps the hint its own zod major produces", async () => {
     const client = stubClient();
     const call = await connected(client);

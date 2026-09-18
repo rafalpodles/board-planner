@@ -698,3 +698,122 @@ test("a refusal quotes the caller back, but only so much of it", async ({ reques
   refused(short);
   expect(short.text).toContain('"nobody" is not someone this board');
 });
+
+/**
+ * Linking tasks over MCP. An epic used to be able to hold its parts only as checklist items — text
+ * nothing can move, assign or run — because the relations the board stores had no tool. The two
+ * assertions that matter are on the *other* task: a parent written from one end has to appear as a
+ * parent from the other, which is the reverse lookup the task route computes rather than anything
+ * the write returned.
+ */
+test("link_tasks builds a parent and its child, and unlink_tasks takes it apart", async ({
+  page,
+  request,
+}) => {
+  const session = await connected(request);
+
+  const linked = await session.callTool("link_tasks", {
+    taskKey: HELD_TASK_KEY,
+    targetTaskKey: SIBLING_TASK_KEY,
+    type: "parent_of",
+  });
+  accepted(linked);
+
+  await signIn(page);
+
+  // The parent's own page: the child is under Children
+  await page.goto(taskUrl(HELD_TASK_NUMBER));
+  await expect(page.getByText(HELD_TASK_TITLE).first()).toBeVisible();
+  const children = page.getByRole("heading", { name: "Children", level: 4, exact: true });
+  await expect(children).toBeVisible();
+  // Scoped to the section rather than the page: unscoped, this asserts the page mentions the key
+  // somewhere, which a breadcrumb or a card would satisfy without any link existing
+  await expect(children.locator("..").getByText(SIBLING_TASK_KEY, { exact: true })).toBeVisible();
+
+  // blocked_by is a different array reached down a different branch of the route, and the tool
+  // description promises it stacks with the relations rather than replacing them
+  const alsoBlocked = await session.callTool("link_tasks", {
+    taskKey: HELD_TASK_KEY,
+    targetTaskKey: SIBLING_TASK_KEY,
+    type: "blocked_by",
+  });
+  accepted(alsoBlocked);
+  await page.reload();
+  const blockedBy = page.getByRole("heading", { name: "Blocked by", level: 4, exact: true });
+  await expect(blockedBy).toBeVisible();
+  await expect(blockedBy.locator("..").getByText(SIBLING_TASK_KEY, { exact: true })).toBeVisible();
+  await expect(children).toBeVisible();
+
+  // The child's page, which nothing wrote to: the parent arrives from the reverse lookup
+  await page.goto(taskUrl(SIBLING_TASK_NUMBER));
+  const parent = page.getByRole("heading", { name: "Parent", level: 4, exact: true });
+  await expect(parent).toBeVisible();
+  // Scoped: the same key is also under "Is blocking" on this page, and an unscoped match would be
+  // satisfied by either — which is to say by neither in particular
+  await expect(parent.locator("..").getByText(HELD_TASK_KEY, { exact: true })).toBeVisible();
+
+  // The link is stored on the parent, so asking from the child's end removes nothing — and the
+  // route would still answer "Dependency removed". The refusal is the tool's, and it has to leave
+  // the link standing.
+  const fromTheWrongEnd = await session.callTool("unlink_tasks", {
+    taskKey: SIBLING_TASK_KEY,
+    targetTaskKey: HELD_TASK_KEY,
+    type: "parent_of",
+  });
+  refused(fromTheWrongEnd);
+  expect(fromTheWrongEnd.text).toContain(`${HELD_TASK_KEY} holds that parent_of link`);
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Parent", level: 4, exact: true })).toBeVisible();
+
+  const unlinked = await session.callTool("unlink_tasks", {
+    taskKey: HELD_TASK_KEY,
+    targetTaskKey: SIBLING_TASK_KEY,
+    type: "parent_of",
+  });
+  accepted(unlinked);
+
+  await page.goto(taskUrl(HELD_TASK_NUMBER));
+  // The positive first: a heading only a loaded task page has, so an empty Children section is
+  // read off a rendered page rather than off one that never arrived
+  await expect(page.getByText(HELD_TASK_TITLE).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Children", level: 4, exact: true })).toHaveCount(0);
+});
+
+/**
+ * The far end is resolved here rather than left to the route, which scopes it to the same project
+ * and would answer "Task not found" — a sentence that sends the caller looking for a typo in a key
+ * that resolved perfectly well. This credential is an instance admin's, so both boards really are
+ * visible to it: the refusal is the rule, not a listing the token cannot see past.
+ */
+test("link_tasks refuses a pair on two boards and names them", async ({ request }) => {
+  await seedSecondProject();
+  await seedDemotableAdmin();
+  const session = await connected(request);
+
+  const across = await session.callTool("link_tasks", {
+    taskKey: HELD_TASK_KEY,
+    targetTaskKey: KEPT_TASK_KEY,
+    type: "relates",
+  });
+  refused(across);
+  expect(across.text).toContain(`${HELD_TASK_KEY} and ${KEPT_TASK_KEY} are on different boards`);
+
+  // The control: the same call within one board is accepted, so the refusal above is about the
+  // pair and not about link_tasks being broken
+  const within = await session.callTool("link_tasks", {
+    taskKey: HELD_TASK_KEY,
+    targetTaskKey: SIBLING_TASK_KEY,
+    type: "relates",
+  });
+  accepted(within);
+
+  // Ends on what the board holds, not on the reply: an accepted call is the one thing a write that
+  // stored nothing can still get right
+  const readBack = await session.callTool("get_task", { taskKey: HELD_TASK_KEY });
+  expect(readBack.parsed.relations).toEqual([
+    expect.objectContaining({
+      type: "relates",
+      task: expect.objectContaining({ taskNumber: SIBLING_TASK_NUMBER }),
+    }),
+  ]);
+});

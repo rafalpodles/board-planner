@@ -151,7 +151,7 @@ a side channel. Name a branch `bp-8/dark-mode` and the pull request finds its ta
 
 ### Your agents work the same board
 
-Twelve MCP tools over HTTP put the board in your terminal, so Claude Code reads the backlog, claims
+Fourteen MCP tools over HTTP put the board in your terminal, so Claude Code reads the backlog, claims
 a task and moves it — through the same permissions a teammate gets. API tokens can be scoped to
 specific projects, and the scope is enforced centrally, so it holds for REST and MCP alike.
 
@@ -218,9 +218,9 @@ the client at one URL:
 }
 ```
 
-Twelve tools: `list_projects`, `get_project`, `list_tasks`, `get_task`, `create_task`,
+Fourteen tools: `list_projects`, `get_project`, `list_tasks`, `get_task`, `create_task`,
 `update_task`, `change_task_status`, `list_sprints`, `create_sprint`, `update_sprint`, `add_comment`,
-`list_comments`.
+`list_comments`, `link_tasks`, `unlink_tasks`.
 
 Clients that want a connector instead of a pasted token get full **OAuth 2.1 with PKCE** and dynamic
 client registration at the same URL — no client secret. For stdio-only clients, a standalone server
@@ -398,7 +398,7 @@ on merge, so a page there is never behind the product.
 | [What is Board Planner](https://board-planner.com/docs/getting-started/what-is-board-planner/) | The idea, who it is for, what it is not |
 | [Quick start](https://board-planner.com/docs/getting-started/quick-start/) | First project, first task, first agent |
 | [PM agent](https://board-planner.com/docs/ai/pm-agent/) | Turning it on, what it may change, the caps it spends against |
-| [Claude Code and MCP](https://board-planner.com/docs/ai/claude-code-and-mcp/) | The twelve tools, scoped tokens, the OAuth connector |
+| [Claude Code and MCP](https://board-planner.com/docs/ai/claude-code-and-mcp/) | The fourteen tools, scoped tokens, the OAuth connector |
 | [Agents](https://board-planner.com/docs/ai/agents/) | Steps, gates, and what a run actually does |
 | [Execution workers](https://board-planner.com/docs/ai/execution-workers/) | Enrolling a machine, which tasks get picked up, how to stop one |
 | [Installing and running](https://board-planner.com/docs/administration/installing-and-running/) | Every environment variable, build and deploy |

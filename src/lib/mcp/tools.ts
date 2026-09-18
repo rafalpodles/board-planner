@@ -3,6 +3,7 @@ import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { z } from "zod";
 import { PlannerClient } from "./planner-client";
 import { resolveFieldsByName } from "@/lib/custom-fields";
+import { DEPENDENCY_TYPES } from "@/types";
 import { APP_NAME } from "@/lib/brand";
 import { echo } from "@/lib/echo";
 import {
@@ -313,6 +314,130 @@ export function registerPlannerTools(server: McpServer): void {
       const client = clientFrom(extra);
       const { projectId, taskId } = await client.resolveTaskKey(taskKey);
       return json(await client.changeTaskStatus(projectId, taskId, status));
+    }
+  );
+
+  // --- Links ---
+
+  // The route scopes the far end to the same project — it looks the second task up by
+  // `{ _id, project }` — so a cross-board link answers "Task not found", which reads as a mistyped
+  // key. Resolving both keys here lets the refusal name the rule that actually refused.
+  async function bothEnds(client: PlannerClient, taskKey: string, targetTaskKey: string) {
+    const [from, to] = await Promise.all([
+      client.resolveTaskKey(taskKey),
+      client.resolveTaskKey(targetTaskKey),
+    ]);
+    if (from.projectId !== to.projectId) {
+      throw new Error(
+        `${echo(taskKey.toUpperCase())} and ${echo(targetTaskKey.toUpperCase())} are on different boards, and a link is only stored within one.`
+      );
+    }
+    return { projectId: from.projectId, taskId: from.taskId, targetTaskId: to.taskId };
+  }
+
+  type LinkedTask = { _id?: string };
+  type TaskEnds = {
+    blockedBy?: LinkedTask[];
+    blocking?: LinkedTask[];
+    relations?: { task?: LinkedTask; type?: string }[];
+    relatedFrom?: { task?: LinkedTask; type?: string }[];
+  };
+
+  // The route's DELETE is a `$pull` on one document and answers "Dependency removed" whenever that
+  // document exists, so a type or an end the task does not hold is indistinguishable from a real
+  // removal. Reading the ends first is what makes the answer mean something — and the far end is
+  // read too, because naming the wrong one is the mistake this shape invites.
+  function endHolding(task: TaskEnds, targetTaskId: string, type: string): "near" | "far" | "none" {
+    const holds = (entries: { task?: LinkedTask; type?: string }[] | undefined) =>
+      (entries ?? []).some((r) => String(r.task?._id ?? "") === targetTaskId && r.type === type);
+    const listed = (tasks: LinkedTask[] | undefined) =>
+      (tasks ?? []).some((t) => String(t?._id ?? "") === targetTaskId);
+
+    if (type === "blocked_by") {
+      if (listed(task.blockedBy)) return "near";
+      return listed(task.blocking) ? "far" : "none";
+    }
+    if (holds(task.relations)) return "near";
+    return holds(task.relatedFrom) ? "far" : "none";
+  }
+
+  const LINK_DIRECTION =
+    "`type` reads from taskKey's side: blocked_by means taskKey is blocked by targetTaskKey; " +
+    "parent_of means taskKey is the parent and targetTaskKey the child, which is how an epic gets " +
+    "sub-tasks instead of a checklist; duplicates means taskKey is the duplicate of targetTaskKey, " +
+    "and the two ends read differently — the far task's page says Duplicated by and offers no way " +
+    "to remove it. Only relates means the same read either way, and even that is stored on one " +
+    "end, so which task you name decides which end unlink_tasks can take it off again.";
+
+  const LINK_TYPE_PARAM = "Which kind of link, read from taskKey's side — see the description.";
+
+  server.registerTool(
+    "link_tasks",
+    {
+      description:
+        "Link two tasks on the same board. " +
+        LINK_DIRECTION +
+        " The link is written on taskKey's side: a second call replaces the relates/duplicates/" +
+        "parent_of link that end holds, while blocked_by is stored separately and stacks with it. " +
+        "The far end keeps whatever it stored about taskKey, so linking a pair from both sides " +
+        "leaves the board holding both. parent_of is the exception, because a task has one parent: " +
+        "it is the CHILD that moves, and its previous parent loses it without being named in the " +
+        "call. Cycles are refused for parent_of and blocked_by, the two types that carry an " +
+        "ordering; relates and duplicates have no ordering to close. get_task reads the links " +
+        "back — as task numbers, not keys, so an agent rebuilds KEY-<n> from the key it already has.",
+      inputSchema: strictInput({
+        taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
+        targetTaskKey: z.string().describe("The task at the other end (e.g. 'CP-2')"),
+        type: z.enum(DEPENDENCY_TYPES).describe(LINK_TYPE_PARAM),
+      }, { writes: true }),
+    },
+    async ({ taskKey, targetTaskKey, type }, extra) => {
+      const client = clientFrom(extra);
+      const { projectId, taskId, targetTaskId } = await bothEnds(client, taskKey, targetTaskKey);
+      return json(await client.addTaskLink(projectId, taskId, targetTaskId, type));
+    }
+  );
+
+  server.registerTool(
+    "unlink_tasks",
+    {
+      description:
+        "Remove a link between two tasks. " +
+        LINK_DIRECTION +
+        " It removes the link stored on taskKey's side, so the " +
+        "arguments have to name the end that holds it and the type it holds — get_task lists " +
+        "both. A call that names a link this end does not hold is refused rather than answered " +
+        "as a removal, and says which end holds it instead — so removing the same link twice " +
+        "refuses the second time rather than passing quietly.",
+      inputSchema: strictInput({
+        taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
+        targetTaskKey: z.string().describe("The task at the other end (e.g. 'CP-2')"),
+        type: z.enum(DEPENDENCY_TYPES).describe(LINK_TYPE_PARAM),
+      }, { writes: true }),
+    },
+    async ({ taskKey, targetTaskKey, type }, extra) => {
+      const client = clientFrom(extra);
+      const { projectId, taskId, targetTaskId } = await bothEnds(client, taskKey, targetTaskKey);
+
+      const near = echo(taskKey.toUpperCase());
+      const far = echo(targetTaskKey.toUpperCase());
+      const held = endHolding(
+        (await client.getTask(projectId, taskId)) as TaskEnds,
+        targetTaskId,
+        type
+      );
+      if (held === "far") {
+        throw new Error(
+          `${far} holds that ${type} link, not ${near}. Call unlink_tasks with the two keys the other way round. Nothing was removed.`
+        );
+      }
+      if (held === "none") {
+        throw new Error(
+          `Neither ${near} nor ${far} holds a ${type} link to the other. get_task lists what each end holds. Nothing was removed.`
+        );
+      }
+
+      return json(await client.removeTaskLink(projectId, taskId, targetTaskId, type));
     }
   );
 

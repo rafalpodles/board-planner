@@ -1,6 +1,6 @@
 # The board over MCP
 
-Project key `BP`. Tools: `list_tasks`, `get_task`, `create_task`, `update_task`, `change_task_status`, `add_comment`, `list_comments`, `get_project`. They arrive on the claude.ai connector under a UUID prefix (`mcp__<uuid>__list_tasks`); a session-start reminder listing `board-planner` as needing authentication is about a stale local entry, not the connector. Call once before believing it.
+Project key `BP`. Tools: `list_tasks`, `get_task`, `create_task`, `update_task`, `change_task_status`, `add_comment`, `list_comments`, `get_project`, `link_tasks`, `unlink_tasks`. They arrive on the claude.ai connector under a UUID prefix (`mcp__<uuid>__list_tasks`); a session-start reminder listing `board-planner` as needing authentication is about a stale local entry, not the connector. Call once before believing it.
 
 ## Columns
 
