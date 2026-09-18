@@ -812,9 +812,8 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
 
     // Children are in their own session now, so a terminal Ctrl-C no longer reaches the agent —
     // loop.stop() alone is a flag checked between tasks, which would mean waiting out a run that
-    // can last the full task timeout. Aborting matches what the operator's stop command already
-    // does, and the run is released with its attempt refunded, which is right: the operator
-    // stopping the worker is not the task failing.
+    // can last the full task timeout. Aborting with SHUTDOWN_SIGNAL requeues the run with its
+    // attempt charged, unlike the operator's stop command — see SHUTDOWN_SIGNAL for why.
     shutdown() {
       loop.stop();
       runs.abort(SHUTDOWN_SIGNAL);
