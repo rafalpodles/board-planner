@@ -37,7 +37,12 @@
     "**/*.ts",
     "**/*.tsx",
     ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts"
+    ".next/dev/types/**/*.ts",
+    // The BP-409 proxied e2e server's own distDir. Committed rather than left for `next dev` to
+    // add on first run: gitignored and empty on a fresh checkout, so the glob matches nothing —
+    // but leaving it out means every local run of that server dirties this file the same way.
+    ".next-proxied/types/**/*.ts",
+    ".next-proxied/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",
