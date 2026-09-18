@@ -221,6 +221,30 @@ test("a mention lands in the mentioned user's feed", async ({ page, request }) =
     .toBe(true);
 });
 
+// A mention renders as bold code, and the typography plugin fences inline code with a backtick on
+// each side, so every mention read `@member`, fences and all
+test("a mention reads as a name, without the backticks inline code gets", async ({ page }) => {
+  await openTask(page, FINISHED_TASK_NUMBER);
+
+  const posted = taskWrite(page, "POST", `/tasks/${FINISHED_TASK_ID}/comments`);
+  await composer(page).fill("@member could you run `npm test` on this?");
+  await page.getByRole("button", { name: "Comment" }).click();
+  await expectWritten(posted, 201);
+
+  const fences = (element: Locator) =>
+    element.evaluate((node) => [
+      getComputedStyle(node, "::before").content,
+      getComputedStyle(node, "::after").content,
+    ]);
+  const mention = page.locator("strong > code", { hasText: "@member" });
+  await expect(mention).toBeVisible();
+  expect(await fences(mention)).toEqual(["none", "none"]);
+  // The control: ordinary inline code in the same comment keeps its fences
+  const code = page.locator("code", { hasText: "npm test" });
+  await expect(code).toBeVisible();
+  expect(await fences(code)).toEqual(['"`"', '"`"']);
+});
+
 test("watching puts a person on the list and their feed keeps following the task", async ({
   page,
   request,

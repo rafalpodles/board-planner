@@ -270,6 +270,12 @@ body {
   --tw-prose-td-borders: var(--color-border);
 }
 
+/* Bold code drops the backticks the plugin puts around code: it is what a mention renders as, and a name is not code */
+.prose strong > code::before,
+.prose strong > code::after {
+  content: none;
+}
+
 .prose table {
   border-collapse: collapse;
 }
