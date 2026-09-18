@@ -961,15 +961,16 @@ test.describe("keyboard", () => {
   });
 
   /**
-   * BP-477. The handler's first line returns for an `INPUT`, `TEXTAREA` or `SELECT` target. Two of
-   * the three are reachable on this screen without opening anything, and both are driven here: the
-   * search box and the sort dropdown, drawn inline in the toolbar (`BoardFilters.tsx:397`, `:634`).
-   * The third appears only once a project has the PM chat enabled (`PmChatWidget.tsx:32`), which
-   * this fixture does not; it is pinned in `ProjectBoardView.test.tsx` with the other two.
+   * BP-477. The handler's first line returns for an `INPUT`, `TEXTAREA` or `SELECT` target, and
+   * all three are reachable on this board, so all three are driven here: the search box
+   * (`BoardFilters.tsx:397`), the sort dropdown inline in the toolbar (`:634`) and the PM chat
+   * composer (`PmChat.tsx:654`), which this fixture reaches because `seed()` enables the agent.
+   * None of them is a registered layer, so the *next* line of the handler refuses none of them —
+   * measured, twice, after twice guessing the opposite.
    *
-   * Nothing in the suite could have covered this by accident: `fill()` sets a value without
-   * dispatching a key at all, and the three specs that do type character by character are nowhere
-   * near a board.
+   * Nothing in the suite covered this already. `fill()` sets a value without dispatching a key at
+   * all, and the specs that do type character by character type into a modal, which that next line
+   * refuses on a different ground — so a test built on one would pass with this check deleted.
    */
   test("the shortcuts are inert while a field has focus", async ({ page }) => {
     await openBoard(page);
@@ -985,10 +986,7 @@ test.describe("keyboard", () => {
       await expect(search).toHaveValue("nvr?");
       await expect(page.getByRole("dialog", { name: "New Task" })).toHaveCount(0);
       await expect(page.getByRole("heading", { name: "Keyboard Shortcuts" })).toHaveCount(0);
-      await expect(page.getByRole("button", { name: "Board", exact: true })).toHaveAttribute(
-        "aria-current",
-        "true"
-      );
+      await expect(page.locator("table")).toHaveCount(0);
       await search.fill("");
     });
 
@@ -1006,10 +1004,28 @@ test.describe("keyboard", () => {
       expect(await sortBy.inputValue()).toBe(before);
       await expect(page.getByRole("dialog", { name: "New Task" })).toHaveCount(0);
       await expect(page.getByRole("heading", { name: "Keyboard Shortcuts" })).toHaveCount(0);
-      await expect(page.getByRole("button", { name: "Board", exact: true })).toHaveAttribute(
-        "aria-current",
-        "true"
-      );
+      // `v` is the one of the four with a visible consequence on this page, and this is where it
+      // would show: the list renders a table, the board does not
+      await expect(page.locator("table")).toHaveCount(0);
+    });
+
+    await test.step("held by the PM chat composer, they type there too", async () => {
+      await page.getByRole("button", { name: "Open PM chat" }).click();
+      const composer = page.getByTestId("pm-chat-panel").locator("textarea");
+      await expect(composer).toBeVisible();
+
+      for (const key of ["n", "v", "r", "?"]) await composer.press(key);
+
+      // The composer is React-controlled like the search box, so its value is the delivered-key
+      // signal here as well — no settle needed
+      await expect(composer).toHaveValue("nvr?");
+      await expect(page.getByRole("dialog", { name: "New Task" })).toHaveCount(0);
+      await expect(page.getByRole("heading", { name: "Keyboard Shortcuts" })).toHaveCount(0);
+      await expect(page.locator("table")).toHaveCount(0);
+
+      // The launcher wears the same label as the panel's own ✕ while the panel is open
+      await page.getByTestId("pm-chat-panel").getByRole("button", { name: "Close PM chat" }).click();
+      await expect(page.getByTestId("pm-chat-panel")).toHaveCount(0);
     });
 
     // The control for both: the same key, with no field holding it

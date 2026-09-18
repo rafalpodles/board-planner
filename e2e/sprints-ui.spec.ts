@@ -649,6 +649,10 @@ test.describe("the board shortcuts on a pinned, sometimes read-only board", () =
     await signIn(page);
     await openSprints(page, `?sprint=${LIFECYCLE_PAST_ONE_ID}`);
     await expect(statusBadge(page)).toHaveText("Completed");
+    // The badge is SprintHeader's and is painted before the board behind the `tasksLoaded` gate
+    // (`sprints/page.tsx:172`); waiting for a column is waiting for the handler to be listening,
+    // without which the silence below would prove nothing
+    await expect(page.getByTestId("column-done")).toBeVisible();
 
     await page.locator("body").press("n");
     await page.waitForTimeout(1_000);
