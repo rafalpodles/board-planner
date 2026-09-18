@@ -1,0 +1,38 @@
+name: Outside contributions
+
+# Two rules from CONTRIBUTING.md, checked only on pull requests from forks: the owner holds the
+# copyright already, so a sign-off from the owner certifies nothing, and pull requests from this
+# repository are the only ones that may change src/ee/
+on:
+  pull_request:
+
+jobs:
+  rules:
+    name: Sign-off present, src/ee untouched
+    if: github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      # Merge commits are skipped, as the DCO app does: GitHub's "Update branch" creates one in the
+      # contributor's name with no sign-off and no way to add one after the fact
+      - name: Every commit carries a Developer Certificate of Origin sign-off
+        run: |
+          commits=$(git rev-list --no-merges "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}")
+          unsigned=0
+          for commit in $commits; do
+            if ! git log -1 --format=%B "$commit" | grep -q '^Signed-off-by: .* <.*>$'; then
+              echo "::error::commit $commit has no Signed-off-by line — commit with git commit -s (see CONTRIBUTING.md)"
+              unsigned=1
+            fi
+          done
+          exit "$unsigned"
+      - name: Nothing under src/ee is changed
+        if: ${{ !cancelled() }}
+        run: |
+          changed=$(git diff --name-only "${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}" -- src/ee/)
+          if [ -n "$changed" ]; then
+            printf '::error::outside contributions to src/ee/ are not accepted (see CONTRIBUTING.md); changed: %s\n' "$changed"
+            exit 1
+          fi
