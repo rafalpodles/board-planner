@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { isPmRunnable } from "@/lib/pm/gate";
+import { openLayerCount } from "@/lib/focus-trap";
 import { OWNS_ITS_KEYS } from "@/lib/keyboard-scope";
 import { projectRefFromPathname } from "@/lib/urls";
 import { ApiProject } from "@/types";
@@ -20,13 +21,28 @@ export function PmChatWidget() {
   const [project, setProject] = useState<ApiProject | null>(null);
   const [open, setOpen] = useState(false);
 
+  const panelRef = useRef<HTMLDivElement>(null);
+  const launcherRef = useRef<HTMLButtonElement>(null);
+
+  // The panel takes the focus when it opens, and that is what makes the rest of this work: a click
+  // on its header or on a message lands on nothing focusable, and without this the focus would sit
+  // on the launcher — outside the panel — so a key pressed straight after clicking *inside* the
+  // chat would be read as the board's. Measured, after shipping the version that did not do it.
+  useEffect(() => {
+    if (open) panelRef.current?.focus({ preventScroll: true });
+  }, [open]);
+
   // The panel is not a layer, so nothing else answers Escape for it. Handled where the key lands
   // rather than on `document`: a global listener would also answer for the page outside the panel,
   // which still belongs to the board (BP-654).
   const dismissOnEscape = (e: React.KeyboardEvent) => {
-    if (e.key !== "Escape") return;
-    e.stopPropagation();
+    // A real layer inside the panel — the attachment lightbox — answers Escape first. Closing the
+    // panel under it would unmount the draft and the staged uploads with it, which is the loss
+    // PmChatWidget.test.tsx already guards against for a dialog opened elsewhere.
+    if (e.key !== "Escape" || openLayerCount() > 0) return;
     setOpen(false);
+    // The focus was inside the panel that is about to leave the DOM
+    launcherRef.current?.focus({ preventScroll: true });
   };
 
   useEffect(() => {
@@ -52,6 +68,10 @@ export function PmChatWidget() {
       {open && (
         <div
           data-testid="pm-chat-panel"
+          ref={panelRef}
+          // Focusable only programmatically: it is the click target of last resort inside the
+          // panel, so anything clicked in here leaves the focus in here
+          tabIndex={-1}
           // The keyboard inside the panel is the panel's, so the board's shortcuts do not fire
           // behind it (BP-654)
           {...{ [OWNS_ITS_KEYS]: "" }}
@@ -103,11 +123,10 @@ export function PmChatWidget() {
           only CSS hides — the comment bar is `lg:hidden` and cannot say so from JSX — so its rule
           repeats that breakpoint. A new bottom bar wants the first (BP-593). */}
       <button
+        ref={launcherRef}
         onClick={() => setOpen((v) => !v)}
-        onKeyDown={dismissOnEscape}
-        // The launcher belongs to the chat too: opening the panel leaves the focus here, and a key
-        // pressed on it is no more the board's than one pressed inside the panel (BP-654)
-        {...{ [OWNS_ITS_KEYS]: "" }}
+        // Deliberately NOT marked as owning its keys: it is the board's page once the panel is
+        // gone, and the focus comes back here when the panel closes
         aria-label={open ? "Close PM chat" : "Open PM chat"}
         // Says it shares the corner, so a toast stands above it rather than on it (BP-597)
         data-corner-obstacle

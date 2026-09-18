@@ -976,10 +976,15 @@ test.describe("keyboard", () => {
     await select(page, [SIBLING_TASK_NUMBER]);
 
     await page.getByRole("button", { name: "Open PM chat" }).click();
-    await expect(page.getByTestId("pm-chat-panel")).toBeVisible();
+    const panel = page.getByTestId("pm-chat-panel");
+    await expect(panel).toBeVisible();
 
-    await test.step("v and n do nothing with the focus where the click left it", async () => {
-      await expect(page.locator("[data-corner-obstacle]")).toBeFocused();
+    await test.step("v and n do nothing after a click that lands on nothing focusable", async () => {
+      // The case the first version of this fix got wrong, and the one the bug was reported from:
+      // the header is not focusable, so without the panel's own `tabIndex={-1}` this click leaves
+      // the focus outside the panel and every key below is read as the board's again
+      await page.locator("[data-corner-panel-header] p").click();
+      await expect(panel).toBeFocused();
 
       await page.keyboard.press("v");
       await page.keyboard.press("n");
@@ -1007,17 +1012,18 @@ test.describe("keyboard", () => {
       expect(await reloaded).toBe("silent");
     });
 
-    await test.step("Escape closes the chat and the selection survives it", async () => {
+    await test.step("Escape closes the chat, and the selection survives it", async () => {
       await page.keyboard.press("Escape");
-      await expect(page.getByTestId("pm-chat-panel")).toHaveCount(0);
+      await expect(panel).toHaveCount(0);
       await expect(page.getByRole("button", { name: "Select (1)" })).toBeVisible();
     });
 
-    // The control: the same keys, with the chat gone, still drive the board
-    await test.step("and the board has its keys back", async () => {
-      await page.getByRole("heading", { name: PROJECT_NAME }).click();
-      await page.keyboard.press("v");
-      await expect(page.locator("table")).toHaveCount(1);
+    // The control, and a regression the first version of this fix introduced: the focus comes back
+    // to the launcher, which is the board's page again — a shortcut pressed there must land
+    await test.step("and the board has its keys back, on the launcher the focus returned to", async () => {
+      await expect(page.locator("[data-corner-obstacle]")).toBeFocused();
+      await page.keyboard.press("n");
+      await expect(page.getByRole("dialog", { name: "New Task" })).toBeVisible();
     });
   });
 

@@ -153,11 +153,17 @@ describe("where the PM launcher is painted", () => {
  * keeps working — and the cost was that nothing answered for its keyboard: the board's shortcuts
  * fired from the panel's own buttons, and Escape cleared a selection on the board behind it
  * instead of dismissing the chat.
+ *
+ * The first version of this fix marked the panel and the launcher and stopped there. A reviewer
+ * broke it in one move: clicking the panel's header, or a message, lands on nothing focusable, so
+ * the focus sat on `body` and every board shortcut was live again — in the very case where the
+ * person had just clicked *inside* the chat. Hence `tabIndex={-1}` and the focus on open, which is
+ * what actually makes the subtree rule hold.
  */
 describe("the chat's own keyboard", () => {
   /** Once the panel is open the launcher relabels itself, and the panel's own ✕ takes the name it
    *  had — so it is read back by the attribute only it carries. */
-  const fab = () => document.querySelector("[data-corner-obstacle]")!;
+  const fab = () => document.querySelector("[data-corner-obstacle]") as HTMLElement;
 
   async function open() {
     render(<PmChatWidget />);
@@ -166,37 +172,50 @@ describe("the chat's own keyboard", () => {
     return screen.getByTestId("pm-chat-panel");
   }
 
-  it("claims the panel and the launcher as its own", async () => {
+  it("claims the panel, and takes the focus into it when it opens", async () => {
     const panel = await open();
     expect(panel.hasAttribute(OWNS_ITS_KEYS)).toBe(true);
-    // The launcher too: opening the chat leaves the focus on it, so the first key after the click
-    // lands here rather than in the panel
-    expect(fab().hasAttribute(OWNS_ITS_KEYS)).toBe(true);
+    // Programmatically focusable only: it is the click target of last resort inside the panel
+    expect(panel.getAttribute("tabindex")).toBe("-1");
+    await waitFor(() => expect(document.activeElement).toBe(panel));
   });
 
-  it("closes on Escape from inside the panel", async () => {
-    const panel = await open();
-    fireEvent.keyDown(panel, { key: "Escape" });
-    expect(screen.queryByTestId("pm-chat-panel")).toBeNull();
-  });
-
-  it("closes on Escape from the launcher, where the focus is left", async () => {
+  // The launcher is the board's page again once the panel is gone, and the focus comes back here
+  it("leaves the launcher to the board", async () => {
     await open();
-    fireEvent.keyDown(fab(), { key: "Escape" });
-    expect(screen.queryByTestId("pm-chat-panel")).toBeNull();
+    expect(fab().hasAttribute(OWNS_ITS_KEYS)).toBe(false);
   });
 
-  // Not swallowed: Escape is the only key the chat answers, and the page behind it is still a page
-  it("lets every other key through", async () => {
+  it("closes on Escape from inside the panel, and hands the focus back", async () => {
     const panel = await open();
-    const seen: string[] = [];
-    const listen = (e: KeyboardEvent) => seen.push(e.key);
-    document.addEventListener("keydown", listen);
+    fireEvent.keyDown(panel, { key: "Escape" });
+    expect(screen.queryByTestId("pm-chat-panel")).toBeNull();
+    expect(document.activeElement).toBe(fab());
+  });
 
-    for (const key of ["v", "r", "n", "?"]) fireEvent.keyDown(panel, { key });
+  /**
+   * The attachment lightbox inside the chat is a real layer. Escape belongs to it first, and the
+   * panel must not close underneath it — that would unmount the draft and the staged uploads, the
+   * loss this suite already guards against for a dialog opened elsewhere.
+   */
+  it("leaves Escape alone while a layer of its own is open", async () => {
+    const panel = await open();
+    render(
+      <Modal open onClose={() => {}} title="An attachment, full size">
+        <p>body</p>
+      </Modal>
+    );
+
     fireEvent.keyDown(panel, { key: "Escape" });
 
-    document.removeEventListener("keydown", listen);
-    expect(seen).toEqual(["v", "r", "n", "?"]);
+    expect(screen.queryByTestId("pm-chat-panel")).not.toBeNull();
+  });
+
+  // Escape is the only key the chat answers; the page behind it is still a page, and what keeps
+  // the board's own handler off these is `ownsItsKeys`, not this component
+  it("answers no other key", async () => {
+    const panel = await open();
+    for (const key of ["v", "r", "n", "?"]) fireEvent.keyDown(panel, { key });
+    expect(screen.queryByTestId("pm-chat-panel")).not.toBeNull();
   });
 });
