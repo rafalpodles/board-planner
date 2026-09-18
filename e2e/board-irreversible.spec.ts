@@ -959,6 +959,41 @@ test.describe("keyboard", () => {
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(new RegExp(`${taskUrl(focused)}$`));
   });
+
+  /**
+   * BP-477. The handler's first line returns for an `INPUT`, `TEXTAREA` or `SELECT` target, and
+   * the search box is the field a person meets on this screen — type "review?" into it and every
+   * letter is a shortcut waiting to fire.
+   *
+   * Nothing in the suite could have covered this by accident: `fill()` sets a value without
+   * dispatching a key at all, and the three specs that do type character by character are nowhere
+   * near a board. The typed value is what proves the keys were delivered — without it a selector
+   * that found nothing would report the same silence as a working guard.
+   *
+   * Only one of the three tags is reachable on this screen: the board's other fields are inside
+   * layers, which the *next* line of the handler refuses anyway, so a test built on one would pass
+   * with the tag check deleted. The other two are pinned in `ProjectBoardView.test.tsx`.
+   */
+  test("the shortcuts are inert while the search box has focus", async ({ page }) => {
+    await openBoard(page);
+    const search = page.getByPlaceholder(/Search tasks/);
+
+    for (const key of ["n", "v", "r", "?"]) await search.press(key);
+    await expect(search).toHaveValue("nvr?");
+
+    await expect(page.getByRole("dialog", { name: "New Task" })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Keyboard Shortcuts" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Board", exact: true })).toHaveAttribute(
+      "aria-current",
+      "true"
+    );
+
+    // The control: the same key, once the field no longer has it
+    await search.fill("");
+    await search.blur();
+    await page.keyboard.press("?");
+    await expect(page.getByRole("heading", { name: "Keyboard Shortcuts" })).toBeVisible();
+  });
 });
 
 test.describe("a board with nothing on it, and one that would not load", () => {
