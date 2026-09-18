@@ -3,6 +3,7 @@ import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { z } from "zod";
 import { PlannerClient } from "./planner-client";
 import { resolveFieldsByName } from "@/lib/custom-fields";
+import { DEPENDENCY_TYPES } from "@/types";
 import { APP_NAME } from "@/lib/brand";
 import { echo } from "@/lib/echo";
 import {
@@ -313,6 +314,71 @@ export function registerPlannerTools(server: McpServer): void {
       const client = clientFrom(extra);
       const { projectId, taskId } = await client.resolveTaskKey(taskKey);
       return json(await client.changeTaskStatus(projectId, taskId, status));
+    }
+  );
+
+  // --- Links ---
+
+  // The route scopes the far end to the same project — it looks the second task up by
+  // `{ _id, project }` — so a cross-board link answers "Task not found", which reads as a mistyped
+  // key. Resolving both keys here lets the refusal name the rule that actually refused.
+  async function bothEnds(client: PlannerClient, taskKey: string, targetTaskKey: string) {
+    const [from, to] = await Promise.all([
+      client.resolveTaskKey(taskKey),
+      client.resolveTaskKey(targetTaskKey),
+    ]);
+    if (from.projectId !== to.projectId) {
+      throw new Error(
+        `${taskKey.toUpperCase()} and ${targetTaskKey.toUpperCase()} are on different boards, and a link is only stored within one.`
+      );
+    }
+    return { projectId: from.projectId, taskId: from.taskId, targetTaskId: to.taskId };
+  }
+
+  const LINK_DIRECTION =
+    "`type` reads from taskKey's side: blocked_by means taskKey is blocked by targetTaskKey; " +
+    "parent_of means taskKey is the parent and targetTaskKey the child, which is how an epic gets " +
+    "sub-tasks instead of a checklist. relates and duplicates carry no direction.";
+
+  server.registerTool(
+    "link_tasks",
+    {
+      description:
+        "Link two tasks on the same board. " +
+        LINK_DIRECTION +
+        " Among relates, duplicates and parent_of a pair holds one link, so linking them again " +
+        "with a different type replaces it; blocked_by is stored separately and stacks with them. " +
+        "A task has one parent, so a second parent_of moves it. A link that would close a cycle is " +
+        "refused. get_task reads the links back.",
+      inputSchema: strictInput({
+        taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
+        targetTaskKey: z.string().describe("The task at the other end (e.g. 'CP-2')"),
+        type: z.enum(DEPENDENCY_TYPES).describe(LINK_DIRECTION),
+      }, { writes: true }),
+    },
+    async ({ taskKey, targetTaskKey, type }, extra) => {
+      const client = clientFrom(extra);
+      const { projectId, taskId, targetTaskId } = await bothEnds(client, taskKey, targetTaskKey);
+      return json(await client.addTaskLink(projectId, taskId, targetTaskId, type));
+    }
+  );
+
+  server.registerTool(
+    "unlink_tasks",
+    {
+      description:
+        "Remove a link between two tasks. The type has to be the one that is stored — get_task " +
+        "lists them — because a pair can hold a blocked_by and one other link at the same time.",
+      inputSchema: strictInput({
+        taskKey: z.string().describe("Task key (e.g. 'CP-1')"),
+        targetTaskKey: z.string().describe("The task at the other end (e.g. 'CP-2')"),
+        type: z.enum(DEPENDENCY_TYPES).describe(LINK_DIRECTION),
+      }, { writes: true }),
+    },
+    async ({ taskKey, targetTaskKey, type }, extra) => {
+      const client = clientFrom(extra);
+      const { projectId, taskId, targetTaskId } = await bothEnds(client, taskKey, targetTaskKey);
+      return json(await client.removeTaskLink(projectId, taskId, targetTaskId, type));
     }
   );
 

@@ -73,13 +73,13 @@ const UNREACHABLE_TASK_FIELDS: Record<string, string> = {
   sprint: "the app — MCP does not set it",
   recurrence: "the app — MCP does not set it",
   order: "the app — MCP does not reorder a board",
-  blockedBy: "the app — MCP does not link tasks",
-  relations: "the app — MCP does not link tasks",
   watchers: "the app — MCP does not set them",
 };
 
 const TASK_FIELD_HINTS: Record<string, string> = {
   ...UNREACHABLE_TASK_FIELDS,
+  blockedBy: "the link_tasks tool",
+  relations: "the link_tasks tool",
   checklist: "acceptanceCriteria, a markdown checklist",
   difficulty: "the fields parameter, keyed by field name",
   component: "the fields parameter, keyed by field name",

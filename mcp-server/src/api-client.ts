@@ -89,6 +89,31 @@ export class ApiClient {
     return this.request("PATCH", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/status`, { status });
   }
 
+  // Links
+  async addTaskLink(
+    projectId: string,
+    taskId: string,
+    targetTaskId: string,
+    type: string
+  ): Promise<unknown> {
+    return this.request("POST", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/links`, {
+      taskId: targetTaskId,
+      type,
+    });
+  }
+
+  async removeTaskLink(
+    projectId: string,
+    taskId: string,
+    targetTaskId: string,
+    type: string
+  ): Promise<unknown> {
+    return this.request("DELETE", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/links`, {
+      taskId: targetTaskId,
+      type,
+    });
+  }
+
   // Comments
   async listComments(projectId: string, taskId: string): Promise<unknown[]> {
     return this.request("GET", `/api/projects/${seg(projectId)}/tasks/${seg(taskId)}/comments`) as Promise<unknown[]>;
