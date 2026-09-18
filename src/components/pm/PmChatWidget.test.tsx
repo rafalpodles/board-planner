@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, waitFor, fireEvent } from "@testing-library/react";
 import { Modal } from "@/components/ui/Modal";
 import { PmChatWidget } from "./PmChatWidget";
+import { OWNS_ITS_KEYS } from "@/lib/keyboard-scope";
 
 /**
  * BP-589. At phone width a dialog is a bottom sheet, and this launcher was painted at the same
@@ -144,5 +145,58 @@ describe("where the PM launcher is painted", () => {
 
     await waitFor(() => expect(api.get).toHaveBeenCalled());
     expect(launcher()).toBeNull();
+  });
+});
+
+/**
+ * BP-654. The panel is on screen without being a layer — deliberately, so the board it sits over
+ * keeps working — and the cost was that nothing answered for its keyboard: the board's shortcuts
+ * fired from the panel's own buttons, and Escape cleared a selection on the board behind it
+ * instead of dismissing the chat.
+ */
+describe("the chat's own keyboard", () => {
+  /** Once the panel is open the launcher relabels itself, and the panel's own ✕ takes the name it
+   *  had — so it is read back by the attribute only it carries. */
+  const fab = () => document.querySelector("[data-corner-obstacle]")!;
+
+  async function open() {
+    render(<PmChatWidget />);
+    await waitFor(() => expect(launcher()).not.toBeNull());
+    fireEvent.click(launcher()!);
+    return screen.getByTestId("pm-chat-panel");
+  }
+
+  it("claims the panel and the launcher as its own", async () => {
+    const panel = await open();
+    expect(panel.hasAttribute(OWNS_ITS_KEYS)).toBe(true);
+    // The launcher too: opening the chat leaves the focus on it, so the first key after the click
+    // lands here rather than in the panel
+    expect(fab().hasAttribute(OWNS_ITS_KEYS)).toBe(true);
+  });
+
+  it("closes on Escape from inside the panel", async () => {
+    const panel = await open();
+    fireEvent.keyDown(panel, { key: "Escape" });
+    expect(screen.queryByTestId("pm-chat-panel")).toBeNull();
+  });
+
+  it("closes on Escape from the launcher, where the focus is left", async () => {
+    await open();
+    fireEvent.keyDown(fab(), { key: "Escape" });
+    expect(screen.queryByTestId("pm-chat-panel")).toBeNull();
+  });
+
+  // Not swallowed: Escape is the only key the chat answers, and the page behind it is still a page
+  it("lets every other key through", async () => {
+    const panel = await open();
+    const seen: string[] = [];
+    const listen = (e: KeyboardEvent) => seen.push(e.key);
+    document.addEventListener("keydown", listen);
+
+    for (const key of ["v", "r", "n", "?"]) fireEvent.keyDown(panel, { key });
+    fireEvent.keyDown(panel, { key: "Escape" });
+
+    document.removeEventListener("keydown", listen);
+    expect(seen).toEqual(["v", "r", "n", "?"]);
   });
 });

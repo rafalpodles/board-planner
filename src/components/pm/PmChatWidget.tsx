@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { isPmRunnable } from "@/lib/pm/gate";
+import { OWNS_ITS_KEYS } from "@/lib/keyboard-scope";
 import { projectRefFromPathname } from "@/lib/urls";
 import { ApiProject } from "@/types";
 import { PmChat } from "./PmChat";
@@ -18,6 +19,15 @@ export function PmChatWidget() {
 
   const [project, setProject] = useState<ApiProject | null>(null);
   const [open, setOpen] = useState(false);
+
+  // The panel is not a layer, so nothing else answers Escape for it. Handled where the key lands
+  // rather than on `document`: a global listener would also answer for the page outside the panel,
+  // which still belongs to the board (BP-654).
+  const dismissOnEscape = (e: React.KeyboardEvent) => {
+    if (e.key !== "Escape") return;
+    e.stopPropagation();
+    setOpen(false);
+  };
 
   useEffect(() => {
     setProject(null);
@@ -42,6 +52,10 @@ export function PmChatWidget() {
       {open && (
         <div
           data-testid="pm-chat-panel"
+          // The keyboard inside the panel is the panel's, so the board's shortcuts do not fire
+          // behind it (BP-654)
+          {...{ [OWNS_ITS_KEYS]: "" }}
+          onKeyDown={dismissOnEscape}
           // Says the bottom-right corner is taken, the way the bars say the bottom strip is. The
           // panel and the toast were anchored to the same `bottom-40` over a pinned bar, and the
           // toast is painted a layer above — so it landed on Send (BP-596).
@@ -90,6 +104,10 @@ export function PmChatWidget() {
           repeats that breakpoint. A new bottom bar wants the first (BP-593). */}
       <button
         onClick={() => setOpen((v) => !v)}
+        onKeyDown={dismissOnEscape}
+        // The launcher belongs to the chat too: opening the panel leaves the focus here, and a key
+        // pressed on it is no more the board's than one pressed inside the panel (BP-654)
+        {...{ [OWNS_ITS_KEYS]: "" }}
         aria-label={open ? "Close PM chat" : "Open PM chat"}
         // Says it shares the corner, so a toast stands above it rather than on it (BP-597)
         data-corner-obstacle
