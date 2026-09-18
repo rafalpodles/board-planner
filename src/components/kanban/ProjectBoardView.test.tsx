@@ -243,7 +243,7 @@ describe("ProjectBoardView's pinViewMode prop", () => {
  * The tag test stands on its own rather than being folded into one shortcut's test: the handler
  * reads the three tags on a single line, and dropping one of them leaves the other two green.
  */
-describe("a key typed into a field", () => {
+describe("ProjectBoardView's typed-field guard", () => {
   for (const tag of ["input", "textarea", "select"] as const) {
     it(`fires no shortcut from a ${tag}`, () => {
       const setShowNewTask = vi.fn();

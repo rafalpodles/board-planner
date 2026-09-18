@@ -976,7 +976,7 @@ test.describe("keyboard", () => {
    */
   test("the shortcuts are inert while the search box has focus", async ({ page }) => {
     await openBoard(page);
-    const search = page.getByPlaceholder(/Search tasks/);
+    const search = page.getByPlaceholder(/^Search tasks/);
 
     for (const key of ["n", "v", "r", "?"]) await search.press(key);
     await expect(search).toHaveValue("nvr?");

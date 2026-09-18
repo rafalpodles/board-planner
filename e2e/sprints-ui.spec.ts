@@ -48,6 +48,8 @@ import { expectToast, recordToasts } from "./toasts";
  *
  * Every assertion about a write is taken from the database rather than from the screen it was made
  * on: a name that only ever existed in React state would look identical to one that was saved.
+ * The one describe that does not is the last, on the board's keyboard shortcuts: what it watches
+ * is a browser preference and a dialog, and neither reaches the server at all.
  */
 
 const sprintsUrl = `/projects/${PROJECT_KEY}/sprints`;
@@ -595,7 +597,11 @@ test.describe("which sprint the page opens on", () => {
  * (`pinViewMode="board"`) and turns the board read-only once the sprint has completed.
  *
  * `e2e/board-irreversible.spec.ts` covers what these keys do on an ordinary board. This is the
- * screen on which they must not.
+ * screen on which they must not. `e2e/shortcut-help-a11y.spec.ts` covers the other half of the
+ * same pair — that the help dialog stops *advertising* both keys here — and it builds the screen
+ * from `seedTaskInCompletedSprint()`, which leaves no open sprint. This fixture is the lifecycle
+ * one because the refusal is only worth anything beside the control: the same key, the same
+ * screen, a sprint that is still running.
  */
 test.describe("the board shortcuts on a pinned, sometimes read-only board", () => {
   const boardUrl = `/projects/${PROJECT_KEY}`;
