@@ -50,6 +50,11 @@ export function PmChatWidget() {
     // closed the chat AND cleared the board's selection behind it. `stopPropagation` is not enough
     // — it does not stop another listener on the same node.
     e.nativeEvent.stopImmediatePropagation();
+    closePanel();
+  };
+
+  /** Every way out of the panel, so the focus never lands on `body` by accident */
+  const closePanel = () => {
     setOpen(false);
     // The focus was inside the panel that is about to leave the DOM
     launcherRef.current?.focus({ preventScroll: true });
@@ -113,7 +118,7 @@ export function PmChatWidget() {
                 ⤢
               </Link>
               <button
-                onClick={() => setOpen(false)}
+                onClick={closePanel}
                 className="text-text-muted hover:text-text cursor-pointer"
                 aria-label="Close PM chat"
               >
