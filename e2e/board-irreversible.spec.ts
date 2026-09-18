@@ -969,25 +969,34 @@ test.describe("keyboard", () => {
    * measured, twice, after twice guessing the opposite.
    *
    * Nothing in the suite covered this already. `fill()` sets a value without dispatching a key at
-   * all, and the specs that do type character by character type into a modal, which that next line
-   * refuses on a different ground — so a test built on one would pass with this check deleted.
+   * all, and of the three specs that do type character by character, one types into the ⌘K palette
+   * over a board — refused by that next line, on a different ground — and the other two type on
+   * `/projects/:key/tasks/1` and `/search`, where this handler is not mounted at all.
+   *
+   * `v` leads the four keys, and the order is load-bearing under mutation rather than decoration:
+   * `n` opens NewTaskModal, which *is* a registered layer, so a run that let `n` through would
+   * have the next line refuse everything after it and the view would never flip. Measured — with
+   * `v` last, the table assertion below passed against the very mutation it is here to catch.
    */
   test("the shortcuts are inert while a field has focus", async ({ page }) => {
+    const KEYS = ["v", "r", "n", "?"] as const;
+    const TYPED = KEYS.join("");
+
     await openBoard(page);
 
     await test.step("typed into the search box, the letters type", async () => {
       const search = page.getByPlaceholder(/^Search tasks/);
-      for (const key of ["n", "v", "r", "?"]) await search.press(key);
+      for (const key of KEYS) await search.press(key);
 
       // The typed value is what proves the keys were delivered — without it a selector that found
       // nothing would report the same silence as a working guard. It is also why nothing settles
       // here, and the reason is a happens-after rather than a race: `keydown` finishes dispatching
       // before the browser inserts the character and fires `input`, which is the event React turns
       // into the change. So any shortcut these four keys could fire has already run by the time
-      // the box reads "nvr?". Two properties hold that up — the field is controlled, and every
+      // the box reads them back. Two properties hold that up — the field is controlled, and every
       // branch of the handler calls preventDefault, so in a broken build the character never
       // arrives at all and this assertion fails on its own.
-      await expect(search).toHaveValue("nvr?");
+      await expect(search).toHaveValue(TYPED);
       await expect(page.getByRole("dialog", { name: "New Task" })).toHaveCount(0);
       await expect(page.getByRole("heading", { name: "Keyboard Shortcuts" })).toHaveCount(0);
       await expect(page.locator("table")).toHaveCount(0);
@@ -999,7 +1008,7 @@ test.describe("keyboard", () => {
       await sortBy.focus();
       const before = await sortBy.inputValue();
 
-      for (const key of ["n", "v", "r", "?"]) await page.keyboard.press(key);
+      for (const key of KEYS) await page.keyboard.press(key);
 
       // A select has no typed value to watch, so this one settles instead. No option on this
       // dropdown begins with any of those letters, so the browser's own type-ahead moves nothing
@@ -1008,7 +1017,7 @@ test.describe("keyboard", () => {
       expect(await sortBy.inputValue()).toBe(before);
       await expect(page.getByRole("dialog", { name: "New Task" })).toHaveCount(0);
       await expect(page.getByRole("heading", { name: "Keyboard Shortcuts" })).toHaveCount(0);
-      // `v` is the one of the four with a visible consequence on this page, and this is where it
+      // `v` is the one of the four with a visible consequence on this board, and this is where it
       // would show: the list renders a table, the board does not
       await expect(page.locator("table")).toHaveCount(0);
     });
@@ -1023,11 +1032,11 @@ test.describe("keyboard", () => {
       const composer = page.getByTestId("pm-chat-panel").locator("textarea");
       await expect(composer).toBeVisible();
 
-      for (const key of ["n", "v", "r", "?"]) await composer.press(key);
+      for (const key of KEYS) await composer.press(key);
 
       // The composer is React-controlled like the search box, so its value is the delivered-key
       // signal here as well — no settle needed
-      await expect(composer).toHaveValue("nvr?");
+      await expect(composer).toHaveValue(TYPED);
       await expect(page.getByRole("dialog", { name: "New Task" })).toHaveCount(0);
       await expect(page.getByRole("heading", { name: "Keyboard Shortcuts" })).toHaveCount(0);
       await expect(page.locator("table")).toHaveCount(0);
