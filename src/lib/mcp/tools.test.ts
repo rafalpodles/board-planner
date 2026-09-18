@@ -262,3 +262,86 @@ describe("resolving an assignee through the board's own roster", () => {
     expect(update).toHaveBeenCalledWith("p1", "t1", expect.objectContaining({ assignee: null }));
   });
 });
+
+/**
+ * Linking tasks over MCP. Until this landed the only way to write an epic's children was a
+ * checklist, which nothing can move, assign or run — so the relations the board already stores
+ * were unreachable from the connection that files the work.
+ *
+ * The far end is named by key, like every other task parameter, and resolved to an id here: ids
+ * appear in no MCP response, so a parameter demanding one cannot be filled from a conversation.
+ */
+describe("link_tasks and unlink_tasks", () => {
+  const ENDS = {
+    "BP-644": { projectId: "p1", taskId: "epic" },
+    "BP-649": { projectId: "p1", taskId: "child" },
+    "MP-7": { projectId: "p2", taskId: "elsewhere" },
+  } as const;
+
+  function resolvesByKey() {
+    vi.spyOn(PlannerClient.prototype, "resolveTaskKey").mockImplementation(async (key: string) => {
+      const end = ENDS[key.toUpperCase() as keyof typeof ENDS];
+      if (!end) throw new Error(`Task ${key} not found`);
+      return end;
+    });
+  }
+
+  beforeEach(resolvesByKey);
+
+  it("sends the far end's id and the type, scoped to the shared project", async () => {
+    const add = vi.spyOn(PlannerClient.prototype, "addTaskLink").mockResolvedValue({});
+
+    await registered()
+      .get("link_tasks")!
+      .handler({ taskKey: "BP-644", targetTaskKey: "BP-649", type: "parent_of" }, extra);
+
+    expect(add).toHaveBeenCalledWith("p1", "epic", "child", "parent_of");
+  });
+
+  it("removes the link the same way", async () => {
+    const remove = vi.spyOn(PlannerClient.prototype, "removeTaskLink").mockResolvedValue({});
+
+    await registered()
+      .get("unlink_tasks")!
+      .handler({ taskKey: "BP-644", targetTaskKey: "BP-649", type: "parent_of" }, extra);
+
+    expect(remove).toHaveBeenCalledWith("p1", "epic", "child", "parent_of");
+  });
+
+  // The route looks the far end up by `{ _id, project }`, so this pair would come back "Task not
+  // found" — a sentence that sends the caller hunting for a typo in a key that resolved fine
+  it.each(["link_tasks", "unlink_tasks"])("%s refuses a pair on two boards, by name", async (tool) => {
+    const add = vi.spyOn(PlannerClient.prototype, "addTaskLink").mockResolvedValue({});
+    const remove = vi.spyOn(PlannerClient.prototype, "removeTaskLink").mockResolvedValue({});
+
+    await expect(
+      registered().get(tool)!.handler({ taskKey: "BP-644", targetTaskKey: "MP-7", type: "relates" }, extra)
+    ).rejects.toThrow(/BP-644 and MP-7 are on different boards/);
+
+    expect(add).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("takes the four kinds the board stores and nothing else", () => {
+    const { schema } = registered().get("link_tasks")!;
+    for (const type of ["blocked_by", "relates", "duplicates", "parent_of"]) {
+      expect(
+        schema.safeParse({ taskKey: "BP-1", targetTaskKey: "BP-2", type }).success
+      ).toBe(true);
+    }
+    expect(
+      schema.safeParse({ taskKey: "BP-1", targetTaskKey: "BP-2", type: "child_of" }).success
+    ).toBe(false);
+  });
+
+  // The hint is what a caller sees when they guess the field name instead of the tool. It said
+  // "the app — MCP does not link tasks", which stopped being true the moment these registered.
+  it("update_task points a blockedBy guess at the tool that does it", () => {
+    const { schema } = registered().get("update_task")!;
+
+    const refusal = schema.safeParse({ taskKey: "BP-1", blockedBy: ["BP-2"] });
+
+    expect(refusal.success).toBe(false);
+    expect(refusal.error!.issues[0].message).toContain('"blockedBy" — use the link_tasks tool');
+  });
+});
