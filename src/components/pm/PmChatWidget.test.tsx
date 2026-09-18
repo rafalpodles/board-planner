@@ -183,9 +183,36 @@ describe("the chat's own keyboard", () => {
     await waitFor(() => expect(document.activeElement).toBe(panel));
   });
 
-  // The launcher is the board's page again once the panel is gone, and the focus comes back here
-  it("leaves the launcher to the board", async () => {
+  // It is what the focus lands on, so it says what it is rather than having its contents read out
+  it("names itself for whoever the focus lands on", async () => {
+    const panel = await open();
+    expect(panel.getAttribute("role")).toBe("complementary");
+    const label = document.getElementById(panel.getAttribute("aria-labelledby")!);
+    expect(label?.textContent).toContain("PM");
+  });
+
+  /**
+   * The launcher is gated rather than simply marked or simply left alone, and both halves matter.
+   * The panel has no focus trap — it is not a layer — so Tab walks out of it onto this button,
+   * which sits outside the panel: a reviewer measured three Tabs from the open panel landing here,
+   * where `n` opened New Task over the chat and Escape cleared the board's selection behind it.
+   */
+  it("belongs to the chat while the chat is open", async () => {
     await open();
+    expect(fab().hasAttribute(OWNS_ITS_KEYS)).toBe(true);
+  });
+
+  it("closes the chat on Escape pressed on it, the way the panel does", async () => {
+    await open();
+    fireEvent.keyDown(fab(), { key: "Escape" });
+    expect(screen.queryByTestId("pm-chat-panel")).toBeNull();
+  });
+
+  // And gives the keys back once there is no chat to own them
+  it("leaves the launcher to the board once the chat is closed", async () => {
+    await open();
+    fireEvent.keyDown(screen.getByTestId("pm-chat-panel"), { key: "Escape" });
+    expect(screen.queryByTestId("pm-chat-panel")).toBeNull();
     expect(fab().hasAttribute(OWNS_ITS_KEYS)).toBe(false);
   });
 

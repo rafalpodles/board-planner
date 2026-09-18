@@ -40,6 +40,16 @@ export function PmChatWidget() {
     // panel under it would unmount the draft and the staged uploads with it, which is the loss
     // PmChatWidget.test.tsx already guards against for a dialog opened elsewhere.
     if (e.key !== "Escape" || openLayerCount() > 0) return;
+    // Mid-composition — Japanese, Chinese, Korean — Escape cancels the IME's candidate window and
+    // belongs to the field, not to the panel
+    if (e.nativeEvent.isComposing) return;
+    // The board's handler listens on `document`, and so does React's delegate — so this key
+    // reaches the board after this handler has run, by which time `open` is false and the marker
+    // that would have told the board to keep its hands off is gone from the launcher. Measured as
+    // an outcome rather than reasoned about: without this line, Escape pressed on the launcher
+    // closed the chat AND cleared the board's selection behind it. `stopPropagation` is not enough
+    // — it does not stop another listener on the same node.
+    e.nativeEvent.stopImmediatePropagation();
     setOpen(false);
     // The focus was inside the panel that is about to leave the DOM
     launcherRef.current?.focus({ preventScroll: true });
@@ -69,6 +79,10 @@ export function PmChatWidget() {
         <div
           data-testid="pm-chat-panel"
           ref={panelRef}
+          // It takes the focus when it opens, so it announces itself rather than letting a reader
+          // land on an unnamed div and hear its contents
+          role="complementary"
+          aria-labelledby="pm-chat-panel-title"
           // Focusable only programmatically: it is the click target of last resort inside the
           // panel, so anything clicked in here leaves the focus in here
           tabIndex={-1}
@@ -88,7 +102,7 @@ export function PmChatWidget() {
             data-corner-panel-header
             className="flex items-center justify-between px-4 py-3 border-b border-border bg-bg-card shrink-0"
           >
-            <p className="font-semibold text-sm">🤖 PM — {project.name}</p>
+            <p id="pm-chat-panel-title" className="font-semibold text-sm">🤖 PM — {project.name}</p>
             <div className="flex items-center gap-3">
               <Link
                 href={`/projects/${projectId}/pm`}
@@ -125,8 +139,13 @@ export function PmChatWidget() {
       <button
         ref={launcherRef}
         onClick={() => setOpen((v) => !v)}
-        // Deliberately NOT marked as owning its keys: it is the board's page once the panel is
-        // gone, and the focus comes back here when the panel closes
+        // Gated on `open`, not simply set or simply absent. The panel has no focus trap — it is
+        // not a layer — so Tab walks out of it onto this button, which sits outside the panel:
+        // while the chat is open this is still the chat's, or `n` there would open New Task over
+        // it and Escape would clear the board's selection behind it. Once the chat is closed it is
+        // the board's page again, and the focus lands back here (BP-654).
+        {...(open ? { [OWNS_ITS_KEYS]: "" } : {})}
+        onKeyDown={open ? dismissOnEscape : undefined}
         aria-label={open ? "Close PM chat" : "Open PM chat"}
         // Says it shares the corner, so a toast stands above it rather than on it (BP-597)
         data-corner-obstacle

@@ -1027,7 +1027,23 @@ test.describe("keyboard", () => {
       await expect(page.getByRole("dialog", { name: "New Task" })).toHaveCount(0);
     });
 
-    await test.step("Escape closes the chat, and the selection survives it", async () => {
+    // The keyboard way out of the panel, measured by a reviewer on the first version of this fix:
+    // the panel has no focus trap on purpose, so Tab walks out of it onto the launcher, which sits
+    // outside the panel. While the chat is open that button is still the chat's.
+    await test.step("and Tab out of the panel lands somewhere that is still the chat's", async () => {
+      const launcher = page.locator("[data-corner-obstacle]");
+      await expect(async () => {
+        await page.keyboard.press("Tab");
+        await expect(launcher).toBeFocused({ timeout: 250 });
+      }).toPass({ timeout: 5_000 });
+
+      await page.keyboard.press("n");
+      await page.waitForTimeout(1_000);
+      await expect(page.getByRole("dialog", { name: "New Task" })).toHaveCount(0);
+      await expect(panel).toBeVisible();
+    });
+
+    await test.step("Escape closes the chat from there too, and the selection survives it", async () => {
       await page.keyboard.press("Escape");
       await expect(panel).toHaveCount(0);
       await expect(page.getByRole("button", { name: "Select (1)" })).toBeVisible();
