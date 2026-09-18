@@ -959,6 +959,100 @@ test.describe("keyboard", () => {
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(new RegExp(`${taskUrl(focused)}$`));
   });
+
+  /**
+   * BP-477. The handler's first line returns for an `INPUT`, `TEXTAREA` or `SELECT` target, and
+   * all three are reachable on this board, so all three are driven here: the search box
+   * (`BoardFilters.tsx:397`), the sort dropdown inline in the toolbar (`:634`) and the PM chat
+   * composer (`PmChat.tsx:654`), which this fixture reaches because `seed()` enables the agent.
+   * None of them is a registered layer, so the *next* line of the handler refuses none of them —
+   * measured, twice, after twice guessing the opposite.
+   *
+   * Nothing in the suite covered this already. `fill()` sets a value without dispatching a key at
+   * all, and of the three specs that do type character by character, one types into the ⌘K palette
+   * over a board — refused by that next line, on a different ground — and the other two type on
+   * `/projects/:key/tasks/1` and `/search`, where this handler is not mounted at all.
+   *
+   * `v` leads the four keys, and the order is load-bearing under mutation rather than decoration:
+   * `n` opens NewTaskModal, which *is* a registered layer, so a run that let `n` through would
+   * have the next line refuse everything after it and the view would never flip. Measured — with
+   * `v` last, the table assertion below passed against the very mutation it is here to catch.
+   */
+  test("the shortcuts are inert while a field has focus", async ({ page }) => {
+    const KEYS = ["v", "r", "n", "?"] as const;
+    const TYPED = KEYS.join("");
+
+    await openBoard(page);
+
+    await test.step("typed into the search box, the letters type", async () => {
+      const search = page.getByPlaceholder(/^Search tasks/);
+      for (const key of KEYS) await search.press(key);
+
+      // The typed value is what proves the keys were delivered — without it a selector that found
+      // nothing would report the same silence as a working guard. It is also why nothing settles
+      // here, and the reason is a happens-after rather than a race: `keydown` finishes dispatching
+      // before the browser inserts the character and fires `input`, which is the event React turns
+      // into the change. So any shortcut these four keys could fire has already run by the time
+      // the box reads them back. Two properties hold that up — the field is controlled, and every
+      // branch these four keys can reach calls preventDefault (Escape's does not, which is why
+      // the claim is scoped to them), so in a broken build the character never arrives at all and
+      // this assertion fails on its own.
+      await expect(search).toHaveValue(TYPED);
+      await expect(page.getByRole("dialog", { name: "New Task" })).toHaveCount(0);
+      await expect(page.getByRole("heading", { name: "Keyboard Shortcuts" })).toHaveCount(0);
+      await expect(page.locator("table")).toHaveCount(0);
+      await search.fill("");
+    });
+
+    await test.step("held by the sort dropdown, they do nothing at all", async () => {
+      const sortBy = page.getByLabel("Sort tasks by");
+      await sortBy.focus();
+      const before = await sortBy.inputValue();
+
+      for (const key of KEYS) await page.keyboard.press(key);
+
+      // A select has no typed value to watch, so this one settles instead. No option on this
+      // dropdown begins with any of those letters, so the browser's own type-ahead moves nothing
+      // either — the value is a control against the keys having gone somewhere else entirely.
+      await page.waitForTimeout(1_000);
+      expect(await sortBy.inputValue()).toBe(before);
+      // `v` leads, and this is where it would show: the list renders a table, the board does not.
+      // First of the three, so a run that lets the keys through says so in the failure rather than
+      // naming whatever the key after it opened.
+      await expect(page.locator("table")).toHaveCount(0);
+      await expect(page.getByRole("dialog", { name: "New Task" })).toHaveCount(0);
+      await expect(page.getByRole("heading", { name: "Keyboard Shortcuts" })).toHaveCount(0);
+    });
+
+    await test.step("held by the PM chat composer, they type there too", async () => {
+      // Asserted rather than merely clicked: the launcher is withheld when a project has no PM
+      // agent (`PmChatWidget.tsx:33`), so a seed or an env that turned it off would take this step
+      // with it — loudly here, instead of leaving a tag untested behind a green tick
+      const launcher = page.getByRole("button", { name: "Open PM chat" });
+      await expect(launcher).toBeVisible();
+      await launcher.click();
+      const composer = page.getByTestId("pm-chat-panel").locator("textarea");
+      await expect(composer).toBeVisible();
+
+      for (const key of KEYS) await composer.press(key);
+
+      // The composer is React-controlled like the search box, so its value is the delivered-key
+      // signal here as well — no settle needed
+      await expect(composer).toHaveValue(TYPED);
+      await expect(page.getByRole("dialog", { name: "New Task" })).toHaveCount(0);
+      await expect(page.getByRole("heading", { name: "Keyboard Shortcuts" })).toHaveCount(0);
+      await expect(page.locator("table")).toHaveCount(0);
+
+      // The launcher wears the same label as the panel's own ✕ while the panel is open
+      await page.getByTestId("pm-chat-panel").getByRole("button", { name: "Close PM chat" }).click();
+      await expect(page.getByTestId("pm-chat-panel")).toHaveCount(0);
+    });
+
+    // The control for both: the same key, with no field holding it
+    await page.getByRole("heading", { name: PROJECT_NAME }).click();
+    await page.keyboard.press("?");
+    await expect(page.getByRole("heading", { name: "Keyboard Shortcuts" })).toBeVisible();
+  });
 });
 
 test.describe("a board with nothing on it, and one that would not load", () => {

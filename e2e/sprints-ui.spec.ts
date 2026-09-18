@@ -48,6 +48,8 @@ import { expectToast, recordToasts } from "./toasts";
  *
  * Every assertion about a write is taken from the database rather than from the screen it was made
  * on: a name that only ever existed in React state would look identical to one that was saved.
+ * The one describe that does not is the last, on the board's keyboard shortcuts: what it watches
+ * is a browser preference and a dialog, and neither reaches the server at all.
  */
 
 const sprintsUrl = `/projects/${PROJECT_KEY}/sprints`;
@@ -586,5 +588,88 @@ test.describe("which sprint the page opens on", () => {
 
     await expect(page).toHaveURL(new RegExp(`sprint=${LIFECYCLE_CURRENT_ID}`));
     await expect(selectedSprintName(page)).toHaveText(LIFECYCLE_CURRENT_NAME);
+  });
+});
+
+/**
+ * BP-477. This page pins the view mode (`pinViewMode="board"`) and turns the board read-only once
+ * the sprint has completed, and both are read inside the board's keyboard handler rather than by
+ * any control — so pressing the key is the only way to watch them here.
+ *
+ * What each of these two tests is worth differs, and the difference is worth stating. The V test
+ * pins the handler's `!pinViewMode` branch and nothing else does. The N test does **not** pin the
+ * handler's `!readOnly` branch: readOnly withholds the modal at the render too
+ * (`ProjectBoardView.tsx:452`), so this test stays green with that branch deleted — measured. It
+ * is here for what a person meets, whichever of the two refusals produces it; the branch itself is
+ * pinned by "does not even ask for the new-task modal on the n shortcut" in
+ * `ProjectBoardView.test.tsx`, which watches the call.
+ *
+ * `e2e/board-irreversible.spec.ts` covers what these keys do on an ordinary board. This is the
+ * screen on which they must not. `e2e/shortcut-help-a11y.spec.ts` covers the other half of the
+ * same pair — that the help dialog stops *advertising* both keys here — and it builds the screen
+ * from `seedTaskInCompletedSprint()`, which leaves no open sprint. This fixture is the lifecycle
+ * one because the refusal is only worth anything beside the control: the same key, the same
+ * screen, a sprint that is still running.
+ */
+test.describe("the board shortcuts on a pinned, sometimes read-only board", () => {
+  const boardUrl = `/projects/${PROJECT_KEY}`;
+  const storedViewMode = (page: Page) =>
+    page.evaluate((key) => localStorage.getItem(`view-mode:${key}`), PROJECT_KEY);
+
+  test("V leaves the project board's stored view alone", async ({ page }) => {
+    await signIn(page);
+    await openSprints(page, `?sprint=${LIFECYCLE_CURRENT_ID}`);
+    await expect(page.getByTestId("column-in_progress")).toBeVisible();
+
+    await page.locator("body").press("v");
+
+    // This page renders the same either way — what the unguarded branch writes is the *project
+    // board's* stored preference, and that is invisible until the board is opened again. Read
+    // once after a settle rather than with a retrying matcher: the value is already what this
+    // asserts before the key is pressed, so a matcher would pass on its first poll.
+    await page.waitForTimeout(1_000);
+    expect(await storedViewMode(page)).not.toBe("list");
+
+    await page.goto(boardUrl);
+    await expect(page.getByRole("button", { name: "Board", exact: true })).toHaveAttribute(
+      "aria-current",
+      "true"
+    );
+
+    // The control: the same key, on the board that pins nothing
+    await page.locator("body").press("v");
+    await expect(page.getByRole("button", { name: "List", exact: true })).toHaveAttribute(
+      "aria-current",
+      "true"
+    );
+    expect(await storedViewMode(page)).toBe("list");
+  });
+
+  test("N is refused on a completed sprint and offered on a live one", async ({ page }) => {
+    await signIn(page);
+    await openSprints(page, `?sprint=${LIFECYCLE_PAST_ONE_ID}`);
+    await expect(statusBadge(page)).toHaveText("Completed");
+    // The badge is SprintHeader's and is painted before the board behind the `tasksLoaded` gate
+    // (`sprints/page.tsx:172`); waiting for a column is waiting for the handler to be listening,
+    // without which the silence below would prove nothing
+    await expect(page.getByTestId("column-done")).toBeVisible();
+
+    await page.locator("body").press("n");
+    await page.waitForTimeout(1_000);
+    await expect(page.getByRole("dialog", { name: "New Task" })).toHaveCount(0);
+
+    // The first control, for the silence: the handler is mounted on this board and did see the
+    // key. `?` is the one shortcut neither guard on this page touches.
+    await page.locator("body").press("?");
+    await expect(page.getByRole("heading", { name: "Keyboard Shortcuts" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("heading", { name: "Keyboard Shortcuts" })).toHaveCount(0);
+
+    // The second control, for the guard: the same key on the same screen, with a sprint that is
+    // still open — so the refusal above is readOnly and not the sprints page as such
+    await openSprints(page, `?sprint=${LIFECYCLE_CURRENT_ID}`);
+    await expect(statusBadge(page)).toHaveText("Active");
+    await page.locator("body").press("n");
+    await expect(page.getByRole("dialog", { name: "New Task" })).toBeVisible();
   });
 });

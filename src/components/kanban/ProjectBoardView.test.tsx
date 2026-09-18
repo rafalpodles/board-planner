@@ -132,10 +132,18 @@ describe("A read-only ProjectBoardView's other write paths", () => {
     expect(screen.getByRole("button", { name: /^Select/ })).toBeTruthy();
   });
 
-  it("does not open the new-task modal on the n shortcut", () => {
-    render(<ProjectBoardView board={makeBoard({ tasks })} readOnly />);
+  /**
+   * The call rather than the modal: readOnly withholds the modal at the render too, so an
+   * assertion that only looks for it stays green with the handler's own `!readOnly` deleted.
+   * A test that did exactly that stood here and was removed with this one's arrival — measured,
+   * not reasoned about: no single mutation could turn it red, the render gate included, which
+   * "never mounts the new-task modal, even if showNewTask is already true" pins on its own.
+   */
+  it("does not even ask for the new-task modal on the n shortcut", () => {
+    const setShowNewTask = vi.fn();
+    render(<ProjectBoardView board={makeBoard({ tasks, setShowNewTask })} readOnly />);
     fireEvent.keyDown(document, { key: "n" });
-    expect(screen.queryByRole("heading", { name: "New Task" })).toBeNull();
+    expect(setShowNewTask).not.toHaveBeenCalled();
   });
 
   it("opens the new-task modal on the n shortcut when not read-only", () => {
@@ -214,6 +222,60 @@ describe("ProjectBoardView's pinViewMode prop", () => {
     const { container } = render(<ProjectBoardView board={makeBoard({ tasks, viewMode: "list" })} />);
     expect(container.querySelector("table")).toBeTruthy();
     expect(screen.queryByTestId("column-todo")).toBeNull();
+  });
+
+  it("leaves the view alone when v is pressed on a pinned board", () => {
+    const setViewMode = vi.fn();
+    render(<ProjectBoardView board={makeBoard({ tasks, setViewMode })} pinViewMode="board" />);
+    fireEvent.keyDown(document, { key: "v" });
+    expect(setViewMode).not.toHaveBeenCalled();
+  });
+
+  it("switches the view on v when nothing is pinned", () => {
+    const setViewMode = vi.fn();
+    render(<ProjectBoardView board={makeBoard({ tasks, setViewMode })} />);
+    fireEvent.keyDown(document, { key: "v" });
+    expect(setViewMode).toHaveBeenCalledWith("list");
+  });
+});
+
+/**
+ * The tag test stands on its own rather than being folded into one shortcut's test: the handler
+ * reads the three tags on a single line, and dropping one of them leaves the other two green.
+ */
+describe("ProjectBoardView's typed-field guard", () => {
+  for (const tag of ["input", "textarea", "select"] as const) {
+    it(`fires no shortcut from a ${tag}`, () => {
+      const setShowNewTask = vi.fn();
+      const setViewMode = vi.fn();
+      const { container } = render(
+        <ProjectBoardView board={makeBoard({ tasks, setShowNewTask, setViewMode })} />
+      );
+      const target = container.appendChild(document.createElement(tag));
+
+      fireEvent.keyDown(target, { key: "n" });
+      fireEvent.keyDown(target, { key: "v" });
+      fireEvent.keyDown(target, { key: "?" });
+
+      expect(setShowNewTask).not.toHaveBeenCalled();
+      expect(setViewMode).not.toHaveBeenCalled();
+      expect(screen.queryByRole("heading", { name: "Keyboard Shortcuts" })).toBeNull();
+    });
+  }
+
+  // The control: the same three keys, dispatched anywhere else, all land
+  it("fires every one of them from outside a field", () => {
+    const setShowNewTask = vi.fn();
+    const setViewMode = vi.fn();
+    render(<ProjectBoardView board={makeBoard({ tasks, setShowNewTask, setViewMode })} />);
+
+    fireEvent.keyDown(document, { key: "n" });
+    fireEvent.keyDown(document, { key: "v" });
+    fireEvent.keyDown(document, { key: "?" });
+
+    expect(setShowNewTask).toHaveBeenCalledWith(true);
+    expect(setViewMode).toHaveBeenCalledWith("list");
+    expect(screen.getByRole("heading", { name: "Keyboard Shortcuts" })).toBeTruthy();
   });
 });
 
