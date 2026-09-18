@@ -1016,11 +1016,12 @@ test.describe("keyboard", () => {
       // either — the value is a control against the keys having gone somewhere else entirely.
       await page.waitForTimeout(1_000);
       expect(await sortBy.inputValue()).toBe(before);
+      // `v` leads, and this is where it would show: the list renders a table, the board does not.
+      // First of the three, so a run that lets the keys through says so in the failure rather than
+      // naming whatever the key after it opened.
+      await expect(page.locator("table")).toHaveCount(0);
       await expect(page.getByRole("dialog", { name: "New Task" })).toHaveCount(0);
       await expect(page.getByRole("heading", { name: "Keyboard Shortcuts" })).toHaveCount(0);
-      // `v` is the one of the four with a visible consequence on this board, and this is where it
-      // would show: the list renders a table, the board does not
-      await expect(page.locator("table")).toHaveCount(0);
     });
 
     await test.step("held by the PM chat composer, they type there too", async () => {
