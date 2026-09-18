@@ -103,6 +103,35 @@ describe("the fleet console's owner column", () => {
     expect(await screen.findByText("Owner Name")).toBeTruthy();
   });
 
+  // Every other test here finds a value somewhere in the row. From BP-305, which rendered its fifth
+  // header's cell seventh, until BP-615, three columns sat under the wrong header — Owner over the
+  // Running cell since BP-358 took that slot — and all of them stayed green.
+  it("reads every value under its own header", async () => {
+    api.get.mockResolvedValue([worker({ lastSeenAt: new Date(Date.now() - 5 * 60_000).toISOString() })]);
+
+    render(<WorkersPage />);
+
+    await screen.findByText("Owner Name");
+    const table = screen.getByRole("table");
+    const headers = within(table).getAllByRole("columnheader").map((h) => h.textContent?.trim());
+    const cells = within(within(table).getAllByRole("row")[1]).getAllByRole("cell");
+    expect(cells).toHaveLength(headers.length);
+    const under = (header: string) => cells[headers.indexOf(header)].textContent?.trim();
+
+    expect(under("Name")).toBe("owner-mac");
+    expect(under("Host")).toBe("mac.home");
+    expect(under("Version")).toBe("1.0.0");
+    expect(under("Checkouts")).toBe("none reported");
+    expect(under("Owner")).toContain("Owner Name");
+    expect(under("Running")).toBe("—");
+    expect(under("Last seen")).toBe("5m ago");
+    expect(under("Preflight")).toBe("not reported");
+    expect(under("Binding error")).toBe("");
+    expect(under("Enabled")).toBe("On");
+    expect(under("Lock")).toBe("Lock");
+    expect(under("Commands")).toMatch(/^Pause.*Stop$/);
+  });
+
   it("falls back to the username when that account has no display name", async () => {
     api.get.mockResolvedValue([worker({ owner: { _id: "u1", username: "owner", fullName: "" } })]);
 
