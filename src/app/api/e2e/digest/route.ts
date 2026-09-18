@@ -16,8 +16,11 @@ import { e2eOnlyMounted } from "@/lib/e2e-only";
  * `in-app-notifications`. Importing the digest into the runner would arm real delivery for specs
  * that never asked for a mail server.
  *
- * 404 rather than 403 when it is not mounted: a refusal that names the route tells a caller it is
- * there.
+ * What the refusal does and does not buy, measured rather than assumed. Next fills in the methods a
+ * route module does not export, so on a deployment where this is shut `OPTIONS` still answers 204
+ * with `Allow: OPTIONS, POST` and `GET` answers 405, where a path with no route at all answers 404.
+ * The path is therefore discoverable whatever this handler returns — as it is anyway, from the
+ * source of a public repository. What is closed is the effect: no tick runs, and nothing is sent.
  */
 export async function POST() {
   if (!e2eOnlyMounted(process.env.E2E, process.env.NODE_ENV)) {

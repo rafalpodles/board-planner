@@ -283,9 +283,12 @@ export default defineConfig({
         // notification grid offers. Without it those routes answer 503 and the specs that drive
         // them assert a refusal instead of the encryption they exist to prove.
         ENCRYPTION_KEY: "e2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee",
-        // Turns off Next's dev indicator, which paints over the bottom-left of every page and
-        // takes a real click meant for a bottom sheet's action row (BP-589). Only here: a
-        // developer running `next dev` by hand keeps it.
+        // Two things now, and the second is not cosmetic. It turns off Next's dev indicator, which
+        // paints over the bottom-left of every page and takes a real click meant for a bottom
+        // sheet's action row (BP-589) — and it mounts `POST /api/e2e/digest`, which runs a digest
+        // tick with nothing authenticating it (`src/lib/e2e-only.ts`, BP-605). So this is not a
+        // variable to set on a deployment to quieten the indicator: outside a production build it
+        // opens that route too. Only here; a developer running `next dev` by hand keeps both.
         E2E: "1",
       },
     },
