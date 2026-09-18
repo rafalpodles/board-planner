@@ -724,7 +724,7 @@ test("link_tasks builds a parent and its child, and unlink_tasks takes it apart"
   // The parent's own page: the child is under Children
   await page.goto(taskUrl(HELD_TASK_NUMBER));
   await expect(page.getByText(HELD_TASK_TITLE).first()).toBeVisible();
-  const children = page.getByRole("heading", { name: "Children", level: 4 });
+  const children = page.getByRole("heading", { name: "Children", level: 4, exact: true });
   await expect(children).toBeVisible();
   // Scoped to the section rather than the page: unscoped, this asserts the page mentions the key
   // somewhere, which a breadcrumb or a card would satisfy without any link existing
@@ -739,14 +739,14 @@ test("link_tasks builds a parent and its child, and unlink_tasks takes it apart"
   });
   accepted(alsoBlocked);
   await page.reload();
-  const blockedBy = page.getByRole("heading", { name: "Blocked by", level: 4 });
+  const blockedBy = page.getByRole("heading", { name: "Blocked by", level: 4, exact: true });
   await expect(blockedBy).toBeVisible();
   await expect(blockedBy.locator("..").getByText(SIBLING_TASK_KEY, { exact: true })).toBeVisible();
   await expect(children).toBeVisible();
 
   // The child's page, which nothing wrote to: the parent arrives from the reverse lookup
   await page.goto(taskUrl(SIBLING_TASK_NUMBER));
-  const parent = page.getByRole("heading", { name: "Parent", level: 4 });
+  const parent = page.getByRole("heading", { name: "Parent", level: 4, exact: true });
   await expect(parent).toBeVisible();
   // Scoped: the same key is also under "Is blocking" on this page, and an unscoped match would be
   // satisfied by either — which is to say by neither in particular
@@ -763,7 +763,7 @@ test("link_tasks builds a parent and its child, and unlink_tasks takes it apart"
   refused(fromTheWrongEnd);
   expect(fromTheWrongEnd.text).toContain(`${HELD_TASK_KEY} holds that parent_of link`);
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Parent", level: 4 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Parent", level: 4, exact: true })).toBeVisible();
 
   const unlinked = await session.callTool("unlink_tasks", {
     taskKey: HELD_TASK_KEY,
@@ -776,7 +776,7 @@ test("link_tasks builds a parent and its child, and unlink_tasks takes it apart"
   // The positive first: a heading only a loaded task page has, so an empty Children section is
   // read off a rendered page rather than off one that never arrived
   await expect(page.getByText(HELD_TASK_TITLE).first()).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Children", level: 4 })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Children", level: 4, exact: true })).toHaveCount(0);
 });
 
 /**

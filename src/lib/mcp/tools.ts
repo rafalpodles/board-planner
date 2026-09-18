@@ -367,7 +367,7 @@ export function registerPlannerTools(server: McpServer): void {
     "sub-tasks instead of a checklist; duplicates means taskKey is the duplicate of targetTaskKey, " +
     "and the two ends read differently — the far task's page says Duplicated by and offers no way " +
     "to remove it. Only relates means the same read either way, and even that is stored on one " +
-    "end, so which task you name decides whose page can remove it again.";
+    "end, so which task you name decides which end unlink_tasks can take it off again.";
 
   const LINK_TYPE_PARAM = "Which kind of link, read from taskKey's side — see the description.";
 
