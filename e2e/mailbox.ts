@@ -21,6 +21,10 @@ export async function mailFor(address: string): Promise<StubMessage[]> {
  *
  * Anything asserted against the raw `data` is asserted against the encoder: a line over 76
  * characters is folded with a trailing `=`, which can fall inside a task key or a URL.
+ *
+ * Two cases, not a quoted-printable decoder. `=20` and `=09` — a trailing space or tab, which the
+ * encoding also escapes — come back as they were written, which no assertion here reads. A caller
+ * matching on trailing whitespace needs a real decoder rather than this.
  */
 export function bodyOf(message: StubMessage): string {
   return message.data.replace(/=\r?\n/g, "").replace(/=3D/g, "=");

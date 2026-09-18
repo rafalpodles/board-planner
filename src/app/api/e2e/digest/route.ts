@@ -10,11 +10,14 @@ import { e2eOnlyMounted } from "@/lib/e2e-only";
  * (`DIGEST_TICK_MS`) so it cannot land in the middle of somebody else's assertion, and asks for a
  * tick here instead.
  *
- * It runs in the dev server rather than in the Playwright worker on purpose. `@/lib/email` captures
- * `SMTP_*` at module load and one worker process shares its module registry across every spec in a
- * project, several of which import `@/lib/task-service` — which reaches `sendEmail` through
- * `in-app-notifications`. Importing the digest into the runner would arm real delivery for specs
- * that never asked for a mail server.
+ * It runs in the dev server rather than in the Playwright worker, and the reason is not that the
+ * import alone would do damage — it would do nothing at all. The runner has no `SMTP_*` (they are
+ * set on the dev server, in `webServer[].env`), so `isEmailConfigured()` is false there and the
+ * tick returns 0 on its first line. The hazard is in what making it work would take: `@/lib/email`
+ * captures `SMTP_*` at module load, and one worker shares its registry across every spec in a
+ * project — `claim-ownership`, `column-roles` and `worker-controls` already import
+ * `@/lib/task-service`, which reaches `sendEmail` through `in-app-notifications`. Giving the runner
+ * a mail server to run this one tick would arm real delivery for those too.
  *
  * What the refusal does and does not buy, measured rather than assumed. Next fills in the methods a
  * route module does not export, so on a deployment where this is shut `OPTIONS` still answers 204

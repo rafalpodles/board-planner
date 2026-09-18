@@ -49,8 +49,12 @@ import {
  *   pass or fail by the clock on the wall.
  *
  * The tick itself is asked for over HTTP (`POST /api/e2e/digest`), which is what puts it inside the
- * dev server: `@/lib/email` captures `SMTP_*` at module load, and importing the digest into this
- * process would arm real mail for every other spec sharing the Playwright worker.
+ * dev server. Calling `digestTick` from here instead would not send anything: this process has no
+ * `SMTP_*` — they are set on the dev server — so `isEmailConfigured()` is false and the tick
+ * returns 0 before it reads a thing. Giving this process a mail server to fix that is the part to
+ * avoid: `@/lib/email` captures `SMTP_*` at module load and one worker shares its registry across
+ * every spec in the group, three of which already import `@/lib/task-service` and would start
+ * delivering real mail from tests that never asked for any.
  *
  * Every gesture is driven on the screen — the grid cell, the digest box, the assignment, and the
  * row the reader opens. Three things are not, and each is setup rather than subject: the clock,
