@@ -17,7 +17,8 @@ machine. This file is the operator's view — what has to be true on the box its
 ## How one task runs
 
 ```
-claim → worktree → claude -p → clean-tree check → gates → push → PR → merge → done
+claim → worktree → claude -p → clean-tree check → gates → push → PR → review column
+claim → … → PR → merge → done                 (when the agent ends with a Merge step)
 ```
 
 Every step reports to the board, so the task's comments are the run log.
@@ -165,7 +166,8 @@ it anywhere else. Logs go to `/tmp/boardplanner-worker.log` and
 `/tmp/boardplanner-worker.error.log`.
 
 Stop it with `launchctl unload ~/Library/LaunchAgents/com.boardplanner.worker.plist`. `SIGTERM`
-and `SIGINT` both finish the task in flight before the loop exits.
+and `SIGINT` both abandon the run in flight rather than waiting it out, and the task goes back to
+the queue with the attempt counted, so a supervisor restarting in a loop cannot retry it for ever.
 
 ## Safety
 
@@ -206,8 +208,12 @@ and `SIGINT` both finish the task in flight before the loop exits.
   board's settings refuse to remove the last `active` or `done` column in the first place; a run
   that still finds a role missing — the columns edited between the claim and the run — hands the
   task back with the attempt charged, so three such runs park it for a person.
-- **Nothing merges unreviewed.** The review gate is a separate Claude with no memory of writing
-  the code, and it sees only the diff.
+- **An unreviewed merge is shown, never forbidden.** A Merge step with no Reviewed gate after the
+  last step that writes is graded *risky* in the agent editor and runs exactly as composed: whether
+  to merge unreviewed is the operator's call. Where a Reviewed gate is present it is a separate
+  Claude with no memory of writing the code: it is given the task and the diff, and can read, never
+  write, a clean checkout of the commit. The shipped Default agent
+  merges nothing; it stops at the pull request.
 - **Nothing executes before the static gates have read the diff.** `protected-paths` refuses
   changes to `package.json`, lockfiles, `.npmrc`, hooks and workflows *before* the build gate runs
   npm on the worktree, and installs run with `--ignore-scripts`. Cost ordering alone would have
@@ -398,7 +404,7 @@ and `SIGINT` both finish the task in flight before the loop exits.
   which `SAFE_CONFIG` pins to `/dev/null` for that reason. What that stages is wider than a
   `.DS_Store`: the gates run `npm ci` and the build inside the worktree, so a `node_modules` or a
   `dist` the repository's own `.gitignore` does not name is committed by the next edit step, where
-  the diff-size gates are what make it loud. One list is left and it is the agent's own —
+  the diff-size gates are what make it loud. One list is left:
   `.git/info/exclude`, untracked and reaching no diff, which is BP-640.
 
   **Nothing this worker commits is signed.** `commit.gpgSign=false` and `push.gpgSign=false` ride on
@@ -440,9 +446,10 @@ and `SIGINT` both finish the task in flight before the loop exits.
   was tried and is worse than doing nothing: the loop claims the next task immediately, so the
   approved column of every project on that checkout empties into escalation one attempt at a time.
 
-  What that identity is worth is worth stating too: an earlier run's agent can write `user.email`
-  into that file or into the shared `.git/config`, and neither is a key git *runs*, so no scan
-  refuses it. A commit's author is as trustworthy as the machine's own configuration. The account a
+  What that identity is worth is worth stating too: an earlier run's agent running unconfined
+  (`CP_ALLOW_UNCONFINED_AGENT=1`) can write `user.email` into that file or into the shared
+  `.git/config`, since a confined one writes nowhere but its worktree. Neither is a key git *runs*,
+  so no scan refuses it. A commit's author is as trustworthy as the machine's own configuration. The account a
   push acts as is pinned separately (BP-373), and that one is not writable from the checkout.
 - **Nothing the server sends becomes a path or an option.** Everything below arrives over HTTP from
   whichever server this worker is enrolled with, and everything past that boundary runs on somebody's
@@ -529,9 +536,11 @@ and `SIGINT` both finish the task in flight before the loop exits.
   else this worker says is queued and retried until it lands; a decision settlement is not, because
   it can become *permanently* invalid — the decision superseded by a second claim, or given up on —
   and a 409 that can never succeed would hold every comment, status move and run record behind it
-  for twenty polls. Instead, a settlement the board did not take leaves the worktree, the marker
-  and the record exactly as they were, and the whole thing is done again on the next poll. That is
-  safe because it is idempotent: the same commit to the same branch is already there, and the pull
+  for twenty polls. Instead, a settlement the board did not take leaves the worktree and the
+  record as they were, counts the attempt on the marker, and is tried again after one, two, four and
+  eight minutes. After five attempts the record is settled failed with the count in its
+  reason, for a person to accept again once they have looked. Retrying is safe because it is
+  idempotent: the same commit to the same branch is already there, and the pull
   request that exists is the one reported.
 - **A report that cannot be delivered is not lost.** Merging to `main` redeploys the app, so the
   report right after a merge is the one most likely to fail — and a lost one would leave the task
@@ -685,6 +694,6 @@ defaults compiled into it, so raising a default reaches every machine that never
 worker still carries `maxDiffLines` and `maxDiffFiles`: they are the fallback a Size gate uses when
 its own block names no limit.
 
-**Nothing merges unless the agent says so.** A project running the shipped **Default** agent gets a
+**Nothing merges unless the agent says so.** A task running the shipped **Default** agent gets a
 branch pushed and a pull request opened, and the task moves to review — nothing lands on the base
 branch. Give it an agent whose sequence ends with **Merge** and it merges its own work.

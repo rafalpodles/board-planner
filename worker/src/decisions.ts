@@ -405,8 +405,8 @@ const MAX_SETTLEMENT_ATTEMPTS = 5;
  *
  * Five attempts against a thirty-second refresh floor is a two-and-a-half-minute budget, which an
  * ordinary redeploy eats whole — and then the record says a machine gave up when what actually
- * happened is that the board restarted. Spaced, the ceiling means "this has been failing for half
- * an hour" rather than "the board was busy".
+ * happened is that the board restarted. Spaced — one, two, four and eight minutes — the ceiling
+ * means "this has been failing for a quarter of an hour" rather than "the board was busy".
  */
 const SETTLE_BACKOFF_MS = 60_000;
 const MAX_SETTLE_BACKOFF_MS = 15 * 60_000;

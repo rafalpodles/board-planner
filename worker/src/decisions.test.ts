@@ -901,7 +901,7 @@ describe("how the retries are spaced", () => {
     expect(h.push).toHaveBeenCalled();
   });
 
-  // Doubling, so five attempts span half an hour rather than two minutes
+  // Doubling, so five attempts span a quarter of an hour rather than two minutes
   it("waits longer after each failure", async () => {
     const h = harnessWithMarker({ attempts: 4, lastAttemptAt: new Date(NOW - 7 * 60_000).toISOString() });
 

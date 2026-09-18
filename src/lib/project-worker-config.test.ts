@@ -229,8 +229,8 @@ describe("resetting a field to the default", () => {
 });
 
 // The rule no per-field validator could hold: every field is checked in isolation, so nothing
-// stopped a project from merging without review — the one safety property worker/README.md
-// asserts outright. It has to be judged on the resulting state, because a partial patch cannot be
+// stopped a project from merging without review — a property worker/README.md used to assert
+// outright. It has to be judged on the resulting state, because a partial patch cannot be
 // read on its own: setting autoMerge alone is fine or fatal depending on a field it never mentions.
 // The rule that lived here — autoMerge may not outlive the review gate — is retired with both
 // fields. Merging is now a Merge step in a composition, and whether the change was reviewed is read

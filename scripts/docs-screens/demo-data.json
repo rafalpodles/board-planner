@@ -1,0 +1,3014 @@
+{
+  "demoNow": {
+    "$date": "2026-08-03T22:40:00Z"
+  },
+  "collections": {
+    "comments": [
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005f0"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005cf"
+        },
+        "author": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "body": "Do we show the preview for annual plans too, or monthly only for now?",
+        "reactions": [],
+        "createdAt": {
+          "$date": "2026-07-31T21:42:14.649Z"
+        },
+        "updatedAt": {
+          "$date": "2026-07-31T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005f1"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005cf"
+        },
+        "author": {
+          "$oid": "6a710b361e3f54529de005ae"
+        },
+        "body": "Monthly only in the first pass — annual has no metered lines yet, so the preview would just repeat the plan price.",
+        "reactions": [
+          {
+            "emoji": "👍",
+            "user": {
+              "$oid": "6a710b361e3f54529de005ad"
+            }
+          }
+        ],
+        "createdAt": {
+          "$date": "2026-07-31T21:42:14.649Z"
+        },
+        "updatedAt": {
+          "$date": "2026-07-31T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005f2"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005cf"
+        },
+        "author": {
+          "$oid": "6a710b361e3f54529de005af"
+        },
+        "body": "Proration is in, @alex — mid-cycle upgrades now split the metered lines at the change date.",
+        "reactions": [],
+        "createdAt": {
+          "$date": "2026-08-02T21:42:14.649Z"
+        },
+        "updatedAt": {
+          "$date": "2026-08-02T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de00641"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005da"
+        },
+        "author": {
+          "$oid": "6a710b361e3f54529de005ae"
+        },
+        "body": "Dunning sequence is ready for review — three emails over ten days.",
+        "reactions": [],
+        "createdAt": {
+          "$date": "2026-08-01T23:16:34.570Z"
+        },
+        "updatedAt": {
+          "$date": "2026-08-01T23:16:34.570Z"
+        }
+      }
+    ],
+    "projects": [
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "name": "Orbit Web App",
+        "key": "ORB",
+        "description": "Customer-facing dashboard and billing portal for Orbit.",
+        "icon": "🛰️",
+        "categories": [
+          {
+            "_id": {
+              "$oid": "6a710b361e3f54529de005b2"
+            },
+            "name": "bug",
+            "color": "#ef4444"
+          },
+          {
+            "_id": {
+              "$oid": "6a710b361e3f54529de005b3"
+            },
+            "name": "doc",
+            "color": "#3b82f6"
+          },
+          {
+            "_id": {
+              "$oid": "6a710b361e3f54529de005b4"
+            },
+            "name": "user-story",
+            "color": "#22c55e"
+          },
+          {
+            "_id": {
+              "$oid": "6a710b361e3f54529de005b5"
+            },
+            "name": "idea",
+            "color": "#8b5cf6"
+          }
+        ],
+        "columns": [
+          {
+            "id": "planned",
+            "label": "Planned",
+            "color": "#6b7280",
+            "role": "backlog",
+            "order": 0,
+            "triggersPmReview": false,
+            "_id": {
+              "$oid": "6a710b361e3f54529de005b6"
+            }
+          },
+          {
+            "id": "todo",
+            "label": "To Do",
+            "color": "#3b82f6",
+            "role": "approved",
+            "order": 1,
+            "triggersPmReview": false,
+            "_id": {
+              "$oid": "6a710b361e3f54529de005b7"
+            }
+          },
+          {
+            "id": "in_progress",
+            "label": "In Progress",
+            "color": "#f59e0b",
+            "role": "active",
+            "order": 2,
+            "triggersPmReview": false,
+            "_id": {
+              "$oid": "6a710b361e3f54529de005b8"
+            }
+          },
+          {
+            "id": "in_review",
+            "label": "In Review",
+            "color": "#a855f7",
+            "role": "review",
+            "order": 3,
+            "triggersPmReview": false,
+            "_id": {
+              "$oid": "6a710b361e3f54529de005b9"
+            }
+          },
+          {
+            "id": "needs_human_review",
+            "label": "Needs Human Review",
+            "color": "#f43f5e",
+            "role": "review",
+            "order": 4,
+            "triggersPmReview": true,
+            "_id": {
+              "$oid": "6a710b361e3f54529de005ba"
+            }
+          },
+          {
+            "id": "ready_to_test",
+            "label": "Ready to Test",
+            "color": "#06b6d4",
+            "role": "review",
+            "order": 5,
+            "triggersPmReview": false,
+            "_id": {
+              "$oid": "6a710b361e3f54529de005bb"
+            }
+          },
+          {
+            "id": "done",
+            "label": "Done",
+            "color": "#22c55e",
+            "role": "done",
+            "order": 6,
+            "triggersPmReview": false,
+            "_id": {
+              "$oid": "6a710b361e3f54529de005bc"
+            }
+          }
+        ],
+        "taskTemplates": [
+          {
+            "_id": {
+              "$oid": "6a710b361e3f54529de005bd"
+            },
+            "name": "Bug report",
+            "title": "",
+            "description": "**Steps to reproduce**\n1. \n\n**Expected**\n\n**Actual**\n",
+            "category": "bug",
+            "acceptanceCriteria": ""
+          }
+        ],
+        "customFields": [
+          {
+            "_id": {
+              "$oid": "6a710b361e3f54529de005b0"
+            },
+            "name": "Difficulty",
+            "fieldType": "dropdown",
+            "options": [
+              "S",
+              "M",
+              "L",
+              "XL"
+            ],
+            "required": false,
+            "order": 0,
+            "showOnCard": true,
+            "showInList": true,
+            "filterable": true,
+            "archived": false
+          }
+        ],
+        "webhooks": [],
+        "notificationChannels": [],
+        "pm": {
+          "enabled": true,
+          "lockedByInstance": false,
+          "model": "",
+          "contextNotes": "Ship the billing revamp before the end of the quarter. Prefer small, reviewable changes.",
+          "dailyTurnCap": 0,
+          "autonomy": {
+            "dailyReview": true,
+            "reviewHour": 9,
+            "reviewIntervalHours": 24,
+            "timezone": "Europe/Warsaw",
+            "handleNeedsHumanReview": true,
+            "lastReviewSlot": "2026-08-03T09"
+          },
+          "links": [
+            {
+              "_id": {
+                "$oid": "6a710b361e3f54529de005be"
+              },
+              "label": "Design system",
+              "url": "https://example.com/design"
+            }
+          ],
+          "mcpServers": []
+        },
+        "githubRepo": "orbitlabs/orbit-web",
+        "githubToken": "",
+        "gitlabRepo": "",
+        "gitlabHost": "https://gitlab.com",
+        "gitlabToken": "",
+        "codaHost": "https://coda.io",
+        "codaDocId": "",
+        "codaTableId": "",
+        "codaToken": "",
+        "taskCounter": 18,
+        "repository": {
+          "url": "https://github.com/orbitlabs/orbit-web",
+          "defaultBranch": "main"
+        },
+        "sortOrder": 0,
+        "owner": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "admins": [
+          {
+            "$oid": "6a710b361e3f54529de005ae"
+          }
+        ],
+        "createdAt": {
+          "$date": "2026-04-05T21:42:14.649Z"
+        },
+        "updatedAt": {
+          "$date": "2026-08-03T21:47:58.964Z"
+        },
+        "worker": {
+          "enabled": true
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005bf"
+        },
+        "name": "Atlas API",
+        "key": "ATL",
+        "description": "Public REST API and webhooks platform.",
+        "icon": "🗺️",
+        "categories": [
+          {
+            "_id": {
+              "$oid": "6a710b361e3f54529de005c0"
+            },
+            "name": "bug",
+            "color": "#ef4444"
+          },
+          {
+            "_id": {
+              "$oid": "6a710b361e3f54529de005c1"
+            },
+            "name": "doc",
+            "color": "#3b82f6"
+          },
+          {
+            "_id": {
+              "$oid": "6a710b361e3f54529de005c2"
+            },
+            "name": "user-story",
+            "color": "#22c55e"
+          },
+          {
+            "_id": {
+              "$oid": "6a710b361e3f54529de005c3"
+            },
+            "name": "idea",
+            "color": "#8b5cf6"
+          }
+        ],
+        "columns": [
+          {
+            "id": "planned",
+            "label": "Planned",
+            "color": "#6b7280",
+            "role": "backlog",
+            "order": 0,
+            "triggersPmReview": false,
+            "_id": {
+              "$oid": "6a710b361e3f54529de005c4"
+            }
+          },
+          {
+            "id": "todo",
+            "label": "To Do",
+            "color": "#3b82f6",
+            "role": "approved",
+            "order": 1,
+            "triggersPmReview": false,
+            "_id": {
+              "$oid": "6a710b361e3f54529de005c5"
+            }
+          },
+          {
+            "id": "in_progress",
+            "label": "In Progress",
+            "color": "#f59e0b",
+            "role": "active",
+            "order": 2,
+            "triggersPmReview": false,
+            "_id": {
+              "$oid": "6a710b361e3f54529de005c6"
+            }
+          },
+          {
+            "id": "in_review",
+            "label": "In Review",
+            "color": "#a855f7",
+            "role": "review",
+            "order": 3,
+            "triggersPmReview": false,
+            "_id": {
+              "$oid": "6a710b361e3f54529de005c7"
+            }
+          },
+          {
+            "id": "needs_human_review",
+            "label": "Needs Human Review",
+            "color": "#f43f5e",
+            "role": "review",
+            "order": 4,
+            "triggersPmReview": true,
+            "_id": {
+              "$oid": "6a710b361e3f54529de005c8"
+            }
+          },
+          {
+            "id": "ready_to_test",
+            "label": "Ready to Test",
+            "color": "#06b6d4",
+            "role": "review",
+            "order": 5,
+            "triggersPmReview": false,
+            "_id": {
+              "$oid": "6a710b361e3f54529de005c9"
+            }
+          },
+          {
+            "id": "done",
+            "label": "Done",
+            "color": "#22c55e",
+            "role": "done",
+            "order": 6,
+            "triggersPmReview": false,
+            "_id": {
+              "$oid": "6a710b361e3f54529de005ca"
+            }
+          }
+        ],
+        "taskTemplates": [],
+        "customFields": [
+          {
+            "_id": {
+              "$oid": "6a710b361e3f54529de005cb"
+            },
+            "name": "Difficulty",
+            "fieldType": "dropdown",
+            "options": [
+              "S",
+              "M",
+              "L",
+              "XL"
+            ],
+            "required": false,
+            "order": 0,
+            "showOnCard": true,
+            "showInList": true,
+            "filterable": true,
+            "archived": false
+          }
+        ],
+        "webhooks": [],
+        "notificationChannels": [],
+        "pm": {
+          "enabled": false,
+          "lockedByInstance": false,
+          "model": "",
+          "contextNotes": "",
+          "dailyTurnCap": 0,
+          "autonomy": {
+            "dailyReview": false,
+            "reviewHour": 9,
+            "reviewIntervalHours": 24,
+            "timezone": "Europe/Warsaw",
+            "handleNeedsHumanReview": false,
+            "lastReviewSlot": ""
+          },
+          "links": [],
+          "mcpServers": []
+        },
+        "githubRepo": "orbitlabs/atlas-api",
+        "githubToken": "",
+        "gitlabRepo": "",
+        "gitlabHost": "https://gitlab.com",
+        "gitlabToken": "",
+        "codaHost": "https://coda.io",
+        "codaDocId": "",
+        "codaTableId": "",
+        "codaToken": "",
+        "taskCounter": 6,
+        "repository": {
+          "url": "https://github.com/orbitlabs/atlas-api",
+          "defaultBranch": "main"
+        },
+        "sortOrder": 1,
+        "owner": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "admins": [],
+        "createdAt": {
+          "$date": "2026-04-05T21:42:14.649Z"
+        },
+        "updatedAt": {
+          "$date": "2026-08-02T21:42:14.649Z"
+        }
+      }
+    ],
+    "settings": [
+      {
+        "_id": {
+          "$oid": "6a710c3924255e8a41ac6c3f"
+        },
+        "__v": 0,
+        "aiModel": "gpt-4o-mini",
+        "pmDefaultDailyTurnCap": 0,
+        "pmDefaultModel": ""
+      }
+    ],
+    "sprints": [
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005cc"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "name": "Sprint 14 — Billing revamp",
+        "startDate": {
+          "$date": "2026-07-30T21:42:14.649Z"
+        },
+        "endDate": {
+          "$date": "2026-08-13T21:42:14.649Z"
+        },
+        "goal": "Self-serve plan changes and a usage-based invoice preview.",
+        "status": "active",
+        "createdAt": {
+          "$date": "2026-07-29T21:42:14.649Z"
+        },
+        "updatedAt": {
+          "$date": "2026-07-30T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005cd"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "name": "Sprint 13 — Onboarding polish",
+        "startDate": {
+          "$date": "2026-07-16T21:42:14.649Z"
+        },
+        "endDate": {
+          "$date": "2026-07-30T21:42:14.649Z"
+        },
+        "goal": "Cut first-run drop-off in half.",
+        "status": "completed",
+        "createdAt": {
+          "$date": "2026-07-15T21:42:14.649Z"
+        },
+        "updatedAt": {
+          "$date": "2026-07-30T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005ce"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "name": "Sprint 15 — Reporting",
+        "startDate": {
+          "$date": "2026-08-13T21:42:14.649Z"
+        },
+        "endDate": {
+          "$date": "2026-08-27T21:42:14.649Z"
+        },
+        "goal": "Exportable usage reports.",
+        "status": "planned",
+        "createdAt": {
+          "$date": "2026-08-01T21:42:14.649Z"
+        },
+        "updatedAt": {
+          "$date": "2026-08-01T21:42:14.649Z"
+        }
+      }
+    ],
+    "notifications": [
+      {
+        "_id": {
+          "$oid": "6a712152c6430fb9b1de12af"
+        },
+        "recipient": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "type": "task_assigned",
+        "task": {
+          "$oid": "6a710b361e3f54529de005d7"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "actor": {
+          "$oid": "6a710b361e3f54529de005ae"
+        },
+        "title": "ORB-3 assigned to you",
+        "body": "Invoice PDF renders blank on Safari",
+        "read": false,
+        "createdAt": {
+          "$date": "2026-08-03T20:52:34.570Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a712152c6430fb9b1de12b0"
+        },
+        "recipient": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "type": "mentioned",
+        "task": {
+          "$oid": "6a710b361e3f54529de005cf"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "actor": {
+          "$oid": "6a710b361e3f54529de005af"
+        },
+        "title": "sam mentioned you in ORB-1",
+        "body": "Proration is in, @alex — mid-cycle upgrades now split the metered lines at the change date.",
+        "read": false,
+        "createdAt": {
+          "$date": "2026-08-02T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a712152c6430fb9b1de12b1"
+        },
+        "recipient": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "type": "status_changed",
+        "task": {
+          "$oid": "6a710b361e3f54529de005dd"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "actor": {
+          "$oid": "6a710b361e3f54529de005af"
+        },
+        "title": "ORB-8 moved to Needs Human Review",
+        "body": "Switch tax calculation to the new provider",
+        "read": false,
+        "createdAt": {
+          "$date": "2026-08-02T23:16:34.570Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a712152c6430fb9b1de12b2"
+        },
+        "recipient": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "type": "comment_added",
+        "task": {
+          "$oid": "6a710b361e3f54529de005da"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "actor": {
+          "$oid": "6a710b361e3f54529de005ae"
+        },
+        "title": "New comment on ORB-6",
+        "body": "Dunning sequence is ready for review — three emails over ten days.",
+        "read": true,
+        "createdAt": {
+          "$date": "2026-08-01T23:16:34.570Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a712152c6430fb9b1de12b3"
+        },
+        "recipient": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "type": "status_changed",
+        "task": {
+          "$oid": "6a710b361e3f54529de005cf"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "actor": {
+          "$oid": "6a710b361e3f54529de005ae"
+        },
+        "title": "ORB-1 moved to In Progress",
+        "body": "Usage-based invoice preview",
+        "read": true,
+        "createdAt": {
+          "$date": "2026-07-29T23:16:34.570Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de00651"
+        },
+        "recipient": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "type": "comment_added",
+        "task": {
+          "$oid": "6a710b361e3f54529de005cf"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "actor": {
+          "$oid": "6a710b361e3f54529de005ae"
+        },
+        "title": "New comment on ORB-1",
+        "body": "Monthly only in the first pass — annual has no metered lines yet, so the preview would just repeat the plan price.",
+        "read": true,
+        "createdAt": {
+          "$date": "2026-07-31T21:42:14.649Z"
+        }
+      }
+    ],
+    "tasks": [
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005cf"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "taskNumber": 1,
+        "title": "Usage-based invoice preview",
+        "description": "Show the customer what the next invoice will look like before the billing period closes, including metered usage lines.",
+        "priority": "high",
+        "category": "user-story",
+        "status": "in_progress",
+        "assignee": {
+          "$oid": "6a710b361e3f54529de005ae"
+        },
+        "dueDate": {
+          "$date": "2026-08-09T21:42:14.649Z"
+        },
+        "checklist": [
+          {
+            "_id": {
+              "$oid": "6a710b361e3f54529de005d0"
+            },
+            "text": "Metered lines render with the correct unit price",
+            "done": true
+          },
+          {
+            "_id": {
+              "$oid": "6a710b361e3f54529de005d1"
+            },
+            "text": "Proration is applied to mid-cycle plan changes",
+            "done": true
+          },
+          {
+            "_id": {
+              "$oid": "6a710b361e3f54529de005d2"
+            },
+            "text": "Preview matches the finalised invoice in staging",
+            "done": false
+          }
+        ],
+        "linkedPRs": [
+          {
+            "_id": {
+              "$oid": "6a710b361e3f54529de005d3"
+            },
+            "provider": "github",
+            "number": 412,
+            "title": "feat(billing): usage-based invoice preview",
+            "state": "open",
+            "url": "https://github.com/orbitlabs/orbit-web/pull/412",
+            "mergedAt": null,
+            "updatedAt": {
+              "$date": "2026-08-03T21:42:14.649Z"
+            },
+            "ci": "running",
+            "ciLabel": "test",
+            "headSha": "9f2c4e1a7b3d5f8e0c6a2b4d1e3f5a7c9b0d2e4f"
+          }
+        ],
+        "pinned": true,
+        "blockedBy": [
+          {
+            "$oid": "6a710b361e3f54529de005dd"
+          }
+        ],
+        "relations": [
+          {
+            "_id": {
+              "$oid": "6a710b361e3f54529de005ef"
+            },
+            "task": {
+              "$oid": "6a710b361e3f54529de005d4"
+            },
+            "type": "relates"
+          }
+        ],
+        "watchers": [
+          {
+            "$oid": "6a710b361e3f54529de005ae"
+          },
+          {
+            "$oid": "6a710b361e3f54529de005ad"
+          },
+          {
+            "$oid": "6a710b361e3f54529de005af"
+          }
+        ],
+        "sprint": {
+          "$oid": "6a710b361e3f54529de005cc"
+        },
+        "customFieldValues": {
+          "6a710b361e3f54529de005b0": "L"
+        },
+        "recurrence": null,
+        "recurringParentId": null,
+        "order": 0,
+        "execution": {
+          "runId": "",
+          "workerId": "",
+          "attempts": 0,
+          "startedAt": null,
+          "lastError": ""
+        },
+        "createdBy": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "createdAt": {
+          "$date": "2026-07-22T21:42:14.649Z"
+        },
+        "updatedAt": {
+          "$date": "2026-08-03T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005d4"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "taskNumber": 2,
+        "title": "Self-serve plan downgrade",
+        "description": "Let customers move to a cheaper plan without contacting support. Downgrades take effect at the end of the current period.",
+        "priority": "urgent",
+        "category": "user-story",
+        "status": "in_progress",
+        "assignee": {
+          "$oid": "6a710b361e3f54529de005af"
+        },
+        "dueDate": {
+          "$date": "2026-08-06T21:42:14.649Z"
+        },
+        "checklist": [
+          {
+            "_id": {
+              "$oid": "6a710b361e3f54529de005d5"
+            },
+            "text": "Downgrade is scheduled, not immediate",
+            "done": true
+          },
+          {
+            "_id": {
+              "$oid": "6a710b361e3f54529de005d6"
+            },
+            "text": "Seat count over the new plan limit blocks the change",
+            "done": false
+          }
+        ],
+        "linkedPRs": [],
+        "pinned": false,
+        "blockedBy": [],
+        "relations": [],
+        "watchers": [
+          {
+            "$oid": "6a710b361e3f54529de005af"
+          }
+        ],
+        "sprint": {
+          "$oid": "6a710b361e3f54529de005cc"
+        },
+        "customFieldValues": {
+          "6a710b361e3f54529de005b0": "M"
+        },
+        "recurrence": null,
+        "recurringParentId": null,
+        "order": 1,
+        "execution": {
+          "runId": "",
+          "workerId": "",
+          "attempts": 0,
+          "startedAt": null,
+          "lastError": ""
+        },
+        "createdBy": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "createdAt": {
+          "$date": "2026-07-23T21:42:14.649Z"
+        },
+        "updatedAt": {
+          "$date": "2026-08-03T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005d7"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "taskNumber": 3,
+        "title": "Invoice PDF renders blank on Safari",
+        "description": "The generated PDF opens as an empty page in Safari 18. Chrome and Firefox are fine, so it is likely the inline font subset.",
+        "priority": "urgent",
+        "category": "bug",
+        "status": "todo",
+        "assignee": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "dueDate": null,
+        "checklist": [],
+        "linkedPRs": [],
+        "pinned": false,
+        "blockedBy": [],
+        "relations": [],
+        "watchers": [
+          {
+            "$oid": "6a710b361e3f54529de005ad"
+          }
+        ],
+        "sprint": {
+          "$oid": "6a710b361e3f54529de005cc"
+        },
+        "customFieldValues": {
+          "6a710b361e3f54529de005b0": "S"
+        },
+        "recurrence": null,
+        "recurringParentId": null,
+        "order": 2,
+        "execution": {
+          "runId": "",
+          "workerId": "",
+          "attempts": 0,
+          "startedAt": null,
+          "lastError": ""
+        },
+        "createdBy": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "createdAt": {
+          "$date": "2026-08-01T21:42:14.649Z"
+        },
+        "updatedAt": {
+          "$date": "2026-08-02T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005d8"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "taskNumber": 4,
+        "title": "Add a billing tab to the account settings",
+        "description": "",
+        "priority": "medium",
+        "category": "user-story",
+        "status": "todo",
+        "assignee": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "dueDate": null,
+        "checklist": [],
+        "linkedPRs": [],
+        "pinned": false,
+        "blockedBy": [],
+        "relations": [],
+        "watchers": [
+          {
+            "$oid": "6a710b361e3f54529de005ad"
+          }
+        ],
+        "sprint": {
+          "$oid": "6a710b361e3f54529de005cc"
+        },
+        "customFieldValues": {
+          "6a710b361e3f54529de005b0": "S"
+        },
+        "recurrence": null,
+        "recurringParentId": null,
+        "order": 3,
+        "execution": {
+          "runId": "",
+          "workerId": "",
+          "attempts": 0,
+          "startedAt": null,
+          "lastError": ""
+        },
+        "createdBy": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "createdAt": {
+          "$date": "2026-07-28T21:42:14.649Z"
+        },
+        "updatedAt": {
+          "$date": "2026-07-31T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005d9"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "taskNumber": 5,
+        "title": "Document the webhook retry policy",
+        "description": "",
+        "priority": "low",
+        "category": "doc",
+        "status": "todo",
+        "assignee": null,
+        "dueDate": null,
+        "checklist": [],
+        "linkedPRs": [],
+        "pinned": false,
+        "blockedBy": [],
+        "relations": [],
+        "watchers": [],
+        "sprint": null,
+        "customFieldValues": {
+          "6a710b361e3f54529de005b0": "S"
+        },
+        "recurrence": null,
+        "recurringParentId": null,
+        "order": 4,
+        "execution": {
+          "runId": "",
+          "workerId": "",
+          "attempts": 0,
+          "startedAt": null,
+          "lastError": ""
+        },
+        "createdBy": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "createdAt": {
+          "$date": "2026-07-25T21:42:14.649Z"
+        },
+        "updatedAt": {
+          "$date": "2026-07-26T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005da"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "taskNumber": 6,
+        "title": "Dunning emails for failed payments",
+        "description": "Three reminder emails over ten days, then suspend the workspace.",
+        "priority": "high",
+        "category": "user-story",
+        "status": "in_review",
+        "assignee": {
+          "$oid": "6a710b361e3f54529de005ae"
+        },
+        "dueDate": null,
+        "checklist": [],
+        "linkedPRs": [
+          {
+            "_id": {
+              "$oid": "6a710b361e3f54529de005db"
+            },
+            "provider": "github",
+            "number": 408,
+            "title": "feat(billing): dunning email sequence",
+            "state": "open",
+            "url": "https://github.com/orbitlabs/orbit-web/pull/408",
+            "mergedAt": null,
+            "updatedAt": {
+              "$date": "2026-08-02T21:42:14.649Z"
+            },
+            "ci": "success",
+            "ciLabel": "test",
+            "headSha": "3b7e9d1f5a2c4e6b8d0f1a3c5e7b9d2f4a6c8e0b"
+          }
+        ],
+        "pinned": false,
+        "blockedBy": [],
+        "relations": [],
+        "watchers": [
+          {
+            "$oid": "6a710b361e3f54529de005ae"
+          },
+          {
+            "$oid": "6a710b361e3f54529de005ad"
+          }
+        ],
+        "sprint": {
+          "$oid": "6a710b361e3f54529de005cc"
+        },
+        "customFieldValues": {
+          "6a710b361e3f54529de005b0": "M"
+        },
+        "recurrence": null,
+        "recurringParentId": null,
+        "order": 5,
+        "execution": {
+          "runId": "",
+          "workerId": "",
+          "attempts": 0,
+          "startedAt": null,
+          "lastError": ""
+        },
+        "createdBy": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "createdAt": {
+          "$date": "2026-07-20T21:42:14.649Z"
+        },
+        "updatedAt": {
+          "$date": "2026-08-02T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005dc"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "taskNumber": 7,
+        "title": "Migrate the pricing table to the new design system",
+        "description": "",
+        "priority": "medium",
+        "category": "user-story",
+        "status": "ready_to_test",
+        "assignee": {
+          "$oid": "6a710b361e3f54529de005af"
+        },
+        "dueDate": null,
+        "checklist": [],
+        "linkedPRs": [],
+        "pinned": false,
+        "blockedBy": [],
+        "relations": [],
+        "watchers": [
+          {
+            "$oid": "6a710b361e3f54529de005af"
+          }
+        ],
+        "sprint": {
+          "$oid": "6a710b361e3f54529de005cc"
+        },
+        "customFieldValues": {
+          "6a710b361e3f54529de005b0": "M"
+        },
+        "recurrence": null,
+        "recurringParentId": null,
+        "order": 6,
+        "execution": {
+          "runId": "",
+          "workerId": "",
+          "attempts": 0,
+          "startedAt": null,
+          "lastError": ""
+        },
+        "createdBy": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "createdAt": {
+          "$date": "2026-07-18T21:42:14.649Z"
+        },
+        "updatedAt": {
+          "$date": "2026-08-01T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005dd"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "taskNumber": 8,
+        "title": "Switch tax calculation to the new provider",
+        "description": "The provider swap changes how VAT is applied to EU customers. Needs a decision on whether historical invoices are recalculated.",
+        "priority": "high",
+        "category": "user-story",
+        "status": "needs_human_review",
+        "assignee": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "dueDate": null,
+        "checklist": [],
+        "linkedPRs": [
+          {
+            "_id": {
+              "$oid": "6a710b361e3f54529de00601"
+            },
+            "provider": "github",
+            "number": 415,
+            "title": "feat(tax): switch tax calculation to the new provider",
+            "state": "open",
+            "url": "https://github.com/orbitlabs/orbit-web/pull/415",
+            "mergedAt": null,
+            "updatedAt": {
+              "$date": "2026-08-03T17:40:00Z"
+            },
+            "ci": "failure",
+            "ciLabel": "e2e",
+            "headSha": "7d9f1b3e5a7c9e2b4d6f8a0c1e3b5d7f9a2c4e6b"
+          }
+        ],
+        "pinned": false,
+        "blockedBy": [],
+        "relations": [],
+        "watchers": [
+          {
+            "$oid": "6a710b361e3f54529de005ad"
+          }
+        ],
+        "sprint": {
+          "$oid": "6a710b361e3f54529de005cc"
+        },
+        "customFieldValues": {
+          "6a710b361e3f54529de005b0": "XL"
+        },
+        "recurrence": null,
+        "recurringParentId": null,
+        "order": 7,
+        "execution": {
+          "runId": "",
+          "workerId": "",
+          "attempts": 0,
+          "startedAt": null,
+          "lastError": ""
+        },
+        "createdBy": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "createdAt": {
+          "$date": "2026-07-14T21:42:14.649Z"
+        },
+        "updatedAt": {
+          "$date": "2026-08-02T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005de"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "taskNumber": 9,
+        "title": "Annual billing with a two-month discount",
+        "description": "",
+        "priority": "medium",
+        "category": "idea",
+        "status": "planned",
+        "assignee": null,
+        "dueDate": null,
+        "checklist": [],
+        "linkedPRs": [],
+        "pinned": false,
+        "blockedBy": [],
+        "relations": [],
+        "watchers": [],
+        "sprint": null,
+        "customFieldValues": {
+          "6a710b361e3f54529de005b0": "L"
+        },
+        "recurrence": null,
+        "recurringParentId": null,
+        "order": 8,
+        "execution": {
+          "runId": "",
+          "workerId": "",
+          "attempts": 0,
+          "startedAt": null,
+          "lastError": ""
+        },
+        "createdBy": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "createdAt": {
+          "$date": "2026-07-09T21:42:14.649Z"
+        },
+        "updatedAt": {
+          "$date": "2026-07-09T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005df"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "taskNumber": 10,
+        "title": "Seat-based pricing for teams",
+        "description": "",
+        "priority": "low",
+        "category": "idea",
+        "status": "planned",
+        "assignee": null,
+        "dueDate": null,
+        "checklist": [],
+        "linkedPRs": [],
+        "pinned": false,
+        "blockedBy": [],
+        "relations": [],
+        "watchers": [],
+        "sprint": null,
+        "customFieldValues": {
+          "6a710b361e3f54529de005b0": "XL"
+        },
+        "recurrence": null,
+        "recurringParentId": null,
+        "order": 9,
+        "execution": {
+          "runId": "",
+          "workerId": "",
+          "attempts": 0,
+          "startedAt": null,
+          "lastError": ""
+        },
+        "createdBy": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "createdAt": {
+          "$date": "2026-07-04T21:42:14.649Z"
+        },
+        "updatedAt": {
+          "$date": "2026-07-04T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005e0"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "taskNumber": 11,
+        "title": "Show remaining trial days in the top bar",
+        "description": "",
+        "priority": "low",
+        "category": "user-story",
+        "status": "planned",
+        "assignee": null,
+        "dueDate": null,
+        "checklist": [],
+        "linkedPRs": [],
+        "pinned": false,
+        "blockedBy": [],
+        "relations": [],
+        "watchers": [],
+        "sprint": null,
+        "customFieldValues": {
+          "6a710b361e3f54529de005b0": "S"
+        },
+        "recurrence": null,
+        "recurringParentId": null,
+        "order": 10,
+        "execution": {
+          "runId": "",
+          "workerId": "",
+          "attempts": 0,
+          "startedAt": null,
+          "lastError": ""
+        },
+        "createdBy": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "createdAt": {
+          "$date": "2026-07-12T21:42:14.649Z"
+        },
+        "updatedAt": {
+          "$date": "2026-07-12T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005e1"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "taskNumber": 12,
+        "title": "Stripe webhook signature verification",
+        "description": "",
+        "priority": "urgent",
+        "category": "bug",
+        "status": "done",
+        "assignee": {
+          "$oid": "6a710b361e3f54529de005af"
+        },
+        "dueDate": null,
+        "checklist": [],
+        "linkedPRs": [
+          {
+            "_id": {
+              "$oid": "6a710b361e3f54529de005e2"
+            },
+            "provider": "github",
+            "number": 391,
+            "title": "fix(billing): verify Stripe webhook signatures",
+            "state": "merged",
+            "url": "https://github.com/orbitlabs/orbit-web/pull/391",
+            "mergedAt": {
+              "$date": "2026-07-29T21:42:14.649Z"
+            },
+            "updatedAt": {
+              "$date": "2026-07-29T21:42:14.649Z"
+            }
+          }
+        ],
+        "pinned": false,
+        "blockedBy": [],
+        "relations": [],
+        "watchers": [
+          {
+            "$oid": "6a710b361e3f54529de005af"
+          }
+        ],
+        "sprint": {
+          "$oid": "6a710b361e3f54529de005cd"
+        },
+        "customFieldValues": {
+          "6a710b361e3f54529de005b0": "S"
+        },
+        "recurrence": null,
+        "recurringParentId": null,
+        "order": 11,
+        "execution": {
+          "runId": "",
+          "workerId": "",
+          "attempts": 0,
+          "startedAt": null,
+          "lastError": ""
+        },
+        "createdBy": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "createdAt": {
+          "$date": "2026-07-10T21:42:14.649Z"
+        },
+        "updatedAt": {
+          "$date": "2026-07-29T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005e3"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "taskNumber": 13,
+        "title": "First-run checklist on the empty dashboard",
+        "description": "",
+        "priority": "high",
+        "category": "user-story",
+        "status": "done",
+        "assignee": {
+          "$oid": "6a710b361e3f54529de005ae"
+        },
+        "dueDate": null,
+        "checklist": [],
+        "linkedPRs": [],
+        "pinned": false,
+        "blockedBy": [],
+        "relations": [],
+        "watchers": [
+          {
+            "$oid": "6a710b361e3f54529de005ae"
+          }
+        ],
+        "sprint": {
+          "$oid": "6a710b361e3f54529de005cd"
+        },
+        "customFieldValues": {
+          "6a710b361e3f54529de005b0": "M"
+        },
+        "recurrence": null,
+        "recurringParentId": null,
+        "order": 12,
+        "execution": {
+          "runId": "",
+          "workerId": "",
+          "attempts": 0,
+          "startedAt": null,
+          "lastError": ""
+        },
+        "createdBy": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "createdAt": {
+          "$date": "2026-07-08T21:42:14.649Z"
+        },
+        "updatedAt": {
+          "$date": "2026-07-28T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005e4"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "taskNumber": 14,
+        "title": "Reduce onboarding form to three fields",
+        "description": "",
+        "priority": "medium",
+        "category": "user-story",
+        "status": "done",
+        "assignee": {
+          "$oid": "6a710b361e3f54529de005ae"
+        },
+        "dueDate": null,
+        "checklist": [],
+        "linkedPRs": [],
+        "pinned": false,
+        "blockedBy": [],
+        "relations": [],
+        "watchers": [
+          {
+            "$oid": "6a710b361e3f54529de005ae"
+          }
+        ],
+        "sprint": {
+          "$oid": "6a710b361e3f54529de005cd"
+        },
+        "customFieldValues": {
+          "6a710b361e3f54529de005b0": "S"
+        },
+        "recurrence": null,
+        "recurringParentId": null,
+        "order": 13,
+        "execution": {
+          "runId": "",
+          "workerId": "",
+          "attempts": 0,
+          "startedAt": null,
+          "lastError": ""
+        },
+        "createdBy": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "createdAt": {
+          "$date": "2026-07-06T21:42:14.649Z"
+        },
+        "updatedAt": {
+          "$date": "2026-07-25T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005e5"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "taskNumber": 15,
+        "title": "Invite teammates during sign-up",
+        "description": "",
+        "priority": "medium",
+        "category": "user-story",
+        "status": "done",
+        "assignee": {
+          "$oid": "6a710b361e3f54529de005af"
+        },
+        "dueDate": null,
+        "checklist": [],
+        "linkedPRs": [],
+        "pinned": false,
+        "blockedBy": [],
+        "relations": [],
+        "watchers": [
+          {
+            "$oid": "6a710b361e3f54529de005af"
+          }
+        ],
+        "sprint": {
+          "$oid": "6a710b361e3f54529de005cd"
+        },
+        "customFieldValues": {
+          "6a710b361e3f54529de005b0": "M"
+        },
+        "recurrence": null,
+        "recurringParentId": null,
+        "order": 14,
+        "execution": {
+          "runId": "",
+          "workerId": "",
+          "attempts": 0,
+          "startedAt": null,
+          "lastError": ""
+        },
+        "createdBy": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "createdAt": {
+          "$date": "2026-07-04T21:42:14.649Z"
+        },
+        "updatedAt": {
+          "$date": "2026-07-22T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005e6"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "taskNumber": 16,
+        "title": "Fix the double-charge on plan upgrade",
+        "description": "",
+        "priority": "urgent",
+        "category": "bug",
+        "status": "done",
+        "assignee": {
+          "$oid": "6a710b361e3f54529de005af"
+        },
+        "dueDate": null,
+        "checklist": [],
+        "linkedPRs": [],
+        "pinned": false,
+        "blockedBy": [],
+        "relations": [],
+        "watchers": [
+          {
+            "$oid": "6a710b361e3f54529de005af"
+          }
+        ],
+        "sprint": {
+          "$oid": "6a710b361e3f54529de005cd"
+        },
+        "customFieldValues": {
+          "6a710b361e3f54529de005b0": "S"
+        },
+        "recurrence": null,
+        "recurringParentId": null,
+        "order": 15,
+        "execution": {
+          "runId": "",
+          "workerId": "",
+          "attempts": 0,
+          "startedAt": null,
+          "lastError": ""
+        },
+        "createdBy": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "createdAt": {
+          "$date": "2026-07-02T21:42:14.649Z"
+        },
+        "updatedAt": {
+          "$date": "2026-07-18T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005e7"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "taskNumber": 17,
+        "title": "Rewrite the pricing page copy",
+        "description": "",
+        "priority": "low",
+        "category": "doc",
+        "status": "done",
+        "assignee": {
+          "$oid": "6a710b361e3f54529de005ae"
+        },
+        "dueDate": null,
+        "checklist": [],
+        "linkedPRs": [],
+        "pinned": false,
+        "blockedBy": [],
+        "relations": [],
+        "watchers": [
+          {
+            "$oid": "6a710b361e3f54529de005ae"
+          }
+        ],
+        "sprint": {
+          "$oid": "6a710b361e3f54529de005cd"
+        },
+        "customFieldValues": {
+          "6a710b361e3f54529de005b0": "S"
+        },
+        "recurrence": null,
+        "recurringParentId": null,
+        "order": 16,
+        "execution": {
+          "runId": "",
+          "workerId": "",
+          "attempts": 0,
+          "startedAt": null,
+          "lastError": ""
+        },
+        "createdBy": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "createdAt": {
+          "$date": "2026-06-30T21:42:14.649Z"
+        },
+        "updatedAt": {
+          "$date": "2026-07-14T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005e8"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "taskNumber": 18,
+        "title": "Retire the legacy checkout flow",
+        "description": "",
+        "priority": "medium",
+        "category": "user-story",
+        "status": "done",
+        "assignee": {
+          "$oid": "6a710b361e3f54529de005af"
+        },
+        "dueDate": null,
+        "checklist": [],
+        "linkedPRs": [],
+        "pinned": false,
+        "blockedBy": [],
+        "relations": [],
+        "watchers": [
+          {
+            "$oid": "6a710b361e3f54529de005af"
+          }
+        ],
+        "sprint": null,
+        "customFieldValues": {
+          "6a710b361e3f54529de005b0": "L"
+        },
+        "recurrence": null,
+        "recurringParentId": null,
+        "order": 17,
+        "execution": {
+          "runId": "",
+          "workerId": "",
+          "attempts": 0,
+          "startedAt": null,
+          "lastError": ""
+        },
+        "createdBy": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "createdAt": {
+          "$date": "2026-06-24T21:42:14.649Z"
+        },
+        "updatedAt": {
+          "$date": "2026-07-10T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005e9"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005bf"
+        },
+        "taskNumber": 1,
+        "title": "Cursor-based pagination for /events",
+        "description": "",
+        "priority": "high",
+        "category": "user-story",
+        "status": "in_progress",
+        "assignee": {
+          "$oid": "6a710b361e3f54529de005af"
+        },
+        "dueDate": null,
+        "checklist": [],
+        "linkedPRs": [],
+        "pinned": false,
+        "blockedBy": [],
+        "relations": [],
+        "watchers": [
+          {
+            "$oid": "6a710b361e3f54529de005af"
+          }
+        ],
+        "sprint": null,
+        "customFieldValues": {
+          "6a710b361e3f54529de005cb": "M"
+        },
+        "recurrence": null,
+        "recurringParentId": null,
+        "order": 0,
+        "execution": {
+          "runId": "",
+          "workerId": "",
+          "attempts": 0,
+          "startedAt": null,
+          "lastError": ""
+        },
+        "createdBy": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "createdAt": {
+          "$date": "2026-07-26T21:42:14.649Z"
+        },
+        "updatedAt": {
+          "$date": "2026-08-03T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005ea"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005bf"
+        },
+        "taskNumber": 2,
+        "title": "Rate limit headers are missing on 429",
+        "description": "",
+        "priority": "high",
+        "category": "bug",
+        "status": "todo",
+        "assignee": null,
+        "dueDate": null,
+        "checklist": [],
+        "linkedPRs": [],
+        "pinned": false,
+        "blockedBy": [],
+        "relations": [],
+        "watchers": [],
+        "sprint": null,
+        "customFieldValues": {
+          "6a710b361e3f54529de005cb": "S"
+        },
+        "recurrence": null,
+        "recurringParentId": null,
+        "order": 1,
+        "execution": {
+          "runId": "",
+          "workerId": "",
+          "attempts": 0,
+          "startedAt": null,
+          "lastError": ""
+        },
+        "createdBy": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "createdAt": {
+          "$date": "2026-07-30T21:42:14.649Z"
+        },
+        "updatedAt": {
+          "$date": "2026-08-01T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005eb"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005bf"
+        },
+        "taskNumber": 3,
+        "title": "Publish an OpenAPI 3.1 schema",
+        "description": "",
+        "priority": "medium",
+        "category": "doc",
+        "status": "todo",
+        "assignee": null,
+        "dueDate": null,
+        "checklist": [],
+        "linkedPRs": [],
+        "pinned": false,
+        "blockedBy": [],
+        "relations": [],
+        "watchers": [],
+        "sprint": null,
+        "customFieldValues": {
+          "6a710b361e3f54529de005cb": "M"
+        },
+        "recurrence": null,
+        "recurringParentId": null,
+        "order": 2,
+        "execution": {
+          "runId": "",
+          "workerId": "",
+          "attempts": 0,
+          "startedAt": null,
+          "lastError": ""
+        },
+        "createdBy": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "createdAt": {
+          "$date": "2026-07-27T21:42:14.649Z"
+        },
+        "updatedAt": {
+          "$date": "2026-07-29T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005ec"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005bf"
+        },
+        "taskNumber": 4,
+        "title": "Signed webhook payloads",
+        "description": "",
+        "priority": "medium",
+        "category": "idea",
+        "status": "planned",
+        "assignee": null,
+        "dueDate": null,
+        "checklist": [],
+        "linkedPRs": [],
+        "pinned": false,
+        "blockedBy": [],
+        "relations": [],
+        "watchers": [],
+        "sprint": null,
+        "customFieldValues": {
+          "6a710b361e3f54529de005cb": "L"
+        },
+        "recurrence": null,
+        "recurringParentId": null,
+        "order": 3,
+        "execution": {
+          "runId": "",
+          "workerId": "",
+          "attempts": 0,
+          "startedAt": null,
+          "lastError": ""
+        },
+        "createdBy": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "createdAt": {
+          "$date": "2026-07-19T21:42:14.649Z"
+        },
+        "updatedAt": {
+          "$date": "2026-07-19T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005ed"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005bf"
+        },
+        "taskNumber": 5,
+        "title": "Deprecate API v1",
+        "description": "",
+        "priority": "low",
+        "category": "user-story",
+        "status": "planned",
+        "assignee": null,
+        "dueDate": null,
+        "checklist": [],
+        "linkedPRs": [],
+        "pinned": false,
+        "blockedBy": [],
+        "relations": [],
+        "watchers": [],
+        "sprint": null,
+        "customFieldValues": {
+          "6a710b361e3f54529de005cb": "XL"
+        },
+        "recurrence": null,
+        "recurringParentId": null,
+        "order": 4,
+        "execution": {
+          "runId": "",
+          "workerId": "",
+          "attempts": 0,
+          "startedAt": null,
+          "lastError": ""
+        },
+        "createdBy": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "createdAt": {
+          "$date": "2026-07-16T21:42:14.649Z"
+        },
+        "updatedAt": {
+          "$date": "2026-07-16T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005ee"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005bf"
+        },
+        "taskNumber": 6,
+        "title": "Idempotency keys on POST /charges",
+        "description": "",
+        "priority": "high",
+        "category": "user-story",
+        "status": "done",
+        "assignee": {
+          "$oid": "6a710b361e3f54529de005af"
+        },
+        "dueDate": null,
+        "checklist": [],
+        "linkedPRs": [],
+        "pinned": false,
+        "blockedBy": [],
+        "relations": [],
+        "watchers": [
+          {
+            "$oid": "6a710b361e3f54529de005af"
+          }
+        ],
+        "sprint": null,
+        "customFieldValues": {
+          "6a710b361e3f54529de005cb": "M"
+        },
+        "recurrence": null,
+        "recurringParentId": null,
+        "order": 5,
+        "execution": {
+          "runId": "",
+          "workerId": "",
+          "attempts": 0,
+          "startedAt": null,
+          "lastError": ""
+        },
+        "createdBy": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "createdAt": {
+          "$date": "2026-07-13T21:42:14.649Z"
+        },
+        "updatedAt": {
+          "$date": "2026-07-27T21:42:14.649Z"
+        }
+      }
+    ],
+    "users": [
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "username": "alex",
+        "fullName": "Alex Rivera",
+        "email": "alex@orbitlabs.dev",
+        "role": "admin",
+        "emailNotifications": false,
+        "collapseEmptyColumns": true,
+        "allowedProjects": [],
+        "createdAt": {
+          "$date": "2026-04-05T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005ae"
+        },
+        "username": "maya",
+        "fullName": "Maya Chen",
+        "email": "maya@orbitlabs.dev",
+        "role": "member",
+        "emailNotifications": false,
+        "collapseEmptyColumns": true,
+        "allowedProjects": [],
+        "createdAt": {
+          "$date": "2026-04-05T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005af"
+        },
+        "username": "sam",
+        "fullName": "Sam Okafor",
+        "email": "sam@orbitlabs.dev",
+        "role": "member",
+        "emailNotifications": false,
+        "collapseEmptyColumns": true,
+        "allowedProjects": [],
+        "createdAt": {
+          "$date": "2026-04-05T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710c8e24255e8a41ac6c40"
+        },
+        "username": "pm",
+        "__v": 0,
+        "allowedProjects": [],
+        "collapseEmptyColumns": true,
+        "createdAt": {
+          "$date": "2026-08-03T21:47:58.957Z"
+        },
+        "email": "",
+        "emailNotifications": false,
+        "fullName": "PM Agent",
+        "role": "member"
+      }
+    ],
+    "pmmessages": [
+      {
+        "_id": {
+          "$oid": "6a712152c6430fb9b1de12b4"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "role": "user",
+        "content": "What is stuck? Anything nobody has touched in a while?",
+        "actions": [],
+        "attachments": [],
+        "trigger": {
+          "type": "chat",
+          "taskKey": ""
+        },
+        "triggeredBy": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "createdAt": {
+          "$date": "2026-08-03T22:04:34.573Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a712152c6430fb9b1de12b5"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "role": "assistant",
+        "content": "Three things are worth your attention:\n\n1. **ORB-8 — Switch tax calculation to the new provider** has been sitting in *Needs Human Review* for a day. It is blocking **ORB-1**, which is the sprint's largest task, so this is the one to unblock first. It needs a decision on whether historical invoices get recalculated — that is a call for you, not for me.\n2. **ORB-9 — Annual billing with a two-month discount** has not been touched in 25 days and is still in *Planned*. Either pull it into the sprint or let it go.\n3. **ORB-3 — Invoice PDF renders blank on Safari** is marked Urgent but was unassigned until just now.\n\nThe rest of Sprint 14 is moving.",
+        "actions": [],
+        "attachments": [],
+        "trigger": {
+          "type": "chat",
+          "taskKey": ""
+        },
+        "triggeredBy": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "createdAt": {
+          "$date": "2026-08-03T22:04:34.573Z"
+        },
+        "usage": {
+          "promptTokens": 41200,
+          "completionTokens": 910,
+          "totalTokens": 42110,
+          "cachedPromptTokens": 28800,
+          "cacheWriteTokens": 0,
+          "calls": 6,
+          "hitStepLimit": false
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a712152c6430fb9b1de12b6"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "role": "user",
+        "content": "Fair. Write acceptance criteria for ORB-4 — it has none.",
+        "actions": [],
+        "attachments": [],
+        "trigger": {
+          "type": "chat",
+          "taskKey": ""
+        },
+        "triggeredBy": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "createdAt": {
+          "$date": "2026-08-03T22:33:22.573Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a712152c6430fb9b1de12b7"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "role": "assistant",
+        "content": "Added four criteria to **ORB-4 — Add a billing tab to the account settings**:\n\n- The billing tab is visible only to workspace owners and billing contacts\n- The current plan, renewal date and payment method are shown without a further click\n- The invoice history lists the last 12 invoices with a download link\n- The tab is reachable by keyboard and announced correctly by a screen reader\n\nI left the task in *To Do* — it is your call whether that scope still fits the sprint.",
+        "actions": [
+          {
+            "tool": "update_task",
+            "taskKey": "ORB-4",
+            "summary": "Added 4 acceptance criteria",
+            "at": {
+              "$date": "2026-08-03T22:33:22.573Z"
+            }
+          }
+        ],
+        "attachments": [],
+        "trigger": {
+          "type": "chat",
+          "taskKey": ""
+        },
+        "triggeredBy": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "createdAt": {
+          "$date": "2026-08-03T22:33:22.573Z"
+        },
+        "usage": {
+          "promptTokens": 30650,
+          "completionTokens": 640,
+          "totalTokens": 31290,
+          "cachedPromptTokens": 26100,
+          "cacheWriteTokens": 0,
+          "calls": 4,
+          "hitStepLimit": false
+        }
+      }
+    ],
+    "activitylogs": [
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005f3"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005cf"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "action": "created",
+        "field": "",
+        "oldValue": "",
+        "newValue": "",
+        "createdAt": {
+          "$date": "2026-07-22T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005f4"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005cf"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "action": "status_changed",
+        "field": "status",
+        "oldValue": "planned",
+        "newValue": "todo",
+        "createdAt": {
+          "$date": "2026-07-25T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005f5"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005cf"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ae"
+        },
+        "action": "status_changed",
+        "field": "status",
+        "oldValue": "todo",
+        "newValue": "in_progress",
+        "createdAt": {
+          "$date": "2026-07-29T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005f6"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005cf"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ae"
+        },
+        "action": "updated",
+        "field": "priority",
+        "oldValue": "medium",
+        "newValue": "high",
+        "createdAt": {
+          "$date": "2026-07-29T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de005f7"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005cf"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005af"
+        },
+        "action": "comment_added",
+        "field": "",
+        "oldValue": "",
+        "newValue": "",
+        "createdAt": {
+          "$date": "2026-08-02T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de00661"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005cf"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "action": "comment_added",
+        "field": "",
+        "oldValue": "",
+        "newValue": "",
+        "createdAt": {
+          "$date": "2026-07-31T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de00662"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005cf"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ae"
+        },
+        "action": "comment_added",
+        "field": "",
+        "oldValue": "",
+        "newValue": "",
+        "createdAt": {
+          "$date": "2026-07-31T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de00663"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005da"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ae"
+        },
+        "action": "comment_added",
+        "field": "",
+        "oldValue": "",
+        "newValue": "",
+        "createdAt": {
+          "$date": "2026-08-01T23:16:34.570Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de00670"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005d4"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "action": "created",
+        "field": "",
+        "oldValue": "",
+        "newValue": "",
+        "createdAt": {
+          "$date": "2026-07-23T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de00671"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005d7"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "action": "created",
+        "field": "",
+        "oldValue": "",
+        "newValue": "",
+        "createdAt": {
+          "$date": "2026-08-01T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de00672"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005d8"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "action": "created",
+        "field": "",
+        "oldValue": "",
+        "newValue": "",
+        "createdAt": {
+          "$date": "2026-07-28T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de00673"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005d9"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "action": "created",
+        "field": "",
+        "oldValue": "",
+        "newValue": "",
+        "createdAt": {
+          "$date": "2026-07-25T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de00674"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005da"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "action": "created",
+        "field": "",
+        "oldValue": "",
+        "newValue": "",
+        "createdAt": {
+          "$date": "2026-07-20T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de00675"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005dc"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "action": "created",
+        "field": "",
+        "oldValue": "",
+        "newValue": "",
+        "createdAt": {
+          "$date": "2026-07-18T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de00676"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005dd"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "action": "created",
+        "field": "",
+        "oldValue": "",
+        "newValue": "",
+        "createdAt": {
+          "$date": "2026-07-14T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de00677"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005de"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "action": "created",
+        "field": "",
+        "oldValue": "",
+        "newValue": "",
+        "createdAt": {
+          "$date": "2026-07-09T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de00678"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005df"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "action": "created",
+        "field": "",
+        "oldValue": "",
+        "newValue": "",
+        "createdAt": {
+          "$date": "2026-07-04T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de00679"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005e0"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "action": "created",
+        "field": "",
+        "oldValue": "",
+        "newValue": "",
+        "createdAt": {
+          "$date": "2026-07-12T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de0067a"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005e1"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "action": "created",
+        "field": "",
+        "oldValue": "",
+        "newValue": "",
+        "createdAt": {
+          "$date": "2026-07-10T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de0067b"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005e3"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "action": "created",
+        "field": "",
+        "oldValue": "",
+        "newValue": "",
+        "createdAt": {
+          "$date": "2026-07-08T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de0067c"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005e4"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "action": "created",
+        "field": "",
+        "oldValue": "",
+        "newValue": "",
+        "createdAt": {
+          "$date": "2026-07-06T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de0067d"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005e5"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "action": "created",
+        "field": "",
+        "oldValue": "",
+        "newValue": "",
+        "createdAt": {
+          "$date": "2026-07-04T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de0067e"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005e6"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "action": "created",
+        "field": "",
+        "oldValue": "",
+        "newValue": "",
+        "createdAt": {
+          "$date": "2026-07-02T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de0067f"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005e7"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "action": "created",
+        "field": "",
+        "oldValue": "",
+        "newValue": "",
+        "createdAt": {
+          "$date": "2026-06-30T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de00680"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005e8"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "action": "created",
+        "field": "",
+        "oldValue": "",
+        "newValue": "",
+        "createdAt": {
+          "$date": "2026-06-24T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de00681"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005e9"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "action": "created",
+        "field": "",
+        "oldValue": "",
+        "newValue": "",
+        "createdAt": {
+          "$date": "2026-07-26T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de00682"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005ea"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "action": "created",
+        "field": "",
+        "oldValue": "",
+        "newValue": "",
+        "createdAt": {
+          "$date": "2026-07-30T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de00683"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005eb"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "action": "created",
+        "field": "",
+        "oldValue": "",
+        "newValue": "",
+        "createdAt": {
+          "$date": "2026-07-27T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de00684"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005ec"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "action": "created",
+        "field": "",
+        "oldValue": "",
+        "newValue": "",
+        "createdAt": {
+          "$date": "2026-07-19T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de00685"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005ed"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "action": "created",
+        "field": "",
+        "oldValue": "",
+        "newValue": "",
+        "createdAt": {
+          "$date": "2026-07-16T21:42:14.649Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de00686"
+        },
+        "task": {
+          "$oid": "6a710b361e3f54529de005ee"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "action": "created",
+        "field": "",
+        "oldValue": "",
+        "newValue": "",
+        "createdAt": {
+          "$date": "2026-07-13T21:42:14.649Z"
+        }
+      }
+    ],
+    "grants": [
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de00611"
+        },
+        "subject": {
+          "$oid": "6a710b361e3f54529de005ae"
+        },
+        "relation": "owner",
+        "objectType": "project",
+        "object": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "createdBy": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "createdAt": {
+          "$date": "2026-07-14T22:40:00Z"
+        },
+        "updatedAt": {
+          "$date": "2026-07-14T22:40:00Z"
+        },
+        "__v": 0
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de00612"
+        },
+        "subject": {
+          "$oid": "6a710b361e3f54529de005af"
+        },
+        "relation": "member",
+        "objectType": "project",
+        "object": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "createdBy": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "createdAt": {
+          "$date": "2026-07-14T22:40:00Z"
+        },
+        "updatedAt": {
+          "$date": "2026-07-14T22:40:00Z"
+        },
+        "__v": 0
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de00613"
+        },
+        "subject": {
+          "$oid": "6a710b361e3f54529de005af"
+        },
+        "relation": "owner",
+        "objectType": "project",
+        "object": {
+          "$oid": "6a710b361e3f54529de005bf"
+        },
+        "createdBy": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "createdAt": {
+          "$date": "2026-07-14T22:40:00Z"
+        },
+        "updatedAt": {
+          "$date": "2026-07-14T22:40:00Z"
+        },
+        "__v": 0
+      }
+    ],
+    "workers": [
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de00621"
+        },
+        "name": "Alex's MacBook Pro",
+        "host": "alex-mbp.local",
+        "platform": "darwin",
+        "version": "1.0.0",
+        "protocolVersion": 1,
+        "credentialHash": "demo-not-a-credential",
+        "repos": [
+          {
+            "_id": {
+              "$oid": "6a710b361e3f54529de00622"
+            },
+            "remote": "git@github.com:orbitlabs/orbit-web.git",
+            "path": "/Users/alex/dev/orbit-web"
+          }
+        ],
+        "owner": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "policy": {
+          "pollIntervalMs": 30000
+        },
+        "policyOverrides": [],
+        "enabled": true,
+        "lockedByInstance": false,
+        "lastSeenAt": {
+          "$date": "2026-08-03T22:40:00Z"
+        },
+        "identity": null,
+        "bindingError": "",
+        "preflight": {
+          "ok": true,
+          "account": "alex-orbit",
+          "reportedAt": {
+            "$date": "2026-08-03T22:40:00Z"
+          },
+          "checks": [
+            {
+              "_id": {
+                "$oid": "6a710b361e3f54529de00623"
+              },
+              "name": "claude",
+              "ok": true,
+              "warn": false,
+              "detail": "Claude Code 2.1.4, signed in"
+            },
+            {
+              "_id": {
+                "$oid": "6a710b361e3f54529de00624"
+              },
+              "name": "gh",
+              "ok": true,
+              "warn": false,
+              "detail": "signed in as alex-orbit"
+            },
+            {
+              "_id": {
+                "$oid": "6a710b361e3f54529de00625"
+              },
+              "name": "git",
+              "ok": true,
+              "warn": false,
+              "detail": "git 2.50.1"
+            }
+          ]
+        },
+        "command": "",
+        "commandIssuedAt": null,
+        "commandAckedAt": null,
+        "createdAt": {
+          "$date": "2026-07-22T22:40:00Z"
+        },
+        "updatedAt": {
+          "$date": "2026-08-03T22:40:00Z"
+        },
+        "__v": 0
+      }
+    ],
+    "projectauditlogs": [
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de00631"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "action": "template_added",
+        "detail": "Bug report",
+        "createdAt": {
+          "$date": "2026-07-22T19:40:00Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de00632"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "action": "settings_updated",
+        "detail": "Category recoloured: doc",
+        "createdAt": {
+          "$date": "2026-07-26T17:00:00Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de00633"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "action": "settings_updated",
+        "detail": "Changed: pm",
+        "createdAt": {
+          "$date": "2026-07-30T21:25:00Z"
+        }
+      },
+      {
+        "_id": {
+          "$oid": "6a710b361e3f54529de00634"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "action": "settings_updated",
+        "detail": "Changed: worker",
+        "createdAt": {
+          "$date": "2026-08-01T16:28:00Z"
+        }
+      }
+    ]
+  }
+}

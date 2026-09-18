@@ -302,6 +302,13 @@ export default function AdminWorkersPage() {
                           : "none reported"}
                       </Link>
                     </td>
+                    <td className="px-3 py-2 max-w-[12rem]">
+                      <OwnerCell
+                        worker={worker}
+                        disabled={savingId === worker._id}
+                        onRelease={() => setReleasing(worker)}
+                      />
+                    </td>
                     <td className="px-3 py-2 whitespace-nowrap">
                       {worker.currentTask ? (
                         <div className="flex items-center gap-2">
@@ -330,13 +337,6 @@ export default function AdminWorkersPage() {
                           </span>
                         )}
                       </div>
-                    </td>
-                    <td className="px-3 py-2 max-w-[12rem]">
-                      <OwnerCell
-                        worker={worker}
-                        disabled={savingId === worker._id}
-                        onRelease={() => setReleasing(worker)}
-                      />
                     </td>
                     <td className="px-3 py-2 max-w-[14rem]">
                       <PreflightCell preflight={worker.preflight} />

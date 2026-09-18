@@ -359,6 +359,25 @@ test.afterEach(async () => {
   if (mongoose.connection.readyState !== 0) await mongoose.disconnect();
 });
 
+// BP-305 rendered its fifth header's cell seventh, and BP-358 gave that slot to Owner: Owner stood
+// over the Running cell and Last seen over the owner's name. Read by position, the way a person does.
+test("owner, running and last seen read under their own headers", async ({ page }) => {
+  await setWorker({ owner: ADMIN_ID, lastSeenAt: new Date(Date.now() - 3 * 60_000) });
+
+  await signIn(page);
+  await page.goto("/settings/workers");
+  const table = page.locator("table").filter({ hasText: WORKER_NAME });
+  const row = fleetRow(page, WORKER_NAME);
+  await expect(row).toBeVisible();
+  const headers = (await table.getByRole("columnheader").allInnerTexts()).map((h) => h.trim());
+  const under = (header: string) => row.getByRole("cell").nth(headers.indexOf(header));
+
+  await expect(under("Owner")).toContainText("E2E Admin");
+  await expect(under("Running")).toContainText(HELD_TASK_KEY);
+  // A cold dev server can take a minute to get here; staleness is five away
+  await expect(under("Last seen")).toHaveText(/^[34]m ago$/);
+});
+
 test("Pause reads as asked until the machine acknowledges it over heartbeat, and as done only then", async ({
   page,
   request,
