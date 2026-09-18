@@ -138,6 +138,18 @@ describe("A read-only ProjectBoardView's other write paths", () => {
     expect(screen.queryByRole("heading", { name: "New Task" })).toBeNull();
   });
 
+  /**
+   * Watching the modal is not enough: readOnly withholds it at the render as well, so this stays
+   * green with the handler's own `!readOnly` deleted — measured, not reasoned about. The call is
+   * the only thing that tells the two refusals apart.
+   */
+  it("does not even ask for the new-task modal on the n shortcut", () => {
+    const setShowNewTask = vi.fn();
+    render(<ProjectBoardView board={makeBoard({ tasks, setShowNewTask })} readOnly />);
+    fireEvent.keyDown(document, { key: "n" });
+    expect(setShowNewTask).not.toHaveBeenCalled();
+  });
+
   it("opens the new-task modal on the n shortcut when not read-only", () => {
     const setShowNewTask = vi.fn();
     render(<ProjectBoardView board={makeBoard({ tasks, setShowNewTask })} />);
