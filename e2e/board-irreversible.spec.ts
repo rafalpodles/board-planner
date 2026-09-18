@@ -994,8 +994,9 @@ test.describe("keyboard", () => {
       // before the browser inserts the character and fires `input`, which is the event React turns
       // into the change. So any shortcut these four keys could fire has already run by the time
       // the box reads them back. Two properties hold that up — the field is controlled, and every
-      // branch of the handler calls preventDefault, so in a broken build the character never
-      // arrives at all and this assertion fails on its own.
+      // branch these four keys can reach calls preventDefault (Escape's does not, which is why
+      // the claim is scoped to them), so in a broken build the character never arrives at all and
+      // this assertion fails on its own.
       await expect(search).toHaveValue(TYPED);
       await expect(page.getByRole("dialog", { name: "New Task" })).toHaveCount(0);
       await expect(page.getByRole("heading", { name: "Keyboard Shortcuts" })).toHaveCount(0);
