@@ -402,7 +402,9 @@ export function registerPlannerTools(server: McpServer): void {
     "unlink_tasks",
     {
       description:
-        "Remove a link between two tasks. It removes the link stored on taskKey's side, so the " +
+        "Remove a link between two tasks. " +
+        LINK_DIRECTION +
+        " It removes the link stored on taskKey's side, so the " +
         "arguments have to name the end that holds it and the type it holds — get_task lists " +
         "both. A call that names a link this end does not hold is refused rather than answered " +
         "as a removal, and says which end holds it instead — so removing the same link twice " +

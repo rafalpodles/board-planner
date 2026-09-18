@@ -25,6 +25,17 @@ function registered() {
   return tools;
 }
 
+/** What the client is actually told, after the shared fragments have been concatenated. */
+function descriptions() {
+  const said = new Map<string, string>();
+  const server = {
+    registerTool: (name: string, config: { description?: string }) =>
+      said.set(name, config.description ?? ""),
+  } as unknown as McpServer;
+  registerPlannerTools(server);
+  return said;
+}
+
 const extra = { authInfo: { token: "cp_x", extra: { baseUrl: "https://board.example.com" } } };
 
 beforeEach(() => {
@@ -388,6 +399,17 @@ describe("link_tasks and unlink_tasks", () => {
 
     expect(add).not.toHaveBeenCalled();
     expect(remove).not.toHaveBeenCalled();
+  });
+
+  // The `type` parameter's own describe() says "see the description", so each tool's description
+  // has to carry the direction rules itself. Sharing one paragraph between the two tools is what
+  // made that pointer lead nowhere on unlink_tasks once already.
+  it.each(["link_tasks", "unlink_tasks"])("%s explains which end each type reads from", (tool) => {
+    const described = descriptions().get(tool)!;
+
+    for (const rule of ["blocked_by means", "parent_of means", "duplicates means"]) {
+      expect(described, `${tool} says nothing about ${rule}`).toContain(rule);
+    }
   });
 
   it("takes the four kinds the board stores and nothing else", () => {
