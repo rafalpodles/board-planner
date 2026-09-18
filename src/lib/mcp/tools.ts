@@ -351,7 +351,7 @@ export function registerPlannerTools(server: McpServer): void {
     const holds = (entries: { task?: LinkedTask; type?: string }[] | undefined) =>
       (entries ?? []).some((r) => String(r.task?._id ?? "") === targetTaskId && r.type === type);
     const listed = (tasks: LinkedTask[] | undefined) =>
-      (tasks ?? []).some((t) => String(t._id ?? "") === targetTaskId);
+      (tasks ?? []).some((t) => String(t?._id ?? "") === targetTaskId);
 
     if (type === "blocked_by") {
       if (listed(task.blockedBy)) return "near";

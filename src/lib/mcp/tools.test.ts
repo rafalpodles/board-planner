@@ -407,7 +407,9 @@ describe("link_tasks and unlink_tasks", () => {
   it.each(["link_tasks", "unlink_tasks"])("%s explains which end each type reads from", (tool) => {
     const described = descriptions().get(tool)!;
 
-    for (const rule of ["blocked_by means", "parent_of means", "duplicates means"]) {
+    // relates is in the list because it is the rule that cost two rounds to get right: the
+    // sentence about it was rewritten twice and was false both times
+    for (const rule of ["blocked_by means", "parent_of means", "duplicates means", "relates means"]) {
       expect(described, `${tool} says nothing about ${rule}`).toContain(rule);
     }
   });
