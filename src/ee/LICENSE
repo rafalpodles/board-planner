@@ -1,0 +1,39 @@
+Board Planner Enterprise Edition Licence
+
+Copyright (c) 2026 Rafał Podleś. All rights reserved.
+
+This directory (src/ee/) and everything under it, the "Enterprise Edition"
+or "EE", is not licensed under the GNU Affero General Public License that
+covers the rest of this repository. The LICENSE file in the repository root
+does not apply to any file under src/ee/.
+
+1. Permitted use. Subject to these terms you may view, copy, modify and run
+   the EE source code, only as part of Board Planner and only for as long as
+   you, or the organisation whose Board Planner instance you run, hold a
+   valid Board Planner subscription or licence key issued by the copyright
+   holder. Trial keys count as valid for their stated period.
+
+2. Not permitted. You may not run EE functionality without a valid
+   subscription or licence key; disable, bypass or alter the licence check
+   in order to enable EE functionality; remove or alter this notice or the
+   licence header of any EE file; or sublicense, sell, rent, lease, publish,
+   distribute or offer the EE source code or any modification of it to
+   third parties, including as a hosted service, except as the copyright
+   holder permits in writing.
+
+3. Contributions. Changes to this directory are not accepted from outside
+   contributors. See CONTRIBUTING.md.
+
+4. Third-party components used by EE code keep their own licences.
+
+5. No warranty. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
+   KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+   IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES
+   OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+   ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+   OTHER DEALINGS IN THE SOFTWARE.
+
+6. The version of this licence that accompanies a release governs that
+   release. If any part of it is found unenforceable, the rest stays in
+   force. Polish law applies.

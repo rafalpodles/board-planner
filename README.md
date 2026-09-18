@@ -403,3 +403,11 @@ on merge, so a page there is never behind the product.
 | [Execution workers](https://board-planner.com/docs/ai/execution-workers/) | Enrolling a machine, which tasks get picked up, how to stop one |
 | [Installing and running](https://board-planner.com/docs/administration/installing-and-running/) | Every environment variable, build and deploy |
 | [REST API](https://board-planner.com/docs/reference/rest-api/) | Endpoints, auth, pagination |
+
+## Licence
+
+Board Planner is free software under the [GNU Affero General Public License v3](LICENSE). One
+directory is the exception: [`src/ee/`](src/ee/) is the commercial Enterprise Edition, licensed
+under [its own terms](src/ee/LICENSE) and usable with a Board Planner subscription or licence
+key. It is empty today; paid connectors and paid AI features will live there. Contributions are
+welcome to everything else, see [CONTRIBUTING.md](CONTRIBUTING.md).

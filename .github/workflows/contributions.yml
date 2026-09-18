@@ -1,0 +1,36 @@
+name: Outside contributions
+
+# Two rules from CONTRIBUTING.md, checked only on pull requests from forks: the owner holds the
+# copyright already, so a sign-off from the owner certifies nothing, and the owner is the one
+# person allowed to change src/ee/
+on:
+  pull_request:
+
+jobs:
+  rules:
+    name: Sign-off present, src/ee untouched
+    if: github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Every commit carries a Developer Certificate of Origin sign-off
+        run: |
+          git fetch --quiet origin "${{ github.event.pull_request.base.sha }}"
+          unsigned=0
+          for commit in $(git rev-list "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"); do
+            if ! git log -1 --format=%B "$commit" | grep -q '^Signed-off-by: .* <.*>$'; then
+              echo "::error::commit $commit has no Signed-off-by line — commit with git commit -s (see CONTRIBUTING.md)"
+              unsigned=1
+            fi
+          done
+          exit "$unsigned"
+      - name: Nothing under src/ee is changed
+        if: ${{ !cancelled() }}
+        run: |
+          changed=$(git diff --name-only "${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}" -- src/ee/)
+          if [ -n "$changed" ]; then
+            printf '::error::outside contributions to src/ee/ are not accepted (see CONTRIBUTING.md); changed: %s\n' "$changed"
+            exit 1
+          fi
