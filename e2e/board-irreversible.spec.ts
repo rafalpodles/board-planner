@@ -981,8 +981,12 @@ test.describe("keyboard", () => {
 
       // The typed value is what proves the keys were delivered — without it a selector that found
       // nothing would report the same silence as a working guard. It is also why nothing settles
-      // here: the box is React-controlled, so a value that has reached the DOM has been through
-      // the render pass a view switch would have been painted in.
+      // here, and the reason is a happens-after rather than a race: `keydown` finishes dispatching
+      // before the browser inserts the character and fires `input`, which is the event React turns
+      // into the change. So any shortcut these four keys could fire has already run by the time
+      // the box reads "nvr?". Two properties hold that up — the field is controlled, and every
+      // branch of the handler calls preventDefault, so in a broken build the character never
+      // arrives at all and this assertion fails on its own.
       await expect(search).toHaveValue("nvr?");
       await expect(page.getByRole("dialog", { name: "New Task" })).toHaveCount(0);
       await expect(page.getByRole("heading", { name: "Keyboard Shortcuts" })).toHaveCount(0);
@@ -1010,7 +1014,12 @@ test.describe("keyboard", () => {
     });
 
     await test.step("held by the PM chat composer, they type there too", async () => {
-      await page.getByRole("button", { name: "Open PM chat" }).click();
+      // Asserted rather than merely clicked: the launcher is withheld when a project has no PM
+      // agent (`PmChatWidget.tsx:33`), so a seed or an env that turned it off would take this step
+      // with it — loudly here, instead of leaving a tag untested behind a green tick
+      const launcher = page.getByRole("button", { name: "Open PM chat" });
+      await expect(launcher).toBeVisible();
+      await launcher.click();
       const composer = page.getByTestId("pm-chat-panel").locator("textarea");
       await expect(composer).toBeVisible();
 
