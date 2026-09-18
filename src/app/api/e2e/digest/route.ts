@@ -15,9 +15,10 @@ import { e2eOnlyMounted } from "@/lib/e2e-only";
  * set on the dev server, in `webServer[].env`), so `isEmailConfigured()` is false there and the
  * tick returns 0 on its first line. The hazard is in what making it work would take: `@/lib/email`
  * captures `SMTP_*` at module load, and one worker shares its registry across every spec in a
- * project — `claim-ownership`, `column-roles` and `worker-controls` already import
- * `@/lib/task-service`, which reaches `sendEmail` through `in-app-notifications`. Giving the runner
- * a mail server to run this one tick would arm real delivery for those too.
+ * project. Three specs drive `@/lib/task-service` in the runner — `claim-ownership` and
+ * `worker-controls`, which share `automation` with the digest spec, and `column-roles` over in
+ * `board` — and it reaches `sendEmail` through `in-app-notifications`. Giving the runner a mail
+ * server to run this one tick would arm real delivery for them too.
  *
  * What the refusal does and does not buy, measured rather than assumed. Next fills in the methods a
  * route module does not export, so on a deployment where this is shut `OPTIONS` still answers 204

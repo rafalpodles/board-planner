@@ -53,8 +53,10 @@ import {
  * `SMTP_*` — they are set on the dev server — so `isEmailConfigured()` is false and the tick
  * returns 0 before it reads a thing. Giving this process a mail server to fix that is the part to
  * avoid: `@/lib/email` captures `SMTP_*` at module load and one worker shares its registry across
- * every spec in the group, three of which already import `@/lib/task-service` and would start
- * delivering real mail from tests that never asked for any.
+ * every spec in the group — and `claim-ownership` and `worker-controls` are in this one, driving
+ * `@/lib/task-service` in the runner. They would start delivering real mail from tests that never
+ * asked for any. (`column-roles` drives it too, from `board`, where a separate worker would carry
+ * the same arming.)
  *
  * Every gesture is driven on the screen — the grid cell, the digest box, the assignment, and the
  * row the reader opens. Three things are not, and each is setup rather than subject: the clock,
