@@ -966,8 +966,10 @@ test.describe("keyboard", () => {
    * production code: with the chat open, `n` opened New Task over it and Escape cleared the board's
    * selection while the chat stayed put, which is a person losing a selection they cannot see go.
    *
-   * The focus after clicking the launcher is on the launcher, not in the panel, so the tag guard
-   * BP-477 pinned never applied here. That is the case this drives.
+   * The tag guard BP-477 pinned never applied here: the focus after clicking the launcher was on
+   * the launcher, and clicking the panel's header lands on nothing focusable at all. Two separate
+   * parts of the fix answer those two paths, so both are driven below — the first version of this
+   * test only drove one of them, and a mutation proved it by staying green.
    */
   test("the chat owns its keys, and Escape dismisses it rather than the board's selection", async ({
     page,
@@ -978,6 +980,15 @@ test.describe("keyboard", () => {
     await page.getByRole("button", { name: "Open PM chat" }).click();
     const panel = page.getByTestId("pm-chat-panel");
     await expect(panel).toBeVisible();
+
+    // Straight after opening, with nothing clicked inside it: this is the panel's focus-on-open,
+    // and without it the focus sits on the launcher, which is the board's
+    await test.step("the panel has the focus, and n does nothing there", async () => {
+      await expect(panel).toBeFocused();
+      await page.keyboard.press("n");
+      await page.waitForTimeout(1_000);
+      await expect(page.getByRole("dialog", { name: "New Task" })).toHaveCount(0);
+    });
 
     await test.step("v and n do nothing after a click that lands on nothing focusable", async () => {
       // The case the first version of this fix got wrong, and the one the bug was reported from:
