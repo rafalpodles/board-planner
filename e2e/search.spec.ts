@@ -645,8 +645,11 @@ test.describe("what the layer's debounce is for", () => {
     // Character by character, inside the 250ms window: `fill` would set the value in one shot and
     // ask nothing of the debounce
     // 100ms between keystrokes: comfortably inside 250ms, so the debounce still coalesces them —
-    // and far enough apart that a shortened debounce would not. At 30ms this passed with the
-    // window cut to 60ms, proving only "some debounce longer than the typing".
+    // and far enough apart that a shortened one would not. At 30ms this passed with the window cut
+    // to 60ms, proving only "some debounce longer than the typing". Measured floor after the
+    // change: `250 → 60` now fails, `250 → 150` still passes, so what this pins is "at least about
+    // 100ms", not the exact 250. Pinning the number itself would mean typing at 250ms intervals,
+    // which stops being a word being typed and starts being seconds of waiting.
     await layerInput(page).pressSequentially(SEARCH_WORD, { delay: 100 });
     await answered;
 

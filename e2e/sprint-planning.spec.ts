@@ -323,10 +323,12 @@ test("a sprint pane still loading its tasks refuses the drop, and takes it once 
     .getByRole("button", { name: new RegExp(`^${PLANNING_SECOND_SPRINT_NAME}\\b`) })
     .click();
   await expect(sprint.getByText("Loading…")).toBeVisible();
-  // The stub was actually hit. A matcher that never matches — comparing an ObjectId to a string is
-  // the easy way to write one — leaves the fetch untouched, the pane loads instantly, and this
-  // test goes green having asserted a refusal that never happened. A reviewer lost a measurement
-  // to exactly that.
+  // The stub was actually hit, and this line is load-bearing rather than belt-and-braces: a
+  // reviewer put the broken matcher back (`=== PLANNING_SECOND_SPRINT_ID`, an ObjectId, instead of
+  // `String(...)`) and measured that the `Loading…` assertion above **still passes** — the
+  // transient loading state flickers into view even when nothing is stalled. So without this
+  // count, a matcher that never matches leaves the fetch untouched and the test goes green having
+  // asserted a refusal that never happened. Do not tidy it away.
   expect(stalls).toBe(1);
 
   const card = backlog.locator(`a[href="${cardHref(PLANNING_BACKLOG_TASK_NUMBER)}"]`);
