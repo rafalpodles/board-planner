@@ -245,6 +245,10 @@ taskSchema.index({ "decision.workerId": 1 });
 // Closing a recurring task asks whether it already has a successor; unindexed that is a scan of
 // every task in every project, and the usual answer — no — is the one that scans to the end
 taskSchema.index({ recurringParentId: 1 });
+// Every board load asks which of the listed tasks somebody is the parent of. The link is stored on
+// the parent, so the question can only be asked from the far end, and unindexed it re-reads every
+// task in the project on each poll. Multikey on the array's `task` field.
+taskSchema.index({ project: 1, "relations.task": 1 });
 
 export const Task: Model<ITask> =
   mongoose.models.Task || mongoose.model<ITask>("Task", taskSchema);

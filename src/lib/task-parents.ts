@@ -3,11 +3,16 @@ import { ApiTaskLink, TaskStatus } from "@/types";
 
 /**
  * A `parent_of` link is stored on the **parent's** document, so a child cannot name its own parent
- * from anything it holds. The detail route pays for that with a reverse lookup per task; the board
- * renders a column of children at once, so this does it once for the whole list.
+ * from anything it holds.
  *
- * Scoped by project as well as by id: the ids come from a list the caller already resolved, but a
- * relation is only ever within one board and the index starts with `project`.
+ * The board already derives the reverse side of a relation in the browser
+ * (`withIncomingRelations`, `use-project-board.ts`) — but only across the tasks it loaded, and the
+ * sprint scope narrows that to one sprint. An epic sitting in the backlog with its children in the
+ * sprint is the ordinary shape here, and in that view the browser has nothing to derive from. So
+ * the lookup runs on the server, over the whole project, and answers for a parent the caller
+ * cannot see.
+ *
+ * Scoped by project as well as by id, which is also the index: `{ project: 1, "relations.task": 1 }`.
  */
 export async function parentsOf(
   projectId: string,

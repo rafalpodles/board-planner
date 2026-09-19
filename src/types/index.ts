@@ -1264,9 +1264,10 @@ export interface ApiTask {
   relations: ApiTaskRelation[];
   relatedFrom: ApiTaskRelation[];
   /**
-   * The task's parent, resolved from the far end that stores the link. Optional because only the
-   * list route supplies it: the detail screen reads the same fact out of `relatedFrom`, which the
-   * list does not compute.
+   * The task's parent, resolved on the server from the far end that stores the link. Optional
+   * because only the list route supplies it — the detail screen reads the same fact out of its own
+   * `relatedFrom`, and the board derives that in the browser for the tasks it loaded. This field
+   * is what answers when the parent is not one of them, which a sprint-scoped board is full of.
    */
   parent?: ApiTaskLink | null;
   watchers: string[];

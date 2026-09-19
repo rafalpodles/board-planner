@@ -152,7 +152,8 @@ export const GET = withProjectAccess(async (request, { params }) => {
 
   // A card shows its parent, and the link lives on the parent's document — so it is resolved from
   // the far end, once for the list. Not part of taskPopulateFields, which can only follow refs a
-  // task holds itself.
+  // task holds itself, and not left to the browser's own reverse derivation, which only sees the
+  // tasks this response carried: under ?sprint= the parent usually is not one of them.
   const parents = await parentsOf(projectId, tasks.map((task) => String(task._id)));
 
   // The board loads every task, so a raw document here would publish each one's whole execution
