@@ -20,6 +20,9 @@ const PORT = Number(process.env.CODA_STUB_PORT ?? 3998);
 
 const DEFAULT_COLUMNS = ["Key", "Title", "Status", "Assignee", "Priority", "Difficulty", "Category", "Due", "Link"];
 
+// Process-global for the whole CI job, not per-test: any future spec reading these must call
+// /control first, the way every test in integrations-panel.spec.ts already does, or it inherits
+// whatever the previous spec left behind.
 let columns = DEFAULT_COLUMNS;
 let lastUpsert = null;
 let requestCount = 0;

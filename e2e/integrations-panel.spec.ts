@@ -194,7 +194,12 @@ test.describe("a channel's masked URL", () => {
     await replaced;
 
     const afterReplace = ((await storedProject()).notificationChannels as { webhookUrl: string }[])[0];
+    // A fresh envelope, not the old one carried over — proves a write happened at all
     expect(afterReplace.webhookUrl).not.toBe(beforeUrl);
+    // Proves it is written to what was actually typed, not merely to *something* different:
+    // maskSecretUrl keeps the origin plus the value's last 4 characters (project-secrets.ts), the
+    // same signal project-channel-secret.spec.ts's own replace test checks for this exact reason
+    await expect(page.getByText("https://hooks.slack.com/••••aced")).toBeVisible();
   });
 });
 
