@@ -27,7 +27,13 @@ import { MEMBER_PASSWORD, MEMBER_USERNAME, seedWithoutSessions } from "./seed";
  *   answers 429.
  */
 
-test.skip(!RUN_PROXIED_SERVER, "needs the proxied app server — set E2E_PROXIED_SERVER=1 (see playwright.config.ts, PROXIED_BASE_URL)");
+const SKIP_REASON =
+  "needs the proxied app server — set E2E_PROXIED_SERVER=1 (see playwright.config.ts, PROXIED_BASE_URL)";
+// test.skip()'s own message is a JSON/JUnit annotation only — the suite's configured `list`
+// reporter never prints it, so "3 skipped" would otherwise say nothing about why. Logged at
+// collection time so it survives in every reporter, `list` included.
+if (!RUN_PROXIED_SERVER) console.log(`proxied-login-throttle.spec.ts: skipping — ${SKIP_REASON}`);
+test.skip(!RUN_PROXIED_SERVER, SKIP_REASON);
 
 const WRONG_PASSWORD = "not-the-password";
 
