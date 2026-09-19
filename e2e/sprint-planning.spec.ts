@@ -328,7 +328,10 @@ test("a sprint pane still loading its tasks refuses the drop, and takes it once 
   // `String(...)`) and measured that the `Loading…` assertion above **still passes** — the
   // transient loading state flickers into view even when nothing is stalled. So without this
   // count, a matcher that never matches leaves the fetch untouched and the test goes green having
-  // asserted a refusal that never happened. Do not tidy it away.
+  // asserted a refusal that never happened. Do not tidy it away — and leave `stalls += 1` below
+  // the `if (held)` return: the counter is bounded to one by that order, so `toBe(1)` reads as
+  // "the stub was hit". Moved above it to count polls, this line would start failing on a board
+  // that simply polled twice.
   expect(stalls).toBe(1);
 
   const card = backlog.locator(`a[href="${cardHref(PLANNING_BACKLOG_TASK_NUMBER)}"]`);
