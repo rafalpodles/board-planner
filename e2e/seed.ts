@@ -806,6 +806,38 @@ export async function demoteActiveColumn() {
   }
 }
 
+export const LIFECYCLE_OLDEST_CLOSED_NAME = "Sprint 1";
+
+/**
+ * Two more completed sprints, taking the lifecycle fixture's two to four — one past
+ * OLDER_COMPLETED_THRESHOLD, so the list folds the oldest away behind "Show N older" instead of
+ * naming them all. Both end before every other sprint here, and `LIFECYCLE_OLDEST_CLOSED_NAME` is
+ * the oldest of the four, so it is the one that gets hidden.
+ */
+export async function seedOlderCompletedSprints() {
+  const db = (await connect()).db!;
+  const now = new Date();
+  const day = 86_400_000;
+  const closed = (suffix: string, name: string, fromDays: number) => ({
+    _id: id(`e2e00000000000000000c4${suffix}`),
+    project: PROJECT_ID,
+    name,
+    goal: "",
+    status: "completed",
+    startDate: new Date(now.getTime() + fromDays * day),
+    endDate: new Date(now.getTime() + (fromDays + 14) * day),
+    createdAt: now,
+    updatedAt: now,
+  });
+  await db
+    .collection("sprints")
+    .insertMany([
+      closed("05", LIFECYCLE_OLDEST_CLOSED_NAME, -104),
+      closed("06", "Sprint 2", -88),
+    ]);
+  await mongoose.disconnect();
+}
+
 /** A sprint as the database holds it, for assertions the API's derived counts would blur. */
 export async function storedSprint(sprintId: mongoose.Types.ObjectId) {
   const db = (await connect()).db!;
