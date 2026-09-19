@@ -8,12 +8,38 @@ export interface StubMessage {
   data: string;
 }
 
+/**
+ * The stub's control port, checked rather than assumed: it names its paths and 404s anything else,
+ * so a helper that stopped matching would read as an empty mailbox — a green "nothing arrived" and
+ * a red "nothing was delivered" both for the wrong reason.
+ */
+async function control(path: string): Promise<Response> {
+  const response = await fetch(`${SMTP_STUB_CONTROL_URL}${path}`);
+  expect(response.ok, `the mail server's control port refused ${path}`).toBe(true);
+  return response;
+}
+
 /** What the SMTP stub has received for one address, oldest first */
 export async function mailFor(address: string): Promise<StubMessage[]> {
-  const response = await fetch(`${SMTP_STUB_CONTROL_URL}/messages`);
-  expect(response.ok, "the mail server's control port refused /messages").toBe(true);
-  const all: StubMessage[] = await response.json();
+  const all: StubMessage[] = await (await control("/messages")).json();
   return all.filter((message) => message.to.includes(address));
+}
+
+/**
+ * Makes the server answer 550 at end-of-DATA for one recipient, and record nothing.
+ *
+ * Aimed at one address rather than at "the next message": the run's other mail is fire-and-forget
+ * and can still be in flight when a spec arms this, so an unscoped refusal lands on whichever
+ * message arrives first — somebody else's.
+ */
+export async function refuseMailFor(address: string) {
+  const answer = await (await control(`/refuse?to=${encodeURIComponent(address)}`)).json();
+  expect(answer.refuseFor, "the mail server did not arm the refusal").toBe(address);
+}
+
+export async function stopRefusing() {
+  const answer = await (await control("/refuse")).json();
+  expect(answer.refuseFor, "the mail server is still refusing somebody's mail").toBeNull();
 }
 
 /**

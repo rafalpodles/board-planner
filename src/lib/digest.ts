@@ -1,3 +1,4 @@
+import type { Types } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { APP_NAME } from "@/lib/brand";
 import { isEmailConfigured, sendEmail } from "@/lib/email";
@@ -9,6 +10,7 @@ import { Notification } from "@/models/notification";
 import { User } from "@/models/user";
 import { resolveChannels, wantsMailSomewhere, PrefsSource } from "@/lib/notification-prefs";
 import { accessibleProjectIds } from "@/lib/grants";
+import type { SchedulerStart } from "@/lib/scheduler";
 
 const TICK_MS = Number(process.env.DIGEST_TICK_MS) || 5 * 60 * 1000;
 const DEFAULT_TIMEZONE = "Europe/Warsaw";
@@ -124,7 +126,7 @@ async function sendDigest(
   lines: DigestLine[],
   total: number,
   atLeast = false
-): Promise<void> {
+): Promise<boolean> {
   const origin = selfOrigin();
   const settingsUrl = origin ? `${origin}/settings/notifications` : undefined;
   const hidden = total - lines.length;
@@ -152,7 +154,7 @@ async function sendDigest(
       : undefined,
   });
 
-  await sendEmail({
+  return sendEmail({
     to: user.email,
     subject: `[${APP_NAME}] ${count} on your tasks`,
     text,
@@ -161,6 +163,125 @@ async function sendDigest(
   });
 }
 
+/**
+ * How long a failing delivery keeps being retried before the reader waits for tomorrow.
+ *
+ * Up to an hour, because the failure this has to outlast is **greylisting**: a receiving server
+ * answers a first-time sender with a 4xx and asks it to come back, conventionally in fifteen
+ * minutes to an hour. A certificate renewal, a Postfix restart or a DNS blip have the same shape.
+ * `sendEmail` collapses all of that into the same `false` as a permanent 550 (`email.ts`), so the
+ * retry cannot tell which it has met and has to be generous enough for the recoverable one.
+ *
+ * *Up to*, because `MAX_DIGEST_ATTEMPTS` binds first at a short interval: at a one-minute tick the
+ * reader gets twenty attempts spanning nineteen minutes, not an hour.
+ *
+ * A floor on the window rather than a ceiling, and the difference is worth knowing: the count is
+ * denominated in ticks, and a server that *hangs* rather than refusing costs each subscriber up to
+ * `socketTimeout`, so a tick can outrun its own interval and the overlap guard skips the next one.
+ * On a sick server the attempts therefore span longer than an hour, not shorter. That is the right
+ * direction, and `MAX_DIGEST_ATTEMPTS` still bounds what it costs (BP-659 review).
+ */
+export const DIGEST_RETRY_WINDOW_MS = 60 * 60 * 1000;
+
+/**
+ * The most attempts one reader's digest is worth in a day, whatever the interval says.
+ *
+ * The window above is the goal; this is the ceiling on what chasing it may cost. Each attempt is a
+ * `buildDigestFor` of up to `DIGEST_SCAN_LIMIT` rows, two populates and an SMTP connection, so a
+ * one-second tick must not turn one dead mailbox into thousands of them.
+ *
+ * It binds at every interval under about three minutes, and the arithmetic is worth writing down
+ * rather than leaving to whoever wonders: at a one-minute tick the twenty attempts span *nineteen*
+ * minutes, not an hour — n attempts cover n−1 intervals, which is the same rule the `+ 1` in
+ * `digestAttemptLimit` exists to honour. That is the cost side winning, deliberately, over the
+ * coverage side.
+ */
+export const MAX_DIGEST_ATTEMPTS = 20;
+
+/**
+ * How many of today's ticks will try a reader whose digest failed.
+ *
+ * Derived from the interval rather than written down as a count, because a count is denominated in
+ * the wrong unit: three attempts is ten minutes at the default interval and two minutes at a
+ * one-minute one, so an operator moving `DIGEST_TICK_MS` to make the digest arrive closer to the
+ * hour would have silently cut the retry window with it (BP-659 review).
+ *
+ * **Plus one, because n attempts are spaced over n−1 intervals.** The first attempt is the tick
+ * that failed; the last lands `(n − 1) × tickMs` after it. Without the `+ 1` the retrying stopped
+ * one interval short of the window at every interval that is not exactly an hour — 55 minutes at
+ * the default — which is inside the greylisting range this exists to outlast (BP-659 review).
+ *
+ * That also makes the floor a consequence rather than a special case: `ticks` is at least 1 for any
+ * positive interval, so the limit is at least 2, which is one attempt and one retry. It used to be
+ * `Math.max(ticks, 1)` — one attempt and no retry, the behaviour this ticket exists to remove — and
+ * the end-to-end test is what caught it, because the suite pins the timer to a day and a day-long
+ * interval divides to one.
+ *
+ * `Math.max(tickMs, 1)` is not only for a zero: `Number("-5") || default` keeps the −5, and a
+ * negative interval would otherwise produce a negative limit, which refuses every retry.
+ */
+export function digestAttemptLimit(tickMs = TICK_MS): number {
+  const ticks = Math.ceil(DIGEST_RETRY_WINDOW_MS / Math.max(tickMs, 1));
+  return Math.min(ticks + 1, MAX_DIGEST_ATTEMPTS);
+}
+
+/**
+ * Records that this reader's digest failed, and hands the day back if there are attempts left.
+ *
+ * The claim is scoped to the day this tick wrote: another instance cannot have taken it while we
+ * held it, but the filter says what the write means rather than trusting that. `lastDigestDay` goes
+ * back to `""` rather than being unset, which is what the schema's default and a fresh document
+ * both look like.
+ *
+ * The count is keyed by the day it counts, so yesterday's failures expire without anybody clearing
+ * them — and a delivery leaves the count where it is for the same reason, rather than spending a
+ * write to tidy up a value nothing will read again.
+ */
+async function digestFailed(
+  user: { _id: Types.ObjectId; username: string },
+  day: string,
+  attemptsBefore: number,
+  what: string,
+  cause?: unknown
+): Promise<void> {
+  const attempts = attemptsBefore + 1;
+  const limit = digestAttemptLimit();
+  const again = attempts < limit;
+  // One line per failure, and it names the reader because `email.ts` does not — an operator reading
+  // "Failed to send email" cannot tell a digest from a password reset. The cause rides along rather
+  // than being logged separately above, which printed every build failure twice.
+  const line = again
+    ? `Digest for ${user.username} ${what}; releasing the day for another attempt`
+    : `Digest for ${user.username} ${what}; ${attempts} of ${limit} attempts today, waiting for tomorrow`;
+  if (cause === undefined) console.error(line);
+  else console.error(line, cause);
+  const retry = { day, attempts };
+  try {
+    const written = await User.updateOne(
+      { _id: user._id, lastDigestDay: day },
+      again ? { $set: { lastDigestDay: "", digestRetry: retry } } : { $set: { digestRetry: retry } }
+    );
+    // Nothing matched means the claim this tick wrote is not there any more, which the claim's own
+    // filter says cannot happen — so it is worth one line rather than a silence, because the reader
+    // has then lost the day and the count that was supposed to bound the retry went nowhere
+    if (written.matchedCount === 0) {
+      console.error(`Digest for ${user.username}: the day's claim was gone before the retry`);
+    }
+  } catch (err) {
+    // This runs inside the loop over every subscriber, so a write that throws here must not end
+    // the tick for everybody after this reader — which is the invariant one of these tests exists
+    // to protect
+    console.error(`Digest could not record the failure for ${user.username}:`, err);
+  }
+}
+
+/**
+ * Sends today's digest to everyone who has one waiting, and answers how many were **delivered**.
+ *
+ * Delivered, not attempted: `sendEmail` answers `false` for a refused or failed send rather than
+ * throwing, and that answer used to be dropped on the floor — the count included messages no mail
+ * server had taken, and the reader lost the day with it (BP-659).
+ */
 export async function digestTick(now = new Date()): Promise<number> {
   if (!isEmailConfigured()) return 0;
   const day = dueDigestDay(now);
@@ -176,8 +297,9 @@ export async function digestTick(now = new Date()): Promise<number> {
       email: { $ne: "" },
       lastDigestDay: { $ne: day },
     },
-    // `role` for the grant lookup, `notifications` for the grid — the two questions the loop asks
-    "email username role emailNotifications notifications"
+    // `role` for the grant lookup, `notifications` for the grid — the two questions the loop asks —
+    // and `digestRetry` for how many of today's ticks have already tried this reader and failed
+    "email username role emailNotifications notifications digestRetry"
   ).lean();
   // Any grid that turns mail on anywhere — the global one or a project's — qualifies. Asking only
   // the global grid dropped anyone who had switched mail off globally and back on for one project:
@@ -191,11 +313,23 @@ export async function digestTick(now = new Date()): Promise<number> {
   for (const user of waiting) {
     // Claimed before the work, and by the day rather than by a timestamp: a crash between here
     // and the send costs one digest instead of sending it from every app instance at once.
+    //
+    // Which leaves everything that is *not* a crash. A refused send, or a database error while the
+    // message was being built, used to keep the claim and end the reader's day: nothing was
+    // delivered, the next tick passed them over, and by the following morning their rows had
+    // fallen out of the 24-hour window and were never mailed at all (BP-659). So the claim is
+    // handed back below on both paths, and the cost of that is named rather than hidden — a send
+    // the transport failed to report is delivered twice. At-least-once is the right way round for
+    // a summary somebody asked for; at-most-once is what silently lost it.
     const claimed = await User.findOneAndUpdate(
       { _id: user._id, lastDigestDay: { $ne: day } },
       { $set: { lastDigestDay: day } }
     );
     if (!claimed) continue;
+
+    // Read from the candidate document rather than counted here: this loop sees a reader once per
+    // tick, and the count has to survive between ticks to bound anything.
+    const attemptsToday = user.digestRetry?.day === day ? (user.digestRetry.attempts ?? 0) : 0;
 
     try {
       const projectIds = await accessibleProjectIds(user);
@@ -205,12 +339,16 @@ export async function digestTick(now = new Date()): Promise<number> {
         projectIds,
         user
       );
-      // A quiet day is not worth a mail saying so
+      // A quiet day is not worth a mail saying so — and the claim stays, because there was nothing
+      // to deliver rather than something that failed to arrive
       if (lines.length === 0) continue;
-      await sendDigest(user, lines, total, atLeast);
-      sent++;
+      if (await sendDigest(user, lines, total, atLeast)) {
+        sent++;
+        continue;
+      }
+      await digestFailed(user, day, attemptsToday, "was not delivered");
     } catch (err) {
-      console.error(`Digest failed for ${user.username}:`, err);
+      await digestFailed(user, day, attemptsToday, "could not be built", err);
     }
   }
 
@@ -218,11 +356,41 @@ export async function digestTick(now = new Date()): Promise<number> {
 }
 
 let started = false;
+let ticking = false;
 
-export function startDigestScheduler(): void {
-  if (started) return;
+export type DigestSchedulerStart = SchedulerStart<"no mail server" | "already running">;
+
+/**
+ * Arms the timer that sends the morning digest, and says what it decided (BP-660).
+ *
+ * It answered `void` before, and the condition that decides whether the digest goes out at all
+ * lived at the call site in `instrumentation.ts` — so nothing could assert either. Both failure
+ * directions are silent: a digest that never goes out produces no error and no failing request.
+ *
+ * The three answers are its sibling's, `startGithubSyncScheduler`, for the reason that one has
+ * them: a second `register()` — which `next dev` does on reload — is not the same as a scheduler
+ * that will never run, and a log that says the same thing about both is worse than no log.
+ */
+export function startDigestScheduler(): DigestSchedulerStart {
+  if (started) return { started: false, reason: "already running" };
+  // Asked here rather than at the call site, so the decision and its reason are one testable thing
+  if (!isEmailConfigured()) return { started: false, reason: "no mail server" };
   started = true;
   setInterval(() => {
-    digestTick().catch((err) => console.error("Digest tick failed:", err));
+    // A tick walks every subscriber and waits on a real mail server for each, so at a short
+    // interval the next one can start while this one is still going — and with the day now handed
+    // back on a failure, an overlapping tick can pick up a reader the first one has just released
+    // and deliver twice. The sibling scheduler has carried this guard since BP-443.
+    if (ticking) {
+      console.warn("Digest tick skipped: the previous one is still running");
+      return;
+    }
+    ticking = true;
+    digestTick()
+      .catch((err) => console.error("Digest tick failed:", err))
+      .finally(() => {
+        ticking = false;
+      });
   }, TICK_MS).unref();
+  return { started: true, tickMs: TICK_MS };
 }

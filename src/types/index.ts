@@ -149,6 +149,8 @@ export interface IUser {
   emailDigest: boolean;
   notifications?: UserNotificationPrefs;
   lastDigestDay: string;
+  /** Today's failed digest attempts, so a permanently undeliverable address is not retried all day. */
+  digestRetry?: { day: string; attempts: number };
   collapseEmptyColumns: boolean;
   role: UserRole;
   // A worker's identity is a user record so authorship, mentions, avatars and history keep

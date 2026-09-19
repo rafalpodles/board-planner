@@ -12,7 +12,7 @@ import {
   seedBoardFeedBystander,
 } from "./seed";
 import { signIn as arriveSignedIn, signInThroughForm } from "./session";
-import { bodyOf, type StubMessage } from "./mailbox";
+import { bodyOf, refuseMailFor, stopRefusing, type StubMessage } from "./mailbox";
 import {
   assignANewTask,
   clearTheMailbox,
@@ -79,11 +79,12 @@ const signIn = (page: Page, username: string, password: string) =>
       : signInThroughForm(page, username, password);
 
 /**
- * Asks the scheduler to run once, and answers with what it says it sent.
+ * Asks the scheduler to run once, and answers how many digests it delivered.
  *
- * The count is the tick's own, not a delivery count — `sendEmail` swallows a transport failure and
- * answers `false`, which `digestTick` does not read. So it is asserted alongside what arrived at
- * the mail server, never instead of it.
+ * Deliveries, since BP-659: the count used to include a message the mail server had refused,
+ * because `sendEmail` answers `false` rather than throwing and nothing read the answer. It is still
+ * asserted alongside what arrived at the stub rather than instead of it — a count cannot say what
+ * was in the message.
  */
 async function runTheDigest(request: APIRequestContext): Promise<number> {
   const response = await request.post("/api/e2e/digest");
@@ -301,6 +302,83 @@ test("a row the reader has already opened is not repeated in the morning", async
   await adminContext.close();
 });
 
+/**
+ * BP-659. The day is claimed in `lastDigestDay` before the message is built, so that a crash costs
+ * one digest rather than sending it from every instance at once. Everything that was not a crash
+ * kept that claim and ended the reader's day in silence: `sendEmail` answers `false` for a refused
+ * send rather than throwing, nothing read the answer, and by the next morning those rows had fallen
+ * out of the digest's 24-hour window and were never mailed at all.
+ *
+ * Driven for real rather than reasoned about: the stub answers 550 at end-of-DATA for one address
+ * (BP-469), which is a refusal from nodemailer's point of view and not a fixture.
+ */
+test("a refused delivery is tried again at the next tick, not lost with the day", async ({
+  browser,
+  request,
+}) => {
+  const memberContext = await browser.newContext();
+  const adminContext = await browser.newContext();
+  const member = await memberContext.newPage();
+  const admin = await adminContext.newPage();
+
+  await signIn(member, MEMBER_USERNAME, MEMBER_PASSWORD);
+  await signIn(admin, ADMIN_USERNAME, ADMIN_PASSWORD);
+
+  await test.step("the member takes their mail as a digest", async () => {
+    await setGlobalCell(member, ASSIGNED_ROW, "E-mail", true);
+    const stored = member.waitForResponse(
+      (r) => r.request().method() === "PUT" && r.url().includes("/api/users/me") && r.status() < 400
+    );
+    await member.getByLabel(DIGEST_BOX).check();
+    await stored;
+  });
+
+  const banked = "Waiting while the mail server says no";
+  await test.step("a task is handed to them, and their mail server stops taking mail", async () => {
+    await assignANewTask(admin, banked, MEMBER_USERNAME);
+    await dispatchHasRun(member, banked);
+    await refuseMailFor(MEMBER_MAILBOX);
+  });
+
+  await test.step("the tick delivers nothing, and says so", async () => {
+    // 0, not 1: the count is deliveries. Against the old code this line reads 1 — the refusal was
+    // counted as a send — and the mailbox below is empty either way, which is what made the
+    // failure silent.
+    expect(await runTheDigest(request)).toBe(0);
+    expect(await digestsFor(MEMBER_MAILBOX)).toHaveLength(0);
+  });
+
+  await test.step("the mail server recovers", async () => {
+    await stopRefusing();
+  });
+
+  const key = await keyOf(banked);
+  await test.step("and the next tick sends the day the first one could not", async () => {
+    // The whole ticket in one line. The day was claimed by the tick that failed, so against the old
+    // code this answers 0 for ever: the reader is passed over until midnight, and tomorrow's
+    // 24-hour window no longer reaches these rows.
+    expect(await runTheDigest(request)).toBe(1);
+
+    await expect(async () => {
+      const digests = await digestsFor(MEMBER_MAILBOX);
+      expect(digests, "the retry delivered nothing").toHaveLength(1);
+      expect(mentions(digests[0], key), `${key} is not in the retried digest`).toBe(true);
+    }).toPass({ timeout: 30_000 });
+  });
+
+  await memberContext.close();
+  await adminContext.close();
+});
+
 test.afterAll(async () => {
-  if (mongoose.connection.readyState !== 0) await mongoose.disconnect();
+  // Cancelled here as well as in the test that arms it: a refusal that outlives this file lands on
+  // whichever spec sends the next message, and nothing would say why it failed.
+  //
+  // In a `finally`, the way `mail-test-send.spec.ts` guards the same pair: `stopRefusing` asserts
+  // what the stub reports back, so it can throw — and a connection left open outlives the worker.
+  try {
+    await stopRefusing();
+  } finally {
+    if (mongoose.connection.readyState !== 0) await mongoose.disconnect();
+  }
 });

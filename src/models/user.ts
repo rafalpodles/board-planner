@@ -81,6 +81,15 @@ const userSchema = new Schema<IUser>({
     type: String,
     default: "",
   },
+  // How many of today's ticks have tried this reader and failed. A failed send hands the day back
+  // so the next tick retries it (BP-659), and a hard refusal — a mailbox that no longer exists,
+  // an address over quota — is indistinguishable from a transient one, so without a count that
+  // retry runs every tick until midnight. Keyed by the day it counts, which is what lets it expire
+  // without anybody clearing it.
+  digestRetry: {
+    day: { type: String, default: "" },
+    attempts: { type: Number, default: 0 },
+  },
   // true keeps the board's existing behaviour for everyone who never touches it
   collapseEmptyColumns: {
     type: Boolean,

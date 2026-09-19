@@ -109,12 +109,18 @@ export async function register() {
             : "GitHub pull-request sync was already running"
       );
 
+      // Logged whichever way it went, like its two neighbours: "no mail server" is an ordinary
+      // self-hosted configuration and "already running" is what a `next dev` reload produces, but
+      // a digest that never goes out is otherwise silent in both directions (BP-660)
       const { startDigestScheduler, digestHour, digestTimezone } = await import("@/lib/digest");
-      const { isEmailConfigured } = await import("@/lib/email");
-      if (isEmailConfigured()) {
-        startDigestScheduler();
-        console.log(`Digest scheduler started — ${digestHour()}:00 ${digestTimezone()}`);
-      }
+      const digest = startDigestScheduler();
+      console.log(
+        digest.started
+          ? `Digest scheduler started — ${digestHour()}:00 ${digestTimezone()}, every ${digest.tickMs}ms`
+          : digest.reason === "no mail server"
+            ? "Digest scheduler is off (no SMTP server configured)"
+            : "Digest scheduler was already running"
+      );
     } catch (err) {
       // Don't crash the server on a transient boot-time DB hiccup;
       // route handlers reconnect lazily via connectDB().

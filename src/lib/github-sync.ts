@@ -1,5 +1,6 @@
 import type { Types } from "mongoose";
 import { connectDB } from "@/lib/db";
+import type { SchedulerStart } from "@/lib/scheduler";
 import { decryptSecret } from "@/lib/encryption";
 import { fetchPullRequests, matchPRsToTasks, parseRepoString, withChecks } from "@/lib/github";
 import { logActivity } from "@/lib/activity";
@@ -477,11 +478,9 @@ let started = false;
 let ticking = false;
 
 /** What `startGithubSyncScheduler` did, so the caller can say which without guessing from a number. */
-export type SchedulerStart =
-  | { started: true; tickMs: number }
-  | { started: false; reason: "off" | "already running" };
+export type GithubSyncStart = SchedulerStart<"off" | "already running">;
 
-export function startGithubSyncScheduler(): SchedulerStart {
+export function startGithubSyncScheduler(): GithubSyncStart {
   const tick = syncTickMs();
   // Two different noes, told apart: a second `register()` — which `next dev` does on reload — used
   // to return the same 0 as "switched off", so the log said the sync was off while it was running.
