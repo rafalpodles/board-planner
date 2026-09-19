@@ -17,9 +17,16 @@ import { signIn } from "./session";
  *
  * The ticket said "nothing runs between 768 and 1024" and that was wrong — `board-irreversible`
  * sizes to 900 and `save-bar-keeps-its-button` sweeps 1023, both for their own reasons. What no
- * spec did was ask either *breakpoint* what it does: the drawer was opened once, in
- * `search-page.spec.ts`, only to reach the search row inside it, and the sprint select had never
- * been touched at any width at all.
+ * spec did was ask either *breakpoint* what it does: the drawer had been opened once, in
+ * `search-page.spec.ts` at phone width, only to reach the search row inside it, and the sprint
+ * select had never been touched at any width at all.
+ *
+ * So the tests below are at three widths and only two of them are about the band. 800 is where the
+ * sidebar has stopped being a drawer; 900 is where the sprint picker has not yet stopped being a
+ * select; 390 is a phone, and the two tests there are the drawer's own behaviour and the comment
+ * bar, neither of which the band has anything to say about. Each has its control at a width on the
+ * other side of the breakpoint it names, because a test that only ever looks at one width cannot
+ * tell a rule from a coincidence.
  *
  * What is driven here is the half that happy-dom cannot answer for. `Sidebar.test.tsx` already
  * covers the drawer's Escape, its focus trap and its focus return; `SprintHeader.test.tsx` covers
@@ -27,11 +34,14 @@ import { signIn } from "./session";
  * None of them can say whether the CSS puts those controls on the screen at the width where they
  * are supposed to exist, or whether `inert` really takes the page behind the drawer away.
  *
- * The task detail's mobile summary sheet and its "More actions" menu are deliberately not here:
- * they belong to BP-474, which names them.
+ * The task detail's mobile summary sheet is not here: BP-474 names it. Its "More actions" menu is
+ * not here either, and not for that reason — `board-irreversible.spec.ts` already drives it at 900,
+ * which is worth knowing before BP-474 writes it a third time.
  */
 
 const PHONE = { width: 390, height: 844 };
+/** Just past `md`: the sidebar is part of the layout again, and nothing had ever checked that */
+const PAST_THE_DRAWER = { width: 800, height: 800 };
 /** Between `md` and `lg`: past the drawer, short of the sprint list */
 const TABLET = { width: 900, height: 800 };
 const DESKTOP = { width: 1280, height: 800 };
@@ -81,6 +91,30 @@ test.describe("the drawer, below md", () => {
     await page.mouse.click(PHONE.width - 20, PHONE.height / 2);
     await expect(drawer).toHaveCount(0);
     expect(await focusable(page, BEHIND_THE_DRAWER)).toBe("took the focus");
+  });
+});
+
+test.describe("the sidebar, once the drawer is over", () => {
+  test("at 800 there is no hamburger and the sidebar is not a dialog", async ({ page }) => {
+    await page.setViewportSize(PAST_THE_DRAWER);
+    await signIn(page);
+    await page.goto("/projects");
+    await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible();
+
+    // Above md the sidebar is part of the layout and owes the page nothing: no way to open it,
+    // because it was never shut, and none of the modal contract it wears as a drawer
+    await expect(page.getByRole("button", { name: "Open navigation" })).toHaveCount(0);
+    await expect(page.getByRole("dialog", { name: "Navigation" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "My Tasks" })).toBeVisible();
+  });
+
+  // The control, one breakpoint down: the same page owes exactly the opposite
+  test("at 700 the hamburger is back", async ({ page }) => {
+    await page.setViewportSize({ width: 700, height: 800 });
+    await signIn(page);
+    await page.goto("/projects");
+
+    await expect(page.getByRole("button", { name: "Open navigation" })).toBeVisible();
   });
 });
 
@@ -137,5 +171,16 @@ test.describe("the comment bar, at phone width", () => {
 
     await expect(page.getByText("Written on a phone")).toBeVisible();
     await expect(bar).toHaveValue("");
+  });
+
+  // The control the CSS actually needs: the bar is `lg:hidden`, and without this the rule could be
+  // deleted and the bar would sit on top of the desktop composer with every test still green
+  test("and is not offered on a desktop, where the page has its own composer", async ({ page }) => {
+    await page.setViewportSize(DESKTOP);
+    await signIn(page);
+    await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
+    await expect(page.getByRole("heading", { name: /Comments/ }).or(page.getByText("Comments"))).toBeVisible();
+
+    await expect(page.getByLabel("Add a comment")).toBeHidden();
   });
 });
