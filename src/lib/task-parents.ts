@@ -22,25 +22,9 @@ export async function parentsOf(
   // asking anything at all
   if (taskIds.length === 0) return new Map();
 
-  // Every parent on the board, not every document holding a relation to one of these ids. The ids
-  // narrow the result in JS below, which is where the $in was doing its real work anyway.
-  //
-  // Measured on MongoDB 4.4 against a synthetic 3,000-task project, one index at a time:
-  //
-  //   unscoped board      no relations index          keys 3000  fetched 3000
-  //                       {project, relations.task}   keys  299  fetched  204
-  //                       {project, relations.type}   keys    5  fetched    5
-  //
-  // The 204 is the residual: a type predicate on an array cannot be covered alongside one on its
-  // `task`, so the other relation kinds are fetched and discarded. The same index also serves the
-  // cycle check in `links/route.ts`, which runs on every parent_of write and can use nothing else.
-  //
-  // The trade it makes, recorded because it is not free: keyed on the type this costs every parent
-  // in the PROJECT, where keying on the child would cost only the parents of the visible tasks. On
-  // a sprint-scoped view of 10 tasks that is 5 fetched against 3 with 5 parents about — and 500
-  // against 4 with 500. It holds because parent_of here is the epic relation, so parents are tens;
-  // a board that parented most of its tasks would want the other shape, and would find this
-  // comment.
+  // Keyed on the type, not on the child: this is a handful of documents while parent_of stays the
+  // epic relation, and one fetch per parent in the project if it ever does not. Measurements and
+  // the crossover are in the PR.
   const parents = await Task.find(
     { project: projectId, "relations.type": "parent_of" },
     "taskNumber title status relations"

@@ -2,6 +2,7 @@ import { test, expect, type APIRequestContext } from "@playwright/test";
 import { ADMIN_AUTH } from "./api";
 import {
   FINISHED_TASK_ID,
+  FINISHED_TASK_NUMBER,
   PLANNING_BACKLOG_TASK_ID,
   PLANNING_BACKLOG_TASK_NUMBER,
   PLANNING_SPRINT_ID,
@@ -9,7 +10,6 @@ import {
   PLANNING_SPRINT_TASK_NUMBER,
   PLANNING_SPRINT_TASK_TITLE,
   seedSprintPlanning,
-  FINISHED_TASK_NUMBER,
   HELD_TASK_ID,
   HELD_TASK_NUMBER,
   HELD_TASK_TITLE,
