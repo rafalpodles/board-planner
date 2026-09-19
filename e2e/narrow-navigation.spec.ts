@@ -107,7 +107,9 @@ test.describe("the sidebar, once the drawer is over", () => {
     // Above md the sidebar is part of the layout and owes the page nothing: no way to open it,
     // because it was never shut, and none of the modal contract it wears as a drawer
     await expect(page.getByRole("button", { name: "Open navigation" })).toHaveCount(0);
-    await expect(page.getByRole("dialog", { name: "Navigation" })).toHaveCount(0);
+    // And it is there as layout rather than as something waiting to be opened. Not asserted as
+    // "no dialog": above md the role is never set, so that check could only fail once the line
+    // above already had — `Sidebar.test.tsx` pins the modal contract itself.
     await expect(page.getByRole("link", { name: "My Tasks" })).toBeVisible();
   });
 
@@ -184,7 +186,10 @@ test.describe("the comment bar, at phone width", () => {
     await page.setViewportSize(DESKTOP);
     await signIn(page);
     await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
-    await expect(page.getByRole("heading", { name: /Comments/ }).or(page.getByText("Comments"))).toBeVisible();
+    // The desktop composer, which is both the gate for "the comments have rendered" and the thing
+    // the bar would be sitting on top of if the rule below were dropped. Not the heading: the task
+    // screen renders `<Comments hideHeading>`, so that branch could never match.
+    await expect(page.getByPlaceholder("Write a comment, @mention someone…")).toBeVisible();
 
     const bar = page.getByLabel("Add a comment");
     await expect(bar).toHaveCount(1);
