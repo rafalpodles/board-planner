@@ -762,3 +762,18 @@ test.describe("the sprint list once there are more closed sprints than it shows"
     await expect(older).toHaveCount(0);
   });
 });
+
+test.describe("a board with no sprints at all", () => {
+  // Re-seeds over the lifecycle fixture the file installs, leaving the board this page greets a
+  // new project with — a state every project passes through exactly once
+  test.beforeEach(seed);
+
+  test("says so, and offers the way out of it", async ({ page }) => {
+    await signIn(page);
+    await page.goto(sprintsUrl);
+
+    await expect(page.getByText("No sprints yet")).toBeVisible();
+    await expect(selectedSprintName(page)).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "New Sprint" })).toBeVisible();
+  });
+});
