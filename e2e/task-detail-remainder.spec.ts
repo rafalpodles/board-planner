@@ -3,8 +3,9 @@ import {
   seed,
   seedAgents,
   seedHandoverStates,
+  seedSprintPlanning,
   PROJECT_KEY,
-  PROJECT_AGENT_NAME,
+  PLANNING_SPRINT_NAME,
   SIBLING_TASK_NUMBER,
   DECOY_TASK_NUMBER,
   NOT_APPROVED_TASK_NUMBER,
@@ -26,6 +27,7 @@ test.beforeEach(async () => {
   await seed();
   await seedAgents();
   await seedHandoverStates();
+  await seedSprintPlanning();
 });
 
 const taskUrl = (taskNumber: number) => `/projects/${PROJECT_KEY}/tasks/${taskNumber}`;
@@ -62,7 +64,7 @@ test.describe("comment reactions", () => {
     await openTask(page, SIBLING_TASK_NUMBER, "admin");
     await postComment(page, "reaction target");
 
-    const comment = page.locator("div", { has: page.getByText("reaction target") }).last();
+    const comment = page.locator("div.group", { hasText: "reaction target" });
     await comment.getByLabel("Add a reaction").click();
     const patched = page.waitForResponse(
       (res) => res.request().method() === "PATCH" && res.url().includes("/comments/")
@@ -74,20 +76,21 @@ test.describe("comment reactions", () => {
     await expect(chip).toBeVisible();
     await expect(chip).toContainText("1");
     // The reader's own reaction is highlighted — asserted against the class the component
-    // switches on `hasOwn`, not against a screenshot.
-    await expect(chip).toHaveClass(/border-primary/);
+    // switches on `hasOwn`, not against a screenshot. Anchored to a whole class token: the
+    // unhighlighted state's own class list contains "hover:border-primary/50", which a bare
+    // substring match on "border-primary" would wrongly count as the highlight.
+    const OWN_REACTION_CLASS = /(?:^|\s)border-primary(?:\s|$)/;
+    await expect(chip).toHaveClass(OWN_REACTION_CLASS);
 
     // A second person reacting with the same emoji groups onto the same chip rather than adding
     // a second one, and does not turn on the highlight for the first reader.
     const memberContext = await browser.newContext();
     const memberPage = await memberContext.newPage();
     await openTask(memberPage, SIBLING_TASK_NUMBER, "member");
-    const memberComment = memberPage
-      .locator("div", { has: memberPage.getByText("reaction target") })
-      .last();
+    const memberComment = memberPage.locator("div.group", { hasText: "reaction target" });
     const memberChip = memberComment.getByRole("button", { name: /👍/ });
     await expect(memberChip).toContainText("1");
-    await expect(memberChip).not.toHaveClass(/border-primary/);
+    await expect(memberChip).not.toHaveClass(OWN_REACTION_CLASS);
     const memberPatched = memberPage.waitForResponse(
       (res) => res.request().method() === "PATCH" && res.url().includes("/comments/")
     );
@@ -99,8 +102,7 @@ test.describe("comment reactions", () => {
     // Back on the first reader: the chip now reflects both, and toggling off removes only theirs.
     await page.reload();
     const chipAfterReload = page
-      .locator("div", { has: page.getByText("reaction target") })
-      .last()
+      .locator("div.group", { hasText: "reaction target" })
       .getByRole("button", { name: /👍/ });
     await expect(chipAfterReload).toContainText("2");
     const toggledOff = page.waitForResponse(
@@ -109,13 +111,13 @@ test.describe("comment reactions", () => {
     await chipAfterReload.click();
     await toggledOff;
     await expect(chipAfterReload).toContainText("1");
-    await expect(chipAfterReload).not.toHaveClass(/border-primary/);
+    await expect(chipAfterReload).not.toHaveClass(OWN_REACTION_CLASS);
   });
 
   test("the reaction picker offers a fixed emoji set", async ({ page }) => {
     await openTask(page, SIBLING_TASK_NUMBER, "admin");
     await postComment(page, "picker target");
-    const comment = page.locator("div", { has: page.getByText("picker target") }).last();
+    const comment = page.locator("div.group", { hasText: "picker target" });
     await comment.getByLabel("Add a reaction").click();
     for (const emoji of ["👍", "👎", "❤️", "👀", "🎉", "😄"]) {
       await expect(page.getByLabel(`React with ${emoji}`)).toBeVisible();
@@ -222,17 +224,17 @@ test.describe("subtasks", () => {
     const created = page.waitForResponse(
       (res) => res.request().method() === "POST" && res.url().endsWith("/tasks")
     );
-    await page.getByLabel("Task title").fill("A real subtask");
-    await page.getByRole("button", { name: "Create Task" }).click();
+    const modal = page.getByRole("dialog").filter({ hasText: "New child of" });
+    await modal.getByLabel("Title").fill("A real subtask");
+    await modal.getByRole("button", { name: "Create Task" }).click();
     await created;
 
     await expect(page.getByRole("heading", { name: /New child of/ })).toHaveCount(0);
-    await expect(
-      page.locator("h4", { hasText: "Children" }).locator("..").getByText("A real subtask")
-    ).toBeVisible();
+    const childrenSection = page.locator("h4", { hasText: "Children" }).locator("..");
+    await expect(childrenSection.getByText("A real subtask")).toBeVisible();
 
-    const childRow = page.locator("a", { hasText: "A real subtask" }).first();
-    await childRow.click();
+    // LinkRow's clickable element is the task-key button, not the title text.
+    await childrenSection.getByRole("button").first().click();
     await expect(
       page.locator("h4", { hasText: "Parent" }).locator("..").getByText("Free to move")
     ).toBeVisible();
@@ -289,7 +291,7 @@ test.describe("property rail rows", () => {
     await saved;
     await expect(page.getByRole("button", { name: "Jan 15, 2027" })).toBeVisible();
 
-    await page.getByRole("button", { name: "Jan 15, 2027" }).click();
+    // The panel stays open after the fill — a second click on the trigger would toggle it shut.
     const cleared = page.waitForResponse(
       (res) => res.request().method() === "PUT" && res.url().includes("/tasks/")
     );
@@ -304,10 +306,20 @@ test.describe("property rail rows", () => {
     const typeSaved = page.waitForResponse(
       (res) => res.request().method() === "PUT" && res.url().includes("/tasks/")
     );
-    await page.getByRole("button", { name: /^user-story$|^bug$|^doc$|^idea$/ }).first().click();
+    // ComboboxRow's trigger carries an explicit role="combobox" (ARIA), which shadows the
+    // native <button>'s implicit "button" role — getByRole("button", ...) never matches it.
+    await page.getByRole("combobox", { name: "Type" }).click();
     await page.getByRole("option", { name: "bug" }).click();
     await typeSaved;
-    await expect(page.getByText("bug", { exact: true })).toBeVisible();
+    await expect(page.getByRole("combobox", { name: "Type" })).toContainText("bug");
+
+    const sprintSaved = page.waitForResponse(
+      (res) => res.request().method() === "PUT" && res.url().includes("/tasks/")
+    );
+    await page.getByRole("combobox", { name: "Sprint" }).click();
+    await page.getByRole("option", { name: PLANNING_SPRINT_NAME }).click();
+    await sprintSaved;
+    await expect(page.getByRole("combobox", { name: "Sprint" })).toContainText(PLANNING_SPRINT_NAME);
   });
 
   test("Reported by names the creator", async ({ page }) => {
