@@ -616,3 +616,62 @@ test.describe("the /search page", () => {
     await expect(results(page).filter({ hasText: OTHER_HIT_TITLE })).toHaveCount(0);
   });
 });
+
+/**
+ * BP-475. Two things the file leaned on without asserting.
+ *
+ * The debounce: several tests wait the 250ms out, and one proves a query below the two-character
+ * minimum sends nothing at all. Neither says what the debounce is *for* — that a person typing a
+ * word does not spend a request per keystroke.
+ *
+ * The phone's way in: the ticket called it an icon that opens this layer. It is not, and has not
+ * been for a while — `SearchTrigger.tsx` is a link to the search page, with a docblock saying the
+ * overlay reads as "a page that lost its back button" at that width. What made it untested is that
+ * it wears the same accessible name as the layer's own input, so every existing match belongs to
+ * the layer.
+ */
+test.describe("what the layer's debounce is for", () => {
+  test("a word typed a letter at a time costs one request, not one per letter", async ({ page }) => {
+    await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
+    const asked: string[] = [];
+    await page.route(/\/api\/search\?/, async (route, request) => {
+      asked.push(new URL(request.url()).searchParams.get("q") ?? "");
+      await route.fallback();
+    });
+
+    await openBoard(page);
+    await openLayer(page);
+    const answered = page.waitForResponse(searchFor(SEARCH_WORD));
+    // Character by character, inside the 250ms window: `fill` would set the value in one shot and
+    // ask nothing of the debounce
+    await layerInput(page).pressSequentially(SEARCH_WORD, { delay: 30 });
+    await answered;
+
+    // Settle past one more debounce, so a straggler would have landed before this reads
+    await page.waitForTimeout(500);
+    expect(asked).toEqual([SEARCH_WORD]);
+  });
+});
+
+test.describe("the phone's way into search", () => {
+  test("the magnifier in the top bar goes to the search page", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
+    await page.goto(`/projects/${PROJECT_KEY}`);
+
+    // Scoped to the bar, because the layer's input carries the same accessible name — which is
+    // exactly why nothing had ever driven this control
+    const magnifier = page
+      .locator("header, div")
+      .filter({ has: page.getByRole("button", { name: "Open navigation" }) })
+      .getByRole("link", { name: "Search tasks and projects" });
+    await expect(magnifier.first()).toBeVisible();
+
+    await magnifier.first().click();
+
+    await expect(page).toHaveURL(/\/search$/);
+    await expect(page.getByRole("heading", { name: "Search", level: 1 })).toBeVisible();
+    // A page, not the palette over the board
+    await expect(layerOf(page)).toHaveCount(0);
+  });
+});
