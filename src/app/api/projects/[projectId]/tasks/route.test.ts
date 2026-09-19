@@ -40,6 +40,8 @@ function request(query = "") {
 
 const ctx = () => ({ params: Promise.resolve({ projectId: PROJECT_ID }) });
 const populated: unknown[] = [];
+const parentDocs: unknown[] = [];
+let listed: unknown[] = [];
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -47,14 +49,23 @@ beforeEach(() => {
   getAuthUser.mockResolvedValue(USER);
   check.mockResolvedValue(true);
   populated.length = 0;
-  taskFind.mockReturnValue({
-    sort: () => ({
-      populate: (fields: unknown) => {
-        populated.push(fields);
-        return Promise.resolve([]);
-      },
-    }),
-  });
+  listed = [];
+  parentDocs.length = 0;
+  // Two different reads go through Task.find here: the list itself, and parentsOf resolving each
+  // card's parent from the far end. Only the second passes a projection, which is what tells them
+  // apart — a single shape serving both is how the list's own mock silently answered for it.
+  taskFind.mockImplementation((_filter: unknown, projection?: unknown) =>
+    projection === undefined
+      ? {
+          sort: () => ({
+            populate: (fields: unknown) => {
+              populated.push(fields);
+              return Promise.resolve(listed);
+            },
+          }),
+        }
+      : { lean: async () => parentDocs }
+  );
   workerFind.mockReturnValue({ select: () => Promise.resolve([]) });
   userFindOne.mockReturnValue({ lean: async () => null });
   projectFindById.mockReturnValue({ lean: async () => ({ categories: [{ name: "bug" }, { name: "doc" }] }) });
@@ -380,11 +391,7 @@ describe("GET /api/projects/:projectId/tasks — what a card publishes", () => {
       execution: { runId: "run-secret-123", workerId: "w1", attempts: 2, phaseSeq: 9, lastError: "boom" },
       decision: { patchSha256: "patch-hash-abc" },
     };
-    taskFind.mockReturnValue({
-      sort: () => ({
-        populate: () => Promise.resolve([{ ...stored, toObject: () => ({ ...stored }) }]),
-      }),
-    });
+    listed = [{ ...stored, toObject: () => ({ ...stored }) }];
     workerFind.mockReturnValue({ select: () => ({ lean: async () => [{ _id: "w1", name: "mac" }] }) });
 
     const text = await (await GET(request(), ctx())).text();
@@ -392,6 +399,60 @@ describe("GET /api/projects/:projectId/tasks — what a card publishes", () => {
     expect(text).toContain("Held by a run");
     expect(text).not.toContain("run-secret-123");
     expect(text).not.toContain("patch-hash-abc");
+  });
+});
+
+/**
+ * The parent is the one fact on a card that its own document does not hold: a parent_of link lives
+ * on the parent. So the list has to resolve it from the far end, and a card whose parent is
+ * somebody else's child must not inherit it.
+ */
+describe("GET /api/projects/:projectId/tasks — the parent each card belongs to", () => {
+  const child = { _id: "child", title: "A slice", toObject: () => ({ _id: "child", title: "A slice" }) };
+
+  it("attaches the parent that names this task", async () => {
+    listed = [child];
+    parentDocs.push({
+      _id: "epic",
+      taskNumber: 644,
+      title: "Epic: Phase 1",
+      status: "todo",
+      relations: [{ task: "child", type: "parent_of" }],
+    });
+
+    const body = JSON.parse(await (await GET(request(), ctx())).text());
+
+    expect(body[0].parent).toEqual({
+      _id: "epic",
+      taskNumber: 644,
+      title: "Epic: Phase 1",
+      status: "todo",
+    });
+  });
+
+  it("answers null rather than leaving the field off, so a card need not guess", async () => {
+    listed = [child];
+
+    const body = JSON.parse(await (await GET(request(), ctx())).text());
+
+    expect(body[0].parent).toBeNull();
+  });
+
+  it("does not give one task's parent to another", async () => {
+    const stranger = { _id: "stranger", title: "Unrelated", toObject: () => ({ _id: "stranger" }) };
+    listed = [child, stranger];
+    parentDocs.push({
+      _id: "epic",
+      taskNumber: 644,
+      title: "Epic: Phase 1",
+      status: "todo",
+      relations: [{ task: "child", type: "parent_of" }],
+    });
+
+    const body = JSON.parse(await (await GET(request(), ctx())).text());
+
+    expect(body[0].parent?.taskNumber).toBe(644);
+    expect(body[1].parent).toBeNull();
   });
 });
 
