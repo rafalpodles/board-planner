@@ -43,8 +43,10 @@ function composer(page: Page) {
 }
 
 function commentWrite(page: Page) {
+  // Exact suffix, not a substring: url().includes("/comments") would resolve just as happily on
+  // a mutated/broken endpoint like ".../comments-broken", proving nothing about a real post.
   return page.waitForResponse(
-    (res) => res.request().method() === "POST" && res.url().includes("/comments")
+    (res) => res.request().method() === "POST" && res.url().endsWith("/comments")
   );
 }
 
@@ -140,7 +142,13 @@ test.describe("posting a comment", () => {
     await bar.getByLabel("Add a comment").fill("posted from the phone bar");
     await bar.getByLabel("Post comment").click();
     await written;
-    await expect(page.getByText("posted from the phone bar")).toBeVisible();
+    // Scoped to an actual rendered comment row, not a bare getByText: the bar deliberately
+    // leaves a failed post's text sitting in the (uncleared) composer for a retry, so an
+    // unscoped locator can't tell "posted" from "typed and silently failed to post".
+    await expect(
+      page.locator("div.group", { hasText: "posted from the phone bar" })
+    ).toBeVisible();
+    await expect(bar.getByLabel("Add a comment")).toHaveValue("");
   });
 });
 
