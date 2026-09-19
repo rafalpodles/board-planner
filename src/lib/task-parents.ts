@@ -49,13 +49,20 @@ export async function parentsOf(
   const wanted = new Set(taskIds);
   const byChild = new Map<string, ApiTaskLink>();
 
+  // One parent per child is enforced by a `updateMany` in `links/route.ts`, but that is three
+  // separate writes, so two parents are reachable by a race. Last-write-wins on the map would then
+  // pick whichever order the index happened to return — a card that changes its mind between
+  // polls. Lowest task number instead: arbitrary, but the same arbitrary answer every time.
+
+  parents.sort((a, b) => a.taskNumber - b.taskNumber);
+
   for (const parent of parents) {
     for (const relation of parent.relations ?? []) {
       // $elemMatch selected the document, not the entry: a parent of two tasks carries a relation
       // to each, and a parent that also `relates` to one of them carries that too
       if (relation.type !== "parent_of") continue;
       const child = String(relation.task);
-      if (!wanted.has(child)) continue;
+      if (!wanted.has(child) || byChild.has(child)) continue;
       byChild.set(child, {
         _id: String(parent._id),
         taskNumber: parent.taskNumber,

@@ -102,6 +102,27 @@ describe("parentsOf", () => {
     expect([...parents.keys()]).toEqual(["child-a"]);
   });
 
+  // links/route.ts enforces one parent with an updateMany across three separate writes, so a race
+  // can leave two. Whichever way that resolves, the card must not change its mind between polls.
+  it("picks the same parent every time when two claim the same child", async () => {
+    const claim = (taskNumber: number, _id: string) => ({
+      _id,
+      taskNumber,
+      title: `Epic ${taskNumber}`,
+      status: "todo",
+      relations: [{ task: "child-a", type: "parent_of" }],
+    });
+    found([claim(900, "late"), claim(644, "early")]);
+
+    const first = await parentsOf("p1", ["child-a"]);
+
+    found([claim(644, "early"), claim(900, "late")]);
+    const second = await parentsOf("p1", ["child-a"]);
+
+    expect(first.get("child-a")?.taskNumber).toBe(644);
+    expect(second.get("child-a")).toEqual(first.get("child-a"));
+  });
+
   it("asks the database nothing for an empty board", async () => {
     const parents = await parentsOf("p1", []);
 

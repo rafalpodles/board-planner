@@ -199,7 +199,7 @@ export function TaskCard({
               // useful thing about it is which one — a card reading "Parent (1)" would say nothing
               <span
                 title={`Parent: ${parent.title}`}
-                className="chip text-[11px] px-1.5 py-0.5 rounded font-medium"
+                className="chip text-[11px] px-1.5 py-0.5 rounded font-medium whitespace-nowrap"
                 style={{ "--chip": "var(--color-text-muted)" } as CSSProperties}
               >
                 Parent {projectKey}-{parent.taskNumber}

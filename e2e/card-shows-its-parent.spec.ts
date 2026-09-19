@@ -1,5 +1,5 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
-import { ADMIN_AUTH, SAME_ORIGIN } from "./api";
+import { ADMIN_AUTH } from "./api";
 import {
   FINISHED_TASK_ID,
   PLANNING_BACKLOG_TASK_ID,
@@ -34,8 +34,11 @@ import { signIn } from "./session";
 test.beforeEach(seed);
 
 const boardUrl = `/projects/${PROJECT_KEY}`;
+// Scoped to a column body for the positive assertions: the same href also appears in the sidebar
+// and in a task panel, so a page-wide match is one rendered surface away from a strict-mode
+// violation. The absence assertions below stay page-wide on purpose — stricter, not looser.
 const cardFor = (taskNumber: number) =>
-  `a[href="/projects/${PROJECT_KEY}/tasks/${taskNumber}"]`;
+  `[data-column-body] a[href="/projects/${PROJECT_KEY}/tasks/${taskNumber}"]`;
 
 async function link(
   request: APIRequestContext,
@@ -44,7 +47,8 @@ async function link(
   type: "parent_of" | "relates"
 ) {
   const response = await request.post(`/api/projects/${PROJECT_ID}/tasks/${fromId}/links`, {
-    headers: { ...ADMIN_AUTH, ...SAME_ORIGIN },
+    // ADMIN_AUTH already carries Sec-Fetch-Site
+    headers: ADMIN_AUTH,
     data: { taskId: toId, type },
   });
   expect(response.status(), await response.text()).toBe(200);

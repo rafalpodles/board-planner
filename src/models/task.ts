@@ -249,7 +249,9 @@ taskSchema.index({ recurringParentId: 1 });
 // board's own parent lookup on every poll, and the cycle check on every parent_of write
 // (`links/route.ts`). Unindexed both re-read every task in the project. Keyed on the type rather
 // than on the child, because that is one point interval instead of one per task on the board, and
-// it fetches only the handful of documents that parent anything.
+// it fetches only the documents that parent anything — a handful while `parent_of` stays the epic
+// relation. If it ever becomes the ordinary subtask link, a scoped board pays one fetch per parent
+// in the project and wants the child-keyed shape instead; `task-parents.ts` has the measurements.
 taskSchema.index({ project: 1, "relations.type": 1 });
 
 export const Task: Model<ITask> =
