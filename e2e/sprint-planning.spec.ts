@@ -16,7 +16,9 @@ import {
   PROJECT_NAME,
   seed,
   seedSprintPlanning,
+  storedTaskSprint,
 } from "./seed";
+import { dragTo } from "./drag";
 import { signIn as arriveSignedIn } from "./session";
 
 /**
@@ -60,22 +62,24 @@ async function readTask(request: APIRequestContext, taskNumber: number) {
 }
 
 /**
- * Chromium runs a native drag on the OS, so Playwright's mouse produces no dragstart/drop in the
- * page (see e2e/run-conflict.spec.ts for the fuller explanation). The events are dispatched by
- * hand instead, sharing one live DataTransfer between the card and the pane.
+ * BP-475. This used to dispatch `dragstart`/`dragover`/`drop` by hand, above a docblock claiming
+ * that "Chromium runs a native drag on the OS, so Playwright's mouse produces no dragstart/drop"
+ * and pointing at `run-conflict.spec.ts` for the fuller explanation. That spec has since been
+ * corrected and now says the opposite — the claim is measurably untrue (BP-493, `e2e/drag.ts`) —
+ * so the cross-reference had inverted and this was the last spec still dispatching its own events.
+ *
+ * What the hand-dispatched version could not tell you is whether a person's drag reaches the pane
+ * at all: it called the handlers directly, so it would have stayed green with the drop target
+ * unreachable, mis-positioned, or covered by something else. `dragTo` drives the mouse and lets
+ * the browser produce the chain.
  *
  * Unlike the board's columns, a planning pane has no insertion marker to prove the dragover was
- * even seen — the pane's own onDragOver only calls preventDefault, with no visible feedback. So
- * there is nothing to assert here beyond dispatching the sequence; the outcome is checked by the
- * caller, in two independent places (the two panes' counts, and the server's own copy of the task).
+ * seen — its `onDragOver` only calls `preventDefault`, with no visible feedback. So the outcome is
+ * what is checked, by the caller, in two independent places (the two panes' counts, and the
+ * server's own copy of the task).
  */
 async function dragCardToPane(page: Page, card: Locator, pane: Locator) {
-  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
-  await card.dispatchEvent("dragstart", { dataTransfer });
-  await pane.dispatchEvent("dragenter", { dataTransfer });
-  await pane.dispatchEvent("dragover", { dataTransfer });
-  await pane.dispatchEvent("drop", { dataTransfer });
-  await dataTransfer.dispose();
+  await dragTo(page, card, pane);
 }
 
 /**
@@ -224,4 +228,49 @@ test("a superseded backlog answer that lands late does not undo a drop", async (
   await page.waitForTimeout(4500);
   await expect(cardsIn(backlog)).toHaveCount(backlogCountBefore + 1);
   expect(backlogRequests).toBe(2);
+});
+
+/**
+ * BP-475. The drags above all land; none of them showed that a drop which is *supposed* to go
+ * nowhere does. Without that, a helper that quietly did nothing — aimed off-target, blocked by an
+ * overlay, releasing outside the window — would look exactly like this file passing.
+ *
+ * The product's own refusal turned out to be unreachable: `PlanningView` withholds `onDropTask`
+ * from the sprint pane until `tasksLoaded`, but the page keeps the whole planning view off screen
+ * until the same fetch lands (`sprints/page.tsx`, `initialLoadDone`), so a stalled fetch leaves no
+ * pane to drop on at all — measured, by stalling it and finding nothing to aim at. What is left,
+ * and what actually guards this file, is aiming the same gesture at something that is not a
+ * droppable: the sprint's own heading, outside both panes.
+ */
+test("a drop outside either pane moves nothing", async ({ page }) => {
+  await signIn(page);
+  await page.goto(planningUrl);
+
+  const backlog = backlogPane(page);
+  const sprint = sprintPane(page);
+  // Waited on by identity rather than by a count: the panes fill in over two fetches, and a count
+  // read between them is a number that was never true for long
+  const inBacklog = backlog.locator(`a[href="${cardHref(PLANNING_BACKLOG_TASK_NUMBER)}"]`);
+  const inSprint = sprint.locator(`a[href="${cardHref(PLANNING_BACKLOG_TASK_NUMBER)}"]`);
+  await expect(inBacklog).toBeVisible();
+
+  const notADroppable = page.getByTestId("sprint-name");
+  const written = page
+    .waitForResponse(
+      (res) => res.request().method() === "PUT" && res.url().includes(`/tasks/${PLANNING_BACKLOG_TASK_ID}`),
+      { timeout: 2_000 }
+    )
+    .then(() => "written")
+    .catch(() => "nothing written");
+  await dragTo(page, inBacklog, notADroppable);
+
+  expect(await written).toBe("nothing written");
+  await expect(inBacklog).toBeVisible();
+  await expect(inSprint).toHaveCount(0);
+  expect(await storedTaskSprint(PLANNING_BACKLOG_TASK_NUMBER)).toBeNull();
+
+  // The control: the same card, the same gesture, aimed at a pane that does take it
+  await dragAndWatchTheWrite(page, inBacklog, sprint, String(PLANNING_BACKLOG_TASK_ID));
+  await expect(inSprint).toBeVisible();
+  await expect(inBacklog).toHaveCount(0);
 });
