@@ -8,7 +8,10 @@ import { describe, it, expect, vi } from "vitest";
  * NODE_ENV logic, which `github.ts` already owns.
  */
 
-const safeFetch = vi.fn(() => Promise.resolve(new Response(JSON.stringify({ items: [] }))));
+const safeFetch = vi.fn(
+  (_url: string, _init?: RequestInit, _options?: { allowLoopback?: boolean }) =>
+    Promise.resolve(new Response(JSON.stringify({ items: [] })))
+);
 vi.mock("./safe-fetch", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./safe-fetch")>()),
   safeFetch,
