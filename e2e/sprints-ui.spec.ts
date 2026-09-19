@@ -803,7 +803,9 @@ test.describe("when the sprints page cannot load its board", () => {
     failing = false;
     await page.getByRole("button", { name: "Retry" }).click();
 
-    await expect(selectedSprintName(page)).toHaveText(LIFECYCLE_CURRENT_NAME);
+    // Two seconds, not the default: the page polls every ten, so a generous window would let the
+    // poll do the button's job — measured, with the handler stubbed out the test still passed
+    await expect(selectedSprintName(page)).toHaveText(LIFECYCLE_CURRENT_NAME, { timeout: 2_000 });
     await expect(page.getByText("Failed to load this board.")).toHaveCount(0);
   });
 });
