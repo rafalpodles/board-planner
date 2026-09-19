@@ -479,9 +479,7 @@ test.describe("the chat that follows you around", () => {
       page.getByText("PM Agent", { exact: true }).last().locator("xpath=..")
     ).toContainText("Answered in the corner.");
 
-    // Two controls carry that name — the panel's own ✕ and the floating button, whose label
-    // flips while the panel is open. The ✕ is the one inside the panel.
-    await page.getByRole("button", { name: "Close PM chat" }).first().click();
+    await page.getByRole("button", { name: "Close PM chat" }).click();
     await expect(page.getByText(/^🤖 PM — /)).toHaveCount(0);
 
     // On the full page the button would be a door to the room you are standing in
@@ -489,6 +487,23 @@ test.describe("the chat that follows you around", () => {
     await expect(page.getByPlaceholder(/Message the PM/)).toBeVisible();
     await page.waitForLoadState("networkidle");
     await expect(fab(page)).toHaveCount(0);
+  });
+
+  // BP-661: the launcher used to relabel itself to "Close PM chat" while open, the same name the
+  // panel's own ✕ carries. `getByRole` is strict by default, so a regression here would fail this
+  // test with a "resolved to 2 elements" error rather than silently reintroducing the ambiguity.
+  test("the launcher and the panel's close button do not share a name while open", async ({
+    page,
+  }) => {
+    await signIn(page);
+    await page.goto(BOARD);
+
+    const opener = page.getByRole("button", { name: "Open PM chat" });
+    await opener.click();
+    await expect(page.getByText(/^🤖 PM — /)).toBeVisible();
+
+    await expect(page.getByRole("button", { name: "Close PM chat" })).toHaveCount(1);
+    await expect(page.getByTestId("pm-chat-launcher")).toHaveAttribute("aria-label", "Hide PM chat");
   });
 
   test("is not offered at all when the agent is switched off", async ({ page }) => {

@@ -173,7 +173,7 @@ test("the PM panel opens fully on screen above a pinned bar", async ({ page }) =
     .toBeGreaterThan(60);
 
   await launcher(page).click();
-  const close = page.getByRole("button", { name: "Close PM chat" }).first();
+  const close = page.getByRole("button", { name: "Close PM chat" });
   await expect(close).toBeVisible();
 
   // What the panel's own raised position is for: the launcher is painted after it at the same z,
@@ -224,7 +224,7 @@ test("the PM panel opens fully on screen above a pinned bar", async ({ page }) =
   // grown bar does not bring it up into the launcher
   const postClearOfTheLauncher = await page.evaluate(() => {
     const post = document.querySelector('[aria-label="Post comment"]')!.getBoundingClientRect();
-    const fab = document.querySelector('[aria-label="Close PM chat"]')!.getBoundingClientRect();
+    const fab = document.querySelector('[data-testid="pm-chat-launcher"]')!.getBoundingClientRect();
     return post.top >= fab.bottom;
   });
   expect(postClearOfTheLauncher).toBe(true);

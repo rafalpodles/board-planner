@@ -158,7 +158,13 @@ export function PmChatWidget() {
         // the board's page again, and the focus lands back here (BP-654).
         {...(open ? { [OWNS_ITS_KEYS]: "" } : {})}
         onKeyDown={open ? dismissOnEscape : undefined}
-        aria-label={open ? "Close PM chat" : "Open PM chat"}
+        // Distinct from the panel's own ✕, which is "Close PM chat": this one is a toggle, not the
+        // close action, and the two used to share a name while the panel was open — one screen-reader
+        // announcement for two different controls, and no way for a test to say which it meant (BP-661)
+        aria-label={open ? "Hide PM chat" : "Open PM chat"}
+        // A stable handle distinct from the accessible name, for tests that mean this button and not
+        // the panel's ✕ (BP-661)
+        data-testid="pm-chat-launcher"
         // Says it shares the corner, so a toast stands above it rather than on it (BP-597)
         data-corner-obstacle
         title="PM Agent"
