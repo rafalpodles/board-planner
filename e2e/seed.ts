@@ -361,6 +361,45 @@ export async function seedCustomFields(values: Record<string, unknown> = {}) {
   await mongoose.disconnect();
 }
 
+export const LIST_DROPDOWN_FIELD_ID = id("e2e00000000000000000f009");
+export const LIST_DROPDOWN_FIELD_NAME = "Component";
+export const LIST_DROPDOWN_OPTIONS = [
+  { id: "zz-api", value: "API", color: "#4ade80", order: 0 },
+  { id: "aa-ui", value: "UI", color: "#f59e0b", order: 1 },
+] as const;
+
+/**
+ * One project field, a dropdown, with `showInList: true` — unlike `FIELDS` above, whose
+ * `fieldDefaults` keeps every one of them off the list. `defaultHidden` still starts it hidden in
+ * the column picker (every project field does, `list-columns.ts`), so a spec using this still has
+ * to turn the column on before it can reach the cell.
+ */
+export async function seedListVisibleDropdownField() {
+  const db = (await connect()).db!;
+  await db.collection("projects").updateOne(
+    { _id: PROJECT_ID },
+    {
+      $set: {
+        customFields: [
+          {
+            _id: LIST_DROPDOWN_FIELD_ID,
+            name: LIST_DROPDOWN_FIELD_NAME,
+            fieldType: "dropdown",
+            options: [...LIST_DROPDOWN_OPTIONS],
+            order: 0,
+            required: false,
+            showOnCard: false,
+            showInList: true,
+            filterable: false,
+            archived: false,
+          },
+        ],
+      },
+    }
+  );
+  await mongoose.disconnect();
+}
+
 /** When a task was last written, as the database has it — `timestamps: true` maintains this. */
 export async function storedUpdatedAt(taskId: mongoose.Types.ObjectId): Promise<number> {
   const db = (await connect()).db!;
