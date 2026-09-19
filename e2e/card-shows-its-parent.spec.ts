@@ -34,9 +34,11 @@ import { signIn } from "./session";
 test.beforeEach(seed);
 
 const boardUrl = `/projects/${PROJECT_KEY}`;
-// Scoped to a column body for the positive assertions: the same href also appears in the sidebar
-// and in a task panel, so a page-wide match is one rendered surface away from a strict-mode
-// violation. The absence assertions below stay page-wide on purpose — stricter, not looser.
+// Every card locator goes through a column body: the same href also appears in the sidebar and in
+// a task panel, so a page-wide match is one rendered surface away from a strict-mode violation.
+// That includes the one absence assertion built from this — which is what it wants anyway, since
+// the claim it makes is that the parent is not among the tasks this board LOADED, and the column
+// bodies are where those are rendered. A link to it elsewhere on the page would not disprove that.
 const cardFor = (taskNumber: number) =>
   `[data-column-body] a[href="/projects/${PROJECT_KEY}/tasks/${taskNumber}"]`;
 
