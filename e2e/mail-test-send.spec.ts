@@ -1,8 +1,14 @@
 import { test, expect, type Page, type Request, type TestInfo } from "@playwright/test";
 import mongoose from "mongoose";
-import { MAIL_SERVER, SMTP_STUB_CONTROL_URL } from "../playwright.config";
+import { MAIL_SERVER } from "../playwright.config";
 import { ADMIN_ID, ADMIN_USERNAME, E2E_MONGODB_URI, seed } from "./seed";
 import { signIn } from "./session";
+// Everything that talks to the stub's control port lives in one module, so a change to what that
+// port answers has one place to follow. This file had byte-identical copies of `control`, `mailFor`
+// and `StubMessage`, and its copy of the prose was the stale one: an unrecognised path 404s since
+// BP-469, it does not answer with the message log (BP-659). What stays here is the per-attempt
+// address below, which is this file's own idea and nobody else's.
+import { mailFor, refuseMailFor, stopRefusing, type StubMessage } from "./mailbox";
 
 /**
  * BP-469, last item. "Send a test message" is the only reason `/settings/email` exists — everywhere
@@ -53,38 +59,6 @@ async function giveTheAdminTheAddress(address: string) {
   // Asserted, because the button is disabled without an address: a screen that never offered it
   // would otherwise read as a screen whose delivery failed
   expect(result.matchedCount, "no admin account to give an address to").toBe(1);
-}
-
-interface StubMessage {
-  from: string;
-  to: string[];
-  data: string;
-}
-
-/**
- * The control port, checked rather than assumed: an unrecognised path there answers with the
- * message log, so a helper that stopped matching would read as an empty mailbox — a green
- * "nothing arrived" and a red "nothing was delivered" both for the wrong reason.
- */
-async function control(path: string): Promise<Response> {
-  const response = await fetch(`${SMTP_STUB_CONTROL_URL}${path}`);
-  expect(response.ok, `the mail server's control port refused ${path}`).toBe(true);
-  return response;
-}
-
-async function mailFor(address: string): Promise<StubMessage[]> {
-  const arrived: StubMessage[] = await (await control("/messages")).json();
-  return arrived.filter((message) => message.to.includes(address));
-}
-
-async function refuseMailFor(address: string) {
-  const answer = await (await control(`/refuse?to=${encodeURIComponent(address)}`)).json();
-  expect(answer.refuseFor, "the mail server did not arm the refusal").toBe(address);
-}
-
-async function stopRefusing() {
-  const answer = await (await control("/refuse")).json();
-  expect(answer.refuseFor, "the mail server is still refusing somebody's mail").toBeNull();
 }
 
 /** This attempt's own recipient, so a retry or a repeat cannot read the attempt before it. */
