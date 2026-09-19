@@ -294,6 +294,7 @@ test("a sprint pane still loading its tasks refuses the drop, and takes it once 
   // run and reads like a product fault.
   let release: () => void = () => {};
   let held = false;
+  let stalls = 0;
   const stalled = new Promise<void>((resolve) => (release = resolve));
   await page.route(
     (url) =>
@@ -302,6 +303,7 @@ test("a sprint pane still loading its tasks refuses the drop, and takes it once 
     async (route) => {
       if (held) return route.fallback();
       held = true;
+      stalls += 1;
       const response = await route.fetch();
       await stalled;
       await route.fulfill({ response });
@@ -321,6 +323,11 @@ test("a sprint pane still loading its tasks refuses the drop, and takes it once 
     .getByRole("button", { name: new RegExp(`^${PLANNING_SECOND_SPRINT_NAME}\\b`) })
     .click();
   await expect(sprint.getByText("Loading…")).toBeVisible();
+  // The stub was actually hit. A matcher that never matches — comparing an ObjectId to a string is
+  // the easy way to write one — leaves the fetch untouched, the pane loads instantly, and this
+  // test goes green having asserted a refusal that never happened. A reviewer lost a measurement
+  // to exactly that.
+  expect(stalls).toBe(1);
 
   const card = backlog.locator(`a[href="${cardHref(PLANNING_BACKLOG_TASK_NUMBER)}"]`);
   await expect(card).toBeVisible();

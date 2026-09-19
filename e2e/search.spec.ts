@@ -644,7 +644,10 @@ test.describe("what the layer's debounce is for", () => {
     const answered = page.waitForResponse(searchFor(SEARCH_WORD));
     // Character by character, inside the 250ms window: `fill` would set the value in one shot and
     // ask nothing of the debounce
-    await layerInput(page).pressSequentially(SEARCH_WORD, { delay: 30 });
+    // 100ms between keystrokes: comfortably inside 250ms, so the debounce still coalesces them —
+    // and far enough apart that a shortened debounce would not. At 30ms this passed with the
+    // window cut to 60ms, proving only "some debounce longer than the typing".
+    await layerInput(page).pressSequentially(SEARCH_WORD, { delay: 100 });
     await answered;
 
     // Settle past one more debounce, so a straggler would have landed before this reads
@@ -659,15 +662,13 @@ test.describe("the phone's way into search", () => {
     await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
     await page.goto(`/projects/${PROJECT_KEY}`);
 
-    // Scoped to the bar, because the layer's input carries the same accessible name — which is
-    // exactly why nothing had ever driven this control
-    const magnifier = page
-      .locator("header, div")
-      .filter({ has: page.getByRole("button", { name: "Open navigation" }) })
-      .getByRole("link", { name: "Search tasks and projects" });
-    await expect(magnifier.first()).toBeVisible();
+    // By role: the same accessible name is worn by the layer's input, the search page's own box
+    // and a row in the shortcut help — but this is the only *link* among them, which is what made
+    // it invisible to every existing match rather than ambiguous to this one
+    const magnifier = page.getByRole("link", { name: "Search tasks and projects" });
+    await expect(magnifier).toBeVisible();
 
-    await magnifier.first().click();
+    await magnifier.click();
 
     await expect(page).toHaveURL(/\/search$/);
     await expect(page.getByRole("heading", { name: "Search", level: 1 })).toBeVisible();

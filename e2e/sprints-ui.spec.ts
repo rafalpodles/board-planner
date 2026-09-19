@@ -777,3 +777,33 @@ test.describe("a board with no sprints at all", () => {
     await expect(page.getByRole("button", { name: "New Sprint" })).toBeVisible();
   });
 });
+
+/**
+ * BP-475 review. The ticket listed this under "never driven" and I answered that it was already
+ * covered — which was true of the *project* board (`board-irreversible.spec.ts`) and not of this
+ * page, which renders its own copy of the message and its own Retry (`sprints/page.tsx`, the
+ * `!board.project` branch). A reviewer pointed at the grep I should have run:
+ * `grep -rn "Retry" e2e/*.spec.ts | grep -i sprint` came back empty.
+ */
+test.describe("when the sprints page cannot load its board", () => {
+  test("it says so and Retry brings it back", async ({ page }) => {
+    await signIn(page);
+
+    // Failing until Retry is pressed, deliberately: the page polls, and a failure that healed on
+    // its own would let the poll do the button's job and leave it unproven
+    let failing = true;
+    await page.route(`**/api/projects/${PROJECT_KEY}`, (route) =>
+      failing ? route.fulfill({ status: 500, body: "{}" }) : route.continue()
+    );
+
+    await page.goto(sprintsUrl);
+    await expect(page.getByText("Failed to load this board.")).toBeVisible();
+    await expect(selectedSprintName(page)).toHaveCount(0);
+
+    failing = false;
+    await page.getByRole("button", { name: "Retry" }).click();
+
+    await expect(selectedSprintName(page)).toHaveText(LIFECYCLE_CURRENT_NAME);
+    await expect(page.getByText("Failed to load this board.")).toHaveCount(0);
+  });
+});
