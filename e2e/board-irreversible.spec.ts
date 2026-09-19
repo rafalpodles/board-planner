@@ -1032,7 +1032,7 @@ test.describe("keyboard", () => {
     // the panel has no focus trap on purpose, so Tab walks out of it onto the launcher, which sits
     // outside the panel. While the chat is open that button is still the chat's.
     await test.step("and Tab out of the panel lands somewhere that is still the chat's", async () => {
-      const launcher = page.locator("[data-corner-obstacle]");
+      const launcher = page.getByTestId("pm-chat-launcher");
       await expect(async () => {
         await page.keyboard.press("Tab");
         await expect(launcher).toBeFocused({ timeout: 250 });
@@ -1053,7 +1053,7 @@ test.describe("keyboard", () => {
     // The control, and a regression the first version of this fix introduced: the focus comes back
     // to the launcher, which is the board's page again — a shortcut pressed there must land
     await test.step("and the board has its keys back, on the launcher the focus returned to", async () => {
-      await expect(page.locator("[data-corner-obstacle]")).toBeFocused();
+      await expect(page.getByTestId("pm-chat-launcher")).toBeFocused();
       await page.keyboard.press("n");
       await expect(page.getByRole("dialog", { name: "New Task" })).toBeVisible();
     });
@@ -1142,8 +1142,7 @@ test.describe("keyboard", () => {
       await expect(page.getByRole("heading", { name: "Keyboard Shortcuts" })).toHaveCount(0);
       await expect(page.locator("table")).toHaveCount(0);
 
-      // The launcher wears the same label as the panel's own ✕ while the panel is open
-      await page.getByTestId("pm-chat-panel").getByRole("button", { name: "Close PM chat" }).click();
+      await page.getByRole("button", { name: "Close PM chat" }).click();
       await expect(page.getByTestId("pm-chat-panel")).toHaveCount(0);
     });
 

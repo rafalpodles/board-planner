@@ -161,12 +161,7 @@ describe("where the PM launcher is painted", () => {
  * what actually makes the subtree rule hold.
  */
 describe("the chat's own keyboard", () => {
-  /** The launcher relabels itself as the panel opens and closes, and the panel's own ✕ borrows the
-   *  same name while it is open — so it is the one of the two that is not inside the panel. */
-  const fab = () =>
-    screen
-      .getAllByRole("button", { name: /PM chat$/ })
-      .find((el) => !el.closest('[data-testid="pm-chat-panel"]'))!;
+  const fab = () => screen.getByTestId("pm-chat-launcher");
 
   async function open() {
     render(<PmChatWidget />);
@@ -272,13 +267,19 @@ describe("the chat's own keyboard", () => {
 
   it("hands the focus back when the panel's own close button is used", async () => {
     await open();
-    const closeButton = screen
-      .getAllByRole("button", { name: "Close PM chat" })
-      .find((el) => el.closest('[data-testid="pm-chat-panel"]'))!;
+    const closeButton = screen.getByRole("button", { name: "Close PM chat" });
 
     fireEvent.click(closeButton);
 
     expect(screen.queryByTestId("pm-chat-panel")).toBeNull();
     expect(document.activeElement).toBe(fab());
+  });
+
+  // BP-661: the launcher used to relabel itself to "Close PM chat" while open, the same name the
+  // panel's own ✕ carries — one accessible name for two controls with different keyboard behaviour
+  it("does not share the panel's close label while it is open", async () => {
+    await open();
+    expect(screen.getAllByRole("button", { name: "Close PM chat" })).toHaveLength(1);
+    expect(fab().getAttribute("aria-label")).toBe("Hide PM chat");
   });
 });

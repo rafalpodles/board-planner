@@ -479,9 +479,7 @@ test.describe("the chat that follows you around", () => {
       page.getByText("PM Agent", { exact: true }).last().locator("xpath=..")
     ).toContainText("Answered in the corner.");
 
-    // Two controls carry that name — the panel's own ✕ and the floating button, whose label
-    // flips while the panel is open. The ✕ is the one inside the panel.
-    await page.getByRole("button", { name: "Close PM chat" }).first().click();
+    await page.getByRole("button", { name: "Close PM chat" }).click();
     await expect(page.getByText(/^🤖 PM — /)).toHaveCount(0);
 
     // On the full page the button would be a door to the room you are standing in
