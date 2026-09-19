@@ -169,7 +169,7 @@ test.describe("a channel's masked URL", () => {
     const beforeUrl = (before as { webhookUrl: string }).webhookUrl;
 
     // Unrelated: toggle a chip and save again, never touching the SecretField
-    await page.getByRole("button", { name: "task moved for Alerts" }).click();
+    await page.getByRole("button", { name: "status changed for Alerts" }).click();
     const unrelatedSave = page.waitForResponse(
       (r) => r.url().includes("/notifications") && r.request().method() === "PUT"
     );
@@ -181,7 +181,12 @@ test.describe("a channel's masked URL", () => {
 
     // Deliberate: the SecretField's own Replace flow
     await page.getByRole("button", { name: "Replace Webhook URL for Alerts" }).click();
-    await page.getByLabel("Webhook URL for Alerts").fill("https://hooks.slack.com/services/T0/B2/replaced");
+    // getByLabel matches by substring against every aria-label, which also catches the "Save
+    // Webhook URL for Alerts" / "Cancel Webhook URL for Alerts" buttons revealed by Replace —
+    // getByRole with the textbox role is the unambiguous one Playwright itself suggests
+    await page
+      .getByRole("textbox", { name: "Webhook URL for Alerts" })
+      .fill("https://hooks.slack.com/services/T0/B2/replaced");
     const replaced = page.waitForResponse(
       (r) => r.url().includes("/notifications") && r.request().method() === "PUT"
     );
@@ -201,7 +206,7 @@ test.describe("Coda", () => {
     await page.getByLabel("Host").fill(CODA_STUB_URL);
     await page.getByLabel("API token").fill("coda-e2e-token");
     const saved = page.waitForResponse(
-      (r) => r.url().endsWith(`/api/projects/${PROJECT_ID}`) && r.request().method() === "PUT"
+      (r) => r.url().endsWith(`/api/projects/${PROJECT_KEY}`) && r.request().method() === "PUT"
     );
     await saveButton(page).click();
     await saved;
@@ -215,7 +220,7 @@ test.describe("Coda", () => {
     const syncButton = page.getByRole("button", { name: "Sync tasks now" });
     await expect(syncButton).toBeVisible();
     const synced = page.waitForResponse(
-      (r) => r.url().endsWith(`/api/projects/${PROJECT_ID}/coda/sync`)
+      (r) => r.url().endsWith(`/api/projects/${PROJECT_KEY}/coda/sync`)
     );
     await syncButton.click();
     const syncResponse = await synced;
@@ -252,7 +257,7 @@ test.describe("GitLab", () => {
     await page.getByLabel("Host").fill(host);
     if (token) await page.getByLabel("Access token").fill(token);
     const saved = page.waitForResponse(
-      (r) => r.url().endsWith(`/api/projects/${PROJECT_ID}`) && r.request().method() === "PUT"
+      (r) => r.url().endsWith(`/api/projects/${PROJECT_KEY}`) && r.request().method() === "PUT"
     );
     await saveButton(page).click();
     await saved;
@@ -273,7 +278,7 @@ test.describe("GitLab", () => {
     ).toBeVisible();
 
     const saved = page.waitForResponse(
-      (r) => r.url().endsWith(`/api/projects/${PROJECT_ID}`) && r.request().method() === "PUT"
+      (r) => r.url().endsWith(`/api/projects/${PROJECT_KEY}`) && r.request().method() === "PUT"
     );
     await saveButton(page).click();
     await saved;
@@ -311,7 +316,7 @@ test.describe("a refused sync", () => {
     await page.goto(SETTINGS);
     await page.getByLabel("Repository URL").fill("https://github.com/e2e/unregistered-repo");
     const repoSaved = page.waitForResponse(
-      (r) => r.url().endsWith(`/api/projects/${PROJECT_ID}`) && r.request().method() === "PUT"
+      (r) => r.url().endsWith(`/api/projects/${PROJECT_KEY}`) && r.request().method() === "PUT"
     );
     await saveButton(page).click();
     await repoSaved;
@@ -319,7 +324,7 @@ test.describe("a refused sync", () => {
     await openIntegration(page, /^GitHub/);
     await page.getByLabel("Access token").fill("ghp_e2e");
     const tokenSaved = page.waitForResponse(
-      (r) => r.url().endsWith(`/api/projects/${PROJECT_ID}`) && r.request().method() === "PUT"
+      (r) => r.url().endsWith(`/api/projects/${PROJECT_KEY}`) && r.request().method() === "PUT"
     );
     await saveButton(page).click();
     await tokenSaved;
@@ -345,12 +350,16 @@ test.describe("the Connections picker", () => {
     if (await picker.isVisible()) await picker.click();
     await page.getByRole("button", { name: /^Webhooks/ }).first().click();
 
-    await expect(page.getByRole("button", { name: "Configure Webhooks" })).toBeVisible();
+    // The tile click both opens and expands the row in one action (Connections.tsx), so it reads
+    // "Collapse" already — asserting "Configure" here would be asserting the state before a click
+    // that never has to happen
+    await expect(page.getByRole("button", { name: "Collapse Webhooks" })).toBeVisible();
     await page.getByRole("button", { name: "Remove Webhooks" }).click();
 
-    // Gone from the connected list, and back in the catalogue — the control that this was really
-    // a removal rather than every row just happening to render
-    await expect(page.getByRole("button", { name: /^Webhooks/ })).toHaveCount(0);
+    // Gone from the connected list specifically — not the catalogue tile, which shares the same
+    // "Webhooks…" prefix and is expected to still exist (that's what "back in the catalogue" means)
+    await expect(page.getByRole("button", { name: "Collapse Webhooks" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Remove Webhooks" })).toHaveCount(0);
     const reopened = page.getByRole("button", { name: /Add integration/ });
     if (await reopened.isVisible()) await reopened.click();
     await expect(page.getByRole("button", { name: /^Webhooks/ })).toBeVisible();
