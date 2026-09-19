@@ -2,6 +2,13 @@ import { test, expect, type APIRequestContext } from "@playwright/test";
 import { ADMIN_AUTH, SAME_ORIGIN } from "./api";
 import {
   FINISHED_TASK_ID,
+  PLANNING_BACKLOG_TASK_ID,
+  PLANNING_BACKLOG_TASK_NUMBER,
+  PLANNING_SPRINT_ID,
+  PLANNING_SPRINT_TASK_ID,
+  PLANNING_SPRINT_TASK_NUMBER,
+  PLANNING_SPRINT_TASK_TITLE,
+  seedSprintPlanning,
   FINISHED_TASK_NUMBER,
   HELD_TASK_ID,
   HELD_TASK_NUMBER,
@@ -86,4 +93,35 @@ test("a parent's other relations do not become parents of their own", async ({ p
   const related = page.locator(cardFor(FINISHED_TASK_NUMBER));
   await expect(related.getByText("Relates (1)")).toBeVisible();
   await expect(related.getByText(/^Parent /)).toHaveCount(0);
+});
+
+/**
+ * The case the browser's own derivation cannot reach, and therefore the reason this lookup is on
+ * the server at all: the board scoped to a sprint loads only that sprint's tasks, so an epic left
+ * in the backlog is not among them and there is nothing to derive a parent from.
+ *
+ * Without the server lookup this test fails while every other one here still passes — which is
+ * what stops the justification and the coverage from drifting apart.
+ */
+test("a child in a sprint names the epic that is not in it", async ({ page, request }) => {
+  await seedSprintPlanning();
+  await link(
+    request,
+    PLANNING_BACKLOG_TASK_ID.toString(),
+    PLANNING_SPRINT_TASK_ID.toString(),
+    "parent_of"
+  );
+
+  await signIn(page);
+  await page.goto(`${boardUrl}?sprint=${PLANNING_SPRINT_ID}`);
+
+  const child = page.locator(cardFor(PLANNING_SPRINT_TASK_NUMBER));
+  await expect(child.getByText(PLANNING_SPRINT_TASK_TITLE)).toBeVisible();
+  await expect(
+    child.getByText(`Parent ${PROJECT_KEY}-${PLANNING_BACKLOG_TASK_NUMBER}`)
+  ).toBeVisible();
+
+  // The parent really is absent from this view — otherwise the browser could have derived it and
+  // the test would prove nothing about the server
+  await expect(page.locator(cardFor(PLANNING_BACKLOG_TASK_NUMBER))).toHaveCount(0);
 });

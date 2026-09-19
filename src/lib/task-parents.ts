@@ -18,13 +18,16 @@ export async function parentsOf(
   projectId: string,
   taskIds: string[]
 ): Promise<Map<string, ApiTaskLink>> {
+  // The query no longer names the ids, so this is the only thing keeping an empty board from
+  // asking anything at all
   if (taskIds.length === 0) return new Map();
 
+  // Every parent on the board, not every document holding a relation to one of these ids: the
+  // second shape needs one index bound per listed task and drags in `relates` and `duplicates`
+  // too, since a type predicate on an array cannot be covered alongside one on its `task`. The ids
+  // narrow the result in JS below, which is where the $in was doing its real work anyway.
   const parents = await Task.find(
-    {
-      project: projectId,
-      relations: { $elemMatch: { task: { $in: taskIds }, type: "parent_of" } },
-    },
+    { project: projectId, "relations.type": "parent_of" },
     "taskNumber title status relations"
   ).lean();
 

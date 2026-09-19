@@ -71,18 +71,35 @@ describe("parentsOf", () => {
     expect(parents.has("child-c")).toBe(false);
   });
 
-  it("scopes the query to the project as well as to the ids", async () => {
+  // The ids deliberately do NOT appear in the filter: naming them costs one index bound per task
+  // on the board and pulls in every other relation kind, and the narrowing happens in JS anyway.
+  // The same query shape the cycle check in links/route.ts already runs, so one index serves both.
+  it("asks for this project's parents by type, not for the listed ids", async () => {
     found([]);
 
     await parentsOf("p1", ["child-a"]);
 
     expect(find).toHaveBeenCalledWith(
-      {
-        project: "p1",
-        relations: { $elemMatch: { task: { $in: ["child-a"] }, type: "parent_of" } },
-      },
+      { project: "p1", "relations.type": "parent_of" },
       "taskNumber title status relations"
     );
+  });
+
+  it("still narrows to the asked-for ids, now that the query does not", async () => {
+    found([
+      {
+        _id: "other-epic",
+        taskNumber: 700,
+        title: "Somebody else's epic",
+        status: "todo",
+        relations: [{ task: "not-on-this-board-view", type: "parent_of" }],
+      },
+      EPIC,
+    ]);
+
+    const parents = await parentsOf("p1", ["child-a"]);
+
+    expect([...parents.keys()]).toEqual(["child-a"]);
   });
 
   it("asks the database nothing for an empty board", async () => {
