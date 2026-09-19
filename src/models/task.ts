@@ -245,6 +245,12 @@ taskSchema.index({ "decision.workerId": 1 });
 // Closing a recurring task asks whether it already has a successor; unindexed that is a scan of
 // every task in every project, and the usual answer — no — is the one that scans to the end
 taskSchema.index({ recurringParentId: 1 });
+// Two callers ask the same question — which tasks on this board are a parent of something: the
+// board's own parent lookup on every poll, and the cycle check on every parent_of write
+// (`links/route.ts`). Unindexed both re-read every task in the project. Keyed on the type rather
+// than on the child, because a type predicate on an array cannot be covered alongside one on its
+// `task`. Holds while `parent_of` stays the epic relation.
+taskSchema.index({ project: 1, "relations.type": 1 });
 
 export const Task: Model<ITask> =
   mongoose.models.Task || mongoose.model<ITask>("Task", taskSchema);
