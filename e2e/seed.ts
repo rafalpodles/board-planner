@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
+import { PM_USERNAME } from "@/lib/pm/username";
 
 // Never the development database. The URI is passed to the dev server too, so a mistake here
 // would have the browser writing into whatever the developer is using at the time.
@@ -1845,6 +1846,90 @@ export async function seedForeignSprint() {
     createdAt: now,
     updatedAt: now,
   });
+  await mongoose.disconnect();
+}
+
+export const PM_USER_ID = id("e2e00000000000000000a009");
+
+export const NOT_APPROVED_TASK_NUMBER = 16;
+export const NOT_APPROVED_TASK_ID = id("e2e00000000000000000d008");
+export const UNASSIGNED_HANDOVER_TASK_NUMBER = 17;
+export const UNASSIGNED_HANDOVER_TASK_ID = id("e2e00000000000000000d009");
+export const UNRECORDED_ASSIGNER_TASK_NUMBER = 18;
+export const UNRECORDED_ASSIGNER_TASK_ID = id("e2e00000000000000000d00a");
+export const PM_FOR_SOMEONE_ELSE_TASK_NUMBER = 19;
+export const PM_FOR_SOMEONE_ELSE_TASK_ID = id("e2e00000000000000000d00b");
+export const ASSIGNED_BY_SOMEONE_ELSE_TASK_NUMBER = 20;
+export const ASSIGNED_BY_SOMEONE_ELSE_TASK_ID = id("e2e00000000000000000d00c");
+
+/**
+ * BP-474. One task per branch of `handoverOf()` (`src/lib/handover.ts`) that shows a notice.
+ * "no-agent" shows none by design, and `SIBLING_TASK_ID` already carries no agent, so it doubles
+ * as that negative control without a fixture of its own. Requires `seedAgents()` for `PROJECT_AGENT_ID`.
+ */
+export async function seedHandoverStates() {
+  const db = (await connect()).db!;
+  const now = new Date();
+  await db.collection("users").insertOne({
+    _id: PM_USER_ID,
+    username: PM_USERNAME,
+    email: "",
+    emailNotifications: false,
+    fullName: "PM",
+    role: "member",
+    kind: "human",
+    createdAt: now,
+  });
+  await db.collection("tasks").insertMany([
+    taskFactory(now)({
+      _id: NOT_APPROVED_TASK_ID,
+      taskNumber: NOT_APPROVED_TASK_NUMBER,
+      title: "Approved for nobody yet",
+      status: "planned",
+      agent: PROJECT_AGENT_ID,
+      assignee: ADMIN_ID,
+      assignedBy: ADMIN_ID,
+    }),
+    taskFactory(now)({
+      _id: UNASSIGNED_HANDOVER_TASK_ID,
+      taskNumber: UNASSIGNED_HANDOVER_TASK_NUMBER,
+      title: "Nobody to hand it to",
+      status: "todo",
+      agent: PROJECT_AGENT_ID,
+      assignee: null,
+    }),
+    taskFactory(now)({
+      _id: UNRECORDED_ASSIGNER_TASK_ID,
+      taskNumber: UNRECORDED_ASSIGNER_TASK_NUMBER,
+      title: "Assigned before BP-358",
+      status: "todo",
+      agent: PROJECT_AGENT_ID,
+      assignee: ADMIN_ID,
+      // No assignedBy at all — the pre-BP-358 shape this state exists for.
+    }),
+    taskFactory(now)({
+      _id: PM_FOR_SOMEONE_ELSE_TASK_ID,
+      taskNumber: PM_FOR_SOMEONE_ELSE_TASK_NUMBER,
+      title: "PM handed this to someone else",
+      status: "todo",
+      agent: PROJECT_AGENT_ID,
+      assignee: ADMIN_ID,
+      assignedBy: PM_USER_ID,
+      pmAssignedFor: MEMBER_ID,
+    }),
+    taskFactory(now)({
+      _id: ASSIGNED_BY_SOMEONE_ELSE_TASK_ID,
+      taskNumber: ASSIGNED_BY_SOMEONE_ELSE_TASK_NUMBER,
+      title: "Handed over by a colleague",
+      status: "todo",
+      agent: PROJECT_AGENT_ID,
+      assignee: ADMIN_ID,
+      assignedBy: MEMBER_ID,
+    }),
+  ]);
+  await db
+    .collection("projects")
+    .updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: ASSIGNED_BY_SOMEONE_ELSE_TASK_NUMBER } });
   await mongoose.disconnect();
 }
 
