@@ -2120,6 +2120,21 @@ export async function seedNewestProject() {
  * handles when there is nothing to reorder — which makes "a member cannot drag" pass whatever the
  * gate does.
  */
+export async function grantMemberOn(projectId: mongoose.Types.ObjectId) {
+  const db = (await connect()).db!;
+  const now = new Date();
+  await db.collection("grants").insertOne({
+    subject: MEMBER_ID,
+    relation: "member",
+    objectType: "project",
+    object: projectId,
+    createdBy: ADMIN_ID,
+    createdAt: now,
+    updatedAt: now,
+  });
+  await mongoose.disconnect();
+}
+
 export const MENTION_CAP_USERNAME_PREFIX = "mention-cap-";
 
 /**
@@ -2133,7 +2148,7 @@ export async function seedManyMentionCandidates() {
   const now = new Date();
   await db.collection("users").insertMany(
     Array.from({ length: 6 }, (_, i) => ({
-      _id: id(`e2e0000000000000000c00${i}`),
+      _id: id(`e2e${"0".repeat(17)}c00${i}`),
       username: `${MENTION_CAP_USERNAME_PREFIX}${i}`,
       password: ADMIN_PASSWORD_HASH,
       fullName: `Mention Cap ${i}`,
@@ -2145,20 +2160,5 @@ export async function seedManyMentionCandidates() {
       createdAt: now,
     }))
   );
-  await mongoose.disconnect();
-}
-
-export async function grantMemberOn(projectId: mongoose.Types.ObjectId) {
-  const db = (await connect()).db!;
-  const now = new Date();
-  await db.collection("grants").insertOne({
-    subject: MEMBER_ID,
-    relation: "member",
-    objectType: "project",
-    object: projectId,
-    createdBy: ADMIN_ID,
-    createdAt: now,
-    updatedAt: now,
-  });
   await mongoose.disconnect();
 }

@@ -409,13 +409,14 @@ test.describe("on a phone", () => {
 
   // useEditorTriggers matches a person against username OR full name; every other mention test
   // here matches by username prefix, which never exercises the full-name half of that filter.
-  // "E2E A" is a substring of admin's full name ("E2E Admin") and of no seeded username — dropping
-  // the fullName clause empties this list.
+  // The trigger pattern itself is space-free (`[a-zA-Z0-9_-]*`), so the query has to be one word:
+  // "E2E" is the shared first word of every seeded full name and appears in no seeded username —
+  // dropping the fullName clause empties this list entirely.
   test("offers a person matched by full name, not username", async ({ page }) => {
     await signIn(page);
     await page.goto(`/projects/${PROJECT_KEY}/tasks/1`);
 
-    await page.getByLabel("Add a comment").fill("thanks @E2E A");
+    await page.getByLabel("Add a comment").fill("thanks @E2E");
 
     const list = page.getByRole("listbox");
     await expect(list).toBeVisible();
