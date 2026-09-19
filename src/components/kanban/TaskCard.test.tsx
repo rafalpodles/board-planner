@@ -377,3 +377,57 @@ describe("TaskCard context menu", () => {
     expect(event.defaultPrevented).toBe(false);
   });
 });
+
+/**
+ * The parent on a card. The link is stored on the parent's document, so the card is told about it
+ * by the list route rather than deriving it — which is why the absent case matters as much as the
+ * present one: every card rendered from anywhere else has no `parent` at all.
+ */
+describe("the parent a card belongs to", () => {
+  const parent = { _id: "p1", taskNumber: 644, title: "Epic: Phase 1", status: "todo" } as const;
+
+  it("names the parent by key rather than counting it", () => {
+    renderCard({ task: { ...task, parent } as ApiTask });
+
+    const chip = screen.getByTitle("Parent: Epic: Phase 1");
+    expect(chip.textContent).toBe("Parent TP-644");
+  });
+
+  it("takes the key from the board it is rendered on, not from the parent", () => {
+    renderCard({ task: { ...task, parent } as ApiTask, projectKey: "IB" });
+
+    expect(screen.getByTitle("Parent: Epic: Phase 1").textContent).toBe("Parent IB-644");
+  });
+
+  it("says nothing when the task has no parent, and draws no empty row", () => {
+    const { container } = render(
+      <TaskCard task={task} projectKey="TP" onClick={() => {}} />
+    );
+
+    expect(screen.queryByText(/^Parent /)).toBeNull();
+    expect(screen.queryByText(/^Blocked \(/)).toBeNull();
+    expect(screen.queryByText(/^Relates \(/)).toBeNull();
+    // And nothing is drawn empty: the row is shared with Blocked and Relates, so an early return
+    // that stopped covering the no-links case would leave a childless div carrying its own margin.
+    // The card has other rows of this shape, hence "none of them is empty" rather than "no row".
+    const rows = [...container.querySelectorAll("div.mb-2.flex.flex-wrap.gap-1")];
+    expect(rows.filter((row) => row.children.length === 0)).toEqual([]);
+  });
+
+  it("stands beside the counted chips rather than replacing them", () => {
+    renderCard({
+      task: {
+        ...task,
+        parent,
+        blockedBy: [{ _id: "b1", taskNumber: 2, title: "x", status: "todo" }],
+        relations: [
+          { type: "relates", task: { _id: "r1", taskNumber: 3, title: "y", status: "todo" } },
+        ],
+      } as ApiTask,
+    });
+
+    expect(screen.getByText("Parent TP-644")).toBeTruthy();
+    expect(screen.getByText("Blocked (1)")).toBeTruthy();
+    expect(screen.getByText("Relates (1)")).toBeTruthy();
+  });
+});

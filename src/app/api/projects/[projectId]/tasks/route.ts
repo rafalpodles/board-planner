@@ -6,6 +6,7 @@ import { Task } from "@/models/task";
 import { DEFAULT_PRIORITY, PRIORITIES } from "@/types";
 import { createTask, taskPopulateFields } from "@/lib/task-service";
 import { withApiExecutions } from "@/lib/task-execution-view";
+import { parentsOf } from "@/lib/task-parents";
 import { getColumnIds } from "@/lib/columns";
 import { User } from "@/models/user";
 import { Project } from "@/models/project";
@@ -149,9 +150,17 @@ export const GET = withProjectAccess(async (request, { params }) => {
     .sort({ order: 1, createdAt: -1 })
     .populate(taskPopulateFields);
 
+  // A card shows its parent, and the link lives on the parent's document — so it is resolved from
+  // the far end, once for the list. Not part of taskPopulateFields, which can only follow refs a
+  // task holds itself.
+  const parents = await parentsOf(projectId, tasks.map((task) => String(task._id)));
+
   // The board loads every task, so a raw document here would publish each one's whole execution
   // subdocument — run identity included — to every project member on every page load
-  return NextResponse.json(await withApiExecutions(tasks));
+  const published = await withApiExecutions(tasks);
+  return NextResponse.json(
+    published.map((task) => ({ ...task, parent: parents.get(String(task._id)) ?? null }))
+  );
 });
 
 

@@ -190,9 +190,21 @@ export function TaskCard({
         const allRelations = [...(task.relations || []), ...(task.relatedFrom || [])];
         const relates = allRelations.filter((r) => r.type === "relates").length;
         const duplicates = allRelations.filter((r) => r.type === "duplicates").length;
-        if (blocked + relates + duplicates === 0) return null;
+        const parent = task.parent;
+        if (!parent && blocked + relates + duplicates === 0) return null;
         return (
           <div className="mb-2 flex flex-wrap gap-1">
+            {parent && (
+              // Named rather than counted, unlike its neighbours: a task has one parent, and the
+              // useful thing about it is which one — a card reading "Parent (1)" would say nothing
+              <span
+                title={`Parent: ${parent.title}`}
+                className="chip text-[11px] px-1.5 py-0.5 rounded font-medium"
+                style={{ "--chip": "var(--color-text-muted)" } as CSSProperties}
+              >
+                Parent {projectKey}-{parent.taskNumber}
+              </span>
+            )}
             {blocked > 0 && (
               <span
                 className="chip text-[11px] px-1.5 py-0.5 rounded font-medium"

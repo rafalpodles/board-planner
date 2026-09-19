@@ -1263,6 +1263,12 @@ export interface ApiTask {
   blocking: ApiTaskLink[];
   relations: ApiTaskRelation[];
   relatedFrom: ApiTaskRelation[];
+  /**
+   * The task's parent, resolved from the far end that stores the link. Optional because only the
+   * list route supplies it: the detail screen reads the same fact out of `relatedFrom`, which the
+   * list does not compute.
+   */
+  parent?: ApiTaskLink | null;
   watchers: string[];
   sprint: string | null;
   // Populated where the task is read whole, a bare id where a writer echoes back what it sent —
