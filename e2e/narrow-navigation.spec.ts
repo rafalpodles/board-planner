@@ -87,8 +87,11 @@ test.describe("the drawer, below md", () => {
     expect(await focusable(page, BEHIND_THE_DRAWER)).toBe("refused the focus");
 
     // The scrim is the other way out, and the only one no unit test can press: it is painted
-    // outside the drawer, so a click on it is a click on nothing
-    await page.mouse.click(PHONE.width - 20, PHONE.height / 2);
+    // outside the drawer, so a click on it is a click on nothing. Aimed from the drawer's own box
+    // rather than at a pair of numbers that would quietly start landing on the drawer if it ever
+    // got wider.
+    const box = (await drawer.boundingBox())!;
+    await page.mouse.click((box.x + box.width + PHONE.width) / 2, box.y + box.height / 2);
     await expect(drawer).toHaveCount(0);
     expect(await focusable(page, BEHIND_THE_DRAWER)).toBe("took the focus");
   });
@@ -147,9 +150,11 @@ test.describe("the band between md and lg", () => {
     await expect(page.getByTestId("sprint-name")).toHaveText(LIFECYCLE_CURRENT_NAME);
 
     await expect(page.getByRole("navigation", { name: "Sprint list" })).toBeVisible();
-    await expect(
-      page.locator('[data-testid="sprint-name"] ~ select[aria-label="Sprint"]')
-    ).toBeHidden();
+    // Counted first: `toBeHidden` is equally happy with a picker that stopped being rendered at
+    // all, which is a different bug wearing this test's green
+    const picker = page.locator('[data-testid="sprint-name"] ~ select[aria-label="Sprint"]');
+    await expect(picker).toHaveCount(1);
+    await expect(picker).toBeHidden();
   });
 });
 
@@ -181,6 +186,8 @@ test.describe("the comment bar, at phone width", () => {
     await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
     await expect(page.getByRole("heading", { name: /Comments/ }).or(page.getByText("Comments"))).toBeVisible();
 
-    await expect(page.getByLabel("Add a comment")).toBeHidden();
+    const bar = page.getByLabel("Add a comment");
+    await expect(bar).toHaveCount(1);
+    await expect(bar).toBeHidden();
   });
 });
