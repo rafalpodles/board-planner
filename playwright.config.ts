@@ -82,6 +82,13 @@ export const PROXIED_BASE_URL = `http://localhost:${PROXIED_PORT}`;
 // is what the file's own test.skip() at the top is for.
 export const RUN_PROXIED_SERVER = process.env.E2E_PROXIED_SERVER === "1";
 
+// A stand-in for the Coda API. `codaHost` is a per-project settings field, not a global env var
+// like GITHUB_API_BASE_URL, so this needs no on/off switch of its own — a spec that never types
+// this URL into a project's Host field never reaches it. Out-of-band for the same reason the
+// proxied server above is: the `PORT + 0..9` block is exactly full (see the note at PORT+7).
+const CODA_STUB_PORT = Number(process.env.CODA_STUB_PORT ?? PORT + 10001);
+export const CODA_STUB_URL = `http://127.0.0.1:${CODA_STUB_PORT}`;
+
 /** The seeded database's URI with its host swapped for the proxy's; credentials and options ride along. */
 function throughMongoProxy(uri: string): string {
   // One host, plain scheme: the proxy is a single TCP pipe, so a host list or an SRV record has
@@ -301,6 +308,15 @@ export default defineConfig({
       stdout: "pipe",
       stderr: "pipe",
       env: { GITHUB_STUB_PORT: String(GITHUB_STUB_PORT) },
+    },
+    {
+      command: `node e2e/coda-stub.mjs`,
+      url: `${CODA_STUB_URL}/health`,
+      reuseExistingServer: false,
+      timeout: 30_000,
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { CODA_STUB_PORT: String(CODA_STUB_PORT) },
     },
     {
       command: `npm run dev -- --port ${PORT}`,

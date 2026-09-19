@@ -246,3 +246,51 @@ describe("dispatchNotifications — every value and every event", () => {
     safeFetch.mockImplementation(() => Promise.resolve(new Response("ok")));
   });
 });
+
+// BP-472: `active` is computed by `ch.enabled && ch.events.includes(event)` — each half of that
+// filter needs its own case, or a mutation that drops either side of the `&&` still passes.
+describe("dispatchNotifications — which channels are eligible", () => {
+  function channels(...rows: { enabled: boolean; events: string[]; name: string }[]) {
+    findById.mockReturnValue({
+      lean: () =>
+        Promise.resolve({
+          notificationChannels: rows.map((row, i) => ({
+            type: "slack",
+            name: row.name,
+            webhookUrl: encryptSecret(`https://hooks.slack.com/services/T/B/${i}`),
+            events: row.events,
+            enabled: row.enabled,
+          })),
+        }),
+    });
+  }
+
+  it("skips a disabled channel even when it is subscribed to the event", async () => {
+    channels({ enabled: false, events: ["task_created"], name: "Disabled" });
+
+    await dispatchNotifications("p1", "task_created", PAYLOAD);
+
+    expect(safeFetch).not.toHaveBeenCalled();
+  });
+
+  it("skips a channel not subscribed to the event even when it is enabled", async () => {
+    channels({ enabled: true, events: ["task_moved"], name: "Wrong event" });
+
+    await dispatchNotifications("p1", "task_created", PAYLOAD);
+
+    expect(safeFetch).not.toHaveBeenCalled();
+  });
+
+  it("delivers to an enabled channel subscribed to the event, alongside ones that are not", async () => {
+    channels(
+      { enabled: false, events: ["task_created"], name: "Disabled" },
+      { enabled: true, events: ["task_moved"], name: "Wrong event" },
+      { enabled: true, events: ["task_created"], name: "Eligible" }
+    );
+
+    await dispatchNotifications("p1", "task_created", PAYLOAD);
+
+    expect(safeFetch).toHaveBeenCalledTimes(1);
+    expect(safeFetch.mock.calls[0][0]).toBe("https://hooks.slack.com/services/T/B/2");
+  });
+});

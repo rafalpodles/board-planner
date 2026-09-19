@@ -1,4 +1,10 @@
 import { safeFetch, logUpstreamFailure, readBoundedJson, MAX_RESPONSE_BYTES } from "./safe-fetch";
+import { allowLoopbackIn } from "./github";
+
+// Mirrors GITHUB_DESTINATION: `NODE_ENV` only, so a real deployment (always "production") is
+// unaffected and only a dev/test run — where BP-472's e2e coverage points this at a stub — can
+// ever reach a loopback host.
+const CODA_DESTINATION = { allowLoopback: allowLoopbackIn() };
 
 const DEFAULT_HOST = "https://coda.io";
 const REQUEST_TIMEOUT_MS = 15000;
@@ -45,15 +51,19 @@ function apiBase(host: string, docId: string): string {
 }
 
 async function codaFetch<T>(url: string, token: string, init?: RequestInit): Promise<T> {
-  const res = await safeFetch(url, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      ...(init?.headers || {}),
+  const res = await safeFetch(
+    url,
+    {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        ...(init?.headers || {}),
+      },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     },
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-  });
+    CODA_DESTINATION
+  );
   if (!res.ok) {
     await logUpstreamFailure("Coda", res);
     throw new Error(`Coda API `);
