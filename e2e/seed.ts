@@ -465,6 +465,32 @@ export const PLANNING_BACKLOG_TASK_NUMBER = 9;
 export const PLANNING_BACKLOG_TASK_ID = id("e2e00000000000000000d103");
 export const PLANNING_BACKLOG_TASK_TITLE = "Waiting in the backlog";
 
+export const PLANNING_SECOND_SPRINT_ID = id("e2e00000000000000000c20a");
+export const PLANNING_SECOND_SPRINT_NAME = "Sprint Beta";
+
+/**
+ * A second sprint beside the planning one, so a test can *switch* sprints rather than load a page.
+ * The difference matters: `sprints/page.tsx` latches `initialLoadDone` on the first load and never
+ * resets it, so a switch is the only way to see the planning view on screen while the incoming
+ * sprint's tasks are still in flight.
+ */
+export async function seedSecondPlanningSprint() {
+  const db = (await connect()).db!;
+  const now = new Date();
+  await db.collection("sprints").insertOne({
+    _id: PLANNING_SECOND_SPRINT_ID,
+    project: PROJECT_ID,
+    name: PLANNING_SECOND_SPRINT_NAME,
+    startDate: new Date(now.getTime() + 15 * 86_400_000),
+    endDate: new Date(now.getTime() + 29 * 86_400_000),
+    goal: "",
+    status: "planned",
+    createdAt: now,
+    updatedAt: now,
+  });
+  await mongoose.disconnect();
+}
+
 export async function seedSprintPlanning() {
   const db = (await connect()).db!;
   const now = new Date();

@@ -7,6 +7,8 @@ import {
   PLANNING_BACKLOG_TASK_NUMBER,
   PLANNING_BACKLOG_TASK_TITLE,
   PLANNING_SPRINT_DONE_TASK_TITLE,
+  PLANNING_SECOND_SPRINT_ID,
+  PLANNING_SECOND_SPRINT_NAME,
   PLANNING_SPRINT_ID,
   PLANNING_SPRINT_TASK_ID,
   PLANNING_SPRINT_TASK_NUMBER,
@@ -15,6 +17,7 @@ import {
   PROJECT_KEY,
   PROJECT_NAME,
   seed,
+  seedSecondPlanningSprint,
   seedSprintPlanning,
   storedTaskSprint,
 } from "./seed";
@@ -235,12 +238,12 @@ test("a superseded backlog answer that lands late does not undo a drop", async (
  * nowhere does. Without that, a helper that quietly did nothing — aimed off-target, blocked by an
  * overlay, releasing outside the window — would look exactly like this file passing.
  *
- * The product's own refusal turned out to be unreachable: `PlanningView` withholds `onDropTask`
- * from the sprint pane until `tasksLoaded`, but the page keeps the whole planning view off screen
- * until the same fetch lands (`sprints/page.tsx`, `initialLoadDone`), so a stalled fetch leaves no
- * pane to drop on at all — measured, by stalling it and finding nothing to aim at. What is left,
- * and what actually guards this file, is aiming the same gesture at something that is not a
- * droppable: the sprint's own heading, outside both panes.
+ * Two refusals are driven, and the second is here because a reviewer disproved my first answer.
+ * I stalled the incoming fetch on a cold load, found no pane to aim at, and wrote that the
+ * product's own refusal was unreachable — "measured". It was measured on one path only:
+ * `sprints/page.tsx` latches `initialLoadDone` on the first load and never resets it, as its own
+ * comment says, so **switching** sprints leaves the planning view on screen with the new sprint's
+ * pane in its loading state, which is exactly when `PlanningView` withholds `onDropTask`.
  */
 test("a drop outside either pane moves nothing", async ({ page }) => {
   await signIn(page);
@@ -273,4 +276,69 @@ test("a drop outside either pane moves nothing", async ({ page }) => {
   await dragAndWatchTheWrite(page, inBacklog, sprint, String(PLANNING_BACKLOG_TASK_ID));
   await expect(inSprint).toBeVisible();
   await expect(inBacklog).toHaveCount(0);
+});
+
+/**
+ * The product's own refusal, reached the way a person reaches it: by switching sprints while the
+ * next one's tasks are still on the way. `PlanningView` passes `onDropTask` to the sprint pane
+ * only once `tasksLoaded`, and without an `onDragOver` to call `preventDefault` the browser emits
+ * no `drop` at all — so this asserts a refusal the product means, not merely a gesture that missed.
+ */
+test("a sprint pane still loading its tasks refuses the drop, and takes it once they land", async ({
+  page,
+}) => {
+  await seedSecondPlanningSprint();
+
+  // Only the first answer is held. The board polls, and a handler that kept stalling would still
+  // be holding a request when the test ends — which Playwright reports as an error on a passing
+  // run and reads like a product fault.
+  let release: () => void = () => {};
+  let held = false;
+  const stalled = new Promise<void>((resolve) => (release = resolve));
+  await page.route(
+    (url) =>
+      /\/tasks$/.test(url.pathname) &&
+      url.searchParams.get("sprint") === String(PLANNING_SECOND_SPRINT_ID),
+    async (route) => {
+      if (held) return route.fallback();
+      held = true;
+      const response = await route.fetch();
+      await stalled;
+      await route.fulfill({ response });
+    }
+  );
+
+  await signIn(page);
+  await page.goto(planningUrl);
+  const backlog = backlogPane(page);
+  const sprint = sprintPane(page);
+  await expect(backlog.getByText("Loading…")).toHaveCount(0);
+
+  // The switch, not a fresh load: the page has already latched `initialLoadDone`, so the planning
+  // view stays on screen and the incoming pane shows its own loading state
+  await page
+    .getByRole("navigation", { name: "Sprint list" })
+    .getByRole("button", { name: new RegExp(`^${PLANNING_SECOND_SPRINT_NAME}\\b`) })
+    .click();
+  await expect(sprint.getByText("Loading…")).toBeVisible();
+
+  const card = backlog.locator(`a[href="${cardHref(PLANNING_BACKLOG_TASK_NUMBER)}"]`);
+  await expect(card).toBeVisible();
+  const written = page
+    .waitForResponse(
+      (res) => res.request().method() === "PUT" && res.url().includes(`/tasks/${PLANNING_BACKLOG_TASK_ID}`),
+      { timeout: 2_000 }
+    )
+    .then(() => "written")
+    .catch(() => "nothing written");
+  await dragTo(page, card, sprint);
+
+  expect(await written).toBe("nothing written");
+  expect(await storedTaskSprint(PLANNING_BACKLOG_TASK_NUMBER)).toBeNull();
+
+  // The control: the same card, the same pane, the same gesture, once its tasks have landed
+  release();
+  await expect(sprint.getByText("Loading…")).toHaveCount(0);
+  await dragAndWatchTheWrite(page, card, sprint, String(PLANNING_BACKLOG_TASK_ID));
+  expect(await storedTaskSprint(PLANNING_BACKLOG_TASK_NUMBER)).toBe(String(PLANNING_SECOND_SPRINT_ID));
 });
