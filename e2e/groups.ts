@@ -52,6 +52,7 @@ export const GROUPS = {
     "list-columns-on-a-phone.spec.ts",
     "list-view-status-filter.spec.ts",
     "board-irreversible.spec.ts",
+    "list-view-seams.spec.ts",
   ],
   project: [
     "project-lifecycle.spec.ts",
