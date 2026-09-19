@@ -465,6 +465,32 @@ export const PLANNING_BACKLOG_TASK_NUMBER = 9;
 export const PLANNING_BACKLOG_TASK_ID = id("e2e00000000000000000d103");
 export const PLANNING_BACKLOG_TASK_TITLE = "Waiting in the backlog";
 
+export const PLANNING_SECOND_SPRINT_ID = id("e2e00000000000000000c20a");
+export const PLANNING_SECOND_SPRINT_NAME = "Sprint Beta";
+
+/**
+ * A second sprint beside the planning one, so a test can *switch* sprints rather than load a page.
+ * The difference matters: `sprints/page.tsx` latches `initialLoadDone` on the first load and never
+ * resets it, so a switch is the only way to see the planning view on screen while the incoming
+ * sprint's tasks are still in flight.
+ */
+export async function seedSecondPlanningSprint() {
+  const db = (await connect()).db!;
+  const now = new Date();
+  await db.collection("sprints").insertOne({
+    _id: PLANNING_SECOND_SPRINT_ID,
+    project: PROJECT_ID,
+    name: PLANNING_SECOND_SPRINT_NAME,
+    startDate: new Date(now.getTime() + 15 * 86_400_000),
+    endDate: new Date(now.getTime() + 29 * 86_400_000),
+    goal: "",
+    status: "planned",
+    createdAt: now,
+    updatedAt: now,
+  });
+  await mongoose.disconnect();
+}
+
 export async function seedSprintPlanning() {
   const db = (await connect()).db!;
   const now = new Date();
@@ -804,6 +830,38 @@ export async function demoteActiveColumn() {
   if (result.modifiedCount !== 1) {
     throw new Error(`demoteActiveColumn changed ${result.modifiedCount} boards, expected 1`);
   }
+}
+
+export const LIFECYCLE_OLDEST_CLOSED_NAME = "Sprint 1";
+
+/**
+ * Two more completed sprints, taking the lifecycle fixture's two to four — one past
+ * OLDER_COMPLETED_THRESHOLD, so the list folds the oldest away behind "Show N older" instead of
+ * naming them all. Both end before every other sprint here, and `LIFECYCLE_OLDEST_CLOSED_NAME` is
+ * the oldest of the four, so it is the one that gets hidden.
+ */
+export async function seedOlderCompletedSprints() {
+  const db = (await connect()).db!;
+  const now = new Date();
+  const day = 86_400_000;
+  const closed = (suffix: string, name: string, fromDays: number) => ({
+    _id: id(`e2e00000000000000000c4${suffix}`),
+    project: PROJECT_ID,
+    name,
+    goal: "",
+    status: "completed",
+    startDate: new Date(now.getTime() + fromDays * day),
+    endDate: new Date(now.getTime() + (fromDays + 14) * day),
+    createdAt: now,
+    updatedAt: now,
+  });
+  await db
+    .collection("sprints")
+    .insertMany([
+      closed("05", LIFECYCLE_OLDEST_CLOSED_NAME, -104),
+      closed("06", "Sprint 2", -88),
+    ]);
+  await mongoose.disconnect();
 }
 
 /** A sprint as the database holds it, for assertions the API's derived counts would blur. */

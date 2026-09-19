@@ -62,6 +62,7 @@ export const GROUPS = {
     "access-change-vs-its-refresh.spec.ts",
     "project-settings.spec.ts",
     "toast-finds-its-place.spec.ts",
+    "toast-stack.spec.ts",
     "save-bar-keeps-its-button.spec.ts",
     "project-dashboard.spec.ts",
     "my-tasks.spec.ts",

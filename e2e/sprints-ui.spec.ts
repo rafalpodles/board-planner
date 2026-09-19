@@ -10,6 +10,7 @@ import {
   LIFECYCLE_CURRENT_NAME,
   LIFECYCLE_FINISHED_TASK_NUMBER,
   LIFECYCLE_PAST_ONE_DELIVERED,
+  LIFECYCLE_OLDEST_CLOSED_NAME,
   LIFECYCLE_PAST_ONE_ID,
   LIFECYCLE_PAST_ONE_NAME,
   LIFECYCLE_PAST_TWO_DELIVERED,
@@ -20,6 +21,7 @@ import {
   PROJECT_KEY,
   demoteDoneColumn,
   seed,
+  seedOlderCompletedSprints,
   seedSprintLifecycle,
   storedSprint,
   storedTaskSprint,
@@ -671,5 +673,139 @@ test.describe("the board shortcuts on a pinned, sometimes read-only board", () =
     await expect(statusBadge(page)).toHaveText("Active");
     await page.locator("body").press("n");
     await expect(page.getByRole("dialog", { name: "New Task" })).toBeVisible();
+  });
+});
+
+/**
+ * BP-475. The states a board reaches once and then lives in, and the controls a person uses to get
+ * there. `sprints-ui` covered the lifecycle thoroughly and left these: a completed sprint is
+ * half-asserted (Complete and Planning are withheld, the rest of read-only was not), the
+ * Board/Planning toggle was navigated around rather than clicked, and three surfaces — the overlap
+ * warning, the empty state and "Show N older" — had only ever been asserted as *absent*.
+ */
+test.describe("a sprint that has closed for good", () => {
+  test("offers no Create Task, and refuses a stale planning bookmark", async ({ page }) => {
+    await signIn(page);
+    await openSprints(page, `?sprint=${LIFECYCLE_PAST_ONE_ID}`);
+    await expect(statusBadge(page)).toHaveText("Completed");
+
+    // The control first: the same button is there on the sprint that is still running, so its
+    // absence below is read-only and not the page having no such button at all
+    await expect(page.getByRole("button", { name: "Create Task" })).toHaveCount(0);
+    await openSprints(page, `?sprint=${LIFECYCLE_CURRENT_ID}`);
+    await expect(page.getByRole("button", { name: "Create Task" })).toBeVisible();
+
+    // A bookmark from when this sprint was open. The page keeps the board rather than honouring it.
+    await page.goto(`${sprintsUrl}?sprint=${LIFECYCLE_PAST_ONE_ID}&view=planning`);
+    await expect(statusBadge(page)).toHaveText("Completed");
+    await expect(page.getByTestId("planning-pane-backlog")).toHaveCount(0);
+    await expect(page.getByTestId("column-done")).toBeVisible();
+  });
+});
+
+test.describe("the controls, used rather than navigated around", () => {
+  test("the Board and Planning toggle switches the view both ways", async ({ page }) => {
+    await signIn(page);
+    await openSprints(page, `?sprint=${LIFECYCLE_CURRENT_ID}`);
+    await expect(page.getByTestId("column-in_progress")).toBeVisible();
+
+    await page.getByRole("button", { name: "Planning", exact: true }).click();
+    await expect(planningBacklog(page)).toBeVisible();
+    await expect(page.getByTestId("column-in_progress")).toHaveCount(0);
+    await expect(page).toHaveURL(/view=planning/);
+
+    await page.getByRole("button", { name: "Board", exact: true }).click();
+    await expect(page.getByTestId("column-in_progress")).toBeVisible();
+    await expect(planningBacklog(page)).toHaveCount(0);
+  });
+
+  test("the form warns about an overlap and still lets the sprint be saved", async ({ page }) => {
+    await signIn(page);
+    await openSprints(page);
+
+    await page.getByRole("button", { name: "New Sprint" }).click();
+    const form = page.getByRole("dialog", { name: "New Sprint" });
+    // Both ends inside the running sprint, which this fixture starts three days ago and ends in
+    // eleven. Filling only the start leaves the suggested end months later, which overlaps the
+    // *planned* sprint instead and makes the warning name a different one.
+    const day = 86_400_000;
+    const iso = (offset: number) => new Date(Date.now() + offset * day).toISOString().slice(0, 10);
+    await form.locator('input[type="date"]').first().fill(iso(-1));
+    await form.locator('input[type="date"]').nth(1).fill(iso(2));
+
+    const warning = form.getByText(/^Overlaps/);
+    await expect(warning).toBeVisible();
+    await expect(warning).toContainText(LIFECYCLE_CURRENT_NAME);
+    await expect(warning).toContainText("You can still save");
+
+    // It is a warning, not a refusal — the sprint saves and the server keeps it
+    const written = sprintWrite(page, "POST");
+    await form.getByRole("button", { name: "Create", exact: true }).click();
+    expect((await written).ok()).toBe(true);
+  });
+});
+
+test.describe("the sprint list once there are more closed sprints than it shows", () => {
+  test.beforeEach(seedOlderCompletedSprints);
+
+  test("folds the oldest away and gives it back on Show older", async ({ page }) => {
+    await signIn(page);
+    await openSprints(page);
+
+    const older = sprintList(page).getByRole("button", { name: /^Show \d+ older/ });
+    await expect(older).toBeVisible();
+    await expect(sprintRow(page, LIFECYCLE_OLDEST_CLOSED_NAME)).toHaveCount(0);
+
+    await older.click();
+
+    await expect(sprintRow(page, LIFECYCLE_OLDEST_CLOSED_NAME)).toBeVisible();
+    await expect(older).toHaveCount(0);
+  });
+});
+
+test.describe("a board with no sprints at all", () => {
+  // Re-seeds over the lifecycle fixture the file installs, leaving the board this page greets a
+  // new project with — a state every project passes through exactly once
+  test.beforeEach(seed);
+
+  test("says so, and offers the way out of it", async ({ page }) => {
+    await signIn(page);
+    await page.goto(sprintsUrl);
+
+    await expect(page.getByText("No sprints yet")).toBeVisible();
+    await expect(selectedSprintName(page)).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "New Sprint" })).toBeVisible();
+  });
+});
+
+/**
+ * BP-475 review. The ticket listed this under "never driven" and I answered that it was already
+ * covered — which was true of the *project* board (`board-irreversible.spec.ts`) and not of this
+ * page, which renders its own copy of the message and its own Retry (`sprints/page.tsx`, the
+ * `!board.project` branch). A reviewer pointed at the grep I should have run:
+ * `grep -rn "Retry" e2e/*.spec.ts | grep -i sprint` came back empty.
+ */
+test.describe("when the sprints page cannot load its board", () => {
+  test("it says so and Retry brings it back", async ({ page }) => {
+    await signIn(page);
+
+    // Failing until Retry is pressed, deliberately: the page polls, and a failure that healed on
+    // its own would let the poll do the button's job and leave it unproven
+    let failing = true;
+    await page.route(`**/api/projects/${PROJECT_KEY}`, (route) =>
+      failing ? route.fulfill({ status: 500, body: "{}" }) : route.continue()
+    );
+
+    await page.goto(sprintsUrl);
+    await expect(page.getByText("Failed to load this board.")).toBeVisible();
+    await expect(selectedSprintName(page)).toHaveCount(0);
+
+    failing = false;
+    await page.getByRole("button", { name: "Retry" }).click();
+
+    // Two seconds, not the default: the page polls every ten, so a generous window would let the
+    // poll do the button's job — measured, with the handler stubbed out the test still passed
+    await expect(selectedSprintName(page)).toHaveText(LIFECYCLE_CURRENT_NAME, { timeout: 2_000 });
+    await expect(page.getByText("Failed to load this board.")).toHaveCount(0);
   });
 });
