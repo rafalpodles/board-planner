@@ -11,11 +11,15 @@ import {
 import { signIn } from "./session";
 
 /**
- * BP-655, split from BP-470. The suite runs at 1280×720 and a handful of specs drop to a phone;
- * nothing ran between 768 and 1024, which is exactly where this product changes its mind twice —
- * the sidebar stops being a drawer at 768 (`md`), and the sprint picker stops being a native
- * select at 1024 (`lg`). A layout that is only ever seen at the two ends is a layout nobody has
- * looked at in the middle.
+ * BP-655, split from BP-470. This product changes its mind twice on the way down: the sidebar
+ * stops being a drawer at 768 (`md`), and the sprint picker stops being a native select at 1024
+ * (`lg`). Neither of those two decisions was exercised at any width.
+ *
+ * The ticket said "nothing runs between 768 and 1024" and that was wrong — `board-irreversible`
+ * sizes to 900 and `save-bar-keeps-its-button` sweeps 1023, both for their own reasons. What no
+ * spec did was ask either *breakpoint* what it does: the drawer was opened once, in
+ * `search-page.spec.ts`, only to reach the search row inside it, and the sprint select had never
+ * been touched at any width at all.
  *
  * What is driven here is the half that happy-dom cannot answer for. `Sidebar.test.tsx` already
  * covers the drawer's Escape, its focus trap and its focus return; `SprintHeader.test.tsx` covers
@@ -61,6 +65,11 @@ test.describe("the drawer, below md", () => {
     await page.getByRole("button", { name: "Open navigation" }).click();
     const drawer = page.getByRole("dialog", { name: "Navigation" });
     await expect(drawer).toBeVisible();
+    // `toBeVisible` is satisfied by a drawer parked at x = -260, entirely off a 390px screen —
+    // measured, with the slide-in removed: every assertion below still passed, on a drawer no
+    // person could see. It slides in on a transform, so the position is the thing to wait for.
+    // `search-page.spec.ts` learned this first and says what it cost.
+    await expect.poll(async () => (await drawer.boundingBox())?.x).toBe(0);
 
     // `inert` asserted on what it does rather than on the attribute: the page behind the drawer
     // stops answering the keyboard, which is the reason it is there (Tab used to walk straight
