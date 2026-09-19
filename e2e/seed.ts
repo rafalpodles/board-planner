@@ -2120,6 +2120,34 @@ export async function seedNewestProject() {
  * handles when there is nothing to reorder — which makes "a member cannot drag" pass whatever the
  * gate does.
  */
+export const MENTION_CAP_USERNAME_PREFIX = "mention-cap-";
+
+/**
+ * BP-479. Six admin-role users sharing a username prefix nothing else in the fixture uses, so one
+ * query matches more than five and exercises `useEditorTriggers`'s `.slice(0, 5)` cap. `role:
+ * "admin"` rather than a grant row: `projectAudienceFilter` admits either, and a grant per user is
+ * more setup than this cap needs.
+ */
+export async function seedManyMentionCandidates() {
+  const db = (await connect()).db!;
+  const now = new Date();
+  await db.collection("users").insertMany(
+    Array.from({ length: 6 }, (_, i) => ({
+      _id: id(`e2e0000000000000000c00${i}`),
+      username: `${MENTION_CAP_USERNAME_PREFIX}${i}`,
+      password: ADMIN_PASSWORD_HASH,
+      fullName: `Mention Cap ${i}`,
+      email: "",
+      emailNotifications: false,
+      collapseEmptyColumns: false,
+      kind: "human",
+      role: "admin",
+      createdAt: now,
+    }))
+  );
+  await mongoose.disconnect();
+}
+
 export async function grantMemberOn(projectId: mongoose.Types.ObjectId) {
   const db = (await connect()).db!;
   const now = new Date();

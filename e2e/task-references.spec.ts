@@ -12,7 +12,9 @@ import {
   HELD_TASK_TITLE,
   SIBLING_TASK_NUMBER,
   SIBLING_TASK_TITLE,
+  MENTION_CAP_USERNAME_PREFIX,
   seed,
+  seedManyMentionCandidates,
 } from "./seed";
 import { signIn as arriveSignedIn } from "./session";
 
@@ -403,6 +405,33 @@ test.describe("on a phone", () => {
     await page.getByLabel("Add a comment").fill(`thanks @${ADMIN_USERNAME.slice(0, 3)}`);
 
     await expect(page.getByRole("listbox")).toBeVisible();
+  });
+
+  // useEditorTriggers matches a person against username OR full name; every other mention test
+  // here matches by username prefix, which never exercises the full-name half of that filter.
+  // "E2E A" is a substring of admin's full name ("E2E Admin") and of no seeded username — dropping
+  // the fullName clause empties this list.
+  test("offers a person matched by full name, not username", async ({ page }) => {
+    await signIn(page);
+    await page.goto(`/projects/${PROJECT_KEY}/tasks/1`);
+
+    await page.getByLabel("Add a comment").fill("thanks @E2E A");
+
+    const list = page.getByRole("listbox");
+    await expect(list).toBeVisible();
+    await expect(list.getByRole("option", { name: /E2E Admin/ })).toBeVisible();
+  });
+
+  test("offers at most five matching people", async ({ page }) => {
+    await seedManyMentionCandidates();
+    await signIn(page);
+    await page.goto(`/projects/${PROJECT_KEY}/tasks/1`);
+
+    await page.getByLabel("Add a comment").fill(`thanks @${MENTION_CAP_USERNAME_PREFIX}`);
+
+    const list = page.getByRole("listbox");
+    await expect(list.getByRole("option").first()).toBeVisible();
+    expect(await list.getByRole("option").count()).toBe(5);
   });
 
   // Enter picks a suggestion while the list is open; it must not also send the comment
