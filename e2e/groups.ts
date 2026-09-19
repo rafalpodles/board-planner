@@ -51,6 +51,7 @@ export const GROUPS = {
     "shortcut-help-escape.spec.ts",
     "shortcut-help-a11y.spec.ts",
     "list-columns-on-a-phone.spec.ts",
+    "narrow-navigation.spec.ts",
     "list-view-status-filter.spec.ts",
     "board-irreversible.spec.ts",
     "list-view-seams.spec.ts",
