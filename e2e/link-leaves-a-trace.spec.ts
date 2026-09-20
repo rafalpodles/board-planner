@@ -36,9 +36,13 @@ import { signIn } from "./session";
  *  1. drop the target end's row in `announce`        → 3 red: "the task that moved", and both
  *                                                      removal tests. Every screen that reads a
  *                                                      history written against the OTHER end.
- *  2. `activity/route.ts` sorts on `createdAt` alone → 1 red: "the task that moved". The pair is
- *                                                      written inside one millisecond, so without
- *                                                      the `_id` tie-break the order is arbitrary.
+ *  2. `activity/route.ts` sorts on `createdAt` alone → 1 red: "the task that moved". Read this one
+ *                                                      as weaker than the others: with the tie
+ *                                                      dropped the order is UNSPECIFIED, not
+ *                                                      wrong, and the planner may still satisfy
+ *                                                      it from the index in the order the test
+ *                                                      wants. A green here later would not mean
+ *                                                      the tie-break had stopped being needed.
  *  3. `logActivities` given the rows reversed        → 1 red: the same test, from the other side —
  *                                                      the tie-break is only worth something if
  *                                                      the rows are inserted in the right order.

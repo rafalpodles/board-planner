@@ -326,10 +326,10 @@ describe("addTaskLink", () => {
     store = [
       task("a", 1),
       task("b", 2, { relations: [{ task: "a", type: "parent_of" }] }),
-      // A third task holding `a` as its child, so the detach has something to take if the refusal
-      // comes too late. Without it the "writes nothing" half of this test is vacuous: the detach
-      // would be a no-op whether it ran before the check or after it.
-      task("elsewhere", 3, { relations: [{ task: "a", type: "parent_of" }] }),
+      // A third task holding `b` — the TARGET — as its child, because that is what the detach
+      // looks for. Holding `a` instead made the detach a no-op for this fixture either way, and
+      // the "writes nothing" half of this test was satisfied trivially.
+      task("elsewhere", 3, { relations: [{ task: "b", type: "parent_of" }] }),
     ];
 
     expect(await addTaskLink(P, "a", "b", "parent_of", ACTOR)).toMatchObject({
@@ -338,7 +338,7 @@ describe("addTaskLink", () => {
     });
     expect(rows()).toEqual([]);
     expect(store.find((d) => d._id === "elsewhere")!.relations).toEqual([
-      { task: "a", type: "parent_of" },
+      { task: "b", type: "parent_of" },
     ]);
     expect(store.find((d) => d._id === "a")!.relations).toEqual([]);
   });
@@ -465,9 +465,10 @@ describe("the task goes away mid-request", () => {
       task("new", 10),
       task("child", 11),
     ];
-    // The task named in the call is deleted between the detach and the attach
+    // Deleted between the PULL and the PUSH. Deleting on the pull instead would make both writes
+    // miss, and the test could not then tell which of the two the guard reads.
     updateOne.mockImplementation((_filter: object, update: Update) => {
-      if (update.$pull) store = store.filter((d) => d._id !== "new");
+      if (update.$push) store = store.filter((d) => d._id !== "new");
     });
 
     expect(await addTaskLink(P, "new", "child", "parent_of", ACTOR)).toEqual({
@@ -496,9 +497,14 @@ describe("somebody else is re-parenting the same child", () => {
       task("new", 10),
       task("child", 11),
     ];
-    let putBack = 1;
+    // The recorder runs before the write, so re-adding on the SECOND call puts the relation back
+    // after the first iteration has already detached it — which is what another request doing a
+    // re-parent looks like from in here. Re-adding on the first call would only give the first
+    // `$pull` two elements to remove at once.
+    let call = 0;
     findOneAndUpdate.mockImplementation(() => {
-      if (putBack-- > 0) {
+      call += 1;
+      if (call === 2) {
         store
           .find((d) => d._id === "old")!
           .relations!.push({ task: "child", type: "parent_of" });
@@ -533,19 +539,23 @@ describe("a relation replaced by another", () => {
     expect(rows()).toEqual([]);
   });
 
-  // No deletion needed for this one: two requests replacing the same relation both read it as
-  // present, and only one of them can actually pull it.
-  it("reports the replacement once when two requests race to make it", async () => {
+  // No deletion needed for this one. Two requests replacing the same relation both read it as
+  // present and only one can pull it; the loser's `$pull` still MATCHES its document, so a guard
+  // reading matchedCount would let it announce a removal somebody else performed.
+  it("does not report a replacement another request had already made", async () => {
     store = [task("a", 1, { relations: [{ task: "b", type: "relates" }] }), task("b", 2)];
+    updateOne.mockImplementation((_filter: object, update: Update) => {
+      // Somebody else got there between this request's read and its own write
+      if (update.$pull) store.find((d) => d._id === "a")!.relations = [];
+    });
 
-    const [first, second] = await Promise.all([
-      addTaskLink(P, "a", "b", "duplicates", ACTOR),
-      addTaskLink(P, "a", "b", "duplicates", ACTOR),
+    expect(await addTaskLink(P, "a", "b", "duplicates", ACTOR)).toEqual({ ok: true });
+
+    expect(rows().filter((r) => r[1] === "link_removed")).toEqual([]);
+    expect(rows().map((r) => [r[0], r[1], r[2]])).toEqual([
+      ["a", "link_added", "duplicates"],
+      ["b", "link_added", "duplicated_by"],
     ]);
-
-    expect([first, second]).toEqual([{ ok: true }, { ok: true }]);
-    const removals = rows().filter((r) => r[1] === "link_removed" && r[2] === "relates");
-    expect(removals).toHaveLength(2); // one fact, written at both ends — not two facts
   });
 });
 
@@ -568,13 +578,14 @@ describe("a board is not the only board", () => {
   // The descendant check scans the board's own parent graph. Unscoped it would refuse a perfectly
   // good link because some other board happens to hold the opposite chain.
   it("does not refuse a link because another board holds the opposite chain", async () => {
+    // The walk starts at the target and goes down. For the filter to matter the chain has to
+    // leave this board on the SECOND hop: `b` is here and names `z`, `z` is elsewhere and names
+    // `a`. Scoped, the walk stops at `z`; unscoped it reaches `a` and refuses a good link.
     store = [
       task("a", 1),
-      task("b", 2),
-      { ...task("x", 80, { relations: [{ task: "a", type: "parent_of" }] }), project: OTHER },
-      { ...task("y", 81, { relations: [{ task: "x", type: "parent_of" }] }), project: OTHER },
+      task("b", 2, { relations: [{ task: "z", type: "parent_of" }] }),
+      { ...task("z", 80, { relations: [{ task: "a", type: "parent_of" }] }), project: OTHER },
     ];
-    store.push({ ...task("b", 82, { relations: [{ task: "y", type: "parent_of" }] }), project: OTHER, _id: "b-elsewhere" });
 
     expect(await addTaskLink(P, "a", "b", "parent_of", ACTOR)).toEqual({ ok: true });
     expect(store.find((d) => d._id === "a")!.relations).toEqual([{ task: "b", type: "parent_of" }]);

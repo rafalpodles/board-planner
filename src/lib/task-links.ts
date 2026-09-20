@@ -27,6 +27,17 @@ interface LinkEnd {
 const END_FIELDS = "_id taskNumber title status assignee watchers relations blockedBy";
 
 /**
+ * What announcing a fact may read about a task: who it is and who to tell, never the links
+ * themselves. The detach below hands back the image from before its own `$pull`, and that only
+ * goes unnoticed while nothing here reads a field the write touched — so the detach projects
+ * exactly this, and the type says so. A future reader reaching for `relations` gets a compile
+ * error rather than a quietly wrong document.
+ */
+type LinkSubject = Omit<LinkEnd, "relations" | "blockedBy">;
+
+const SUBJECT_FIELDS = "_id taskNumber title status assignee watchers";
+
+/**
  * One link that appeared or went away — a fact about a pair, not about a task. `holder` is the
  * task whose own document changed (relations are stored one-directionally), `target` the other
  * end. Both get a timeline row; the pair gets one webhook.
@@ -34,8 +45,8 @@ const END_FIELDS = "_id taskNumber title status assignee watchers relations bloc
 interface LinkFact {
   action: "added" | "removed";
   type: DependencyType;
-  holder: LinkEnd;
-  target: LinkEnd;
+  holder: LinkSubject;
+  target: LinkSubject;
 }
 
 const INVERSE: Record<DependencyType, LinkDirection> = {
@@ -113,7 +124,7 @@ export async function addTaskLink(
 
   // `parent_of` is the one relation with a direction that must stay acyclic, and a task gets a
   // single parent so the hierarchy stays a tree.
-  let losing: LinkEnd[] = [];
+  let losing: LinkSubject[] = [];
   if (type === "parent_of") {
     const cycle = await wouldDescend(projectId, taskId, targetTaskId);
     if (cycle) return cycle;
@@ -249,8 +260,8 @@ async function takeTheChildOffItsOtherParents(
   projectId: string,
   taskId: string,
   targetTaskId: string
-): Promise<LinkEnd[]> {
-  const losing: LinkEnd[] = [];
+): Promise<LinkSubject[]> {
+  const losing: LinkSubject[] = [];
   const seen = new Set<string>();
 
   for (;;) {
@@ -261,8 +272,8 @@ async function takeTheChildOffItsOtherParents(
         relations: { $elemMatch: { task: targetTaskId, type: "parent_of" } },
       },
       { $pull: { relations: { task: targetTaskId, type: "parent_of" } } },
-      { returnDocument: "before", projection: END_FIELDS }
-    ).lean<LinkEnd>();
+      { returnDocument: "before", projection: SUBJECT_FIELDS }
+    ).lean<LinkSubject>();
 
     if (!parent) return losing;
 
@@ -365,9 +376,14 @@ async function announce(projectId: string, actorId: string, facts: LinkFact[]): 
     Project.findById(projectId, "key name").lean(),
     usernameOf(actorId),
   ]);
-  const keyOf = (end: LinkEnd) => taskKeyOf(project?.key, end.taskNumber);
+  const keyOf = (end: LinkSubject) => taskKeyOf(project?.key, end.taskNumber);
 
-  const rows: { subject: LinkEnd; other: LinkEnd; direction: LinkDirection; fact: LinkFact }[] = [];
+  const rows: {
+    subject: LinkSubject;
+    other: LinkSubject;
+    direction: LinkDirection;
+    fact: LinkFact;
+  }[] = [];
   for (const fact of facts) {
     rows.push({ subject: fact.holder, other: fact.target, direction: fact.type, fact });
     rows.push({ subject: fact.target, other: fact.holder, direction: INVERSE[fact.type], fact });
