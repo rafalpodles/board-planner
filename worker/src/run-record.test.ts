@@ -28,6 +28,25 @@ describe("recordFor", () => {
     });
   });
 
+  // BP-289: detail used to be forced blank for every rejection, because nothing read it back. It
+  // now carries the gate's own reason, which the next claim resurfaces to the coding step so that
+  // attempt does not start cold — refusedBy is unchanged, still the short label the UI renders.
+  it("carries the gate's reason into detail, when one is given", () => {
+    expect(
+      recordFor(task, "gateRejected", "size-strict", 0, 1000, 0, "the diff is 900 lines, limit is 400")
+    ).toMatchObject({
+      outcome: "refused",
+      refusedBy: "size-strict",
+      detail: "the diff is 900 lines, limit is 400",
+    });
+  });
+
+  it("cuts a long reason the same way it cuts everything else bound for this record", () => {
+    expect(
+      recordFor(task, "gateRejected", "size-strict", 0, 1000, 0, "x".repeat(5000)).detail
+    ).toHaveLength(2000);
+  });
+
   it("keeps the detail for every other outcome, where nothing refused", () => {
     expect(recordFor(task, "blocked", "the scope is ambiguous", 0, 1000, 0)).toMatchObject({
       outcome: "blocked",

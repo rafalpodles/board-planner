@@ -68,7 +68,12 @@ function buildPrompt(task: ClaimedTask): string {
   const criteria = task.acceptanceCriteria.length
     ? `\n\nAcceptance criteria:\n${task.acceptanceCriteria.map((c) => `- ${c}`).join("\n")}`
     : "";
-  return `Task ${task.taskKey}: ${task.title}\n\n${task.description}${criteria}`;
+  // Only the coding step's own prompt, never the gate's (BP-289): review.ts's buildPrompt reads
+  // task.title/description/acceptanceCriteria one field at a time and has no path to this one.
+  const priorRejection = task.previousRejectionReason
+    ? `\n\nA previous attempt at this task was rejected at review, for this reason:\n\n${task.previousRejectionReason}\n\nTake it into account.`
+    : "";
+  return `Task ${task.taskKey}: ${task.title}\n\n${task.description}${criteria}${priorRejection}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

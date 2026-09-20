@@ -33,6 +33,12 @@ export interface ClaimedTask {
   description: string;
   acceptanceCriteria: string[];
   attempts: number;
+  // The prior gate rejection's own reason, empty when the last thing that happened to this task
+  // was not a rejection. Read by the coding step's own prompt only (executor.ts) — the review
+  // gate's prompt (gates/review.ts) reads title/description/acceptanceCriteria one at a time and
+  // has no path to this field, which is what keeps it blind to there having been a retry at all
+  // (BP-289).
+  previousRejectionReason: string;
   // Resolved by the server at claim time and sent whole, not by reference: the agent can be edited
   // or deleted while this run holds the task, and a run has to mean what it meant when it started.
   agent: AgentSnapshot;

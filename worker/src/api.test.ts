@@ -76,8 +76,35 @@ describe("createApiClient", () => {
       description: "body",
       acceptanceCriteria: ["first"],
       attempts: 1,
+      previousRejectionReason: "",
       runId: "run-on-the-task",
     });
+  });
+
+  // BP-289: a claim response with no previousRejectionReason at all — an older server, or a first
+  // attempt — must map to "", not undefined, so buildPrompt's `task.previousRejectionReason ? ...`
+  // check has a string to test rather than a value it has to guard against first.
+  it("carries a claimed task's previous rejection reason through, when the server sent one", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        _id: "t1",
+        agent,
+        project: "CP",
+        taskNumber: 158,
+        title: "Do the thing",
+        description: "body",
+        checklist: [],
+        execution: { attempts: 2, runId: "run-on-the-task" },
+        previousRejectionReason: "the new field is not covered by a test",
+      }),
+    });
+    const api = createApiClient(config, fetchMock as never, identityStore);
+
+    const task = await api.claim("CP", "run-1");
+
+    expect(task?.previousRejectionReason).toBe("the new field is not covered by a test");
   });
 
   it("falls back to the run it proposed when the response carries none", async () => {

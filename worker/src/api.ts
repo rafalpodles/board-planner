@@ -96,6 +96,7 @@ interface RawTask {
   checklist?: Array<{ text?: unknown }>;
   execution?: { attempts?: number; runId?: unknown };
   agent?: unknown;
+  previousRejectionReason?: unknown;
 }
 
 function parseEntry(value: unknown): SnapshotEntry | null {
@@ -411,6 +412,8 @@ export function createApiClient(
           .filter((item): item is { text: string } => typeof item.text === "string")
           .map((item) => item.text),
         attempts: raw.execution?.attempts ?? 0,
+        previousRejectionReason:
+          typeof raw.previousRejectionReason === "string" ? raw.previousRejectionReason : "",
         // The run stored on the task wins over the one this call proposed: the server is what
         // every later event is checked against
         runId:

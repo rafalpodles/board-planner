@@ -532,6 +532,48 @@ describe("createExecutor", () => {
     expect(flagIndex).toBeGreaterThanOrEqual(0);
     expect(args[flagIndex + 1]).toMatch(/untrusted/i);
   });
+
+  // BP-289: a retry used to start cold, with no memory of why the last attempt's change was
+  // rejected — this is the coding step's half of the fix. The review gate's own prompt is built by
+  // a different function in a different file (gates/review.ts) that never reads this field, which
+  // is what review.test.ts's sibling assertion pins.
+  it("tells the coding step why a previous attempt was rejected, when the claim carried one", async () => {
+    const { runner, run } = runnerReturning({
+      code: 0,
+      stdout: completed(FIXTURE_RESULT),
+      stderr: "",
+      timedOut: false,
+    });
+    const retried = {
+      ...options,
+      task: claimedTask({
+        description: "Do it well",
+        acceptanceCriteria: ["works"],
+        previousRejectionReason: "the diff touched auth.ts with no accompanying test",
+      }),
+    };
+
+    await createExecutor(config, runner).execute(retried);
+
+    const args = run.mock.calls[0][1] as string[];
+    const prompt = args[args.lastIndexOf("-p") + 1];
+    expect(prompt).toContain("the diff touched auth.ts with no accompanying test");
+  });
+
+  it("says nothing about a previous rejection when the claim did not carry one", async () => {
+    const { runner, run } = runnerReturning({
+      code: 0,
+      stdout: completed(FIXTURE_RESULT),
+      stderr: "",
+      timedOut: false,
+    });
+
+    await createExecutor(config, runner).execute(options);
+
+    const args = run.mock.calls[0][1] as string[];
+    const prompt = args[args.lastIndexOf("-p") + 1];
+    expect(prompt).not.toMatch(/rejected|previous attempt/i);
+  });
 });
 
 describe("reporting the stream as it arrives", () => {

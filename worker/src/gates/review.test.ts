@@ -112,6 +112,19 @@ describe("reviewGate", () => {
     expect(prompt).toContain("handles zero");
   });
 
+  // BP-289: the coding step's retry prompt carries the previous rejection's reason (executor.ts);
+  // the reviewer must not, or a gate that already knows "the last attempt was rejected for X" is
+  // no longer judging the diff on its own merits.
+  it("stays blind to a previous rejection the task is carrying for the retry's own prompt", async () => {
+    const { runner, run } = claudeReturning({ approved: true, reason: "" });
+
+    await reviewGate(runner, TIMEOUT_MS).run(
+      context({}, { previousRejectionReason: "the diff touched auth.ts with no accompanying test" })
+    );
+
+    expect(promptOf(run)).not.toContain("auth.ts with no accompanying test");
+  });
+
   it("labels the task and the diff as untrusted data rather than instructions", async () => {
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 

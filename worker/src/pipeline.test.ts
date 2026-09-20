@@ -42,6 +42,7 @@ const task: ClaimedTask = {
   description: "body",
   acceptanceCriteria: [],
   attempts: 1,
+  previousRejectionReason: "",
   runId: "run-1",
   agent: agentOf(DEFAULT_SEQUENCE),
 };
@@ -947,6 +948,79 @@ describe("runTask", () => {
     );
     expect(later.run).not.toHaveBeenCalled();
     expect(h.delivery.merge).not.toHaveBeenCalled();
+  });
+
+  // BP-289: reject -> retry-with-context -> pass, end to end. The coding step's own test
+  // (executor.test.ts) pins that this field changes its prompt, and the review gate's own test
+  // (gates/review.test.ts) pins that the same field never changes its. This is the seam between
+  // them: the pipeline carries the field, unread, from a fresh claim's blank field to a retry's
+  // populated one, and the run completes normally once the second attempt is not rejected again.
+  it("reject, retry with the reason, then pass", async () => {
+    const reason = "the diff touched auth.ts with no accompanying test";
+    const freshTask = running("implement", "review");
+    const h1 = harness({ gateFor: () => rejectingGate("review", reason) });
+
+    await runTask(h1.deps, freshTask);
+
+    // The raw verdict is recorded, not a copy decorated for a human — see the repeat test below for
+    // why that distinction matters.
+    expect(h1.recordRun).toHaveBeenCalledWith(
+      freshTask.projectId,
+      expect.objectContaining({ outcome: "refused", detail: reason })
+    );
+
+    // What a later claim would hand back, resolved from the AgentRun just recorded
+    // (tasks/claim/route.ts) — simulated here the way the server populates it.
+    const retriedTask = { ...freshTask, previousRejectionReason: reason };
+    const reviewOnRetry = passingGate("review");
+    const h2 = harness({ gateFor: () => reviewOnRetry });
+
+    await runTask(h2.deps, retriedTask);
+
+    expect(h2.executor.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({ previousRejectionReason: reason }),
+      })
+    );
+    // The gate is handed the same whole task — GateContext.task is not a copy — and still passes
+    // it straight through, which is what review.test.ts's own assertion says its prompt does with it.
+    expect(reviewOnRetry.run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({ previousRejectionReason: reason }),
+      })
+    );
+    expect(h2.reporter.gateRejected).not.toHaveBeenCalled();
+  });
+
+  it("tells the person when a retry hit the same rejection its brief already carried", async () => {
+    const reason = "the diff touched auth.ts with no accompanying test";
+    const retriedTask = { ...running("implement", "review"), previousRejectionReason: reason };
+    const h = harness({ gateFor: () => rejectingGate("review", reason) });
+
+    await runTask(h.deps, retriedTask);
+
+    const [, , reportedReason] = h.reporter.gateRejected.mock.calls[0];
+    expect(reportedReason).toContain(reason);
+    expect(reportedReason).toMatch(/same reason|already.*rejected/i);
+    // The comparison is against the raw reason, so a third attempt could still be compared against
+    // this one rather than against its own decorated wrapper.
+    expect(h.recordRun).toHaveBeenCalledWith(
+      retriedTask.projectId,
+      expect.objectContaining({ detail: reason })
+    );
+  });
+
+  it("says nothing about a repeat when the rejection is not the same one as before", async () => {
+    const retriedTask = {
+      ...running("implement", "review"),
+      previousRejectionReason: "an old, unrelated problem",
+    };
+    const h = harness({ gateFor: () => rejectingGate("review", "a new problem entirely") });
+
+    await runTask(h.deps, retriedTask);
+
+    const [, , reportedReason] = h.reporter.gateRejected.mock.calls[0];
+    expect(reportedReason).toBe("a new problem entirely");
   });
 
   it("stops between phases without starting the next gate", async () => {
