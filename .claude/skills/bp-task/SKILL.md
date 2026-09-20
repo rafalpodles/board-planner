@@ -40,7 +40,7 @@ A task is done when it is merged, documented, cleaned up after, and nobody was a
 
 ## 5. Clean up and close
 
-- Stop the dev server and Playwright processes, `docker rm -f bp<n>-mongo`, delete the remote and local branch, `git worktree remove`, delete scratchpad files.
+- Stop the dev server and Playwright processes, `docker rm -fv bp<n>-mongo` (the `-v` matters: plain `-f` drops the container but leaves its anonymous volumes behind, and they don't show up as "bp<n>" anything — they just sit there filling disk), delete the remote and local branch, `git worktree remove`, delete scratchpad files.
 - Closing comment with the PR links, `change_task_status` to `done`.
 
 ## Red flags

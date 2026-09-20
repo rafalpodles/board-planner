@@ -77,10 +77,15 @@ gh pr merge <n> --merge --subject "<PR title> (#<n>)"
 gh pr view <n> --json state -q .state          # MERGED, before anything else
 git push origin --delete bp-<n>/<slug>
 git worktree remove ~/Documents/Projects/ClaudePlanner-worktrees/bp-<n>
-docker rm -f bp<n>-mongo
+git branch -d bp-<n>/<slug>
+docker rm -fv bp<n>-mongo
 ```
 
 Separate calls, never chained. `gh pr merge` exits 0 without merging when the branch is behind, and deleting the head branch closes the PR; the result reads as CLOSED with the commit only in the worktree and `main` untouched. Recovery: re-push the branch, `gh pr reopen <n>` (or a new PR if reopen is refused), merge. A stacked PR keeps its dead base: `gh pr edit <n> --base main` first. Confirm on main afterwards: `git show origin/main:<path> | grep <symbol>`.
+
+`git worktree remove` does not delete the branch itself — it just detaches the worktree, and the branch sits there locally until something deletes it too. `git branch -d` refuses to fire from the main checkout right after a merge if that checkout hasn't fetched yet (it checks the branch against local `HEAD`, not `origin/main`); `git fetch origin` first, or confirm with `git merge-base --is-ancestor bp-<n>/<slug> origin/main` and use `-D` if `-d` still balks.
+
+`docker rm -fv`, not `-f` alone: plain `-f` drops the container but leaves its anonymous volumes (`mongo:4.4` declares two, for `/data/db` and `/data/configdb`) sitting on disk with no name tying them back to `bp<n>`. They show up in `docker volume ls -f dangling=true` as bare hashes, indistinguishable from any other task's leftovers, and accumulate silently across sessions until something notices the disk filling up. `-v` removes them with the container in one step; recovering them after the fact means matching `docker volume inspect <id> --format '{{.CreatedAt}}'` against when that task's container was started, which is not a full guarantee.
 
 `main` auto-deploys to production.
 
