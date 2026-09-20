@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withAdmin } from "@/lib/middleware";
 import { Project } from "@/models/project";
@@ -16,6 +17,12 @@ export const PUT = withAdmin(async (request) => {
       { error: "order must be an array of project ids" },
       { status: 400 }
     );
+  }
+
+  // Checked before it reaches Mongoose, as the task reorder already does: a malformed id there
+  // is a CastError, which surfaces as a 500 rather than the 400 this is.
+  if ((ids as string[]).some((id) => !isValidObjectId(id))) {
+    return NextResponse.json({ error: "order contains a malformed project id" }, { status: 400 });
   }
 
   const unique = new Set(ids as string[]);
