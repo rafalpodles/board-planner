@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { EnrolWorkerModal } from "@/components/settings/EnrolWorkerModal";
 import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
+import { useHorizontalOverflow } from "@/hooks/use-horizontal-overflow";
 import { timeAgo } from "@/lib/time";
 import { workerPolicyRows } from "@/lib/worker-policy-view";
 import { commandStatus, WorkerCommand } from "@/lib/worker-command-status";
@@ -147,6 +148,7 @@ export default function AdminWorkersPage() {
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [enrolling, setEnrolling] = useState(false);
+  const { ref: scroller, moreRight } = useHorizontalOverflow<HTMLDivElement>();
   // The only way back from a release is a fresh enrolment run on that machine, by whoever sits at
   // it — every other destructive control in this product asks first, and this one is less reversible
   // than most of them.
@@ -220,6 +222,15 @@ export default function AdminWorkersPage() {
   }
   if (!isAdmin || !workers) return null;
 
+  // Pinned from `lg` up only. The controls are 232px wide, and below that breakpoint the settings
+  // shell leaves the table less room than they take — measured at 768, where the scrollport is
+  // 210px — so pinning them there would cover the table rather than sit beside it.
+  // The shadow is the only sign that anything lies under the column — scrollbars are hidden
+  // app-wide (BP-224), so without it the table just looks like it ends there.
+  const stickyCell = `lg:sticky lg:right-0 z-10 w-px whitespace-nowrap px-3 py-2 lg:border-l border-border ${
+    moreRight ? "lg:shadow-[-10px_0_12px_-6px_rgba(0,0,0,0.35)]" : ""
+  }`;
+
   return (
     <div className="max-w-6xl mx-auto">
       <div className="flex items-start justify-between gap-4 mb-6">
@@ -253,8 +264,18 @@ export default function AdminWorkersPage() {
         }}
       />
 
-      <div className="border border-border rounded-lg overflow-hidden">
-        <div className="overflow-x-auto">
+      <div className="relative border border-border rounded-lg overflow-hidden bg-bg-card">
+        {/* Below `lg` nothing is pinned, so this fade is the only sign the table continues.
+            Above it the pinned column and its shadow say the same thing, and a fade there would
+            only wash out the controls it is meant to point at. */}
+        {moreRight && (
+          <div
+            aria-hidden="true"
+            data-testid="fleet-overflow-fade"
+            className="pointer-events-none absolute inset-y-0 right-0 z-20 w-8 bg-gradient-to-l from-bg-card lg:hidden"
+          />
+        )}
+        <div ref={scroller} className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-bg-input text-text-muted text-xs border-b border-border">
@@ -267,15 +288,18 @@ export default function AdminWorkersPage() {
                 <th className="text-left px-3 py-2 font-medium">Last seen</th>
                 <th className="text-left px-3 py-2 font-medium">Preflight</th>
                 <th className="text-left px-3 py-2 font-medium">Binding error</th>
-                <th className="text-left px-3 py-2 font-medium">Enabled</th>
-                <th className="text-left px-3 py-2 font-medium">Lock</th>
-                <th className="text-left px-3 py-2 font-medium">Commands</th>
+                {/* BP-642: pinned to the right edge. Nine columns do not fit a laptop, and the
+                    switch the docs call "the one to reach for when something is going wrong" was
+                    the first thing off the screen. */}
+                <th className={`${stickyCell} bg-bg-input text-left font-medium`}>
+                  Controls
+                </th>
               </tr>
             </thead>
             <tbody>
               {workers.length === 0 && (
                 <tr>
-                  <td colSpan={12} className="px-3 py-6 text-center text-text-muted text-sm">
+                  <td colSpan={10} className="px-3 py-6 text-center text-text-muted text-sm">
                     No workers registered yet.
                   </td>
                 </tr>
@@ -348,40 +372,42 @@ export default function AdminWorkersPage() {
                         </span>
                       )}
                     </td>
-                    <td className="px-3 py-2">
-                      <Button
-                        size="sm"
-                        variant={worker.enabled && !worker.lockedByInstance ? "primary" : "secondary"}
-                        disabled={savingId === worker._id || worker.lockedByInstance}
-                        onClick={() => patch(worker, { enabled: !worker.enabled })}
-                      >
-                        {worker.enabled ? "On" : "Off"}
-                      </Button>
-                    </td>
-                    <td className="px-3 py-2">
-                      <button
-                        onClick={() => patch(worker, { lockedByInstance: !worker.lockedByInstance })}
-                        disabled={savingId === worker._id}
-                        className={`inline-flex min-h-11 cursor-pointer items-center rounded border px-3 text-xs transition-colors sm:min-h-0 sm:px-2 sm:py-1 ${
-                          worker.lockedByInstance
-                            ? "border-danger bg-danger/10 text-danger"
-                            : "border-border text-text-muted hover:text-text"
-                        }`}
-                        title={
-                          worker.lockedByInstance
-                            ? "Locked — this worker cannot claim or continue tasks"
-                            : "Lock this worker (kill switch)"
-                        }
-                      >
-                        {worker.lockedByInstance ? "Locked" : "Lock"}
-                      </button>
-                    </td>
-                    <td className="px-3 py-2">
+                    <td className={`${stickyCell} bg-bg-card`}>
                       <div className="flex flex-col gap-1">
                         {status && (
                           <span className={`text-xs ${TONE_CLASSES[status.tone]}`}>{status.text}</span>
                         )}
-                        <div className="flex flex-wrap gap-1">
+                        <div className="flex items-center gap-1">
+                          <Button
+                            size="sm"
+                            variant={
+                              worker.enabled && !worker.lockedByInstance ? "primary" : "secondary"
+                            }
+                            disabled={savingId === worker._id || worker.lockedByInstance}
+                            onClick={() => patch(worker, { enabled: !worker.enabled })}
+                          >
+                            {worker.enabled ? "On" : "Off"}
+                          </Button>
+                          <button
+                            onClick={() =>
+                              patch(worker, { lockedByInstance: !worker.lockedByInstance })
+                            }
+                            disabled={savingId === worker._id}
+                            className={`inline-flex min-h-11 cursor-pointer items-center rounded border px-3 text-xs transition-colors sm:min-h-0 sm:px-2 sm:py-1 ${
+                              worker.lockedByInstance
+                                ? "border-danger bg-danger/10 text-danger"
+                                : "border-border text-text-muted hover:text-text"
+                            }`}
+                            title={
+                              worker.lockedByInstance
+                                ? "Locked — this worker cannot claim or continue tasks"
+                                : "Lock this worker (kill switch)"
+                            }
+                          >
+                            {worker.lockedByInstance ? "Locked" : "Lock"}
+                          </button>
+                        </div>
+                        <div className="flex gap-1">
                           <Button
                             size="sm"
                             variant="secondary"
@@ -411,7 +437,7 @@ export default function AdminWorkersPage() {
                     </td>
                   </tr>,
                   <tr key={`${worker._id}-policy`} className="border-b border-border last:border-b-0">
-                    <td colSpan={12} className="px-3 pb-3 pt-0">
+                    <td colSpan={10} className="px-3 pb-3 pt-0">
                       <PreflightWarning preflight={worker.preflight} />
                       <div className="flex flex-wrap gap-1.5">
                         {workerPolicyRows(worker as never).map((row) => (

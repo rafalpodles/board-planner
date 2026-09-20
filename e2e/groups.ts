@@ -115,6 +115,7 @@ export const GROUPS = {
     "workers-enrolment.spec.ts",
     "worker-controls.spec.ts",
     "worker-enrolment-name.spec.ts",
+    "fleet-table-controls.spec.ts",
     "run-conflict.spec.ts",
     "run-completion.spec.ts",
     "machine-fault-outcome.spec.ts",
