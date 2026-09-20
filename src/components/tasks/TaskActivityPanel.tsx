@@ -11,6 +11,8 @@ interface TaskActivityPanelProps {
   taskId: string;
   /** Bumped when a comment is posted from the phone's bottom bar */
   commentRefreshKey?: number;
+  /** Bumped when something outside this panel wrote a history row — a link, today (BP-658) */
+  historyRefreshKey?: number;
 }
 
 type Tab = "comments" | "history";
@@ -20,6 +22,7 @@ export function TaskActivityPanel({
   scope,
   taskId,
   commentRefreshKey = 0,
+  historyRefreshKey = 0,
 }: TaskActivityPanelProps) {
   const [tab, setTab] = useState<Tab>("comments");
   const [commentCount, setCommentCount] = useState<number | null>(null);
@@ -113,7 +116,8 @@ export function TaskActivityPanel({
           taskId={taskId}
           hideHeading
           onCountChange={setHistoryCount}
-          refreshKey={historyRefresh}
+          // Both only ever go up, so their sum changes whenever either does
+          refreshKey={historyRefresh + historyRefreshKey}
         />
       </div>
     </div>

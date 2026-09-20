@@ -159,6 +159,7 @@ function TaskDetailView({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [commentRefreshKey, setCommentRefreshKey] = useState(0);
+  const [linkRefreshKey, setLinkRefreshKey] = useState(0);
 
   const { draft, set, autoSaveState, autoSaveError, retry, resend } = useTaskEditor(
     projectId,
@@ -422,7 +423,10 @@ function TaskDetailView({
               projectKey={project.key}
               task={task}
               columns={columns}
-              onChanged={onReload}
+              onChanged={() => {
+                setLinkRefreshKey((k) => k + 1);
+                onReload();
+              }}
               onAddChild={() => setAddingChild(true)}
             />
 
@@ -434,6 +438,7 @@ function TaskDetailView({
                 taskId={task._id}
                 scope={scope}
                 commentRefreshKey={commentRefreshKey}
+                historyRefreshKey={linkRefreshKey}
               />
             </section>
           </div>
