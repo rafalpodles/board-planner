@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   CRITERION_TEXT_MAX_LENGTH,
+  MAX_CATEGORIES,
+  MAX_TASK_TEMPLATES,
   FULL_NAME_MAX_LENGTH,
   PROJECT_KEY_MAX_LENGTH,
   TASK_TITLE_MAX_LENGTH,
@@ -236,5 +238,21 @@ describe("an acceptance criterion", () => {
   it("caps the length, at the boundary", () => {
     expect(isValidCriterionText("a".repeat(CRITERION_TEXT_MAX_LENGTH))).toBe(true);
     expect(isValidCriterionText("a".repeat(CRITERION_TEXT_MAX_LENGTH + 1))).toBe(false);
+  });
+});
+
+/**
+ * These two are published: the product's Limits documentation states them, so they are a promise
+ * to somebody outside this repo rather than an implementation detail.
+ *
+ * The route tests derive their fixtures from these constants — which is right, because they are
+ * about the mechanism (the ceiling rides in the write's own filter) rather than about the number.
+ * It does mean raising a constant cannot turn those red. This is where that is caught, so the
+ * documented figure and the enforced one cannot part company quietly (BP-716).
+ */
+describe("the per-project ceilings the docs publish", () => {
+  it("are fifty categories and fifty templates", () => {
+    expect(MAX_CATEGORIES).toBe(50);
+    expect(MAX_TASK_TEMPLATES).toBe(50);
   });
 });
