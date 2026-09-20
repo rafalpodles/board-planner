@@ -28,14 +28,64 @@ const createNotifications = vi.fn();
 
 const lean = <T>(value: T) => ({ lean: async () => value });
 
+type Update = {
+  $pull?: Record<string, unknown>;
+  $push?: Record<string, unknown>;
+  $addToSet?: Record<string, unknown>;
+};
+
+/**
+ * The writes really land on the store. A mock that only records its arguments cannot tell a read
+ * taken BEFORE a pull from one taken after it — and "before" is the whole of what keeps the
+ * previous parent knowable, so the ordering has to be observable here or nothing pins it.
+ */
+function apply(doc: Doc, update: Update): void {
+  const list = (field: string) => (doc as unknown as Record<string, unknown[]>)[field] ?? [];
+  const set = (field: string, value: unknown[]) => {
+    (doc as unknown as Record<string, unknown[]>)[field] = value;
+  };
+
+  for (const [field, criteria] of Object.entries(update.$pull ?? {})) {
+    const matches =
+      criteria && typeof criteria === "object"
+        ? sift(criteria as object)
+        : (item: unknown) => item === criteria;
+    set(
+      field,
+      list(field).filter((item) => !matches(item))
+    );
+  }
+  for (const [field, value] of Object.entries(update.$push ?? {})) {
+    set(field, [...list(field), value]);
+  }
+  for (const [field, value] of Object.entries(update.$addToSet ?? {})) {
+    if (!list(field).some((item) => item === value)) set(field, [...list(field), value]);
+  }
+}
+
 vi.mock("@/models/task", () => ({
   Task: {
     findOne: (filter: object) => lean(store.find(sift(filter)) ?? null),
     find: (filter: object) => lean(store.filter(sift(filter))),
-    updateOne,
-    updateMany,
-    findByIdAndUpdate,
-    findOneAndUpdate,
+    updateOne: async (filter: object, update: Update) => {
+      updateOne(filter, update);
+      const doc = store.find(sift(filter));
+      if (doc) apply(doc, update);
+    },
+    updateMany: async (filter: object, update: Update) => {
+      updateMany(filter, update);
+      for (const doc of store.filter(sift(filter))) apply(doc, update);
+    },
+    findByIdAndUpdate: async (id: string, update: Update) => {
+      findByIdAndUpdate(id, update);
+      const doc = store.find((d) => d._id === id);
+      if (doc) apply(doc, update);
+    },
+    findOneAndUpdate: async (filter: object, update: Update) => {
+      findOneAndUpdate(filter, update);
+      const doc = store.find(sift(filter));
+      if (doc) apply(doc, update);
+    },
   },
 }));
 vi.mock("@/models/project", () => ({
@@ -149,6 +199,12 @@ describe("addTaskLink", () => {
         (c) => (c[0] as { taskId: string }).taskId === "old"
       )?.[0]
     ).toMatchObject({ type: "task_linked", recipientIds: ["u-owner"] });
+
+    // And the move itself happened: the rows above describe a real re-parent, not a narration
+    expect(store.find((d) => d._id === "old")!.relations).toEqual([]);
+    expect(store.find((d) => d._id === "new")!.relations).toEqual([
+      { task: "child", type: "parent_of" },
+    ]);
   });
 
   // It both lost and gained a parent; the bell says where it ended up, the timeline keeps both.
