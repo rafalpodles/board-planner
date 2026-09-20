@@ -49,9 +49,9 @@ import { signIn } from "./session";
  *  4. reverting `TaskDetail`/`TaskActivityPanel` to  → 1 red, and only that one: "appears without
  *     the branch base, alone                           a reload". The two halves are independent.
  *
- * **Three mutations this file does NOT kill, and where they are killed instead.** Every scenario
- * here gives the child exactly ONE previous parent, which is all a browser can produce, so the
- * detach loop never iterates:
+ * **What this file does NOT kill, and where it is killed instead.** Every scenario here gives the
+ * child exactly ONE previous parent and no concurrent writer, which is all a browser can produce,
+ * so the detach loop never iterates and no race is ever reached:
  *
  *  - stopping the detach after the first parent, and dropping the loop's `_id` exclusion from its
  *    filter, both leave all 7 green. `src/lib/task-links.test.ts` builds a child with two parents

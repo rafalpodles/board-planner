@@ -32,6 +32,19 @@ const createNotifications = vi.fn();
 
 const lean = <T>(value: T) => ({ lean: async () => value });
 
+/**
+ * Answers with only the fields the caller asked for, the way MongoDB does.
+ *
+ * A fake that hands back the whole document cannot tell a projection that names every field it
+ * needs from one that forgot `assignee` — and losing that one loses the first entry of every
+ * recipient list, silently, in a layer no other test reaches.
+ */
+function projected<T extends object>(doc: T | null, fields?: string): T | null {
+  if (!doc || !fields) return doc;
+  const named = new Set(fields.split(/\s+/).filter(Boolean).concat("_id"));
+  return Object.fromEntries(Object.entries(doc).filter(([key]) => named.has(key))) as T;
+}
+
 type Update = {
   $pull?: Record<string, unknown>;
   $push?: Record<string, unknown>;
@@ -69,8 +82,10 @@ function apply(doc: Doc, update: Update): void {
 
 vi.mock("@/models/task", () => ({
   Task: {
-    findOne: (filter: object) => lean(store.find(sift(filter)) ?? null),
-    find: (filter: object) => lean(store.filter(sift(filter))),
+    findOne: (filter: object, fields?: string) =>
+      lean(projected(store.find(sift(filter)) ?? null, fields)),
+    find: (filter: object, fields?: string) =>
+      lean(store.filter(sift(filter)).map((d) => projected(d, fields)!)),
     // `matchedCount` and `modifiedCount` are both read by the production code, and they are NOT
     // the same answer: a `$pull` whose criteria match nothing still matches its document. A mock
     // that made one a synonym of the other would pass a guard that read the wrong one.
@@ -97,13 +112,14 @@ vi.mock("@/models/task", () => ({
     findOneAndUpdate: (
       filter: object,
       update: Update,
-      options?: { returnDocument?: "before" | "after" }
+      options?: { returnDocument?: "before" | "after"; projection?: string }
     ) => {
       findOneAndUpdate(filter, update, options);
       const doc = store.find(sift(filter));
       const before = doc ? structuredClone(doc) : null;
       if (doc) apply(doc, update);
-      return lean(options?.returnDocument === "before" ? before : doc ?? null);
+      const answered = options?.returnDocument === "before" ? before : doc ?? null;
+      return lean(projected(answered, options?.projection));
     },
   },
 }));
@@ -473,7 +489,7 @@ describe("the task goes away mid-request", () => {
 
     expect(await addTaskLink(P, "new", "child", "parent_of", ACTOR)).toEqual({
       ok: false,
-      error: "Task not found — it was removed while this link was being made",
+      error: "Task not found — it is no longer on this board",
       status: 404,
     });
 
@@ -501,17 +517,24 @@ describe("somebody else is re-parenting the same child", () => {
     // after the first iteration has already detached it — which is what another request doing a
     // re-parent looks like from in here. Re-adding on the first call would only give the first
     // `$pull` two elements to remove at once.
+    // Put back on EVERY call after the first, not just one: a loop that deduplicates without
+    // terminating writes exactly the same rows and only differs by never returning.
     let call = 0;
-    findOneAndUpdate.mockImplementation(() => {
+    const isDetach = (u: Update) =>
+      (u.$pull?.relations as { type?: string } | undefined)?.type === "parent_of";
+    findOneAndUpdate.mockImplementation((_filter: object, update: Update) => {
+      if (!isDetach(update)) return;
       call += 1;
-      if (call === 2) {
+      if (call >= 2) {
         store
           .find((d) => d._id === "old")!
           .relations!.push({ task: "child", type: "parent_of" });
       }
     });
 
+    // Returning at all is half of what this test is about
     await addTaskLink(P, "new", "child", "parent_of", ACTOR);
+    expect(call).toBeLessThan(10);
 
     const removals = rows().filter((r) => r[1] === "link_removed" && r[0] === "old");
     expect(removals).toHaveLength(1);
@@ -535,7 +558,8 @@ describe("somebody else is re-parenting the same child", () => {
       task("child", 11),
     ];
     let call = 0;
-    findOneAndUpdate.mockImplementation(() => {
+    findOneAndUpdate.mockImplementation((_filter: object, update: Update) => {
+      if ((update.$pull?.relations as { type?: string } | undefined)?.type !== "parent_of") return;
       call += 1;
       if (call === 2) {
         store.find((d) => d._id === "p1")!.relations!.push({ task: "child", type: "parent_of" });
@@ -565,7 +589,7 @@ describe("a relation replaced by another", () => {
 
     expect(await addTaskLink(P, "a", "b", "duplicates", ACTOR)).toEqual({
       ok: false,
-      error: "Task not found — it was removed while this link was being made",
+      error: "Task not found — it is no longer on this board",
       status: 404,
     });
     // Nothing was removed and nothing was added, so nothing is owed a row
@@ -637,6 +661,19 @@ describe("a board is not the only board", () => {
       { task: "child", type: "parent_of" },
     ]);
     expect(rows().map((r) => r[0])).toEqual(["mine", "child"]);
+  });
+
+  // The same shape as the descendant walk above, for the blocking graph: unscoped, a blocker is
+  // refused with 400 because another board holds the opposite chain.
+  it("does not refuse a blocker because another board holds the opposite chain", async () => {
+    store = [
+      task("a", 1),
+      task("b", 2, { blockedBy: ["z"] }),
+      { ...task("z", 80, { blockedBy: ["a"] }), project: OTHER },
+    ];
+
+    expect(await addTaskLink(P, "a", "b", "blocked_by", ACTOR)).toEqual({ ok: true });
+    expect(store.find((d) => d._id === "a")!.blockedBy).toEqual(["b"]);
   });
 
   it("will not remove a link from a task on another board", async () => {

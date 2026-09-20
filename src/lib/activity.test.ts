@@ -31,6 +31,9 @@ describe("logActivities", () => {
 
     expect(insertMany).toHaveBeenCalledTimes(1);
     expect(insertMany.mock.calls[0][0].map((d: { task: string }) => d.task)).toEqual(["a", "b"]);
+    // And no options: `ordered` defaults to true, which is what stops the server reordering them
+    // and what decides whether a failure leaves the earlier rows behind.
+    expect(insertMany.mock.calls[0]).toHaveLength(1);
   });
 
   // The order is the whole reason this is one call: a reader breaks a createdAt tie on _id, and

@@ -24,18 +24,20 @@ interface LinkEnd {
   blockedBy?: unknown[];
 }
 
-const END_FIELDS = "_id taskNumber title status assignee watchers relations blockedBy";
+/** What announcing reads. `LinkSubject` is derived from it below; keep the two together. */
+const SUBJECT_FIELDS = "_id taskNumber title status assignee watchers";
+
+/** Everything above, plus the two fields deciding whether a link is there at all. */
+const END_FIELDS = `${SUBJECT_FIELDS} relations blockedBy`;
 
 /**
  * What announcing a fact may read about a task: who it is and who to tell, never the links
  * themselves. The detach below hands back the image from before its own `$pull`, and that only
  * goes unnoticed while nothing here reads a field the write touched — so the detach projects
- * exactly this, and the type says so. A future reader reaching for `relations` gets a compile
- * error rather than a quietly wrong document.
+ * exactly `SUBJECT_FIELDS`, and the type says so. A future reader reaching for `relations` gets a
+ * compile error rather than a quietly wrong document.
  */
 type LinkSubject = Omit<LinkEnd, "relations" | "blockedBy">;
-
-const SUBJECT_FIELDS = "_id taskNumber title status assignee watchers";
 
 /**
  * One link that appeared or went away — a fact about a pair, not about a task. `holder` is the
@@ -179,10 +181,11 @@ export async function addTaskLink(
     await announce(projectId, actorId, lost);
     // Deliberately not the bare "Task not found" of the guard above, which means nothing happened.
     // Here the child really has been detached, and a caller that retries on a 404 would otherwise
-    // keep retrying a link that can never be made while the task it names is gone.
+    // keep retrying a link that can never be made. The wording says only what a zero matchedCount
+    // establishes — the filter stopped matching — rather than asserting a deletion it cannot see.
     return {
       ok: false,
-      error: "Task not found — it was removed while this link was being made",
+      error: "Task not found — it is no longer on this board",
       status: 404,
     };
   }
