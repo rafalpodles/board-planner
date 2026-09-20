@@ -29,16 +29,29 @@ import { signIn } from "./session";
  *
  * ## Mutation registry
  *
- * Applied to HEAD, run, reverted. `src/lib/task-links.ts`:
- *  1. `losing = parents.filter(…)` → `losing = []`   → "the epic it left": TP-4 keeps only its
- *                                                      own row and never learns it lost a child
- *  2. read the parents AFTER the `updateMany`        → the same, for the same reason: by then
- *                                                      there is nothing left to read
- *  3. drop the target end's row in `announce`        → "the task that moved": TP-3 shows neither
- *                                                      the parent it lost nor the one it gained
- *  4. drop the `!held` guard in `removeTaskLink`     → "removing from the end that holds it":
- *                                                      the control row appears on a task whose
- *                                                      link was never removed
+ * Each was applied to HEAD, run, and reverted; the tests named are the ones that actually went
+ * red, not the ones that were expected to. `src/lib/task-links.ts`:
+ *
+ *  1. `losing = parents.filter(…)` → `losing = []`   → 4 red: both re-parent tests and both bell
+ *                                                      tests. TP-4 never learns it lost a child,
+ *                                                      and TP-3 loses the row about leaving it.
+ *  2. read the parents AFTER the `updateMany`        → the same 4, for the same reason: by then
+ *                                                      there is nothing left to read. This is
+ *                                                      what makes the read order load-bearing.
+ *  3. drop the target end's row in `announce`        → 2 red: "the task that moved" and the
+ *                                                      removal test, both of which read a history
+ *                                                      written against the OTHER end.
+ *  4. reverting `TaskDetail`/`TaskActivityPanel` to  → 1 red, and only that one: "appears without
+ *     the branch base, alone                           a reload". The two halves of this change
+ *                                                      are independent.
+ *
+ * What this file does NOT pin, so the next reader does not assume it: the `!held` guard in
+ * `removeTaskLink` — dropping it leaves all six green. The UI offers Unlink only on the end that
+ * holds the link, so a removal from the wrong end is unreachable from a browser; it arrives over
+ * the API and MCP, and `src/lib/task-links.test.ts` is where it is covered. Neither is the webhook
+ * dispatch: `isAllowedWebhookUrl` refuses an http destination, and the receiver stub is http on
+ * 127.0.0.1, so no delivery can land in this rig at all — `external-integrations.spec.ts` asserts
+ * exactly that. What `dispatchWebhooks` is asked to send is pinned in the unit test instead.
  */
 
 const taskUrl = (n: number) => `/projects/${PROJECT_KEY}/tasks/${n}`;
