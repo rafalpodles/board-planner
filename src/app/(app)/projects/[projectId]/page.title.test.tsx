@@ -1,14 +1,20 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, cleanup, waitFor } from "@testing-library/react";
 import KanbanPage from "./page";
 import { APP_NAME } from "@/lib/brand";
 import { ApiProject, ApiTask } from "@/types";
+import type { ProjectBoard } from "@/hooks/use-project-board";
 
 /**
  * BP-480. The board writes the browser tab's title — the project's name plus how much is in
  * progress and waiting — and nothing at any level read it back. It is painted outside the page,
  * so a coverage audit that looks for controls walks straight past it.
+ *
+ * The board is handed to the page directly, the way `page.scope.test.tsx` does it, rather than
+ * fetched: the title is written by a passive effect, and a gate on rendered output — a heading —
+ * can resolve on the commit before that effect has run. The first version of this file did exactly
+ * that and flaked one run in eight.
  *
  * Two things rot quietly here. The counts come from column **roles** rather than ids, which is the
  * whole point: a board that renamed "To Do" counted nothing and showed a bare project name until
@@ -16,9 +22,19 @@ import { ApiProject, ApiTask } from "@/types";
  * behind on the way out is the kind of bug nobody files and everybody sees.
  */
 
-const { api } = vi.hoisted(() => ({
+const { api, boardOverride } = vi.hoisted(() => ({
   api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn() },
+  boardOverride: { current: null as ProjectBoard | null },
 }));
+
+vi.mock("@/hooks/use-project-board", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/use-project-board")>();
+  return {
+    ...actual,
+    useProjectBoard: (...args: Parameters<typeof actual.useProjectBoard>) =>
+      boardOverride.current ?? actual.useProjectBoard(...args),
+  };
+});
 
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/hooks/use-auth", () => ({
@@ -71,30 +87,75 @@ function task(id: string, status: string): ApiTask {
   } as ApiTask;
 }
 
-async function renderBoard(proj: ApiProject, tasks: ApiTask[]) {
-  api.get.mockImplementation((url: string) => {
-    if (url === "/api/projects/p1") return Promise.resolve(proj);
-    if (url.startsWith("/api/projects/p1/tasks")) return Promise.resolve(tasks.map((t) => ({ ...t })));
-    if (url === "/api/projects/p1/sprints") return Promise.resolve([]);
-    if (url.endsWith("/assignable-users")) return Promise.resolve([]);
-    return Promise.reject(new Error(`unexpected GET ${url}`));
-  });
-  const view = render(<KanbanPage />);
-  // The heading is the board's own, and waiting for it means the project request has landed —
-  // the title is written from the same data
-  await screen.findByRole("heading", { name: "Test Project" });
-  return view;
+// Every field the page's own view needs; the test only ever varies the two the title reads
+function board(project: ApiProject | null, tasks: ApiTask[]): ProjectBoard {
+  return {
+    project,
+    tasks,
+    sprints: [],
+    assignableUsers: [],
+    loading: false,
+    loadError: false,
+    reload: vi.fn(),
+    viewMode: "board",
+    setViewMode: vi.fn(),
+    showNewTask: false,
+    setShowNewTask: vi.fn(),
+    scope: "all",
+    loadedScope: "all",
+    selectedTasks: new Set(),
+    setSelectedTasks: vi.fn(),
+    selectionMode: false,
+    setSelectionMode: vi.fn(),
+    confirmBulkDelete: false,
+    setConfirmBulkDelete: vi.fn(),
+    bulkDeleting: false,
+    deleting: false,
+    confirmContextDelete: null,
+    setConfirmContextDelete: vi.fn(),
+    heldMove: null,
+    heldDelete: null,
+    setHeldDelete: () => {},
+    forceHeldDelete: async () => {},
+    setHeldMove: vi.fn(),
+    forceHeldMove: vi.fn(),
+    forcing: false,
+    handleStatusChange: vi.fn(),
+    handleTaskDrop: vi.fn(),
+    handleReorder: vi.fn(),
+    handleBulkMove: vi.fn(),
+    handleBulkSprint: vi.fn(),
+    handleBulkDelete: vi.fn(),
+    applySprintChange: vi.fn(),
+    patchTask: vi.fn(),
+    handleAssigneeChange: vi.fn(),
+    handleFieldValueChange: vi.fn(),
+    handleRowSprintChange: vi.fn(),
+    handleContextDuplicate: vi.fn(),
+    handleContextDelete: vi.fn(),
+  } as unknown as ProjectBoard;
+}
+
+/** Waits on the title itself: it is written by an effect, so no rendered output gates it */
+async function expectTitle(expected: string) {
+  await waitFor(() => expect(document.title).toBe(expected));
+}
+
+function renderBoard(proj: ApiProject, tasks: ApiTask[]) {
+  boardOverride.current = board(proj, tasks);
+  return render(<KanbanPage />);
 }
 
 beforeEach(() => {
   api.get.mockReset();
+  boardOverride.current = null;
   document.title = APP_NAME;
 });
 afterEach(cleanup);
 
 describe("the browser tab's title", () => {
   it("names the board and what is on it, counting by role rather than by column id", async () => {
-    await renderBoard(project(), [
+    renderBoard(project(), [
       task("t1", "queued"),
       task("t2", "queued"),
       task("t3", "doing"),
@@ -103,26 +164,45 @@ describe("the browser tab's title", () => {
       task("t5", "shipped"),
     ]);
 
-    expect(document.title).toBe(`Test Project (1 in progress, 2 todo) — ${APP_NAME}`);
+    await expectTitle(`Test Project (1 in progress, 2 todo) — ${APP_NAME}`);
   });
 
   it("leaves out a count that is zero rather than printing it", async () => {
-    await renderBoard(project(), [task("t1", "queued")]);
-    expect(document.title).toBe(`Test Project (1 todo) — ${APP_NAME}`);
+    renderBoard(project(), [task("t1", "queued")]);
+    await expectTitle(`Test Project (1 todo) — ${APP_NAME}`);
   });
 
   it("gives an empty board its plain name, with no empty parentheses", async () => {
-    await renderBoard(project(), [task("t4", "icebox"), task("t5", "shipped")]);
-    expect(document.title).toBe(`Test Project — ${APP_NAME}`);
+    renderBoard(project(), [task("t4", "icebox"), task("t5", "shipped")]);
+    await expectTitle(`Test Project — ${APP_NAME}`);
     expect(document.title).not.toContain("(");
   });
 
   it("puts the plain app name back on the way out", async () => {
-    const view = await renderBoard(project(), [task("t3", "doing")]);
-    expect(document.title).toContain("Test Project");
+    const view = renderBoard(project(), [task("t3", "doing")]);
+    await expectTitle(`Test Project (1 in progress) — ${APP_NAME}`);
 
     view.unmount();
 
     expect(document.title).toBe(APP_NAME);
+  });
+
+  /**
+   * The counts follow the board while it is open, not only at first paint. Without `tasks` in the
+   * effect's dependency array every test above still passes — measured — and the title would sit
+   * stale after an optimistic move, which the board makes on every drag without touching `project`.
+   */
+  it("follows the board when its tasks change under it", async () => {
+    // The same project object on both renders, deliberately: build a fresh one and the effect
+    // re-runs because `project` changed, which would pass with `tasks` missing from the deps —
+    // measured, that is exactly what the first version of this test did
+    const sameProject = project();
+    const view = renderBoard(sameProject, [task("t1", "queued")]);
+    await expectTitle(`Test Project (1 todo) — ${APP_NAME}`);
+
+    boardOverride.current = board(sameProject, [task("t1", "doing")]);
+    view.rerender(<KanbanPage />);
+
+    await expectTitle(`Test Project (1 in progress) — ${APP_NAME}`);
   });
 });

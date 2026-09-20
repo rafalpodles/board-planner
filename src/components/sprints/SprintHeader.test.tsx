@@ -255,6 +255,9 @@ describe("the countdown", () => {
    */
   it("says nothing at all once the board is read-only", () => {
     const text = countdown(hours(24 * 5), { readOnly: true });
+    // Anchored: without this the assertions below are equally happy with a header that rendered
+    // nothing at all, which is a different bug wearing this test's green
+    expect(text).toContain("Sprint 6");
     expect(text).not.toContain("days left");
     expect(text).not.toContain("ends today");
 
@@ -264,8 +267,21 @@ describe("the countdown", () => {
 
   it("says nothing at all for a sprint with no end date", () => {
     const text = countdown(null);
+    expect(text).toContain("Sprint 6");
     expect(text).not.toContain("left");
     expect(text).not.toContain("ends today");
     expect(text).not.toContain("over");
+  });
+
+  /**
+   * The guard between a bad date and `NaN days left` on somebody's board. Deleting it left all
+   * twenty-four tests in this file green, so it was carried by nothing.
+   */
+  it("says nothing for an end date that is not a date", () => {
+    const text = countdown("the fifteenth");
+    expect(text).toContain("Sprint 6");
+    expect(text).not.toContain("NaN");
+    expect(text).not.toContain("left");
+    expect(text).not.toContain("ends today");
   });
 });
