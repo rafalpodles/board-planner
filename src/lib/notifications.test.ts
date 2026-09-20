@@ -208,6 +208,54 @@ describe("dispatchNotifications — every value and every event", () => {
     expect(comment).not.toContain("<https://phish.example");
   });
 
+  // The sentence is composed server-side and is the whole of what these two events say, so a
+  // formatter that drops `data.summary` posts a message with no content at all.
+  it("posts the link sentence to Slack for both directions", async () => {
+    channelsOf("slack", ["task_linked", "task_unlinked"], "https://hooks.slack.com/services/T/B/x");
+
+    await dispatchNotifications("p1", "task_linked", {
+      ...PAYLOAD,
+      data: { summary: "rafal made BP-1 the parent of BP-2", relatedTaskKey: "BP-2" },
+    });
+    await dispatchNotifications("p1", "task_unlinked", {
+      ...PAYLOAD,
+      data: { summary: "rafal removed BP-2 from BP-1's children", relatedTaskKey: "BP-2" },
+    });
+
+    const linked = JSON.stringify(sentBody(0));
+    expect(linked).toContain("Tasks linked in Board");
+    expect(linked).toContain("rafal made BP-1 the parent of BP-2");
+    const unlinked = JSON.stringify(sentBody(1));
+    expect(unlinked).toContain("Link removed in Board");
+    expect(unlinked).toContain("rafal removed BP-2 from BP-1");
+  });
+
+  it("posts the link sentence to Discord, with the other end as a field", async () => {
+    channelsOf("discord", ["task_linked"], "https://discord.com/api/webhooks/1/x");
+
+    await dispatchNotifications("p1", "task_linked", {
+      ...PAYLOAD,
+      data: { summary: "rafal linked BP-1 to BP-2", relatedTaskKey: "BP-2" },
+    });
+
+    const embed = sentBody(0).embeds[0];
+    expect(embed.title).toBe("Tasks linked: BP-1");
+    expect(embed.description).toBe("rafal linked BP-1 to BP-2");
+    expect(embed.fields).toContainEqual({ name: "Related", value: "BP-2", inline: true });
+  });
+
+  // The escaping the rest of this block exists for, on the one field these two events add
+  it("escapes the summary rather than posting it as markup", async () => {
+    channelsOf("slack", ["task_linked"], "https://hooks.slack.com/services/T/B/x");
+
+    await dispatchNotifications("p1", "task_linked", {
+      ...PAYLOAD,
+      data: { summary: "<!channel> linked BP-1 to BP-2", relatedTaskKey: "BP-2" },
+    });
+
+    expect(JSON.stringify(sentBody(0))).not.toContain("<!channel>");
+  });
+
   it("escapes the author on Discord", async () => {
     channelsOf("discord", ["comment_added"], "https://discord.com/api/webhooks/1/x");
 

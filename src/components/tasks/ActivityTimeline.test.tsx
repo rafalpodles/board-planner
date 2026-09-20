@@ -320,3 +320,118 @@ describe("ActivityTimeline — what a sync did to the links", () => {
     await waitFor(() => expect(screen.getByText(/….*\/pull\/12345$/)).toBeTruthy());
   });
 });
+
+/**
+ * BP-658. One link writes a row at both ends, and `field` carries the relation as THIS task
+ * experiences it — so the parent's row and the child's row are the same write read from opposite
+ * sides, and neither may render as the other.
+ */
+describe("ActivityTimeline — what a link did to this task", () => {
+  it("reads a gained child from the parent's side", async () => {
+    api.get.mockResolvedValue([
+      { ...log, action: "link_added", field: "parent_of", oldValue: "", newValue: "BP-11" },
+    ]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() =>
+      expect(screen.getByText("Owner Name made this task the parent of BP-11")).toBeTruthy()
+    );
+  });
+
+  it("reads the same write from the child's side as a gained parent", async () => {
+    api.get.mockResolvedValue([
+      { ...log, action: "link_added", field: "child_of", oldValue: "", newValue: "BP-10" },
+    ]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() =>
+      expect(screen.getByText("Owner Name made BP-10 the parent of this task")).toBeTruthy()
+    );
+  });
+
+  // The epic nobody named in the call: this row is the only place it is written down
+  it("names the child an epic lost", async () => {
+    api.get.mockResolvedValue([
+      { ...log, action: "link_removed", field: "parent_of", oldValue: "BP-11", newValue: "" },
+    ]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() =>
+      expect(screen.getByText("Owner Name removed BP-11 from this task's children")).toBeTruthy()
+    );
+  });
+
+  it("distinguishes a blocker from the task it blocks", async () => {
+    api.get.mockResolvedValue([
+      { ...log, _id: "l1", action: "link_added", field: "blocked_by", oldValue: "", newValue: "BP-2" },
+      { ...log, _id: "l2", action: "link_added", field: "blocks", oldValue: "", newValue: "BP-3" },
+    ]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() =>
+      expect(screen.getByText("Owner Name marked this task as blocked by BP-2")).toBeTruthy()
+    );
+    expect(screen.getByText("Owner Name marked BP-3 as blocked by this task")).toBeTruthy();
+  });
+
+  it("reads a duplicate from both sides", async () => {
+    api.get.mockResolvedValue([
+      { ...log, _id: "l1", action: "link_added", field: "duplicates", oldValue: "", newValue: "BP-2" },
+      {
+        ...log,
+        _id: "l2",
+        action: "link_removed",
+        field: "duplicated_by",
+        oldValue: "BP-3",
+        newValue: "",
+      },
+    ]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() =>
+      expect(screen.getByText("Owner Name marked this task as a duplicate of BP-2")).toBeTruthy()
+    );
+    expect(screen.getByText("Owner Name removed BP-3 as a duplicate of this task")).toBeTruthy();
+  });
+
+  // The control: an unknown action still falls through to the generic line rather than
+  // rendering as a link with an empty other end
+  it("does not read an unrelated action as a link", async () => {
+    api.get.mockResolvedValue([{ ...log, action: "something_else" }]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() =>
+      expect(screen.getByText("Owner Name performed an action")).toBeTruthy()
+    );
+  });
+
+  /**
+   * The other half of that control, and the one the first draft missed: a KNOWN action whose
+   * `field` is not a direction this app writes. `field` carries no enum in the schema and the
+   * component casts it, so an old or hand-written row reaches the phrasing — and before the
+   * default branch it rendered an icon, a timestamp and no sentence at all.
+   */
+  it("still says something when the direction is one it does not know", async () => {
+    api.get.mockResolvedValue([
+      { ...log, action: "link_added", field: "", oldValue: "", newValue: "BP-2" },
+    ]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() =>
+      expect(
+        screen.getByText("Owner Name added a dependency between this task and BP-2")
+      ).toBeTruthy()
+    );
+    // and it does not pass itself off as the `relates` row it used to be worded as
+    expect(screen.queryByText("Owner Name linked this task to BP-2")).toBeNull();
+  });
+
+  // `⚯` was legible in a browser and two loose rings at 12px. This pins the glyph to the set the
+  // rest of the table already renders, and the removal to the one every other removal uses.
+  it("draws a link with a glyph this table already proves, and a removal with the removal mark", async () => {
+    api.get.mockResolvedValue([
+      { ...log, _id: "l1", action: "link_added", field: "relates", newValue: "BP-2" },
+      { ...log, _id: "l2", action: "link_removed", field: "relates", oldValue: "BP-3" },
+    ]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+
+    await waitFor(() => expect(screen.getByText("↗")).toBeTruthy());
+    expect(screen.getByText("×")).toBeTruthy();
+    // Decoration: the sentence beside it already says what happened
+    expect(screen.getByText("↗").getAttribute("aria-hidden")).toBe("true");
+    expect(screen.getByText("×").className).toContain("text-danger");
+  });
+});

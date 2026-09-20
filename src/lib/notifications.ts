@@ -113,6 +113,24 @@ function formatSlackPayload(
         ],
       };
 
+    case "task_linked":
+    case "task_unlinked":
+      return {
+        blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: `*${event === "task_linked" ? "Tasks linked" : "Link removed"} in ${name}*\n<${taskUrl}|${taskKey}> ${title}`,
+            },
+          },
+          {
+            type: "context",
+            elements: [{ type: "mrkdwn", text: e(String(data?.summary ?? "")) }],
+          },
+        ],
+      };
+
     default:
       return { text: `[${key}] ${event}: ${taskKey} ${title}` };
   }
@@ -136,6 +154,8 @@ function formatDiscordPayload(
     task_created: 0x22c55e, // green
     status_changed: 0x3b82f6, // blue
     comment_added: 0xf59e0b, // amber
+    task_linked: 0x8b5cf6, // violet
+    task_unlinked: 0x8b5cf6,
   };
 
   switch (event) {
@@ -195,6 +215,24 @@ function formatDiscordPayload(
         allowed_mentions: DISCORD_NO_MENTIONS,
       };
     }
+
+    case "task_linked":
+    case "task_unlinked":
+      return {
+        embeds: [
+          {
+            title: `${event === "task_linked" ? "Tasks linked" : "Link removed"}: ${taskKey}`,
+            description: d(String(data?.summary ?? title)),
+            url: taskUrl,
+            color: colors[event],
+            fields: [
+              { name: "Related", value: d(String(data?.relatedTaskKey ?? "")), inline: true },
+              { name: "Project", value: name, inline: true },
+            ],
+          },
+        ],
+        allowed_mentions: DISCORD_NO_MENTIONS,
+      };
 
     default:
       return { content: `[${d(project.key)}] ${event}: ${taskKey} ${title}`, allowed_mentions: DISCORD_NO_MENTIONS };

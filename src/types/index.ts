@@ -315,12 +315,19 @@ export interface ITaskTemplate {
   acceptanceCriteria: string;
 }
 
-export type WebhookEvent = "task_created" | "status_changed" | "comment_added";
+export type WebhookEvent =
+  | "task_created"
+  | "status_changed"
+  | "comment_added"
+  | "task_linked"
+  | "task_unlinked";
 
 export const WEBHOOK_EVENTS: WebhookEvent[] = [
   "task_created",
   "status_changed",
   "comment_added",
+  "task_linked",
+  "task_unlinked",
 ];
 
 export interface IWebhook {
@@ -1385,7 +1392,26 @@ export type ActivityAction =
   // A sync gave this task a pull request, or took one away. The only two a machine writes, and
   // the only two whose `user` may be absent (BP-628).
   | "pr_linked"
-  | "pr_unlinked";
+  | "pr_unlinked"
+  // A dependency between two tasks appeared or went away. `field` holds a LinkDirection rather
+  // than the stored relation type, because one write lands on both ends and each end reads it
+  // from its own side (BP-658).
+  | "link_added"
+  | "link_removed";
+
+/**
+ * A relation as the task whose timeline you are reading experiences it. The stored types are
+ * one-directional — `A.relations = [{ task: B, type: "parent_of" }]` is on A only — so B's own
+ * row has to name the same fact from the other end.
+ */
+export type LinkDirection =
+  | "blocked_by"
+  | "blocks"
+  | "relates"
+  | "duplicates"
+  | "duplicated_by"
+  | "parent_of"
+  | "child_of";
 
 export interface IActivityLog {
   _id: Types.ObjectId;
@@ -1524,16 +1550,18 @@ export type NotificationType =
   | "status_changed"
   | "comment_added"
   | "mentioned"
-  | "task_created";
+  | "task_created"
+  | "task_linked";
 
 // The order the settings grid renders them in. task_created is last because it is the only row
-// whose recipients are not derived from a task: the other four filter a list the system already
+// whose recipients are not derived from a task: the others filter a list the system already
 // computed from an assignee and watchers, this one selects people by the tick itself.
 export const NOTIFICATION_TYPES: NotificationType[] = [
   "task_assigned",
   "mentioned",
   "status_changed",
   "comment_added",
+  "task_linked",
   "task_created",
 ];
 

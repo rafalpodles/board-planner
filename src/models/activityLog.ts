@@ -10,6 +10,8 @@ const ACTIONS = [
   "comment_deleted",
   "pr_linked",
   "pr_unlinked",
+  "link_added",
+  "link_removed",
 ];
 
 const activityLogSchema = new Schema<IActivityLog>(

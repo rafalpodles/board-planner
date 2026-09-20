@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { LoadFailed } from "@/components/ui/LoadFailed";
-import { ApiActivityLog, STATUS_LABELS, TaskStatus } from "@/types";
+import { ApiActivityLog, LinkDirection, STATUS_LABELS, TaskStatus } from "@/types";
 import { timeAgo } from "@/lib/time";
+import { describeLinkChange } from "@/lib/link-phrasing";
 
 interface ActivityTimelineProps {
   projectId: string;
@@ -35,6 +36,12 @@ function actionIcon(action: string) {
       return "↗";
     case "pr_unlinked":
       return "×";
+    // The same glyph as pr_linked, and for the same reason: a link appeared. `⚯` rendered, but its
+    // bridge disappears into the antialiasing at 12px and it reads as two loose rings.
+    case "link_added":
+      return "↗";
+    case "link_removed":
+      return "×";
     default:
       return "•";
   }
@@ -48,6 +55,7 @@ function actionColor(action: string) {
       return "text-primary";
     case "comment_deleted":
     case "pr_unlinked":
+    case "link_removed":
       return "text-danger";
     default:
       return "text-text-muted";
@@ -129,6 +137,24 @@ function describeAction(log: ApiActivityLog): string {
       return `${userName} linked ${linkLabel(log.newValue)}`;
     case "pr_unlinked":
       return `${userName} unlinked ${linkLabel(log.oldValue)}`;
+    // Written at both ends of one link, so `field` is the relation as THIS task experiences it —
+    // the parent's row and the child's row describe the same write from opposite sides (BP-658).
+    case "link_added":
+      return describeLinkChange({
+        actor: userName,
+        action: "added",
+        direction: log.field as LinkDirection,
+        self: "this task",
+        other: log.newValue,
+      });
+    case "link_removed":
+      return describeLinkChange({
+        actor: userName,
+        action: "removed",
+        direction: log.field as LinkDirection,
+        self: "this task",
+        other: log.oldValue,
+      });
     default:
       return `${userName} performed an action`;
   }
@@ -229,6 +255,7 @@ export function ActivityTimeline({
             className="flex items-start gap-2 text-sm"
           >
             <span
+              aria-hidden="true"
               className={`flex-shrink-0 w-5 h-5 flex items-center justify-center text-xs rounded-full bg-bg-input ${actionColor(log.action)}`}
             >
               {actionIcon(log.action)}

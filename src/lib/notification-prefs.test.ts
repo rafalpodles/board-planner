@@ -101,6 +101,88 @@ describe("what the project screen shows", () => {
   });
 });
 
+/**
+ * A row can be added to the grid long after somebody last saved theirs. Blank would record it as
+ * a "no" they never gave, and would split the population in two: accounts that never opened the
+ * screen would hear about it (the legacy fallback) while accounts that had been there would not.
+ */
+describe("a row nobody has been asked about", () => {
+  it("takes the same default a grid that was never saved takes", () => {
+    const stored = allOff();
+    delete (stored as Partial<NotificationMatrix>).task_linked;
+    stored.status_changed = { inApp: false, email: false, chat: false };
+
+    const m = defaultMatrix({ notifications: { defaults: stored } });
+
+    expect(m.task_linked).toEqual({ inApp: true, email: false, chat: false });
+    // and the rows they DID answer are left exactly as answered
+    expect(m.status_changed).toEqual({ inApp: false, email: false, chat: false });
+  });
+
+  // The firehose row is the exception everywhere, including here
+  it("leaves the board-wide row off", () => {
+    const stored = allOff();
+    delete (stored as Partial<NotificationMatrix>).task_created;
+
+    expect(defaultMatrix({ notifications: { defaults: stored } }).task_created).toEqual({
+      inApp: false,
+      email: false,
+      chat: false,
+    });
+  });
+
+  // Mail is the one channel they HAVE answered for every row they saw; a new row is not consent
+  it("does not start writing to their inbox on the strength of an old boolean", () => {
+    const stored = allOff();
+    delete (stored as Partial<NotificationMatrix>).task_linked;
+
+    const m = defaultMatrix({ emailNotifications: true, notifications: { defaults: stored } });
+
+    expect(m.task_linked.email).toBe(false);
+  });
+
+  // The control: an account with no grid at all still follows the old boolean
+  it("still follows the old boolean for an account that never saved anything", () => {
+    expect(defaultMatrix({ emailNotifications: true }).task_linked).toEqual({
+      inApp: true,
+      email: true,
+      chat: false,
+    });
+  });
+
+  // A project override is a grid somebody saved just as much as the global one is, and it is the
+  // half a first pass at this missed: fixing only defaultMatrix left the new row silent on every
+  // board anybody had ever ticked "use my own settings" for.
+  it("fills the row in a project's own grid too", () => {
+    const own = allOff();
+    delete (own as Partial<NotificationMatrix>).task_linked;
+    own.comment_added = { inApp: true, email: false, chat: false };
+    const user = { notifications: { projects: [{ project: P1, matrix: own }] } };
+
+    expect(matrixInForce(user, P1).task_linked).toEqual({
+      inApp: true,
+      email: false,
+      chat: false,
+    });
+    // and the rows that grid did answer are still its own, not the global grid's
+    expect(matrixInForce(user, P1).comment_added).toEqual({
+      inApp: true,
+      email: false,
+      chat: false,
+    });
+    expect(resolveChannels(user, P1, "task_linked").inApp).toBe(true);
+  });
+
+  // The control: an override that answers the row keeps its answer, including a deliberate no
+  it("leaves a row the project's grid did answer exactly as answered", () => {
+    const own = allOff();
+    own.task_linked = { inApp: false, email: false, chat: false };
+    const user = { notifications: { projects: [{ project: P1, matrix: own }] } };
+
+    expect(resolveChannels(user, P1, "task_linked").inApp).toBe(false);
+  });
+});
+
 describe("normalising what a client sends", () => {
   it("fills in every row and drops anything it does not recognise", () => {
     const m = normaliseMatrix({ mentioned: { inApp: true }, nonsense: { inApp: true } });

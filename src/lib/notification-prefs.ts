@@ -9,7 +9,16 @@ import {
 /** What a user record has to carry for any of this to resolve. Deliberately narrow: the dispatch
  *  paths pass lean documents, and asking for the whole IUser would make them fetch more.
  *  `project` is left loose because a lean document yields an ObjectId and a request body a
- *  string — both are compared through String(), so neither is privileged. */
+ *  string — both are compared through String(), so neither is privileged.
+ *
+ *  **Lean, and that is now correctness rather than cost.** A grid is read row by row, and a row the
+ *  stored document does not mention is the signal that nobody has been asked about it. Hydrating
+ *  the document first would have Mongoose materialise that row from the sub-schema's own `false`
+ *  defaults, which is indistinguishable from an answered "no" — and the row would fall silent with
+ *  nothing to say so.
+ *
+ *  No test can hold this: a spec passes a plain object, which always looks lean. The four callers
+ *  and this paragraph are the whole of the defence. */
 export interface PrefsSource {
   emailNotifications?: boolean;
   notifications?: {
@@ -21,32 +30,51 @@ export interface PrefsSource {
 
 const OFF: NotificationChannels = { inApp: false, email: false, chat: false };
 
-export function blankMatrix(): NotificationMatrix {
-  return Object.fromEntries(
-    NOTIFICATION_TYPES.map((type) => [type, { ...OFF }])
-  ) as NotificationMatrix;
+/** What a row nobody has answered for is worth.
+ *
+ *  task_created is the exception, and deliberately so. The other rows describe work the reader is
+ *  already attached to — their own task, or one they watch; this one is every task anybody opens
+ *  on the board. Handing it the legacy "bell on" would subscribe every existing account to a
+ *  firehose it never asked for, by the act of adding the row. So it starts off everywhere and only
+ *  a tick turns it on. */
+function unanswered(type: NotificationType, email: boolean): NotificationChannels {
+  return type === "task_created" ? { ...OFF } : { inApp: true, email, chat: false };
 }
 
 /** What an account that has never opened the screen gets: the bell as it has always behaved, and
- *  mail exactly where the old boolean put it. Nothing is written to reach this state.
- *
- *  task_created is the exception, and deliberately so. The other four rows describe work the
- *  reader is already attached to; this one is every task anybody opens on the board. Handing it
- *  the legacy "bell on" would subscribe every existing account to a firehose it never asked for,
- *  by the act of adding the row. So it starts off everywhere and only a tick turns it on. */
+ *  mail exactly where the old boolean put it. Nothing is written to reach this state. */
 function legacyMatrix(emailNotifications: boolean): NotificationMatrix {
   return Object.fromEntries(
-    NOTIFICATION_TYPES.map((type) => [
-      type,
-      type === "task_created" ? { ...OFF } : { inApp: true, email: emailNotifications, chat: false },
-    ])
+    NOTIFICATION_TYPES.map((type) => [type, unanswered(type, emailNotifications)])
+  ) as NotificationMatrix;
+}
+
+/**
+ * A stored grid, with any row it does not mention filled in.
+ *
+ * A row added to the grid after this person last saved it is one they have never been asked about,
+ * and blank would record it as a "no" they never gave. Without mail, though: they HAVE answered
+ * that question for every row they saw, and a new row is not consent to be written to.
+ *
+ * It cuts the other way for somebody who went through the screen and unticked everything: they
+ * gave a fairly clear answer to "do you want the bell", and this hands them one row of it back —
+ * on the screen as a tick they never put there. That is the price of the choice, taken because the
+ * alternative silences the row for everybody who ever touched their settings: a strictly larger
+ * group, and one that cannot tell it is missing anything.
+ *
+ * Both stored grids come through here. A project override is a grid somebody saved just as much as
+ * the global one, and filling only the global one left the new row silent on exactly the boards
+ * its owner had taken the trouble to tune.
+ */
+function answered(stored: NotificationMatrix): NotificationMatrix {
+  return Object.fromEntries(
+    NOTIFICATION_TYPES.map((type) => [type, stored[type] ?? unanswered(type, false)])
   ) as NotificationMatrix;
 }
 
 export function defaultMatrix(user: PrefsSource | null | undefined): NotificationMatrix {
   const stored = user?.notifications?.defaults;
-  if (stored) return { ...blankMatrix(), ...stored };
-  return legacyMatrix(!!user?.emailNotifications);
+  return stored ? answered(stored) : legacyMatrix(!!user?.emailNotifications);
 }
 
 function overrideFor(
@@ -68,7 +96,7 @@ export function matrixInForce(
   projectId: string
 ): NotificationMatrix {
   const own = overrideFor(user, projectId);
-  return own ? { ...blankMatrix(), ...own } : defaultMatrix(user);
+  return own ? answered(own) : defaultMatrix(user);
 }
 
 /** Delivery to chat needs a service AND an address; either alone sends nothing and says nothing. */
