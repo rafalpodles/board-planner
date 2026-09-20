@@ -5,8 +5,6 @@ import { ApiInstanceAuditLog, InstanceAuditAction } from "@/types";
 // INSTANCE_AUDIT_ACTIONS) so nobody scanning the list has to read the next column to find out what
 // happened.
 const LABELS: Partial<Record<InstanceAuditAction, string>> = {
-  worker_locked: "Kill switch on",
-  worker_unlocked: "Kill switch cleared",
   worker_enabled: "Worker enabled",
   worker_disabled: "Worker disabled",
   worker_renamed: "Worker renamed",
@@ -54,7 +52,9 @@ const UNKNOWN_COMMAND = "Command sent to a worker";
 // The actions worth spotting at a glance: they stop a machine, hand out the credential that lets a
 // new one join, or hand somebody a way into another person's account.
 const NOTABLE = new Set<InstanceAuditAction>([
-  "worker_locked",
+  // The one that stops a machine, which is what this set is for. It reads `worker_disabled` since
+  // BP-693 collapsed the lock into it; before that the same place in this set said worker_locked.
+  "worker_disabled",
   "enrolment_token_minted",
   "enrolment_token_spent",
   "user_password_reset",

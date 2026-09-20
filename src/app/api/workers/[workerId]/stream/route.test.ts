@@ -19,7 +19,6 @@ function workerDoc(overrides: Record<string, unknown> = {}) {
   return {
     _id: WORKER_ID,
     enabled: true,
-    lockedByInstance: false,
     credentialHash: "irrelevant-once-verified",
     ...overrides,
   };
@@ -48,15 +47,6 @@ afterEach(() => {
 describe("GET /api/workers/:workerId/stream", () => {
   it("403s a disabled worker without opening a stream", async () => {
     verifyWorkerCredential.mockResolvedValue(workerDoc({ enabled: false }));
-
-    const response = await GET(request(), ctx());
-
-    expect(response.status).toBe(403);
-    expect(registerWorkerStream).not.toHaveBeenCalled();
-  });
-
-  it("403s an instance-locked worker without opening a stream", async () => {
-    verifyWorkerCredential.mockResolvedValue(workerDoc({ lockedByInstance: true }));
 
     const response = await GET(request(), ctx());
 

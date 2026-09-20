@@ -628,7 +628,6 @@ export interface IWorker {
   // Which policy fields an operator actually set; everything else follows the default
   policyOverrides: string[];
   enabled: boolean;
-  lockedByInstance: boolean;
   lastSeenAt: Date | null;
   // The person this machine belongs to, and the only thing that decides what it may reach: null
   // for a worker enrolled before BP-358, which claims nothing until it is enrolled again
@@ -664,7 +663,6 @@ export interface ApiWorker {
   policy: WorkerPolicy;
   policyOverrides: string[];
   enabled: boolean;
-  lockedByInstance: boolean;
   lastSeenAt: string | null;
   bindingError: string;
   preflight: ApiWorkerPreflight | null;
@@ -1434,9 +1432,10 @@ export type ProjectAuditAction =
 // The kill switch first, because "who stopped this machine" is the question this log exists to
 // answer. Separate verbs rather than one worker_updated with a detail column: an operator scanning
 // the list should not have to read the next column to find out what happened.
+//
+// `worker_locked` and `worker_unlocked` went with the second kill switch they recorded (BP-693);
+// a row still carrying either renders through the view's fallback, as a sentence without the verb.
 export const INSTANCE_AUDIT_ACTIONS = [
-  "worker_locked",
-  "worker_unlocked",
   "worker_enabled",
   "worker_disabled",
   "worker_renamed",

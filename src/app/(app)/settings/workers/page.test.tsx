@@ -55,7 +55,6 @@ function worker(over: Partial<ApiWorker> = {}): ApiWorker {
     policy: { pollIntervalMs: 30_000 },
     policyOverrides: [],
     enabled: true,
-    lockedByInstance: false,
     lastSeenAt: new Date().toISOString(),
     bindingError: "",
     preflight: null,
@@ -128,9 +127,10 @@ describe("the fleet console's owner column", () => {
     expect(under("Preflight")).toBe("not reported");
     expect(under("Binding error")).toBe("");
     // BP-642 folded Enabled, Lock and Commands into one pinned cell: three columns' worth of
-    // controls did not fit a laptop beside the nine that describe the machine. Read in order, so
-    // the fold is a regrouping and not a silent loss of one of them.
-    expect(under("Controls")).toMatch(/^On\s*Lock\s*Pause\s*Resume\s*Stop$/);
+    // controls did not fit a laptop beside the nine that describe the machine. BP-693 then took
+    // Lock with it, being a second kill switch for the same 403. The commands are icons and carry
+    // their words as accessible names, so the cell's text is the state chip alone.
+    expect(under("Controls")).toBe("On");
   });
 
   it("falls back to the username when that account has no display name", async () => {

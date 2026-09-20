@@ -246,7 +246,7 @@ export function withProjectAccessOrWorker(handler: AuthenticatedHandler) {
     if (!worker) {
       return NextResponse.json({ error: "Worker credential rejected" }, { status: 401 });
     }
-    if (!worker.enabled || worker.lockedByInstance) {
+    if (!worker.enabled) {
       return NextResponse.json({ error: "this worker may not run" }, { status: 403 });
     }
 

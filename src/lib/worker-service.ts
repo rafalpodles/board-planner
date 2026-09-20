@@ -69,7 +69,6 @@ export function verdictFor(
     };
   }
   if (!worker.enabled) return { ok: false, reason: "this worker is disabled" };
-  if (worker.lockedByInstance) return { ok: false, reason: "this worker is locked by the instance" };
 
   // A non-finite lastSeenAt (unparseable, missing) must count as maximally stale, not as fresh
   const seenAt = worker.lastSeenAt ? new Date(worker.lastSeenAt).getTime() : NaN;
@@ -125,7 +124,7 @@ export interface AssignableProject extends MatchableProject {
 }
 
 function isLive(worker: IWorker, now: Date): boolean {
-  if (!worker.enabled || worker.lockedByInstance) return false;
+  if (!worker.enabled) return false;
   const seenAt = worker.lastSeenAt ? new Date(worker.lastSeenAt).getTime() : NaN;
   return Number.isFinite(seenAt) && now.getTime() - seenAt <= WORKER_STALE_MS;
 }
@@ -279,7 +278,6 @@ export interface CheckoutClaimant {
   host: string;
   repos?: RepoReport[];
   enabled?: boolean;
-  lockedByInstance?: boolean;
   lastSeenAt?: Date | string | null;
   createdAt?: Date | string;
 }
@@ -473,7 +471,6 @@ export function toApiWorker(
     policy: worker.policy,
     policyOverrides: [...(worker.policyOverrides ?? [])],
     enabled: worker.enabled,
-    lockedByInstance: worker.lockedByInstance,
     lastSeenAt: worker.lastSeenAt ? new Date(worker.lastSeenAt).toISOString() : null,
     bindingError: worker.bindingError,
     preflight: worker.preflight

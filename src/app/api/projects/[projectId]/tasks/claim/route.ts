@@ -33,7 +33,7 @@ export const POST = withWorker(async (request, { params, worker }) => {
     Project.findById(projectId).select("_id repositoryUrl githubRepo gitlabRepo gitlabHost worker").lean(),
     // A worker that lost a contested checkout must be refused here too, not merely left unassigned
     Worker.find({ _id: { $ne: worker._id } }).select(
-      "_id name host repos enabled lockedByInstance lastSeenAt createdAt"
+      "_id name host repos enabled lastSeenAt createdAt"
     ),
     ownerReachableProjectIds(worker),
   ]);

@@ -107,7 +107,7 @@ const OBJECT_ID = /^[0-9a-f]{7,64}$/;
 const PR_URL = /^https?:\/\/[A-Za-z0-9.-]+(?::\d+)?(?:\/[A-Za-z0-9._~-]+)*\/pull\/\d+$/;
 
 export const POST = withWorker(async (request, { worker }) => {
-  if (!worker.enabled || worker.lockedByInstance) {
+  if (!worker.enabled) {
     return NextResponse.json({ error: "this worker may not run", abort: true }, { status: 403 });
   }
 
@@ -185,7 +185,7 @@ export const POST = withWorker(async (request, { worker }) => {
 const SETTLEMENTS: TaskDecisionState[] = ["delivered", "refused", "failed", "discarded"];
 
 export const PATCH = withWorker(async (request, { worker }) => {
-  if (!worker.enabled || worker.lockedByInstance) {
+  if (!worker.enabled) {
     return NextResponse.json({ error: "this worker may not run", abort: true }, { status: 403 });
   }
 

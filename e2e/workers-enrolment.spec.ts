@@ -31,7 +31,7 @@ import { signIn as arriveSignedIn, signInThroughForm } from "./session";
  *
  * The pairing every test is built on: **a credential is not proved by appearing in a list.** It is
  * proved by the same credential being taken on a real request before a switch is thrown, and
- * refused on the same request afterwards. A screen showing "Locked" over a machine that carries on
+ * refused on the same request afterwards. A screen showing "Off" over a machine that carries on
  * working is the failure this file exists to catch.
  *
  * Three notes on the fixture:
@@ -346,8 +346,8 @@ test("the kill switch stops a credential that was working a moment ago", async (
   await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
   await page.goto("/settings/workers");
   const row = fleetRow(page, WORKER_NAME);
-  await row.getByRole("button", { name: "Lock", exact: true }).click();
-  await expect(row.getByRole("button", { name: "Locked" })).toBeVisible();
+  await row.getByRole("button", { name: "On", exact: true }).click();
+  await expect(row.getByRole("button", { name: "Off", exact: true })).toBeVisible();
 
   const refused = await machineReadsItsWork(request, machine);
   expect(refused.status()).toBe(403);
@@ -356,23 +356,9 @@ test("the kill switch stops a credential that was working a moment ago", async (
   expect((await refused.json()).abort).toBe(true);
 
   // And the switch is a switch, not a one-way door
-  await row.getByRole("button", { name: "Locked" }).click();
-  await expect(row.getByRole("button", { name: "Lock", exact: true })).toBeVisible();
+  await row.getByRole("button", { name: "Off", exact: true }).click();
+  await expect(row.getByRole("button", { name: "On", exact: true })).toBeVisible();
   expect((await machineReadsItsWork(request, machine)).status()).toBe(200);
-});
-
-test("switching a machine off refuses it in the same way", async ({ page, request }) => {
-  const machine = { workerId: String(WORKER_ID), credential: WORKER_CREDENTIAL };
-  expect((await machineReadsItsWork(request, machine)).status()).toBe(200);
-
-  await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);
-  await page.goto("/settings/workers");
-  const row = fleetRow(page, WORKER_NAME);
-  await row.getByRole("button", { name: "On", exact: true }).click();
-  await expect(row.getByRole("button", { name: "Off", exact: true })).toBeVisible();
-
-  // Two switches, two tests: removing either half of the guard reddens exactly one of them
-  expect((await machineReadsItsWork(request, machine)).status()).toBe(403);
 });
 
 test("releasing a machine leaves it claiming nothing, and says so on the row", async ({

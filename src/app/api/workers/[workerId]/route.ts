@@ -13,7 +13,7 @@ import { InstanceAuditAction } from "@/types";
 // Everything a worker document still carries is fleet management: what this machine is called,
 // whether it may run, and how often it asks. What the work looks like moved to the project, so
 // there is no longer a project-admin path into this route.
-const ADMIN_FIELDS = ["enabled", "lockedByInstance", "name"] as const;
+const ADMIN_FIELDS = ["enabled", "name"] as const;
 const POLICY_FIELDS = ["pollIntervalMs"] as const;
 
 // The worker's own source of current policy and assignments between heartbeats, so it has to
@@ -22,7 +22,7 @@ const POLICY_FIELDS = ["pollIntervalMs"] as const;
 export const GET = withWorker(async (_request, { worker }) => {
   // The one withWorker route that used to answer a killed worker, handing it its policy, its
   // assignments and the whole fleet inventory — an incomplete kill switch (BP-305)
-  if (!worker.enabled || worker.lockedByInstance) {
+  if (!worker.enabled) {
     return NextResponse.json({ error: "this worker may not run", abort: true }, { status: 403 });
   }
 
@@ -33,7 +33,7 @@ export const GET = withWorker(async (_request, { worker }) => {
     // enabled test still happens, inside assignmentsFor and offersFor, where it decides work.
     Project.find({}).select("_id key name repositoryUrl githubRepo gitlabRepo gitlabHost worker").lean(),
     Worker.find({ _id: { $ne: worker._id } }).select(
-      "_id name host repos enabled lockedByInstance lastSeenAt createdAt"
+      "_id name host repos enabled lastSeenAt createdAt"
     ),
     ownerReachableProjectIds(worker),
   ]);
@@ -81,7 +81,7 @@ function isPositiveInt(value: unknown): value is number {
 export const PATCH = withAuth(async (request, { params, user }) => {
   await connectDB();
 
-  // A machine credential must not be able to rename a laptop or clear lockedByInstance on it; that
+  // A machine credential must not be able to rename a laptop or switch itself back on; that
   // requires an interactive admin session. Keyed on viaMachineCredential, not tokenScoped: an
   // unscoped admin API token leaves tokenScoped false and used to pass straight through here.
   if (user.viaMachineCredential) {
@@ -193,7 +193,6 @@ export const PATCH = withAuth(async (request, { params, user }) => {
 interface WorkerBefore {
   name: string;
   enabled: boolean;
-  lockedByInstance: boolean;
   owner?: unknown;
   policy?: { pollIntervalMs?: number };
   policyOverrides?: string[];
@@ -209,18 +208,15 @@ function auditEntries(
   const target = before.name;
   const entries: { action: InstanceAuditAction; target: string; detail?: string }[] = [];
 
-  if (typeof body.lockedByInstance === "boolean" && body.lockedByInstance !== before.lockedByInstance) {
-    entries.push({
-      action: body.lockedByInstance ? "worker_locked" : "worker_unlocked",
-      target,
-      detail: body.lockedByInstance
-        ? "Kill switch on — this machine takes no work until it is cleared"
-        : "Kill switch cleared",
-    });
-  }
-
+  // The kill switch, and the only one: BP-693 collapsed `lockedByInstance` into this field, which
+  // every guard had been testing beside it for the same 403. The sentence the lock entry carried
+  // moves here rather than going with it — it is what the row has to say to be worth keeping.
   if (typeof body.enabled === "boolean" && body.enabled !== before.enabled) {
-    entries.push({ action: body.enabled ? "worker_enabled" : "worker_disabled", target });
+    entries.push({
+      action: body.enabled ? "worker_enabled" : "worker_disabled",
+      target,
+      detail: body.enabled ? undefined : "This machine takes no work until it is switched back on",
+    });
   }
 
   if (body.owner === null && before.owner) {

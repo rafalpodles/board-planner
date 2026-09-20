@@ -19,9 +19,10 @@ import { signIn } from "./session";
  * either side of that measurement rather than either side of `lg`.
  */
 const LAPTOP = { width: 1440, height: 900 };
-// 542px of scrollport: past `lg`, and the width at which pinning a 232px column would take
-// two fifths of the table. The threshold is a measurement, so this is where it has to be read.
-const NARROW_DESKTOP = { width: 1100, height: 900 };
+// 466px of scrollport, which is under the threshold: a 130px column there would be more than a
+// quarter of the table. `lg` is 1024 too, and the coincidence is not the point — the threshold is
+// a measurement of the scrollport, and this is the width that reads it.
+const NARROW_DESKTOP = { width: 1024, height: 900 };
 const PHONE = { width: 375, height: 812 };
 
 async function openFleet(page: Page) {
@@ -31,8 +32,9 @@ async function openFleet(page: Page) {
   return page.getByRole("row").filter({ hasText: WORKER_NAME }).first();
 }
 
-const controlsCell = (page: Page) =>
-  page.locator("tbody td").filter({ hasText: "Resume" }).first();
+// By test id, not by the text in it: the commands are icons and carry their words as accessible
+// names rather than as content, so there is nothing in this cell to match on
+const controlsCell = (page: Page) => page.getByTestId("worker-controls").first();
 
 /**
  * How many shadows the pinned cell actually paints.
@@ -105,7 +107,7 @@ test("every control of a fleet row is on the screen at 1440x900", async ({ page 
   // locator scoped to it would pass by describing the fix back to itself. Bounded by the
   // scrollport rather than the viewport — the table's visible area ends ~18px short of the
   // window, and a control overflowing into that strip is off the screen just the same.
-  for (const name of ["On", "Lock", "Pause", "Resume", "Stop"]) {
+  for (const name of ["On", "Pause", "Resume", "Stop"]) {
     const control = row.getByRole("button", { name, exact: true });
     const box = await control.boundingBox();
     expect(box, `${name} has no box`).not.toBeNull();
@@ -208,9 +210,8 @@ test("at phone width nothing is pinned and the scroller fades its own edge inste
 
 /**
  * The threshold is a measured scrollport, so it is readable only by standing either side of it.
- * Above `lg` and still unpinned: at 1100 the settings shell leaves 542px, and a 232px column
- * would be two fifths of the table. Without this the constant could be anything from 358 to 882
- * and every other test would stay green.
+ * At 1024 the settings shell leaves 466px, under the threshold, so nothing pins. Without this the
+ * constant could be anything from 358 to 882 and every other test would stay green.
  */
 test("a desktop too narrow for the table beside it pins nothing", async ({ page }) => {
   await page.setViewportSize(NARROW_DESKTOP);

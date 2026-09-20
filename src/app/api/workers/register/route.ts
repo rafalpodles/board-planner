@@ -23,7 +23,7 @@ import { logInstanceAudit } from "@/lib/instanceAudit";
 // The reason is the laptop, not this route. A worker runs the coding agent at the same uid with
 // Read and `bypassPermissions`, so anything on that disk is readable by the agent. While this was
 // withAdmin, the credential the laptop had to hold was an unscoped instance-admin token — enough to
-// PATCH lockedByInstance and lift the worker's own kill switch. An enrolment token is spent by the
+// PATCH its own Enabled switch back on and lift the kill switch. An enrolment token is spent by the
 // first registration and is useless afterwards, so reading it off disk buys nothing.
 function bearerOf(request: Request): string {
   const header = request.headers.get("authorization") ?? "";

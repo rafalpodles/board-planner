@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 
-import { useCallback, useEffect, useState } from "react";
+import { ReactNode, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
@@ -20,21 +20,23 @@ import { ApiWorker, ApiWorkerPreflight } from "@/types";
 const POLL_MS = 5_000;
 
 /**
- * The width of the pinned controls column, and the two numbers derived from it.
+ * The width of the pinned controls column at its widest, and the two numbers derived from it.
+ * Measured at 124px with the command-status line absent; 130 is that rounded up to leave the chip
+ * room to say something longer without the constant becoming a lie.
  *
  * A constant rather than a measurement, and that is not laziness: below the threshold the commands
  * row wraps, so the column's width is a function of whether it is pinned. Measuring it to decide
  * would close the loop — unpinned, wrapped, narrow, pin; pinned, unwrapped, wide, unpin — driven
  * round by the ResizeObserver that watches it.
  *
- * Pinning wants room for the table beside the column, not merely room for the column: three times
- * over leaves two thirds of the width still reading as a table. The scrollport is the window less
- * 558px of sidebar, padding, settings nav and the card's border, so the threshold of 696 is a
- * window about 1254 wide. It pins at 1440 (882px) and at 1280 (722px, the narrowest common one),
- * and leaves 1024 (466px) and everything below it scrolling the ordinary way.
+ * Pinning wants room for the table beside the column, not merely room for the column: four times
+ * over leaves three quarters of the width still reading as a table. The scrollport is the window
+ * less 558px of sidebar, padding, settings nav and the card's border, so the threshold of 520 is
+ * a window about 1078 wide. It pins at 1440 (882px) and at 1280 (722px), and leaves 1024 (466px)
+ * and everything below it scrolling the ordinary way.
  */
-const CONTROLS_WIDTH = 232;
-const PIN_MIN_SCROLLPORT = CONTROLS_WIDTH * 3;
+const CONTROLS_WIDTH = 130;
+const PIN_MIN_SCROLLPORT = CONTROLS_WIDTH * 4;
 const PIN_SCROLL_PADDING = CONTROLS_WIDTH + 8;
 const FADE_RIGHT = "linear-gradient(to right, #000 calc(100% - 32px), transparent)";
 
@@ -140,6 +142,78 @@ function PreflightCell({ preflight }: { preflight: ApiWorkerPreflight | null }) 
  * sideways, and an instance admin who never scrolls it would have met this machine as `ready`.
  * Nothing is duplicated — the cell names the check, this says what it means (BP-606).
  */
+/**
+ * A machine's state, as a word. Quiet by default because "on" and "unlocked" are the ordinary
+ * case and a table of ordinary rows should not be a wall of filled buttons; colour arrives only
+ * when the state is one somebody should notice.
+ */
+function StateChip({
+  children,
+  onClick,
+  disabled,
+  title,
+  tone,
+}: {
+  children: ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  title: string;
+  tone: "neutral" | "muted" | "danger";
+}) {
+  const tones = {
+    neutral: "border-border text-text hover:bg-bg-hover",
+    muted: "border-border/60 text-text-muted hover:bg-bg-hover",
+    danger: "border-danger/50 bg-danger/10 text-danger hover:bg-danger/15",
+  };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={`focus-ring inline-flex min-h-11 cursor-pointer items-center rounded-full border px-2.5 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-0 sm:py-1 ${tones[tone]}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+/**
+ * A command, as an icon. The word is the accessible name rather than the label: three verbs at
+ * `text-xs` were the widest thing in this column, and the shapes — two bars, a triangle, a square —
+ * are the ones every transport control has used for fifty years.
+ */
+function CommandIcon({
+  label,
+  children,
+  onClick,
+  disabled,
+  danger,
+}: {
+  label: string;
+  children: ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  danger?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      title={label}
+      className={`focus-ring inline-flex h-11 w-11 cursor-pointer items-center justify-center rounded-lg text-text-muted/90 transition-colors disabled:cursor-not-allowed disabled:opacity-50 sm:h-8 sm:w-8 ${
+        danger ? "hover:bg-danger/10 hover:text-danger" : "hover:bg-bg-hover hover:text-text"
+      }`}
+    >
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" className="h-4 w-4">
+        {children}
+      </svg>
+    </button>
+  );
+}
+
 function PreflightWarning({ preflight }: { preflight: ApiWorkerPreflight | null }) {
   const warned = (preflight?.checks ?? []).filter((c) => c.ok && c.warn);
   if (warned.length === 0) return null;
@@ -202,7 +276,7 @@ export default function AdminWorkersPage() {
 
   async function patch(
     worker: ApiWorker,
-    changes: Partial<Pick<ApiWorker, "enabled" | "lockedByInstance" | "owner">>
+    changes: Partial<Pick<ApiWorker, "enabled" | "owner">>
   ) {
     setSavingId(worker._id);
     try {
@@ -415,75 +489,57 @@ export default function AdminWorkersPage() {
                         </span>
                       )}
                     </td>
-                    <td className={`${stickyCell} bg-bg-card`}>
+                    <td data-testid="worker-controls" className={`${stickyCell} bg-bg-card`}>
                       <div className="flex flex-col gap-1">
                         {status && (
                           <span className={`text-xs ${TONE_CLASSES[status.tone]}`}>{status.text}</span>
                         )}
+                        {/* State reads as state and actions read as actions. Five filled buttons
+                            said everything at once, in two visual languages, across 232px of an
+                            882px table. The chip says what the machine IS; the three icons do
+                            something to it. Their accessible names are still the words, which is
+                            what the specs press them by.
+
+                            One chip, not two: `lockedByInstance` was a second kill switch every
+                            guard tested beside this one, for the same 403 (BP-693). */}
                         <div className="flex items-center gap-1">
-                          {/* The "Enabled" header went when the three columns merged, so the
-                              title says what is on — the same way Lock beside it does. Not an
-                              `aria-label`: that would replace the accessible name, which is the
-                              visible word and what six specs press this button by. */}
-                          <Button
-                            size="sm"
-                            variant={
-                              worker.enabled && !worker.lockedByInstance ? "primary" : "secondary"
-                            }
-                            disabled={savingId === worker._id || worker.lockedByInstance}
+                          <StateChip
                             onClick={() => patch(worker, { enabled: !worker.enabled })}
+                            disabled={savingId === worker._id}
+                            tone={worker.enabled ? "neutral" : "danger"}
                             title={
                               worker.enabled
-                                ? "Enabled — this worker may claim tasks"
-                                : "Disabled — this worker claims nothing"
+                                ? "Enabled — this worker may claim tasks. Switch it off to stop it."
+                                : "Disabled — this worker takes no work until it is switched back on"
                             }
                           >
                             {worker.enabled ? "On" : "Off"}
-                          </Button>
-                          <button
-                            onClick={() =>
-                              patch(worker, { lockedByInstance: !worker.lockedByInstance })
-                            }
-                            disabled={savingId === worker._id}
-                            className={`inline-flex min-h-11 cursor-pointer items-center rounded border px-3 text-xs transition-colors sm:min-h-9 sm:px-2 sm:py-1 ${
-                              worker.lockedByInstance
-                                ? "border-danger bg-danger/10 text-danger"
-                                : "border-border text-text-muted hover:text-text"
-                            }`}
-                            title={
-                              worker.lockedByInstance
-                                ? "Locked — this worker cannot claim or continue tasks"
-                                : "Lock this worker (kill switch)"
-                            }
-                          >
-                            {worker.lockedByInstance ? "Locked" : "Lock"}
-                          </button>
+                          </StateChip>
                         </div>
-                        <div className={`flex gap-1 ${pinned ? "" : "flex-wrap"}`}>
-                          <Button
-                            size="sm"
-                            variant="secondary"
+                        <div className="flex items-center gap-0.5">
+                          <CommandIcon
+                            label="Pause"
                             disabled={savingId === worker._id}
                             onClick={() => sendCommand(worker, "pause")}
                           >
-                            Pause
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="secondary"
+                            <rect x="6" y="5" width="3.5" height="14" rx="1" />
+                            <rect x="14.5" y="5" width="3.5" height="14" rx="1" />
+                          </CommandIcon>
+                          <CommandIcon
+                            label="Resume"
                             disabled={savingId === worker._id}
                             onClick={() => sendCommand(worker, "resume")}
                           >
-                            Resume
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="danger"
+                            <path d="M8 5.5v13l11-6.5z" />
+                          </CommandIcon>
+                          <CommandIcon
+                            label="Stop"
+                            danger
                             disabled={savingId === worker._id}
                             onClick={() => sendCommand(worker, "stop")}
                           >
-                            Stop
-                          </Button>
+                            <rect x="6" y="6" width="12" height="12" rx="2" />
+                          </CommandIcon>
                         </div>
                       </div>
                     </td>

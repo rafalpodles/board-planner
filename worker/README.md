@@ -610,8 +610,8 @@ replaced. Nothing leaves the machine.
 
 Two, and neither of them can lift this worker's kill switch. That is the point: the worker runs the
 coding agent at the same uid with `Read` and `bypassPermissions`, so anything on this disk is
-readable by the agent, and an unscoped instance-admin token there would let it clear
-`lockedByInstance` on itself.
+readable by the agent, and an unscoped instance-admin token there would let it switch its own
+`enabled` flag back on.
 
 **`CP_ENROLMENT_TOKEN` / `CP_ENROLMENT_TOKEN_FILE`** — single-use, one hour to live. Mint one from
 Settings → Workers → "Enrol a worker" and put it on the machine. The first registration spends it
@@ -666,8 +666,8 @@ the right shape while a machine took work assigned to a project-wide nominee —
 admitting a machine was an instance-level decision. A machine now runs only its owner's own work, on
 its owner's own hardware, entirely inside permissions that person already holds, so the approval
 signed off on something already permitted. **Enrolling is self-service:** whoever connects the
-machine owns it. An instance admin keeps the fleet console and the kill switch (`enabled`,
-`lockedByInstance`) and is no longer a required step.
+machine owns it. An instance admin keeps the fleet console and the kill switch (`enabled`) and is
+no longer a required step.
 
 A machine with **no owner** — every worker enrolled before BP-358 — reaches nothing: no assignments,
 no claim, refused by the middleware. That is deliberate rather than a fallback to the old behaviour,

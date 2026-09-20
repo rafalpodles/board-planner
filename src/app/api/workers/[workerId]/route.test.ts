@@ -69,7 +69,6 @@ const WORKER = {
   // BP-305/BP-358: assignments are what the owner can reach, narrowed by the reported repos
   owner: OWNER_ID,
   enabled: true,
-  lockedByInstance: false,
   createdAt: new Date("2026-06-01"),
   updatedAt: new Date(),
 };
@@ -196,15 +195,15 @@ describe("PATCH releases a machine from its owner", () => {
 });
 
 describe("PATCH /api/workers/:workerId", () => {
-  it("lets an instance admin rename, enable and lock a machine", async () => {
+  it("lets an instance admin rename a machine and switch it off", async () => {
     getAuthUser.mockResolvedValue(INSTANCE_ADMIN);
 
-    const response = await PATCH(patchRequest({ name: "rig", lockedByInstance: true }), ctx());
+    const response = await PATCH(patchRequest({ name: "rig", enabled: false }), ctx());
 
     expect(response.status).toBe(200);
     expect(workerFindByIdAndUpdate).toHaveBeenCalledWith(
       WORKER_ID,
-      { $set: { name: "rig", lockedByInstance: true } },
+      { $set: { name: "rig", enabled: false } },
       { new: true }
     );
   });
@@ -221,11 +220,11 @@ describe("PATCH /api/workers/:workerId", () => {
   });
 
   // Found by driving a real server: an unscoped admin API token passed the old tokenScoped guard
-  // and cleared lockedByInstance — the kill switch, lifted by the credential the worker held.
+  // and switched the machine back on — the kill switch, lifted by the credential the worker held.
   it("refuses an unscoped admin API token, which is still a machine credential", async () => {
     getAuthUser.mockResolvedValue(UNSCOPED_ADMIN_TOKEN);
 
-    const response = await PATCH(patchRequest({ lockedByInstance: false }), ctx());
+    const response = await PATCH(patchRequest({ enabled: true }), ctx());
 
     expect(response.status).toBe(403);
     expect(workerFindByIdAndUpdate).not.toHaveBeenCalled();
@@ -321,16 +320,13 @@ describe("the kill switch covers this route too", () => {
     });
   }
 
-  it.each([{ enabled: false }, { lockedByInstance: true }])(
-    "refuses a worker that may not run (%o)",
-    async (state) => {
-      verifyWorkerCredential.mockResolvedValue({ ...WORKER, ...state });
+  it("refuses a worker that may not run", async () => {
+    verifyWorkerCredential.mockResolvedValue({ ...WORKER, enabled: false });
 
-      const res = await GET(killSwitchRequest(), ctx());
+    const res = await GET(killSwitchRequest(), ctx());
 
-      expect(res.status).toBe(403);
-    }
-  );
+    expect(res.status).toBe(403);
+  });
 });
 
 describe("GET /api/workers/:workerId", () => {
@@ -500,8 +496,7 @@ describe("GET and a contested checkout", () => {
         name: "older",
         host: "mac.home",
         enabled: true,
-        lockedByInstance: false,
-        lastSeenAt: new Date(),
+              lastSeenAt: new Date(),
         createdAt: new Date("2020-01-01"),
         repos: [{ remote: "git@github.com:owner/repo.git", path: "/repo" }],
       },
@@ -529,29 +524,28 @@ describe("what the fleet audit log records", () => {
   });
 
   it("records the kill switch as its own action, not as an update", async () => {
-    await PATCH(patchRequest({ lockedByInstance: true }), ctx());
+    await PATCH(patchRequest({ enabled: false }), ctx());
 
     expect(entries()).toEqual([
       expect.objectContaining({
-        action: "worker_locked",
+        action: "worker_disabled",
         target: "rig-laptop",
         user: "admin-1",
+        // BP-693: the sentence the retired `worker_locked` row carried. Without it the log says a
+        // machine was disabled and nothing about what that means for the work it was doing.
+        detail: expect.stringContaining("takes no work"),
       }),
     ]);
   });
 
   it("distinguishes clearing the kill switch from setting it", async () => {
-    workerFindById.mockResolvedValue({ ...WORKER, lockedByInstance: true });
+    workerFindById.mockResolvedValue({ ...WORKER, enabled: false });
 
-    await PATCH(patchRequest({ lockedByInstance: false }), ctx());
+    await PATCH(patchRequest({ enabled: true }), ctx());
 
-    expect(entries()[0].action).toBe("worker_unlocked");
-  });
-
-  it("separates disabling a worker from stopping it", async () => {
-    await PATCH(patchRequest({ enabled: false }), ctx());
-
-    expect(entries()[0].action).toBe("worker_disabled");
+    expect(entries()[0].action).toBe("worker_enabled");
+    // Switching one back on says nothing beyond the verb: there is no consequence to spell out
+    expect(entries()[0].detail).toBeUndefined();
   });
 
   // The old name, because that is what earlier rows call this machine and a reader following its
@@ -582,9 +576,9 @@ describe("what the fleet audit log records", () => {
   // One request, two changes, two rows — a reader scanning actions should not have to unpack a
   // detail column to find the one that stopped the machine
   it("writes one entry per field that actually changed", async () => {
-    await PATCH(patchRequest({ lockedByInstance: true, enabled: false }), ctx());
+    await PATCH(patchRequest({ enabled: false, name: "studio-mini" }), ctx());
 
-    expect(entries().map((e) => e.action)).toEqual(["worker_locked", "worker_disabled"]);
+    expect(entries().map((e) => e.action)).toEqual(["worker_disabled", "worker_renamed"]);
   });
 
   it("records nothing for a field resent with the value it already had", async () => {
@@ -620,7 +614,7 @@ describe("what the fleet audit log records", () => {
   it("records nothing when the document is gone by the time it is written", async () => {
     workerFindByIdAndUpdate.mockReturnValue({ populate: () => Promise.resolve(null) });
 
-    const response = await PATCH(patchRequest({ lockedByInstance: true }), ctx());
+    const response = await PATCH(patchRequest({ enabled: false }), ctx());
 
     expect(response.status).toBe(404);
     expect(logInstanceAudit).not.toHaveBeenCalled();
@@ -629,7 +623,7 @@ describe("what the fleet audit log records", () => {
   it("records nothing when the request is refused", async () => {
     getAuthUser.mockResolvedValue(PLAIN_MEMBER);
 
-    await PATCH(patchRequest({ lockedByInstance: true }), ctx());
+    await PATCH(patchRequest({ enabled: false }), ctx());
 
     expect(logInstanceAudit).not.toHaveBeenCalled();
   });
