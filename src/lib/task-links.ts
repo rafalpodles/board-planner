@@ -1,7 +1,7 @@
 import { isValidObjectId, Types } from "mongoose";
 import { Task } from "@/models/task";
 import { Project } from "@/models/project";
-import { logActivity } from "@/lib/activity";
+import { logActivities } from "@/lib/activity";
 import { dispatchWebhooks } from "@/lib/webhooks";
 import { dispatchNotifications } from "@/lib/notifications";
 import { createNotifications, collectRecipients, assigneeIdOf } from "@/lib/in-app-notifications";
@@ -10,9 +10,7 @@ import { taskKeyOf } from "@/lib/task-key";
 import { usernameOf } from "@/lib/usernames";
 import { DependencyType, LinkDirection, RelationType } from "@/types";
 
-export type LinkResult =
-  | { ok: true; changed: boolean }
-  | { ok: false; error: string; status: number };
+export type LinkResult = { ok: true } | { ok: false; error: string; status: number };
 
 /** Everything the announcing needs about one end of a link, in one projection. */
 interface LinkEnd {
@@ -100,13 +98,13 @@ export async function addTaskLink(
     const cycle = await wouldCycle(projectId, taskId, targetTaskId);
     if (cycle) return cycle;
 
-    if (blocks(task, targetTaskId)) return { ok: true, changed: false };
+    if (blocks(task, targetTaskId)) return { ok: true };
 
     await Task.findByIdAndUpdate(taskId, { $addToSet: { blockedBy: targetTaskId } });
     await announce(projectId, actorId, [
       { action: "added", type, holder: task, target: other },
     ]);
-    return { ok: true, changed: true };
+    return { ok: true };
   }
 
   // A pair holds one relation, so choosing a different type replaces whatever was there — which
@@ -123,31 +121,46 @@ export async function addTaskLink(
     losing = await takeTheChildOffItsOtherParents(projectId, taskId, targetTaskId);
     // Already the parent and nothing else claimed the child: a refresh re-sending the same link.
     // The call above removed nothing in that case, so there is still nothing to undo.
-    if (replaced === type && losing.length === 0) return { ok: true, changed: false };
+    if (replaced === type && losing.length === 0) return { ok: true };
   } else if (replaced === type) {
-    return { ok: true, changed: false };
+    return { ok: true };
+  }
+
+  // Losses first, so the timeline reads in the order things happened, and so the removals can be
+  // announced on their own if the attach below turns out not to have landed.
+  const lost: LinkFact[] = losing.map((parent) => ({
+    action: "removed" as const,
+    type: "parent_of" as const,
+    holder: parent,
+    target: other,
+  }));
+  if (replaced && replaced !== type) {
+    lost.push({ action: "removed", type: replaced, holder: task, target: other });
   }
 
   await Task.updateOne(
     { _id: taskId, project: projectId },
     { $pull: { relations: { task: targetTaskId } } }
   );
-  await Task.updateOne(
+  const attached = await Task.updateOne(
     { _id: taskId, project: projectId },
     { $push: { relations: { task: targetTaskId, type: type as RelationType } } }
   );
 
-  const facts: LinkFact[] = [];
-  for (const parent of losing) {
-    facts.push({ action: "removed", type: "parent_of", holder: parent, target: other });
+  // The detach proves what it removed; this has to prove what it added, or `announce` reports a
+  // parenting that never happened. The task can be deleted between the read above and this write —
+  // narrow, but it is the half of the operation the sentence is about.
+  if (!attached.matchedCount) {
+    // What was detached really was detached, so those tasks are still owed their row.
+    await announce(projectId, actorId, lost);
+    return { ok: false, error: "Task not found", status: 404 };
   }
-  if (replaced && replaced !== type) {
-    facts.push({ action: "removed", type: replaced, holder: task, target: other });
-  }
-  facts.push({ action: "added", type, holder: task, target: other });
 
-  await announce(projectId, actorId, facts);
-  return { ok: true, changed: true };
+  await announce(projectId, actorId, [
+    ...lost,
+    { action: "added", type, holder: task, target: other },
+  ]);
+  return { ok: true };
 }
 
 export async function removeTaskLink(
@@ -181,16 +194,16 @@ export async function removeTaskLink(
   // route's contract is unchanged, and removal from the wrong end is BP-657's to settle — but a
   // history row, a bell and a webhook for a link that was never there would be worse than the
   // silence this ticket is about.
-  if (!held) return { ok: true, changed: false };
+  if (!held) return { ok: true };
 
   const other = await Task.findOne(
     { _id: targetTaskId, project: projectId },
     END_FIELDS
   ).lean<LinkEnd>();
-  if (!other) return { ok: true, changed: true };
+  if (!other) return { ok: true };
 
   await announce(projectId, actorId, [{ action: "removed", type, holder: task, target: other }]);
-  return { ok: true, changed: true };
+  return { ok: true };
 }
 
 /**
@@ -203,12 +216,13 @@ export async function removeTaskLink(
  * in between is named by neither. Whoever's `findOneAndUpdate` matched is the request that did the
  * removal, so what is announced is what happened.
  *
- * It terminates because every iteration removes exactly one relation; the cap is there so a write
- * that somehow stops removing cannot spin, and it names itself in the log rather than passing for
- * a board with nothing left to detach.
+ * It terminates, and not by a counter: the filter matches a document only while it still holds the
+ * relation, and `$pull` with the same document operand removes every element that matched — so an
+ * iteration that matched strictly shrinks the set the next one can match, and that set is finite.
+ * A cap stood here briefly and could only ever truncate real work, leaving the child with some
+ * parents detached and a new one attached behind a 200: a tree broken somewhere other than where
+ * it was found.
  */
-const MAX_PARENTS_DETACHED = 50;
-
 async function takeTheChildOffItsOtherParents(
   projectId: string,
   taskId: string,
@@ -216,7 +230,7 @@ async function takeTheChildOffItsOtherParents(
 ): Promise<LinkEnd[]> {
   const losing: LinkEnd[] = [];
 
-  while (losing.length < MAX_PARENTS_DETACHED) {
+  for (;;) {
     const parent = await Task.findOneAndUpdate(
       {
         project: projectId,
@@ -230,11 +244,6 @@ async function takeTheChildOffItsOtherParents(
     if (!parent) return losing;
     losing.push(parent);
   }
-
-  console.error(
-    `Stopped detaching task ${targetTaskId} after ${MAX_PARENTS_DETACHED} parents on project ${projectId}`
-  );
-  return losing;
 }
 
 async function wouldCycle(
@@ -342,20 +351,19 @@ async function announce(projectId: string, actorId: string, facts: LinkFact[]): 
       other: keyOf(row.other),
     });
 
-  // In order, not in parallel: `facts` puts what was lost before what was gained, and a re-parented
-  // task takes both rows in the same millisecond. Written concurrently their ids interleave, and
-  // the timeline — which falls back to `_id` on a tie — can then show the task gaining a parent
-  // before losing one.
-  for (const row of rows) {
-    await logActivity(
-      idOf(row.subject),
-      actorId,
-      row.fact.action === "added" ? "link_added" : "link_removed",
-      row.direction,
-      row.fact.action === "added" ? "" : keyOf(row.other),
-      row.fact.action === "added" ? keyOf(row.other) : ""
-    );
-  }
+  // One write, in `facts` order — what was lost before what was gained. A re-parented task takes
+  // both of its rows inside the same millisecond, and the timeline breaks that tie on `_id`, so
+  // the order these are inserted in is the order they are read in.
+  await logActivities(
+    rows.map((row) => ({
+      taskId: idOf(row.subject),
+      userId: actorId,
+      action: row.fact.action === "added" ? ("link_added" as const) : ("link_removed" as const),
+      field: row.direction,
+      oldValue: row.fact.action === "added" ? "" : keyOf(row.other),
+      newValue: row.fact.action === "added" ? keyOf(row.other) : "",
+    }))
+  );
 
   const perTask = new Map<string, (typeof rows)[number]>();
   for (const row of rows) {

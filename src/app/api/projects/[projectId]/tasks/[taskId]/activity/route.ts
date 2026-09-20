@@ -16,9 +16,15 @@ export const GET = withProjectAccess(async (_request, { params }) => {
 
   const logs = await ActivityLog.find({ task: taskId })
     // One act can write several rows in the same millisecond — a re-parented task loses and gains
-    // a parent in one request — and `createdAt` alone then orders them arbitrarily, which reads as
-    // the task gaining a parent before losing it. `_id` rises with insertion, so it breaks the tie
-    // the way the eye expects (BP-658).
+    // a parent in one request — and `createdAt` alone leaves that pair in an arbitrary order, so
+    // half the time the list claims the task lost its parent AFTER it gained one. `_id` rises with
+    // insertion, and this list is newest-first, so `-1` puts the row written last at the top,
+    // which is where it belongs (BP-658).
+    //
+    // The index is `{ task: 1, createdAt: -1 }`, so the tie-break makes this a blocking sort
+    // rather than a scan in index order. With `limit(100)` over one task's own history that is a
+    // top-k on a small set; it was measured against widening the index and judged not worth a
+    // second index build on a live collection.
     .sort({ createdAt: -1, _id: -1 })
     .limit(100)
     .populate("user", "username fullName")

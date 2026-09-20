@@ -9,7 +9,13 @@ import {
 /** What a user record has to carry for any of this to resolve. Deliberately narrow: the dispatch
  *  paths pass lean documents, and asking for the whole IUser would make them fetch more.
  *  `project` is left loose because a lean document yields an ObjectId and a request body a
- *  string — both are compared through String(), so neither is privileged. */
+ *  string — both are compared through String(), so neither is privileged.
+ *
+ *  **Lean, and that is now correctness rather than cost.** A grid is read row by row, and a row the
+ *  stored document does not mention is the signal that nobody has been asked about it. Hydrating
+ *  the document first would have Mongoose materialise that row from the sub-schema's own `false`
+ *  defaults, which is indistinguishable from an answered "no" — and the row would fall silent with
+ *  nothing to say so. */
 export interface PrefsSource {
   emailNotifications?: boolean;
   notifications?: {
@@ -46,16 +52,31 @@ function legacyMatrix(emailNotifications: boolean): NotificationMatrix {
   ) as NotificationMatrix;
 }
 
-export function defaultMatrix(user: PrefsSource | null | undefined): NotificationMatrix {
-  const stored = user?.notifications?.defaults;
-  if (!stored) return legacyMatrix(!!user?.emailNotifications);
-  // A row added to the grid after this person last saved it is one they have never been asked
-  // about, and blank would record it as a "no" they never gave — so it takes the same default a
-  // grid that was never saved takes. Without mail: they HAVE answered that question for every row
-  // they saw, and a new row is not consent to be written to.
+/**
+ * A stored grid, with any row it does not mention filled in.
+ *
+ * A row added to the grid after this person last saved it is one they have never been asked about,
+ * and blank would record it as a "no" they never gave. Without mail, though: they HAVE answered
+ * that question for every row they saw, and a new row is not consent to be written to.
+ *
+ * It cuts the other way for somebody who went through the screen and unticked everything: they
+ * gave a fairly clear answer to "do you want the bell", and this hands them one row of it back.
+ * That is the price of the choice, taken because the alternative silences the row for everybody
+ * who ever touched their settings — a larger group, and the one most likely to notice the gap.
+ *
+ * Both stored grids come through here. A project override is a grid somebody saved just as much as
+ * the global one, and filling only the global one left the new row silent on exactly the boards
+ * its owner had taken the trouble to tune.
+ */
+function answered(stored: NotificationMatrix): NotificationMatrix {
   return Object.fromEntries(
     NOTIFICATION_TYPES.map((type) => [type, stored[type] ?? unanswered(type, false)])
   ) as NotificationMatrix;
+}
+
+export function defaultMatrix(user: PrefsSource | null | undefined): NotificationMatrix {
+  const stored = user?.notifications?.defaults;
+  return stored ? answered(stored) : legacyMatrix(!!user?.emailNotifications);
 }
 
 function overrideFor(
@@ -77,7 +98,7 @@ export function matrixInForce(
   projectId: string
 ): NotificationMatrix {
   const own = overrideFor(user, projectId);
-  return own ? { ...blankMatrix(), ...own } : defaultMatrix(user);
+  return own ? answered(own) : defaultMatrix(user);
 }
 
 /** Delivery to chat needs a service AND an address; either alone sends nothing and says nothing. */

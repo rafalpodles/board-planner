@@ -411,8 +411,12 @@ describe("ActivityTimeline — what a link did to this task", () => {
     ]);
     render(<ActivityTimeline projectId="TP" taskId="t1" />);
     await waitFor(() =>
-      expect(screen.getByText("Owner Name linked this task to BP-2")).toBeTruthy()
+      expect(
+        screen.getByText("Owner Name added a dependency between this task and BP-2")
+      ).toBeTruthy()
     );
+    // and it does not pass itself off as the `relates` row it used to be worded as
+    expect(screen.queryByText("Owner Name linked this task to BP-2")).toBeNull();
   });
 
   // `⚯` was legible in a browser and two loose rings at 12px. This pins the glyph to the set the

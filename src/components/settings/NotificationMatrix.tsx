@@ -17,6 +17,8 @@ const PROJECT_ROW_LABEL: Partial<Record<NotificationType, string>> = {
   task_created: "Anybody creates a task on this board",
 };
 
+const OFF = { inApp: false, email: false, chat: false };
+
 const COLUMNS = [
   { key: "inApp", label: "In app" },
   { key: "email", label: "E-mail" },
@@ -44,7 +46,9 @@ export function NotificationMatrixEditor({
     (scope === "project" && PROJECT_ROW_LABEL[type]) || ROW_LABEL[type];
 
   function toggle(type: NotificationType, column: (typeof COLUMNS)[number]["key"]) {
-    onChange({ ...value, [type]: { ...value[type], [column]: !value[type][column] } });
+    // Optional: a grid saved before a row existed has no entry for it, and a click must not be
+    // the way that is discovered. The server fills the gap; this is the belt to that brace.
+    onChange({ ...value, [type]: { ...OFF, ...value[type], [column]: !value[type]?.[column] } });
   }
 
   return (

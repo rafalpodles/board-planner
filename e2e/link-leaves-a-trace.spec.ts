@@ -156,6 +156,15 @@ test.describe("a re-parent through the UI", () => {
         `${ADMIN_FULL_NAME} removed this task from ${PROJECT_KEY}-${FINISHED_TASK_NUMBER}'s children`
       )
     ).toBeVisible();
+
+    // And in that order. Both rows are written inside one millisecond, so `createdAt` alone leaves
+    // the pair arbitrary and half the time this screen says the task lost its old parent AFTER
+    // gaining its new one. The list is newest-first, so the gain belongs above the loss.
+    const gained = `${ADMIN_FULL_NAME} made ${PROJECT_KEY}-${DECOY_TASK_NUMBER} the parent of this task`;
+    const lost = `${ADMIN_FULL_NAME} removed this task from ${PROJECT_KEY}-${FINISHED_TASK_NUMBER}'s children`;
+    const shown = await history.innerText();
+    expect(shown).toContain(gained);
+    expect(shown.indexOf(gained)).toBeLessThan(shown.indexOf(lost));
   });
 
   // The panel is on screen when the link is made, and reloading to see what just happened is not

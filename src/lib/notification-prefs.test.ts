@@ -149,6 +149,38 @@ describe("a row nobody has been asked about", () => {
       chat: false,
     });
   });
+
+  // A project override is a grid somebody saved just as much as the global one is, and it is the
+  // half a first pass at this missed: fixing only defaultMatrix left the new row silent on every
+  // board anybody had ever ticked "use my own settings" for.
+  it("fills the row in a project's own grid too", () => {
+    const own = allOff();
+    delete (own as Partial<NotificationMatrix>).task_linked;
+    own.comment_added = { inApp: true, email: false, chat: false };
+    const user = { notifications: { projects: [{ project: P1, matrix: own }] } };
+
+    expect(matrixInForce(user, P1).task_linked).toEqual({
+      inApp: true,
+      email: false,
+      chat: false,
+    });
+    // and the rows that grid did answer are still its own, not the global grid's
+    expect(matrixInForce(user, P1).comment_added).toEqual({
+      inApp: true,
+      email: false,
+      chat: false,
+    });
+    expect(resolveChannels(user, P1, "task_linked").inApp).toBe(true);
+  });
+
+  // The control: an override that answers the row keeps its answer, including a deliberate no
+  it("leaves a row the project's grid did answer exactly as answered", () => {
+    const own = allOff();
+    own.task_linked = { inApp: false, email: false, chat: false };
+    const user = { notifications: { projects: [{ project: P1, matrix: own }] } };
+
+    expect(resolveChannels(user, P1, "task_linked").inApp).toBe(false);
+  });
 });
 
 describe("normalising what a client sends", () => {

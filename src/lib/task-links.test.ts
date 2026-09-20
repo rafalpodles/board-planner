@@ -25,7 +25,7 @@ const updateOne = vi.fn();
 const updateMany = vi.fn();
 const findByIdAndUpdate = vi.fn();
 const findOneAndUpdate = vi.fn();
-const logActivity = vi.fn();
+const logActivities = vi.fn();
 const dispatchWebhooks = vi.fn();
 const dispatchNotifications = vi.fn();
 const createNotifications = vi.fn();
@@ -71,10 +71,13 @@ vi.mock("@/models/task", () => ({
   Task: {
     findOne: (filter: object) => lean(store.find(sift(filter)) ?? null),
     find: (filter: object) => lean(store.filter(sift(filter))),
+    // `matchedCount` is the answer the production code reads to decide whether the task it was
+    // asked to write to still exists, so the mock has to give the real one.
     updateOne: async (filter: object, update: Update) => {
       updateOne(filter, update);
       const doc = store.find(sift(filter));
       if (doc) apply(doc, update);
+      return { matchedCount: doc ? 1 : 0, modifiedCount: doc ? 1 : 0 };
     },
     updateMany: async (filter: object, update: Update) => {
       updateMany(filter, update);
@@ -105,7 +108,9 @@ vi.mock("@/models/project", () => ({
   Project: { findById: () => lean({ key: "BP", name: "Board Planner" }) },
 }));
 vi.mock("@/lib/usernames", () => ({ usernameOf: async () => "rafal" }));
-vi.mock("@/lib/activity", () => ({ logActivity: (...a: unknown[]) => logActivity(...a) }));
+vi.mock("@/lib/activity", () => ({
+  logActivities: (rows: unknown[]) => logActivities(rows),
+}));
 vi.mock("@/lib/webhooks", () => ({ dispatchWebhooks: (...a: unknown[]) => dispatchWebhooks(...a) }));
 vi.mock("@/lib/notifications", () => ({
   dispatchNotifications: (...a: unknown[]) => dispatchNotifications(...a),
@@ -143,14 +148,27 @@ function task(id: string, taskNumber: number, extra: Partial<Doc> = {}): Doc {
  * same either way round, and the timeline does not: it renders `newValue` for `link_added` and
  * `oldValue` for `link_removed`, so a write into the wrong slot is a row naming no other end.
  */
+type LoggedRow = {
+  taskId: string;
+  action: string;
+  field: string;
+  oldValue: string;
+  newValue: string;
+};
+
 function rows(): [string, string, string, string, string][] {
-  return logActivity.mock.calls.map((c) => [
-    c[0] as string,
-    c[2] as string,
-    c[3] as string,
-    c[4] as string,
-    c[5] as string,
-  ]);
+  return logActivities.mock.calls.flatMap((c) =>
+    (c[0] as LoggedRow[]).map(
+      (r) =>
+        [r.taskId, r.action, r.field, r.oldValue, r.newValue] as [
+          string,
+          string,
+          string,
+          string,
+          string,
+        ]
+    )
+  );
 }
 
 function notifiedTasks(): { taskId: string; title: string }[] {
@@ -171,7 +189,7 @@ describe("addTaskLink", () => {
 
     const result = await addTaskLink(P, "a", "b", "relates", ACTOR);
 
-    expect(result).toEqual({ ok: true, changed: true });
+    expect(result).toEqual({ ok: true });
     expect(rows()).toEqual([
       ["a", "link_added", "relates", "", "BP-2"],
       ["b", "link_added", "relates", "", "BP-1"],
@@ -247,8 +265,8 @@ describe("addTaskLink", () => {
 
     const result = await addTaskLink(P, "a", "b", "relates", ACTOR);
 
-    expect(result).toEqual({ ok: true, changed: false });
-    expect(logActivity).not.toHaveBeenCalled();
+    expect(result).toEqual({ ok: true });
+    expect(rows()).toEqual([]);
     expect(createNotifications).not.toHaveBeenCalled();
     expect(dispatchWebhooks).not.toHaveBeenCalled();
   });
@@ -256,11 +274,8 @@ describe("addTaskLink", () => {
   it("says nothing when an existing blocker is sent again", async () => {
     store = [task("a", 1, { blockedBy: ["b"] }), task("b", 2)];
 
-    expect(await addTaskLink(P, "a", "b", "blocked_by", ACTOR)).toEqual({
-      ok: true,
-      changed: false,
-    });
-    expect(logActivity).not.toHaveBeenCalled();
+    expect(await addTaskLink(P, "a", "b", "blocked_by", ACTOR)).toEqual({ ok: true });
+    expect(rows()).toEqual([]);
   });
 
   // One pair holds one relation, so choosing a different type silently replaced the old one.
@@ -303,14 +318,21 @@ describe("addTaskLink", () => {
     store = [
       task("a", 1),
       task("b", 2, { relations: [{ task: "a", type: "parent_of" }] }),
+      // A third task holding `a` as its child, so the detach has something to take if the refusal
+      // comes too late. Without it the "writes nothing" half of this test is vacuous: the detach
+      // would be a no-op whether it ran before the check or after it.
+      task("elsewhere", 3, { relations: [{ task: "a", type: "parent_of" }] }),
     ];
 
     expect(await addTaskLink(P, "a", "b", "parent_of", ACTOR)).toMatchObject({
       ok: false,
       status: 400,
     });
-    expect(logActivity).not.toHaveBeenCalled();
-    expect(updateMany).not.toHaveBeenCalled();
+    expect(rows()).toEqual([]);
+    expect(store.find((d) => d._id === "elsewhere")!.relations).toEqual([
+      { task: "a", type: "parent_of" },
+    ]);
+    expect(store.find((d) => d._id === "a")!.relations).toEqual([]);
   });
 
   it("refuses a blocker that would close a cycle", async () => {
@@ -328,10 +350,7 @@ describe("removeTaskLink", () => {
   it("writes a row at both ends of a link it actually held", async () => {
     store = [task("a", 1, { relations: [{ task: "b", type: "duplicates" }] }), task("b", 2)];
 
-    expect(await removeTaskLink(P, "a", "b", "duplicates", ACTOR)).toEqual({
-      ok: true,
-      changed: true,
-    });
+    expect(await removeTaskLink(P, "a", "b", "duplicates", ACTOR)).toEqual({ ok: true });
     expect(rows()).toEqual([
       ["a", "link_removed", "duplicates", "BP-2", ""],
       ["b", "link_removed", "duplicated_by", "BP-1", ""],
@@ -344,11 +363,8 @@ describe("removeTaskLink", () => {
   it("says nothing when this end held no such link", async () => {
     store = [task("a", 1), task("b", 2, { relations: [{ task: "a", type: "duplicates" }] })];
 
-    expect(await removeTaskLink(P, "a", "b", "duplicates", ACTOR)).toEqual({
-      ok: true,
-      changed: false,
-    });
-    expect(logActivity).not.toHaveBeenCalled();
+    expect(await removeTaskLink(P, "a", "b", "duplicates", ACTOR)).toEqual({ ok: true });
+    expect(rows()).toEqual([]);
     expect(createNotifications).not.toHaveBeenCalled();
     expect(dispatchWebhooks).not.toHaveBeenCalled();
   });
@@ -356,10 +372,8 @@ describe("removeTaskLink", () => {
   it("says nothing when the named type is not the type that is stored", async () => {
     store = [task("a", 1, { relations: [{ task: "b", type: "relates" }] }), task("b", 2)];
 
-    expect(await removeTaskLink(P, "a", "b", "duplicates", ACTOR)).toMatchObject({
-      changed: false,
-    });
-    expect(logActivity).not.toHaveBeenCalled();
+    expect(await removeTaskLink(P, "a", "b", "duplicates", ACTOR)).toMatchObject({ ok: true });
+    expect(rows()).toEqual([]);
     // And nothing was taken: the `$pull` runs before the guard, so a criteria that forgot the type
     // would delete the relation that IS there and still report having done nothing.
     expect(store.find((d) => d._id === "a")!.relations).toEqual([{ task: "b", type: "relates" }]);
@@ -384,6 +398,85 @@ describe("removeTaskLink", () => {
   });
 });
 
+describe("a child with more than one parent", () => {
+  // The detach is a loop, and every fixture elsewhere gives the child exactly one parent — so its
+  // second iteration was pinned by nothing. Data like this is already broken (a task has one
+  // parent), which is the only reason the loop exists rather than a single write.
+  it("takes the child off every one of them, and tells each", async () => {
+    store = [
+      task("old-a", 8, { relations: [{ task: "child", type: "parent_of" }], watchers: ["u-a"] }),
+      task("old-b", 9, { relations: [{ task: "child", type: "parent_of" }], watchers: ["u-b"] }),
+      task("new", 10),
+      task("child", 11),
+    ];
+
+    await addTaskLink(P, "new", "child", "parent_of", ACTOR);
+
+    expect(store.find((d) => d._id === "old-a")!.relations).toEqual([]);
+    expect(store.find((d) => d._id === "old-b")!.relations).toEqual([]);
+    expect(store.find((d) => d._id === "new")!.relations).toEqual([
+      { task: "child", type: "parent_of" },
+    ]);
+
+    // Both losses, then the gain — and the child's side of each
+    expect(rows()).toEqual([
+      ["old-a", "link_removed", "parent_of", "BP-11", ""],
+      ["child", "link_removed", "child_of", "BP-8", ""],
+      ["old-b", "link_removed", "parent_of", "BP-11", ""],
+      ["child", "link_removed", "child_of", "BP-9", ""],
+      ["new", "link_added", "parent_of", "", "BP-11"],
+      ["child", "link_added", "child_of", "", "BP-10"],
+    ]);
+
+    const notified = createNotifications.mock.calls.map((c) => c[0] as { taskId: string });
+    expect(notified.map((n) => n.taskId).sort()).toEqual(["child", "new", "old-a", "old-b"]);
+  });
+
+  // One write, in one order: the timeline breaks a createdAt tie on _id, so the order these are
+  // inserted in is the order a reader sees
+  it("writes every row of the act in a single batch", async () => {
+    store = [
+      task("old", 9, { relations: [{ task: "child", type: "parent_of" }] }),
+      task("new", 10),
+      task("child", 11),
+    ];
+
+    await addTaskLink(P, "new", "child", "parent_of", ACTOR);
+
+    expect(logActivities).toHaveBeenCalledTimes(1);
+    expect((logActivities.mock.calls[0][0] as unknown[]).length).toBe(4);
+  });
+});
+
+describe("the task goes away mid-request", () => {
+  // The detach proves what it removed; the attach has to prove what it added, or the sentence
+  // announces a parenting that never happened.
+  it("announces the detach it really did, and refuses the link it could not make", async () => {
+    store = [
+      task("old", 9, { relations: [{ task: "child", type: "parent_of" }] }),
+      task("new", 10),
+      task("child", 11),
+    ];
+    // The task named in the call is deleted between the detach and the attach
+    updateOne.mockImplementation((_filter: object, update: Update) => {
+      if (update.$pull) store = store.filter((d) => d._id !== "new");
+    });
+
+    expect(await addTaskLink(P, "new", "child", "parent_of", ACTOR)).toEqual({
+      ok: false,
+      error: "Task not found",
+      status: 404,
+    });
+
+    // The old epic really did lose the child, so it is still owed its row
+    expect(rows()).toEqual([
+      ["old", "link_removed", "parent_of", "BP-11", ""],
+      ["child", "link_removed", "child_of", "BP-9", ""],
+    ]);
+    expect(rows().some((r) => r[1] === "link_added")).toBe(false);
+  });
+});
+
 describe("a board is not the only board", () => {
   // Every read and write in the module is scoped by project. Without a task on a SECOND board,
   // deleting those filters changes no assertion — and an un-scoped `parent_of` detach would reach
@@ -398,6 +491,21 @@ describe("a board is not the only board", () => {
       status: 404,
     });
     expect(store.find((d) => d._id === "a")!.relations).toEqual([]);
+  });
+
+  // The descendant check scans the board's own parent graph. Unscoped it would refuse a perfectly
+  // good link because some other board happens to hold the opposite chain.
+  it("does not refuse a link because another board holds the opposite chain", async () => {
+    store = [
+      task("a", 1),
+      task("b", 2),
+      { ...task("x", 80, { relations: [{ task: "a", type: "parent_of" }] }), project: OTHER },
+      { ...task("y", 81, { relations: [{ task: "x", type: "parent_of" }] }), project: OTHER },
+    ];
+    store.push({ ...task("b", 82, { relations: [{ task: "y", type: "parent_of" }] }), project: OTHER, _id: "b-elsewhere" });
+
+    expect(await addTaskLink(P, "a", "b", "parent_of", ACTOR)).toEqual({ ok: true });
+    expect(store.find((d) => d._id === "a")!.relations).toEqual([{ task: "b", type: "parent_of" }]);
   });
 
   it("leaves another board's parent holding its child", async () => {
@@ -439,10 +547,7 @@ describe("the same id, spelled differently", () => {
   it("records the removal when the request spells the id in upper case", async () => {
     store = [task(LOWER_A, 1, { blockedBy: [LOWER_B] }), task(LOWER_B, 2)];
 
-    expect(await removeTaskLink(P, UPPER_A, UPPER_B, "blocked_by", ACTOR)).toEqual({
-      ok: true,
-      changed: true,
-    });
+    expect(await removeTaskLink(P, UPPER_A, UPPER_B, "blocked_by", ACTOR)).toEqual({ ok: true });
     expect(store.find((d) => d._id === LOWER_A)!.blockedBy).toEqual([]);
     expect(rows()).toEqual([
       [LOWER_A, "link_removed", "blocked_by", "BP-2", ""],
@@ -453,20 +558,21 @@ describe("the same id, spelled differently", () => {
   it("still says nothing when an upper-case request re-sends a link that exists", async () => {
     store = [task(LOWER_A, 1, { relations: [{ task: LOWER_B, type: "relates" }] }), task(LOWER_B, 2)];
 
-    expect(await addTaskLink(P, UPPER_A, UPPER_B, "relates", ACTOR)).toEqual({
-      ok: true,
-      changed: false,
-    });
-    expect(logActivity).not.toHaveBeenCalled();
+    expect(await addTaskLink(P, UPPER_A, UPPER_B, "relates", ACTOR)).toEqual({ ok: true });
+    expect(rows()).toEqual([]);
     expect(dispatchWebhooks).not.toHaveBeenCalled();
   });
 
   // The same mismatch made a task its own parent: `targetTaskId === taskId` compared two spellings
   it("refuses a task linked to itself under a different spelling", async () => {
+    store = [task(LOWER_A, 1)];
+
     expect(await addTaskLink(P, UPPER_A, LOWER_A, "relates", ACTOR)).toMatchObject({
       ok: false,
       status: 400,
     });
+    // and the relation this used to write is not there
+    expect(store.find((d) => d._id === LOWER_A)!.relations).toEqual([]);
   });
 
   // A re-parent that changes nothing must not fabricate the loss of a child
@@ -476,11 +582,8 @@ describe("the same id, spelled differently", () => {
       task(LOWER_B, 2),
     ];
 
-    expect(await addTaskLink(P, UPPER_A, UPPER_B, "parent_of", ACTOR)).toEqual({
-      ok: true,
-      changed: false,
-    });
-    expect(logActivity).not.toHaveBeenCalled();
+    expect(await addTaskLink(P, UPPER_A, UPPER_B, "parent_of", ACTOR)).toEqual({ ok: true });
+    expect(rows()).toEqual([]);
     expect(dispatchWebhooks).not.toHaveBeenCalled();
   });
 });

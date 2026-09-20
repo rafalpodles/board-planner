@@ -86,10 +86,21 @@ describe("a direction it does not know", () => {
   // vague one: every other action in that switch degrades to a sentence.
   it("still says something rather than nothing", () => {
     expect(say("something_else" as LinkDirection, "added", "this task", "BP-9")).toBe(
-      "rafal linked this task to BP-9"
+      "rafal added a dependency between this task and BP-9"
     );
     expect(say("something_else" as LinkDirection, "removed", "this task", "BP-9")).toBe(
-      "rafal unlinked this task from BP-9"
+      "rafal removed a dependency between this task and BP-9"
     );
+  });
+
+  // And it must not borrow a type it has no evidence for. Reusing the `relates` wording made a
+  // row whose direction could not be read indistinguishable from a real "relates" link.
+  it("does not name a relation it cannot read", () => {
+    const vague = say("something_else" as LinkDirection, "added", "this task", "BP-9");
+
+    expect(vague).not.toBe(say("relates", "added", "this task", "BP-9"));
+    for (const named of ["linked", "parent", "duplicate", "blocked"]) {
+      expect(vague).not.toContain(named);
+    }
   });
 });

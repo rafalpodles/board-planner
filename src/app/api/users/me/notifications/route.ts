@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
 import { User } from "@/models/user";
-import { defaultMatrix, normaliseMatrix } from "@/lib/notification-prefs";
+import { defaultMatrix, matrixInForce, normaliseMatrix } from "@/lib/notification-prefs";
 import { PERSONAL_CHAT_KINDS, PersonalChatKind } from "@/types";
 import { encryptSecret, isEncryptionConfigured } from "@/lib/encryption";
 import { isAllowedWebhookUrl } from "@/lib/url-validation";
@@ -19,9 +19,12 @@ export const GET = withAuth(async (_request, { user }) => {
     // Absent means the account has never saved: the screen shows the same values either way, but
     // it is the difference between "these are my settings" and "these are what you had before"
     configured: !!stored?.notifications?.defaults,
+    // Through matrixInForce, not raw: a grid saved before a row existed does not mention it, and
+    // the editor reads `value[type][column]` — an absent row is a TypeError on the first click,
+    // on precisely the boards this person took the trouble to tune (BP-658).
     projects: (stored?.notifications?.projects ?? []).map((p) => ({
       project: String(p.project),
-      matrix: p.matrix,
+      matrix: matrixInForce(stored, String(p.project)),
     })),
     chat: {
       kind: stored?.notifications?.chat?.kind ?? "",

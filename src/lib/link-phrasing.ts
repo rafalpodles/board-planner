@@ -8,9 +8,9 @@ import { LinkDirection } from "@/types";
  * "this task" as `self`. Two spellings of the same event drift; one cannot.
  *
  * `actor` is the caller's, and the two callers do differ: the timeline has the row's populated
- * user and reads `fullName`, the notification has only an id and reads `username`. That is the
- * convention on both screens already — every other notification title in this app names a
- * username — so it is left alone rather than made uniform here.
+ * user and reads `fullName`, the notification has only an id and reads `username`. Only one other
+ * notification title in this app names an actor at all — `mentioned` — and it names a username,
+ * so this follows it rather than being made uniform here.
  */
 export function describeLinkChange({
   actor,
@@ -57,7 +57,18 @@ export function describeLinkChange({
     // `field` on an activity row is an unconstrained string, so the timeline's cast is a promise
     // the schema does not keep. Every other action in that switch degrades to a sentence rather
     // than to a blank row; this one has to as well.
-    default:
-      return added ? `${actor} linked ${self} to ${other}` : `${actor} unlinked ${self} from ${other}`;
+    //
+    // The `never` keeps what a bare default would have given away: a direction added to the union
+    // and not handled above is still a compile error rather than quietly taking this branch.
+    default: {
+      const unhandled: never = direction;
+      void unhandled;
+      // Deliberately NOT the `relates` sentence, which this used to borrow: a row whose direction
+      // cannot be read is no evidence that the relation was that one, and naming a type here would
+      // invent the very fact the row failed to carry.
+      return added
+        ? `${actor} added a dependency between ${self} and ${other}`
+        : `${actor} removed a dependency between ${self} and ${other}`;
+    }
   }
 }
