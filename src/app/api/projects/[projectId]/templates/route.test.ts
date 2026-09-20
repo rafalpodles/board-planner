@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   CATEGORY_NAME_MAX_LENGTH,
   MAX_TASK_TEMPLATES,
+  TASK_DESCRIPTION_MAX_LENGTH,
   TASK_TITLE_MAX_LENGTH,
   TEMPLATE_NAME_MAX_LENGTH,
 } from "@/lib/identifiers";
@@ -47,14 +48,17 @@ const template = (id: string, name: string): Template => ({
 function project(...templates: Template[]) {
   const doc = { taskTemplates: templates, save: vi.fn(async () => {}) };
   projectFindById.mockResolvedValue(doc);
-  // The add is an atomic $push whose filter carries the ceiling; the stub applies it the way the
-  // database would, refusal included.
+  /**
+   * The add is an atomic `$push` whose filter carries the ceiling; the stub applies it the way the
+   * database would, refusal included — and answers a **different document** from the one
+   * `findById` resolved, because that is what the database does. Handing the loaded document back
+   * would let the route answer with the list as it was before the push and hide it.
+   */
   projectFindOneAndUpdate.mockImplementation(
     async (filter: Record<string, unknown>, update: { $push: { taskTemplates: Template } }) => {
       const full = doc.taskTemplates.length >= Number(MAX_TASK_TEMPLATES);
       if (`taskTemplates.${MAX_TASK_TEMPLATES - 1}` in filter && full) return null;
-      doc.taskTemplates = [...doc.taskTemplates, update.$push.taskTemplates];
-      return doc;
+      return { ...doc, taskTemplates: [...doc.taskTemplates, update.$push.taskTemplates] };
     }
   );
   return doc;
@@ -92,17 +96,27 @@ describe("POST /api/projects/:projectId/templates", () => {
   });
 
   it("fills the fields the request left out", async () => {
-    const doc = project();
+    project();
 
-    await call(POST, { name: "Bug" });
+    const body = (await (await call(POST, { name: "Bug" })).json()) as Template[];
 
-    expect(doc.taskTemplates[0]).toEqual({
+    expect(body[0]).toEqual({
       name: "Bug",
       title: "",
       description: "",
       category: "user-story",
       acceptanceCriteria: "",
     });
+  });
+
+  // The answer comes from the write, not from the snapshot read before it — otherwise a 201 would
+  // carry the list as it was a moment earlier and the settings screen would commit that.
+  it("answers with the list the write produced, not the one it read", async () => {
+    project(template("t1", "Crash report"));
+
+    const body = (await (await call(POST, { name: "Bug" })).json()) as Template[];
+
+    expect(names(body)).toEqual(["Crash report", "Bug"]);
   });
 
   it("refuses a name that is missing, blank, or not a string", async () => {
@@ -168,6 +182,11 @@ describe("POST /api/projects/:projectId/templates", () => {
     ["a title past a task's own limit", { name: "Bug", title: "x".repeat(TASK_TITLE_MAX_LENGTH + 1) }],
     ["a non-string title", { name: "Bug", title: 7 }],
     ["a non-string description", { name: "Bug", description: [] }],
+    [
+      "acceptance criteria past a task's own limit",
+      { name: "Bug", acceptanceCriteria: "x".repeat(TASK_DESCRIPTION_MAX_LENGTH + 1) },
+    ],
+    ["a non-string acceptance criteria", { name: "Bug", acceptanceCriteria: {} }],
     // Bounded by what a CATEGORY may be called, not by what a template may be called: any looser
     // and a template can name a category that no category is allowed to be.
     [

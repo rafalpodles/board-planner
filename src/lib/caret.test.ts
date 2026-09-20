@@ -5,8 +5,10 @@ import { caretCoordinates } from "./caret";
 /**
  * **What these tests can and cannot reach.** happy-dom parses and styles but does not lay out, so
  * `offsetTop` and `offsetLeft` are always 0 — the pixel arithmetic this module exists for needs a
- * real engine and is exercised by the browser suite, not here. Measured, not assumed: the first
- * test below asserts that zero rather than working around it.
+ * real engine. It is driven in `e2e/task-references.spec.ts`, "follows the caret down a tall
+ * description", which is the failure this module was written for: on a 400px description the
+ * suggestion list hung at the top of the screen while the caret was at the bottom. Measured, not
+ * assumed: the first test below asserts that zero rather than working around it.
  *
  * What is reachable is everything around the measurement: the mirror is built, populated and
  * removed; the scroll offsets are subtracted; the line height falls back the way it says it does.

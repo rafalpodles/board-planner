@@ -40,14 +40,20 @@ function project(names: string[], templates: Array<{ name: string; category: str
     save: vi.fn(async () => {}),
   };
   projectFindById.mockResolvedValue(doc);
-  // The add is an atomic $push with the ceiling in its filter, so the stub applies the write the
-  // way the database would — including refusing it once the array is full.
+  /**
+   * The add is an atomic `$push` with the ceiling in its filter, so the stub applies the write the
+   * way the database would — including refusing it once the array is full.
+   *
+   * It answers a **different document** from the one `findById` resolved, which is what the
+   * database does: `project` is a snapshot taken before the push. A stub that mutated the loaded
+   * document and handed it back would let the route answer with `project.categories` — the list
+   * WITHOUT the row just added — and no assertion here could tell.
+   */
   projectFindOneAndUpdate.mockImplementation(
     async (filter: Record<string, unknown>, update: { $push: { categories: Category } }) => {
       const full = doc.categories.length >= Number(MAX_CATEGORIES);
       if (`categories.${MAX_CATEGORIES - 1}` in filter && full) return null;
-      doc.categories = [...doc.categories, update.$push.categories];
-      return doc;
+      return { ...doc, categories: [...doc.categories, update.$push.categories] };
     }
   );
   return doc;
@@ -104,11 +110,27 @@ describe("POST /api/projects/:projectId/categories", () => {
   });
 
   it("defaults the colour when none is given", async () => {
-    const doc = project(["bug"]);
+    project(["bug"]);
 
-    await call(POST, { name: "feature" });
+    // Read off the answer, not off the loaded document: the answer is the only place the row the
+    // database actually wrote appears.
+    const body = (await (await call(POST, { name: "feature" })).json()) as Category[];
 
-    expect(doc.categories.at(-1)).toEqual({ name: "feature", color: "#3b82f6" });
+    expect(body.at(-1)).toEqual({ name: "feature", color: "#3b82f6" });
+  });
+
+  /**
+   * The answer carries the row that was just added, which means it comes from the write and not
+   * from the snapshot read before it. Returning `project.categories` would answer 201 with the
+   * list as it was a moment earlier, and the settings screen — which commits the response as the
+   * whole truth, ids included — would render the save as having done nothing.
+   */
+  it("answers with the list the write produced, not the one it read", async () => {
+    project(["bug"]);
+
+    const body = (await (await call(POST, { name: "feature" })).json()) as Category[];
+
+    expect(names(body)).toEqual(["bug", "feature"]);
   });
 
   it("refuses a name that is missing, blank, or past fifty characters", async () => {
