@@ -155,11 +155,53 @@ jobs:
       - run: npm ci
       - run: npm run build
 
+  plan_e2e:
+    # Decides which of the six groups below this push can possibly affect, so a change confined to
+    # one feature area doesn't pay for all six. See e2e/affected-groups.ts for the mapping and the
+    # fail-safe rules; scripts/plan-e2e-groups.ts turns its answer into the output the matrix job
+    # reads. No `npm ci` here — the script imports nothing outside this repo's own TypeScript.
+    name: Plan — which e2e groups this change touches
+    runs-on: ubuntu-latest
+    outputs:
+      groups: ${{ steps.plan.outputs.groups }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+      - name: Decide
+        id: plan
+        run: |
+          set +e
+          node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/plan-e2e-groups.ts
+          STATUS=$?
+          set -e
+          if [ "$STATUS" -ne 0 ] || ! grep -q '^groups=' "$GITHUB_OUTPUT"; then
+            echo "::warning::could not determine affected e2e groups, running all of them"
+            echo 'groups=["tasks","task-fields","board","project","people","automation"]' >> "$GITHUB_OUTPUT"
+          fi
+
   e2e:
     # One job per group in e2e/groups.ts, each with a runner, a Mongo and a dev server of its own,
     # so the groups need no isolation from one another. `groups.test.ts` fails the unit job when
-    # this list and that file disagree, and when a spec belongs to no group at all.
+    # this list and that file disagree, and when a spec belongs to no group at all. The matrix
+    # always lists all six — plan_e2e decides which of them actually run. That gate is a step-level
+    # `if:`, not a job-level one: the `matrix` context (needed to compare against plan_e2e's answer)
+    # is only available to steps, not to a job's own `if:`. An unaffected group's job still runs —
+    # checkout, setup, `npm ci` — it just skips straight past Chromium and the tests themselves,
+    # which is where the time actually goes.
+    #
+    # `if: !cancelled()` plus the `!= 'success'` half of the "Whether plan_e2e picked this group"
+    # check below both exist for the same failure the plan_e2e job's own internal fallback can't
+    # reach: plan_e2e failing outright (checkout, setup-node, an infra hiccup) rather than its
+    # script failing. `needs:` alone would then skip every e2e job — running zero of six groups,
+    # the opposite of "ambiguous means run everything." `!= 'success'` short-circuits before
+    # `fromJson` ever sees a possibly-empty `outputs.groups`.
     name: End to end — ${{ matrix.group }}
+    needs: plan_e2e
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -185,24 +227,31 @@ jobs:
           cache: npm
       - run: npm ci
 
+      - name: Whether plan_e2e picked this group
+        id: affected
+        run: echo "run=${{ needs.plan_e2e.result != 'success' || contains(fromJson(needs.plan_e2e.outputs.groups), matrix.group) }}" >> "$GITHUB_OUTPUT"
+
       # Keyed on the resolved Playwright version: a browser cache from an older one is not
       # merely stale, it fails to launch
       - name: Playwright version
         id: pw
+        if: steps.affected.outputs.run == 'true'
         run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@v6
         id: browser-cache
+        if: steps.affected.outputs.run == 'true'
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
-        if: steps.browser-cache.outputs.cache-hit != 'true'
+        if: steps.affected.outputs.run == 'true' && steps.browser-cache.outputs.cache-hit != 'true'
       - name: Install Chromium system dependencies
         run: npx playwright install-deps chromium
-        if: steps.browser-cache.outputs.cache-hit == 'true'
+        if: steps.affected.outputs.run == 'true' && steps.browser-cache.outputs.cache-hit == 'true'
 
       - name: Tests
+        if: steps.affected.outputs.run == 'true'
         env:
           # Only the job that owns proxied-login-throttle.spec.ts pays for the second dev server —
           # see RUN_PROXIED_SERVER in playwright.config.ts. Every other group leaves this unset and
