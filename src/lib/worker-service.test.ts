@@ -71,7 +71,6 @@ function worker(overrides: Record<string, unknown> = {}) {
   return {
     _id: "w1",
     enabled: true,
-    lockedByInstance: false,
     protocolVersion: PROTOCOL_VERSION,
     lastSeenAt: fresh,
     host: "mac.home",
@@ -88,7 +87,6 @@ describe("verdictFor", () => {
 
   it.each([
     ["disabled", { enabled: false }, /disabled/i],
-    ["locked by the instance", { lockedByInstance: true }, /locked/i],
     ["reporting no checkout of this project", { repos: [] }, /no checkout/i],
   ])("refuses a worker %s", (_label, overrides, pattern) => {
     const verdict = verdictFor(worker(overrides), project(), PROTOCOL_VERSION, now);
@@ -543,7 +541,6 @@ describe("contested checkouts", () => {
     name: "first",
     host: "mac.home",
     enabled: true,
-    lockedByInstance: false,
     lastSeenAt: fresh,
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
     repos: [REPO],
@@ -594,7 +591,7 @@ describe("contested checkouts", () => {
     expect(usableRepos(mine, [older], now)).toEqual([other]);
   });
 
-  // A disabled or locked worker is not running, so it must not hold a checkout hostage
+  // A worker that is switched off is not running, so it must not hold a checkout hostage
   it("does not let a disabled worker keep a checkout", () => {
     const disabled = claimant({ _id: "w1", name: "off", enabled: false, createdAt: new Date("2020-01-01") });
 
@@ -610,7 +607,6 @@ describe("verdictFor and a contested checkout", () => {
     name: "older",
     host: "mac.home",
     enabled: true,
-    lockedByInstance: false,
     lastSeenAt: fresh,
     createdAt: new Date("2020-01-01"),
     repos: [{ remote: REMOTE, path: "/repo" }],

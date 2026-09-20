@@ -45,7 +45,7 @@ export const GET = withAuth(async (_request, { params, user }) => {
   // must see what that laptop can be given, not what they themselves can reach.
   const [projects, others, reachable] = await Promise.all([
     Project.find({}).select("_id key name repositoryUrl githubRepo gitlabRepo gitlabHost worker").lean(),
-    Worker.find({ _id: { $ne: worker._id } }).select("_id name host repos enabled lockedByInstance lastSeenAt createdAt"),
+    Worker.find({ _id: { $ne: worker._id } }).select("_id name host repos enabled lastSeenAt createdAt"),
     ownerReachableProjectIds(worker),
   ]);
 

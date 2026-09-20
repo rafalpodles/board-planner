@@ -501,10 +501,10 @@ test("a command reaches the machine's open stream the moment it is issued, and a
     stream.close();
   }
 
-  // The kill switch closes this door too. Without the refusal a locked machine would keep a
+  // The kill switch closes this door too. Without the refusal a switched-off machine would keep a
   // channel the console still believes in, and only its heartbeat would be told to stop.
-  await row.getByRole("button", { name: "Lock", exact: true }).click();
-  await expect(row.getByRole("button", { name: "Locked" })).toBeVisible();
+  await row.getByRole("button", { name: "On", exact: true }).click();
+  await expect(row.getByRole("button", { name: "Off", exact: true })).toBeVisible();
   const refused = await openStream();
   refused.close();
   expect(refused.status).toBe(403);
@@ -557,8 +557,8 @@ test("a phase the machine reports over /events is what the card and the fleet co
 
   // The kill switch reaches the run in flight: its next report is told to abort, and the board
   // keeps the last phase that was true rather than one the admin just stopped
-  await row.getByRole("button", { name: "Lock", exact: true }).click();
-  await expect(row.getByRole("button", { name: "Locked" })).toBeVisible();
+  await row.getByRole("button", { name: "On", exact: true }).click();
+  await expect(row.getByRole("button", { name: "Off", exact: true })).toBeVisible();
   const aborted = await reportPhase(request, { seq: 9, phase: "gates:review" });
   expect(aborted.status()).toBe(403);
   expect((await aborted.json()).abort).toBe(true);
@@ -1168,7 +1168,7 @@ test("the fleet screen says whether a machine confines the agent it runs", async
   const accepted = fleetRow(page, WORKER_NAME);
   await expect(accepted.getByText(/^ready/)).toBeVisible();
   // The sentence is on the full-width line under the worker, not in the Preflight column: that
-  // column is the eighth of twelve and starts past the right edge of a 1280px viewport, so a
+  // column is the eighth of ten and starts past the right edge of a 1280px viewport, so a
   // warning that lived only there is one nobody reads without scrolling the table sideways.
   // Page-scoped, not row-scoped: the line lives in the full-width row BENEATH the worker's own,
   // which is the whole of the change — and this fleet has one machine on it.

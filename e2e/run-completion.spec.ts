@@ -126,7 +126,6 @@ test("a different worker holding its own run is still refused the first worker's
     policy: { pollIntervalMs: 30_000 },
     policyOverrides: [],
     enabled: true,
-    lockedByInstance: false,
     lastSeenAt: new Date(),
     identity: null,
     bindingError: "",

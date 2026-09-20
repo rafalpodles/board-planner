@@ -10,7 +10,7 @@ export const POST = withWorker(async (request, { worker }) => {
   // Every other withWorker route refuses a killed worker, and this one is not the exception: an
   // abort is asynchronous, so without this the board would keep advancing a run the admin just
   // stopped — at exactly the moment the operator needs the badge to be true
-  if (!worker.enabled || worker.lockedByInstance) {
+  if (!worker.enabled) {
     return NextResponse.json({ error: "this worker may not run", abort: true }, { status: 403 });
   }
 

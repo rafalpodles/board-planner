@@ -14,7 +14,7 @@ describe("logInstanceAudit", () => {
 
   it("records the actor, the action and what was acted on", async () => {
     await logInstanceAudit({
-      action: "worker_locked",
+      action: "worker_disabled",
       target: "rig-laptop",
       user: "admin-1",
       detail: "Kill switch on",
@@ -23,7 +23,7 @@ describe("logInstanceAudit", () => {
     expect(create).toHaveBeenCalledWith({
       user: "admin-1",
       actorUsername: "",
-      action: "worker_locked",
+      action: "worker_disabled",
       target: "rig-laptop",
       detail: "Kill switch on",
     });
@@ -66,7 +66,7 @@ describe("logInstanceAudit", () => {
     create.mockRejectedValue(new Error("mongo is down"));
 
     await expect(
-      logInstanceAudit({ action: "worker_locked", target: "rig-laptop" })
+      logInstanceAudit({ action: "worker_disabled", target: "rig-laptop" })
     ).resolves.toBeUndefined();
   });
 });

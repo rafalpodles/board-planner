@@ -34,7 +34,6 @@ function workerDoc(overrides: Record<string, unknown> = {}) {
   return {
     _id: "w1",
     enabled: true,
-    lockedByInstance: false,
     identity: IDENTITY_ID,
     repos: [{ remote: REMOTE, path: "/checkout" }],
     // BP-305/BP-358: the reported repos narrow what this machine's owner can reach, they never
@@ -193,14 +192,6 @@ describe("the grant is re-derived on every call", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  it("refuses a worker locked by the instance, whatever the project says", async () => {
-    verifyWorkerCredential.mockResolvedValue(workerDoc({ lockedByInstance: true }));
-    const handler = vi.fn();
-
-    expect((await withProjectAccessOrWorker(handler)(workerRequest(), context())).status).toBe(403);
-    expect(handler).not.toHaveBeenCalled();
-  });
-
   it("refuses a worker that has no identity to act as", async () => {
     verifyWorkerCredential.mockResolvedValue(workerDoc({ identity: null }));
     const handler = vi.fn();
@@ -285,10 +276,10 @@ describe("the grant is re-derived on every call", () => {
       expect(handler).not.toHaveBeenCalled();
     });
 
-    // A disabled or locked machine is refused before any of this: the kill switch is not a
-    // permissions question and must not be softened by holding a task
+    // A switched-off machine is refused before any of this: the kill switch is not a permissions
+    // question and must not be softened by holding a task
     it("does not let a killed worker report either", async () => {
-      verifyWorkerCredential.mockResolvedValue(workerDoc({ lockedByInstance: true }));
+      verifyWorkerCredential.mockResolvedValue(workerDoc({ enabled: false }));
       taskExists.mockResolvedValue({ _id: "t1" });
 
       expect(

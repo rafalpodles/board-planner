@@ -106,7 +106,7 @@ export const POST = withWorker(async (request, { worker }) => {
   if (!read.ok && read.reason === "too-large") return read.response;
   const body = read.ok ? read.value : {};
 
-  if (!worker.enabled || worker.lockedByInstance) {
+  if (!worker.enabled) {
     return NextResponse.json({ error: "this worker may not run", abort: true }, { status: 403 });
   }
 
@@ -137,7 +137,7 @@ export const POST = withWorker(async (request, { worker }) => {
   // Two worker processes on one machine must not share a working tree, and the same decision has to
   // hold at claim time — so it is made in worker-service and used by both this route and verdictFor.
   const others = await Worker.find({ _id: { $ne: worker._id } }).select(
-    "_id name host repos enabled lockedByInstance lastSeenAt createdAt"
+    "_id name host repos enabled lastSeenAt createdAt"
   );
   const inventory = usableRepos(
     {
@@ -145,7 +145,6 @@ export const POST = withWorker(async (request, { worker }) => {
       name: worker.name,
       host: worker.host,
       enabled: worker.enabled,
-      lockedByInstance: worker.lockedByInstance,
       lastSeenAt: worker.lastSeenAt,
       createdAt: worker.createdAt,
       repos: repos ?? worker.repos ?? [],

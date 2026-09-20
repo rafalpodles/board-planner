@@ -31,7 +31,7 @@ describe("auditActionLabel", () => {
   });
 
   it("keeps the labels the page already had", () => {
-    expect(auditActionLabel(entry("worker_locked"))).toBe("Kill switch on");
+    expect(auditActionLabel(entry("worker_disabled"))).toBe("Worker disabled");
     expect(auditActionLabel(entry("enrolment_token_minted"))).toBe("Enrolment token minted");
   });
 
@@ -43,14 +43,21 @@ describe("auditActionLabel", () => {
       auditActionLabel(entry("project_worker_policy_changed" as InstanceAuditAction))
     ).toBe("project worker policy changed");
   });
+
+  // BP-693 retired the lock the same way, and for the same reason: the field it recorded is gone
+  it("reads a retired kill-switch row as a sentence too", () => {
+    expect(auditActionLabel(entry("worker_locked" as InstanceAuditAction))).toBe("worker locked");
+  });
 });
 
 describe("auditIsNotable", () => {
   // The pairing the bug named: two ways to stop a machine, one of them drawn in red and the other
-  // as quiet as a rename
+  // as quiet as a rename. The kill switch is `worker_disabled` since BP-693 collapsed the lock
+  // into it — the highlight had to move with the field, or the log stops flagging what stops a
+  // machine at all.
   it("marks a stop as loudly as the kill switch beside it", () => {
     expect(auditIsNotable(entry("worker_command_sent", "stop"))).toBe(true);
-    expect(auditIsNotable(entry("worker_locked"))).toBe(true);
+    expect(auditIsNotable(entry("worker_disabled"))).toBe(true);
   });
 
   it("marks a pause too, because it also takes work off the machine", () => {

@@ -97,7 +97,11 @@ const SCENARIOS: Record<string, Scenario> = {
       await machineIsLive(page);
     },
   },
-  // Wide, like the list view: at 1440 the Enabled, Lock and Commands columns sit past the edge
+  // Wide, like the list view. BP-642 pinned the controls to the right edge, so at 1440 they are on
+  // the screen — but the table is 995px against an 882px scrollport there, and the header caught
+  // half-drawn under the pinned column is Preflight's. Measured, at 1440 and again after BP-693
+  // narrowed the column: a documentation screenshot reads that as a rendering fault rather than as
+  // a table that scrolls. At 1760 the whole table fits, headers and all.
   "admin-workers": {
     viewport: WIDE,
     run: async (page) => {

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 
-import { useCallback, useEffect, useState } from "react";
+import { ReactNode, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
@@ -11,12 +11,42 @@ import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { EnrolWorkerModal } from "@/components/settings/EnrolWorkerModal";
 import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
+import { useHorizontalOverflow } from "@/hooks/use-horizontal-overflow";
 import { timeAgo } from "@/lib/time";
 import { workerPolicyRows } from "@/lib/worker-policy-view";
 import { commandStatus, WorkerCommand } from "@/lib/worker-command-status";
 import { ApiWorker, ApiWorkerPreflight } from "@/types";
 
 const POLL_MS = 5_000;
+
+/**
+ * The width of the pinned controls column at its widest, and the two numbers derived from it.
+ * Measured at 124px with the command-status line absent; 130 is that rounded up to leave the chip
+ * room to say something longer without the constant becoming a lie.
+ *
+ * A constant rather than a measurement, and that is not laziness: below the threshold the commands
+ * row wraps, so the column's width is a function of whether it is pinned. Measuring it to decide
+ * would close the loop — unpinned, wrapped, narrow, pin; pinned, unwrapped, wide, unpin — driven
+ * round by the ResizeObserver that watches it.
+ *
+ * Pinning wants room for the table beside the column, not merely room for the column: four times
+ * over leaves three quarters of the width still reading as a table. The scrollport is the window
+ * less 558px of sidebar, padding, settings nav and the card's border, so the threshold of 520 is
+ * a window about 1078 wide. It pins at 1440 (882px) and at 1280 (722px), and leaves 1024 (466px)
+ * and everything below it scrolling the ordinary way.
+ */
+const CONTROLS_WIDTH = 130;
+const PIN_MIN_SCROLLPORT = CONTROLS_WIDTH * 4;
+const PIN_SCROLL_PADDING = CONTROLS_WIDTH + 8;
+const FADE_RIGHT = "linear-gradient(to right, #000 calc(100% - 32px), transparent)";
+
+/**
+ * Whole strings, never built around the `moreRight` branch: Tailwind finds class names by reading
+ * the source, so an arbitrary value split across an interpolation is one it never generates.
+ */
+const PIN_EDGE = "shadow-[inset_1px_0_0_0_var(--color-border)]";
+const PIN_EDGE_OVER_CONTENT =
+  "shadow-[inset_1px_0_0_0_var(--color-border),var(--pin-edge-shadow)]";
 
 const TONE_CLASSES = {
   pending: "text-warning",
@@ -108,10 +138,82 @@ function PreflightCell({ preflight }: { preflight: ApiWorkerPreflight | null }) 
 /**
  * The cost a passing check carries, on the full-width line under the worker.
  *
- * Where it can be read: the Preflight column is the eighth of twelve in a table that scrolls
+ * Where it can be read: the Preflight column is the eighth of ten in a table that scrolls
  * sideways, and an instance admin who never scrolls it would have met this machine as `ready`.
  * Nothing is duplicated — the cell names the check, this says what it means (BP-606).
  */
+/**
+ * A machine's state, as a word. Quiet by default because "on" and "unlocked" are the ordinary
+ * case and a table of ordinary rows should not be a wall of filled buttons; colour arrives only
+ * when the state is one somebody should notice.
+ */
+function StateChip({
+  children,
+  onClick,
+  disabled,
+  title,
+  tone,
+}: {
+  children: ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  title: string;
+  tone: "neutral" | "muted" | "danger";
+}) {
+  const tones = {
+    neutral: "border-border text-text hover:bg-bg-hover",
+    muted: "border-border/60 text-text-muted hover:bg-bg-hover",
+    danger: "border-danger/50 bg-danger/10 text-danger hover:bg-danger/15",
+  };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={`focus-ring inline-flex min-h-11 cursor-pointer items-center rounded-full border px-2.5 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-0 sm:py-1 ${tones[tone]}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+/**
+ * A command, as an icon. The word is the accessible name rather than the label: three verbs at
+ * `text-xs` were the widest thing in this column, and the shapes — two bars, a triangle, a square —
+ * are the ones every transport control has used for fifty years.
+ */
+function CommandIcon({
+  label,
+  children,
+  onClick,
+  disabled,
+  danger,
+}: {
+  label: string;
+  children: ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  danger?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      title={label}
+      className={`focus-ring inline-flex h-11 w-11 cursor-pointer items-center justify-center rounded-lg text-text-muted/90 transition-colors disabled:cursor-not-allowed disabled:opacity-50 sm:h-8 sm:w-8 ${
+        danger ? "hover:bg-danger/10 hover:text-danger" : "hover:bg-bg-hover hover:text-text"
+      }`}
+    >
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" className="h-4 w-4">
+        {children}
+      </svg>
+    </button>
+  );
+}
+
 function PreflightWarning({ preflight }: { preflight: ApiWorkerPreflight | null }) {
   const warned = (preflight?.checks ?? []).filter((c) => c.ok && c.warn);
   if (warned.length === 0) return null;
@@ -147,6 +249,7 @@ export default function AdminWorkersPage() {
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [enrolling, setEnrolling] = useState(false);
+  const { ref: scroller, moreRight, width: scrollportWidth } = useHorizontalOverflow<HTMLDivElement>();
   // The only way back from a release is a fresh enrolment run on that machine, by whoever sits at
   // it — every other destructive control in this product asks first, and this one is less reversible
   // than most of them.
@@ -173,7 +276,7 @@ export default function AdminWorkersPage() {
 
   async function patch(
     worker: ApiWorker,
-    changes: Partial<Pick<ApiWorker, "enabled" | "lockedByInstance" | "owner">>
+    changes: Partial<Pick<ApiWorker, "enabled" | "owner">>
   ) {
     setSavingId(worker._id);
     try {
@@ -220,6 +323,23 @@ export default function AdminWorkersPage() {
   }
   if (!isAdmin || !workers) return null;
 
+  // Measured, not a breakpoint: this scrollport is the window less a sidebar and a settings nav,
+  // so `lg` says 1024 and means 468px here — half of it would be the pinned column. Below the
+  // threshold nothing is pinned and the fade on the scroller carries the signal instead.
+  const pinned = scrollportWidth >= PIN_MIN_SCROLLPORT;
+
+  // `w-px` and `whitespace-nowrap` are one decision: auto table layout treats the width as a
+  // suggestion and min-content wins, so the cell is exactly as wide as the widest row of controls
+  // — and only because nothing in it wraps.
+  //
+  // The left edge is an inset shadow rather than `border-l`: Tailwind's preflight leaves the
+  // table at `border-collapse: collapse`, where borders belong to the grid and are painted by the
+  // table, so a border here would stay at the column's natural position and slide out from under
+  // the pinned cell the moment the operator scrolls (found in review).
+  const stickyCell = `w-px whitespace-nowrap px-3 py-2 ${
+    pinned ? `sticky right-0 z-10 ${moreRight ? PIN_EDGE_OVER_CONTENT : PIN_EDGE}` : ""
+  }`;
+
   return (
     <div className="max-w-6xl mx-auto">
       <div className="flex items-start justify-between gap-4 mb-6">
@@ -253,8 +373,25 @@ export default function AdminWorkersPage() {
         }}
       />
 
-      <div className="border border-border rounded-lg overflow-hidden">
-        <div className="overflow-x-auto">
+      {/* `bg-bg-card` because the pinned cell has to be opaque to hide what passes under it, and an
+          opaque cell on a transparent row is a stripe. The sibling tables in this section carry no
+          background, so this one is deliberately the odd one out. */}
+      <div className="border border-border rounded-lg overflow-hidden bg-bg-card">
+        {/* Nothing pinned means nothing says the table continues, so the scroller fades its own
+            right edge. A mask rather than an overlay: the header's background is a different
+            token, and a gradient painted from `bg-bg-card` tinted its last 32px and repainted the
+            border under it. The mask asks no questions about what is underneath — the same answer
+            `use-panel-clamp` reached vertically (BP-636). */}
+        <div
+          ref={scroller}
+          className="overflow-x-auto"
+          style={{
+            ...(moreRight && !pinned ? { maskImage: FADE_RIGHT, WebkitMaskImage: FADE_RIGHT } : {}),
+            // Tabbing to a control that is off to the right scrolls it into view at the very edge
+            // of the scrollport — which is under the pinned column, focus ring and all
+            ...(pinned ? { scrollPaddingRight: `${PIN_SCROLL_PADDING}px` } : {}),
+          }}
+        >
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-bg-input text-text-muted text-xs border-b border-border">
@@ -267,15 +404,19 @@ export default function AdminWorkersPage() {
                 <th className="text-left px-3 py-2 font-medium">Last seen</th>
                 <th className="text-left px-3 py-2 font-medium">Preflight</th>
                 <th className="text-left px-3 py-2 font-medium">Binding error</th>
-                <th className="text-left px-3 py-2 font-medium">Enabled</th>
-                <th className="text-left px-3 py-2 font-medium">Lock</th>
-                <th className="text-left px-3 py-2 font-medium">Commands</th>
+                {/* BP-642: Enabled, Lock and Commands, pinned to the right edge. The nine columns
+                    that describe a machine fit a laptop; three more columns of controls did not,
+                    and the switch the docs call "the one to reach for when something is going
+                    wrong" was the first thing off the screen. */}
+                <th className={`${stickyCell} bg-bg-input text-left font-medium`}>
+                  Controls
+                </th>
               </tr>
             </thead>
             <tbody>
               {workers.length === 0 && (
                 <tr>
-                  <td colSpan={12} className="px-3 py-6 text-center text-text-muted text-sm">
+                  <td colSpan={10} className="px-3 py-6 text-center text-text-muted text-sm">
                     No workers registered yet.
                   </td>
                 </tr>
@@ -348,70 +489,68 @@ export default function AdminWorkersPage() {
                         </span>
                       )}
                     </td>
-                    <td className="px-3 py-2">
-                      <Button
-                        size="sm"
-                        variant={worker.enabled && !worker.lockedByInstance ? "primary" : "secondary"}
-                        disabled={savingId === worker._id || worker.lockedByInstance}
-                        onClick={() => patch(worker, { enabled: !worker.enabled })}
-                      >
-                        {worker.enabled ? "On" : "Off"}
-                      </Button>
-                    </td>
-                    <td className="px-3 py-2">
-                      <button
-                        onClick={() => patch(worker, { lockedByInstance: !worker.lockedByInstance })}
-                        disabled={savingId === worker._id}
-                        className={`inline-flex min-h-11 cursor-pointer items-center rounded border px-3 text-xs transition-colors sm:min-h-0 sm:px-2 sm:py-1 ${
-                          worker.lockedByInstance
-                            ? "border-danger bg-danger/10 text-danger"
-                            : "border-border text-text-muted hover:text-text"
-                        }`}
-                        title={
-                          worker.lockedByInstance
-                            ? "Locked — this worker cannot claim or continue tasks"
-                            : "Lock this worker (kill switch)"
-                        }
-                      >
-                        {worker.lockedByInstance ? "Locked" : "Lock"}
-                      </button>
-                    </td>
-                    <td className="px-3 py-2">
+                    <td data-testid="worker-controls" className={`${stickyCell} bg-bg-card`}>
                       <div className="flex flex-col gap-1">
                         {status && (
                           <span className={`text-xs ${TONE_CLASSES[status.tone]}`}>{status.text}</span>
                         )}
-                        <div className="flex flex-wrap gap-1">
-                          <Button
-                            size="sm"
-                            variant="secondary"
+                        {/* State reads as state and actions read as actions. Five filled buttons
+                            said everything at once, in two visual languages, across 232px of an
+                            882px table. The chip says what the machine IS; the three icons do
+                            something to it. Their accessible names are still the words, which is
+                            what the specs press them by.
+
+                            One chip, not two: `lockedByInstance` was a second kill switch every
+                            guard tested beside this one, for the same 403 (BP-693). */}
+                        <div className="flex items-center gap-1">
+                          <StateChip
+                            onClick={() => patch(worker, { enabled: !worker.enabled })}
+                            disabled={savingId === worker._id}
+                            tone={worker.enabled ? "neutral" : "danger"}
+                            title={
+                              worker.enabled
+                                ? "Enabled — this worker may claim tasks. Switch it off to stop it."
+                                : "Disabled — this worker takes no work until it is switched back on"
+                            }
+                          >
+                            {worker.enabled ? "On" : "Off"}
+                          </StateChip>
+                        </div>
+                        <div className="flex items-center gap-0.5">
+                          <CommandIcon
+                            label="Pause"
                             disabled={savingId === worker._id}
                             onClick={() => sendCommand(worker, "pause")}
                           >
-                            Pause
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="secondary"
+                            <rect x="6" y="5" width="3.5" height="14" rx="1" />
+                            <rect x="14.5" y="5" width="3.5" height="14" rx="1" />
+                          </CommandIcon>
+                          <CommandIcon
+                            label="Resume"
                             disabled={savingId === worker._id}
                             onClick={() => sendCommand(worker, "resume")}
                           >
-                            Resume
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="danger"
+                            <path d="M8 5.5v13l11-6.5z" />
+                          </CommandIcon>
+                          <CommandIcon
+                            label="Stop"
+                            danger
                             disabled={savingId === worker._id}
                             onClick={() => sendCommand(worker, "stop")}
                           >
-                            Stop
-                          </Button>
+                            <rect x="6" y="6" width="12" height="12" rx="2" />
+                          </CommandIcon>
                         </div>
                       </div>
                     </td>
                   </tr>,
+                  // colSpan over every column, the pinned one included: `PreflightWarning` below
+                  // holds itself at the scroller's left edge with `sticky left-3`, and sticky is
+                  // clamped to its containing block — so a cell one column short carries the
+                  // sentence off the left exactly as BP-606 found it. The pinned column's edge
+                  // therefore stops at this row rather than running through it.
                   <tr key={`${worker._id}-policy`} className="border-b border-border last:border-b-0">
-                    <td colSpan={12} className="px-3 pb-3 pt-0">
+                    <td colSpan={10} className="px-3 pb-3 pt-0">
                       <PreflightWarning preflight={worker.preflight} />
                       <div className="flex flex-wrap gap-1.5">
                         {workerPolicyRows(worker as never).map((row) => (

@@ -41,8 +41,8 @@ export const POST = withAdmin(async (request, { params, user }) => {
     return NextResponse.json({ error: "Worker not found" }, { status: 404 });
   }
 
-  // The other way to stop a machine. Recording only lockedByInstance would leave an operator
-  // reading a log full of worker_locked rows and concluding nothing else had stopped anything.
+  // The other way to stop a machine. Recording only the Enabled switch would leave an operator
+  // reading a log full of worker_disabled rows and concluding nothing else had stopped anything.
   void logInstanceAudit({
     action: "worker_command_sent",
     target: worker.name,

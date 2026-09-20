@@ -42,7 +42,6 @@ function workerDoc(overrides: Record<string, unknown> = {}) {
   return {
     _id: WORKER_ID,
     enabled: true,
-    lockedByInstance: false,
     version: "1.0.0",
     host: "mac.home",
     lastSeenAt: new Date(),
@@ -202,7 +201,6 @@ describe("one working tree, one worker", () => {
     name: "second-process",
     host: "mac.home",
     enabled: true,
-    lockedByInstance: false,
     lastSeenAt: new Date(),
     createdAt: new Date("2020-01-01"),
     repos: [{ remote: REMOTE, path: "/repo" }],

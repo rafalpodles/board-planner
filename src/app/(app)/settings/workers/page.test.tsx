@@ -55,7 +55,6 @@ function worker(over: Partial<ApiWorker> = {}): ApiWorker {
     policy: { pollIntervalMs: 30_000 },
     policyOverrides: [],
     enabled: true,
-    lockedByInstance: false,
     lastSeenAt: new Date().toISOString(),
     bindingError: "",
     preflight: null,
@@ -127,9 +126,11 @@ describe("the fleet console's owner column", () => {
     expect(under("Last seen")).toBe("5m ago");
     expect(under("Preflight")).toBe("not reported");
     expect(under("Binding error")).toBe("");
-    expect(under("Enabled")).toBe("On");
-    expect(under("Lock")).toBe("Lock");
-    expect(under("Commands")).toMatch(/^Pause.*Stop$/);
+    // BP-642 folded Enabled, Lock and Commands into one pinned cell: three columns' worth of
+    // controls did not fit a laptop beside the nine that describe the machine. BP-693 then took
+    // Lock with it, being a second kill switch for the same 403. The commands are icons and carry
+    // their words as accessible names, so the cell's text is the state chip alone.
+    expect(under("Controls")).toBe("On");
   });
 
   it("falls back to the username when that account has no display name", async () => {
@@ -261,7 +262,7 @@ describe("a check that passed at a cost", () => {
 
     render(<WorkersPage />);
 
-    // The full-width line under the worker, because the Preflight column is the eighth of twelve
+    // The full-width line under the worker, because the Preflight column is the eighth of ten
     // in a table that scrolls sideways — measured off the right edge of a 1280px viewport.
     const line = await screen.findByTestId("preflight-warning");
     expect(line.textContent).toContain("sandbox");
@@ -269,8 +270,10 @@ describe("a check that passed at a cost", () => {
     expect(line.className).toContain("text-warning");
     // The word, so the amber is not the only thing saying this is a warning
     expect(line.textContent).toContain("Warning:");
-    // And the line that proves it left the Preflight column: only the full-width row spans the table
-    expect(line.closest("td")?.colSpan).toBe(12);
+    // And the line that proves it left the Preflight column: only the full-width row spans the
+    // table. Ten, not nine: BP-642 briefly gave this row a pinned cell of its own, which shrank
+    // the block this line's `sticky left-3` is clamped to and carried it off the left again.
+    expect(line.closest("td")?.colSpan).toBe(10);
   });
 
   it("still opens the preflight cell with ready, and names the check in amber", async () => {

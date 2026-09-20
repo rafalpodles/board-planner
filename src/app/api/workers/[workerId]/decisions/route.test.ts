@@ -56,7 +56,7 @@ function record(over: Record<string, unknown> = {}) {
 }
 
 function workerDoc(over: Record<string, unknown> = {}) {
-  return { _id: WORKER_ID, credentialHash: "h", enabled: true, lockedByInstance: false, ...over };
+  return { _id: WORKER_ID, credentialHash: "h", enabled: true, ...over };
 }
 
 beforeEach(() => {
@@ -80,8 +80,8 @@ describe("POST /api/workers/:workerId/decisions", () => {
     expect(createDecision).not.toHaveBeenCalled();
   });
 
-  it("refuses a machine the instance has switched off or killed", async () => {
-    verifyWorkerCredential.mockResolvedValue(workerDoc({ lockedByInstance: true }));
+  it("refuses a machine the instance has switched off", async () => {
+    verifyWorkerCredential.mockResolvedValue(workerDoc({ enabled: false }));
     const { req, ctx } = call("POST", record());
 
     const response = await POST(req, ctx);

@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/Badge";
 import { useFocusTrap } from "@/hooks/use-focus-trap";
 import { useProjects } from "@/hooks/use-projects";
 import { closeOpenLayers, openLayerCount } from "@/lib/focus-trap";
+import { isTypingTarget } from "@/lib/keyboard-scope";
 import { projectRefFromPathname } from "@/lib/urls";
 import { STATUS_LABELS } from "@/types";
 import { MIN_QUERY, SearchHit, columnOf, groupOf, useSearch } from "./use-search";
@@ -30,17 +31,6 @@ function runsOf(hits: SearchHit[], currentProjectRef?: string): Run[] {
       items: numbered.filter(({ hit }) => groupOf(hit, currentProjectRef) === group),
     }))
     .filter((run) => run.items.length > 0);
-}
-
-function isTypingTarget(target: EventTarget | null): boolean {
-  const el = target as HTMLElement | null;
-  if (!el) return false;
-  return (
-    el.tagName === "INPUT" ||
-    el.tagName === "TEXTAREA" ||
-    el.tagName === "SELECT" ||
-    el.isContentEditable
-  );
 }
 
 function useSearchShortcut(

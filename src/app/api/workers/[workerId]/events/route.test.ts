@@ -35,9 +35,9 @@ function request(headers: Record<string, string>, body: unknown) {
 
 const event = { taskId: TASK_ID, runId: "run-1", seq: 1, phase: "gates:build" };
 
-// enabled and lockedByInstance carry schema defaults, so a real Worker document always has them
+// enabled carries a schema default, so a real Worker document always has it
 function workerDoc(overrides: Record<string, unknown> = {}) {
-  return { _id: WORKER_ID, credentialHash: "h", enabled: true, lockedByInstance: false, ...overrides };
+  return { _id: WORKER_ID, credentialHash: "h", enabled: true, ...overrides };
 }
 
 beforeEach(() => {
@@ -49,11 +49,8 @@ beforeEach(() => {
 describe("POST /api/workers/:workerId/events", () => {
   // An abort is asynchronous, so a killed worker keeps running for a while. Without this the board
   // would show that run advancing normally, right when the operator needs the badge to be true
-  it.each([
-    ["disabled", { enabled: false }],
-    ["locked by the instance", { lockedByInstance: true }],
-  ])("refuses a worker that is %s, without touching a task", async (_label, overrides) => {
-    verifyWorkerCredential.mockResolvedValue(workerDoc(overrides));
+  it("refuses a worker that is disabled, without touching a task", async () => {
+    verifyWorkerCredential.mockResolvedValue(workerDoc({ enabled: false }));
     const { req, ctx } = request(authed, event);
 
     const response = await POST(req, ctx);

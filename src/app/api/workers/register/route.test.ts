@@ -117,7 +117,7 @@ describe("POST /api/workers/register", () => {
   });
 
   // The property this whole credential exists for: no admin session, no admin API token, nothing
-  // on the laptop that could reach PATCH /api/workers/:id and lift lockedByInstance.
+  // on the laptop that could reach PATCH /api/workers/:id and switch the machine back on.
   it("never consults the session — an admin identity does not register a worker", async () => {
     await POST(request(VALID, "cpe_good"));
 

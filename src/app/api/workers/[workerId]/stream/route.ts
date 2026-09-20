@@ -5,7 +5,7 @@ import { registerWorkerStream, unregisterWorkerStream } from "@/lib/worker-event
 const PING_MS = 15_000;
 
 export const GET = withWorker(async (_request, { worker }) => {
-  if (!worker.enabled || worker.lockedByInstance) {
+  if (!worker.enabled) {
     return NextResponse.json({ error: "this worker may not run" }, { status: 403 });
   }
 

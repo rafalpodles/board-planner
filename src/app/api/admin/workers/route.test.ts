@@ -38,7 +38,6 @@ function workerDoc(overrides: Record<string, unknown> = {}) {
       model: "opus",
     },
     enabled: true,
-    lockedByInstance: false,
     lastSeenAt: new Date(),
     bindingError: "",
     command: "",

@@ -32,7 +32,6 @@ const workerSchema = new Schema<IWorker>(
     // other field at creation, so this list is the only record of intent.
     policyOverrides: { type: [String], default: [] },
     enabled: { type: Boolean, default: true },
-    lockedByInstance: { type: Boolean, default: false },
     lastSeenAt: { type: Date, default: null },
     // Set only from the browser screen, by the person who owns the machine. Deliberately not
     // `default: []` versus absent — see IWorker: "never chosen" and "chose nothing" are different
