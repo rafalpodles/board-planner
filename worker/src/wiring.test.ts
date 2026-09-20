@@ -1269,6 +1269,24 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       expect(run.logError).toHaveBeenCalledWith(expect.stringContaining("package-lock.json"));
     });
 
+    // The comment on the loop that writes this line promises it is said once per binding rather
+    // than once per poll. It was not: rebind clears `unusable` and re-reports it every refresh, so
+    // a machine beside a repository the gates refuse wrote the same line every thirty seconds for
+    // weeks — 40 MB of it on the machine this was found on.
+    it("says it once while the reason has not changed, not once every refresh", async () => {
+      const run = await runOneTask(undefined, undefined, {
+        readFile: (path) =>
+          path.endsWith("package.json") ? JSON.stringify({ scripts: { lint: "eslint" } }) : null,
+        passes: 2,
+        clockJumpOnSleepMs: 31_000,
+      });
+
+      const refusals = run.logError.mock.calls.filter(
+        ([line]) => typeof line === "string" && line.includes("not claiming for project p1")
+      );
+      expect(refusals).toHaveLength(1);
+    });
+
     // "Why is this machine sitting on a project and doing nothing" has to be answerable from the
     // cockpit, not only from a log line that scrolled past.
     it("says on the socket why the project is not being worked on", async () => {

@@ -224,6 +224,11 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // before a task is claimed — checkRepo runs at every rebind — and spending an agent's run to
   // rediscover it at the build gate is the cost this map exists to stop (BP-379).
   const unusable = new Map<string, string>();
+  // What was last said about each unusable project. Survives rebind, unlike `unusable`, because
+  // that map is rebuilt from scratch every refresh and cannot remember what has already been
+  // reported. An entry is dropped once the project binds cleanly, so a reason that comes back is
+  // said again.
+  const reportedUnusable = new Map<string, string>();
   /**
    * Projects this machine has stopped offering because their checkout itself is the problem — a
    * git config carrying a key git runs on checkout, found by the run that refused to make one
@@ -411,12 +416,17 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       return checks;
     });
 
-    // Said once per binding rather than once per poll: a machine sitting next to a repository the
+    // Said once per reason rather than once per poll: a machine sitting next to a repository the
     // gates will refuse would otherwise write the same line every thirty seconds forever.
     for (const [projectId, reason] of unusable) {
+      if (reportedUnusable.get(projectId) === reason) continue;
+      reportedUnusable.set(projectId, reason);
       deps.logError(
         `not claiming for project ${projectId}: its checkout cannot pass the gates — ${reason}`
       );
+    }
+    for (const projectId of [...reportedUnusable.keys()]) {
+      if (!unusable.has(projectId)) reportedUnusable.delete(projectId);
     }
     heartbeat.reportBindingError([inventoryError, ...errors].filter(Boolean).join("; "));
 
