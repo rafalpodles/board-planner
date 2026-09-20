@@ -19,3 +19,24 @@ export function ownsItsKeys(target: EventTarget | null): boolean {
   const el = target as Element | null;
   return typeof el?.closest === "function" && el.closest(`[${OWNS_ITS_KEYS}]`) !== null;
 }
+
+/**
+ * Did this key land in something the person is typing into?
+ *
+ * One definition, because there were two (BP-656): the search palette's covered `isContentEditable`
+ * and the board's did not. They agreed on every input that exists — the product has no
+ * `contentEditable` surface, and `InlineTitle` is a `<textarea>` on purpose — so nothing was broken.
+ * The docs were the tie-breaker: `reference/keyboard-shortcuts.md` already promises the keys type
+ * rather than fire "with the focus in a text box, a select or anything editable". Editable counts,
+ * and a rich-text field added tomorrow is covered before it is written.
+ */
+export function isTypingTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el) return false;
+  return (
+    el.tagName === "INPUT" ||
+    el.tagName === "TEXTAREA" ||
+    el.tagName === "SELECT" ||
+    el.isContentEditable === true
+  );
+}

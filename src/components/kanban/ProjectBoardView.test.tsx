@@ -320,6 +320,27 @@ describe("ProjectBoardView's typed-field guard", () => {
     });
   }
 
+  // BP-656: the arm the board's own copy of this rule was missing, before both call sites moved
+  // to `isTypingTarget`. No product surface is contentEditable today, so this is the test that
+  // keeps the rule the docs promise from rotting before the first rich-text field arrives.
+  it("fires no shortcut from a contentEditable element", () => {
+    const setShowNewTask = vi.fn();
+    const setViewMode = vi.fn();
+    const { container } = render(
+      <ProjectBoardView board={makeBoard({ tasks, setShowNewTask, setViewMode })} />
+    );
+    const target = container.appendChild(document.createElement("div"));
+    target.setAttribute("contenteditable", "true");
+
+    fireEvent.keyDown(target, { key: "n" });
+    fireEvent.keyDown(target, { key: "v" });
+    fireEvent.keyDown(target, { key: "?" });
+
+    expect(setShowNewTask).not.toHaveBeenCalled();
+    expect(setViewMode).not.toHaveBeenCalled();
+    expect(screen.queryByRole("heading", { name: "Keyboard Shortcuts" })).toBeNull();
+  });
+
   // The control: the same three keys, dispatched anywhere else, all land
   it("fires every one of them from outside a field", () => {
     const setShowNewTask = vi.fn();

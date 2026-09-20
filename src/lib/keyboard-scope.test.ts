@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, afterEach } from "vitest";
-import { OWNS_ITS_KEYS, ownsItsKeys } from "./keyboard-scope";
+import { OWNS_ITS_KEYS, isTypingTarget, ownsItsKeys } from "./keyboard-scope";
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -36,5 +36,27 @@ describe("ownsItsKeys", () => {
     expect(ownsItsKeys(document.body)).toBe(false);
     expect(ownsItsKeys(document)).toBe(false);
     expect(ownsItsKeys(null)).toBe(false);
+  });
+});
+
+describe("isTypingTarget", () => {
+  it.each(["input", "textarea", "select"])("says yes for a %s", (tag) => {
+    const at = mount(`<${tag} id="field"></${tag}>`);
+    expect(isTypingTarget(at("field"))).toBe(true);
+  });
+
+  // BP-656: the half the board's copy of this rule was missing. The docs promise the keys type
+  // rather than fire in "anything editable", and this is what makes that sentence true.
+  it("says yes for a contentEditable element", () => {
+    const at = mount(`<div id="rich" contenteditable="true"></div>`);
+    expect(isTypingTarget(at("rich"))).toBe(true);
+  });
+
+  it("leaves a button, the body, the document and nothing at all alone", () => {
+    const at = mount(`<button id="card">A card</button>`);
+    expect(isTypingTarget(at("card"))).toBe(false);
+    expect(isTypingTarget(document.body)).toBe(false);
+    expect(isTypingTarget(document)).toBe(false);
+    expect(isTypingTarget(null)).toBe(false);
   });
 });
