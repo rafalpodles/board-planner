@@ -162,8 +162,13 @@ describe("PUT /api/projects/:projectId/tasks/reorder", () => {
       expect(taskFind).not.toHaveBeenCalled();
     });
 
+    // The message, not only the status: the unknown-ids check further down refuses this request
+    // too, so a test reading the 400 alone would stay green with the duplicate guard deleted.
     it("refuses duplicates, which would give one task two positions", async () => {
-      expect((await put({ order: [id(1), id(2), id(1)] })).status).toBe(400);
+      const res = await put({ order: [id(1), id(2), id(1)] });
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: "order contains duplicate ids" });
       expect(taskBulkWrite).not.toHaveBeenCalled();
     });
   });

@@ -97,10 +97,16 @@ describe("PUT /api/projects/reorder", () => {
     expect(projectBulkWrite).not.toHaveBeenCalled();
   });
 
+  /**
+   * The message matters as much as the status here. Mongo's `$in` folds the repeat away, so the
+   * unknown-ids check below refuses this request too — with the wrong reason. Asserting only the
+   * 400 let the duplicate guard be deleted without a test noticing.
+   */
   it("refuses duplicate ids, which would otherwise give one project two positions", async () => {
     const res = await put({ order: [A, B, A] });
 
     expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "order contains duplicate ids" });
     expect(projectBulkWrite).not.toHaveBeenCalled();
   });
 
