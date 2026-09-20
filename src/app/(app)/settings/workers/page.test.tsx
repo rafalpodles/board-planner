@@ -130,7 +130,7 @@ describe("the fleet console's owner column", () => {
     // BP-642 folded Enabled, Lock and Commands into one pinned cell: three columns' worth of
     // controls did not fit a laptop beside the nine that describe the machine. Read in order, so
     // the fold is a regrouping and not a silent loss of one of them.
-    expect(under("Controls")).toMatch(/^On.*Lock.*Pause.*Resume.*Stop$/);
+    expect(under("Controls")).toMatch(/^On\s*Lock\s*Pause\s*Resume\s*Stop$/);
   });
 
   it("falls back to the username when that account has no display name", async () => {
@@ -270,8 +270,9 @@ describe("a check that passed at a cost", () => {
     expect(line.className).toContain("text-warning");
     // The word, so the amber is not the only thing saying this is a warning
     expect(line.textContent).toContain("Warning:");
-    // And the line that proves it left the Preflight column: only the full-width row spans the table
-    expect(line.closest("td")?.colSpan).toBe(10);
+    // And the line that proves it left the Preflight column: it spans every column but the pinned
+    // one, which continues through this row as an empty cell (BP-642)
+    expect(line.closest("td")?.colSpan).toBe(9);
   });
 
   it("still opens the preflight cell with ready, and names the check in amber", async () => {

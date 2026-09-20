@@ -1168,7 +1168,7 @@ test("the fleet screen says whether a machine confines the agent it runs", async
   const accepted = fleetRow(page, WORKER_NAME);
   await expect(accepted.getByText(/^ready/)).toBeVisible();
   // The sentence is on the full-width line under the worker, not in the Preflight column: that
-  // column is the eighth of twelve and starts past the right edge of a 1280px viewport, so a
+  // column is the eighth of ten and starts past the right edge of a 1280px viewport, so a
   // warning that lived only there is one nobody reads without scrolling the table sideways.
   // Page-scoped, not row-scoped: the line lives in the full-width row BENEATH the worker's own,
   // which is the whole of the change — and this fleet has one machine on it.

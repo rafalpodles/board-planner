@@ -42,8 +42,8 @@ function size(el: HTMLElement) {
  * and rebuild its listeners, and re-applying the fixture would undo whatever the test had just
  * changed, so every assertion after the first would read the starting numbers back.
  */
-function Table({ loaded }: { loaded: boolean }) {
-  const { ref, moreRight } = useHorizontalOverflow<HTMLDivElement>();
+function Table({ loaded, id = "scroller" }: { loaded: boolean; id?: string }) {
+  const { ref, moreRight, width } = useHorizontalOverflow<HTMLDivElement>();
   const attach = useCallback(
     (node: HTMLDivElement | null) => {
       if (node && !sized.has(node)) {
@@ -56,7 +56,7 @@ function Table({ loaded }: { loaded: boolean }) {
   );
   if (!loaded) return null;
   return (
-    <div data-testid="scroller" data-more={String(moreRight)} ref={attach}>
+    <div key={id} data-testid="scroller" data-more={String(moreRight)} data-width={String(width)} ref={attach}>
       <table />
     </div>
   );
@@ -65,6 +65,7 @@ function Table({ loaded }: { loaded: boolean }) {
 let sized = new WeakSet<Element>();
 
 const more = () => screen.getByTestId("scroller").getAttribute("data-more");
+const width = () => screen.getByTestId("scroller").getAttribute("data-width");
 
 beforeEach(() => {
   geometry = { scrollWidth: 0, clientWidth: 0, scrollLeft: 0 };
@@ -154,5 +155,60 @@ describe("useHorizontalOverflow", () => {
 
     cleanup();
     expect(disconnected).toBeGreaterThan(0);
+  });
+});
+
+describe("useHorizontalOverflow's reported width", () => {
+  // The caller pins a column beside the table, so what it needs is the scrollport's width, not the
+  // window's: a breakpoint would say 1024 where this reports 468 (BP-642)
+  it("reports the scrollport's own width", () => {
+    geometry = { scrollWidth: 1104, clientWidth: 882, scrollLeft: 0 };
+    render(<Table loaded />);
+    expect(width()).toBe("882");
+  });
+
+  it("re-reports it when the scrollport is resized", () => {
+    geometry = { scrollWidth: 1104, clientWidth: 882, scrollLeft: 0 };
+    render(<Table loaded />);
+
+    const el = screen.getByTestId("scroller");
+    Object.defineProperty(el, "clientWidth", { value: 468, configurable: true });
+    act(() => {
+      instances.forEach((o) => o.fire());
+    });
+    expect(width()).toBe("468");
+  });
+
+  /**
+   * The leak the node-swap teardown exists for. Nothing in the app remounts this scroller today,
+   * so without a test the first two lines of the ref callback are unreachable: the effect's own
+   * cleanup covers unmount, and a second observer on a detached node would go unnoticed.
+   */
+  it("lets go of the node it leaves when the ref moves to another", () => {
+    geometry = { scrollWidth: 1104, clientWidth: 882, scrollLeft: 0 };
+    const { rerender } = render(<Table loaded id="first" />);
+    expect(instances).toHaveLength(1);
+    expect(disconnected).toBe(0);
+
+    rerender(<Table loaded id="second" />);
+    expect(disconnected).toBe(1);
+    expect(instances).toHaveLength(2);
+  });
+
+  // A scroller that goes and comes back is measured again rather than read from what it said last
+  // time: the page unmounts this table whenever a reload leaves it without rows
+  it("measures a returning scroller afresh", () => {
+    geometry = { scrollWidth: 1104, clientWidth: 882, scrollLeft: 0 };
+    const { rerender } = render(<Table loaded />);
+    expect(more()).toBe("true");
+
+    rerender(<Table loaded={false} />);
+    expect(screen.queryByTestId("scroller")).toBeNull();
+
+    geometry = { scrollWidth: 400, clientWidth: 468, scrollLeft: 0 };
+    sized = new WeakSet();
+    rerender(<Table loaded />);
+    expect(more()).toBe("false");
+    expect(width()).toBe("468");
   });
 });

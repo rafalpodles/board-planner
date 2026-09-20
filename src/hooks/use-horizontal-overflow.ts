@@ -7,11 +7,16 @@ function hasMoreRight(el: HTMLElement): boolean {
 }
 
 /**
- * Whether a horizontal scroller still has content to the right of what it shows.
+ * What a horizontal scroller is showing: whether content still lies to its right, and how much
+ * room it has.
  *
  * Scrollbars are hidden app-wide (`globals.css`, BP-224), so a wide table gives the reader no sign
  * at all that it continues — which is how the fleet's Lock switch spent a release off the right
  * edge of a laptop (BP-642). The caller draws the sign; this answers when to.
+ *
+ * `width` is reported because a caller pinning a column has to know what it is pinning it beside:
+ * a breakpoint answers how wide the WINDOW is, and the scrollport here is the window less a
+ * sidebar and a settings nav — 468px at `lg`, where a 232px column would take half the table.
  *
  * A callback ref, not a `useRef` handed to an effect: the caller renders the scroller only once
  * its rows have loaded, so an effect that ran on the first render would find no node and — with
@@ -20,8 +25,9 @@ function hasMoreRight(el: HTMLElement): boolean {
 export function useHorizontalOverflow<T extends HTMLElement>(): {
   ref: (node: T | null) => void;
   moreRight: boolean;
+  width: number;
 } {
-  const [moreRight, setMoreRight] = useState(false);
+  const [state, setState] = useState({ moreRight: false, width: 0 });
   const cleanup = useRef<(() => void) | null>(null);
 
   const ref = useCallback((node: T | null) => {
@@ -29,7 +35,11 @@ export function useHorizontalOverflow<T extends HTMLElement>(): {
     cleanup.current = null;
     if (!node) return;
 
-    const measure = () => setMoreRight(hasMoreRight(node));
+    const measure = () =>
+      setState((prev) => {
+        const next = { moreRight: hasMoreRight(node), width: node.clientWidth };
+        return prev.moreRight === next.moreRight && prev.width === next.width ? prev : next;
+      });
     measure();
     node.addEventListener("scroll", measure, { passive: true });
     // Both: the scrollport changes with the window, the content with the rows that arrive in it
@@ -45,5 +55,5 @@ export function useHorizontalOverflow<T extends HTMLElement>(): {
 
   useEffect(() => () => cleanup.current?.(), []);
 
-  return { ref, moreRight };
+  return { ...state, ref };
 }

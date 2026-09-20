@@ -41,6 +41,11 @@
   --color-priority-medium: #60a5fa;
   --color-priority-high: #fbbf24;
   --color-priority-urgent: #f87171;
+
+  /* The edge of a column pinned over a scroller (BP-642). A shadow, so it reads as content
+     passing underneath rather than as one more column rule — and per theme, because black at a
+     readable strength on #0f172a is black at an overbearing one on white. */
+  --pin-edge-shadow: -10px 0 14px -6px rgba(0, 0, 0, 0.85);
 }
 
 body {
@@ -63,6 +68,8 @@ body {
   --color-danger-hover: #991b1b;
   --color-success: #166534;
   --color-warning: #92400e;
+
+  --pin-edge-shadow: -10px 0 12px -6px rgba(15, 23, 42, 0.35);
 
   --color-status-planned: #4b5563;
   --color-status-todo: #1d4ed8;

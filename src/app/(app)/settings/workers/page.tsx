@@ -109,10 +109,29 @@ function PreflightCell({ preflight }: { preflight: ApiWorkerPreflight | null }) 
 /**
  * The cost a passing check carries, on the full-width line under the worker.
  *
- * Where it can be read: the Preflight column is the eighth of twelve in a table that scrolls
+ * Where it can be read: the Preflight column is the eighth of ten in a table that scrolls
  * sideways, and an instance admin who never scrolls it would have met this machine as `ready`.
  * Nothing is duplicated — the cell names the check, this says what it means (BP-606).
  */
+/**
+ * The controls are about 232px. Pinning them needs a scrollport with room for the table beside
+ * them, not merely room for them: three times over leaves two thirds of the width still reading
+ * as a table. Measured, this pins at 1440 (882px) and leaves 1024 (468px) and everything below
+ * it scrolling the ordinary way.
+ */
+const PIN_MIN_SCROLLPORT = 700;
+const PIN_SCROLL_PADDING = 240;
+const FADE_RIGHT = "linear-gradient(to right, #000 calc(100% - 32px), transparent)";
+
+/**
+ * Whole strings, not built around the `moreRight` branch: Tailwind finds class names by reading
+ * the source, so an arbitrary value split across an interpolation is one it never generates — and
+ * the column rendered with no edge at all until this was measured in a browser.
+ */
+const PIN_EDGE = "shadow-[inset_1px_0_0_0_var(--color-border)]";
+const PIN_EDGE_OVER_CONTENT =
+  "shadow-[inset_1px_0_0_0_var(--color-border),var(--pin-edge-shadow)]";
+
 function PreflightWarning({ preflight }: { preflight: ApiWorkerPreflight | null }) {
   const warned = (preflight?.checks ?? []).filter((c) => c.ok && c.warn);
   if (warned.length === 0) return null;
@@ -148,7 +167,7 @@ export default function AdminWorkersPage() {
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [enrolling, setEnrolling] = useState(false);
-  const { ref: scroller, moreRight } = useHorizontalOverflow<HTMLDivElement>();
+  const { ref: scroller, moreRight, width: scrollportWidth } = useHorizontalOverflow<HTMLDivElement>();
   // The only way back from a release is a fresh enrolment run on that machine, by whoever sits at
   // it — every other destructive control in this product asks first, and this one is less reversible
   // than most of them.
@@ -222,13 +241,21 @@ export default function AdminWorkersPage() {
   }
   if (!isAdmin || !workers) return null;
 
-  // Pinned from `lg` up only. The controls are 232px wide, and below that breakpoint the settings
-  // shell leaves the table less room than they take — measured at 768, where the scrollport is
-  // 210px — so pinning them there would cover the table rather than sit beside it.
-  // The shadow is the only sign that anything lies under the column — scrollbars are hidden
-  // app-wide (BP-224), so without it the table just looks like it ends there.
-  const stickyCell = `lg:sticky lg:right-0 z-10 w-px whitespace-nowrap px-3 py-2 lg:border-l border-border ${
-    moreRight ? "lg:shadow-[-10px_0_12px_-6px_rgba(0,0,0,0.35)]" : ""
+  // Measured, not a breakpoint: this scrollport is the window less a sidebar and a settings nav,
+  // so `lg` says 1024 and means 468px here — half of it would be the pinned column. Below the
+  // threshold nothing is pinned and the fade on the scroller carries the signal instead.
+  const pinned = scrollportWidth >= PIN_MIN_SCROLLPORT;
+
+  // `w-px` and `whitespace-nowrap` are one decision: auto table layout treats the width as a
+  // suggestion and min-content wins, so the cell is exactly as wide as the widest row of controls
+  // — and only because nothing in it wraps.
+  //
+  // The left edge is an inset shadow rather than `border-l`: Tailwind's preflight leaves the
+  // table at `border-collapse: collapse`, where borders belong to the grid and are painted by the
+  // table, so a border here would stay at the column's natural position and slide out from under
+  // the pinned cell the moment the operator scrolls (found in review).
+  const stickyCell = `w-px whitespace-nowrap px-3 py-2 ${
+    pinned ? `sticky right-0 z-10 ${moreRight ? PIN_EDGE_OVER_CONTENT : PIN_EDGE}` : ""
   }`;
 
   return (
@@ -264,18 +291,25 @@ export default function AdminWorkersPage() {
         }}
       />
 
-      <div className="relative border border-border rounded-lg overflow-hidden bg-bg-card">
-        {/* Below `lg` nothing is pinned, so this fade is the only sign the table continues.
-            Above it the pinned column and its shadow say the same thing, and a fade there would
-            only wash out the controls it is meant to point at. */}
-        {moreRight && (
-          <div
-            aria-hidden="true"
-            data-testid="fleet-overflow-fade"
-            className="pointer-events-none absolute inset-y-0 right-0 z-20 w-8 bg-gradient-to-l from-bg-card lg:hidden"
-          />
-        )}
-        <div ref={scroller} className="overflow-x-auto">
+      {/* `bg-bg-card` because the pinned cell has to be opaque to hide what passes under it, and an
+          opaque cell on a transparent row is a stripe. The sibling tables in this section carry no
+          background, so this one is deliberately the odd one out. */}
+      <div className="border border-border rounded-lg overflow-hidden bg-bg-card">
+        {/* Nothing pinned means nothing says the table continues, so the scroller fades its own
+            right edge. A mask rather than an overlay: the header's background is a different
+            token, and a gradient painted from `bg-bg-card` tinted its last 32px and repainted the
+            border under it. The mask asks no questions about what is underneath — the same answer
+            `use-panel-clamp` reached vertically (BP-636). */}
+        <div
+          ref={scroller}
+          className="overflow-x-auto"
+          style={{
+            ...(moreRight && !pinned ? { maskImage: FADE_RIGHT, WebkitMaskImage: FADE_RIGHT } : {}),
+            // Tabbing to a control that is off to the right scrolls it into view at the very edge
+            // of the scrollport — which is under the pinned column, focus ring and all
+            ...(pinned ? { scrollPaddingRight: `${PIN_SCROLL_PADDING}px` } : {}),
+          }}
+        >
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-bg-input text-text-muted text-xs border-b border-border">
@@ -288,9 +322,10 @@ export default function AdminWorkersPage() {
                 <th className="text-left px-3 py-2 font-medium">Last seen</th>
                 <th className="text-left px-3 py-2 font-medium">Preflight</th>
                 <th className="text-left px-3 py-2 font-medium">Binding error</th>
-                {/* BP-642: pinned to the right edge. Nine columns do not fit a laptop, and the
-                    switch the docs call "the one to reach for when something is going wrong" was
-                    the first thing off the screen. */}
+                {/* BP-642: Enabled, Lock and Commands, pinned to the right edge. The nine columns
+                    that describe a machine fit a laptop; three more columns of controls did not,
+                    and the switch the docs call "the one to reach for when something is going
+                    wrong" was the first thing off the screen. */}
                 <th className={`${stickyCell} bg-bg-input text-left font-medium`}>
                   Controls
                 </th>
@@ -378,6 +413,10 @@ export default function AdminWorkersPage() {
                           <span className={`text-xs ${TONE_CLASSES[status.tone]}`}>{status.text}</span>
                         )}
                         <div className="flex items-center gap-1">
+                          {/* The "Enabled" header went when the three columns merged, so the
+                              title says what is on — the same way Lock beside it does. Not an
+                              `aria-label`: that would replace the accessible name, which is the
+                              visible word and what six specs press this button by. */}
                           <Button
                             size="sm"
                             variant={
@@ -385,6 +424,11 @@ export default function AdminWorkersPage() {
                             }
                             disabled={savingId === worker._id || worker.lockedByInstance}
                             onClick={() => patch(worker, { enabled: !worker.enabled })}
+                            title={
+                              worker.enabled
+                                ? "Enabled — this worker may claim tasks"
+                                : "Disabled — this worker claims nothing"
+                            }
                           >
                             {worker.enabled ? "On" : "Off"}
                           </Button>
@@ -393,7 +437,7 @@ export default function AdminWorkersPage() {
                               patch(worker, { lockedByInstance: !worker.lockedByInstance })
                             }
                             disabled={savingId === worker._id}
-                            className={`inline-flex min-h-11 cursor-pointer items-center rounded border px-3 text-xs transition-colors sm:min-h-0 sm:px-2 sm:py-1 ${
+                            className={`inline-flex min-h-11 cursor-pointer items-center rounded border px-3 text-xs transition-colors sm:min-h-9 sm:px-2 sm:py-1 ${
                               worker.lockedByInstance
                                 ? "border-danger bg-danger/10 text-danger"
                                 : "border-border text-text-muted hover:text-text"
@@ -407,7 +451,7 @@ export default function AdminWorkersPage() {
                             {worker.lockedByInstance ? "Locked" : "Lock"}
                           </button>
                         </div>
-                        <div className="flex gap-1">
+                        <div className={`flex gap-1 ${pinned ? "" : "flex-wrap"}`}>
                           <Button
                             size="sm"
                             variant="secondary"
@@ -437,7 +481,7 @@ export default function AdminWorkersPage() {
                     </td>
                   </tr>,
                   <tr key={`${worker._id}-policy`} className="border-b border-border last:border-b-0">
-                    <td colSpan={10} className="px-3 pb-3 pt-0">
+                    <td colSpan={9} className="px-3 pb-3 pt-0">
                       <PreflightWarning preflight={worker.preflight} />
                       <div className="flex flex-wrap gap-1.5">
                         {workerPolicyRows(worker as never).map((row) => (
@@ -463,6 +507,10 @@ export default function AdminWorkersPage() {
                         ))}
                       </div>
                     </td>
+                    {/* The pinned column continues through this row, empty. Without it the edge
+                        appears on every other row, and the policy chips pass under the controls
+                        of the machine above them. */}
+                    <td className={`${stickyCell} bg-bg-card`} aria-hidden="true" />
                   </tr>,
                 ];
               })}
