@@ -99,7 +99,7 @@ mcp-server/           # Standalone MCP server (stdio transport)
   shared team channel in `project.notificationChannels`, which is unchanged and has no recipient.
   Accounts with no stored grid fall back to the old `emailNotifications` boolean, so nothing was
   migrated. The bell hides rows rather than skipping the write — `Notification.inApp` — because the
-  digest is assembled from those documents. Four of the five rows *filter* a recipient list built
+  digest is assembled from those documents. Five of the six rows *filter* a recipient list built
   from a task's assignee and watchers; `task_created` has no such list and instead *selects* its
   audience from the ticks themselves (`src/lib/board-feed.ts`), bounded by
   `BOARD_FEED_FANOUT_LIMIT`. It is the one row the legacy fallback leaves off, so adding it

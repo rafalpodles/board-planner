@@ -1,3 +1,4 @@
+import { isValidObjectId, Types } from "mongoose";
 import { Task } from "@/models/task";
 import { Project } from "@/models/project";
 import { logActivity } from "@/lib/activity";
@@ -50,6 +51,20 @@ function idOf(value: unknown): string {
   return String((value as { _id?: unknown })?._id ?? value ?? "");
 }
 
+/**
+ * The one spelling of an id that every comparison here uses.
+ *
+ * `isValidObjectId` accepts UPPER-case hex and `resolveTaskId` hands the path segment on verbatim,
+ * while `String(ObjectId)` is always lower-case — so the same task arrives spelled one way in the
+ * URL, another in the body and a third from a document. Mongo casts all of them to the same id and
+ * writes happily; only the string comparisons disagree. Left unnormalised, a DELETE naming an
+ * upper-case id really removed the link and then reported nothing, which is the silence this
+ * module exists to end.
+ */
+function canonicalId(id: string): string {
+  return isValidObjectId(id) ? new Types.ObjectId(id).toString() : id;
+}
+
 function relationBetween(task: LinkEnd, otherId: string): RelationType | undefined {
   return (task.relations ?? []).find((r) => idOf(r.task) === otherId)?.type;
 }
@@ -60,11 +75,14 @@ function blocks(task: LinkEnd, otherId: string): boolean {
 
 export async function addTaskLink(
   projectId: string,
-  taskId: string,
-  targetTaskId: string,
+  rawTaskId: string,
+  rawTargetTaskId: string,
   type: DependencyType,
   actorId: string
 ): Promise<LinkResult> {
+  const taskId = canonicalId(rawTaskId);
+  const targetTaskId = canonicalId(rawTargetTaskId);
+
   if (targetTaskId === taskId) {
     return { ok: false, error: "A task cannot depend on itself", status: 400 };
   }
@@ -102,26 +120,20 @@ export async function addTaskLink(
     const cycle = await wouldDescend(projectId, taskId, targetTaskId);
     if (cycle) return cycle;
 
-    // Read before the write: the previous parents are the tasks nobody named in this call, and
-    // after `updateMany` there is nothing left to say who they were.
-    const parents = await Task.find(
-      { project: projectId, relations: { $elemMatch: { task: targetTaskId, type: "parent_of" } } },
-      END_FIELDS
-    ).lean<LinkEnd[]>();
-    losing = parents.filter((p) => idOf(p) !== taskId);
+    losing = await takeTheChildOffItsOtherParents(projectId, taskId, targetTaskId);
+    // Already the parent and nothing else claimed the child: a refresh re-sending the same link.
+    // The call above removed nothing in that case, so there is still nothing to undo.
+    if (replaced === type && losing.length === 0) return { ok: true, changed: false };
+  } else if (replaced === type) {
+    return { ok: true, changed: false };
   }
 
-  if (replaced === type && losing.length === 0) return { ok: true, changed: false };
-
-  if (type === "parent_of") {
-    await Task.updateMany(
-      { project: projectId, relations: { $elemMatch: { task: targetTaskId, type: "parent_of" } } },
-      { $pull: { relations: { task: targetTaskId, type: "parent_of" } } }
-    );
-  }
-  await Task.updateOne({ _id: taskId }, { $pull: { relations: { task: targetTaskId } } });
   await Task.updateOne(
-    { _id: taskId },
+    { _id: taskId, project: projectId },
+    { $pull: { relations: { task: targetTaskId } } }
+  );
+  await Task.updateOne(
+    { _id: taskId, project: projectId },
     { $push: { relations: { task: targetTaskId, type: type as RelationType } } }
   );
 
@@ -140,23 +152,30 @@ export async function addTaskLink(
 
 export async function removeTaskLink(
   projectId: string,
-  taskId: string,
-  targetTaskId: string,
+  rawTaskId: string,
+  rawTargetTaskId: string,
   type: DependencyType,
   actorId: string
 ): Promise<LinkResult> {
-  const task = await Task.findOne({ _id: taskId, project: projectId }, END_FIELDS).lean<LinkEnd>();
-  if (!task) return { ok: false, error: "Task not found", status: 404 };
-
-  const held =
-    type === "blocked_by" ? blocks(task, targetTaskId) : relationBetween(task, targetTaskId) === type;
+  const taskId = canonicalId(rawTaskId);
+  const targetTaskId = canonicalId(rawTargetTaskId);
 
   const update =
     type === "blocked_by"
       ? { $pull: { blockedBy: targetTaskId } }
       : { $pull: { relations: { task: targetTaskId, type } } };
 
-  await Task.findOneAndUpdate({ _id: taskId, project: projectId }, update);
+  // "before", so what is announced is what THIS write removed. Deciding from a separate read
+  // taken first would let a link added in between be pulled here and recorded nowhere — the
+  // same read-then-write gap the parent removal above closes.
+  const task = await Task.findOneAndUpdate({ _id: taskId, project: projectId }, update, {
+    returnDocument: "before",
+    projection: END_FIELDS,
+  }).lean<LinkEnd>();
+  if (!task) return { ok: false, error: "Task not found", status: 404 };
+
+  const held =
+    type === "blocked_by" ? blocks(task, targetTaskId) : relationBetween(task, targetTaskId) === type;
 
   // This end held no such link, so the write removed nothing. The request still answers 200 — the
   // route's contract is unchanged, and removal from the wrong end is BP-657's to settle — but a
@@ -172,6 +191,50 @@ export async function removeTaskLink(
 
   await announce(projectId, actorId, [{ action: "removed", type, holder: task, target: other }]);
   return { ok: true, changed: true };
+}
+
+/**
+ * Takes the child off every parent except the one being given it, one atomic write at a time, and
+ * answers with the parents it actually took it from.
+ *
+ * A single `updateMany` would be one write, but then the epics to announce would have to come from
+ * a read taken beforehand — and under two concurrent re-parents that read is stale: both requests
+ * see the original parent, both announce that it lost the child, and the epic that really lost it
+ * in between is named by neither. Whoever's `findOneAndUpdate` matched is the request that did the
+ * removal, so what is announced is what happened.
+ *
+ * It terminates because every iteration removes exactly one relation; the cap is there so a write
+ * that somehow stops removing cannot spin, and it names itself in the log rather than passing for
+ * a board with nothing left to detach.
+ */
+const MAX_PARENTS_DETACHED = 50;
+
+async function takeTheChildOffItsOtherParents(
+  projectId: string,
+  taskId: string,
+  targetTaskId: string
+): Promise<LinkEnd[]> {
+  const losing: LinkEnd[] = [];
+
+  while (losing.length < MAX_PARENTS_DETACHED) {
+    const parent = await Task.findOneAndUpdate(
+      {
+        project: projectId,
+        _id: { $ne: taskId },
+        relations: { $elemMatch: { task: targetTaskId, type: "parent_of" } },
+      },
+      { $pull: { relations: { task: targetTaskId, type: "parent_of" } } },
+      { returnDocument: "before", projection: END_FIELDS }
+    ).lean<LinkEnd>();
+
+    if (!parent) return losing;
+    losing.push(parent);
+  }
+
+  console.error(
+    `Stopped detaching task ${targetTaskId} after ${MAX_PARENTS_DETACHED} parents on project ${projectId}`
+  );
+  return losing;
 }
 
 async function wouldCycle(
@@ -279,18 +342,20 @@ async function announce(projectId: string, actorId: string, facts: LinkFact[]): 
       other: keyOf(row.other),
     });
 
-  await Promise.all(
-    rows.map((row) =>
-      logActivity(
-        idOf(row.subject),
-        actorId,
-        row.fact.action === "added" ? "link_added" : "link_removed",
-        row.direction,
-        row.fact.action === "added" ? "" : keyOf(row.other),
-        row.fact.action === "added" ? keyOf(row.other) : ""
-      )
-    )
-  );
+  // In order, not in parallel: `facts` puts what was lost before what was gained, and a re-parented
+  // task takes both rows in the same millisecond. Written concurrently their ids interleave, and
+  // the timeline — which falls back to `_id` on a tie — can then show the task gaining a parent
+  // before losing one.
+  for (const row of rows) {
+    await logActivity(
+      idOf(row.subject),
+      actorId,
+      row.fact.action === "added" ? "link_added" : "link_removed",
+      row.direction,
+      row.fact.action === "added" ? "" : keyOf(row.other),
+      row.fact.action === "added" ? keyOf(row.other) : ""
+    );
+  }
 
   const perTask = new Map<string, (typeof rows)[number]>();
   for (const row of rows) {

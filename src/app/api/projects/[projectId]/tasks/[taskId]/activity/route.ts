@@ -15,7 +15,11 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   }
 
   const logs = await ActivityLog.find({ task: taskId })
-    .sort({ createdAt: -1 })
+    // One act can write several rows in the same millisecond — a re-parented task loses and gains
+    // a parent in one request — and `createdAt` alone then orders them arbitrarily, which reads as
+    // the task gaining a parent before losing it. `_id` rises with insertion, so it breaks the tie
+    // the way the eye expects (BP-658).
+    .sort({ createdAt: -1, _id: -1 })
     .limit(100)
     .populate("user", "username fullName")
     .lean();

@@ -6,6 +6,11 @@ import { LinkDirection } from "@/types";
  * Shared by the server, which writes it into a notification title where both ends have to be
  * named, and by the timeline, which renders it under a task that is already on screen and passes
  * "this task" as `self`. Two spellings of the same event drift; one cannot.
+ *
+ * `actor` is the caller's, and the two callers do differ: the timeline has the row's populated
+ * user and reads `fullName`, the notification has only an id and reads `username`. That is the
+ * convention on both screens already — every other notification title in this app names a
+ * username — so it is left alone rather than made uniform here.
  */
 export function describeLinkChange({
   actor,
@@ -49,5 +54,10 @@ export function describeLinkChange({
       return added
         ? `${actor} made ${other} the parent of ${self}`
         : `${actor} removed ${self} from ${other}'s children`;
+    // `field` on an activity row is an unconstrained string, so the timeline's cast is a promise
+    // the schema does not keep. Every other action in that switch degrades to a sentence rather
+    // than to a blank row; this one has to as well.
+    default:
+      return added ? `${actor} linked ${self} to ${other}` : `${actor} unlinked ${self} from ${other}`;
   }
 }

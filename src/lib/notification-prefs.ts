@@ -27,26 +27,35 @@ export function blankMatrix(): NotificationMatrix {
   ) as NotificationMatrix;
 }
 
-/** What an account that has never opened the screen gets: the bell as it has always behaved, and
- *  mail exactly where the old boolean put it. Nothing is written to reach this state.
+/** What a row nobody has answered for is worth.
  *
- *  task_created is the exception, and deliberately so. The other four rows describe work the
- *  reader is already attached to; this one is every task anybody opens on the board. Handing it
- *  the legacy "bell on" would subscribe every existing account to a firehose it never asked for,
- *  by the act of adding the row. So it starts off everywhere and only a tick turns it on. */
+ *  task_created is the exception, and deliberately so. The other rows describe work the reader is
+ *  already attached to — their own task, or one they watch; this one is every task anybody opens
+ *  on the board. Handing it the legacy "bell on" would subscribe every existing account to a
+ *  firehose it never asked for, by the act of adding the row. So it starts off everywhere and only
+ *  a tick turns it on. */
+function unanswered(type: NotificationType, email: boolean): NotificationChannels {
+  return type === "task_created" ? { ...OFF } : { inApp: true, email, chat: false };
+}
+
+/** What an account that has never opened the screen gets: the bell as it has always behaved, and
+ *  mail exactly where the old boolean put it. Nothing is written to reach this state. */
 function legacyMatrix(emailNotifications: boolean): NotificationMatrix {
   return Object.fromEntries(
-    NOTIFICATION_TYPES.map((type) => [
-      type,
-      type === "task_created" ? { ...OFF } : { inApp: true, email: emailNotifications, chat: false },
-    ])
+    NOTIFICATION_TYPES.map((type) => [type, unanswered(type, emailNotifications)])
   ) as NotificationMatrix;
 }
 
 export function defaultMatrix(user: PrefsSource | null | undefined): NotificationMatrix {
   const stored = user?.notifications?.defaults;
-  if (stored) return { ...blankMatrix(), ...stored };
-  return legacyMatrix(!!user?.emailNotifications);
+  if (!stored) return legacyMatrix(!!user?.emailNotifications);
+  // A row added to the grid after this person last saved it is one they have never been asked
+  // about, and blank would record it as a "no" they never gave — so it takes the same default a
+  // grid that was never saved takes. Without mail: they HAVE answered that question for every row
+  // they saw, and a new row is not consent to be written to.
+  return Object.fromEntries(
+    NOTIFICATION_TYPES.map((type) => [type, stored[type] ?? unanswered(type, false)])
+  ) as NotificationMatrix;
 }
 
 function overrideFor(

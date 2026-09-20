@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-// mongoose's own query matcher, so the filter that finds the previous parents is judged by
-// MongoDB semantics rather than by a stub that answers whatever the test wanted
+// An independent reimplementation of MongoDB's query language, pinned at the version mongoose
+// itself depends on. NOT the server's matcher — server-side queries are evaluated by MongoDB —
+// but the four shapes this file relies on were checked against MongoDB's documented semantics:
+// `$elemMatch` (same element), `$pull` with a document criteria (partial match per element),
+// `{ $exists: true, $ne: [] }` (excludes the empty array) and `$ne` on an id. What it buys is a
+// store the code can be run against, rather than a stub that answers whatever the test wanted.
 import sift from "sift";
 
 interface Doc {
@@ -81,10 +85,19 @@ vi.mock("@/models/task", () => ({
       const doc = store.find((d) => d._id === id);
       if (doc) apply(doc, update);
     },
-    findOneAndUpdate: async (filter: object, update: Update) => {
-      findOneAndUpdate(filter, update);
+    // `returnDocument: "before"` is honoured, because the production code decides what to
+    // announce from the document the write itself handed back. A mock that returned the state
+    // AFTER the pull would make every "did this write remove anything" answer false.
+    findOneAndUpdate: (
+      filter: object,
+      update: Update,
+      options?: { returnDocument?: "before" | "after" }
+    ) => {
+      findOneAndUpdate(filter, update, options);
       const doc = store.find(sift(filter));
+      const before = doc ? structuredClone(doc) : null;
       if (doc) apply(doc, update);
+      return lean(options?.returnDocument === "before" ? before : doc ?? null);
     },
   },
 }));
@@ -123,13 +136,20 @@ function task(id: string, taskNumber: number, extra: Partial<Doc> = {}): Doc {
   };
 }
 
-/** Every timeline row this call wrote, as [taskId, action, direction, otherKey]. */
-function rows(): [string, string, string, string][] {
+/**
+ * Every timeline row this call wrote, as [taskId, action, direction, oldValue, newValue].
+ *
+ * The two value slots stay apart on purpose. Collapsing them to whichever is non-empty reads the
+ * same either way round, and the timeline does not: it renders `newValue` for `link_added` and
+ * `oldValue` for `link_removed`, so a write into the wrong slot is a row naming no other end.
+ */
+function rows(): [string, string, string, string, string][] {
   return logActivity.mock.calls.map((c) => [
     c[0] as string,
     c[2] as string,
     c[3] as string,
-    (c[4] || c[5]) as string,
+    c[4] as string,
+    c[5] as string,
   ]);
 }
 
@@ -153,8 +173,8 @@ describe("addTaskLink", () => {
 
     expect(result).toEqual({ ok: true, changed: true });
     expect(rows()).toEqual([
-      ["a", "link_added", "relates", "BP-2"],
-      ["b", "link_added", "relates", "BP-1"],
+      ["a", "link_added", "relates", "", "BP-2"],
+      ["b", "link_added", "relates", "", "BP-1"],
     ]);
     expect(dispatchWebhooks).toHaveBeenCalledTimes(1);
     expect(dispatchWebhooks.mock.calls[0][1]).toBe("task_linked");
@@ -166,8 +186,8 @@ describe("addTaskLink", () => {
     await addTaskLink(P, "a", "b", "blocked_by", ACTOR);
 
     expect(rows()).toEqual([
-      ["a", "link_added", "blocked_by", "BP-2"],
-      ["b", "link_added", "blocks", "BP-1"],
+      ["a", "link_added", "blocked_by", "", "BP-2"],
+      ["b", "link_added", "blocks", "", "BP-1"],
     ]);
     expect(findByIdAndUpdate).toHaveBeenCalledWith("a", { $addToSet: { blockedBy: "b" } });
   });
@@ -183,10 +203,10 @@ describe("addTaskLink", () => {
     await addTaskLink(P, "new", "child", "parent_of", ACTOR);
 
     expect(rows()).toEqual([
-      ["old", "link_removed", "parent_of", "BP-11"],
-      ["child", "link_removed", "child_of", "BP-9"],
-      ["new", "link_added", "parent_of", "BP-11"],
-      ["child", "link_added", "child_of", "BP-10"],
+      ["old", "link_removed", "parent_of", "BP-11", ""],
+      ["child", "link_removed", "child_of", "BP-9", ""],
+      ["new", "link_added", "parent_of", "", "BP-11"],
+      ["child", "link_added", "child_of", "", "BP-10"],
     ]);
 
     const notified = notifiedTasks();
@@ -250,12 +270,16 @@ describe("addTaskLink", () => {
     await addTaskLink(P, "a", "b", "duplicates", ACTOR);
 
     expect(rows()).toEqual([
-      ["a", "link_removed", "relates", "BP-2"],
-      ["b", "link_removed", "relates", "BP-1"],
-      ["a", "link_added", "duplicates", "BP-2"],
-      ["b", "link_added", "duplicated_by", "BP-1"],
+      ["a", "link_removed", "relates", "BP-2", ""],
+      ["b", "link_removed", "relates", "BP-1", ""],
+      ["a", "link_added", "duplicates", "", "BP-2"],
+      ["b", "link_added", "duplicated_by", "", "BP-1"],
     ]);
     expect(dispatchWebhooks.mock.calls.map((c) => c[1])).toEqual(["task_unlinked", "task_linked"]);
+    // "one pair holds one relation" is a claim about the stored document, not about the rows
+    expect(store.find((d) => d._id === "a")!.relations).toEqual([
+      { task: "b", type: "duplicates" },
+    ]);
   });
 
   it("refuses a task linked to itself", async () => {
@@ -309,8 +333,8 @@ describe("removeTaskLink", () => {
       changed: true,
     });
     expect(rows()).toEqual([
-      ["a", "link_removed", "duplicates", "BP-2"],
-      ["b", "link_removed", "duplicated_by", "BP-1"],
+      ["a", "link_removed", "duplicates", "BP-2", ""],
+      ["b", "link_removed", "duplicated_by", "BP-1", ""],
     ]);
     expect(dispatchWebhooks.mock.calls[0][1]).toBe("task_unlinked");
   });
@@ -336,6 +360,9 @@ describe("removeTaskLink", () => {
       changed: false,
     });
     expect(logActivity).not.toHaveBeenCalled();
+    // And nothing was taken: the `$pull` runs before the guard, so a criteria that forgot the type
+    // would delete the relation that IS there and still report having done nothing.
+    expect(store.find((d) => d._id === "a")!.relations).toEqual([{ task: "b", type: "relates" }]);
   });
 
   it("records a blocker being taken off", async () => {
@@ -344,8 +371,8 @@ describe("removeTaskLink", () => {
     await removeTaskLink(P, "a", "b", "blocked_by", ACTOR);
 
     expect(rows()).toEqual([
-      ["a", "link_removed", "blocked_by", "BP-2"],
-      ["b", "link_removed", "blocks", "BP-1"],
+      ["a", "link_removed", "blocked_by", "BP-2", ""],
+      ["b", "link_removed", "blocks", "BP-1", ""],
     ]);
   });
 
@@ -354,5 +381,176 @@ describe("removeTaskLink", () => {
       ok: false,
       status: 404,
     });
+  });
+});
+
+describe("a board is not the only board", () => {
+  // Every read and write in the module is scoped by project. Without a task on a SECOND board,
+  // deleting those filters changes no assertion — and an un-scoped `parent_of` detach would reach
+  // across every board in the database.
+  const OTHER = "p2";
+
+  it("refuses to link a task on another board", async () => {
+    store = [task("a", 1), { ...task("b", 2), project: OTHER }];
+
+    expect(await addTaskLink(P, "a", "b", "relates", ACTOR)).toMatchObject({
+      ok: false,
+      status: 404,
+    });
+    expect(store.find((d) => d._id === "a")!.relations).toEqual([]);
+  });
+
+  it("leaves another board's parent holding its child", async () => {
+    store = [
+      { ...task("elsewhere", 90, { relations: [{ task: "child", type: "parent_of" }] }), project: OTHER },
+      task("mine", 10),
+      task("child", 11),
+    ];
+
+    await addTaskLink(P, "mine", "child", "parent_of", ACTOR);
+
+    expect(store.find((d) => d._id === "elsewhere")!.relations).toEqual([
+      { task: "child", type: "parent_of" },
+    ]);
+    expect(rows().map((r) => r[0])).toEqual(["mine", "child"]);
+  });
+
+  it("will not remove a link from a task on another board", async () => {
+    store = [{ ...task("a", 1, { relations: [{ task: "b", type: "relates" }] }), project: OTHER }];
+
+    expect(await removeTaskLink(P, "a", "b", "relates", ACTOR)).toMatchObject({
+      ok: false,
+      status: 404,
+    });
+    expect(store.find((d) => d._id === "a")!.relations).toEqual([{ task: "b", type: "relates" }]);
+  });
+});
+
+describe("the same id, spelled differently", () => {
+  // `isValidObjectId` accepts upper-case hex and `resolveTaskId` passes the path segment through
+  // untouched, while `String(ObjectId)` is lower-case. Mongo casts every spelling to one id and
+  // writes; only the comparisons here disagree — and the worst of it was a DELETE that really
+  // removed the link and then reported nothing at all.
+  const LOWER_A = "507f1f77bcf86cd799439011";
+  const UPPER_A = LOWER_A.toUpperCase();
+  const LOWER_B = "507f1f77bcf86cd799439012";
+  const UPPER_B = LOWER_B.toUpperCase();
+
+  it("records the removal when the request spells the id in upper case", async () => {
+    store = [task(LOWER_A, 1, { blockedBy: [LOWER_B] }), task(LOWER_B, 2)];
+
+    expect(await removeTaskLink(P, UPPER_A, UPPER_B, "blocked_by", ACTOR)).toEqual({
+      ok: true,
+      changed: true,
+    });
+    expect(store.find((d) => d._id === LOWER_A)!.blockedBy).toEqual([]);
+    expect(rows()).toEqual([
+      [LOWER_A, "link_removed", "blocked_by", "BP-2", ""],
+      [LOWER_B, "link_removed", "blocks", "BP-1", ""],
+    ]);
+  });
+
+  it("still says nothing when an upper-case request re-sends a link that exists", async () => {
+    store = [task(LOWER_A, 1, { relations: [{ task: LOWER_B, type: "relates" }] }), task(LOWER_B, 2)];
+
+    expect(await addTaskLink(P, UPPER_A, UPPER_B, "relates", ACTOR)).toEqual({
+      ok: true,
+      changed: false,
+    });
+    expect(logActivity).not.toHaveBeenCalled();
+    expect(dispatchWebhooks).not.toHaveBeenCalled();
+  });
+
+  // The same mismatch made a task its own parent: `targetTaskId === taskId` compared two spellings
+  it("refuses a task linked to itself under a different spelling", async () => {
+    expect(await addTaskLink(P, UPPER_A, LOWER_A, "relates", ACTOR)).toMatchObject({
+      ok: false,
+      status: 400,
+    });
+  });
+
+  // A re-parent that changes nothing must not fabricate the loss of a child
+  it("does not report a parent losing the child it is being given", async () => {
+    store = [
+      task(LOWER_A, 1, { relations: [{ task: LOWER_B, type: "parent_of" }] }),
+      task(LOWER_B, 2),
+    ];
+
+    expect(await addTaskLink(P, UPPER_A, UPPER_B, "parent_of", ACTOR)).toEqual({
+      ok: true,
+      changed: false,
+    });
+    expect(logActivity).not.toHaveBeenCalled();
+    expect(dispatchWebhooks).not.toHaveBeenCalled();
+  });
+});
+
+describe("what leaves the building", () => {
+  // The event name alone says nothing about what a receiver is handed, and no other layer covers
+  // the payload: the e2e rig cannot deliver a webhook at all (isAllowedWebhookUrl refuses http).
+  it("hands the webhook both ends, the type, and the sentence", async () => {
+    store = [task("a", 1), task("b", 2)];
+
+    await addTaskLink(P, "a", "b", "parent_of", ACTOR);
+
+    expect(dispatchWebhooks).toHaveBeenCalledTimes(1);
+    const [projectId, event, payload] = dispatchWebhooks.mock.calls[0];
+    expect(projectId).toBe(P);
+    expect(event).toBe("task_linked");
+    expect(payload).toEqual({
+      project: { key: "BP", name: "Board Planner" },
+      task: { taskKey: "BP-1", title: "Task 1", status: "todo" },
+      data: {
+        type: "parent_of",
+        relatedTaskKey: "BP-2",
+        relatedTaskTitle: "Task 2",
+        summary: "rafal made BP-1 the parent of BP-2",
+      },
+    });
+  });
+
+  // The project's shared Slack/Discord channel is a second dispatcher with its own event filter
+  it("tells the project's own channel the same thing", async () => {
+    store = [task("a", 1), task("b", 2)];
+
+    await addTaskLink(P, "a", "b", "relates", ACTOR);
+
+    expect(dispatchNotifications).toHaveBeenCalledTimes(1);
+    const [projectId, event, payload] = dispatchNotifications.mock.calls[0];
+    expect([projectId, event]).toEqual([P, "task_linked"]);
+    // The formatters read `data.summary` and `data.relatedTaskKey`; an absent one renders blank
+    expect(payload).toMatchObject({
+      data: { summary: "rafal linked BP-1 to BP-2", relatedTaskKey: "BP-2" },
+    });
+  });
+
+  it("gives the e-mail everything it needs to render a row", async () => {
+    store = [task("a", 1, { assignee: "u-assignee" }), task("b", 2)];
+
+    await addTaskLink(P, "a", "b", "duplicates", ACTOR);
+
+    const forA = createNotifications.mock.calls
+      .map((c) => c[0] as { taskId: string; email?: Record<string, unknown> })
+      .find((n) => n.taskId === "a")!;
+    expect(forA.email).toEqual({
+      kicker: "Tasks linked",
+      taskKey: "BP-1",
+      taskTitle: "Task 1",
+      taskMeta: "Board Planner · rafal marked BP-1 as a duplicate of BP-2",
+      projectRef: "BP",
+      taskNumber: 1,
+      assigneeId: "u-assignee",
+    });
+  });
+
+  it("calls the removal a removal in the mail", async () => {
+    store = [task("a", 1, { relations: [{ task: "b", type: "relates" }] }), task("b", 2)];
+
+    await removeTaskLink(P, "a", "b", "relates", ACTOR);
+
+    const forA = createNotifications.mock.calls
+      .map((c) => c[0] as { taskId: string; email?: { kicker?: string } })
+      .find((n) => n.taskId === "a")!;
+    expect(forA.email?.kicker).toBe("Link removed");
   });
 });

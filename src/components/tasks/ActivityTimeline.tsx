@@ -36,8 +36,10 @@ function actionIcon(action: string) {
       return "↗";
     case "pr_unlinked":
       return "×";
+    // The same glyph as pr_linked, and for the same reason: a link appeared. `⚯` rendered, but its
+    // bridge disappears into the antialiasing at 12px and it reads as two loose rings.
     case "link_added":
-      return "⚯";
+      return "↗";
     case "link_removed":
       return "×";
     default:
@@ -253,6 +255,7 @@ export function ActivityTimeline({
             className="flex items-start gap-2 text-sm"
           >
             <span
+              aria-hidden="true"
               className={`flex-shrink-0 w-5 h-5 flex items-center justify-center text-xs rounded-full bg-bg-input ${actionColor(log.action)}`}
             >
               {actionIcon(log.action)}

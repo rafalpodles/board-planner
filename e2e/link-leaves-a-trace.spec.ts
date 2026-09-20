@@ -1,4 +1,4 @@
-import { test, expect, type Page, type APIRequestContext } from "@playwright/test";
+import { test, expect, type Locator, type Page, type APIRequestContext } from "@playwright/test";
 import { ADMIN_AUTH } from "./api";
 import { db } from "./notification-grid";
 import {
@@ -45,26 +45,44 @@ import { signIn } from "./session";
  *     the branch base, alone                           a reload". The two halves of this change
  *                                                      are independent.
  *
- * What this file does NOT pin, so the next reader does not assume it: the `!held` guard in
- * `removeTaskLink` — dropping it leaves all six green. The UI offers Unlink only on the end that
- * holds the link, so a removal from the wrong end is unreachable from a browser; it arrives over
- * the API and MCP, and `src/lib/task-links.test.ts` is where it is covered. Neither is the webhook
- * dispatch: `isAllowedWebhookUrl` refuses an http destination, and the receiver stub is http on
- * 127.0.0.1, so no delivery can land in this rig at all — `external-integrations.spec.ts` asserts
- * exactly that. What `dispatchWebhooks` is asked to send is pinned in the unit test instead.
+ * An earlier draft of this block claimed a removal from the wrong end was "unreachable from a
+ * browser". It is not, and the claim was being used to skip a test: `TaskLinks` folds an incoming
+ * `relates` into the same removable section as an outgoing one, so the × is there for both. The
+ * last test below drives it.
+ *
+ * What this file does NOT pin: the webhook. `isAllowedWebhookUrl` refuses an http destination and
+ * the receiver stub is http on 127.0.0.1, so no delivery can land in this rig at all —
+ * `external-integrations.spec.ts` asserts exactly that. `src/lib/task-links.test.ts` asserts the
+ * payload `dispatchWebhooks` is handed, which is as close as this repo can get.
  */
 
 const taskUrl = (n: number) => `/projects/${PROJECT_KEY}/tasks/${n}`;
 
+/**
+ * The timeline names the actor by `fullName`, the notification by `username`. Both are asserted
+ * exactly, because "admin" is a substring of "E2E Admin" and `getByText` matches substrings
+ * case-insensitively — so a loose assertion here passes whichever of the two the code used.
+ */
+const ADMIN_FULL_NAME = "E2E Admin";
+const exactly = (page: Page | Locator, text: string) => page.getByText(text, { exact: true });
+
 test.beforeEach(seed);
 
-/** The task's History tab, once its rows are in — the empty line is also the loading state. */
+/**
+ * The task's History tab, once its rows are really in.
+ *
+ * NOT `expect(panel.getByText("No history yet")).toBeHidden()`: that line is gated on
+ * `!failed && !reading && logs.length === 0`, so while the read is in flight it is absent — and
+ * `toBeHidden` passes on an element that is not there. The assertion held before the fetch, during
+ * it and after it, which also left the "Show all" read below racing a list that had not loaded.
+ * Waiting for the first row is a signal only an answered read can give.
+ */
 async function openHistory(page: Page, taskNumber: number) {
   await page.goto(taskUrl(taskNumber));
   await page.getByRole("tab", { name: /^History/ }).click();
   const panel = page.locator("#task-panel-history");
   await expect(panel).toBeVisible();
-  await expect(panel.getByText("No history yet")).toBeHidden();
+  await expect(panel.getByRole("time").first()).toBeVisible();
   const showAll = page.getByRole("button", { name: /Show all \d+ entries/ });
   if (await showAll.isVisible()) await showAll.click();
   return panel;
@@ -110,11 +128,12 @@ test.describe("a re-parent through the UI", () => {
     // The control, on the same screen and from the same run: TP-4 gaining the child is recorded
     // too, so a silence below cannot be a history panel that renders no link rows at all.
     await expect(
-      history.getByText(`${ADMIN_USERNAME} made this task the parent of ${PROJECT_KEY}-${SIBLING_TASK_NUMBER}`)
+      exactly(history, `${ADMIN_FULL_NAME} made this task the parent of ${PROJECT_KEY}-${SIBLING_TASK_NUMBER}`)
     ).toBeVisible();
     await expect(
-      history.getByText(
-        `${ADMIN_USERNAME} removed ${PROJECT_KEY}-${SIBLING_TASK_NUMBER} from this task's children`
+      exactly(
+        history,
+        `${ADMIN_FULL_NAME} removed ${PROJECT_KEY}-${SIBLING_TASK_NUMBER} from this task's children`
       )
     ).toBeVisible();
   });
@@ -126,13 +145,15 @@ test.describe("a re-parent through the UI", () => {
     const history = await openHistory(page, SIBLING_TASK_NUMBER);
 
     await expect(
-      history.getByText(
-        `${ADMIN_USERNAME} made ${PROJECT_KEY}-${DECOY_TASK_NUMBER} the parent of this task`
+      exactly(
+        history,
+        `${ADMIN_FULL_NAME} made ${PROJECT_KEY}-${DECOY_TASK_NUMBER} the parent of this task`
       )
     ).toBeVisible();
     await expect(
-      history.getByText(
-        `${ADMIN_USERNAME} removed this task from ${PROJECT_KEY}-${FINISHED_TASK_NUMBER}'s children`
+      exactly(
+        history,
+        `${ADMIN_FULL_NAME} removed this task from ${PROJECT_KEY}-${FINISHED_TASK_NUMBER}'s children`
       )
     ).toBeVisible();
   });
@@ -157,9 +178,10 @@ test.describe("a re-parent through the UI", () => {
     expect((await linked).status()).toBe(200);
 
     await expect(
-      page
-        .locator("#task-panel-history")
-        .getByText(`${ADMIN_USERNAME} linked this task to ${PROJECT_KEY}-${SIBLING_TASK_NUMBER}`)
+      exactly(
+        page.locator("#task-panel-history"),
+        `${ADMIN_FULL_NAME} linked this task to ${PROJECT_KEY}-${SIBLING_TASK_NUMBER}`
+      )
     ).toBeVisible({ timeout: 10_000 });
   });
 });
@@ -184,8 +206,12 @@ test.describe("the bell", () => {
     // the time the row exists, so this reloads until the server has it rather than reading once.
     await expect(async () => {
       await theirs.goto("/notifications");
-      await expect(theirs.getByText(expected)).toBeVisible({ timeout: 3_000 });
+      await expect(exactly(theirs, expected)).toBeVisible({ timeout: 3_000 });
     }).toPass({ timeout: 30_000 });
+
+    // The type chip beside it: the only screen that names a notification type, and the one place
+    // a new row shows up as its raw key
+    await expect(theirs.getByText("Dependency").first()).toBeVisible();
 
     await member.close();
   });
@@ -205,13 +231,18 @@ test.describe("the bell", () => {
     const expected = `${ADMIN_USERNAME} removed ${PROJECT_KEY}-${SIBLING_TASK_NUMBER} from ${PROJECT_KEY}-${FINISHED_TASK_NUMBER}'s children`;
     await expect(async () => {
       await theirs.goto("/notifications");
-      await expect(theirs.getByText(expected)).toBeVisible({ timeout: 3_000 });
+      await expect(exactly(theirs, expected)).toBeVisible({ timeout: 3_000 });
     }).toPass({ timeout: 30_000 });
     await member.close();
 
-    // Only now, with the dispatch proven to have run, is the admin's empty feed evidence
+    // Only now, with the dispatch proven to have run, is the admin's empty feed evidence — and
+    // only once the screen is known to have rendered. `toHaveCount(0)` retries toward its starting
+    // state, so a page that 500s or never finishes loading satisfies it just as well as an
+    // actually empty feed.
     await page.goto("/notifications");
-    await expect(page.getByText(expected)).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Notifications" })).toBeVisible();
+    await expect(page.getByText("No notifications yet.")).toBeVisible();
+    await expect(exactly(page, expected)).toHaveCount(0);
   });
 });
 
@@ -231,16 +262,55 @@ test.describe("removal", () => {
 
     const mine = await openHistory(page, DECOY_TASK_NUMBER);
     await expect(
-      mine.getByText(
-        `${ADMIN_USERNAME} removed ${PROJECT_KEY}-${SIBLING_TASK_NUMBER} from this task's children`
+      exactly(
+        mine,
+        `${ADMIN_FULL_NAME} removed ${PROJECT_KEY}-${SIBLING_TASK_NUMBER} from this task's children`
       )
     ).toBeVisible();
 
     const theirs = await openHistory(page, SIBLING_TASK_NUMBER);
     await expect(
-      theirs.getByText(
-        `${ADMIN_USERNAME} removed this task from ${PROJECT_KEY}-${DECOY_TASK_NUMBER}'s children`
+      exactly(
+        theirs,
+        `${ADMIN_FULL_NAME} removed this task from ${PROJECT_KEY}-${DECOY_TASK_NUMBER}'s children`
       )
     ).toBeVisible();
+  });
+});
+
+/**
+ * The end that does NOT hold the link. `relates` is symmetric to a reader, so `TaskLinks` folds
+ * an incoming one into the same "Relates to" section as an outgoing one, × and all — which makes
+ * this a click a person can make, not an API-only path.
+ *
+ * What the × does about the link is BP-657's to settle. What this pins is the half that belongs
+ * here: the write removed nothing, so nothing may be recorded as though it had.
+ */
+test.describe("removing from the end that does not hold the link", () => {
+  test("records nothing, because nothing was removed", async ({ page, request }) => {
+    const related = await request.post(
+      `/api/projects/${PROJECT_KEY}/tasks/${DECOY_TASK_ID}/links`,
+      { headers: ADMIN_AUTH, data: { taskId: String(SIBLING_TASK_ID), type: "relates" } }
+    );
+    expect(related.status(), await related.text()).toBe(200);
+
+    await signIn(page);
+    await page.goto(taskUrl(SIBLING_TASK_NUMBER));
+    const removed = page.waitForResponse(
+      (r) => r.request().method() === "DELETE" && r.url().includes(`/tasks/${SIBLING_TASK_ID}/links`)
+    );
+    await page
+      .getByRole("button", { name: `Unlink ${PROJECT_KEY}-${DECOY_TASK_NUMBER}` })
+      .click();
+    expect((await removed).status()).toBe(200);
+
+    const history = await openHistory(page, SIBLING_TASK_NUMBER);
+
+    // The control: the row the SETUP wrote against this same task is on this same screen, so the
+    // absence below is this write's silence and not a panel that renders no link rows at all.
+    await expect(
+      exactly(history, `${ADMIN_FULL_NAME} linked this task to ${PROJECT_KEY}-${DECOY_TASK_NUMBER}`)
+    ).toBeVisible();
+    await expect(history.getByText(/unlinked/i)).toHaveCount(0);
   });
 });

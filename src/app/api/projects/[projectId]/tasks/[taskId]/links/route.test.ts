@@ -36,7 +36,16 @@ const ctx = () => ({ params: Promise.resolve({ projectId: "p1", taskId: "t1" }) 
 
 beforeEach(() => {
   vi.clearAllMocks();
-  findOneAndUpdate.mockResolvedValue({ _id: "t1" });
+  findOneAndUpdate.mockReturnValue({
+    lean: async () => ({
+      _id: "t1",
+      taskNumber: 1,
+      title: "t",
+      status: "todo",
+      relations: [],
+      blockedBy: [],
+    }),
+  });
   findOne.mockReturnValue({
     lean: async () => ({ _id: "t1", taskNumber: 1, title: "t", status: "todo", relations: [], blockedBy: [] }),
   });
@@ -49,7 +58,8 @@ describe("DELETE /api/projects/:projectId/tasks/:taskId/links", () => {
     expect(res.status).toBe(200);
     expect(findOneAndUpdate).toHaveBeenCalledWith(
       { _id: "t1", project: "p1" },
-      { $pull: { blockedBy: OTHER_TASK } }
+      { $pull: { blockedBy: OTHER_TASK } },
+      expect.objectContaining({ returnDocument: "before" })
     );
   });
 
@@ -67,6 +77,19 @@ describe("DELETE /api/projects/:projectId/tasks/:taskId/links", () => {
 
     expect(res.status).toBe(400);
     expect(findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  // The shape BP-304 was about, asserted positively — the tests above only prove that a REFUSED
+  // request writes nothing, not that an accepted one writes a criteria naming the type.
+  it("pulls only the relation of the named type", async () => {
+    const res = await DELETE(request("DELETE", { taskId: OTHER_TASK, type: "relates" }), ctx());
+
+    expect(res.status).toBe(200);
+    expect(findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: "t1", project: "p1" },
+      { $pull: { relations: { task: OTHER_TASK, type: "relates" } } },
+      expect.objectContaining({ returnDocument: "before" })
+    );
   });
 
   // {$pull: {relations: {task, type: {$ne: null}}}} drops every relation to that task

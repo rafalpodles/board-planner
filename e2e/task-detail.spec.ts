@@ -381,7 +381,9 @@ test("dependencies: a blocker is linked by key, shown, and removable", async ({
     await expect(page.getByText("Dependency added")).toBeVisible(); // toast
     // The section's own heading, not any text containing the phrase. Since BP-658 the history
     // panel on this same page says "marked this task as blocked by TP-3", and `getByText` is a
-    // case-insensitive substring match — so the unscoped locator resolved to the history row too.
+    // case-insensitive substring match — so the unscoped locator could resolve to the history row
+    // as well. Intermittently: that panel refetches asynchronously after the write, so whether it
+    // already holds the row depends on which lands first.
     const blockedBy = page.getByRole("heading", { name: "Blocked by" }).locator("..");
     await expect(blockedBy.getByText(`${PROJECT_KEY}-${SIBLING_TASK_NUMBER}`)).toBeVisible();
     await expect(blockedBy.getByText(SIBLING_TASK_TITLE)).toBeVisible();

@@ -7,7 +7,7 @@ const ROW_LABEL: Record<NotificationType, string> = {
   mentioned: "Somebody mentions you",
   status_changed: "A task you follow changes column",
   comment_added: "A task you follow gets a comment",
-  task_linked: "A task you follow is linked to another",
+  task_linked: "A task you follow gains or loses a dependency",
   // Replaced on the project screen, where "a board" has an answer — see PROJECT_ROW_LABEL
   task_created: "Anybody creates a task on a board",
 };

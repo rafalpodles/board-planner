@@ -3,18 +3,19 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
-import { ApiNotification } from "@/types";
+import { ApiNotification, NotificationType } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { timeAgo } from "@/lib/time";
 import { taskPath } from "@/lib/urls";
 import { PageHeader } from "@/components/shell/PageHeader";
 
-const TYPE_LABELS: Record<string, string> = {
+const TYPE_LABELS: Record<NotificationType, string> = {
   task_assigned: "Assigned",
   status_changed: "Status changed",
   comment_added: "Comment",
   mentioned: "Mentioned",
   task_created: "New task",
+  task_linked: "Dependency",
 };
 
 export default function NotificationsPage() {

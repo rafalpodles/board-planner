@@ -398,4 +398,36 @@ describe("ActivityTimeline — what a link did to this task", () => {
       expect(screen.getByText("Owner Name performed an action")).toBeTruthy()
     );
   });
+
+  /**
+   * The other half of that control, and the one the first draft missed: a KNOWN action whose
+   * `field` is not a direction this app writes. `field` carries no enum in the schema and the
+   * component casts it, so an old or hand-written row reaches the phrasing — and before the
+   * default branch it rendered an icon, a timestamp and no sentence at all.
+   */
+  it("still says something when the direction is one it does not know", async () => {
+    api.get.mockResolvedValue([
+      { ...log, action: "link_added", field: "", oldValue: "", newValue: "BP-2" },
+    ]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() =>
+      expect(screen.getByText("Owner Name linked this task to BP-2")).toBeTruthy()
+    );
+  });
+
+  // `⚯` was legible in a browser and two loose rings at 12px. This pins the glyph to the set the
+  // rest of the table already renders, and the removal to the one every other removal uses.
+  it("draws a link with a glyph this table already proves, and a removal with the removal mark", async () => {
+    api.get.mockResolvedValue([
+      { ...log, _id: "l1", action: "link_added", field: "relates", newValue: "BP-2" },
+      { ...log, _id: "l2", action: "link_removed", field: "relates", oldValue: "BP-3" },
+    ]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+
+    await waitFor(() => expect(screen.getByText("↗")).toBeTruthy());
+    expect(screen.getByText("×")).toBeTruthy();
+    // Decoration: the sentence beside it already says what happened
+    expect(screen.getByText("↗").getAttribute("aria-hidden")).toBe("true");
+    expect(screen.getByText("×").className).toContain("text-danger");
+  });
 });
