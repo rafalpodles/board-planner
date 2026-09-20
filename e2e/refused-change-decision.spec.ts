@@ -437,3 +437,202 @@ test("the board's task list does not carry the patch", async ({ request }) => {
   expect(tasks.some((task) => task._id === String(HELD_TASK_ID))).toBe(true);
   for (const task of tasks) expect(task.decision).toBeUndefined();
 });
+
+/**
+ * BP-704. `DecisionPanel.test.tsx` covers six degraded states with a mocked API; none of them is
+ * driven by a browser test. Mutation M5 of the 20 September 2026 audit measured the cost: the
+ * `presumedGone` branch was removed and `refused-change-decision.spec.ts` stayed green.
+ */
+
+/**
+ * `PATCH /api/workers/[workerId]/decisions` — the machine's own settlement — receives no request
+ * anywhere else in this file; every "delivered" case above plants the state directly in Mongo.
+ * This one drives it for real, which is also how `decision-error` gets on screen: the field is
+ * never set by `createDecision`, only by a settlement that reports one.
+ */
+test("the machine settles a refusal with an error, over its own PATCH, and the panel offers another go", async ({
+  page,
+  request,
+}) => {
+  await request.post(`/api/workers/${WORKER_ID}/decisions`, {
+    headers: workerHeaders(),
+    data: record(),
+  });
+
+  await signIn(page, "owner");
+  await openTheTask(page);
+
+  await page.getByRole("button", { name: "Accept and push" }).click();
+  const acceptedAsAnswered = page.waitForResponse(
+    (response) =>
+      response.url().includes(`/tasks/${HELD_TASK_ID}/decision`) && response.request().method() === "POST"
+  );
+  await page.getByRole("dialog").getByRole("button", { name: "Accept and push" }).click();
+  expect((await acceptedAsAnswered).status()).toBe(200);
+  await expect.poll(async () => (await storedDecision())?.state).toBe("accepted");
+
+  const settled = await request.patch(`/api/workers/${WORKER_ID}/decisions`, {
+    headers: workerHeaders(),
+    data: { taskId: String(HELD_TASK_ID), state: "refused", error: "remote hung up" },
+  });
+  expect(settled.status(), await settled.text()).toBe(200);
+  await expect.poll(async () => (await storedDecision())?.state).toBe("refused");
+
+  await page.reload();
+  await expect(page.getByTestId("decision-error")).toContainText("remote hung up");
+  await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
+});
+
+/**
+ * A worker document has no `lastSeenAt` at all until its first heartbeat, and that reached the
+ * panel as `new Date(null)` — "has not been heard from since 01/01/1970" — on the one paragraph
+ * whose subject is whether anybody is coming back.
+ */
+test("a worker that has never checked in is never dated as 1970", async ({ page, request }) => {
+  await request.post(`/api/workers/${WORKER_ID}/decisions`, {
+    headers: workerHeaders(),
+    data: record(),
+  });
+  const handle = await db();
+  await handle.collection("workers").updateOne({ _id: WORKER_ID }, { $unset: { lastSeenAt: "" } });
+
+  await signIn(page, "owner");
+  await openTheTask(page);
+
+  const warning = page.getByTestId("decision-machine-quiet");
+  await expect(warning).toContainText("has never been heard from");
+  await expect(warning).not.toContainText("1970");
+});
+
+/**
+ * The same warning, on a machine that has checked in before but has now gone quiet for longer than
+ * `PRESUMED_GONE_MS` — the ordinary case the ticket is about, and the one `presumedGone` gates on.
+ */
+test("a worker gone quiet for a while is announced, beside the way out", async ({
+  page,
+  request,
+}) => {
+  await request.post(`/api/workers/${WORKER_ID}/decisions`, {
+    headers: workerHeaders(),
+    data: record(),
+  });
+  const handle = await db();
+  await handle
+    .collection("workers")
+    .updateOne({ _id: WORKER_ID }, { $set: { lastSeenAt: new Date(Date.now() - 30 * 60_000) } });
+
+  await signIn(page, "owner");
+  await openTheTask(page);
+
+  await expect(page.getByTestId("decision-machine-quiet")).toContainText(
+    "has not been heard from since"
+  );
+  // The control: the panel still offers a way out of waiting on a machine it has just said may
+  // never answer
+  await expect(page.getByRole("button", { name: "Give up" })).toBeVisible();
+});
+
+/**
+ * A change whose diff was not selected still renders a headline, a file count and an Accept
+ * button — the panel has to say the diff itself is missing, or somebody consents to a change the
+ * page never showed them.
+ */
+test("a record with no patch says the change itself is missing, not an empty panel", async ({
+  page,
+  request,
+}) => {
+  const created = await request.post(`/api/workers/${WORKER_ID}/decisions`, {
+    headers: workerHeaders(),
+    data: record({ patch: "" }),
+  });
+  expect(created.status(), await created.text()).toBe(201);
+
+  await signIn(page, "owner");
+  await openTheTask(page);
+
+  await expect(page.getByTestId("decision-patch-missing")).toContainText(
+    "The change itself is not on this record"
+  );
+  // Not suppressed: whether this may be accepted is the server's word, not the component's
+  await expect(page.getByRole("button", { name: "Accept and push" })).toBeVisible();
+});
+
+/**
+ * Both counts and both lists are written from the same input array by `createDecision`, so a
+ * mismatch is not reachable through the public route — it is what an incomplete read looks like,
+ * and the panel has to say how many tripped the gate even when the paths did not arrive.
+ */
+test("protected files reported but not listed still say how many tripped the gate", async ({
+  page,
+  request,
+}) => {
+  await request.post(`/api/workers/${WORKER_ID}/decisions`, {
+    headers: workerHeaders(),
+    data: record(),
+  });
+  const handle = await db();
+  await handle
+    .collection("tasks")
+    .updateOne(
+      { _id: HELD_TASK_ID },
+      { $set: { "decision.protectedFiles": [], "decision.protectedFileCount": 2 } }
+    );
+
+  await signIn(page, "owner");
+  await openTheTask(page);
+
+  await expect(page.getByTestId("decision-protected-unlisted")).toContainText(
+    "2 protected files, not listed on this record"
+  );
+  await expect(page.getByTestId("decision-protected-files")).toHaveCount(0);
+});
+
+/**
+ * The url the machine reports is as worker-supplied as the patch beside it, and the settle route
+ * checks its shape and not whether it parses at all elsewhere in this repository — a shape that
+ * cannot pass the settle route's own `PR_URL` check, planted the way `settleAs` already plants
+ * `delivered` above.
+ */
+test("a pull request url the panel cannot parse at all is shown as text, not a link", async ({
+  page,
+  request,
+}) => {
+  await request.post(`/api/workers/${WORKER_ID}/decisions`, {
+    headers: workerHeaders(),
+    data: record(),
+  });
+  await settleAs("delivered", "not a url");
+
+  await signIn(page, "owner");
+  await openTheTask(page);
+
+  await expect(page.getByTestId("decision-pr-unreadable")).toContainText("not a url");
+  await expect(page.getByTestId("decision-pr")).toHaveCount(0);
+});
+
+/**
+ * A bare name and date directly above the buttons would read as the assignee; the panel names the
+ * verb too, and nothing in this file has read it off the screen before — the "accepting" test
+ * above only checks the stored document.
+ */
+test("a settled decision names who answered, and how, on screen", async ({ page, request }) => {
+  await request.post(`/api/workers/${WORKER_ID}/decisions`, {
+    headers: workerHeaders(),
+    data: record(),
+  });
+
+  await signIn(page, "owner");
+  await openTheTask(page);
+
+  await page.getByRole("button", { name: "Accept and push" }).click();
+  const answered = page.waitForResponse(
+    (response) =>
+      response.url().includes(`/tasks/${HELD_TASK_ID}/decision`) && response.request().method() === "POST"
+  );
+  await page.getByRole("dialog").getByRole("button", { name: "Accept and push" }).click();
+  expect((await answered).status()).toBe(200);
+  await expect.poll(async () => (await storedDecision())?.state).toBe("accepted");
+
+  await page.reload();
+  await expect(page.getByTestId("decision-decided-by")).toContainText("Accepted by E2E Owner");
+});
