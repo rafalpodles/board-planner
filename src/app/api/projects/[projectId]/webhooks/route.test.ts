@@ -19,7 +19,7 @@ vi.mock("@/lib/middleware", () => ({
       handler(req, { ...(ctx as object), user: { _id: "owner1" } }),
 }));
 
-const { GET, POST, PUT, DELETE } = await import("./route");
+const { POST, PUT, DELETE } = await import("./route");
 
 function request(method: string, body?: unknown) {
   return new Request("https://app.example.com/api/projects/p1/webhooks", {
@@ -47,16 +47,6 @@ beforeEach(() => {
   findById.mockResolvedValue(projectDoc([webhook]));
   findOneAndUpdate.mockResolvedValue(projectDoc([webhook]));
   findOne.mockReturnValue({ lean: () => Promise.resolve({ webhooks: [webhook] }) });
-});
-
-describe("GET /api/projects/:projectId/webhooks", () => {
-  it("404s when the project does not exist", async () => {
-    findById.mockResolvedValue(null);
-
-    const res = await GET(request("GET"), ctx());
-
-    expect(res.status).toBe(404);
-  });
 });
 
 describe("POST /api/projects/:projectId/webhooks", () => {

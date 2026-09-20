@@ -7,18 +7,6 @@ import { Project } from "@/models/project";
 import { Task } from "@/models/task";
 import { logProjectAudit } from "@/lib/projectAudit";
 
-export const GET = withProjectAccess(async (_request, { params }) => {
-  const { projectId } = await params;
-  await connectDB();
-
-  const project = await Project.findById(projectId, "categories");
-  if (!project) {
-    return NextResponse.json({ error: "Project not found" }, { status: 404 });
-  }
-
-  return NextResponse.json(project.categories || []);
-});
-
 export const POST = withProjectAccess(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
