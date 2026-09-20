@@ -97,7 +97,11 @@ const SCENARIOS: Record<string, Scenario> = {
       await machineIsLive(page);
     },
   },
-  // Wide, like the list view: at 1440 the Enabled, Lock and Commands columns sit past the edge
+  // Wide, like the list view. BP-642 pinned Enabled, Lock and Commands to the right edge, so at
+  // 1440 they are on the screen — but the table is still wider than the scrollport there, and what
+  // now passes under the pinned column is Last seen, whose header is caught half-drawn. Measured,
+  // at 1440: a documentation screenshot reads that as a rendering fault rather than as a table
+  // that scrolls. The whole table fits from about 1661.
   "admin-workers": {
     viewport: WIDE,
     run: async (page) => {
