@@ -320,3 +320,82 @@ describe("ActivityTimeline — what a sync did to the links", () => {
     await waitFor(() => expect(screen.getByText(/….*\/pull\/12345$/)).toBeTruthy());
   });
 });
+
+/**
+ * BP-658. One link writes a row at both ends, and `field` carries the relation as THIS task
+ * experiences it — so the parent's row and the child's row are the same write read from opposite
+ * sides, and neither may render as the other.
+ */
+describe("ActivityTimeline — what a link did to this task", () => {
+  it("reads a gained child from the parent's side", async () => {
+    api.get.mockResolvedValue([
+      { ...log, action: "link_added", field: "parent_of", oldValue: "", newValue: "BP-11" },
+    ]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() =>
+      expect(screen.getByText("Owner Name made this task the parent of BP-11")).toBeTruthy()
+    );
+  });
+
+  it("reads the same write from the child's side as a gained parent", async () => {
+    api.get.mockResolvedValue([
+      { ...log, action: "link_added", field: "child_of", oldValue: "", newValue: "BP-10" },
+    ]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() =>
+      expect(screen.getByText("Owner Name made BP-10 the parent of this task")).toBeTruthy()
+    );
+  });
+
+  // The epic nobody named in the call: this row is the only place it is written down
+  it("names the child an epic lost", async () => {
+    api.get.mockResolvedValue([
+      { ...log, action: "link_removed", field: "parent_of", oldValue: "BP-11", newValue: "" },
+    ]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() =>
+      expect(screen.getByText("Owner Name removed BP-11 from this task's children")).toBeTruthy()
+    );
+  });
+
+  it("distinguishes a blocker from the task it blocks", async () => {
+    api.get.mockResolvedValue([
+      { ...log, _id: "l1", action: "link_added", field: "blocked_by", oldValue: "", newValue: "BP-2" },
+      { ...log, _id: "l2", action: "link_added", field: "blocks", oldValue: "", newValue: "BP-3" },
+    ]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() =>
+      expect(screen.getByText("Owner Name marked this task as blocked by BP-2")).toBeTruthy()
+    );
+    expect(screen.getByText("Owner Name marked BP-3 as blocked by this task")).toBeTruthy();
+  });
+
+  it("reads a duplicate from both sides", async () => {
+    api.get.mockResolvedValue([
+      { ...log, _id: "l1", action: "link_added", field: "duplicates", oldValue: "", newValue: "BP-2" },
+      {
+        ...log,
+        _id: "l2",
+        action: "link_removed",
+        field: "duplicated_by",
+        oldValue: "BP-3",
+        newValue: "",
+      },
+    ]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() =>
+      expect(screen.getByText("Owner Name marked this task as a duplicate of BP-2")).toBeTruthy()
+    );
+    expect(screen.getByText("Owner Name removed BP-3 as a duplicate of this task")).toBeTruthy();
+  });
+
+  // The control: an unknown action still falls through to the generic line rather than
+  // rendering as a link with an empty other end
+  it("does not read an unrelated action as a link", async () => {
+    api.get.mockResolvedValue([{ ...log, action: "something_else" }]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() =>
+      expect(screen.getByText("Owner Name performed an action")).toBeTruthy()
+    );
+  });
+});
