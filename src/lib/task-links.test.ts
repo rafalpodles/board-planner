@@ -34,7 +34,6 @@ let clock = 0;
 
 const updateOne = vi.fn();
 const updateMany = vi.fn();
-const findByIdAndUpdate = vi.fn();
 const findOneAndUpdate = vi.fn();
 const logActivities = vi.fn();
 const dispatchWebhooks = vi.fn();
@@ -113,11 +112,6 @@ vi.mock("@/models/task", () => ({
       updateMany(filter, update);
       for (const doc of store.filter(sift(filter))) apply(doc, update);
     },
-    findByIdAndUpdate: async (id: string, update: Update) => {
-      findByIdAndUpdate(id, update);
-      const doc = store.find((d) => d._id === id);
-      if (doc) apply(doc, update);
-    },
     // `returnDocument: "before"` is honoured, because the production code decides what to
     // announce from the document the write itself handed back. A mock that returned the state
     // AFTER the pull would make every "did this write remove anything" answer false.
@@ -129,7 +123,13 @@ vi.mock("@/models/task", () => ({
       findOneAndUpdate(filter, update, options);
       const doc = store.find(sift(filter));
       const before = doc ? structuredClone(doc) : null;
-      if (doc) apply(doc, update);
+      if (doc) {
+        apply(doc, update);
+        // Mongoose hooks this writer too. Nothing here reads a counter off it today, but a fake
+        // that models the timestamp on one writer and not the other is the shape that let a
+        // `modifiedCount` gate pass while doing nothing in production.
+        (doc as unknown as Record<string, unknown>).updatedAt = `t${++clock}`;
+      }
       const answered = options?.returnDocument === "before" ? before : doc ?? null;
       return lean(projected(answered, options?.projection));
     },
