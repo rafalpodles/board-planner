@@ -159,9 +159,12 @@ describe("the browser tab's title", () => {
       task("t1", "queued"),
       task("t2", "queued"),
       task("t3", "doing"),
-      // Neither of these is counted: one is behind the board, one is finished
+      // None of these is counted: one is behind the board, two are finished. Two rather than one
+      // on purpose — with a single finished task, counting `done` instead of `active` produces the
+      // same sentence and this test cannot tell the two apart.
       task("t4", "icebox"),
       task("t5", "shipped"),
+      task("t6", "shipped"),
     ]);
 
     await expectTitle(`Test Project (1 in progress, 2 todo) — ${APP_NAME}`);
