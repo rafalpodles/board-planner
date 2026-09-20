@@ -213,8 +213,14 @@ export async function removeTaskLink(
  * A single `updateMany` would be one write, but then the epics to announce would have to come from
  * a read taken beforehand — and under two concurrent re-parents that read is stale: both requests
  * see the original parent, both announce that it lost the child, and the epic that really lost it
- * in between is named by neither. Whoever's `findOneAndUpdate` matched is the request that did the
- * removal, so what is announced is what happened.
+ * in between is named by neither.
+ *
+ * What carries that is the MATCH, not the document handed back: a `findOneAndUpdate` that matched
+ * is the request that did this removal, and no other request can have matched the same one. The
+ * returned image is read only for the task's identity — key, title, assignee, watchers — none of
+ * which the `$pull` touches, so "before" and "after" are the same document here. It is named
+ * anyway because `removeTaskLink` below genuinely depends on the distinction, and two writes in
+ * one file that mean different things by silence would be worse than one redundant word.
  *
  * It terminates, and not by a counter: the filter matches a document only while it still holds the
  * relation, and `$pull` with the same document operand removes every element that matched — so an

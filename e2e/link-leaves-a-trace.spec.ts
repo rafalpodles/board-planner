@@ -20,38 +20,49 @@ import { signIn } from "./session";
  * the only write to a task reachable from MCP with no entry in its own history.
  *
  * The case driven here is the one that cost somebody else something. A task has one parent, so
- * re-parenting it under a new epic silently pulls it out of the old one, by an `updateMany` that
- * names the old epic nowhere. Three tasks change, only two are in the request, and before this the
- * third had no record of it at all.
+ * re-parenting it under a new epic pulls it out of the old one — on `main` by an `updateMany` that
+ * named the old epic nowhere, and since this change by a write per parent that does. Three tasks
+ * change, only two are in the request, and before this the third had no record of it at all.
  *
  * Each task's history is read on its own screen, because a row written against the wrong task is
  * exactly the defect that a single-screen assertion cannot see.
  *
  * ## Mutation registry
  *
- * Each was applied to HEAD, run, and reverted; the tests named are the ones that actually went
- * red, not the ones that were expected to. `src/lib/task-links.ts`:
+ * Each was applied to the current implementation, run, and reverted; the tests named are the ones
+ * that actually went red, not the ones that were expected to. The baseline was checked at 7 green
+ * before each, because a run whose dev server never started also reports no failures.
  *
- *  1. `losing = parents.filter(…)` → `losing = []`   → 4 red: both re-parent tests and both bell
- *                                                      tests. TP-4 never learns it lost a child,
- *                                                      and TP-3 loses the row about leaving it.
- *  2. read the parents AFTER the `updateMany`        → the same 4, for the same reason: by then
- *                                                      there is nothing left to read. This is
- *                                                      what makes the read order load-bearing.
- *  3. drop the target end's row in `announce`        → 2 red: "the task that moved" and the
- *                                                      removal test, both of which read a history
- *                                                      written against the OTHER end.
+ *  1. drop the target end's row in `announce`        → 3 red: "the task that moved", and both
+ *                                                      removal tests. Every screen that reads a
+ *                                                      history written against the OTHER end.
+ *  2. `activity/route.ts` sorts on `createdAt` alone → 1 red: "the task that moved". The pair is
+ *                                                      written inside one millisecond, so without
+ *                                                      the `_id` tie-break the order is arbitrary.
+ *  3. `logActivities` given the rows reversed        → 1 red: the same test, from the other side —
+ *                                                      the tie-break is only worth something if
+ *                                                      the rows are inserted in the right order.
  *  4. reverting `TaskDetail`/`TaskActivityPanel` to  → 1 red, and only that one: "appears without
- *     the branch base, alone                           a reload". The two halves of this change
- *                                                      are independent.
+ *     the branch base, alone                           a reload". The two halves are independent.
+ *
+ * **Three mutations this file does NOT kill, and where they are killed instead.** Every scenario
+ * here gives the child exactly ONE previous parent, which is all a browser can produce, so the
+ * detach loop never iterates:
+ *
+ *  - stopping the detach after the first parent, and dropping `_id: { $ne: taskId }` from its
+ *    filter, both leave all 7 green. `src/lib/task-links.test.ts` builds a child with two parents
+ *    and a no-op re-parent, and kills both there.
+ *  - `returnDocument: "before"` → `"after"` in the detach kills nothing anywhere, and that is
+ *    correct: the announce reads only fields `$pull` does not touch, so the two images are the
+ *    same document. What the detach rests on is the match, not the image.
  *
  * An earlier draft of this block claimed a removal from the wrong end was "unreachable from a
  * browser". It is not, and the claim was being used to skip a test: `TaskLinks` folds an incoming
  * `relates` into the same removable section as an outgoing one, so the × is there for both. The
  * last test below drives it.
  *
- * What this file does NOT pin: the webhook. `isAllowedWebhookUrl` refuses an http destination and
- * the receiver stub is http on 127.0.0.1, so no delivery can land in this rig at all —
+ * Also not pinned here: the webhook. `isAllowedWebhookUrl` refuses an http destination and the
+ * receiver stub is http on 127.0.0.1, so no delivery can land in this rig at all —
  * `external-integrations.spec.ts` asserts exactly that. `src/lib/task-links.test.ts` asserts the
  * payload `dispatchWebhooks` is handed, which is as close as this repo can get.
  */
