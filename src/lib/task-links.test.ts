@@ -515,8 +515,39 @@ describe("somebody else is re-parenting the same child", () => {
 
     const removals = rows().filter((r) => r[1] === "link_removed" && r[0] === "old");
     expect(removals).toHaveLength(1);
-    // and the loop stopped rather than going round again
     expect(rows().filter((r) => r[0] === "child" && r[1] === "link_removed")).toHaveLength(1);
+
+    // And the relation the other request put back is still there. Excluding a seen parent in the
+    // FILTER is what makes that true: noticing the repeat after the write would mean this request
+    // had detached the child a second time and announced nothing about it.
+    expect(store.find((d) => d._id === "old")!.relations).toEqual([
+      { task: "child", type: "parent_of" },
+    ]);
+  });
+
+  // A third parent must still be reached: excluding the one already taken is what keeps the loop
+  // going past a repeat rather than abandoning the rest of the work.
+  it("goes on to the parents it has not seen", async () => {
+    store = [
+      task("p1", 7, { relations: [{ task: "child", type: "parent_of" }] }),
+      task("p2", 8, { relations: [{ task: "child", type: "parent_of" }] }),
+      task("new", 10),
+      task("child", 11),
+    ];
+    let call = 0;
+    findOneAndUpdate.mockImplementation(() => {
+      call += 1;
+      if (call === 2) {
+        store.find((d) => d._id === "p1")!.relations!.push({ task: "child", type: "parent_of" });
+      }
+    });
+
+    await addTaskLink(P, "new", "child", "parent_of", ACTOR);
+
+    const lost = rows().filter((r) => r[1] === "link_removed").map((r) => r[0]);
+    expect(lost.filter((id) => id === "p1")).toHaveLength(1);
+    expect(lost.filter((id) => id === "p2")).toHaveLength(1);
+    expect(store.find((d) => d._id === "p2")!.relations).toEqual([]);
   });
 });
 
@@ -526,7 +557,9 @@ describe("a relation replaced by another", () => {
 
   it("does not report the replacement when the task vanished before the pull", async () => {
     store = [task("a", 1, { relations: [{ task: "b", type: "relates" }] }), task("b", 2)];
-    updateOne.mockImplementation((_filter: object, update: Update) => {
+    // The replacing `$pull` is a findOneAndUpdate, because the type it removes has to come from
+    // the image that write returns rather than from the read at the top.
+    findOneAndUpdate.mockImplementation((_filter: object, update: Update) => {
       if (update.$pull) store = store.filter((d) => d._id !== "a");
     });
 
@@ -544,7 +577,7 @@ describe("a relation replaced by another", () => {
   // reading matchedCount would let it announce a removal somebody else performed.
   it("does not report a replacement another request had already made", async () => {
     store = [task("a", 1, { relations: [{ task: "b", type: "relates" }] }), task("b", 2)];
-    updateOne.mockImplementation((_filter: object, update: Update) => {
+    findOneAndUpdate.mockImplementation((_filter: object, update: Update) => {
       // Somebody else got there between this request's read and its own write
       if (update.$pull) store.find((d) => d._id === "a")!.relations = [];
     });

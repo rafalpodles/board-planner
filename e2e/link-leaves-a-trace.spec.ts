@@ -53,9 +53,13 @@ import { signIn } from "./session";
  * here gives the child exactly ONE previous parent, which is all a browser can produce, so the
  * detach loop never iterates:
  *
- *  - stopping the detach after the first parent, and dropping `_id: { $ne: taskId }` from its
+ *  - stopping the detach after the first parent, and dropping the loop's `_id` exclusion from its
  *    filter, both leave all 7 green. `src/lib/task-links.test.ts` builds a child with two parents
  *    and a no-op re-parent, and kills both there.
+ *  - so do the two guards a concurrent request is needed to reach: the exclusion that stops an
+ *    epic being detached twice when somebody else re-parents the same child mid-loop, and reading
+ *    the REPLACED relation's type from the write that removed it rather than from the read before
+ *    it. A browser produces neither, and both are killed in the unit test.
  *  - `returnDocument: "before"` → `"after"` in the detach kills nothing anywhere, and that is
  *    correct: the announce reads only fields `$pull` does not touch, so the two images are the
  *    same document. What the detach rests on is the match, not the image.

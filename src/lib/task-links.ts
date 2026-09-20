@@ -74,7 +74,10 @@ function canonicalId(id: string): string {
   return isValidObjectId(id) ? new Types.ObjectId(id).toString() : id;
 }
 
-function relationBetween(task: LinkEnd, otherId: string): RelationType | undefined {
+function relationBetween(
+  task: { relations?: { task: unknown; type: RelationType }[] },
+  otherId: string
+): RelationType | undefined {
   return (task.relations ?? []).find((r) => idOf(r.task) === otherId)?.type;
 }
 
@@ -149,12 +152,19 @@ export async function addTaskLink(
     target: other,
   }));
 
-  const dropped = await Task.updateOne(
+  // `returnDocument: "before"`, and the announced type read from THAT rather than from the read
+  // at the top. A concurrent request can change what this pair holds in between, and `$pull` takes
+  // whatever is there — so the earlier read is the right thing to short-circuit a no-op on, and
+  // the wrong thing to name a removal by.
+  const dropped = await Task.findOneAndUpdate(
     { _id: taskId, project: projectId },
-    { $pull: { relations: { task: targetTaskId } } }
-  );
-  if (replaced && replaced !== type && dropped.modifiedCount) {
-    lost.push({ action: "removed", type: replaced, holder: task, target: other });
+    { $pull: { relations: { task: targetTaskId } } },
+    { returnDocument: "before", projection: "relations" }
+  ).lean<{ relations?: { task: unknown; type: RelationType }[] }>();
+
+  const droppedType = dropped ? relationBetween(dropped, targetTaskId) : undefined;
+  if (droppedType && droppedType !== type) {
+    lost.push({ action: "removed", type: droppedType, holder: task, target: other });
   }
   const attached = await Task.updateOne(
     { _id: taskId, project: projectId },
@@ -250,11 +260,16 @@ export async function removeTaskLink(
  * run for as long as that traffic lasts — collecting the same parent twice as it went, which is a
  * duplicate history row and a duplicate webhook for one request.
  *
- * So a parent matched twice ends the loop rather than extending it. A second match is never work
- * this request still owes; it is the signal that somebody else is writing. Unlike the fixed cap
- * that stood here briefly, this cannot truncate anything real — every distinct parent is still
- * detached and still announced. That cap could only ever cut real work short, leaving the child
- * with some parents detached and a new one attached behind a 200.
+ * So a parent this loop has already taken the child off is excluded from the filter, and the
+ * repeat simply never matches. It has to be the filter rather than a check on the way out:
+ * `findOneAndUpdate` is one operation, so by the time the code could notice a repeat the `$pull`
+ * has already run — and that is a second detach this request performed and would not announce,
+ * which is the silence the whole change exists to end. Excluded instead, the relation the other
+ * request just wrote stays where it put it, and is its to report.
+ *
+ * Unlike the fixed cap that stood here briefly, this cannot truncate anything real: every distinct
+ * parent is still detached and still announced. That cap could only ever cut real work short,
+ * leaving the child with some parents detached and a new one attached behind a 200.
  */
 async function takeTheChildOffItsOtherParents(
   projectId: string,
@@ -262,13 +277,13 @@ async function takeTheChildOffItsOtherParents(
   targetTaskId: string
 ): Promise<LinkSubject[]> {
   const losing: LinkSubject[] = [];
-  const seen = new Set<string>();
+  const done = [taskId];
 
   for (;;) {
     const parent = await Task.findOneAndUpdate(
       {
         project: projectId,
-        _id: { $ne: taskId },
+        _id: { $nin: done },
         relations: { $elemMatch: { task: targetTaskId, type: "parent_of" } },
       },
       { $pull: { relations: { task: targetTaskId, type: "parent_of" } } },
@@ -277,13 +292,7 @@ async function takeTheChildOffItsOtherParents(
 
     if (!parent) return losing;
 
-    if (seen.has(idOf(parent))) {
-      console.warn(
-        `Detaching task ${targetTaskId} matched parent ${idOf(parent)} twice — another request is re-parenting it`
-      );
-      return losing;
-    }
-    seen.add(idOf(parent));
+    done.push(idOf(parent));
     losing.push(parent);
   }
 }
