@@ -37,7 +37,9 @@ const ctx = () => ({ params: Promise.resolve({ projectId: "p1", taskId: "t1" }) 
 beforeEach(() => {
   vi.clearAllMocks();
   findOneAndUpdate.mockResolvedValue({ _id: "t1" });
-  findOne.mockResolvedValue({ _id: "t1", relations: [], blockedBy: [], save: vi.fn() });
+  findOne.mockReturnValue({
+    lean: async () => ({ _id: "t1", taskNumber: 1, title: "t", status: "todo", relations: [], blockedBy: [] }),
+  });
 });
 
 describe("DELETE /api/projects/:projectId/tasks/:taskId/links", () => {
@@ -47,8 +49,7 @@ describe("DELETE /api/projects/:projectId/tasks/:taskId/links", () => {
     expect(res.status).toBe(200);
     expect(findOneAndUpdate).toHaveBeenCalledWith(
       { _id: "t1", project: "p1" },
-      { $pull: { blockedBy: OTHER_TASK } },
-      expect.anything()
+      { $pull: { blockedBy: OTHER_TASK } }
     );
   });
 

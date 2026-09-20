@@ -1,12 +1,12 @@
 import mongoose, { Schema, Model } from "mongoose";
-import { INotification } from "@/types";
+import { INotification, NOTIFICATION_TYPES } from "@/types";
 
 const notificationSchema = new Schema<INotification>(
   {
     recipient: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     type: {
       type: String,
-      enum: ["task_assigned", "status_changed", "comment_added", "mentioned", "task_created"],
+      enum: NOTIFICATION_TYPES,
       required: true,
     },
     task: { type: Schema.Types.ObjectId, ref: "Task", required: true },

@@ -20,6 +20,7 @@ import { BoardCannotClaim, ROLES_A_RUN_NEEDS } from "@/lib/claim-refusal";
 import { escalationColumnId } from "@/lib/escalation";
 import { isRunnable, normaliseComposition } from "@/lib/agent-rules";
 import { taskKeyOf } from "@/lib/task-key";
+import { usernameOf } from "@/lib/usernames";
 import { logActivity } from "@/lib/activity";
 import { dispatchWebhooks } from "@/lib/webhooks";
 import { dispatchNotifications } from "@/lib/notifications";
@@ -879,11 +880,6 @@ interface StatusChangeAnnouncement {
  */
 function capitalise(value: string): string {
   return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
-}
-
-async function usernameOf(userId: string): Promise<string> {
-  const user = await User.findById(userId, "username").lean();
-  return user?.username ?? "somebody";
 }
 
 async function announceStatusChange(a: StatusChangeAnnouncement): Promise<void> {
