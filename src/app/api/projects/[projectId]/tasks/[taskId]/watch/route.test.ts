@@ -80,14 +80,6 @@ describe("POST /api/projects/:projectId/tasks/:taskId/watch", () => {
     expect(update()).toEqual({ $addToSet: { watchers: ME } });
   });
 
-  // $addToSet rather than $push, so a double-click cannot store the same watcher twice and
-  // leave a task that needs un-watching twice.
-  it("adds idempotently", async () => {
-    await post();
-
-    expect(update()).not.toHaveProperty("$push");
-  });
-
   it("copes with a task that has no watchers array at all", async () => {
     taskFindOne.mockResolvedValue({ _id: TASK_ID, project: PROJECT_ID });
 

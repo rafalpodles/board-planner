@@ -101,6 +101,12 @@ describe("POST /api/projects/:projectId/templates", () => {
 
     expect((await call(POST, { name: "Bug" })).status).toBe(404);
   });
+
+  it("records the addition on the project's audit log, under the trimmed name", async () => {
+    await call(POST, { name: "  Bug  " });
+
+    expect(logProjectAudit).toHaveBeenCalledWith(PROJECT_ID, "u1", "template_added", "Bug");
+  });
 });
 
 describe("PUT /api/projects/:projectId/templates", () => {
@@ -153,10 +159,26 @@ describe("DELETE /api/projects/:projectId/templates", () => {
     expect(names(await res.json())).toEqual(["Page"]);
   });
 
+  it("records the removal on the project's audit log", async () => {
+    project(template("t1", "Crash report"));
+
+    await call(DELETE, { templateId: "t1" });
+
+    expect(logProjectAudit).toHaveBeenCalledWith(
+      PROJECT_ID,
+      "u1",
+      "template_removed",
+      "Crash report"
+    );
+  });
+
   /**
    * A delete of something already gone still saves and still answers 200 — it is idempotent, and
    * two people closing the same row do not get an error. It logs nothing, though, because there
    * is no name to log and an audit row saying a template was removed twice would be a lie.
+   *
+   * The test above is this one's control: without it, deleting the audit call outright would
+   * satisfy the negative assertion here and nothing else in the file would notice.
    */
   it("is idempotent, and records nothing when there was nothing to remove", async () => {
     const doc = project(template("t1", "Crash report"));

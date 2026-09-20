@@ -4,6 +4,8 @@ import { connectDB } from "@/lib/db";
 import { withAdmin } from "@/lib/middleware";
 import { Project } from "@/models/project";
 
+const MAX_IDS = 1000;
+
 // The sidebar order is one list shared by everyone, so it is an instance-level
 // setting — the same reason creating a project is admin-only.
 export const PUT = withAdmin(async (request) => {
@@ -19,8 +21,12 @@ export const PUT = withAdmin(async (request) => {
     );
   }
 
-  // Checked before it reaches Mongoose, as the task reorder already does: a malformed id there
-  // is a CastError, which surfaces as a 500 rather than the 400 this is.
+  // Both bounds the task reorder already applies before anything reaches Mongoose: a list with no
+  // ceiling becomes an unbounded $in and bulkWrite, and a malformed id casts to a CastError there,
+  // which surfaces as a 500 rather than the 400 this is.
+  if (ids.length > MAX_IDS) {
+    return NextResponse.json({ error: `order accepts at most ${MAX_IDS} ids` }, { status: 400 });
+  }
   if ((ids as string[]).some((id) => !isValidObjectId(id))) {
     return NextResponse.json({ error: "order contains a malformed project id" }, { status: 400 });
   }

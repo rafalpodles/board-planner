@@ -98,6 +98,30 @@ describe("PUT /api/projects/reorder", () => {
   });
 
   /**
+   * The sibling task reorder has capped its list since it was written; this one had no ceiling at
+   * all, so an admin could send an unbounded `$in` and an unbounded bulkWrite. Instance-admin only
+   * and therefore not urgent — but the guard beside it was being copied from that same route, and
+   * leaving half of it behind is how the two drift.
+   */
+  it("refuses more than a thousand ids, and accepts exactly a thousand", async () => {
+    const many = (count: number) =>
+      Array.from({ length: count }, (_, i) => `507f1f77bcf86cd7${String(i).padStart(8, "0")}`);
+
+    const refused = await put({ order: many(1001) });
+
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toEqual({ error: "order accepts at most 1000 ids" });
+    expect(projectFind).not.toHaveBeenCalled();
+
+    // The control at the boundary: a thousand gets past this guard and is refused further down
+    // for a different reason, which is what proves the ceiling is 1000 and not something smaller.
+    const atTheLimit = await put({ order: many(1000) });
+
+    expect(await atTheLimit.json()).toEqual({ error: "order contains unknown project ids" });
+    expect(projectFind).toHaveBeenCalled();
+  });
+
+  /**
    * The message matters as much as the status here. Mongo's `$in` folds the repeat away, so the
    * unknown-ids check below refuses this request too — with the wrong reason. Asserting only the
    * 400 let the duplicate guard be deleted without a test noticing.

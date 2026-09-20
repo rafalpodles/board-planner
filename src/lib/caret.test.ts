@@ -131,16 +131,30 @@ describe("caretCoordinates", () => {
       return seen as unknown as HTMLDivElement;
     }
 
-    it("copies the typography that decides where text wraps", () => {
-      const mirror = mirrorDuring(
-        textarea("hello", {
-          styles: { "font-size": "17px", "font-family": "Georgia", "letter-spacing": "2px" },
-        })
-      );
+    /**
+     * Every property that decides where a line breaks, not a sample of three. The box metrics
+     * matter as much as the typography — a mirror at a different width wraps at a different
+     * column, which puts the marker on the wrong line, and that is the whole failure mode.
+     */
+    it.each([
+      ["width", "width", "233px"],
+      ["box-sizing", "boxSizing", "border-box"],
+      ["padding-left", "paddingLeft", "13px"],
+      ["padding-top", "paddingTop", "11px"],
+      ["border-left-width", "borderLeftWidth", "3px"],
+      ["font-size", "fontSize", "17px"],
+      ["font-family", "fontFamily", "Georgia"],
+      ["font-weight", "fontWeight", "700"],
+      ["letter-spacing", "letterSpacing", "2px"],
+      ["word-spacing", "wordSpacing", "4px"],
+      ["line-height", "lineHeight", "29px"],
+      ["text-indent", "textIndent", "7px"],
+      ["text-transform", "textTransform", "uppercase"],
+      ["word-break", "wordBreak", "break-all"],
+    ])("copies %s onto the mirror", (property, camel, value) => {
+      const mirror = mirrorDuring(textarea("hello", { styles: { [property]: value } }));
 
-      expect(mirror.style.fontSize).toBe("17px");
-      expect(mirror.style.fontFamily).toBe("Georgia");
-      expect(mirror.style.letterSpacing).toBe("2px");
+      expect((mirror.style as unknown as Record<string, string>)[camel]).toBe(value);
     });
 
     // It grows instead of scrolling, and wraps like the field does, so the marker lands on the

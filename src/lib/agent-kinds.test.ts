@@ -60,7 +60,7 @@ describe("GATE_KINDS", () => {
   it("gives every select some options, and every option a value and a label", () => {
     for (const kind of GATE_KINDS) {
       for (const param of kind.params.filter((p) => p.type === "select")) {
-        expect(param.options, `${kind.key}.${param.key}`).toBeTruthy();
+        expect(param.options?.length ?? 0, `${kind.key}.${param.key}`).toBeGreaterThan(0);
         for (const option of param.options ?? []) {
           expect(option.value, `${kind.key}.${param.key}`).toBeTruthy();
           expect(option.label, `${kind.key}.${param.key}`).toBeTruthy();

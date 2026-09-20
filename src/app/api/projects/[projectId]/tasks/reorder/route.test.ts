@@ -15,6 +15,14 @@ const { PUT } = await import("./route");
 const PROJECT_ID = "507f1f77bcf86cd799439011";
 const id = (n: number) => `507f1f77bcf86cd7994390${String(20 + n).padStart(2, "0")}`;
 
+/**
+ * `n` distinct, well-formed ObjectIds. Not `id()` — that one pads to two characters and runs off
+ * the end of a 24-character hex string at n = 80, so a long list built from it is mostly malformed
+ * and gets refused by the guard above rather than by the ceiling this is about.
+ */
+const manyIds = (count: number) =>
+  Array.from({ length: count }, (_, i) => `507f1f77bcf86cd7${String(i).padStart(8, "0")}`);
+
 function put(body: unknown) {
   return PUT(
     new Request(`http://localhost/api/projects/${PROJECT_ID}/tasks/reorder`, {
@@ -121,8 +129,6 @@ describe("PUT /api/projects/:projectId/tasks/reorder", () => {
     expect(res.status).toBe(200);
     // id(3) is the newest, so the tie already put it first and it alone keeps its stored 0.
     expect(writes()).toEqual([`${id(1)}:1`, `${id(2)}:2`]);
-    const settled = [0, ...writes().map((w: string) => Number(w.split(":")[1]))];
-    expect(new Set(settled).size).toBe(3);
   });
 
   describe("what it refuses", () => {
@@ -147,11 +153,20 @@ describe("PUT /api/projects/:projectId/tasks/reorder", () => {
       expect(taskBulkWrite).not.toHaveBeenCalled();
     });
 
-    it("refuses more than a thousand ids", async () => {
-      const res = await put({ order: Array.from({ length: 1001 }, (_, i) => id(i)) });
+    it("refuses more than a thousand ids, and accepts exactly a thousand", async () => {
+      const res = await put({ order: manyIds(1001) });
 
       expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: "order accepts at most 1000 ids" });
       expect(taskFind).not.toHaveBeenCalled();
+
+      // The control, at the boundary: a thousand well-formed ids gets past this guard and is
+      // refused further down for a different reason, which is what proves the ceiling is 1000
+      // and not something smaller that happens to also refuse the list above.
+      const atTheLimit = await put({ order: manyIds(1000) });
+
+      expect(await atTheLimit.json()).toEqual({ error: "order contains unknown task ids" });
+      expect(taskFind).toHaveBeenCalled();
     });
 
     // Before Mongoose sees it: a malformed id casts to a CastError there, which is a 500.
@@ -211,6 +226,9 @@ describe("PUT /api/projects/:projectId/tasks/reorder", () => {
     it("leaves a row the read never saw alone", async () => {
       await put({ order: [id(2), id(1)] });
 
+      // The control: the two rows that WERE named are written, so the absence below is the
+      // route leaving id(3) alone rather than the request having written nothing at all.
+      expect(writes()).toEqual([`${id(2)}:0`, `${id(1)}:1`]);
       expect(writes().join(" ")).not.toContain(id(3));
     });
   });

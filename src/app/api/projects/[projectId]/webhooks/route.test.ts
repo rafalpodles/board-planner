@@ -44,6 +44,8 @@ function projectDoc(webhooks: unknown[]) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Answers, rather than being left undefined, so the three assertions below fail on the
+  // assertion itself if a writer starts loading the project — not on a crash inside the route.
   findById.mockResolvedValue(projectDoc([webhook]));
   findOneAndUpdate.mockResolvedValue(projectDoc([webhook]));
   findOne.mockReturnValue({ lean: () => Promise.resolve({ webhooks: [webhook] }) });
@@ -78,7 +80,7 @@ describe("POST /api/projects/:projectId/webhooks", () => {
   // The $push is atomic and single-round-trip on purpose (BP-407): the old load→mutate→save()
   // shape re-sent the whole array on every write, which raced dispatchWebhooks recording a
   // delivery outcome on a different webhook in the same project and silently dropped it.
-  it("never loads the project into memory first", async () => {
+  it("never calls Project.findById, the load half of load-mutate-save", async () => {
     await POST(request("POST", { url: "https://hooks.example.com/b" }), ctx());
 
     expect(findById).not.toHaveBeenCalled();
@@ -156,7 +158,7 @@ describe("PUT /api/projects/:projectId/webhooks", () => {
     );
   });
 
-  it("never loads the project into memory first", async () => {
+  it("never calls Project.findById, the load half of load-mutate-save", async () => {
     await PUT(request("PUT", { webhookId: "w1", enabled: false }), ctx());
 
     expect(findById).not.toHaveBeenCalled();
@@ -183,7 +185,7 @@ describe("DELETE /api/projects/:projectId/webhooks", () => {
     );
   });
 
-  it("never loads the project into memory first", async () => {
+  it("never calls Project.findById, the load half of load-mutate-save", async () => {
     await DELETE(request("DELETE", { webhookId: "w1" }), ctx());
 
     expect(findById).not.toHaveBeenCalled();
