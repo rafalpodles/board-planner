@@ -146,8 +146,10 @@ export const AI_PROMPT_MAX_LENGTH = 10_000;
 
 /**
  * The two per-project lists BP-323 missed. Both are read on every board load and both grew without
- * a ceiling of any kind (BP-716). Fifty each, matching the custom-field list next to them in the
- * same settings section rather than inventing a third number.
+ * a ceiling of any kind (BP-716). Fifty each, taking the custom-field list's number rather than
+ * inventing a third — its number only, not its mechanism: that one is checked with a count read
+ * after loading the document, which bounds nothing under concurrency, and these two are enforced
+ * in the write's own filter.
  *
  * A template's own text is bounded by what it becomes: a template is copied into a task, so
  * holding it to the task's limits is the only bound that means anything downstream.

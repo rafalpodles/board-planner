@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
+  CATEGORY_NAME_MAX_LENGTH,
   MAX_TASK_TEMPLATES,
   TASK_TITLE_MAX_LENGTH,
   TEMPLATE_NAME_MAX_LENGTH,
@@ -167,6 +168,12 @@ describe("POST /api/projects/:projectId/templates", () => {
     ["a title past a task's own limit", { name: "Bug", title: "x".repeat(TASK_TITLE_MAX_LENGTH + 1) }],
     ["a non-string title", { name: "Bug", title: 7 }],
     ["a non-string description", { name: "Bug", description: [] }],
+    // Bounded by what a CATEGORY may be called, not by what a template may be called: any looser
+    // and a template can name a category that no category is allowed to be.
+    [
+      "a category longer than a category name may be",
+      { name: "Bug", category: "x".repeat(CATEGORY_NAME_MAX_LENGTH + 1) },
+    ],
   ])("refuses %s", async (_name, body) => {
     expect((await call(POST, body)).status).toBe(400);
     expect(projectFindOneAndUpdate).not.toHaveBeenCalled();

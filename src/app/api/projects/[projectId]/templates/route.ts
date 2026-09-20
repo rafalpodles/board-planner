@@ -4,6 +4,7 @@ import { withProjectAccess, withProjectOwner } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { logProjectAudit } from "@/lib/projectAudit";
 import {
+  CATEGORY_NAME_MAX_LENGTH,
   MAX_TASK_TEMPLATES,
   TASK_DESCRIPTION_MAX_LENGTH,
   TASK_TITLE_MAX_LENGTH,
@@ -49,7 +50,9 @@ function templateProblem(
     ["title", TASK_TITLE_MAX_LENGTH],
     ["description", TASK_DESCRIPTION_MAX_LENGTH],
     ["acceptanceCriteria", TASK_DESCRIPTION_MAX_LENGTH],
-    ["category", TEMPLATE_NAME_MAX_LENGTH],
+    // The category's own limit, not the template's: a template names a category, and bounding it
+    // any looser lets a template name one that no category is allowed to be.
+    ["category", CATEGORY_NAME_MAX_LENGTH],
   ] as const) {
     const value = body[field];
     if (value === undefined) continue;
