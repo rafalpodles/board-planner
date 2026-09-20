@@ -19,6 +19,9 @@ import { signIn } from "./session";
  * either side of that measurement rather than either side of `lg`.
  */
 const LAPTOP = { width: 1440, height: 900 };
+// 542px of scrollport: past `lg`, and the width at which pinning a 232px column would take
+// two fifths of the table. The threshold is a measurement, so this is where it has to be read.
+const NARROW_DESKTOP = { width: 1100, height: 900 };
 const PHONE = { width: 375, height: 812 };
 
 async function openFleet(page: Page) {
@@ -43,9 +46,30 @@ const paintedShadows = (page: Page) =>
   controlsCell(page).evaluate(
     (el) =>
       (getComputedStyle(el).boxShadow.match(/rgba?\([^)]*\)/g) ?? []).filter(
-        (colour) => !/,\s*0\)$/.test(colour)
+        // The four-argument form with a zero alpha, not "ends in 0)": an opaque colour whose
+        // last channel happens to be zero is a shadow, and `--color-border` could become one
+        (colour) => !/^rgba\(\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+\s*,\s*0\s*\)$/.test(colour)
       ).length
   );
+
+/** The alpha of the outer edge shade, which is what has to be visible against the row behind it */
+const edgeShadowAlpha = (page: Page) =>
+  controlsCell(page).evaluate((el) => {
+    const outer = (getComputedStyle(el).boxShadow.match(/rgba?\([^)]*\)/g) ?? []).filter(
+      (colour) => /^rgba\(/.test(colour) && !/,\s*0\s*\)$/.test(colour)
+    );
+    const alpha = outer[0]?.match(/,\s*([\d.]+)\s*\)$/)?.[1];
+    return alpha ? Number(alpha) : 0;
+  });
+
+const maskOf = (page: Page) =>
+  page.evaluate(() => {
+    const scroller = document.querySelector("table")!.parentElement as HTMLElement;
+    return getComputedStyle(scroller).maskImage;
+  });
+
+const setTheme = (page: Page, theme: "dark" | "light") =>
+  page.evaluate((t) => document.documentElement.setAttribute("data-theme", t), theme);
 
 /** The visible right edge of the table, which is where a pinned column ends — not the window's */
 const scrollportRight = (page: Page) =>
@@ -89,12 +113,7 @@ test("the pinned column says the table continues, and stops saying it at the end
   await expect.poll(() => paintedShadows(page)).toBe(2);
   // The fade belongs to the unpinned case only — drawn here it would wash out the very controls
   // the pinned column exists to show
-  await expect
-    .poll(() => page.evaluate(() => {
-      const scroller = document.querySelector("table")!.parentElement as HTMLElement;
-      return getComputedStyle(scroller).maskImage;
-    }))
-    .toBe("none");
+  await expect.poll(() => maskOf(page)).toBe("none");
 
   // Scrolled to the end there is nothing left underneath, and an edge shadow would be a lie. The
   // inset rule drawing the column's own left edge stays, so this is narrowed to the outer one.
@@ -105,6 +124,32 @@ test("the pinned column says the table continues, and stops saying it at the end
   await expect.poll(() => paintedShadows(page)).toBe(1);
 });
 
+/**
+ * What the pinned column is worth is what a reader can see of it, and the value that decides that
+ * is a per-theme token — so both themes are read, and the alpha is held above a floor. A token of
+ * `rgba(0,0,0,0.01)` counts as a shadow and is the very defect the token was introduced for.
+ */
+test("the edge is visible in both themes, and focus does not park underneath it", async ({
+  page,
+}) => {
+  await page.setViewportSize(LAPTOP);
+  await openFleet(page);
+
+  for (const theme of ["dark", "light"] as const) {
+    await setTheme(page, theme);
+    await expect.poll(() => paintedShadows(page), { message: theme }).toBe(2);
+    expect(await edgeShadowAlpha(page), `${theme} edge is too faint to read`).toBeGreaterThan(0.2);
+  }
+
+  // Tabbing to a control off to the right scrolls it to the edge of the scrollport, which is
+  // under the pinned column unless the scroller reserves its width
+  const padding = await page.evaluate(() => {
+    const scroller = document.querySelector("table")!.parentElement as HTMLElement;
+    return parseFloat(getComputedStyle(scroller).scrollPaddingRight);
+  });
+  expect(padding, "no room reserved for the pinned column").toBeGreaterThan(200);
+});
+
 test("at phone width nothing is pinned and the scroller fades its own edge instead", async ({
   page,
 }) => {
@@ -112,9 +157,26 @@ test("at phone width nothing is pinned and the scroller fades its own edge inste
   await openFleet(page);
 
   await expect(controlsCell(page)).toHaveCSS("position", "static");
-  const mask = await page.evaluate(() => {
-    const scroller = document.querySelector("table")!.parentElement as HTMLElement;
-    return getComputedStyle(scroller).maskImage;
+  expect(await maskOf(page), "no fade on a table that plainly overflows").toContain("gradient");
+
+  // And it stops at the end, for the same reason the pinned column's shadow does
+  await page.evaluate(() => {
+    const scroller = document.querySelector("table")!.parentElement!;
+    scroller.scrollLeft = scroller.scrollWidth;
   });
-  expect(mask, "no fade on a table that plainly overflows").toContain("gradient");
+  await expect.poll(() => maskOf(page)).toBe("none");
+});
+
+/**
+ * The threshold is a measured scrollport, so it is readable only by standing either side of it.
+ * Above `lg` and still unpinned: at 1100 the settings shell leaves 542px, and a 232px column
+ * would be two fifths of the table. Without this the constant could be anything from 358 to 882
+ * and every other test would stay green.
+ */
+test("a desktop too narrow for the table beside it pins nothing", async ({ page }) => {
+  await page.setViewportSize(NARROW_DESKTOP);
+  await openFleet(page);
+
+  await expect(controlsCell(page)).toHaveCSS("position", "static");
+  expect(await maskOf(page)).toContain("gradient");
 });

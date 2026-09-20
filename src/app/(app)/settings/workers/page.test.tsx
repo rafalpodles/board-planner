@@ -270,9 +270,10 @@ describe("a check that passed at a cost", () => {
     expect(line.className).toContain("text-warning");
     // The word, so the amber is not the only thing saying this is a warning
     expect(line.textContent).toContain("Warning:");
-    // And the line that proves it left the Preflight column: it spans every column but the pinned
-    // one, which continues through this row as an empty cell (BP-642)
-    expect(line.closest("td")?.colSpan).toBe(9);
+    // And the line that proves it left the Preflight column: only the full-width row spans the
+    // table. Ten, not nine: BP-642 briefly gave this row a pinned cell of its own, which shrank
+    // the block this line's `sticky left-3` is clamped to and carried it off the left again.
+    expect(line.closest("td")?.colSpan).toBe(10);
   });
 
   it("still opens the preflight cell with ready, and names the check in amber", async () => {

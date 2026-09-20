@@ -19,6 +19,33 @@ import { ApiWorker, ApiWorkerPreflight } from "@/types";
 
 const POLL_MS = 5_000;
 
+/**
+ * The width of the pinned controls column, and the two numbers derived from it.
+ *
+ * A constant rather than a measurement, and that is not laziness: below the threshold the commands
+ * row wraps, so the column's width is a function of whether it is pinned. Measuring it to decide
+ * would close the loop — unpinned, wrapped, narrow, pin; pinned, unwrapped, wide, unpin — driven
+ * round by the ResizeObserver that watches it.
+ *
+ * Pinning wants room for the table beside the column, not merely room for the column: three times
+ * over leaves two thirds of the width still reading as a table. The scrollport is the window less
+ * 556px of sidebar, padding and settings nav, so the threshold is a window about 1256 wide — it
+ * pins at 1440 (882px) and at 1280 (722px, the narrowest it allows), and leaves 1024 (468px) and
+ * everything below it scrolling the ordinary way.
+ */
+const CONTROLS_WIDTH = 232;
+const PIN_MIN_SCROLLPORT = CONTROLS_WIDTH * 3;
+const PIN_SCROLL_PADDING = CONTROLS_WIDTH + 8;
+const FADE_RIGHT = "linear-gradient(to right, #000 calc(100% - 32px), transparent)";
+
+/**
+ * Whole strings, never built around the `moreRight` branch: Tailwind finds class names by reading
+ * the source, so an arbitrary value split across an interpolation is one it never generates.
+ */
+const PIN_EDGE = "shadow-[inset_1px_0_0_0_var(--color-border)]";
+const PIN_EDGE_OVER_CONTENT =
+  "shadow-[inset_1px_0_0_0_var(--color-border),var(--pin-edge-shadow)]";
+
 const TONE_CLASSES = {
   pending: "text-warning",
   applied: "text-text-muted",
@@ -113,25 +140,6 @@ function PreflightCell({ preflight }: { preflight: ApiWorkerPreflight | null }) 
  * sideways, and an instance admin who never scrolls it would have met this machine as `ready`.
  * Nothing is duplicated — the cell names the check, this says what it means (BP-606).
  */
-/**
- * The controls are about 232px. Pinning them needs a scrollport with room for the table beside
- * them, not merely room for them: three times over leaves two thirds of the width still reading
- * as a table. Measured, this pins at 1440 (882px) and leaves 1024 (468px) and everything below
- * it scrolling the ordinary way.
- */
-const PIN_MIN_SCROLLPORT = 700;
-const PIN_SCROLL_PADDING = 240;
-const FADE_RIGHT = "linear-gradient(to right, #000 calc(100% - 32px), transparent)";
-
-/**
- * Whole strings, not built around the `moreRight` branch: Tailwind finds class names by reading
- * the source, so an arbitrary value split across an interpolation is one it never generates — and
- * the column rendered with no edge at all until this was measured in a browser.
- */
-const PIN_EDGE = "shadow-[inset_1px_0_0_0_var(--color-border)]";
-const PIN_EDGE_OVER_CONTENT =
-  "shadow-[inset_1px_0_0_0_var(--color-border),var(--pin-edge-shadow)]";
-
 function PreflightWarning({ preflight }: { preflight: ApiWorkerPreflight | null }) {
   const warned = (preflight?.checks ?? []).filter((c) => c.ok && c.warn);
   if (warned.length === 0) return null;
@@ -480,8 +488,13 @@ export default function AdminWorkersPage() {
                       </div>
                     </td>
                   </tr>,
+                  // colSpan over every column, the pinned one included: `PreflightWarning` below
+                  // holds itself at the scroller's left edge with `sticky left-3`, and sticky is
+                  // clamped to its containing block — so a cell one column short carries the
+                  // sentence off the left exactly as BP-606 found it. The pinned column's edge
+                  // therefore stops at this row rather than running through it.
                   <tr key={`${worker._id}-policy`} className="border-b border-border last:border-b-0">
-                    <td colSpan={9} className="px-3 pb-3 pt-0">
+                    <td colSpan={10} className="px-3 pb-3 pt-0">
                       <PreflightWarning preflight={worker.preflight} />
                       <div className="flex flex-wrap gap-1.5">
                         {workerPolicyRows(worker as never).map((row) => (
@@ -507,10 +520,6 @@ export default function AdminWorkersPage() {
                         ))}
                       </div>
                     </td>
-                    {/* The pinned column continues through this row, empty. Without it the edge
-                        appears on every other row, and the policy chips pass under the controls
-                        of the machine above them. */}
-                    <td className={`${stickyCell} bg-bg-card`} aria-hidden="true" />
                   </tr>,
                 ];
               })}
