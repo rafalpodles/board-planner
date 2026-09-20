@@ -1,13 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { MAX_NOTIFICATION_CHANNELS } from "@/lib/webhook-input";
 
 const KEY = "a".repeat(64);
 process.env.ENCRYPTION_KEY = KEY;
 
 const findById = vi.fn();
+const findOneAndUpdate = vi.fn();
 const save = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
-vi.mock("@/models/project", () => ({ Project: { findById } }));
+vi.mock("@/models/project", () => ({ Project: { findById, findOneAndUpdate } }));
 vi.mock("@/lib/projectAudit", () => ({ logProjectAudit: vi.fn() }));
 vi.mock("@/lib/project-secrets", () => ({ sanitizeProjectSecrets: (p: unknown) => p }));
 vi.mock("@/lib/middleware", () => ({
@@ -46,9 +48,19 @@ beforeEach(() => {
   project = {
     notificationChannels: [channel],
     save,
-    toObject: () => ({ notificationChannels: [channel] }),
+    toObject: () => ({ notificationChannels: project.notificationChannels }),
   };
   findById.mockResolvedValue(project);
+  // The add is an atomic $push with the ceiling in its filter, so the stub applies the write
+  // the way the database would — including refusing it once the array is full.
+  findOneAndUpdate.mockImplementation(
+    async (filter: Record<string, unknown>, update: { $push: { notificationChannels: typeof channel } }) => {
+      const full = project.notificationChannels.length >= MAX_NOTIFICATION_CHANNELS;
+      if (`notificationChannels.${MAX_NOTIFICATION_CHANNELS - 1}` in filter && full) return null;
+      project.notificationChannels = [...project.notificationChannels, update.$push.notificationChannels];
+      return project;
+    }
+  );
 });
 
 afterEach(() => {
@@ -183,12 +195,14 @@ describe("POST /api/projects/:projectId/notifications", () => {
 
     expect(res.status).toBe(503);
     expect(project.notificationChannels).toHaveLength(1);
-    expect(save).not.toHaveBeenCalled();
+    expect(findOneAndUpdate).not.toHaveBeenCalled();
   });
 
-  // BP-323
-  it("refuses a channel past the cap of 20", async () => {
-    project.notificationChannels = Array.from({ length: 20 }, () => ({ ...channel }));
+  // BP-323, tightened by BP-719: the count was read against the document loaded above the
+  // write, so every concurrent racer saw the same pre-write length and N of them together
+  // landed the array past the cap. The ceiling now lives in the write's own filter instead.
+  it(`refuses a channel past the cap of ${MAX_NOTIFICATION_CHANNELS}`, async () => {
+    project.notificationChannels = Array.from({ length: MAX_NOTIFICATION_CHANNELS }, () => ({ ...channel }));
 
     const res = await POST(
       request("POST", { type: "slack", name: "One more", webhookUrl: "https://hooks.slack.com/new" }),
@@ -196,7 +210,42 @@ describe("POST /api/projects/:projectId/notifications", () => {
     );
 
     expect(res.status).toBe(400);
-    expect(project.notificationChannels).toHaveLength(20);
+    expect(project.notificationChannels).toHaveLength(MAX_NOTIFICATION_CHANNELS);
+  });
+
+  it(`still adds the ${MAX_NOTIFICATION_CHANNELS}th`, async () => {
+    project.notificationChannels = Array.from({ length: MAX_NOTIFICATION_CHANNELS - 1 }, () => ({ ...channel }));
+
+    const res = await POST(
+      request("POST", { type: "slack", name: "The last one", webhookUrl: "https://hooks.slack.com/new" }),
+      ctx()
+    );
+
+    expect(res.status).toBe(201);
+    expect(project.notificationChannels).toHaveLength(MAX_NOTIFICATION_CHANNELS);
+  });
+
+  // The bound is in the write's own filter, not in a count read against the document loaded
+  // above it — this is the one that would go red if the ceiling ever moved back to a count read.
+  it("carries the ceiling in the write filter rather than checking it beforehand", async () => {
+    await POST(
+      request("POST", { type: "slack", name: "Releases", webhookUrl: "https://hooks.slack.com/new" }),
+      ctx()
+    );
+
+    expect(findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: "p1", [`notificationChannels.${MAX_NOTIFICATION_CHANNELS - 1}`]: { $exists: false } },
+      { $push: { notificationChannels: expect.objectContaining({ name: "Releases", type: "slack" }) } },
+      { returnDocument: "after" }
+    );
+  });
+
+  it("does not re-send the whole array", async () => {
+    await POST(
+      request("POST", { type: "slack", name: "Releases", webhookUrl: "https://hooks.slack.com/new" }),
+      ctx()
+    );
+
     expect(save).not.toHaveBeenCalled();
   });
 
