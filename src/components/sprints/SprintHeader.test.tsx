@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent, within } from "@testing-library/react";
 import { SprintHeader } from "./SprintHeader";
 import { ApiSprint } from "@/types";
@@ -181,5 +181,91 @@ describe("a board with no Done column", () => {
 
     expect(screen.getByTestId("sprint-progress").textContent).toBe("0/8");
     expect(screen.queryByTestId("sprint-progress-unmeasurable")).toBeNull();
+  });
+});
+
+/**
+ * BP-480. `daysLeft` has three branches around a `Math.ceil` and fourteen tests above it touched
+ * none of them. It is not decoration: a sprint that reads "1 day left" on its final day is a
+ * planning error, and the boundary between that and "ends today" is where an off-by-one lands.
+ *
+ * Time is pinned rather than computed from the real clock, and only `Date` is faked — faking
+ * timers as well would take React's scheduling with it.
+ */
+describe("the countdown", () => {
+  const NOW = new Date("2026-03-10T12:00:00Z");
+  const hours = (n: number) => new Date(NOW.getTime() + n * 3_600_000).toISOString();
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** The countdown sits in the header's own line; read the whole thing and look for the phrase */
+  function countdown(endDate: string | null, props: Partial<React.ComponentProps<typeof SprintHeader>> = {}) {
+    cleanup();
+    renderHeader({
+      // `endDate: null` is a sprint that never had one, which the type models as absent
+      sprint: sprint({ _id: "f", name: "Sprint 6", status: "active", endDate: endDate ?? undefined }),
+      ...props,
+    });
+    return document.body.textContent ?? "";
+  }
+
+  it("counts the days that are left", () => {
+    expect(countdown(hours(24 * 5))).toContain("5 days left");
+  });
+
+  it("says day, not days, for the last one", () => {
+    // 25 hours: ceil puts it at 2, so the singular is read from a day and a bit under
+    expect(countdown(hours(23))).toContain("1 day left");
+    expect(countdown(hours(25))).toContain("2 days left");
+  });
+
+  /**
+   * The part-day case, and the reason `Math.ceil` is not interchangeable with `Math.floor`: six
+   * hours from now is 0.25 of a day, which rounds up to one. Flooring it would call the same
+   * moment "ends today", a day early.
+   */
+  it("rounds a part day up rather than down", () => {
+    expect(countdown(hours(6))).toContain("1 day left");
+    expect(countdown(hours(6))).not.toContain("ends today");
+  });
+
+  it("says it ends today from the moment it is due until a day after", () => {
+    expect(countdown(hours(0))).toContain("ends today");
+    // An hour past due is still today's sprint: ceil(-0.04) is -0, which is neither negative nor
+    // a day over
+    expect(countdown(hours(-1))).toContain("ends today");
+    expect(countdown(hours(-23))).toContain("ends today");
+  });
+
+  it("counts the days it is over by, once it is a whole day over", () => {
+    expect(countdown(hours(-25))).toContain("1 day over");
+    expect(countdown(hours(-49))).toContain("2 days over");
+  });
+
+  /**
+   * Not the sprint's `status`, which is what it looks like: the component reads `readOnly`, and
+   * this page sets that from a completed sprint (`sprints/page.tsx`'s `sprintIsReadOnly`). So a
+   * countdown on a finished sprint is a question about the prop, not about the record.
+   */
+  it("says nothing at all once the board is read-only", () => {
+    const text = countdown(hours(24 * 5), { readOnly: true });
+    expect(text).not.toContain("days left");
+    expect(text).not.toContain("ends today");
+
+    // The control, same sprint, same end date: without readOnly it does count
+    expect(countdown(hours(24 * 5))).toContain("5 days left");
+  });
+
+  it("says nothing at all for a sprint with no end date", () => {
+    const text = countdown(null);
+    expect(text).not.toContain("left");
+    expect(text).not.toContain("ends today");
+    expect(text).not.toContain("over");
   });
 });
