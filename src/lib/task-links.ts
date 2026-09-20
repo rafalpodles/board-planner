@@ -127,21 +127,24 @@ export async function addTaskLink(
   }
 
   // Losses first, so the timeline reads in the order things happened, and so the removals can be
-  // announced on their own if the attach below turns out not to have landed.
+  // announced on their own if the attach below turns out not to have landed. Every one of these is
+  // proved by the write that made it — `losing` by each detach's own match, and the replaced
+  // relation by the pull below. Announcing one on the strength of a read taken beforehand is how
+  // the 404 path would come to report a removal that never happened, on a task that still exists.
   const lost: LinkFact[] = losing.map((parent) => ({
     action: "removed" as const,
     type: "parent_of" as const,
     holder: parent,
     target: other,
   }));
-  if (replaced && replaced !== type) {
-    lost.push({ action: "removed", type: replaced, holder: task, target: other });
-  }
 
-  await Task.updateOne(
+  const dropped = await Task.updateOne(
     { _id: taskId, project: projectId },
     { $pull: { relations: { task: targetTaskId } } }
   );
+  if (replaced && replaced !== type && dropped.modifiedCount) {
+    lost.push({ action: "removed", type: replaced, holder: task, target: other });
+  }
   const attached = await Task.updateOne(
     { _id: taskId, project: projectId },
     { $push: { relations: { task: targetTaskId, type: type as RelationType } } }
@@ -153,7 +156,14 @@ export async function addTaskLink(
   if (!attached.matchedCount) {
     // What was detached really was detached, so those tasks are still owed their row.
     await announce(projectId, actorId, lost);
-    return { ok: false, error: "Task not found", status: 404 };
+    // Deliberately not the bare "Task not found" of the guard above, which means nothing happened.
+    // Here the child really has been detached, and a caller that retries on a 404 would otherwise
+    // keep retrying a link that can never be made while the task it names is gone.
+    return {
+      ok: false,
+      error: "Task not found — it was removed while this link was being made",
+      status: 404,
+    };
   }
 
   await announce(projectId, actorId, [
@@ -222,12 +232,18 @@ export async function removeTaskLink(
  * anyway because `removeTaskLink` below genuinely depends on the distinction, and two writes in
  * one file that mean different things by silence would be worse than one redundant word.
  *
- * It terminates, and not by a counter: the filter matches a document only while it still holds the
- * relation, and `$pull` with the same document operand removes every element that matched — so an
- * iteration that matched strictly shrinks the set the next one can match, and that set is finite.
- * A cap stood here briefly and could only ever truncate real work, leaving the child with some
- * parents detached and a new one attached behind a 200: a tree broken somewhere other than where
- * it was found.
+ * It is bounded by the number of DISTINCT parents, which is the only bound that costs nothing.
+ * `$pull` uses the same operand the filter matched on, so a document this loop has taken the child
+ * off cannot match again by itself. It can be made to: the `$push` further up is a writer, so a
+ * concurrent re-parent of the same child puts the relation back, and an unbounded loop would then
+ * run for as long as that traffic lasts — collecting the same parent twice as it went, which is a
+ * duplicate history row and a duplicate webhook for one request.
+ *
+ * So a parent matched twice ends the loop rather than extending it. A second match is never work
+ * this request still owes; it is the signal that somebody else is writing. Unlike the fixed cap
+ * that stood here briefly, this cannot truncate anything real — every distinct parent is still
+ * detached and still announced. That cap could only ever cut real work short, leaving the child
+ * with some parents detached and a new one attached behind a 200.
  */
 async function takeTheChildOffItsOtherParents(
   projectId: string,
@@ -235,6 +251,7 @@ async function takeTheChildOffItsOtherParents(
   targetTaskId: string
 ): Promise<LinkEnd[]> {
   const losing: LinkEnd[] = [];
+  const seen = new Set<string>();
 
   for (;;) {
     const parent = await Task.findOneAndUpdate(
@@ -248,6 +265,14 @@ async function takeTheChildOffItsOtherParents(
     ).lean<LinkEnd>();
 
     if (!parent) return losing;
+
+    if (seen.has(idOf(parent))) {
+      console.warn(
+        `Detaching task ${targetTaskId} matched parent ${idOf(parent)} twice — another request is re-parenting it`
+      );
+      return losing;
+    }
+    seen.add(idOf(parent));
     losing.push(parent);
   }
 }

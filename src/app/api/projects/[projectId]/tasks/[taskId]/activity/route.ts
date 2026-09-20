@@ -22,9 +22,9 @@ export const GET = withProjectAccess(async (_request, { params }) => {
     // which is where it belongs (BP-658).
     //
     // The index is `{ task: 1, createdAt: -1 }`, so the tie-break makes this a blocking sort
-    // rather than a scan in index order. With `limit(100)` over one task's own history that is a
-    // top-k on a small set; it was measured against widening the index and judged not worth a
-    // second index build on a live collection.
+    // rather than a scan in index order. Not measured — reasoned: `{ task }` is a highly selective
+    // equality over one task's own history, and a top-100 over that is small enough that widening
+    // the index was judged not worth starting a second index build on a live collection.
     .sort({ createdAt: -1, _id: -1 })
     .limit(100)
     .populate("user", "username fullName")

@@ -15,7 +15,10 @@ import {
  *  stored document does not mention is the signal that nobody has been asked about it. Hydrating
  *  the document first would have Mongoose materialise that row from the sub-schema's own `false`
  *  defaults, which is indistinguishable from an answered "no" — and the row would fall silent with
- *  nothing to say so. */
+ *  nothing to say so.
+ *
+ *  No test can hold this: a spec passes a plain object, which always looks lean. The four callers
+ *  and this paragraph are the whole of the defence. */
 export interface PrefsSource {
   emailNotifications?: boolean;
   notifications?: {
@@ -26,12 +29,6 @@ export interface PrefsSource {
 }
 
 const OFF: NotificationChannels = { inApp: false, email: false, chat: false };
-
-export function blankMatrix(): NotificationMatrix {
-  return Object.fromEntries(
-    NOTIFICATION_TYPES.map((type) => [type, { ...OFF }])
-  ) as NotificationMatrix;
-}
 
 /** What a row nobody has answered for is worth.
  *
@@ -60,9 +57,10 @@ function legacyMatrix(emailNotifications: boolean): NotificationMatrix {
  * that question for every row they saw, and a new row is not consent to be written to.
  *
  * It cuts the other way for somebody who went through the screen and unticked everything: they
- * gave a fairly clear answer to "do you want the bell", and this hands them one row of it back.
- * That is the price of the choice, taken because the alternative silences the row for everybody
- * who ever touched their settings — a larger group, and the one most likely to notice the gap.
+ * gave a fairly clear answer to "do you want the bell", and this hands them one row of it back —
+ * on the screen as a tick they never put there. That is the price of the choice, taken because the
+ * alternative silences the row for everybody who ever touched their settings: a strictly larger
+ * group, and one that cannot tell it is missing anything.
  *
  * Both stored grids come through here. A project override is a grid somebody saved just as much as
  * the global one, and filling only the global one left the new row silent on exactly the boards

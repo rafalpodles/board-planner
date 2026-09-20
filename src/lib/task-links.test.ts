@@ -71,13 +71,16 @@ vi.mock("@/models/task", () => ({
   Task: {
     findOne: (filter: object) => lean(store.find(sift(filter)) ?? null),
     find: (filter: object) => lean(store.filter(sift(filter))),
-    // `matchedCount` is the answer the production code reads to decide whether the task it was
-    // asked to write to still exists, so the mock has to give the real one.
+    // `matchedCount` and `modifiedCount` are both read by the production code, and they are NOT
+    // the same answer: a `$pull` whose criteria match nothing still matches its document. A mock
+    // that made one a synonym of the other would pass a guard that read the wrong one.
     updateOne: async (filter: object, update: Update) => {
       updateOne(filter, update);
       const doc = store.find(sift(filter));
-      if (doc) apply(doc, update);
-      return { matchedCount: doc ? 1 : 0, modifiedCount: doc ? 1 : 0 };
+      if (!doc) return { matchedCount: 0, modifiedCount: 0 };
+      const before = JSON.stringify(doc);
+      apply(doc, update);
+      return { matchedCount: 1, modifiedCount: JSON.stringify(doc) === before ? 0 : 1 };
     },
     updateMany: async (filter: object, update: Update) => {
       updateMany(filter, update);
@@ -180,6 +183,11 @@ function notifiedTasks(): { taskId: string; title: string }[] {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // clearAllMocks keeps implementations, and two tests below give `updateOne` a side effect to
+  // simulate a task vanishing mid-request. Without this, that side effect ran in every test
+  // declared after them.
+  updateOne.mockReset();
+  findOneAndUpdate.mockReset();
   store = [];
 });
 
@@ -464,7 +472,7 @@ describe("the task goes away mid-request", () => {
 
     expect(await addTaskLink(P, "new", "child", "parent_of", ACTOR)).toEqual({
       ok: false,
-      error: "Task not found",
+      error: "Task not found — it was removed while this link was being made",
       status: 404,
     });
 
@@ -474,6 +482,70 @@ describe("the task goes away mid-request", () => {
       ["child", "link_removed", "child_of", "BP-9", ""],
     ]);
     expect(rows().some((r) => r[1] === "link_added")).toBe(false);
+  });
+});
+
+describe("somebody else is re-parenting the same child", () => {
+  // The detach loop's own writes cannot make a document match twice — `$pull` uses the operand the
+  // filter matched on. Another request's `$push` can. Without a guard the loop keeps going for as
+  // long as that traffic lasts, and collects the same epic more than once on the way: a duplicate
+  // history row and a duplicate webhook for one act.
+  it("detaches a parent once, however often it is put back", async () => {
+    store = [
+      task("old", 9, { relations: [{ task: "child", type: "parent_of" }] }),
+      task("new", 10),
+      task("child", 11),
+    ];
+    let putBack = 1;
+    findOneAndUpdate.mockImplementation(() => {
+      if (putBack-- > 0) {
+        store
+          .find((d) => d._id === "old")!
+          .relations!.push({ task: "child", type: "parent_of" });
+      }
+    });
+
+    await addTaskLink(P, "new", "child", "parent_of", ACTOR);
+
+    const removals = rows().filter((r) => r[1] === "link_removed" && r[0] === "old");
+    expect(removals).toHaveLength(1);
+    // and the loop stopped rather than going round again
+    expect(rows().filter((r) => r[0] === "child" && r[1] === "link_removed")).toHaveLength(1);
+  });
+});
+
+describe("a relation replaced by another", () => {
+  // The replaced link used to be announced on the strength of the read taken before the write —
+  // the very thing the parent detach was rewritten to stop doing. Two ways it lies:
+
+  it("does not report the replacement when the task vanished before the pull", async () => {
+    store = [task("a", 1, { relations: [{ task: "b", type: "relates" }] }), task("b", 2)];
+    updateOne.mockImplementation((_filter: object, update: Update) => {
+      if (update.$pull) store = store.filter((d) => d._id !== "a");
+    });
+
+    expect(await addTaskLink(P, "a", "b", "duplicates", ACTOR)).toEqual({
+      ok: false,
+      error: "Task not found — it was removed while this link was being made",
+      status: 404,
+    });
+    // Nothing was removed and nothing was added, so nothing is owed a row
+    expect(rows()).toEqual([]);
+  });
+
+  // No deletion needed for this one: two requests replacing the same relation both read it as
+  // present, and only one of them can actually pull it.
+  it("reports the replacement once when two requests race to make it", async () => {
+    store = [task("a", 1, { relations: [{ task: "b", type: "relates" }] }), task("b", 2)];
+
+    const [first, second] = await Promise.all([
+      addTaskLink(P, "a", "b", "duplicates", ACTOR),
+      addTaskLink(P, "a", "b", "duplicates", ACTOR),
+    ]);
+
+    expect([first, second]).toEqual([{ ok: true }, { ok: true }]);
+    const removals = rows().filter((r) => r[1] === "link_removed" && r[2] === "relates");
+    expect(removals).toHaveLength(2); // one fact, written at both ends — not two facts
   });
 });
 
