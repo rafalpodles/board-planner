@@ -31,7 +31,7 @@ const POLL_MS = 5_000;
  * over leaves two thirds of the width still reading as a table. The scrollport is the window less
  * 558px of sidebar, padding, settings nav and the card's border, so the threshold of 696 is a
  * window about 1254 wide. It pins at 1440 (882px) and at 1280 (722px, the narrowest common one),
- * and leaves 1024 (468px) and everything below it scrolling the ordinary way.
+ * and leaves 1024 (466px) and everything below it scrolling the ordinary way.
  */
 const CONTROLS_WIDTH = 232;
 const PIN_MIN_SCROLLPORT = CONTROLS_WIDTH * 3;

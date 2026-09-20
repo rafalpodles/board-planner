@@ -42,23 +42,37 @@ const controlsCell = (page: Page) =>
  * entries with any alpha at all is what tells the column's own left edge (one, always) from the
  * edge it draws over content passing underneath (two).
  */
+/**
+ * The shadow entries that are actually painted, each with whatever follows its colour.
+ *
+ * Read in the browser by both callers below, so there is one answer to "is this shadow painted".
+ * A transparent placeholder is the four-argument form with a zero alpha — not "ends in 0)", which
+ * would also discard an opaque colour whose last channel happens to be zero.
+ */
 const paintedShadows = (page: Page) =>
   controlsCell(page).evaluate(
     (el) =>
-      (getComputedStyle(el).boxShadow.match(/rgba?\([^)]*\)/g) ?? []).filter(
-        // The four-argument form with a zero alpha, not "ends in 0)": an opaque colour whose
-        // last channel happens to be zero is a shadow, and `--color-border` could become one
-        (colour) => !/^rgba\(\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+\s*,\s*0\s*\)$/.test(colour)
+      (getComputedStyle(el).boxShadow.match(/(rgba?\([^)]*\))([^,]*)/g) ?? []).filter(
+        (entry) => !/^rgba\(\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+\s*,\s*0\s*\)/.test(entry)
       ).length
   );
 
-/** The alpha of the outer edge shade, which is what has to be visible against the row behind it */
+/**
+ * The alpha of the outer edge shade — the thing that has to be visible against the row behind it.
+ *
+ * Chosen by the `inset` keyword, not by position and not by colour format. The column's own rule
+ * is the inset one; skipping it because `--color-border` is a hex and serializes as `rgb()` would
+ * hold only until that token gained an alpha, at which point this would measure the inset rule
+ * under the shade's name and pass.
+ */
 const edgeShadowAlpha = (page: Page) =>
   controlsCell(page).evaluate((el) => {
-    const outer = (getComputedStyle(el).boxShadow.match(/rgba?\([^)]*\)/g) ?? []).filter(
-      (colour) => /^rgba\(/.test(colour) && !/,\s*0\s*\)$/.test(colour)
+    const shade = (getComputedStyle(el).boxShadow.match(/(rgba?\([^)]*\))([^,]*)/g) ?? []).find(
+      (entry) =>
+        !/^rgba\(\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+\s*,\s*0\s*\)/.test(entry) &&
+        !/\binset\b/.test(entry)
     );
-    const alpha = outer[0]?.match(/,\s*([\d.]+)\s*\)$/)?.[1];
+    const alpha = shade?.match(/,\s*([\d.]+)\s*\)/)?.[1];
     return alpha ? Number(alpha) : 0;
   });
 
@@ -125,29 +139,54 @@ test("the pinned column says the table continues, and stops saying it at the end
 });
 
 /**
- * What the pinned column is worth is what a reader can see of it, and the value that decides that
- * is a per-theme token — so both themes are read, and the alpha is held above a floor. A token of
- * `rgba(0,0,0,0.01)` counts as a shadow and is the very defect the token was introduced for.
+ * What a pinned column is worth is what a reader can see of its edge, and the value deciding that
+ * is a per-theme token.
+ *
+ * The floors are per theme and both sit ABOVE the value that made this a ticket: 0.35 black, which
+ * reads on white and is all but invisible on `#1e293b`. A single floor of 0.2 would pass on
+ * exactly that regression. They differ for the same reason the token does — alpha stands in for
+ * contrast, and one number cannot mean "visible" against two backgrounds.
+ *
+ * The last assertion is what catches the per-theme split being deleted altogether: `:root` holds
+ * the dark value, so removing the light override leaves light inheriting it, clearing every floor
+ * while the themes stop differing at all.
  */
-test("the edge is visible in both themes, and focus does not park underneath it", async ({
-  page,
-}) => {
+test("the pinned edge is readable in both themes", async ({ page }) => {
   await page.setViewportSize(LAPTOP);
   await openFleet(page);
 
+  const alphas: Record<string, number> = {};
   for (const theme of ["dark", "light"] as const) {
     await setTheme(page, theme);
     await expect.poll(() => paintedShadows(page), { message: theme }).toBe(2);
-    expect(await edgeShadowAlpha(page), `${theme} edge is too faint to read`).toBeGreaterThan(0.2);
+    alphas[theme] = await edgeShadowAlpha(page);
   }
 
-  // Tabbing to a control off to the right scrolls it to the edge of the scrollport, which is
-  // under the pinned column unless the scroller reserves its width
+  expect(alphas.dark, "a dark edge at or under 0.35 is the defect this token replaced").toBeGreaterThan(0.6);
+  expect(alphas.light, "light edge too faint to read").toBeGreaterThan(0.25);
+  expect(alphas.light, "light edge heavy enough to read as a bar").toBeLessThan(0.6);
+  expect(alphas.dark, "one value for both themes is the thing the token exists to avoid").not.toBe(
+    alphas.light
+  );
+});
+
+/**
+ * Tabbing to a control off to the right scrolls it to the edge of the scrollport, which is under
+ * the pinned column unless the scroller reserves its width. Measured against the column's own box
+ * rather than a number copied from `CONTROLS_WIDTH`, so the constant is checked against the layout
+ * it claims to describe.
+ */
+test("the scroller reserves the pinned column's width", async ({ page }) => {
+  await page.setViewportSize(LAPTOP);
+  await openFleet(page);
+
+  const column = await controlsCell(page).boundingBox();
   const padding = await page.evaluate(() => {
     const scroller = document.querySelector("table")!.parentElement as HTMLElement;
     return parseFloat(getComputedStyle(scroller).scrollPaddingRight);
   });
-  expect(padding, "no room reserved for the pinned column").toBeGreaterThan(200);
+  expect(column).not.toBeNull();
+  expect(padding, "less room reserved than the column takes").toBeGreaterThanOrEqual(column!.width);
 });
 
 test("at phone width nothing is pinned and the scroller fades its own edge instead", async ({

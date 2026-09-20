@@ -21,6 +21,11 @@ function hasMoreRight(el: HTMLElement): boolean {
  * A callback ref, not a `useRef` handed to an effect: the caller renders the scroller only once
  * its rows have loaded, so an effect that ran on the first render would find no node and — with
  * nothing in its dependencies to change — never look again.
+ *
+ * Nothing is reset when the node detaches: the values stay as last measured until a node
+ * re-attaches and measures again. Harmless for a caller that mounts its scroller once and keeps
+ * it; a caller that hides it and goes on rendering — a tab, an accordion — reads the previous
+ * scroller's width for one frame, and decides layout on it.
  */
 export function useHorizontalOverflow<T extends HTMLElement>(): {
   ref: (node: T | null) => void;
