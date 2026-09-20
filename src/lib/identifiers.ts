@@ -144,6 +144,19 @@ export const TASK_DESCRIPTION_MAX_LENGTH = 100_000;
 export const COMMENT_BODY_MAX_LENGTH = 20_000;
 export const AI_PROMPT_MAX_LENGTH = 10_000;
 
+/**
+ * The two per-project lists BP-323 missed. Both are read on every board load and both grew without
+ * a ceiling of any kind (BP-716). Fifty each, matching the custom-field list next to them in the
+ * same settings section rather than inventing a third number.
+ *
+ * A template's own text is bounded by what it becomes: a template is copied into a task, so
+ * holding it to the task's limits is the only bound that means anything downstream.
+ */
+export const MAX_CATEGORIES = 50;
+export const MAX_TASK_TEMPLATES = 50;
+export const CATEGORY_NAME_MAX_LENGTH = 50;
+export const TEMPLATE_NAME_MAX_LENGTH = 100;
+
 export const COMMENT_BODY_RULE = `A comment must be at most ${COMMENT_BODY_MAX_LENGTH.toLocaleString("en-US")} characters`;
 export const TASK_TITLE_RULE = `A title must be at most ${TASK_TITLE_MAX_LENGTH} characters and cannot contain zero-width, bidi or other control characters`;
 export const CRITERION_TEXT_RULE = `An acceptance criterion must be at most ${CRITERION_TEXT_MAX_LENGTH} characters and cannot contain zero-width, bidi or other control characters`;

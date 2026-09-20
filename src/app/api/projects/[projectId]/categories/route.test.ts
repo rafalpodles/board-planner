@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { MAX_CATEGORIES } from "@/lib/identifiers";
 
 const getAuthUser = vi.fn();
 const check = vi.fn();
 const projectFindById = vi.fn();
+const projectFindOneAndUpdate = vi.fn();
 const taskFind = vi.fn();
 const taskUpdateMany = vi.fn();
 const logProjectAudit = vi.fn();
@@ -10,7 +12,9 @@ const logProjectAudit = vi.fn();
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ getAuthUser, RateLimitError: class extends Error {} }));
 vi.mock("@/lib/grants", () => ({ check }));
-vi.mock("@/models/project", () => ({ Project: { findById: projectFindById } }));
+vi.mock("@/models/project", () => ({
+  Project: { findById: projectFindById, findOneAndUpdate: projectFindOneAndUpdate },
+}));
 vi.mock("@/models/task", () => ({ Task: { find: taskFind, updateMany: taskUpdateMany } }));
 vi.mock("@/lib/projectAudit", () => ({ logProjectAudit }));
 
@@ -36,7 +40,22 @@ function project(names: string[], templates: Array<{ name: string; category: str
     save: vi.fn(async () => {}),
   };
   projectFindById.mockResolvedValue(doc);
+  // The add is an atomic $push with the ceiling in its filter, so the stub applies the write the
+  // way the database would — including refusing it once the array is full.
+  projectFindOneAndUpdate.mockImplementation(
+    async (filter: Record<string, unknown>, update: { $push: { categories: Category } }) => {
+      const full = doc.categories.length >= Number(MAX_CATEGORIES);
+      if (`categories.${MAX_CATEGORIES - 1}` in filter && full) return null;
+      doc.categories = [...doc.categories, update.$push.categories];
+      return doc;
+    }
+  );
   return doc;
+}
+
+/** A project already holding its ceiling of categories. */
+function projectAtTheCeiling() {
+  return project(Array.from({ length: MAX_CATEGORIES }, (_, i) => `c${i}`));
 }
 
 /** No task anywhere holds any category — the DELETE guard's happy path. */
@@ -125,6 +144,52 @@ describe("POST /api/projects/:projectId/categories", () => {
     projectFindById.mockResolvedValue(null);
 
     expect((await call(POST, { name: "feature" })).status).toBe(404);
+  });
+
+  /**
+   * BP-716. The list is read on every board load and had no ceiling at all — BP-323 capped
+   * checklists, webhooks, worker inventories and AI prompts, and this one was not in that sweep.
+   */
+  it(`refuses the ${MAX_CATEGORIES + 1}th category`, async () => {
+    projectAtTheCeiling();
+
+    const res = await call(POST, { name: "one too many" });
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: `A project may have at most ${MAX_CATEGORIES} categories`,
+    });
+  });
+
+  it(`still adds the ${MAX_CATEGORIES}th`, async () => {
+    project(Array.from({ length: MAX_CATEGORIES - 1 }, (_, i) => `c${i}`));
+
+    expect((await call(POST, { name: "the last one" })).status).toBe(201);
+  });
+
+  /**
+   * The bound is in the write's own filter, not in a count read against the document loaded
+   * above it — every concurrent racer sees the same pre-write length, so a check up there bounds
+   * nothing. This asserts the filter carries it, which is the only part a test can see.
+   */
+  it("carries the ceiling in the write filter rather than checking it beforehand", async () => {
+    await call(POST, { name: "feature" });
+
+    expect(projectFindOneAndUpdate).toHaveBeenCalledWith(
+      { _id: PROJECT_ID, [`categories.${MAX_CATEGORIES - 1}`]: { $exists: false } },
+      { $push: { categories: { name: "feature", color: "#3b82f6" } } },
+      { returnDocument: "after" }
+    );
+  });
+
+  // The old shape re-sent the whole array on every add, which clobbers a rename landing at the
+  // same moment — the same reason the webhook writers are atomic (BP-407).
+  it("does not re-send the whole array", async () => {
+    const doc = project(["bug"]);
+
+    await call(POST, { name: "feature" });
+
+    expect(doc.save).not.toHaveBeenCalled();
   });
 });
 
