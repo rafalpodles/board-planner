@@ -1,5 +1,44 @@
-import { describe, it, expect } from "vitest";
-import { matchPRsToTasks, reduceChecks } from "./github";
+import { describe, it, expect, vi } from "vitest";
+import { allowLoopbackIn, fetchPullRequests, matchPRsToTasks, reduceChecks } from "./github";
+
+/**
+ * BP-472 found `coda.ts` calling `safeFetch` with no `DestinationOptions` at all — a silent
+ * refusal of `127.0.0.1` in every environment, because `allowLoopback` defaults to false — and
+ * fixed it by mirroring this file's own `GITHUB_DESTINATION`. Nothing pinned that GITHUB_DESTINATION
+ * itself stays wired to `safeFetch`, so the same regression could land here with no test to catch it.
+ */
+// vi.hoisted, not a plain top-level const: this file (unlike coda.test.ts) statically imports
+// "./github" above, so without it the mock factory below — itself hoisted above every import —
+// would run before this assignment and throw a TDZ error
+const safeFetch = vi.hoisted(() =>
+  vi.fn((_url: string, _init?: RequestInit, _options?: { allowLoopback?: boolean }) =>
+    Promise.resolve(new Response(JSON.stringify([])))
+  )
+);
+vi.mock("./safe-fetch", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./safe-fetch")>()),
+  safeFetch,
+}));
+
+describe("the loopback carve-out that lets e2e/github-stub.mjs be reached", () => {
+  it("passes a DestinationOptions that allows loopback outside production", async () => {
+    await fetchPullRequests("owner", "repo", "tok");
+
+    expect(safeFetch).toHaveBeenCalled();
+    // vitest itself runs with NODE_ENV=test, so this is the same "not production" case the e2e
+    // stub relies on — asserting the concrete value, not just that some object was passed
+    for (const call of safeFetch.mock.calls) {
+      expect(call[2]).toEqual({ allowLoopback: true });
+    }
+  });
+
+  // Pins allowLoopbackIn's own logic directly, rather than only through GITHUB_DESTINATION's
+  // module-load-time snapshot of it
+  it("refuses loopback in production", () => {
+    expect(allowLoopbackIn("production")).toBe(false);
+    expect(allowLoopbackIn("test")).toBe(true);
+  });
+});
 
 /**
  * A task key is built from the project's current key, so renaming the key renames every
