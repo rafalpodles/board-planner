@@ -1,32 +1,29 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 // A category name lands in the PM's SYSTEM prompt, and any member can write one (BP-321)
-import { hasControlCharacters } from "@/lib/identifiers";
+import {
+  CATEGORY_NAME_MAX_LENGTH,
+  hasControlCharacters,
+  MAX_CATEGORIES,
+} from "@/lib/identifiers";
 import { withProjectAccess, withProjectOwner } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { Task } from "@/models/task";
 import { logProjectAudit } from "@/lib/projectAudit";
-
-export const GET = withProjectAccess(async (_request, { params }) => {
-  const { projectId } = await params;
-  await connectDB();
-
-  const project = await Project.findById(projectId, "categories");
-  if (!project) {
-    return NextResponse.json({ error: "Project not found" }, { status: 404 });
-  }
-
-  return NextResponse.json(project.categories || []);
-});
 
 export const POST = withProjectAccess(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
 
   const { name, color } = await request.json();
-  if (!name || typeof name !== "string" || !name.trim() || name.trim().length > 50) {
+  if (
+    !name ||
+    typeof name !== "string" ||
+    !name.trim() ||
+    name.trim().length > CATEGORY_NAME_MAX_LENGTH
+  ) {
     return NextResponse.json(
-      { error: "Category name is required (max 50 chars)" },
+      { error: `Category name is required (max ${CATEGORY_NAME_MAX_LENGTH} chars)` },
       { status: 400 }
     );
   }
@@ -47,13 +44,27 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
     return NextResponse.json({ error: "Category already exists" }, { status: 409 });
   }
 
-  categories.push({ name: name.trim(), color: color || "#3b82f6" } as typeof categories[number]);
-  project.categories = categories;
-  await project.save();
+  // The ceiling goes in the write's own filter, not in a count read against the document above:
+  // every concurrent racer sees the same pre-write length, so a check up there bounds nothing.
+  // This is the only operation that grows the array, so bounding it bounds the array (BP-716).
+  // The push is atomic for the same reason the webhook writers are (BP-407) — it no longer
+  // re-sends the whole array, which would clobber a rename landing at the same moment.
+  const added = await Project.findOneAndUpdate(
+    { _id: projectId, [`categories.${MAX_CATEGORIES - 1}`]: { $exists: false } },
+    { $push: { categories: { name: name.trim(), color: color || "#3b82f6" } } },
+    { returnDocument: "after" }
+  );
+  // The project was read a moment ago, so a miss here is the ceiling and not a vanished project.
+  if (!added) {
+    return NextResponse.json(
+      { error: `A project may have at most ${MAX_CATEGORIES} categories` },
+      { status: 400 }
+    );
+  }
 
   logProjectAudit(projectId, user._id, "settings_updated", `Category added: ${name.trim()}`);
 
-  return NextResponse.json(project.categories, { status: 201 });
+  return NextResponse.json(added.categories, { status: 201 });
 });
 
 export const PATCH = withProjectAccess(async (request, { params, user }) => {
@@ -67,8 +78,11 @@ export const PATCH = withProjectAccess(async (request, { params, user }) => {
 
   const renaming = typeof newName === "string" && newName.trim() && newName.trim() !== name;
   const target = renaming ? newName.trim() : name;
-  if (renaming && target.length > 50) {
-    return NextResponse.json({ error: "Category name is too long (max 50 chars)" }, { status: 400 });
+  if (renaming && target.length > CATEGORY_NAME_MAX_LENGTH) {
+    return NextResponse.json(
+      { error: `Category name is too long (max ${CATEGORY_NAME_MAX_LENGTH} chars)` },
+      { status: 400 }
+    );
   }
   if (renaming && hasControlCharacters(target)) {
     return NextResponse.json(

@@ -14,18 +14,6 @@ import { withAdmin } from "@/lib/middleware";
 import { revokeUserCredentials, revokeUserSessions } from "@/lib/session";
 import { User } from "@/models/user";
 
-export const GET = withAdmin(async (_request, { params }) => {
-  const { userId } = await params;
-  await connectDB();
-
-  const user = await User.findById(userId);
-  if (!user) {
-    return NextResponse.json({ error: "User not found" }, { status: 404 });
-  }
-
-  return NextResponse.json(user);
-});
-
 export const PUT = withAdmin(async (request, { params, user: admin }) => {
   const { userId } = await params;
   await connectDB();

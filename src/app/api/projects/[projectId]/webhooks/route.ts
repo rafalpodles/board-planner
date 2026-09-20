@@ -12,18 +12,6 @@ function masked(project: any) {
   return sanitizeProjectSecrets(project.toObject()).webhooks || [];
 }
 
-export const GET = withProjectOwner(async (_request, { params }) => {
-  const { projectId } = await params;
-  await connectDB();
-
-  const project = await Project.findById(projectId, "webhooks");
-  if (!project) {
-    return NextResponse.json({ error: "Project not found" }, { status: 404 });
-  }
-
-  return NextResponse.json(masked(project));
-});
-
 // All three writers below use an atomic operator ($push/$set/$pull) rather than load, mutate
 // in memory, save() — that pattern re-sent the WHOLE webhooks array on every save, and
 // dispatchWebhooks records a delivery outcome onto one row from its own background write

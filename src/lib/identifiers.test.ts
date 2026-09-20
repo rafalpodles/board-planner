@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   CRITERION_TEXT_MAX_LENGTH,
+  MAX_CATEGORIES,
+  MAX_TASK_TEMPLATES,
+  TEMPLATE_NAME_MAX_LENGTH,
   FULL_NAME_MAX_LENGTH,
   PROJECT_KEY_MAX_LENGTH,
   TASK_TITLE_MAX_LENGTH,
@@ -236,5 +239,23 @@ describe("an acceptance criterion", () => {
   it("caps the length, at the boundary", () => {
     expect(isValidCriterionText("a".repeat(CRITERION_TEXT_MAX_LENGTH))).toBe(true);
     expect(isValidCriterionText("a".repeat(CRITERION_TEXT_MAX_LENGTH + 1))).toBe(false);
+  });
+});
+
+/**
+ * These three are published, in the Limits bullet of `reference/rest-api.md` in the
+ * **board-planner-site** repository. Changing one here means editing that file too, in a pull
+ * request of its own — which is the whole reason this block exists, because nothing else in this
+ * repository can see that promise.
+ *
+ * The route tests derive their fixtures from these constants, which is right: they are about the
+ * mechanism (the ceiling rides in the write's own filter) rather than about the number. It does
+ * mean raising a constant cannot turn those red. This is where that is caught (BP-716).
+ */
+describe("the per-project ceilings the docs publish", () => {
+  it("are fifty categories, fifty templates and a hundred characters of template name", () => {
+    expect(MAX_CATEGORIES).toBe(50);
+    expect(MAX_TASK_TEMPLATES).toBe(50);
+    expect(TEMPLATE_NAME_MAX_LENGTH).toBe(100);
   });
 });

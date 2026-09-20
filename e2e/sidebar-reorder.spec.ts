@@ -329,3 +329,40 @@ test("a project read that nothing overtook is still applied", async ({ page }) =
   late.release();
   await expect.poll(() => keysInSidebar(page)).toEqual(reordered);
 });
+
+/**
+ * BP-714: the same body a typo produces, answered as a typo.
+ *
+ * `order` went straight into `Project.find({ _id: { $in: ids } })`, so a string that is not an
+ * ObjectId threw a CastError — which the auth middleware rethrows, because it is not a
+ * database-unreachable error — and the caller got a 500. The sibling task reorder has guarded
+ * this since it was written. Driven through the API rather than the sidebar because the sidebar
+ * can only ever send ids it was given, which is exactly why nothing had noticed.
+ */
+test("a reorder naming an id that is not an id is refused, not a 500", async ({ page }) => {
+  await signIn(page);
+  const before = await storedOrder(page);
+
+  const refused = await page.request.put("/api/projects/reorder", {
+    headers: SAME_ORIGIN,
+    data: { order: [PROJECT_ID, "not-an-id", SECOND_PROJECT_ID] },
+  });
+
+  expect(refused.status()).toBe(400);
+  expect(await refused.json()).toEqual({ error: "order contains a malformed project id" });
+  expect(await storedOrder(page)).toEqual(before);
+
+  // The control. Without it a refusal caused by a mis-built request would read exactly like the
+  // refusal the guard exists to produce.
+  const accepted = await page.request.put("/api/projects/reorder", {
+    headers: SAME_ORIGIN,
+    data: { order: [SECOND_PROJECT_ID, NEWEST_PROJECT_ID, PROJECT_ID] },
+  });
+
+  expect(accepted.status()).toBe(200);
+  expect(await storedOrder(page)).toEqual([
+    SECOND_PROJECT_KEY,
+    NEWEST_PROJECT_KEY,
+    PROJECT_KEY,
+  ]);
+});

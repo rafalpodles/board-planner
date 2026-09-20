@@ -3,15 +3,74 @@ import { connectDB } from "@/lib/db";
 import { withProjectAccess, withProjectOwner } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { logProjectAudit } from "@/lib/projectAudit";
+import {
+  CATEGORY_NAME_MAX_LENGTH,
+  MAX_TASK_TEMPLATES,
+  TASK_DESCRIPTION_MAX_LENGTH,
+  TASK_TITLE_MAX_LENGTH,
+  TEMPLATE_NAME_MAX_LENGTH,
+} from "@/lib/identifiers";
+
+interface StoredTemplate {
+  _id: { toString(): string };
+  name: string;
+}
+
+/**
+ * The same rules on both writers.
+ *
+ * They used to differ: `POST` refused a blank, duplicate or non-string name and `PUT` wrote
+ * whatever the body held, because the update walked a field list and assigned. A template is
+ * offered by name, so a duplicate is indistinguishable at the only moment anybody picks one and a
+ * blank name is a row that cannot be picked at all (BP-716).
+ *
+ * The text bounds are the task's own: a template is copied into a task, so anything looser here
+ * is just the long way round to the limit that route enforces.
+ */
+function templateProblem(
+  body: Record<string, unknown>,
+  existing: StoredTemplate[],
+  self?: StoredTemplate
+): string | null {
+  if (body.name !== undefined) {
+    const name = body.name;
+    if (typeof name !== "string" || !name.trim()) return "Template name is required";
+    if (name.trim().length > TEMPLATE_NAME_MAX_LENGTH) {
+      return `Template name must be ${TEMPLATE_NAME_MAX_LENGTH} characters or less`;
+    }
+    const taken = existing.some(
+      (t) =>
+        t.name.toLowerCase() === name.trim().toLowerCase() &&
+        (!self || t._id.toString() !== self._id.toString())
+    );
+    if (taken) return "Template with this name already exists";
+  }
+
+  for (const [field, max] of [
+    ["title", TASK_TITLE_MAX_LENGTH],
+    ["description", TASK_DESCRIPTION_MAX_LENGTH],
+    ["acceptanceCriteria", TASK_DESCRIPTION_MAX_LENGTH],
+    // The category's own limit, not the template's: a template names a category, and bounding it
+    // any looser lets a template name one that no category is allowed to be.
+    ["category", CATEGORY_NAME_MAX_LENGTH],
+  ] as const) {
+    const value = body[field];
+    if (value === undefined) continue;
+    if (typeof value !== "string") return `${field} must be a string`;
+    if (value.length > max) return `${field} must be ${max.toLocaleString("en-US")} characters or less`;
+  }
+
+  return null;
+}
 
 export const POST = withProjectAccess(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
 
-  const { name, title, description, category, acceptanceCriteria } =
-    await request.json();
+  const body = await request.json();
+  const { name, title, description, category, acceptanceCriteria } = body;
 
-  if (!name || typeof name !== "string" || !name.trim()) {
+  if (name === undefined) {
     return NextResponse.json({ error: "Template name is required" }, { status: 400 });
   }
 
@@ -20,24 +79,41 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  const templates = project.taskTemplates || [];
-  if (templates.some((t) => t.name.toLowerCase() === name.trim().toLowerCase())) {
-    return NextResponse.json({ error: "Template with this name already exists" }, { status: 409 });
+  const templates = (project.taskTemplates || []) as unknown as StoredTemplate[];
+  const problem = templateProblem(body, templates);
+  if (problem) {
+    // A name already taken is a conflict; everything else here is a malformed request.
+    const status = problem.endsWith("already exists") ? 409 : 400;
+    return NextResponse.json({ error: problem }, { status });
   }
 
-  templates.push({
-    name: name.trim(),
-    title: title || "",
-    description: description || "",
-    category: category || "user-story",
-    acceptanceCriteria: acceptanceCriteria || "",
-  } as typeof templates[number]);
-  project.taskTemplates = templates;
-  await project.save();
+  // The ceiling in the write's own filter rather than a count read above it, for the reason the
+  // categories route gives: every racer sees the same pre-write length (BP-716).
+  const added = await Project.findOneAndUpdate(
+    { _id: projectId, [`taskTemplates.${MAX_TASK_TEMPLATES - 1}`]: { $exists: false } },
+    {
+      $push: {
+        taskTemplates: {
+          name: name.trim(),
+          title: title || "",
+          description: description || "",
+          category: category || "user-story",
+          acceptanceCriteria: acceptanceCriteria || "",
+        },
+      },
+    },
+    { returnDocument: "after" }
+  );
+  if (!added) {
+    return NextResponse.json(
+      { error: `A project may have at most ${MAX_TASK_TEMPLATES} templates` },
+      { status: 400 }
+    );
+  }
 
   logProjectAudit(projectId, user._id, "template_added", name.trim());
 
-  return NextResponse.json(project.taskTemplates, { status: 201 });
+  return NextResponse.json(added.taskTemplates, { status: 201 });
 });
 
 export const PUT = withProjectAccess(async (request, { params, user }) => {
@@ -61,10 +137,21 @@ export const PUT = withProjectAccess(async (request, { params, user }) => {
     return NextResponse.json({ error: "Template not found" }, { status: 404 });
   }
 
+  const problem = templateProblem(
+    updates,
+    (project.taskTemplates || []) as unknown as StoredTemplate[],
+    template as unknown as StoredTemplate
+  );
+  if (problem) {
+    const status = problem.endsWith("already exists") ? 409 : 400;
+    return NextResponse.json({ error: problem }, { status });
+  }
+
   const allowed = ["name", "title", "description", "category", "acceptanceCriteria"];
   for (const field of allowed) {
     if (updates[field] !== undefined) {
-      (template as unknown as Record<string, unknown>)[field] = updates[field];
+      (template as unknown as Record<string, unknown>)[field] =
+        field === "name" ? (updates[field] as string).trim() : updates[field];
     }
   }
 
