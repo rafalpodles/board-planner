@@ -127,9 +127,10 @@ describe("the fleet console's owner column", () => {
     expect(under("Last seen")).toBe("5m ago");
     expect(under("Preflight")).toBe("not reported");
     expect(under("Binding error")).toBe("");
-    expect(under("Enabled")).toBe("On");
-    expect(under("Lock")).toBe("Lock");
-    expect(under("Commands")).toMatch(/^Pause.*Stop$/);
+    // BP-642 folded Enabled, Lock and Commands into one pinned cell: three columns' worth of
+    // controls did not fit a laptop beside the nine that describe the machine. Read in order, so
+    // the fold is a regrouping and not a silent loss of one of them.
+    expect(under("Controls")).toMatch(/^On.*Lock.*Pause.*Resume.*Stop$/);
   });
 
   it("falls back to the username when that account has no display name", async () => {
@@ -261,7 +262,7 @@ describe("a check that passed at a cost", () => {
 
     render(<WorkersPage />);
 
-    // The full-width line under the worker, because the Preflight column is the eighth of twelve
+    // The full-width line under the worker, because the Preflight column is the eighth of ten
     // in a table that scrolls sideways — measured off the right edge of a 1280px viewport.
     const line = await screen.findByTestId("preflight-warning");
     expect(line.textContent).toContain("sandbox");
@@ -270,7 +271,7 @@ describe("a check that passed at a cost", () => {
     // The word, so the amber is not the only thing saying this is a warning
     expect(line.textContent).toContain("Warning:");
     // And the line that proves it left the Preflight column: only the full-width row spans the table
-    expect(line.closest("td")?.colSpan).toBe(12);
+    expect(line.closest("td")?.colSpan).toBe(10);
   });
 
   it("still opens the preflight cell with ready, and names the check in amber", async () => {
