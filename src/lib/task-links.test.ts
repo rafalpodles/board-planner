@@ -21,6 +21,17 @@ interface Doc {
 
 let store: Doc[] = [];
 
+/**
+ * Stands in for what `{ timestamps: true }` does to every update.
+ *
+ * Mongoose adds `$set: { updatedAt: now }` to any non-replace update before it reaches the server,
+ * so a write that matched a document always modified it — `modifiedCount` cannot tell an
+ * `$addToSet` that added something from one that found it already there. A fake without this
+ * answers the question the test wanted rather than the one Mongo answers, and the gate that used
+ * to read `modifiedCount` passed here while doing nothing in production.
+ */
+let clock = 0;
+
 const updateOne = vi.fn();
 const updateMany = vi.fn();
 const findByIdAndUpdate = vi.fn();
@@ -95,6 +106,7 @@ vi.mock("@/models/task", () => ({
       if (!doc) return { matchedCount: 0, modifiedCount: 0 };
       const before = JSON.stringify(doc);
       apply(doc, update);
+      (doc as unknown as Record<string, unknown>).updatedAt = `t${++clock}`;
       return { matchedCount: 1, modifiedCount: JSON.stringify(doc) === before ? 0 : 1 };
     },
     updateMany: async (filter: object, update: Update) => {
@@ -231,10 +243,12 @@ describe("addTaskLink", () => {
       ["a", "link_added", "blocked_by", "", "BP-2"],
       ["b", "link_added", "blocks", "", "BP-1"],
     ]);
-    // Scoped by project like every other write here, not by id alone
-    expect(updateOne).toHaveBeenCalledWith(
+    // Scoped by project like every other write here, not by id alone — and asking for the image
+    // from before its own write, which is the only thing that can say whether it added anything
+    expect(findOneAndUpdate).toHaveBeenCalledWith(
       { _id: "a", project: P },
-      { $addToSet: { blockedBy: "b" } }
+      { $addToSet: { blockedBy: "b" } },
+      { returnDocument: "before", projection: "blockedBy" }
     );
   });
 
@@ -367,9 +381,10 @@ describe("addTaskLink", () => {
   // because its own write made it.
   it("says nothing when another request added the same blocker first", async () => {
     store = [task("a", 1), task("b", 2)];
-    updateOne.mockImplementation((_filter: object, update: Update) => {
+    findOneAndUpdate.mockImplementation((_filter: object, update: Update) => {
       // Somebody else adds it between this request's read and its own $addToSet, which is then
-      // idempotent and changes nothing
+      // idempotent. `modifiedCount` cannot see that — the timestamp hook makes every matched
+      // write a modified one — so the before-image is what has to answer.
       if (update.$addToSet) store.find((d) => d._id === "a")!.blockedBy = ["b"];
     });
 
@@ -382,7 +397,7 @@ describe("addTaskLink", () => {
 
   it("refuses the blocker when the task went away before the write", async () => {
     store = [task("a", 1), task("b", 2)];
-    updateOne.mockImplementation((_filter: object, update: Update) => {
+    findOneAndUpdate.mockImplementation((_filter: object, update: Update) => {
       if (update.$addToSet) store = store.filter((d) => d._id !== "a");
     });
 

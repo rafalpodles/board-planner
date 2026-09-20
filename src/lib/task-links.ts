@@ -83,7 +83,7 @@ function relationBetween(
   return (task.relations ?? []).find((r) => idOf(r.task) === otherId)?.type;
 }
 
-function blocks(task: LinkEnd, otherId: string): boolean {
+function blocks(task: { blockedBy?: unknown[] }, otherId: string): boolean {
   return (task.blockedBy ?? []).some((id) => idOf(id) === otherId);
 }
 
@@ -117,23 +117,31 @@ export async function addTaskLink(
     if (blocks(task, targetTaskId)) return { ok: true };
 
     // The same rule the rest of this module follows, and the last branch that did not: the fact is
-    // announced because THIS write made it, not because a read said it was about to. `$addToSet`
-    // is idempotent, so a concurrent request adding the same blocker leaves `modifiedCount` at
-    // zero here — that request owns the announcement, and this one has nothing to report. The
-    // filter carries the project for the same reason every other write in this module does; a
+    // announced because THIS write made it, not because a read said it was about to.
+    //
+    // Read from the image, NOT from `modifiedCount`. The schema carries `timestamps: true`, so
+    // Mongoose adds `$set: { updatedAt: now }` to every update before it leaves — which means a
+    // write that matched always modified, and the counter cannot tell an `$addToSet` that added
+    // something from one that found it already there. Measured against the real database: a
+    // duplicate `$addToSet` reports `modifiedCount: 1`. The array itself cannot be fooled that way.
+    //
+    // The filter carries the project for the same reason every other write in this module does; a
     // write scoped by id alone cannot stand as proof of anything about this board.
-    const blocked = await Task.updateOne(
+    const blocked = await Task.findOneAndUpdate(
       { _id: taskId, project: projectId },
-      { $addToSet: { blockedBy: targetTaskId } }
-    );
-    if (!blocked.matchedCount) {
+      { $addToSet: { blockedBy: targetTaskId } },
+      { returnDocument: "before", projection: "blockedBy" }
+    ).lean<{ blockedBy?: unknown[] }>();
+
+    if (!blocked) {
       return {
         ok: false,
         error: "Task not found — it is no longer on this board",
         status: 404,
       };
     }
-    if (!blocked.modifiedCount) return { ok: true };
+    // Already there before this write, so another request added it and owns the announcement
+    if (blocks(blocked, targetTaskId)) return { ok: true };
 
     await announce(projectId, actorId, [
       { action: "added", type, holder: task, target: other },
