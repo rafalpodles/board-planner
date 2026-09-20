@@ -116,7 +116,25 @@ export async function addTaskLink(
 
     if (blocks(task, targetTaskId)) return { ok: true };
 
-    await Task.findByIdAndUpdate(taskId, { $addToSet: { blockedBy: targetTaskId } });
+    // The same rule the rest of this module follows, and the last branch that did not: the fact is
+    // announced because THIS write made it, not because a read said it was about to. `$addToSet`
+    // is idempotent, so a concurrent request adding the same blocker leaves `modifiedCount` at
+    // zero here — that request owns the announcement, and this one has nothing to report. The
+    // filter carries the project for the same reason every other write in this module does; a
+    // write scoped by id alone cannot stand as proof of anything about this board.
+    const blocked = await Task.updateOne(
+      { _id: taskId, project: projectId },
+      { $addToSet: { blockedBy: targetTaskId } }
+    );
+    if (!blocked.matchedCount) {
+      return {
+        ok: false,
+        error: "Task not found — it is no longer on this board",
+        status: 404,
+      };
+    }
+    if (!blocked.modifiedCount) return { ok: true };
+
     await announce(projectId, actorId, [
       { action: "added", type, holder: task, target: other },
     ]);

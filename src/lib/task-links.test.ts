@@ -231,7 +231,11 @@ describe("addTaskLink", () => {
       ["a", "link_added", "blocked_by", "", "BP-2"],
       ["b", "link_added", "blocks", "", "BP-1"],
     ]);
-    expect(findByIdAndUpdate).toHaveBeenCalledWith("a", { $addToSet: { blockedBy: "b" } });
+    // Scoped by project like every other write here, not by id alone
+    expect(updateOne).toHaveBeenCalledWith(
+      { _id: "a", project: P },
+      { $addToSet: { blockedBy: "b" } }
+    );
   });
 
   // The case the ticket is about: the epic that loses a child is named by nobody in the call.
@@ -359,6 +363,37 @@ describe("addTaskLink", () => {
     expect(store.find((d) => d._id === "a")!.relations).toEqual([]);
   });
 
+  // The fourth branch that used to announce a fact because a read said it was coming rather than
+  // because its own write made it.
+  it("says nothing when another request added the same blocker first", async () => {
+    store = [task("a", 1), task("b", 2)];
+    updateOne.mockImplementation((_filter: object, update: Update) => {
+      // Somebody else adds it between this request's read and its own $addToSet, which is then
+      // idempotent and changes nothing
+      if (update.$addToSet) store.find((d) => d._id === "a")!.blockedBy = ["b"];
+    });
+
+    expect(await addTaskLink(P, "a", "b", "blocked_by", ACTOR)).toEqual({ ok: true });
+
+    expect(rows()).toEqual([]);
+    expect(dispatchWebhooks).not.toHaveBeenCalled();
+    expect(createNotifications).not.toHaveBeenCalled();
+  });
+
+  it("refuses the blocker when the task went away before the write", async () => {
+    store = [task("a", 1), task("b", 2)];
+    updateOne.mockImplementation((_filter: object, update: Update) => {
+      if (update.$addToSet) store = store.filter((d) => d._id !== "a");
+    });
+
+    expect(await addTaskLink(P, "a", "b", "blocked_by", ACTOR)).toEqual({
+      ok: false,
+      error: "Task not found — it is no longer on this board",
+      status: 404,
+    });
+    expect(rows()).toEqual([]);
+  });
+
   it("refuses a blocker that would close a cycle", async () => {
     store = [task("a", 1), task("b", 2, { blockedBy: ["a"] })];
 
@@ -366,7 +401,7 @@ describe("addTaskLink", () => {
       ok: false,
       status: 400,
     });
-    expect(findByIdAndUpdate).not.toHaveBeenCalled();
+    expect(store.find((d) => d._id === "a")!.blockedBy).toEqual([]);
   });
 });
 
