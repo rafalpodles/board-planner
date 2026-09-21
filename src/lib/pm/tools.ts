@@ -159,6 +159,7 @@ async function whyItWillNotRun(
     agent?: unknown;
     assignee?: unknown;
     assignedBy?: unknown;
+    pmAssignedFor?: unknown;
     status?: unknown;
     blockedBy?: unknown;
     execution?: { attempts?: number } | null;
@@ -170,9 +171,18 @@ async function whyItWillNotRun(
   ).lean();
   if (!project) return "this project is not enabled for workers, so nothing will run it";
   const columns = getProjectColumns(project);
-  const attemptsExhausted = (task.execution?.attempts ?? 0) >= MAX_EXECUTION_ATTEMPTS;
+  // Named field by field: the task is a Mongoose document, and spreading one copies its internals
+  const judged = {
+    agent: task.agent,
+    assignee: task.assignee,
+    assignedBy: task.assignedBy,
+    pmAssignedFor: task.pmAssignedFor,
+    status: task.status,
+    blockedBy: task.blockedBy,
+    attemptsExhausted: (task.execution?.attempts ?? 0) >= MAX_EXECUTION_ATTEMPTS,
+  };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const handover = handoverOf({ ...(task as any), attemptsExhausted }, columns);
+  const handover = handoverOf(judged as any, columns);
   // No agent means a person is doing it, and nothing about the board matters to that
   if (!handover.runs && handover.problems[0].reason === "no-agent") {
     return whyThisProblem(handover.problems[0], project.key);

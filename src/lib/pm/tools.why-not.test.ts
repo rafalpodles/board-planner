@@ -122,6 +122,24 @@ describe("the PM says every reason its hand-over will not run", () => {
     expect((await assign({ execution: { attempts: 2 } })).result).toEqual({ task: "BP-9", assignee: "owner" });
   });
 
+  // assignTask answers a Mongoose document, whose fields are getters and do not survive a spread
+  it("reads the task's fields off a document rather than spreading it", async () => {
+    const doc = Object.create({ ...SOUND, agent: null });
+    assignTaskMock.mockResolvedValue({ ok: true, data: doc });
+
+    const { result } = await PM_TOOLS.assign_task.execute({ taskKey: "BP-9", username: "owner" }, ctx);
+
+    expect((result as { note: string }).note).toContain("no agent is named on it");
+  });
+
+  it("finds a sound document sound", async () => {
+    assignTaskMock.mockResolvedValue({ ok: true, data: Object.create(SOUND) });
+
+    const { result } = await PM_TOOLS.assign_task.execute({ taskKey: "BP-9", username: "owner" }, ctx);
+
+    expect(result).toEqual({ task: "BP-9", assignee: "owner" });
+  });
+
   // A board deleted between the assignment and this read answers, rather than throwing
   it("does not throw when the project is gone", async () => {
     projectFindById.mockReturnValue({ lean: async () => null });
