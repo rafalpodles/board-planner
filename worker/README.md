@@ -221,9 +221,10 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   write, a clean checkout of the commit. The shipped Default agent
   merges nothing; it stops at the pull request.
 - **Nothing executes before the static gates have read the diff.** `protected-paths` refuses
-  changes to `package.json`, lockfiles, `.npmrc`, hooks and workflows *before* the build gate runs
-  npm on the worktree, and installs run with `--ignore-scripts`. Cost ordering alone would have
-  executed agent-written lifecycle scripts first.
+  changes to `package.json`, lockfiles, `.npmrc`, `.husky/` and workflows *before* the build gate
+  runs npm on the worktree, and installs run with `--ignore-scripts`. Cost ordering alone would have
+  executed agent-written lifecycle scripts first. Not real git hooks — `.git/hooks/` is untracked,
+  so a changed-files diff can never name a path under it in the first place (BP-310).
 - **Nothing is checked out of a poisoned clone, and a poisoned clone is not tried twice.** The
   first thing a run does is read the shared checkout's own git config and refuse it if it carries a
   key git would run — a `filter.<name>.smudge`, an `ext::` transport, an `include.path` this cannot
@@ -387,9 +388,13 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   own child, so the destination's `post-receive` would hold the credentials. Both are refused.
 
   What this does **not** claim: the allowlist includes `HOME`, because the CLI authenticates from
-  its logged-in session there. An agent that goes looking can **read** what is under it. Writing is
-  a different matter since BP-349 — see the next bullet — but the environment is the boundary for
-  reading, and the filesystem is not.
+  its logged-in session there. An agent that goes looking can **read** what is under it —
+  `~/.boardplanner/worker.json` (this worker's own board credential), `~/.config/gh/hosts.yml`,
+  `~/.claude/.credentials.json`, `~/.npmrc`, `~/.ssh`, `~/.aws`, all at this process's own uid.
+  Writing is a different matter since BP-349 — see the next bullet — but the environment is the
+  boundary for reading, and the filesystem is not: "a subprocess cannot inherit this worker's
+  secrets" is true of what travels in `env`, not of what the agent's own filesystem access can
+  reach (BP-310).
 
   **What it costs.** `~/.gitconfig` is not read on those calls, so anything an operator keeps there
   no longer applies to delivery: a deploy key set through `core.sshCommand`, a `url.*.insteadOf`

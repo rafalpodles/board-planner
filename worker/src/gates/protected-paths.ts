@@ -50,8 +50,12 @@ export const AGENT_INSTRUCTION_FILE =
 // cannot be accepted.
 //
 // `.gitmodules` is its neighbour: it names other repositories a checkout pulls in.
+// `.git/hooks` used to be one of the directories below, and never could match: `diff.changedFiles`
+// comes from `git diff --numstat`, and git refuses to track any path with a `.git` path component,
+// so nothing under `.git/hooks/` is ever a changed file this gate is asked about. `.husky/` is a
+// real hook install path git does track, which is what made the dead clause easy to miss (BP-310).
 export const EXECUTABLE_CONFIG_FILE =
-  /(^|\/)(package(-lock)?\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.ya?ml|\.npmrc|\.yarnrc(\.yml)?|binding\.gyp)$|(^|\/)(next|vite|vitest|webpack|rollup|jest|babel|astro|svelte|nuxt|tailwind|postcss|playwright|esbuild|metro|remix|gatsby)\.config\.[cm]?[jt]sx?$|(^|\/)(\.babelrc(\.[cm]?js(on)?)?|Makefile|CMakeLists\.txt|\.gitattributes|\.gitmodules)$|(^|\/)(\.husky|\.git\/hooks|\.github\/workflows|\.github\/actions|scripts)\//i;
+  /(^|\/)(package(-lock)?\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.ya?ml|\.npmrc|\.yarnrc(\.yml)?|binding\.gyp)$|(^|\/)(next|vite|vitest|webpack|rollup|jest|babel|astro|svelte|nuxt|tailwind|postcss|playwright|esbuild|metro|remix|gatsby)\.config\.[cm]?[jt]sx?$|(^|\/)(\.babelrc(\.[cm]?js(on)?)?|Makefile|CMakeLists\.txt|\.gitattributes|\.gitmodules)$|(^|\/)(\.husky|\.github\/workflows|\.github\/actions|scripts)\//i;
 
 // Manifests that decide what runs *after* this change lands, in a repository this worker's gates
 // cannot execute at all. A non-JS repo fails the build gate on `npm ci` before reading anything, so

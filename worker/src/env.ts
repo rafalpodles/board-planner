@@ -2,7 +2,9 @@
 // agent controls, so the child environment is built from an allowlist. A denylist cannot work:
 // it has to name every secret that will ever exist in the parent, and CP_API_TOKEN alone would
 // let the agent write to the board as the operator.
-const ALLOWED = [
+// Exported so the behavioural tripwire (child-env.behavioral.integration.test.ts) can assert
+// against the real list rather than a hand-copied one that would drift from it (BP-310).
+export const ALLOWED = [
   "PATH",
   "HOME",
   "USER",

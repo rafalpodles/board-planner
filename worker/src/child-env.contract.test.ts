@@ -34,12 +34,21 @@ function filesMatching(pattern: RegExp): string[] {
     .sort();
 }
 
+// `process.env`, `process["env"]`/`process['env']`, and a destructured `env` — `import { env } from
+// "node:process"`, `const { env } = process` — are the same read spelled four ways. BP-310 ranked
+// all three of the non-dotted forms "low" plausibility and "free to close by widening the regex".
+// A file that only destructures `env` and uses it later (`const { env } = process; …spread(env)`)
+// still fails the read-restriction test below on the destructuring line alone, so the spread regex
+// only needs the two `process.env`-shaped spellings — it does not have to chase the local name too.
+const PROCESS_ENV_READ = /process(?:\.env|\s*\[\s*["']env["']\s*\])|from\s*["']node:process["']|\{\s*env\s*\}\s*=\s*process\b/;
+const PROCESS_ENV_SPREAD = /\.\.\.\s*process(?:\.env|\s*\[\s*["']env["']\s*\])/;
+
 describe("every subprocess environment is built from the allowlist", () => {
   it("no source file spreads the worker's environment into a child", () => {
-    expect(filesMatching(/\.\.\.\s*process\.env/)).toEqual([]);
+    expect(filesMatching(PROCESS_ENV_SPREAD)).toEqual([]);
   });
 
   it("only env.ts and wiring.ts read process.env at all", () => {
-    expect(filesMatching(/process\.env/)).toEqual(MAY_READ_PROCESS_ENV);
+    expect(filesMatching(PROCESS_ENV_READ)).toEqual(MAY_READ_PROCESS_ENV);
   });
 });

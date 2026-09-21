@@ -109,12 +109,20 @@ describe("protectedPathsGate", () => {
     ".yarnrc.yml",
     "binding.gyp",
     ".husky/pre-commit",
-    ".git/hooks/pre-push",
     ".github/workflows/ci.yml",
     "packages/api/package.json",
     "nested/dir/.npmrc",
   ])("refuses %s", async (file) => {
     expect((await gate.run(context([file]))).ok).toBe(false);
+  });
+
+  // BP-310. `.git/hooks/pre-push` used to be on the list above, and the assertion never meant
+  // anything: `diff.changedFiles` comes from `git diff --numstat`, and git refuses to track any
+  // path with a `.git` component, so this gate is never actually asked about one. Kept as its own
+  // test — rather than deleted outright — so the dead clause's removal reads as a decision, not an
+  // accident a future pass quietly re-adds.
+  it("does not refuse .git/hooks/pre-push, which real git can never report as a changed file", async () => {
+    expect((await gate.run(context([".git/hooks/pre-push"]))).ok).toBe(true);
   });
 
   it.each([
