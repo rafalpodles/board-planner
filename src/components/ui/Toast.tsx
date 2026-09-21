@@ -33,7 +33,8 @@ interface Toast {
 }
 
 interface ToastContextValue {
-  toast: (message: string, type?: ToastType, options?: { action?: ToastAction }) => void;
+  toast: (message: string, type?: ToastType, options?: { action?: ToastAction }) => number;
+  dismiss: (id: number) => void;
 }
 
 const TOAST_MS = 3000;
@@ -111,6 +112,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       setToasts((prev) => [...prev, { id, message, type, action }]);
       const timer = setTimeout(() => removeToast(id), action ? TOAST_WITH_ACTION_MS : TOAST_MS);
       timersRef.current.set(id, timer);
+      return id;
     },
     [removeToast]
   );
@@ -247,7 +249,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <ToastContext.Provider value={{ toast }}>
+    <ToastContext.Provider value={{ toast, dismiss: removeToast }}>
       {children}
       {toasts.length > 0 && (
         <div

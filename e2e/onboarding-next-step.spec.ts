@@ -84,6 +84,25 @@ test("a new account is offered a board from the toast, and its owner hears about
   await expect(grace).toHaveURL(new RegExp(`/projects/${PROJECT_KEY}$`));
 });
 
+test("the offer goes with the page it would open on", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/settings/users");
+  await page.getByRole("button", { name: "New User" }).click();
+  const form = page.getByRole("dialog", { name: "New User" });
+  await form.getByLabel("Username").fill("grace");
+  await form.getByLabel("Full Name").fill("Grace Hopper");
+  await form.getByLabel("Password").fill("hopper-1906");
+  await form.getByRole("button", { name: "Create User" }).click();
+  const offer = page.getByTestId("toast").filter({ hasText: "Grace Hopper's account is ready" });
+  await expect(offer).toBeVisible();
+
+  await page.getByRole("complementary").getByRole("link", { name: "My Tasks" }).click();
+  await expect(page).toHaveURL(/\/my-tasks$/);
+
+  // Well inside the ten seconds it would otherwise stay for
+  await expect(offer).toHaveCount(0, { timeout: 2_000 });
+});
+
 test("a role change on the board's settings reaches the person's bell", async ({
   page,
   browser,

@@ -4,16 +4,17 @@ import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
 import { render, screen, cleanup, act, waitFor } from "@testing-library/react";
 import UsersPage from "./page";
 
-const { api, auth, toast } = vi.hoisted(() => ({
+const { api, auth, toast, dismiss } = vi.hoisted(() => ({
   api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), del: vi.fn() },
   auth: { user: { _id: "u1", username: "owner" }, isAdmin: true, isLoading: false },
   toast: vi.fn(),
+  dismiss: vi.fn(),
 }));
 
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/hooks/use-auth", () => ({ useAuth: () => auth }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
-vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast }) }));
+vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast, dismiss }) }));
 vi.mock("@/hooks/use-projects", () => ({
   useProjects: () => ({
     projects: [
@@ -311,6 +312,16 @@ describe("adding a new account to a board", () => {
     await waitFor(() =>
       expect(screen.queryByRole("dialog", { name: "Add Grace Hopper to a board" })).toBeNull()
     );
+  });
+
+  it("takes its offer down when the admin leaves the page it would open on", async () => {
+    toast.mockReturnValue(41);
+    await createGrace();
+    expect(dismiss).not.toHaveBeenCalled();
+
+    cleanup();
+
+    expect(dismiss).toHaveBeenCalledWith(41);
   });
 
   it("keeps the picker open and says why when the grant is refused", async () => {

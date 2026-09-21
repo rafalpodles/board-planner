@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, FormEvent } from "react";
+import { useEffect, useRef, useState, FormEvent } from "react";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { useRouter } from "next/navigation";
@@ -49,7 +49,15 @@ export default function UsersPage() {
   const [addingToBoard, setAddingToBoard] = useState<ApiUser | null>(null);
 
   const api = useApi();
-  const { toast } = useToast();
+  const { toast, dismiss } = useToast();
+  const actionToasts = useRef<number[]>([]);
+
+  // The action opens a dialog on this page, so it must not outlive the page it would open it on
+  useEffect(() => {
+    const ids = actionToasts.current;
+    return () => ids.forEach((id) => dismiss?.(id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (authLoading) return;
@@ -108,10 +116,12 @@ export default function UsersPage() {
     // Before the refresh, so it does not wait on a slow list — and said at all, which it was not:
     // a create used to produce no line of its own, leaving a failed refresh as the only thing a new
     // account ever said.
-    toast(
-      `${created.fullName}'s account is ready. They will see no board until you add them to one.`,
-      "success",
-      { action: { label: "Add to a board", onClick: () => setAddingToBoard(created) } }
+    actionToasts.current.push(
+      toast(
+        `${created.fullName}'s account is ready. They will see no board until you add them to one.`,
+        "success",
+        { action: { label: "Add to a board", onClick: () => setAddingToBoard(created) } }
+      )
     );
     await refreshUsers();
   }

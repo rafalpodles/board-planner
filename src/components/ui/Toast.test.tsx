@@ -469,14 +469,16 @@ describe("where a toast lands", () => {
 // BP-753: a toast that offers the next step, rather than only reporting the last one
 describe("a toast with an action", () => {
   function ActionRaiser({ onAction }: { onAction: () => void }) {
-    const { toast } = useToast();
+    const { toast, dismiss } = useToast();
+    dismissById = dismiss;
     raiseWithAction = () =>
       toast("Ada's account is ready.", "success", {
         action: { label: "Add to a board", onClick: onAction },
       });
     return null;
   }
-  let raiseWithAction: () => void;
+  let raiseWithAction: () => number;
+  let dismissById: (id: number) => void;
 
   function mountWithAction(onAction = vi.fn()) {
     stateViewport(800);
@@ -512,10 +514,26 @@ describe("a toast with an action", () => {
         "Ada's account is ready.Add to a board",
       ]);
 
-      act(() => vi.advanceTimersByTime(7000));
+      act(() => vi.advanceTimersByTime(6999));
+      expect(screen.getAllByTestId("toast")).toHaveLength(1);
+
+      act(() => vi.advanceTimersByTime(1));
       expect(screen.queryByTestId("toast")).toBeNull();
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("can be taken down by whoever raised it", () => {
+    mountWithAction();
+    let id = 0;
+    act(() => {
+      id = raiseWithAction();
+    });
+    act(() => raise("Saved"));
+
+    act(() => dismissById(id));
+
+    expect(screen.getAllByTestId("toast").map((t) => t.textContent)).toEqual(["Saved"]);
   });
 });
