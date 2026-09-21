@@ -111,8 +111,6 @@ describe("useTaskEditor", () => {
     expect(api.put).not.toHaveBeenCalled();
   });
 
-  // The history panel refetches on this. `autoSaveState` stays "saved" from one save to the next,
-  // so it cannot tell a listener that another write landed; this has to change on every one.
   it("counts each accepted save, and only accepted ones", async () => {
     render(<Harness task={baseTask} />);
     expect(screen.getByTestId("saved-count").textContent).toBe("0");

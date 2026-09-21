@@ -3,11 +3,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, cleanup, fireEvent } from "@testing-library/react";
 import { mayLeave, useLeaveGuard } from "./use-leave-guard";
 
-/**
- * The wrapper stands in for Next's `<Link>`: React's handler, delegated at the root, takes the click
- * in the bubble phase and navigates in code. A guard that listened in the bubble phase too would run
- * after it and never get to ask — which is why these assert on `navigate`, not on the event.
- */
+// Stands in for Next's `<Link>`, which navigates in code from a bubble-phase handler
 function Page({ dirty, navigate }: { dirty: boolean; navigate: (href: string) => void }) {
   useLeaveGuard(dirty, "Leave without saving?");
   return (
@@ -32,8 +28,7 @@ function click(text: string, init: MouseEventInit = {}) {
 }
 
 beforeEach(() => {
-  // One window serves the whole file, and a path left behind by one test can satisfy another's
-  // "same page" early return — which is how the no-unsaved control once passed for that reason
+  // A path left behind by one test would satisfy another's "same page" early return
   window.history.replaceState(null, "", "/agents/a1");
 });
 

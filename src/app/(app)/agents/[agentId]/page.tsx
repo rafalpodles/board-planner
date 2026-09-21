@@ -239,8 +239,7 @@ export default function AgentDetailPage() {
                 {saved && !unsaved ? "Saved" : "Save"}
               </Button>
             )}
-            {/* Mounted empty rather than inserted with its text: a live region that arrives
-                already filled is often not announced at all */}
+            {/* Mounted empty: a live region that arrives already filled is often not announced */}
             {mayEdit && (
               <span role="status" className="text-[12px] text-warning">
                 {unsaved ? "Unsaved changes" : ""}

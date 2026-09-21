@@ -32,8 +32,7 @@ test("an edit appears in History without a reload, and so does a description cha
   page,
 }) => {
   await signIn(page);
-  // Armed before the navigation: both tab panels mount with the page, so the history is read then,
-  // not when its tab is clicked
+  // Armed before the navigation: the history is first read when the page mounts
   const historyLoaded = page.waitForResponse((r) => r.url().includes("/activity") && r.ok());
   await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
   await expect(page.getByLabel("Task title")).toBeVisible();
@@ -80,8 +79,7 @@ test("a board with no grant says so on every screen of it, and offers no Retry",
   }
 });
 
-// As an admin: to anybody without a grant the server deliberately answers a missing board and a
-// refused one the same way, so only a reader who could see it may be told it is not there
+// As an admin: to anybody without a grant a missing board and a refused one answer the same
 test("a board that does not exist gets a different sentence from a refused one", async ({ page }) => {
   await signIn(page);
   await page.goto("/projects/NOSUCHKEY/settings");
@@ -121,8 +119,7 @@ test.describe("an agent with unsaved changes", () => {
   test.beforeEach(async () => {
     const handle = await db();
     // The block catalog is seeded at server start and seed() empties the database
-    // Push too: a pipeline that writes files is refused a save without one, which is the product's
-    // rule and not what this test is about
+    // Push too: a pipeline that writes files is refused a save without one
     await handle.collection("agentblocks").insertMany(
       [
         { key: "implement", name: "Implement", description: "Make the change", capability: "edit" },

@@ -42,8 +42,7 @@ export function useComposition(source: AgentComposition | undefined, lookup: Loo
   const [entries, setEntries] = useState<Entries>(() => toEntries(source ?? emptyComposition()));
   const [dragging, setDragging] = useState<ApiAgentBlock | null>(null);
 
-  // Seeded once, during render: in an effect the first frame compared an empty editor with the
-  // agent and read as unsaved; and a second seed would let the refetch after a save undo it
+  // Seeded once and during render: an effect's first frame would read as unsaved
   const [seeded, setSeeded] = useState(!!source);
   if (source && !seeded) {
     setSeeded(true);

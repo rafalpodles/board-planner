@@ -19,8 +19,7 @@ export const GET = withProjectAccess(async (_request, { params }) => {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });
   }
 
-  // `_id` breaks a `createdAt` tie: one act can write several rows in the same millisecond, and
-  // `_id` rises with insertion, so newest-first puts the row written last on top (BP-658).
+  // `_id` breaks a `createdAt` tie: one request can write several rows in a millisecond (BP-658)
   const headers = await ActivityLog.find({ task: taskId })
     .sort({ createdAt: -1, _id: -1 })
     .limit(SCANNED)
