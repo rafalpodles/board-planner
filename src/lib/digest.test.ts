@@ -50,6 +50,7 @@ const {
   DIGEST_RETRY_WINDOW_MS,
   MAX_DIGEST_ATTEMPTS,
   digestAttemptLimit,
+  lineFor,
 } = await import("@/lib/digest");
 
 /** What the module's own interval allows, so the fixtures below cannot drift from the rule. */
@@ -142,6 +143,88 @@ describe("when the digest is due", () => {
     expect(digestHour()).toBe(23);
     process.env.DIGEST_HOUR = "-3";
     expect(digestHour()).toBe(0);
+  });
+});
+
+// BP-692. `lineFor` strips the row's own key from the title so it is not printed twice — once as
+// the row's key, once inside the sentence. Only two of the app's title shapes lead with it; the
+// rest carry it trailing or mid-sentence, so one case per shape here is what would have caught it.
+describe("lineFor", () => {
+  const PROJECT_REF = { _id: PROJECT, key: "TP" };
+  const origin = "https://app.example.com";
+
+  it("strips a leading key (assigned)", () => {
+    const line = lineFor(
+      { title: "TP-2 assigned to you", task: { taskNumber: 2 }, project: PROJECT_REF },
+      origin
+    );
+    expect(line).toEqual({
+      key: "TP-2",
+      title: "assigned to you",
+      url: "https://app.example.com/projects/TP/tasks/2",
+    });
+  });
+
+  it("strips a leading key (moved)", () => {
+    const line = lineFor(
+      { title: "TP-2 moved to In Review", task: { taskNumber: 2 }, project: PROJECT_REF },
+      origin
+    );
+    expect(line.title).toBe("moved to In Review");
+  });
+
+  it("strips a trailing key (comment)", () => {
+    const line = lineFor(
+      { title: "New comment on TP-2", task: { taskNumber: 2 }, project: PROJECT_REF },
+      origin
+    );
+    expect(line.title).toBe("New comment on");
+  });
+
+  it("strips a trailing key (mention)", () => {
+    const line = lineFor(
+      { title: "admin mentioned you in TP-2", task: { taskNumber: 2 }, project: PROJECT_REF },
+      origin
+    );
+    expect(line.title).toBe("admin mentioned you in");
+  });
+
+  it("strips a mid-sentence key (task_linked), leaving the other task's key alone", () => {
+    const line = lineFor(
+      {
+        title: "rafal marked TP-3 as blocked by TP-4",
+        task: { taskNumber: 3 },
+        project: PROJECT_REF,
+      },
+      origin
+    );
+    expect(line.title).toBe("rafal marked as blocked by TP-4");
+  });
+
+  it("strips a mid-sentence key (board feed)", () => {
+    const line = lineFor(
+      { title: "New task TP-5 in Board Planner", task: { taskNumber: 5 }, project: PROJECT_REF },
+      origin
+    );
+    expect(line.title).toBe("New task in Board Planner");
+  });
+
+  // TP-2 must not eat the leading digit of TP-20 — a plain substring replace would
+  it("does not touch a different key that merely starts with the same digits", () => {
+    const line = lineFor(
+      {
+        title: "TP-2 mentions TP-20 in its description",
+        task: { taskNumber: 2 },
+        project: PROJECT_REF,
+      },
+      origin
+    );
+    expect(line.title).toBe("mentions TP-20 in its description");
+  });
+
+  it("leaves the title untouched when the project cannot be resolved", () => {
+    const line = lineFor({ title: "New comment on #42", task: { taskNumber: 42 }, project: null }, origin);
+    expect(line).toEqual({ key: "—", title: "New comment on #42", url: undefined });
   });
 });
 

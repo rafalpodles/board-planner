@@ -41,17 +41,24 @@ interface DigestLine {
   url?: string;
 }
 
+// A handful of titles lead with the row's own key ("TP-2 assigned to you"), most don't ("New
+// comment on TP-2", "admin mentioned you in TP-2", and task_linked's key mid-sentence) — so the
+// key is stripped wherever it sits, as a whole word, rather than only at the front. Any other
+// task's key in the same sentence (the blocker in a task_linked row) is left alone.
+function stripKey(title: string, key: string): string {
+  if (!key) return title;
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const stripped = title.replace(new RegExp(`\\b${escaped}\\b`), "");
+  return stripped === title ? title : stripped.replace(/\s{2,}/g, " ").trim();
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function lineFor(notification: any, origin: string | null): DigestLine {
+export function lineFor(notification: any, origin: string | null): DigestLine {
   const task = notification.task;
   const project = notification.project;
   const hasRef = Boolean(project?.key && task?.taskNumber);
   const key = hasRef ? `${project.key}-${task.taskNumber}` : "";
-  // The notification title leads with the same key the row is labelled with, so "TP-2 assigned to
-  // you" would print the key twice on one line
-  const title = key && notification.title.startsWith(`${key} `)
-    ? notification.title.slice(key.length + 1)
-    : notification.title;
+  const title = stripKey(notification.title, key);
   return {
     key: key || "—",
     title,
