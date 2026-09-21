@@ -1,13 +1,18 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 import {
   DECOY_TASK_TITLE,
   PERSONAL_AGENT_ID,
   PERSONAL_AGENT_NAME,
+  PROJECT_ID,
   PROJECT_KEY,
+  SIBLING_TASK_ID,
   SIBLING_TASK_NUMBER,
+  SIBLING_TASK_TITLE,
+  SPARE_COLUMN,
   seed,
   seedAgents,
 } from "./seed";
+import { ADMIN_AUTH } from "./api";
 import { signIn as arriveSignedIn } from "./session";
 import { answerNoMailServer } from "./mail-screen";
 
@@ -31,10 +36,14 @@ const AFTER_THE_TOAST = 3500;
  * Fails the matching request until `stop()` is called. Returns the switch, so the same test can
  * prove the screen recovers when a Retry finds a server that answers.
  */
-async function failUntilTold(page: Page, url: string | RegExp) {
+async function failUntilTold(
+  page: Page,
+  url: string | RegExp | ((url: URL) => boolean),
+  { onlyReads = false } = {}
+) {
   let failing = true;
   await page.route(url, async (route) => {
-    if (!failing) return route.continue();
+    if (!failing || (onlyReads && route.request().method() !== "GET")) return route.fallback();
     await route.fulfill({
       status: 500,
       contentType: "application/json",
@@ -178,7 +187,17 @@ test("a search that answers with nothing still reports no tasks", async ({ page 
   await expect(page.getByTestId("search-error")).toHaveCount(0);
 });
 
-test("a task whose comments cannot be read does not claim it has none", async ({ page }) => {
+test("a task whose comments cannot be read does not claim it has none", async ({
+  page,
+  request,
+}) => {
+  const remark = "A remark that was there all along";
+  const posted = await request.post(
+    `/api/projects/${PROJECT_ID}/tasks/${SIBLING_TASK_ID}/comments`,
+    { headers: ADMIN_AUTH, data: { body: remark } }
+  );
+  expect(posted.status(), await posted.text()).toBe(201);
+
   await signIn(page);
   const stopFailing = await failUntilTold(page, "**/comments");
   await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
@@ -188,9 +207,17 @@ test("a task whose comments cannot be read does not claim it has none", async ({
   await page.waitForTimeout(AFTER_THE_TOAST);
   await expect(page.getByTestId("comments-error")).toBeVisible();
 
+  // A section, not the page: the task and its other tab are still there
+  await expect(page.getByRole("textbox", { name: "Task title" })).toHaveValue(SIBLING_TASK_TITLE);
+  await page.getByRole("tab", { name: /^History/ }).click();
+  const history = page.locator("#task-panel-history");
+  await expect(history.getByText("E2E Admin added a comment")).toBeVisible();
+  await expect(history.getByTestId("history-error")).toHaveCount(0);
+  await page.getByRole("tab", { name: /^Comments/ }).click();
+
   stopFailing();
   await page.getByRole("button", { name: "Retry" }).click();
-  await expect(page.getByText("No comments yet")).toBeVisible();
+  await expect(page.locator("#task-panel-comments").getByText(remark)).toBeVisible();
   await expect(page.getByTestId("comments-error")).toHaveCount(0);
 });
 
@@ -266,4 +293,192 @@ test("the agent editor still says no agent with that id when the read answers", 
 
   await expect(page.getByText("No agent with that id.")).toBeVisible();
   await expect(page.getByTestId("agent-editor-error")).toHaveCount(0);
+});
+
+/**
+ * BP-700. The two banners that sit above a catalog already on screen: a mutation that lands and a
+ * reload after it that does not. Only the read is failed, so the write is real and the refreshed
+ * catalog has something the stale one lacks — which is what shows the Retry read again.
+ */
+const AGENTS_READ = (url: URL) => url.pathname === "/api/agents";
+
+test("the catalog keeps what it has and says a refresh failed, and Retry brings the new agent", async ({
+  page,
+}) => {
+  await seedAgents();
+  await signIn(page);
+  await page.goto("/agents");
+  await expect(page.getByText(PERSONAL_AGENT_NAME)).toBeVisible();
+
+  const stopFailing = await failUntilTold(page, AGENTS_READ, { onlyReads: true });
+  const created = page.waitForResponse(
+    (r) => r.request().method() === "POST" && new URL(r.url()).pathname === "/api/agents"
+  );
+  await page.getByRole("button", { name: "New agent" }).click();
+  await page.getByLabel("Name").fill("Written while unread");
+  await page.getByRole("button", { name: "Create" }).click();
+  expect((await created).status()).toBe(201);
+
+  await expect(page.getByTestId("agents-catalog-stale")).toBeVisible();
+  await expect(page.getByTestId("agents-catalog-error")).toHaveCount(0);
+  await page.waitForTimeout(AFTER_THE_TOAST);
+  await expect(page.getByTestId("agents-catalog-stale")).toBeVisible();
+  await expect(page.getByText(PERSONAL_AGENT_NAME)).toBeVisible();
+  await expect(page.getByText("Written while unread")).toHaveCount(0);
+
+  stopFailing();
+  await page.getByTestId("agents-catalog-stale").getByRole("button", { name: "Retry" }).click();
+  await expect(page.getByText("Written while unread")).toBeVisible();
+  await expect(page.getByTestId("agents-catalog-stale")).toHaveCount(0);
+});
+
+// The control: the same write against a server that answers raises no banner at all
+test("the catalog shows a new agent with no banner when the reload answers", async ({ page }) => {
+  await seedAgents();
+  await signIn(page);
+  await page.goto("/agents");
+  await expect(page.getByText(PERSONAL_AGENT_NAME)).toBeVisible();
+
+  await page.getByRole("button", { name: "New agent" }).click();
+  await page.getByLabel("Name").fill("Written and read back");
+  await page.getByRole("button", { name: "Create" }).click();
+
+  await expect(page.getByText("Written and read back")).toBeVisible();
+  await expect(page.getByTestId("agents-catalog-stale")).toHaveCount(0);
+});
+
+test("the agent editor keeps the agent on screen when a reload fails, and Retry reads the rename", async ({
+  page,
+}) => {
+  await seedAgents();
+  await signIn(page);
+  await page.goto(`/agents/${PERSONAL_AGENT_ID}`);
+  await expect(page.getByRole("heading", { name: PERSONAL_AGENT_NAME })).toBeVisible();
+
+  const stopFailing = await failUntilTold(page, AGENTS_READ, { onlyReads: true });
+  await page.getByRole("button", { name: "Rename" }).click();
+  await page.getByRole("textbox", { name: "Agent name" }).fill("Renamed while unread");
+  const renamed = page.waitForResponse(
+    (r) => r.request().method() === "PUT" && r.url().endsWith(`/api/agents/${PERSONAL_AGENT_ID}`)
+  );
+  await page.getByRole("button", { name: "Save name" }).click();
+  expect((await renamed).status()).toBe(200);
+
+  await expect(page.getByTestId("agent-editor-stale")).toBeVisible();
+  await expect(page.getByTestId("agent-editor-error")).toHaveCount(0);
+  await page.waitForTimeout(AFTER_THE_TOAST);
+  await expect(page.getByTestId("agent-editor-stale")).toBeVisible();
+  await expect(page.getByRole("heading", { name: PERSONAL_AGENT_NAME })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeVisible();
+
+  stopFailing();
+  await page.getByTestId("agent-editor-stale").getByRole("button", { name: "Retry" }).click();
+  await expect(page.getByRole("heading", { name: "Renamed while unread" })).toBeVisible();
+  await expect(page.getByTestId("agent-editor-stale")).toHaveCount(0);
+});
+
+// The control: a rename whose reload answers shows the new name with no banner
+test("the agent editor shows a rename with no banner when the reload answers", async ({ page }) => {
+  await seedAgents();
+  await signIn(page);
+  await page.goto(`/agents/${PERSONAL_AGENT_ID}`);
+  await expect(page.getByRole("heading", { name: PERSONAL_AGENT_NAME })).toBeVisible();
+
+  await page.getByRole("button", { name: "Rename" }).click();
+  await page.getByRole("textbox", { name: "Agent name" }).fill("Renamed and read back");
+  await page.getByRole("button", { name: "Save name" }).click();
+
+  await expect(page.getByRole("heading", { name: "Renamed and read back" })).toBeVisible();
+  await expect(page.getByTestId("agent-editor-stale")).toHaveCount(0);
+});
+
+/**
+ * BP-700. The history is a tab beside the comments, not the page: its failure must stay inside
+ * it. A status change made through the API before the page opens gives the task one real row, so
+ * what the Retry recovers is that row rather than an empty state a failure could imitate.
+ */
+const HISTORY_READ = (url: URL) => url.pathname.endsWith(`/tasks/${SIBLING_TASK_ID}/activity`);
+const HISTORY_ROW = `E2E Admin changed status from In Progress to ${SPARE_COLUMN.label}`;
+
+async function giveTheTaskHistory(request: APIRequestContext) {
+  const response = await request.patch(
+    `/api/projects/${PROJECT_ID}/tasks/${SIBLING_TASK_ID}/status`,
+    { headers: ADMIN_AUTH, data: { status: SPARE_COLUMN.id } }
+  );
+  expect(response.status(), await response.text()).toBe(200);
+}
+
+test("a task whose history cannot be read says so inside the tab, and Retry reads it", async ({
+  page,
+  request,
+}) => {
+  await giveTheTaskHistory(request);
+  await signIn(page);
+  const stopFailing = await failUntilTold(page, HISTORY_READ);
+  await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
+
+  const historyTab = page.getByRole("tab", { name: /^History/ });
+  await historyTab.click();
+  const panel = page.locator("#task-panel-history");
+  await expect(panel.getByTestId("history-error")).toBeVisible();
+  await expect(panel.getByText("No history yet")).toHaveCount(0);
+
+  await page.waitForTimeout(AFTER_THE_TOAST);
+  await expect(panel.getByTestId("history-error")).toBeVisible();
+  // A section, not the page: the task and its other tab are still there
+  await expect(page.getByRole("textbox", { name: "Task title" })).toHaveValue(SIBLING_TASK_TITLE);
+  await page.getByRole("tab", { name: /^Comments/ }).click();
+  await expect(page.getByText("No comments yet")).toBeVisible();
+  await historyTab.click();
+
+  stopFailing();
+  await panel.getByRole("button", { name: "Retry" }).click();
+  await expect(panel.getByText(HISTORY_ROW)).toBeVisible();
+  await expect(panel.getByTestId("history-error")).toHaveCount(0);
+});
+
+// The control: the same task with a read that answers shows its row and no panel
+test("a task whose history answers shows it", async ({ page, request }) => {
+  await giveTheTaskHistory(request);
+  await signIn(page);
+  await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
+
+  await page.getByRole("tab", { name: /^History/ }).click();
+  const panel = page.locator("#task-panel-history");
+  await expect(panel.getByText(HISTORY_ROW)).toBeVisible();
+  await expect(panel.getByTestId("history-error")).toHaveCount(0);
+});
+
+/**
+ * The count, as BP-582 pinned it for comments: the first read answers and puts a number on the
+ * tab, then a saved edit makes the open history re-read and that read fails. With the tab hidden
+ * a refresh only drops the count without reading, so the tab is opened first: only the read's
+ * own failure path can take the number away here.
+ */
+test("the History tab drops its count when a reload of the history fails", async ({
+  page,
+  request,
+}) => {
+  await giveTheTaskHistory(request);
+  await signIn(page);
+  await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
+
+  const historyTab = page.getByRole("tab", { name: /^History/ });
+  await historyTab.click();
+  const panel = page.locator("#task-panel-history");
+  await expect(panel.getByText(HISTORY_ROW)).toBeVisible();
+  await expect(historyTab).toHaveText(/^History\s*[1-9]\d*$/);
+
+  await failUntilTold(page, HISTORY_READ);
+  const failedReread = page.waitForResponse(
+    (r) => HISTORY_READ(new URL(r.url())) && r.status() === 500
+  );
+  await page.getByLabel("Task title").fill("Renamed while the history cannot be re-read");
+  await failedReread;
+
+  await expect(panel.getByTestId("history-error")).toBeVisible();
+  await expect(panel.getByText(HISTORY_ROW)).toBeVisible();
+  await expect(historyTab, "no number beside a panel that cannot count").toHaveText("History", {
+    timeout: 1_000,
+  });
 });

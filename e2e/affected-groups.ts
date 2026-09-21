@@ -25,6 +25,10 @@ const OWNED: readonly { prefix: string; groups: readonly GroupName[] }[] = [
   // cards using these) — verified via grep, not assumed from the directory name alone.
   { prefix: "src/components/tasks/", groups: ["tasks", "task-fields", "board"] },
   { prefix: "src/components/tasks/GitlabActivity", groups: ["tasks", "task-fields", "board", "project"] },
+  // Their failed reads and the tab counts are pinned in failed-read-states.spec.ts, which is in the project group
+  { prefix: "src/components/tasks/Comments", groups: ["tasks", "task-fields", "board", "project"] },
+  { prefix: "src/components/tasks/ActivityTimeline", groups: ["tasks", "task-fields", "board", "project"] },
+  { prefix: "src/components/tasks/TaskActivityPanel", groups: ["tasks", "task-fields", "board", "project"] },
 
   // Pages — nested, more specific project subpages before the bare project route
   { prefix: "src/app/(app)/projects/[projectId]/tasks/", groups: ["tasks"] },

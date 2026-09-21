@@ -79,6 +79,16 @@ describe("computeAffectedGroups", () => {
     ]);
   });
 
+  it("adds project for the task panels whose failed reads failed-read-states.spec.ts pins", () => {
+    for (const file of [
+      "src/components/tasks/Comments.tsx",
+      "src/components/tasks/ActivityTimeline.tsx",
+      "src/components/tasks/TaskActivityPanel.tsx",
+    ]) {
+      expect(computeAffectedGroups([file])).toEqual(["tasks", "task-fields", "board", "project"]);
+    }
+  });
+
   it("falls back to every group for a non-spec e2e helper file", () => {
     expect(computeAffectedGroups(["e2e/api.ts"])).toEqual([...GROUP_NAMES]);
     expect(computeAffectedGroups(["e2e/groups.ts"])).toEqual([...GROUP_NAMES]);
