@@ -59,6 +59,7 @@ export const GROUPS = {
     "board-irreversible.spec.ts",
     "list-view-seams.spec.ts",
     "card-shows-its-parent.spec.ts",
+    "board-scope-and-filters.spec.ts",
   ],
   project: [
     "project-lifecycle.spec.ts",
