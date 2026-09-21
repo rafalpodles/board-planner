@@ -171,9 +171,10 @@ describe("POST /api/workers/enrolment/device/:userCode/approve", () => {
       );
     });
 
+    // Switched off under the lock, so an enable is exactly what the route would otherwise write
     it("leaves a locked project off, for its owner and for an instance admin alike", async () => {
       projectSelect.mockResolvedValue(
-        project({ worker: { enabled: true, lockedByInstance: true } })
+        project({ worker: { enabled: false, lockedByInstance: true } })
       );
       for (const who of [MEMBER, ADMIN]) {
         grants(true, true);
