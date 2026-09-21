@@ -142,10 +142,16 @@ test("an instance admin's lock wins over the owner, on the screen, on the API an
   await expect(ownerPage.getByTestId("workers-locked")).toContainText(
     "An instance admin has locked workers off."
   );
-  await expect(enableSwitch(ownerPage)).toBeDisabled();
   await expect(lockSwitch(ownerPage)).toHaveCount(0);
 
-  await onProject({ "worker.enabled": false });
+  // The owner may still switch runs off under the lock, and once off cannot switch them back on
+  await expect(enableSwitch(ownerPage)).toBeEnabled();
+  await enableSwitch(ownerPage).uncheck({ force: true });
+  await saveWorkers(ownerPage);
+  expect((await storedWorker()).enabled).toBe(false);
+  await ownerPage.reload();
+  await expect(enableSwitch(ownerPage)).toBeDisabled();
+
   const refused = await putWorker(ownerContext.request, { enabled: true });
   expect(refused.status()).toBe(403);
   expect((await refused.json()).error).toBe(
