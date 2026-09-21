@@ -21,13 +21,14 @@ import {
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { useAuth } from "@/hooks/use-auth";
 import { useProjects } from "@/hooks/use-projects";
+import { useLeaveGuard } from "@/hooks/use-leave-guard";
 import { PageHeader } from "@/components/shell/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { LoadFailed } from "@/components/ui/LoadFailed";
 import { agentProblems } from "@/lib/agent-rules";
 import { BUCKETS } from "../catalog";
 import { useStore } from "../store";
-import { useComposition } from "../useComposition";
+import { sameComposition, useComposition } from "../useComposition";
 import { BlockBody, Bucket, Palette } from "../components/blocks";
 
 // Corner distance picks a neighbouring bucket's first row over the bucket the cursor is actually
@@ -148,6 +149,11 @@ export default function AgentDetailPage() {
   const [naming, setNaming] = useState<{ name: string; description: string } | null>(null);
   const problems = agentProblems(composition, lookup);
 
+  // Placing a step looks final — it appears in its phase at once — so a reader who leaves without
+  // pressing Save loses it believing it was kept. Four of four evaluators did exactly that.
+  const unsaved = mayEdit && !!agent && !sameComposition(composition, agent.composition);
+  useLeaveGuard(unsaved, "This agent has changes that are not saved. Leave without saving them?");
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: keyboardCoordinates })
@@ -227,6 +233,11 @@ export default function AgentDetailPage() {
               >
                 {saved ? "Saved" : "Save"}
               </Button>
+            )}
+            {unsaved && !saved && (
+              <span role="status" className="text-[12px] text-warning">
+                Unsaved changes
+              </span>
             )}
           </>
         }

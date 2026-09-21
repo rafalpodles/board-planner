@@ -33,6 +33,12 @@ function toComposition(entries: Entries): AgentComposition {
   return out;
 }
 
+/** Whether two compositions hold the same blocks in the same places with the same parameters. */
+export function sameComposition(a: AgentComposition, b: AgentComposition | undefined): boolean {
+  const normal = (c: AgentComposition) => JSON.stringify(toComposition(toEntries(c)));
+  return normal(a) === normal(b ?? emptyComposition());
+}
+
 export function useComposition(source: AgentComposition | undefined, lookup: Lookup) {
   const [entries, setEntries] = useState<Entries>(() => toEntries(source ?? emptyComposition()));
   const [dragging, setDragging] = useState<ApiAgentBlock | null>(null);
