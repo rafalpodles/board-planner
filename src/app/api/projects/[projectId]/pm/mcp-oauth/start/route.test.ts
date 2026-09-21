@@ -140,17 +140,16 @@ describe("POST /api/projects/[projectId]/pm/mcp-oauth/start — a client whose c
   });
 
   it("refuses rather than replacing a client the admin typed by hand", async () => {
-    projectFindById.mockResolvedValue(
-      projectWithServer({
-        clientId: "admin-typed-id",
-        clientSecret: "enc:admin-secret",
-        clientSource: "typed",
-        authorizationEndpoint: "https://provider.example/authorize",
-        tokenEndpoint: "https://provider.example/token",
-        redirectUri: "https://old.example.com/api/pm/oauth/callback",
-        status: "connected",
-      })
-    );
+    const project = projectWithServer({
+      clientId: "admin-typed-id",
+      clientSecret: "enc:admin-secret",
+      clientSource: "typed",
+      authorizationEndpoint: "https://provider.example/authorize",
+      tokenEndpoint: "https://provider.example/token",
+      redirectUri: "https://old.example.com/api/pm/oauth/callback",
+      status: "connected",
+    });
+    projectFindById.mockResolvedValue(project);
 
     const res = await POST(request(), ctx());
 
@@ -158,9 +157,38 @@ describe("POST /api/projects/[projectId]/pm/mcp-oauth/start — a client whose c
     expect(await res.json()).toMatchObject({ error: expect.stringContaining(REDIRECT_URI) });
     expect(registerClient).not.toHaveBeenCalled();
     expect(pmOauthStateCreate).not.toHaveBeenCalled();
-    const oauth = (await projectFindById.mock.results[0].value).pm.mcpServers[0].oauth;
+    const oauth = project.pm.mcpServers[0].oauth;
     expect(oauth.clientId).toBe("admin-typed-id");
     expect(oauth.clientSecret).toBe("enc:admin-secret");
+    // Test-quality review: this write is the entire point of the fix — the refusal is a dead end
+    // without it. Nothing had pinned that it actually happens.
+    expect(oauth.redirectUri).toBe(REDIRECT_URI);
+    expect(project.save).toHaveBeenCalled();
+  });
+
+  // Test-quality review: the refusal above writes the one thing its own guard reads, so nothing
+  // had proven the retry it asks for ("Connect again") actually gets past that guard rather than
+  // refusing forever. This is that proof — same server object, POST called twice.
+  it("a retry after the refusal above no longer hits the same guard", async () => {
+    const project = projectWithServer({
+      clientId: "admin-typed-id",
+      clientSecret: "enc:admin-secret",
+      clientSource: "typed",
+      authorizationEndpoint: "https://provider.example/authorize",
+      tokenEndpoint: "https://provider.example/token",
+      redirectUri: "https://old.example.com/api/pm/oauth/callback",
+      status: "connected",
+    });
+    projectFindById.mockResolvedValue(project);
+
+    const first = await POST(request(), ctx());
+    expect(first.status).toBe(400);
+
+    const second = await POST(request(), ctx());
+
+    expect(second.status).toBe(200);
+    expect(registerClient).not.toHaveBeenCalled();
+    expect(project.pm.mcpServers[0].oauth.clientId).toBe("admin-typed-id");
   });
 
   it("refuses a legacy record with unknown provenance the same way, rather than guessing", async () => {
