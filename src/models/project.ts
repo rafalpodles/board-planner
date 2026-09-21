@@ -160,6 +160,7 @@ const projectSchema = new Schema<IProject>(
             type: {
               clientId: { type: String, default: "" },
               clientSecret: { type: String, default: "" },
+              clientSource: { type: String, enum: ["", "typed", "registered"], default: "" },
               authorizationEndpoint: { type: String, default: "" },
               tokenEndpoint: { type: String, default: "" },
               registrationEndpoint: { type: String, default: "" },

@@ -594,6 +594,15 @@ test("changing your own password signs out its API tokens, connected apps and ma
 }) => {
   const oauthAccess = `cpat_${randomBytes(24).toString("hex")}`;
   const hash = (value: string) => createHash("sha256").update(value).digest("hex");
+  // verifyOAuthAccessToken now checks the client itself still exists (BP-747) — a token for a
+  // client this app never registered is exactly the state a completed deletion cascade leaves,
+  // which is not what this test is about, so the row it seeds has to be a live one.
+  await (await db()).collection("oauthclients").insertOne({
+    clientId: "e2e-connected-app",
+    clientName: "E2E Connected App",
+    redirectUris: [],
+    createdAt: new Date(),
+  });
   await (await db()).collection("oauthtokens").insertOne({
     accessTokenHash: hash(oauthAccess),
     refreshTokenHash: hash(`cprt_${randomBytes(24).toString("hex")}`),

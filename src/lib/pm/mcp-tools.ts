@@ -3,7 +3,7 @@ import { Project } from "@/models/project";
 import { decryptSecret, encryptSecret } from "@/lib/encryption";
 import { resolveMcpAuthToken } from "./config";
 import { refreshTokens } from "./mcp-oauth";
-import { McpClient, McpToolDef } from "./mcp-client";
+import { McpClient, McpHttpError, McpToolDef } from "./mcp-client";
 import { isReadSafe } from "./read-safe";
 import { OrToolDefinition } from "./openrouter";
 
@@ -55,13 +55,17 @@ async function persistOauthFields(
 
 async function resolveOauthAccessToken(
   projectId: string,
-  server: IPmMcpServer
+  server: IPmMcpServer,
+  opts: { force?: boolean } = {}
 ): Promise<string | undefined> {
   const oauth = server.oauth;
   if (!oauth?.accessToken || oauth.status === "needs_reauth") return undefined;
 
+  // `force` skips this: the stored expiry says the token is still good, but the provider itself
+  // just answered 401 — the caller already knows "fresh" was wrong (BP-750).
   const fresh =
-    !oauth.expiresAt || new Date(oauth.expiresAt).getTime() > Date.now() + EXPIRY_MARGIN_MS;
+    !opts.force &&
+    (!oauth.expiresAt || new Date(oauth.expiresAt).getTime() > Date.now() + EXPIRY_MARGIN_MS);
   if (fresh) return decryptSecret(oauth.accessToken);
 
   if (!oauth.refreshToken) {
@@ -83,12 +87,20 @@ async function resolveOauthAccessToken(
         refreshToken: decryptSecret(oauth.refreshToken),
         resource: server.url,
       });
-      await persistOauthFields(projectId, server, {
+      const fields = {
         accessToken: encryptSecret(tokens.accessToken),
         refreshToken: tokens.refreshToken ? encryptSecret(tokens.refreshToken) : oauth.refreshToken,
         expiresAt: tokens.expiresAt,
-        status: "connected",
-      });
+        status: "connected" as const,
+      };
+      await persistOauthFields(projectId, server, fields);
+      // Mongo has the rotated pair now, but nothing makes a second reader of this same `server`
+      // object notice — and there is one: a forced refresh (`force: true`, below) called moments
+      // later in the same discoverMcpTools run, after this promise has already left
+      // refreshInFlight, reads oauth.refreshToken directly. Left unmutated it would replay the
+      // token the provider just rotated away from — invalid_grant on a rotating provider, or
+      // revocation of the whole family on one with reuse detection (BP-750 review).
+      Object.assign(oauth, fields);
       return tokens.accessToken;
     } catch (err) {
       console.warn(`[pm/mcp] token refresh failed for "${server.name}": ${err instanceof Error ? err.message : err}`);
@@ -112,6 +124,22 @@ export async function resolveServerToken(
   return resolveMcpAuthToken(server);
 }
 
+// The transport status, not the message: a JSON-RPC-level error's `message` is text the MCP peer
+// itself composed (mcp-client.ts's `MCP error <code>: <message>`), and matching on that would let
+// any server that merely mentions "401" trigger a token refresh it has no business triggering
+// (BP-750 review). A stored expiry saying the token is still good does not mean the provider
+// agrees — it may have revoked the token early, and this is the only place that finds out.
+function isUnauthorized(err: unknown): boolean {
+  return err instanceof McpHttpError && err.status === 401;
+}
+
+async function connectAndList(url: string, token: string | undefined) {
+  const client = new McpClient(url, token);
+  await client.initialize();
+  const tools = await client.listTools();
+  return { client, tools };
+}
+
 export async function discoverMcpTools(projectId: string, servers: IPmMcpServer[]): Promise<McpRuntime> {
   const runtime: McpRuntime = { tools: new Map(), serverNames: [] };
   const enabled = servers.filter((s) => s.enabled);
@@ -123,10 +151,32 @@ export async function discoverMcpTools(projectId: string, servers: IPmMcpServer[
       if (server.authType === "oauth" && !token) {
         throw new Error("OAuth connection not established or needs re-authorization");
       }
-      const client = new McpClient(server.url, token);
-      await client.initialize();
-      const tools = await client.listTools();
-      return { server, client, tools };
+      try {
+        const { client, tools } = await connectAndList(server.url, token);
+        return { server, client, tools };
+      } catch (err) {
+        if (server.authType !== "oauth" || !isUnauthorized(err)) throw err;
+
+        // The stored status stayed "connected" through the 401 above — nothing before this point
+        // touches it — so left alone the panel would keep saying Connected while every turn
+        // silently lost this server's tools (BP-750). One forced refresh, bypassing the expiry
+        // check that just proved unreliable; resolveOauthAccessToken itself marks needs_reauth
+        // when there is no refresh token or the refresh fails.
+        const refreshed = await resolveOauthAccessToken(projectId, server, { force: true });
+        if (!refreshed) throw err;
+        try {
+          const { client, tools } = await connectAndList(server.url, refreshed);
+          return { server, client, tools };
+        } catch (retryErr) {
+          // Only a confirmed second 401 means the freshly refreshed token itself does not work —
+          // anything else (a timeout, a 5xx, a network blip) is the server having a bad moment,
+          // not a reason to disable the connection until a human reconnects it (BP-750 review).
+          if (isUnauthorized(retryErr)) {
+            await persistOauthFields(projectId, server, { status: "needs_reauth" }).catch(() => {});
+          }
+          throw retryErr;
+        }
+      }
     })
   );
 

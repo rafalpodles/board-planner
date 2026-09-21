@@ -2,10 +2,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const findOneAndDelete = vi.fn();
 const create = vi.fn();
+const deleteOne = vi.fn();
+const clientExists = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/oauthCode", () => ({ OAuthCode: { findOne: vi.fn() } }));
-vi.mock("@/models/oauthToken", () => ({ OAuthToken: { findOneAndDelete, create } }));
+vi.mock("@/models/oauthToken", () => ({ OAuthToken: { findOneAndDelete, create, deleteOne } }));
+vi.mock("@/models/oauthClient", () => ({ OAuthClient: { exists: clientExists } }));
 
 const { POST } = await import("./route");
 const { sha256 } = await import("@/lib/oauth");
@@ -23,7 +26,8 @@ function refreshRequest(token = REFRESH) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  create.mockResolvedValue({});
+  create.mockResolvedValue({ _id: "newtok1" });
+  clientExists.mockResolvedValue({ _id: "c1" });
 });
 
 describe("POST /oauth/token — refresh rotation", () => {
@@ -87,6 +91,48 @@ describe("POST /oauth/token — refresh rotation", () => {
     );
 
     expect(findOneAndDelete.mock.calls[0][0].clientId).toBe("c9");
+  });
+});
+
+/**
+ * BP-747. `findOneAndDelete` consumes the old refresh token before the client's own deletion
+ * cascade can touch it, and `issueTokens` only learns the client is gone by checking after it has
+ * already written the new pair — the exact ordering a race with DELETE /api/oauth/clients produces.
+ */
+describe("POST /oauth/token — the client is deleted mid-refresh", () => {
+  it("refuses the grant and removes the token it had already written", async () => {
+    findOneAndDelete.mockResolvedValue({
+      clientId: "client-x",
+      user: "u1",
+      scope: "mcp",
+      allowedProjects: [],
+    });
+    create.mockResolvedValue({ _id: "orphan-candidate" });
+    // The tightest version of the race: by the time issueTokens checks, the client is already gone.
+    clientExists.mockResolvedValue(null);
+
+    const res = await POST(refreshRequest());
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "invalid_grant" });
+    expect(clientExists).toHaveBeenCalledWith({ clientId: "client-x" });
+    // The row created moments before must not survive as a live, unrevocable credential.
+    expect(deleteOne).toHaveBeenCalledWith({ _id: "orphan-candidate" });
+  });
+
+  it("still issues the pair when the client exists at the check", async () => {
+    findOneAndDelete.mockResolvedValue({
+      clientId: "client-x",
+      user: "u1",
+      scope: "mcp",
+      allowedProjects: [],
+    });
+    clientExists.mockResolvedValue({ _id: "client-x" });
+
+    const res = await POST(refreshRequest());
+
+    expect(res.status).toBe(200);
+    expect(deleteOne).not.toHaveBeenCalled();
   });
 });
 

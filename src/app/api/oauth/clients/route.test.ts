@@ -50,6 +50,20 @@ describe("DELETE /api/oauth/clients", () => {
     expect(clientDeleteOne).toHaveBeenCalledWith({ _id: VALID_ID });
   });
 
+  // BP-747: a refresh or code exchange racing this handler checks OAuthClient.exists after it
+  // creates its own new token row, and that check is only trustworthy once the client row itself
+  // is gone. Deleting it last left a window — between this handler's own token cleanup and the
+  // client row actually disappearing — where a concurrent grant's existence check still saw the
+  // client and handed out a credential nothing would ever revoke.
+  it("deletes the client row before cascading to its tokens, codes and consents", async () => {
+    await DELETE(request({ id: VALID_ID }), ctx());
+
+    const clientDeletedAt = clientDeleteOne.mock.invocationCallOrder[0];
+    expect(clientDeletedAt).toBeLessThan(tokenDeleteMany.mock.invocationCallOrder[0]);
+    expect(clientDeletedAt).toBeLessThan(codeDeleteMany.mock.invocationCallOrder[0]);
+    expect(clientDeletedAt).toBeLessThan(consentDeleteMany.mock.invocationCallOrder[0]);
+  });
+
   // BP-304: admin-only, so lower severity — but findById({"$ne": null}) still picks an
   // arbitrary client and cascade-deletes its tokens, codes and consents.
   it("refuses a Mongo operator in place of an id", async () => {

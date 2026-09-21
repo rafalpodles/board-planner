@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { Types } from "mongoose";
 import { connectDB } from "@/lib/db";
+import { OAuthClient } from "@/models/oauthClient";
 import { OAuthCode } from "@/models/oauthCode";
 import { OAuthToken } from "@/models/oauthToken";
 import {
@@ -35,7 +36,7 @@ async function issueTokens(
   const refreshToken = randomToken("cprt_");
   const now = Date.now();
 
-  await OAuthToken.create({
+  const created = await OAuthToken.create({
     accessTokenHash: sha256(accessToken),
     refreshTokenHash: sha256(refreshToken),
     clientId,
@@ -45,6 +46,17 @@ async function issueTokens(
     accessExpiresAt: new Date(now + ACCESS_TOKEN_TTL_SECONDS * 1000),
     refreshExpiresAt: new Date(now + REFRESH_TOKEN_TTL_SECONDS * 1000),
   });
+
+  // Closes a race with the client's own deletion cascade (clients/route.ts): a refresh or code
+  // exchange already past its own read can still land this insert after the client is gone, and
+  // nothing downstream of token issuance ever looks at OAuthClient again. The cascade now deletes
+  // the client first specifically so this read is reliable — by the time it can return false, the
+  // client is not coming back (BP-747).
+  const clientStillExists = await OAuthClient.exists({ clientId });
+  if (!clientStillExists) {
+    await OAuthToken.deleteOne({ _id: created._id });
+    return tokenError("invalid_grant", "client no longer exists");
+  }
 
   return NextResponse.json(
     {

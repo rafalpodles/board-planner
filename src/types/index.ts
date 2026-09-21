@@ -445,9 +445,15 @@ export type PmMcpAuthType = (typeof PM_MCP_AUTH_TYPES)[number];
 export const PM_MCP_OAUTH_STATUSES = ["unconfigured", "connected", "needs_reauth"] as const;
 export type PmMcpOauthStatus = (typeof PM_MCP_OAUTH_STATUSES)[number];
 
+// "" means unknown — every record predating this field. Treated the same as "typed": never
+// silently replaced, only "registered" (this app's own dynamic registration) is (BP-751).
+export const PM_MCP_OAUTH_CLIENT_SOURCES = ["", "typed", "registered"] as const;
+export type PmMcpOauthClientSource = (typeof PM_MCP_OAUTH_CLIENT_SOURCES)[number];
+
 export interface IPmMcpOauth {
   clientId: string;
   clientSecret: string;
+  clientSource: PmMcpOauthClientSource;
   authorizationEndpoint: string;
   tokenEndpoint: string;
   registrationEndpoint: string;

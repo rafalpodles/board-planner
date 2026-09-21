@@ -164,7 +164,7 @@ export async function handleOauth(req, res, origin, answerRpc) {
     return true;
   }
 
-  if ((m = path.match(/^\/_control\/oauth\/([\w-]+)\/(client|revoke|log)$/))) {
+  if ((m = path.match(/^\/_control\/oauth\/([\w-]+)\/(client|revoke|revoke-access|log)$/))) {
     const t = tenantOf(m[1]);
     if (m[2] === "client") {
       const body = JSON.parse((await readBody(req)) || "{}");
@@ -176,6 +176,12 @@ export async function handleOauth(req, res, origin, answerRpc) {
       json(res, 200, { ok: true });
     } else if (m[2] === "revoke") {
       t.revoked = true;
+      t.accessTokens.clear();
+      json(res, 200, { ok: true });
+    } else if (m[2] === "revoke-access") {
+      // Only the access token: the refresh token stays valid, unlike plain "revoke". Models a
+      // provider revoking early — the client's own, still-unexpired record does not know anything
+      // changed until it actually calls the server and gets a 401 (BP-750).
       t.accessTokens.clear();
       json(res, 200, { ok: true });
     } else {

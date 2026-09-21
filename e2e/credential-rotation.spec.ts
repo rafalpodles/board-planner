@@ -274,4 +274,54 @@ test.describe("OAuth credentials", () => {
     await expect(clients).toHaveCount(1);
     await expect(section(page, "Connected apps (OAuth)").getByRole("button", { name: "Revoke" })).toHaveCount(1);
   });
+
+  // BP-747. issueTokens now checks the client still exists before handing back a fresh pair. The
+  // race this closes is "the client's deletion cascade has already run by the time this insert
+  // lands" — reproduced directly here rather than actually raced, because two real HTTP requests'
+  // relative timing cannot be trusted to land in the one order that would exercise the new check
+  // at all (test-quality review: a version of this test that fired a UI delete-click and a raw
+  // refresh call together via Promise.all passed regardless of which one the fix removed — the
+  // refresh almost always finished before the click's several round trips even started, so it was
+  // proving only the pre-existing `deleteMany` cleanup, not the new `OAuthClient.exists` check).
+  test("a refresh for a client that is already gone is refused, and leaves no orphaned token", async ({
+    request,
+    browser,
+    baseURL,
+  }) => {
+    const RACER = "E2E Race Client";
+    const racer = await connectApp(browser, baseURL, request, RACER);
+    await expectWorks(request, racer.accessToken);
+    // Not vacuous: there is a live row here before the delete below, so a null after it means the
+    // delete actually ran — not that nothing was ever there (test-quality review).
+    expect(
+      await (await db()).collection("oauthtokens").findOne({ clientId: racer.clientId })
+    ).not.toBeNull();
+
+    // The state a client's deletion cascade leaves mid-flight if it dies right after removing the
+    // client row: the client is gone, the token row this refresh is about to consume is not.
+    const { deletedCount } = await (await db())
+      .collection("oauthclients")
+      .deleteOne({ clientId: racer.clientId });
+    expect(deletedCount, "the setup must actually remove the client row").toBe(1);
+
+    // Free coverage for the other half of the same fix (auth.ts's verifyOAuthAccessToken): the
+    // still-live access token this same client issued is refused too, once the client is gone.
+    const board = await request.get(`/api/projects/${PROJECT_KEY}`, {
+      headers: { Authorization: `Bearer ${racer.accessToken}` },
+    });
+    expect(board.status()).toBe(401);
+
+    const refreshed = await request.post("/oauth/token", {
+      form: {
+        grant_type: "refresh_token",
+        refresh_token: racer.refreshToken,
+        client_id: racer.clientId,
+      },
+    });
+
+    expect(refreshed.status()).toBe(400);
+    expect((await refreshed.json()).error).toBe("invalid_grant");
+    const orphan = await (await db()).collection("oauthtokens").findOne({ clientId: racer.clientId });
+    expect(orphan, "no live row survives — not the consumed old one, not a freshly minted one").toBeNull();
+  });
 });

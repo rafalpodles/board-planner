@@ -44,16 +44,50 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const oauth: any = server.oauth ?? {};
 
-  // The app's public URL changed since registration (e.g. localhost → production):
-  // a dynamically registered client is bound to the old callback, so re-register.
-  // Covers legacy registrations too, where oauth.redirectUri was never stored.
-  if (oauth.clientId && oauth.registrationEndpoint && oauth.redirectUri !== redirectUri) {
-    oauth.clientId = "";
-    oauth.clientSecret = "";
-    oauth.accessToken = "";
-    oauth.refreshToken = "";
-    oauth.expiresAt = null;
-    oauth.status = "unconfigured";
+  // The app's public URL changed since registration (e.g. localhost → production): a dynamically
+  // registered client is bound to the old callback, so re-register. Gated on
+  // `authorizationEndpoint` rather than `clientId` alone: a server whose Connect has never once
+  // succeeded has an empty `redirectUri` too, for the ordinary reason that this route has never
+  // finished writing one — not because the callback changed since a real connection, which is the
+  // only thing this block is about. `authorizationEndpoint` is set only once discovery has
+  // actually completed, which "never connected" and "connected, but before redirectUri was even
+  // stored" (the legacy case) tell apart the same way every other legacy record does.
+  //
+  // Only a client this app registered itself is re-registered silently — `clientSource` is unset
+  // for every record predating it, including that legacy one, and treated the same as "typed": a
+  // client the admin typed by hand is registered with the provider under the OLD callback by the
+  // admin, not by us, and silently discarding it (registering a fresh one nobody asked for,
+  // without a word) replaced a credential the admin owns with one the provider has never heard of
+  // (BP-751).
+  if (oauth.clientId && oauth.authorizationEndpoint && oauth.redirectUri !== redirectUri) {
+    if (oauth.clientSource === "registered" && oauth.registrationEndpoint) {
+      oauth.clientId = "";
+      oauth.clientSecret = "";
+      oauth.clientSource = "";
+      oauth.accessToken = "";
+      oauth.refreshToken = "";
+      oauth.expiresAt = null;
+      oauth.status = "unconfigured";
+    } else {
+      // Recorded now, not left for the success path at the bottom of this function to write —
+      // that line never runs on this return. Without this, nothing in the app ever clears the
+      // stale value this same condition reads next time: retyping the identical client id is a
+      // no-op (config.ts's merge only resets on a *changed* id), and Disconnect deliberately
+      // keeps it. Left unrecorded, this 400 would repeat forever and "update it here" would name
+      // an action that does not exist (BP-751 review). Recording it makes the retry this message
+      // asks for actually work: Connect again once the provider knows the new address, and this
+      // guard no longer has anything to compare against.
+      oauth.redirectUri = redirectUri;
+      server.oauth = oauth;
+      project.markModified("pm.mcpServers");
+      await project.save();
+      return NextResponse.json(
+        {
+          error: `This connection's callback address changed to ${redirectUri}. Make sure this client is registered with that address on the provider, then Connect again — a client id this app did not register itself is never replaced automatically.`,
+        },
+        { status: 400 }
+      );
+    }
   }
 
   try {
@@ -76,6 +110,7 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
       const registered = await registerClient(oauth.registrationEndpoint, redirectUri);
       oauth.clientId = registered.clientId;
       oauth.clientSecret = registered.clientSecret ? encryptSecret(registered.clientSecret) : "";
+      oauth.clientSource = "registered";
       if (registered.clientSecret) oauth.tokenAuthMethod = "client_secret_basic";
     }
   } catch (err) {
