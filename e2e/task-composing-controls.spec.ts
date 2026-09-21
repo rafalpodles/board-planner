@@ -269,7 +269,7 @@ test.describe("the new-task form", () => {
     await modal.getByLabel("Title").fill("Release: 2.4");
 
     await test.step("a checklist item is added by Enter and by the Add button", async () => {
-      const input = modal.getByPlaceholder("Add checklist item...");
+      const input = modal.getByPlaceholder("Add criterion");
       await input.fill("tag pushed");
       await input.press("Enter");
       await expect(input).toHaveValue("");
@@ -286,7 +286,7 @@ test.describe("the new-task form", () => {
       expect(posts, "Enter in an empty checklist box created the task").toBe(0);
       await expect(modal).toBeVisible();
       const rows = modal
-        .getByText("Checklist", { exact: true })
+        .getByText("Acceptance criteria", { exact: true })
         .locator("xpath=..")
         .locator("input[type='text']:not([placeholder])");
       await expect(rows).toHaveCount(3);

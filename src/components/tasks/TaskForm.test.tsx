@@ -18,7 +18,7 @@ function mount() {
   const onSaved = vi.fn();
   render(<TaskForm projectId="p1" onSaved={onSaved} onCancel={() => {}} />);
   fireEvent.change(screen.getByLabelText("Title"), { target: { value: "A task" } });
-  return { onSaved, input: screen.getByPlaceholderText("Add checklist item...") };
+  return { onSaved, input: screen.getByPlaceholderText("Add criterion") };
 }
 
 describe("the checklist box", () => {
