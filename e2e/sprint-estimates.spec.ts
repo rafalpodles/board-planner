@@ -1,14 +1,25 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { ADMIN_AUTH } from "./api";
-import { ESTIMATE_SPRINT_ID, PROJECT_ID, seed, seedSprintEstimates } from "./seed";
+import {
+  ESTIMATE_DONE_NUMERIC_TASK_ID,
+  ESTIMATE_OPEN_STRING_TASK_ID,
+  ESTIMATE_SPRINT_ID,
+  ESTIMATE_SPRINT_NAME,
+  PROJECT_ID,
+  PROJECT_KEY,
+  demoteDoneColumn,
+  seed,
+  seedSprintEstimates,
+} from "./seed";
+import { signIn } from "./session";
 
 /**
  * BP-208 Task 11. GET /sprints is on the board's poll path (page.tsx), so its estimate
  * accumulators have to survive real documents, not just a mocked Task.aggregate — a unit test
  * mocking that call only proves the pipeline's shape, never what MongoDB does with a string in
- * $convert. This is the one place that question gets a real database to answer it. No UI renders
- * these two fields yet (that's BP-208 Task 12/13), so this is an API-level check — see
- * e2e/field-history.spec.ts for other specs that assert straight off `request` the same way.
+ * $convert. This is the one place that question gets a real database to answer it. The first
+ * test asks the API; the rest drive the sprint header and the planning pane that render the same
+ * numbers (BP-701).
  */
 
 test.beforeEach(async () => {
@@ -38,4 +49,87 @@ test("sums a real number and a value the inline editor stored as a string, and t
   expect(sprint.estimateTotal).toBe(8);
   // Only the two done-role tasks count here: the 5, and the "TBD" one, which still contributes 0.
   expect(sprint.estimateDone).toBe(5);
+});
+
+/**
+ * BP-701. The seeded sprint reads 5 of 8 points done: 5 finished, 3 (stored as the string "3")
+ * still open, "TBD" finished but worth nothing, and one task never estimated. Moving the "3" to
+ * Done on the board is what turns it into 8 of 8, so the second number is the screen's own
+ * arithmetic after a real move, not a fixture echoed back.
+ */
+const SPRINT_URL = `/projects/${PROJECT_KEY}/sprints?sprint=${ESTIMATE_SPRINT_ID}`;
+
+const estimateProgress = (page: Page) => page.getByTestId("sprint-estimate-progress");
+const sprintPane = (page: Page) => page.getByTestId("planning-pane-sprint");
+// The pane's own heading, not the task titles inside it, which are headings too
+const sprintPaneHeading = (page: Page) => sprintPane(page).locator(":scope > h3");
+const card = (page: Page, taskNumber: number) =>
+  page.locator(`a[href="/projects/${PROJECT_KEY}/tasks/${taskNumber}"]`);
+
+test("the sprint header reads the points done out of the points planned, and a move to Done adds to it", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.goto(SPRINT_URL);
+
+  await expect(page.getByTestId("sprint-name")).toHaveText(ESTIMATE_SPRINT_NAME);
+  await expect(page.getByTestId("sprint-progress")).toHaveText("2/4");
+  await expect(estimateProgress(page)).toHaveText("5/8 Points");
+
+  const moved = page.waitForResponse(
+    (r) =>
+      r.request().method() === "PATCH" &&
+      r.url().endsWith(`/tasks/${ESTIMATE_OPEN_STRING_TASK_ID}/status`)
+  );
+  await card(page, 102).click({ button: "right" });
+  const menu = page.getByTestId("task-context-menu");
+  await expect(menu).toBeVisible();
+  await menu.getByRole("button", { name: "Done", exact: true }).click();
+  expect((await moved).status()).toBe(200);
+
+  // Inside a second of the answer, so the board's ten-second poll cannot be what satisfied it
+  await expect(page.getByTestId("sprint-progress")).toHaveText("3/4", { timeout: 1_000 });
+  await expect(estimateProgress(page)).toHaveText("8/8 Points", { timeout: 1_000 });
+});
+
+test("the planning pane heads the sprint with its points, and taking a task out takes its points", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.goto(`${SPRINT_URL}&view=planning`);
+
+  const heading = sprintPaneHeading(page);
+  await expect(heading).toHaveText(`${ESTIMATE_SPRINT_NAME} (4) · 8 Points`);
+  await expect(estimateProgress(page)).toHaveText("5/8 Points");
+
+  const removed = page.waitForResponse(
+    (r) =>
+      r.request().method() === "PUT" &&
+      r.url().endsWith(`/tasks/${ESTIMATE_DONE_NUMERIC_TASK_ID}`)
+  );
+  await sprintPane(page)
+    .getByRole("button", { name: "Remove Estimated and done from the sprint" })
+    .click();
+  expect((await removed).status()).toBe(200);
+
+  await expect(heading).toHaveText(`${ESTIMATE_SPRINT_NAME} (3) · 3 Points`, { timeout: 1_000 });
+  // What is left done is the "TBD" task, worth nothing — not 5 carried over from the one removed
+  await expect(estimateProgress(page)).toHaveText("0/3 Points", { timeout: 1_000 });
+});
+
+test("on a board with no Done column the header gives no points-done figure", async ({ page }) => {
+  await demoteDoneColumn();
+  await signIn(page);
+  await page.goto(SPRINT_URL);
+
+  await expect(page.getByTestId("sprint-name")).toHaveText(ESTIMATE_SPRINT_NAME);
+  await expect(page.getByTestId("sprint-progress-unmeasurable")).toBeVisible();
+  await expect(estimateProgress(page)).toHaveCount(0);
+
+  // The total does not depend on Done, so the planning pane still owes it
+  await page.goto(`${SPRINT_URL}&view=planning`);
+  await expect(sprintPaneHeading(page)).toHaveText(
+    `${ESTIMATE_SPRINT_NAME} (4) · 8 Points`
+  );
+  await expect(estimateProgress(page)).toHaveCount(0);
 });
