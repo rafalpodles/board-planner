@@ -404,7 +404,6 @@ test("a task whose history cannot be read says so inside the tab, and Retry read
   const panel = page.locator("#task-panel-history");
   await expect(panel.getByTestId("history-error")).toBeVisible();
   await expect(panel.getByText("No history yet")).toHaveCount(0);
-  await expect(historyTab, "no number beside a panel that cannot count").toHaveText("History");
 
   await page.waitForTimeout(AFTER_THE_TOAST);
   await expect(panel.getByTestId("history-error")).toBeVisible();
@@ -418,7 +417,6 @@ test("a task whose history cannot be read says so inside the tab, and Retry read
   await panel.getByRole("button", { name: "Retry" }).click();
   await expect(panel.getByText(HISTORY_ROW)).toBeVisible();
   await expect(panel.getByTestId("history-error")).toHaveCount(0);
-  await expect(historyTab).toHaveText(/^History\s*\d+$/);
 });
 
 // The control: the same task with a read that answers shows its row and no panel
@@ -431,4 +429,37 @@ test("a task whose history answers shows it", async ({ page, request }) => {
   const panel = page.locator("#task-panel-history");
   await expect(panel.getByText(HISTORY_ROW)).toBeVisible();
   await expect(panel.getByTestId("history-error")).toHaveCount(0);
+});
+
+/**
+ * The count, as BP-582 pinned it for comments: the first read answers and puts a number on the
+ * tab, then a comment makes the history re-read and that read fails. The row stays (it is this
+ * task's either way); the number beside the tab does not.
+ */
+test("the History tab drops its count when a reload of the history fails", async ({
+  page,
+  request,
+}) => {
+  await giveTheTaskHistory(request);
+  await signIn(page);
+  await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
+
+  const historyTab = page.getByRole("tab", { name: /^History/ });
+  await expect(historyTab).toHaveText(/^History\s*[1-9]\d*$/);
+
+  await failUntilTold(page, HISTORY_READ);
+  const box = page.getByRole("textbox", { name: "Write a comment, @mention someone…" });
+  await expect(box).toBeVisible();
+  await box.fill("A remark the history cannot be re-read after");
+  const failedReread = page.waitForResponse(
+    (r) => HISTORY_READ(new URL(r.url())) && r.status() === 500
+  );
+  await page.getByRole("button", { name: "Comment", exact: true }).click();
+  await failedReread;
+
+  await historyTab.click();
+  const panel = page.locator("#task-panel-history");
+  await expect(panel.getByTestId("history-error")).toBeVisible();
+  await expect(panel.getByText(HISTORY_ROW)).toBeVisible();
+  await expect(historyTab, "no number beside a panel that cannot count").toHaveText("History");
 });
