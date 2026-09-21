@@ -218,6 +218,88 @@ describe("discoverMcpTools — an OAuth server's token", () => {
   });
 });
 
+// BP-750. A stored expiry saying the token is still good is a local guess; the provider can
+// revoke an access token early, and the only way to learn that is the 401 it answers with.
+describe("discoverMcpTools — a 401 despite a stored expiry that still looked fresh", () => {
+  const rejecting401 = () => ({
+    initialize: vi.fn().mockRejectedValue(new Error("MCP server responded 401")),
+    listTools: vi.fn(),
+  });
+
+  it("retries once after a forced refresh, and serves the tools on the refreshed token", async () => {
+    let call = 0;
+    McpClientMock.mockImplementation(() =>
+      call++ === 0
+        ? rejecting401()
+        : { initialize: vi.fn().mockResolvedValue(undefined), listTools: vi.fn().mockResolvedValue([{ name: "list_tickets" }]) }
+    );
+    refreshTokens.mockResolvedValue({
+      accessToken: "new-access",
+      refreshToken: "new-refresh",
+      expiresAt: new Date(Date.now() + hour),
+    });
+
+    const runtime = await discoverMcpTools("p1", [oauthServer({ expiresAt: new Date(Date.now() + hour) })]);
+
+    expect(refreshTokens).toHaveBeenCalledTimes(1);
+    expect(McpClientMock).toHaveBeenNthCalledWith(1, "https://acme.example/mcp", "old-access");
+    expect(McpClientMock).toHaveBeenNthCalledWith(2, "https://acme.example/mcp", "new-access");
+    expect(runtime.serverNames).toEqual(["acme"]);
+    expect(updateOne.mock.calls[0][1].$set["pm.mcpServers.$.oauth.status"]).toBe("connected");
+  });
+
+  it("marks needs_reauth, not connected, when there is nothing to refresh with", async () => {
+    McpClientMock.mockImplementation(rejecting401);
+
+    const runtime = await discoverMcpTools("p1", [
+      oauthServer({ expiresAt: new Date(Date.now() + hour), refreshToken: undefined }),
+    ]);
+
+    expect(refreshTokens).not.toHaveBeenCalled();
+    expect(updateOne).toHaveBeenCalledTimes(1);
+    expect(updateOne).toHaveBeenCalledWith(
+      { _id: "p1", "pm.mcpServers": { $elemMatch: { name: "acme", "oauth.clientId": "client-1" } } },
+      { $set: { "pm.mcpServers.$.oauth.status": "needs_reauth" } }
+    );
+    expect(runtime.serverNames).toEqual([]);
+  });
+
+  it("marks needs_reauth when the freshly refreshed token 401s again", async () => {
+    McpClientMock.mockImplementation(rejecting401);
+    refreshTokens.mockResolvedValue({ accessToken: "new-access", expiresAt: new Date(Date.now() + hour) });
+
+    const runtime = await discoverMcpTools("p1", [oauthServer({ expiresAt: new Date(Date.now() + hour) })]);
+
+    // The refresh's own write says connected; the retry's own failure has the last word.
+    const statuses = updateOne.mock.calls.map(([, update]) => update.$set["pm.mcpServers.$.oauth.status"]);
+    expect(statuses).toEqual(["connected", "needs_reauth"]);
+    expect(runtime.serverNames).toEqual([]);
+  });
+
+  it("does not retry a failure that is not a 401, and leaves the stored status untouched", async () => {
+    McpClientMock.mockImplementation(() => ({
+      initialize: vi.fn().mockRejectedValue(new Error("fetch failed")),
+      listTools: vi.fn(),
+    }));
+
+    const runtime = await discoverMcpTools("p1", [oauthServer({ expiresAt: new Date(Date.now() + hour) })]);
+
+    expect(refreshTokens).not.toHaveBeenCalled();
+    expect(updateOne).not.toHaveBeenCalled();
+    expect(runtime.serverNames).toEqual([]);
+  });
+
+  it("does not force-refresh a bearer server's 401 — there is no OAuth token to refresh", async () => {
+    McpClientMock.mockImplementation(rejecting401);
+
+    const runtime = await discoverMcpTools("p1", [server()]);
+
+    expect(refreshTokens).not.toHaveBeenCalled();
+    expect(updateOne).not.toHaveBeenCalled();
+    expect(runtime.serverNames).toEqual([]);
+  });
+});
+
 describe("callMcpTool", () => {
   const tool = (text: string) =>
     ({

@@ -55,13 +55,17 @@ async function persistOauthFields(
 
 async function resolveOauthAccessToken(
   projectId: string,
-  server: IPmMcpServer
+  server: IPmMcpServer,
+  opts: { force?: boolean } = {}
 ): Promise<string | undefined> {
   const oauth = server.oauth;
   if (!oauth?.accessToken || oauth.status === "needs_reauth") return undefined;
 
+  // `force` skips this: the stored expiry says the token is still good, but the provider itself
+  // just answered 401 — the caller already knows "fresh" was wrong (BP-750).
   const fresh =
-    !oauth.expiresAt || new Date(oauth.expiresAt).getTime() > Date.now() + EXPIRY_MARGIN_MS;
+    !opts.force &&
+    (!oauth.expiresAt || new Date(oauth.expiresAt).getTime() > Date.now() + EXPIRY_MARGIN_MS);
   if (fresh) return decryptSecret(oauth.accessToken);
 
   if (!oauth.refreshToken) {
@@ -112,6 +116,20 @@ export async function resolveServerToken(
   return resolveMcpAuthToken(server);
 }
 
+// The shape McpClient's rpc() throws for a non-ok response (`mcp-client.ts`): "MCP server
+// responded 401". A stored expiry saying the token is still good does not mean the provider
+// agrees — it may have revoked the token early, and this is the only place that finds out.
+function isUnauthorized(err: unknown): boolean {
+  return err instanceof Error && /\bresponded 401\b/.test(err.message);
+}
+
+async function connectAndList(url: string, token: string | undefined) {
+  const client = new McpClient(url, token);
+  await client.initialize();
+  const tools = await client.listTools();
+  return { client, tools };
+}
+
 export async function discoverMcpTools(projectId: string, servers: IPmMcpServer[]): Promise<McpRuntime> {
   const runtime: McpRuntime = { tools: new Map(), serverNames: [] };
   const enabled = servers.filter((s) => s.enabled);
@@ -123,10 +141,27 @@ export async function discoverMcpTools(projectId: string, servers: IPmMcpServer[
       if (server.authType === "oauth" && !token) {
         throw new Error("OAuth connection not established or needs re-authorization");
       }
-      const client = new McpClient(server.url, token);
-      await client.initialize();
-      const tools = await client.listTools();
-      return { server, client, tools };
+      try {
+        const { client, tools } = await connectAndList(server.url, token);
+        return { server, client, tools };
+      } catch (err) {
+        if (server.authType !== "oauth" || !isUnauthorized(err)) throw err;
+
+        // The stored status stayed "connected" through the 401 above — nothing before this point
+        // touches it — so left alone the panel would keep saying Connected while every turn
+        // silently lost this server's tools (BP-750). One forced refresh, bypassing the expiry
+        // check that just proved unreliable; resolveOauthAccessToken itself marks needs_reauth
+        // when there is no refresh token or the refresh fails.
+        const refreshed = await resolveOauthAccessToken(projectId, server, { force: true });
+        if (!refreshed) throw err;
+        try {
+          const { client, tools } = await connectAndList(server.url, refreshed);
+          return { server, client, tools };
+        } catch (retryErr) {
+          await persistOauthFields(projectId, server, { status: "needs_reauth" }).catch(() => {});
+          throw retryErr;
+        }
+      }
     })
   );
 
