@@ -5,10 +5,15 @@ import Foundation
 // be run counts as a no. A directory that is not a git checkout, or a git that will not answer,
 // is not "clean" — it is unexamined, and the difference matters exactly once.
 public enum RemovalVerdict: Equatable, Sendable {
-    /// Safe to remove. `worktrees` are the linked worktrees to take with it — they live beside the
-    /// checkout under a shared `cp-worktrees` root, so deleting that root wholesale would take
-    /// another project's worktrees with it.
-    case go(worktrees: [String])
+    /// Safe to remove. `root` is the physical path to delete — git's own resolution of the
+    /// granted path, which may itself be a symlink (BP-428). Handed back rather than re-resolved
+    /// by the caller: resolving again at delete time, after the operator has already been shown
+    /// and asked about a path, is the same race this file's own two-look pattern exists to close
+    /// elsewhere — the granted path could point somewhere else by the time the delete runs.
+    /// `worktrees` are the linked worktrees to take with it — they live beside the checkout under
+    /// a shared `cp-worktrees` root, so deleting that root wholesale would take another project's
+    /// worktrees with it.
+    case go(root: String, worktrees: [String])
     case refused(reason: String)
     /// The path is a linked worktree of another repository. Its own case rather than a `.refused`
     /// carrying the same sentence: every other refusal here describes the checkout's *state* —
@@ -55,8 +60,9 @@ public struct CheckoutRemoval: Sendable {
             return .refused(reason: "the worker is running a task — stop it, or wait for it to finish")
         }
 
-        // Already gone. The allowlist entry still has to go, and there is nothing to delete.
-        guard exists(path) else { return .go(worktrees: []) }
+        // Already gone. The allowlist entry still has to go, and there is nothing to delete —
+        // root is the granted path itself, since git cannot resolve anything that is not there.
+        guard exists(path) else { return .go(root: path, worktrees: []) }
 
         let toplevel = run(["-C", path, "rev-parse", "--show-toplevel"], path)
         guard toplevel.code == 0 else {
@@ -269,7 +275,7 @@ public struct CheckoutRemoval: Sendable {
             }
         }
 
-        return .go(worktrees: linked)
+        return .go(root: root, worktrees: linked)
     }
 
     private func lines(_ output: String) -> [String] {
@@ -281,7 +287,7 @@ public struct CheckoutRemoval: Sendable {
     /// two lines and the parser keeps the prefix — measured on real git as `…/we` out of `…/we\nird`.
     ///
     /// What that cost is worse than it sounds. The truncated path names nothing on disk, so
-    /// `check`'s `exists` filter drops it and the verdict becomes `.go(worktrees: [])`: the removal
+    /// `check`'s `exists` filter drops it and the verdict becomes `.go(root:, worktrees: [])`: the removal
     /// then reports `.removed` — "deleted /co" — while the live worktree is still there. It is not
     /// the partial-removal case in the same ticket; it is a clean-looking success that left
     /// something behind (BP-427).

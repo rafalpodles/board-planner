@@ -222,7 +222,7 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
             XCTAssertFalse(
                 reason.contains(resolved(checkout)),
                 "the reason names the repository rather than the path it was asked about: \(reason)")
-        case .go(let worktrees):
+        case .go(_, let worktrees):
             XCTAssertFalse(
                 worktrees.map(resolved).contains(resolved(checkout)),
                 "the main checkout is not something unticking a worktree may delete")
@@ -234,7 +234,7 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
     func testItStillAllowsRemovingACheckoutWhoseWorktreesAreClean() {
         let (checkout, worktree) = repoWithWorktree()
 
-        guard case .go(let worktrees) = removal().check(path: checkout, workerIsBusy: false) else {
+        guard case .go(_, let worktrees) = removal().check(path: checkout, workerIsBusy: false) else {
             XCTFail("a clean checkout with a clean worktree must still be removable")
             return
         }
@@ -244,7 +244,7 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
     /// BP-427. `worktree list --porcelain` terminates each attribute with a newline, so a worktree
     /// whose path contains one spans two lines and the parser keeps the prefix — `…/we` out of the
     /// `…/we\nird` this test creates. The truncated path names nothing on disk, so the `exists`
-    /// filter drops it and the verdict is `.go(worktrees: [])`: the removal then reports having
+    /// filter drops it and the verdict is `.go(root:, worktrees: [])`: the removal then reports having
     /// deleted the checkout while that worktree is still there. A success that left something
     /// behind, rather than the partial removal covered elsewhere in the ticket.
     ///
@@ -267,7 +267,7 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
         _ = git(checkout, ["push", "-q", "-u", "origin", "HEAD"])
         _ = git(checkout, ["worktree", "add", "-q", odd, "-b", "odd"])
 
-        guard case .go(let worktrees) = removal().check(path: checkout, workerIsBusy: false) else {
+        guard case .go(_, let worktrees) = removal().check(path: checkout, workerIsBusy: false) else {
             return XCTFail("expected a go, got \(removal().check(path: checkout, workerIsBusy: false))")
         }
 

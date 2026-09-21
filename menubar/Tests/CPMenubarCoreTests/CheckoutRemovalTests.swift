@@ -45,7 +45,9 @@ final class CheckoutRemovalTests: XCTestCase {
     }
 
     func testItAllowsRemovingACleanCheckout() {
-        XCTAssertEqual(Git().removal().check(path: "/checkouts/SB", workerIsBusy: false), .go(worktrees: []))
+        XCTAssertEqual(
+            Git().removal().check(path: "/checkouts/SB", workerIsBusy: false),
+            .go(root: "/checkouts/SB", worktrees: []))
     }
 
     // First, and regardless of what the directory looks like: a run whose worktree vanishes fails
@@ -149,7 +151,9 @@ final class CheckoutRemovalTests: XCTestCase {
 
         let verdict = git.removal().check(path: linkPath, workerIsBusy: false)
 
-        XCTAssertEqual(verdict, .go(worktrees: []))
+        // The point of BP-428's second half: the verdict hands back what to actually delete, not
+        // just permission to delete the granted path.
+        XCTAssertEqual(verdict, .go(root: realPath, worktrees: []))
     }
 
     // The control on the fix above: a path that really is a subdirectory — reached through no
@@ -184,7 +188,9 @@ final class CheckoutRemovalTests: XCTestCase {
         git.volumeFoldsCase = { _ in true }
         git.answers["worktree"] = (0, porcelainZ("worktree /checkouts/sb\nHEAD abc"))
 
-        XCTAssertEqual(git.removal().check(path: "/checkouts/sb", workerIsBusy: false), .go(worktrees: []))
+        XCTAssertEqual(
+            git.removal().check(path: "/checkouts/sb", workerIsBusy: false),
+            .go(root: "/checkouts/SB", worktrees: []))
     }
 
     // The control: on a volume that does NOT fold case, the same two strings really do name two
@@ -226,7 +232,9 @@ final class CheckoutRemovalTests: XCTestCase {
 
         XCTAssertEqual(
             verdict,
-            .go(worktrees: ["/checkouts/cp-worktrees/w1/bp-1", "/checkouts/cp-worktrees/w1/bp-2"]))
+            .go(
+                root: "/checkouts/SB",
+                worktrees: ["/checkouts/cp-worktrees/w1/bp-1", "/checkouts/cp-worktrees/w1/bp-2"]))
     }
 
 
@@ -271,7 +279,8 @@ final class CheckoutRemovalTests: XCTestCase {
 
         let verdict = git.removal().check(path: "/checkouts/SB", workerIsBusy: false)
 
-        XCTAssertEqual(verdict, .go(worktrees: ["/checkouts/cp-worktrees/w1/bp-1"]))
+        XCTAssertEqual(
+            verdict, .go(root: "/checkouts/SB", worktrees: ["/checkouts/cp-worktrees/w1/bp-1"]))
     }
 
     /// A worktree somebody removed with `rm -rf` and never pruned. It is still registered, and
@@ -298,7 +307,7 @@ final class CheckoutRemovalTests: XCTestCase {
 
         XCTAssertEqual(
             git.removal().check(path: "/checkouts/SB", workerIsBusy: false),
-            .go(worktrees: ["/checkouts/cp-worktrees/w1/live"]))
+            .go(root: "/checkouts/SB", worktrees: ["/checkouts/cp-worktrees/w1/live"]))
     }
 
     /// The file's own rule, applied to the arm this branch added: a check that cannot be run is a
@@ -338,7 +347,8 @@ final class CheckoutRemovalTests: XCTestCase {
         git.present = []
 
         XCTAssertEqual(
-            git.removal().check(path: "/checkouts/SB", workerIsBusy: false), .go(worktrees: []))
+            git.removal().check(path: "/checkouts/SB", workerIsBusy: false),
+            .go(root: "/checkouts/SB", worktrees: []))
     }
 
     // Cheapest first, and nothing runs after a no: a refusal must not leave git commands running
