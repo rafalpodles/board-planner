@@ -1016,7 +1016,7 @@ describe("the hand-over notice, with the board judged too", () => {
 
     expect(notice().dataset.reason).toBe("no-repository");
     expect(notice().textContent).toContain(
-      "This board names no repository, so no machine can match it — its owner, Ada, can add one in Settings → Integrations."
+      "This board names no repository, so no machine can match it — its owner, Ada, can add one in Project settings → Integrations."
     );
   });
 
@@ -1033,7 +1033,7 @@ describe("the hand-over notice, with the board judged too", () => {
 
     expect(notice().dataset.reason).toBe("runs-locked");
     expect(notice().textContent).toBe(
-      "Nothing will run this yet. An instance admin has locked agent runs off for this board — an instance admin can lift the lock in Settings → Workers."
+      "Nothing will run this yet. An instance admin has locked agent runs off for this board — an instance admin can lift the lock in Project settings → Workers."
     );
     expect(notice().textContent).not.toContain("Ada");
     expect(screen.queryByTestId("handover-waiting")).toBeNull();
@@ -1051,7 +1051,7 @@ describe("the hand-over notice, with the board judged too", () => {
 
     expect(problems()).toEqual(["runs-locked", "runs-off"]);
     expect(screen.getAllByTestId("handover-problem")[1].textContent).toBe(
-      "Agent runs are also off — once the lock is lifted, its owner, Ada, can switch them on in Settings → Workers."
+      "Agent runs are also off — once the lock is lifted, its owner, Ada, can switch them on in Project settings → Workers."
     );
   });
 
@@ -1102,27 +1102,35 @@ describe("the hand-over notice, with the board judged too", () => {
     );
   });
 
-  // A pause set on the machine itself never reaches the server, so the server-side resume is
-  // the only one this screen can see take effect
-  it("tells the assignee their machine is paused, and where to resume it", () => {
-    withBoard({ machine: "paused" });
+  // A pause or stop comes only from the fleet console, which only an instance admin can open —
+  // telling anyone else to resume it there would send them to a page that turns them away
+  it.each([
+    ["paused", "machine-paused"],
+    ["stopped", "machine-stopped"],
+  ] as const)("tells a non-admin assignee their machine was %s, and that only an admin can resume it", (state, reason) => {
+    withBoard({ machine: state });
 
-    expect(notice().dataset.reason).toBe("machine-paused");
+    expect(notice().dataset.reason).toBe(reason);
     expect(notice().textContent).toBe(
-      "Nothing will run this yet. Your machine is connected but not taking work: it is paused. Resume it in Settings → Workers."
+      `Nothing will run this yet. Your machine is connected but not taking work: an instance admin ${state} it, and only an instance admin can resume it.`
     );
-    expect(notice().textContent).not.toContain("menubar");
+    expect(screen.queryByRole("link", { name: "Settings → Workers" })).toBeNull();
     expect(screen.queryByTestId("handover-waiting")).toBeNull();
   });
 
-  it("tells the assignee their machine was stopped", () => {
-    withBoard({ machine: "stopped" });
+  it.each(["paused", "stopped"] as const)(
+    "tells an instance admin their %s machine can be resumed in Settings → Workers",
+    (state) => {
+      withBoard({ machine: state }, {}, { viewerIsInstanceAdmin: true });
 
-    expect(notice().dataset.reason).toBe("machine-stopped");
-    expect(notice().textContent).toBe(
-      "Nothing will run this yet. Your machine is connected but not taking work: it was stopped. Resume it in Settings → Workers."
-    );
-  });
+      expect(notice().textContent).toBe(
+        `Nothing will run this yet. Your machine is connected but not taking work: it is ${state}. Resume it in Settings → Workers.`
+      );
+      expect(screen.getByRole("link", { name: "Settings → Workers" }).getAttribute("href")).toBe(
+        "/settings/workers"
+      );
+    }
+  );
 
   // The sandbox check is the one that stops the claim itself
   it("says a machine whose sandbox check failed is not taking work", () => {
@@ -1140,7 +1148,7 @@ describe("the hand-over notice, with the board judged too", () => {
 
     expect(notice().dataset.reason).toBe("missing-columns");
     expect(notice().textContent).toContain(
-      "This board has no Awaiting review or Done column, so no machine can run work on it — its owner, Ada, can give a column that role in Settings → Board."
+      "This board has no Awaiting review or Done column, so no machine can run work on it — its owner, Ada, can give a column that role in Project settings → Board."
     );
   });
 
@@ -1148,6 +1156,14 @@ describe("the hand-over notice, with the board judged too", () => {
     withBoard({ columns: [{ role: "active" }] });
 
     expect(notice().textContent).toContain("no Ready to pick up, Awaiting review or Done column");
+  });
+
+  // No advice about the board could make it run, so none is listed beside it
+  it("names spent attempts alone, however unready the board", () => {
+    withBoard({ repositoryUrl: "", workerEnabled: false, machine: "none" }, { attemptsExhausted: true });
+
+    expect(notice().dataset.reason).toBe("attempts-exhausted");
+    expect(screen.queryAllByTestId("handover-problem")).toHaveLength(0);
   });
 
   it("names a task machines have given up on, instead of waiting for one", () => {

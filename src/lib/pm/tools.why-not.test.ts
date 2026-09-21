@@ -118,6 +118,14 @@ describe("the PM says every reason its hand-over will not run", () => {
     });
   });
 
+  it("names spent attempts alone, with no advice about the board beside it", async () => {
+    board({ repositoryUrl: "", worker: { enabled: false } });
+
+    expect((await assign({ execution: { attempts: 3 } })).result).toMatchObject({
+      note: "Assigned, but machines have already tried it as many times as they may, so none will take it again — a person has to finish it.",
+    });
+  });
+
   it("does not name attempts a task still has", async () => {
     expect((await assign({ execution: { attempts: 2 } })).result).toEqual({ task: "BP-9", assignee: "owner" });
   });

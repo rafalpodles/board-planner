@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { awaitingClaim, handoverOf } from "./handover";
+import { awaitingClaim, handoverOf, isFinal } from "./handover";
 import { ApiTask, ApiUser } from "@/types";
 import type { AnyColumn } from "@/lib/columns";
 
@@ -282,7 +282,30 @@ describe("handoverOf and spent attempts", () => {
     });
   });
 
+  it("names spent attempts alone, whatever else the task lacks", () => {
+    expect(
+      handoverOf(task({ attemptsExhausted: true, status: "someday", assignee: null } as never), BOARD)
+    ).toEqual({ runs: false, problems: [{ reason: "attempts-exhausted", by: null }] });
+  });
+
+  it("still names no agent first", () => {
+    expect(handoverOf(task({ attemptsExhausted: true, agent: null } as never), BOARD)).toMatchObject({
+      problems: [{ reason: "no-agent" }],
+    });
+  });
+
   it("runs a task with attempts left", () => {
     expect(handoverOf(task({ attemptsExhausted: false } as never), BOARD)).toEqual({ runs: true });
+  });
+});
+
+describe("isFinal", () => {
+  it.each([
+    [{ runs: true }, false],
+    [{ runs: false, problems: [{ reason: "no-agent", by: null }] }, true],
+    [{ runs: false, problems: [{ reason: "attempts-exhausted", by: null }] }, true],
+    [{ runs: false, problems: [{ reason: "unassigned", by: null }] }, false],
+  ] as const)("judges %o as final: %s", (handover, expected) => {
+    expect(isFinal(handover as never)).toBe(expected);
   });
 });

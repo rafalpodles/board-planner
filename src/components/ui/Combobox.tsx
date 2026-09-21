@@ -524,7 +524,7 @@ export function Combobox(props: ComboboxProps) {
                               id={`${optionId}-description`}
                               data-testid="option-description"
                               title={option.description}
-                              className="line-clamp-3 break-words"
+                              className="line-clamp-3 whitespace-pre-line break-words"
                             >
                               {option.description}
                             </span>

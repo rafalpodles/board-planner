@@ -32,6 +32,7 @@ import type { ApiAgent, ApiTask } from "@/types";
 import {
   awaitingClaim,
   handoverOf,
+  isFinal,
   refIdOf,
   type Handover,
   type HandoverProblem,
@@ -147,33 +148,34 @@ function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }
       return (
         <>
           This board names no repository, so no machine can match it — {who} can add one in
-          Settings → Integrations.
+          Project settings → Integrations.
         </>
       );
     case "runs-off":
       return ctx.locked ? (
         <>
-          Agent runs are also off — once the lock is lifted, {who} can switch them on in Settings →
-          Workers.
+          Agent runs are also off — once the lock is lifted, {who} can switch them on in Project
+          settings → Workers.
         </>
       ) : (
         <>
-          Agent runs are off for this board — {who} can switch them on in Settings → Workers.
+          Agent runs are off for this board — {who} can switch them on in Project settings →
+          Workers.
         </>
       );
     case "runs-locked":
       return (
         <>
           An instance admin has locked agent runs off for this board —{" "}
-          {ctx.viewerIsInstanceAdmin ? "you" : "an instance admin"} can lift the lock in Settings →
-          Workers.
+          {ctx.viewerIsInstanceAdmin ? "you" : "an instance admin"} can lift the lock in Project
+          settings → Workers.
         </>
       );
     case "missing-columns":
       return (
         <>
           This board has no {missingRolesText(ctx.columns)} column, so no machine can run work on
-          it — {who} can give a column that role in Settings → Board.
+          it — {who} can give a column that role in Project settings → Board.
         </>
       );
     case "no-machine":
@@ -191,19 +193,24 @@ function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }
         </>
       );
     case "machine-paused":
-      return (
+    case "machine-stopped": {
+      const done = blocker.reason === "machine-paused" ? "paused" : "stopped";
+      // A pause or stop only ever comes from the fleet console, and only an instance admin opens it
+      return ctx.viewerIsInstanceAdmin ? (
         <>
-          Your machine is connected but not taking work: it is paused. Resume it in Settings →
-          Workers.
+          Your machine is connected but not taking work: it is {done}. Resume it in{" "}
+          <a href="/settings/workers" className="underline">
+            Settings → Workers
+          </a>
+          .
+        </>
+      ) : (
+        <>
+          Your machine is connected but not taking work: an instance admin {done} it, and only an
+          instance admin can resume it.
         </>
       );
-    case "machine-stopped":
-      return (
-        <>
-          Your machine is connected but not taking work: it was stopped. Resume it in Settings →
-          Workers.
-        </>
-      );
+    }
     case "machine-failing":
       return (
         <>
@@ -247,17 +254,19 @@ function HandoverNotice({
   // approved column a machine has had its chance, and a run may be holding the task right now.
   if (!handover || !awaiting) return null;
   if (!handover.runs && handover.problems[0].reason === "no-agent") return null;
+  const final = isFinal(handover);
 
   const viewerIsAssignee = !!viewer && assignee?.username === viewer;
-  const gaps = board
-    ? readinessGaps({
-        repositoryUrl: board.repositoryUrl,
-        workerEnabled: board.workerEnabled,
-        lockedByInstance: board.lockedByInstance,
-        columns: board.columns,
-        machine: viewerIsAssignee ? board.machine : null,
-      })
-    : [];
+  const gaps =
+    board && !final
+      ? readinessGaps({
+          repositoryUrl: board.repositoryUrl,
+          workerEnabled: board.workerEnabled,
+          lockedByInstance: board.lockedByInstance,
+          columns: board.columns,
+          machine: viewerIsAssignee ? board.machine : null,
+        })
+      : [];
   const blockers: Blocker[] = [
     ...(handover.runs ? [] : handover.problems),
     ...gaps.map((reason) => ({ reason })),

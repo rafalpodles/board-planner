@@ -57,7 +57,7 @@ test.describe("a member's own task, as the board changes under it", () => {
     await expect(notice(page)).toHaveAttribute("data-reason", "no-repository");
     await expect(problems(page)).toHaveCount(0);
     await expect(notice(page)).toHaveText(
-      "Nothing will run this yet. This board names no repository, so no machine can match it — its owner, E2E Owner, can add one in Settings → Integrations."
+      "Nothing will run this yet. This board names no repository, so no machine can match it — its owner, E2E Owner, can add one in Project settings → Integrations."
     );
   });
 
@@ -71,7 +71,7 @@ test.describe("a member's own task, as the board changes under it", () => {
     await expect(notice(page)).toHaveAttribute("data-reason", "runs-off");
     await expect(problems(page)).toHaveCount(0);
     await expect(notice(page)).toHaveText(
-      "Nothing will run this yet. Agent runs are off for this board — its owner, E2E Owner, can switch them on in Settings → Workers."
+      "Nothing will run this yet. Agent runs are off for this board — its owner, E2E Owner, can switch them on in Project settings → Workers."
     );
   });
 
@@ -88,7 +88,7 @@ test.describe("a member's own task, as the board changes under it", () => {
 
     await expect(notice(page)).toHaveAttribute("data-reason", "runs-locked");
     await expect(notice(page)).toHaveText(
-      "Nothing will run this yet. An instance admin has locked agent runs off for this board — an instance admin can lift the lock in Settings → Workers."
+      "Nothing will run this yet. An instance admin has locked agent runs off for this board — an instance admin can lift the lock in Project settings → Workers."
     );
     await expect(waiting(page)).toHaveCount(0);
   });
@@ -161,7 +161,7 @@ test.describe("a member's own task, as the board changes under it", () => {
 
     await expect(notice(page)).toHaveAttribute("data-reason", "machine-paused");
     await expect(notice(page)).toHaveText(
-      "Nothing will run this yet. Your machine is connected but not taking work: it is paused. Resume it in Settings → Workers."
+      "Nothing will run this yet. Your machine is connected but not taking work: an instance admin paused it, and only an instance admin can resume it."
     );
     await expect(waiting(page)).toHaveCount(0);
   });
@@ -194,9 +194,8 @@ test.describe("a member's own task, as the board changes under it", () => {
     await expect(notice(page)).toContainText("its sandbox check failed");
   });
 
-  test("a task machines have given up on says so, not that it is waiting", async ({ page }) => {
-    await setBoardReadiness({ repositoryUrl: HANDOVER_REPOSITORY, workerEnabled: true });
-    await seedMachine("git@github.com:e2e/handover-board.git");
+  // No advice about the board could make it run, so none is listed beside it
+  test("a task machines have given up on says so, alone, not that it is waiting", async ({ page }) => {
     await spendAttempts(MEMBER_HANDOVER_TASK_ID, 3);
     await openAs(page, "member");
 
@@ -234,7 +233,7 @@ test.describe("a member's own task, as the board changes under it", () => {
 
     await expect(notice(page)).toHaveAttribute("data-reason", "runs-locked runs-off");
     await expect(problems(page).nth(1)).toHaveText(
-      "Agent runs are also off — once the lock is lifted, its owner, E2E Owner, can switch them on in Settings → Workers."
+      "Agent runs are also off — once the lock is lifted, its owner, E2E Owner, can switch them on in Project settings → Workers."
     );
   });
 

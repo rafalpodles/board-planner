@@ -125,8 +125,20 @@ function assigneeProblem(task: Judged): HandoverProblem | null {
  * @param columns the board's own columns, which carry the roles a claim is defined in terms of.
  * Omitted where the caller does not know them, and then this requirement is not judged.
  */
+const FINAL: HandoverReason[] = ["no-agent", "attempts-exhausted"];
+
+/** A reason that stands alone: with it, nothing about the board is worth listing */
+export function isFinal(handover: Handover): boolean {
+  return !handover.runs && FINAL.includes(handover.problems[0].reason);
+}
+
 export function handoverOf(task: Judged, columns?: AnyColumn[]): Handover {
   if (!task.agent) return { runs: false, problems: [{ reason: "no-agent", by: null }] };
+  // Nothing resets a task's attempts and the claim skips one that has spent them, so no other
+  // advice would make it run: the reason stands alone, like choosing no agent
+  if (task.attemptsExhausted) {
+    return { runs: false, problems: [{ reason: "attempts-exhausted", by: null }] };
+  }
 
   const problems: HandoverProblem[] = [];
   // The everyday false positive without it: pick an agent on a task still in the backlog, assign it
@@ -139,8 +151,6 @@ export function handoverOf(task: Judged, columns?: AnyColumn[]): Handover {
   // The claim leaves a task with an unfinished blocker alone until that blocker reaches a done column
   const blockers = columns ? openBlockers(task, columns) : [];
   if (blockers.length > 0) problems.push({ reason: "blocked", by: null, blockers });
-  // Nothing resets a task's attempts, and the claim skips a task that has spent them
-  if (task.attemptsExhausted) problems.push({ reason: "attempts-exhausted", by: null });
 
   return problems.length === 0 ? { runs: true } : { runs: false, problems };
 }

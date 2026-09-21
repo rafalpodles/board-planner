@@ -15,7 +15,7 @@ import {
 import { OrToolDefinition } from "./openrouter";
 import { unknownParameterMessage, NOTHING_TO_CHANGE } from "@/lib/mcp/strict-input";
 import { buildBoardDigest } from "./board-review";
-import { handoverOf, type HandoverProblem } from "@/lib/handover";
+import { handoverOf, isFinal, type HandoverProblem } from "@/lib/handover";
 import { missingRolesText, readinessGaps, type ReadinessGap } from "@/lib/project-readiness";
 import { projectRepositoryUrl } from "@/lib/repository";
 import type { AnyColumn } from "@/lib/columns";
@@ -149,9 +149,9 @@ export function refuseUndeclaredArgs(tool: PmTool, args: Record<string, unknown>
  * all. Those have to be said where the PM says it assigned the work — the Agent row on the task
  * detail is a view nobody reopens after reading "BP-x → @owner" in the chat.
  *
- * Deliberately not a promise of the opposite. The claim also weighs open blockers, spent attempts
- * and whether that person owns a live machine at all, none of which is knowable here, so "" means
- * "no reason found", never "it will run".
+ * Deliberately not a promise of the opposite. The claim also needs that person to own a live
+ * machine serving the repository, which is not knowable here, so "" means "no reason found",
+ * never "it will run".
  */
 async function whyItWillNotRun(
   projectId: string,
@@ -183,8 +183,8 @@ async function whyItWillNotRun(
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handover = handoverOf(judged as any, columns);
-  // No agent means a person is doing it, and nothing about the board matters to that
-  if (!handover.runs && handover.problems[0].reason === "no-agent") {
+  // No agent, or no attempts left: nothing about the board would change that
+  if (!handover.runs && isFinal(handover)) {
     return whyThisProblem(handover.problems[0], project.key);
   }
   const reasons = [
