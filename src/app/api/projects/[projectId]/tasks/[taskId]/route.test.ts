@@ -20,6 +20,7 @@ vi.mock("@/lib/task-service", () => ({
   heldRunRefusal,
   toApiExecution: (e: unknown) => e,
   taskPopulateFields: [],
+  MAX_EXECUTION_ATTEMPTS: 3,
 }));
 // The severance itself — what it reads, pulls, and announces — is task-links.test.ts's job; this
 // file only has to prove the route hands it the right deleted-task identity.
@@ -278,9 +279,9 @@ describe("DELETE .../tasks/:taskId and the run hold", () => {
  * document. The e2e catches it on the screen; this catches it in a second.
  */
 describe("GET: what the decision panel is served", () => {
-  function taskServed() {
+  function taskServed(execution?: { attempts: number }) {
     const task = {
-      execution: undefined,
+      execution,
       decision: { workerId: "507f1f77bcf86cd799439099", gate: "protected-paths" },
       relations: [],
       toObject: () => ({ taskNumber: 1 }),
@@ -308,5 +309,36 @@ describe("GET: what the decision panel is served", () => {
     // Not the subdocument: `.select("decision")` is a parent INCLUSION, which overrides every
     // `select: false` under it and would bring `files` and `patchSha256` along unasked.
     expect(named).not.toContain("decision");
+  });
+});
+
+/**
+ * BP-727 review. A task out of attempts is never claimed again, and nothing resets its count; the
+ * task screen has to say so rather than "waiting for your machine".
+ */
+describe("GET: whether machines have given up on the task", () => {
+  async function served(execution?: { attempts: number }) {
+    const task = {
+      execution,
+      decision: null,
+      relations: [],
+      toObject: () => ({ taskNumber: 1 }),
+    };
+    taskFindOne.mockReturnValue({
+      select: () => ({ populate: () => ({ populate: () => Promise.resolve(task) }) }),
+    });
+    workerFindById.mockReturnValue({ select: () => ({ lean: async () => null }) });
+    const res = await GET(new Request(`https://app.example.com/api/projects/p1/tasks/${TASK}`), ctx());
+    return (await res.json()).attemptsExhausted;
+  }
+
+  it.each([
+    [undefined, false],
+    [{ attempts: 0 }, false],
+    [{ attempts: 2 }, false],
+    [{ attempts: 3 }, true],
+    [{ attempts: 4 }, true],
+  ])("with execution %o answers %s", async (execution, expected) => {
+    expect(await served(execution)).toBe(expected);
   });
 });

@@ -27,6 +27,7 @@ export const GROUPS = {
     "task-write-refusal-echo.spec.ts",
     "picker-stays-open.spec.ts",
     "task-detail-remainder.spec.ts",
+    "handover-readiness.spec.ts",
     "link-leaves-a-trace.spec.ts",
     "first-use-gaps.spec.ts",
     "task-composing-controls.spec.ts",

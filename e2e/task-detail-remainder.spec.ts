@@ -4,6 +4,10 @@ import {
   seedAgents,
   seedHandoverStates,
   seedSprintPlanning,
+  seedMachine,
+  setBoardReadiness,
+  ADMIN_ID,
+  HANDOVER_REPOSITORY,
   PROJECT_KEY,
   PLANNING_SPRINT_NAME,
   SIBLING_TASK_NUMBER,
@@ -276,6 +280,13 @@ test.describe("subtasks", () => {
 
 test.describe("the handover notice", () => {
   const notice = (page: Page) => page.getByTestId("handover-notice");
+
+  // A ready board and a live machine for the reader, so each case below is the task's own reason
+  // alone; the board's gaps are handover-readiness.spec.ts's subject
+  test.beforeEach(async () => {
+    await setBoardReadiness({ repositoryUrl: HANDOVER_REPOSITORY, workerEnabled: true });
+    await seedMachine("git@github.com:e2e/handover-board.git", { owner: ADMIN_ID });
+  });
 
   test("no agent: no notice at all", async ({ page }) => {
     await openTask(page, SIBLING_TASK_NUMBER, "admin");

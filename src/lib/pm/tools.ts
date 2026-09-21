@@ -10,14 +10,18 @@ import {
   changeStatus,
   assignTask,
   addComment,
+  MAX_EXECUTION_ATTEMPTS,
 } from "@/lib/task-service";
 import { OrToolDefinition } from "./openrouter";
 import { unknownParameterMessage, NOTHING_TO_CHANGE } from "@/lib/mcp/strict-input";
 import { buildBoardDigest } from "./board-review";
-import { handoverOf } from "@/lib/handover";
+import { finalProblem, handoverOf, type HandoverProblem } from "@/lib/handover";
+import { missingRolesText, readinessGaps, type ReadinessGap } from "@/lib/project-readiness";
+import { projectRepositoryUrl } from "@/lib/repository";
+import type { AnyColumn } from "@/lib/columns";
 import { getProjectColumns } from "@/lib/columns";
 import { echo } from "@/lib/echo";
-import { isWorkerLockedByInstance, projectRunsWorkers } from "@/lib/worker-gate";
+import { isWorkerLockedByInstance } from "@/lib/worker-gate";
 
 export interface PmToolContext {
   projectId: string;
@@ -145,32 +149,83 @@ export function refuseUndeclaredArgs(tool: PmTool, args: Record<string, unknown>
  * all. Those have to be said where the PM says it assigned the work — the Agent row on the task
  * detail is a view nobody reopens after reading "BP-x → @owner" in the chat.
  *
- * Deliberately not a promise of the opposite. The claim also weighs open blockers, spent attempts
- * and whether that person owns a live machine at all, none of which is knowable here, so "" means
- * "no reason found", never "it will run".
+ * Deliberately not a promise of the opposite. The claim also needs that person to own a live
+ * machine serving the repository, which is not knowable here, so "" means "no reason found",
+ * never "it will run".
  */
 async function whyItWillNotRun(
   projectId: string,
-  task: { agent?: unknown; assignee?: unknown; assignedBy?: unknown; status?: unknown }
+  task: {
+    agent?: unknown;
+    assignee?: unknown;
+    assignedBy?: unknown;
+    pmAssignedFor?: unknown;
+    status?: unknown;
+    blockedBy?: unknown;
+    execution?: { attempts?: number } | null;
+  }
 ): Promise<string> {
-  const project = await Project.findById(projectId, "columns worker").lean();
-  if (project && isWorkerLockedByInstance(project.worker)) {
-    return "an instance admin has locked workers off for this project, so nothing will run it";
-  }
-  if (!project || !projectRunsWorkers(project.worker)) {
-    return "this project is not enabled for workers, so nothing will run it";
-  }
+  const project = await Project.findById(
+    projectId,
+    "key columns worker repositoryUrl githubRepo gitlabRepo"
+  ).lean();
+  if (!project) return "this project is not enabled for workers, so nothing will run it";
+  const columns = getProjectColumns(project);
+  // Named field by field: the task is a Mongoose document, and spreading one copies its internals
+  const judged = {
+    agent: task.agent,
+    assignee: task.assignee,
+    assignedBy: task.assignedBy,
+    pmAssignedFor: task.pmAssignedFor,
+    status: task.status,
+    blockedBy: task.blockedBy,
+    attemptsExhausted: (task.execution?.attempts ?? 0) >= MAX_EXECUTION_ATTEMPTS,
+  };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const handover = handoverOf(task as any, getProjectColumns(project));
-  if (handover.runs) return "";
-  // A switch with no fall-through on purpose: the first version of this returned "" for the three
-  // reasons it did not name, and two of them are reachable *immediately after a successful
-  // assignment* — `updateTask` stamps `assignedBy` only when the assignee actually moves, so
-  // re-assigning a legacy task to the person who already holds it leaves the assigner unrecorded,
-  // and re-assigning a task somebody else handed over leaves theirs. Both then answered
-  // "BP-x → @owner" with no caveat and were never claimed: the exact silence this ticket exists to
-  // end, reproduced inside the feature written to end it.
-  switch (handover.reason) {
+  const handover = handoverOf(judged as any, columns);
+  // No agent, or no attempts left: nothing about the board would change that
+  const final = finalProblem(handover);
+  if (final) return whyThisProblem(final, project.key);
+  const reasons = [
+    ...(handover.runs ? [] : handover.problems.map((p) => whyThisProblem(p, project.key))),
+    ...readinessGaps({
+      repositoryUrl: projectRepositoryUrl(project),
+      workerEnabled: !!project.worker?.enabled,
+      lockedByInstance: isWorkerLockedByInstance(project.worker),
+      columns,
+    }).map((gap) => whyThisGap(gap, columns)),
+  ];
+  return reasons.join("; and ");
+}
+
+function whyThisGap(gap: ReadinessGap, columns: AnyColumn[]): string {
+  switch (gap) {
+    case "no-repository":
+      return "this project names no repository, so no machine can match it";
+    case "runs-off":
+      return "this project is not enabled for workers, so nothing will run it";
+    case "runs-locked":
+      return "an instance admin has locked workers off for this project, so nothing will run it";
+    case "missing-columns":
+      return `the board has no ${missingRolesText(columns)} column, so no machine can claim from it`;
+    default:
+      return "";
+  }
+}
+
+// A switch with no fall-through on purpose: the first version of this returned "" for the three
+// reasons it did not name, and two of them are reachable *immediately after a successful
+// assignment* — `updateTask` stamps `assignedBy` only when the assignee actually moves, so
+// re-assigning a legacy task to the person who already holds it leaves the assigner unrecorded,
+// and re-assigning a task somebody else handed over leaves theirs. Both then answered
+// "BP-x → @owner" with no caveat and were never claimed: the exact silence this ticket exists to
+// end, reproduced inside the feature written to end it.
+function whyThisProblem({ reason, blockers }: HandoverProblem, key: string): string {
+  switch (reason) {
+    case "attempts-exhausted":
+      return "machines have already tried it as many times as they may, so none will take it again — a person has to finish it";
+    case "blocked":
+      return `it waits on unfinished blockers (${(blockers ?? []).map((n) => `${key}-${n}`).join(", ")})`;
     case "no-agent":
       return "no agent is named on it, so nothing will run it — a task naming none is one a person is doing";
     case "not-approved-yet":

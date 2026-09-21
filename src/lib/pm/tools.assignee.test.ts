@@ -133,14 +133,32 @@ describe("the PM's assign_task on a project an instance admin locked off", () =>
     });
   });
 
+  // Everything else is in place, so the lock is the one reason and the sentence is exactly it
   it("says the lock is why nothing will run it, though the owner switched workers on", async () => {
+    const owner = { _id: "u1", username: "kuba", fullName: "Kuba" };
+    assignTaskMock.mockResolvedValue({
+      ok: true,
+      data: { taskNumber: 9, assignee: owner, assignedBy: owner, agent: "a1", status: "todo" },
+    });
     projectFindById.mockReturnValue({
-      lean: async () => ({ columns: COLUMNS, worker: { enabled: true, lockedByInstance: true } }),
+      lean: async () => ({
+        key: "BP",
+        repositoryUrl: "https://github.com/acme/bp",
+        columns: [
+          { id: "todo", label: "To do", color: "#000", role: "approved", order: 0 },
+          { id: "doing", label: "Doing", color: "#000", role: "active", order: 1 },
+          { id: "check", label: "Check", color: "#000", role: "review", order: 2 },
+          { id: "done", label: "Done", color: "#000", role: "done", order: 3 },
+        ],
+        worker: { enabled: true, lockedByInstance: true },
+      }),
     });
 
     const { result } = await PM_TOOLS.assign_task.execute({ taskKey: "BP-9", username: "kuba" }, ctx);
 
-    expect(result).toMatchObject({
+    expect(result).toEqual({
+      task: "BP-9",
+      assignee: "kuba",
       willRun: false,
       note: "Assigned, but an instance admin has locked workers off for this project, so nothing will run it.",
     });
@@ -154,7 +172,8 @@ describe("the PM's assign_task on a project an instance admin locked off", () =>
     const { result } = await PM_TOOLS.assign_task.execute({ taskKey: "BP-9", username: "kuba" }, ctx);
 
     expect(result).toMatchObject({
-      note: "Assigned, but this project is not enabled for workers, so nothing will run it.",
+      note: expect.stringContaining("this project is not enabled for workers, so nothing will run it"),
     });
+    expect((result as { note: string }).note).not.toContain("locked");
   });
 });

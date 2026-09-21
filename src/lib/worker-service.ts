@@ -11,6 +11,7 @@ import { ensureWorkerUser } from "@/lib/worker-user";
 import { accessibleProjectIds } from "@/lib/grants";
 import { User } from "@/models/user";
 import { isWorkerLockedByInstance, projectRunsWorkers } from "@/lib/worker-gate";
+import type { MachineState } from "@/types";
 
 export const PROTOCOL_VERSION = 1;
 export const WORKER_STALE_MS = 5 * 60 * 1000;
@@ -140,6 +141,57 @@ function isLive(worker: IWorker, now: Date): boolean {
   if (!worker.enabled) return false;
   const seenAt = worker.lastSeenAt ? new Date(worker.lastSeenAt).getTime() : NaN;
   return Number.isFinite(seenAt) && now.getTime() - seenAt <= WORKER_STALE_MS;
+}
+
+type ServingMachine = Pick<IWorker, "enabled" | "lastSeenAt" | "repos"> &
+  Partial<Pick<IWorker, "preflight" | "command" | "commandIssuedAt" | "commandAckedAt">>;
+
+// The name the worker gives the check that stops it claiming (worker/src/preflight.ts)
+const SANDBOX_CHECK = "sandbox";
+
+// Proven only by the machine's acknowledgement, the way the fleet console reads it: a command
+// issued and not yet acked may still be finishing a run. `stop` aborts the run and pauses the loop.
+function haltAcknowledged(worker: ServingMachine): "paused" | "stopped" | null {
+  if ((worker.command !== "pause" && worker.command !== "stop") || !worker.commandAckedAt) return null;
+  const ackedAt = new Date(worker.commandAckedAt).getTime();
+  const issuedAt = worker.commandIssuedAt ? new Date(worker.commandIssuedAt).getTime() : null;
+  if (issuedAt !== null && ackedAt <= issuedAt) return null;
+  return worker.command === "pause" ? "paused" : "stopped";
+}
+
+// Only the sandbox check stops the claim outright. Other failed checks may belong to another
+// project's checkout, which the report does not attribute, so they say nothing about this board.
+function sandboxFailed(worker: ServingMachine): boolean {
+  return (worker.preflight?.checks ?? []).some((c) => c.name === SANDBOX_CHECK && !c.ok);
+}
+
+const MACHINE_RANK: Record<MachineState, number> = {
+  none: 0,
+  stale: 1,
+  failing: 2,
+  stopped: 3,
+  paused: 4,
+  live: 5,
+};
+
+/**
+ * The best of these machines, for this project's repository. A machine that reports in but will
+ * not take work — paused, stopped, or failing its sandbox check — is not `live`, and says why.
+ */
+export function machineStateFor(
+  workers: ServingMachine[],
+  project: MatchableProject,
+  now = new Date()
+): MachineState {
+  let best: MachineState = "none";
+  for (const worker of workers) {
+    if (!matchRepo(project, worker.repos ?? [])) continue;
+    const candidate: MachineState = !isLive(worker as IWorker, now)
+      ? "stale"
+      : (haltAcknowledged(worker) ?? (sandboxFailed(worker) ? "failing" : "live"));
+    if (MACHINE_RANK[candidate] > MACHINE_RANK[best]) best = candidate;
+  }
+  return best;
 }
 
 // Only what an operator actually set. Sending the stored policy would pin every field forever,

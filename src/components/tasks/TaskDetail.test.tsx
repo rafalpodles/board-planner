@@ -613,13 +613,31 @@ describe("TaskDetail, the Agent row's handover notice", () => {
     assignedBy: { _id: "u2", username: "kmk", fullName: "Krzysiek" },
   };
 
-  function serve(over: Record<string, unknown> = {}) {
+  // The page's own project read is deliberately NOT ready: the board is judged from the
+  // readiness read, which is the one the focus re-read refreshes
+  const readyBoard = project;
+  const READY = {
+    owners: [] as string[],
+    canAdmin: false,
+    repositoryUrl: "https://github.com/acme/tp",
+    workerEnabled: true,
+    lockedByInstance: false,
+    columns: [{ role: "approved" }, { role: "active" }, { role: "review" }, { role: "done" }],
+    machine: "live",
+  };
+
+  function serve(
+    over: Record<string, unknown> = {},
+    board: Record<string, unknown> = readyBoard,
+    readiness: Record<string, unknown> = READY
+  ) {
     api.get.mockImplementation((url: string) => {
       if (url === "/api/projects/TP/assignable-users") return Promise.resolve([]);
       if (url.startsWith("/api/agent")) return Promise.resolve([]);
       if (url.includes("/tasks/")) return Promise.resolve({ ...handedOver, ...over });
       if (url.includes("/sprints")) return Promise.resolve([]);
-      return Promise.resolve(project);
+      if (url === "/api/projects/TP/handover") return Promise.resolve(readiness);
+      return Promise.resolve(board);
     });
   }
 
@@ -702,14 +720,177 @@ describe("TaskDetail, the Agent row's handover notice", () => {
     }
   );
 
-  // Nothing to say about a task whose assignee handed it to themselves — the everyday case, and a
-  // notice on it would be on almost every task on the board
+  // Nothing to warn about a task whose assignee handed it to themselves on a ready board — the
+  // everyday case, and a warning on it would be on almost every task on the board
   it("says nothing when the hand-over is sound", async () => {
     serve({ assignedBy: { _id: "u1", username: "owner", fullName: "Owner Name" } });
     renderDetail();
     await loaded();
 
     expect(screen.queryByTestId("handover-notice")).toBeNull();
+    expect(
+      within(screen.getByRole("complementary")).getByTestId("handover-waiting").textContent
+    ).toBe("Waiting for your machine to take it.");
+  });
+
+  // BP-727. The board's own gaps reach both call sites, with the owners the endpoint named
+  const selfAssigned = { assignedBy: { _id: "u1", username: "owner", fullName: "Owner Name" } };
+  const noRepository = { ...READY, repositoryUrl: "", owners: ["Ada"] };
+
+  it("names a board with no repository, and its owner, on the rail", async () => {
+    serve(selfAssigned, readyBoard, noRepository);
+    renderDetail();
+    await loaded();
+
+    const notice = within(screen.getByRole("complementary")).getByTestId("handover-notice");
+    expect(notice.dataset.reason).toBe("no-repository");
+    expect(notice.textContent).toContain("its owner, Ada,");
+  });
+
+  it("names it in the mobile sheet too", async () => {
+    serve(selfAssigned, readyBoard, noRepository);
+    renderDetail();
+    await loaded();
+    await act(async () => screen.getByRole("button", { name: "All details" }).click());
+
+    expect(
+      within(screen.getByRole("dialog")).getByTestId("handover-notice").dataset.reason
+    ).toBe("no-repository");
+  });
+
+  it("names agent runs switched off from the board's own worker setting", async () => {
+    serve(selfAssigned, readyBoard, { ...READY, workerEnabled: false });
+    renderDetail();
+    await loaded();
+
+    expect(
+      within(screen.getByRole("complementary")).getByTestId("handover-notice").dataset.reason
+    ).toBe("runs-off");
+  });
+
+  // A locked board whose owner switched runs on must not read as ready
+  it("names a lock on a board whose owner switched runs on", async () => {
+    serve(selfAssigned, readyBoard, { ...READY, lockedByInstance: true });
+    renderDetail();
+    await loaded();
+
+    const notice = within(screen.getByRole("complementary")).getByTestId("handover-notice");
+    expect(notice.dataset.reason).toBe("runs-locked");
+    expect(screen.queryByTestId("handover-waiting")).toBeNull();
+  });
+
+  it("tells the assignee they have no machine, from the readiness read", async () => {
+    serve(selfAssigned, readyBoard, { ...READY, machine: "none" });
+    renderDetail();
+    await loaded();
+
+    expect(
+      within(screen.getByRole("complementary")).getByTestId("handover-notice").dataset.reason
+    ).toBe("no-machine");
+  });
+
+  function serveChanging(readiness: () => Record<string, unknown>) {
+    api.get.mockImplementation((url: string) => {
+      if (url === "/api/projects/TP/assignable-users") return Promise.resolve([]);
+      if (url.startsWith("/api/agent")) return Promise.resolve([]);
+      if (url.includes("/tasks/")) return Promise.resolve({ ...handedOver, ...selfAssigned });
+      if (url.includes("/sprints")) return Promise.resolve([]);
+      if (url === "/api/projects/TP/handover") return Promise.resolve(readiness());
+      return Promise.resolve(readyBoard);
+    });
+  }
+  const handoverReads = () =>
+    api.get.mock.calls.filter((c: unknown[]) => c[0] === "/api/projects/TP/handover").length;
+
+  // Connecting a machine happens in another window; coming back must show it without a reopen
+  it("reads the machine again when the window regains focus", async () => {
+    let machine = "none";
+    serveChanging(() => ({ ...READY, machine }));
+    renderDetail();
+    await loaded();
+    const rail = within(screen.getByRole("complementary"));
+    expect(rail.getByTestId("handover-notice").dataset.reason).toBe("no-machine");
+
+    machine = "live";
+    await act(async () => window.dispatchEvent(new Event("focus")));
+
+    await waitFor(() => expect(rail.queryByTestId("handover-notice")).toBeNull());
+    expect(rail.getByTestId("handover-waiting").textContent).toBe("Waiting for your machine to take it.");
+  });
+
+  // Switching runs on is done in Settings, in another tab; the board's own fields come back too
+  it("reads the board's own readiness again on focus, not only the machine", async () => {
+    let workerEnabled = false;
+    serveChanging(() => ({ ...READY, workerEnabled }));
+    renderDetail();
+    await loaded();
+    const rail = within(screen.getByRole("complementary"));
+    expect(rail.getByTestId("handover-notice").dataset.reason).toBe("runs-off");
+
+    workerEnabled = true;
+    await act(async () => window.dispatchEvent(new Event("focus")));
+
+    await waitFor(() => expect(rail.queryByTestId("handover-notice")).toBeNull());
+  });
+
+  // Coming back to a tab fires focus and visibilitychange together; one read answers both
+  it("reads once for a focus and a visibility change that arrive together", async () => {
+    serveChanging(() => READY);
+    renderDetail();
+    await loaded();
+    const before = handoverReads();
+
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    await waitFor(() => expect(handoverReads()).toBe(before + 1));
+    await act(async () => new Promise((r) => setTimeout(r, 50)));
+    expect(handoverReads()).toBe(before + 1);
+  });
+
+  // A tab going to the background is not a return to it
+  it("does not read while the page is hidden", async () => {
+    serveChanging(() => READY);
+    renderDetail();
+    await loaded();
+    const before = handoverReads();
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+
+    await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+    await act(async () => new Promise((r) => setTimeout(r, 50)));
+
+    expect(handoverReads()).toBe(before);
+    visibility.mockRestore();
+  });
+
+  it("names a task machines have spent every attempt on, instead of waiting", async () => {
+    serve({ ...selfAssigned, attemptsExhausted: true });
+    renderDetail();
+    await loaded();
+
+    expect(
+      within(screen.getByRole("complementary")).getByTestId("handover-notice").dataset.reason
+    ).toBe("attempts-exhausted");
+    expect(screen.queryByTestId("handover-waiting")).toBeNull();
+  });
+
+  // The endpoint failing must not take the task with it, and then the board is simply not judged
+  it("still opens the task when the readiness read fails, and judges only the task", async () => {
+    api.get.mockImplementation((url: string) => {
+      if (url === "/api/projects/TP/assignable-users") return Promise.resolve([]);
+      if (url.startsWith("/api/agent")) return Promise.resolve([]);
+      if (url.includes("/tasks/")) return Promise.resolve({ ...handedOver, ...selfAssigned });
+      if (url.includes("/sprints")) return Promise.resolve([]);
+      if (url === "/api/projects/TP/handover") return Promise.reject(new Error("boom"));
+      return Promise.resolve({ ...project, repositoryUrl: "", worker: { enabled: false } });
+    });
+    renderDetail();
+    await loaded();
+
+    expect(screen.queryByTestId("handover-notice")).toBeNull();
+    expect(screen.queryByTestId("handover-waiting")).toBeNull();
   });
 });
 

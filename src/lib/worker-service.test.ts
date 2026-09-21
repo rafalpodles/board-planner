@@ -24,6 +24,7 @@ vi.mock("@/models/grant", () => ({ Grant: { find: grantFind } }));
 
 const {
   assignmentsFor,
+  machineStateFor,
   catalogueFor,
   offersFor,
   lostCheckouts,
@@ -851,5 +852,136 @@ describe("an instance admin's lock on the project", () => {
 
     expect(verdictFor(worker(), unlocked, PROTOCOL_VERSION, now)).toEqual({ ok: true });
     expect(assignmentsFor(reported, [unlocked], [PROJECT_ID])).toHaveLength(1);
+  });
+});
+
+/**
+ * BP-727. What the task screen tells a reader about their own machines, for this board's repository
+ * only. Coarse on purpose: no name, no host, no time.
+ */
+describe("machineStateFor", () => {
+  const NOW = new Date("2026-09-21T12:00:00Z");
+  const board = { _id: "p1", repositoryUrl: "https://github.com/acme/orbit" };
+  const fresh = new Date(NOW.getTime() - 1000);
+  const old = new Date(NOW.getTime() - WORKER_STALE_MS - 1000);
+  const orbit = [{ remote: "git@github.com:acme/orbit.git", path: "/w/orbit" }];
+  const other = [{ remote: "git@github.com:acme/other.git", path: "/w/other" }];
+  const machine = (over: Record<string, unknown>) =>
+    ({ enabled: true, lastSeenAt: fresh, repos: orbit, ...over }) as never;
+  const state = (workers: unknown[]) => machineStateFor(workers as never[], board, NOW);
+
+  const issued = new Date(NOW.getTime() - 60_000);
+  const acked = new Date(NOW.getTime() - 30_000);
+  const commanded = (command: string, over: Record<string, unknown> = {}) =>
+    machine({ command, commandIssuedAt: issued, commandAckedAt: acked, ...over });
+  const preflight = (checks: { name: string; ok: boolean }[], ok = checks.every((c) => c.ok)) => ({
+    ok,
+    account: "",
+    checks: checks.map((c) => ({ ...c, detail: "/Users/ada/private path" })),
+    reportedAt: NOW,
+  });
+
+  it("is none with no machine at all", () => {
+    expect(state([])).toBe("none");
+  });
+
+  // A live machine that does not serve this repository cannot take this task
+  it("is none when the only live machine has no checkout of this repository", () => {
+    expect(state([machine({ repos: other })])).toBe("none");
+  });
+
+  it("is live when a machine with the checkout reported in recently", () => {
+    expect(state([machine({})])).toBe("live");
+  });
+
+  it("is stale when the machine with the checkout has not reported in", () => {
+    expect(state([machine({ lastSeenAt: old })])).toBe("stale");
+  });
+
+  it("is stale when the machine with the checkout is switched off", () => {
+    expect(state([machine({ enabled: false })])).toBe("stale");
+  });
+
+  it("is live when any one of several machines serves it", () => {
+    expect(state([machine({ lastSeenAt: old }), machine({ repos: other }), machine({})])).toBe("live");
+  });
+
+  it("is stale when the machine with the checkout is stale and the live one lacks it", () => {
+    expect(state([machine({ lastSeenAt: old }), machine({ repos: other })])).toBe("stale");
+  });
+
+  it("is none on a board that names no repository", () => {
+    expect(machineStateFor([machine({})], { _id: "p1", repositoryUrl: "" }, NOW)).toBe("none");
+  });
+
+  it("is paused when a pause was issued and the machine acknowledged it", () => {
+    expect(state([commanded("pause")])).toBe("paused");
+  });
+
+  // worker/src/commands.ts: stop aborts the run and pauses the loop, redelivered after a restart
+  it("is stopped when a stop was issued and the machine acknowledged it", () => {
+    expect(state([commanded("stop")])).toBe("stopped");
+  });
+
+  it.each(["pause", "stop"])("is still live while a %s is issued but not acknowledged", (command) => {
+    expect(state([machine({ command, commandIssuedAt: issued, commandAckedAt: null })])).toBe("live");
+    expect(state([commanded(command, { commandIssuedAt: acked, commandAckedAt: issued })])).toBe("live");
+  });
+
+  // "Newer than", as the fleet console reads it: an ack stamped at the issue time proves nothing
+  it("is still live when the acknowledgement is stamped exactly at the issue time", () => {
+    expect(state([commanded("pause", { commandIssuedAt: acked, commandAckedAt: acked })])).toBe("live");
+  });
+
+  it("is paused when an acknowledged pause has no issue time on record", () => {
+    expect(state([commanded("pause", { commandIssuedAt: null })])).toBe("paused");
+  });
+
+  it("is live again once resumed", () => {
+    expect(state([commanded("resume")])).toBe("live");
+  });
+
+  it("is failing when its sandbox check failed", () => {
+    expect(state([machine({ preflight: preflight([{ name: "git", ok: true }, { name: "sandbox", ok: false }]) })])).toBe(
+      "failing"
+    );
+  });
+
+  // Repository and quarantine checks may be another project's checkout; they do not stop this one
+  it("is live when only another check failed, such as another project's checkout", () => {
+    expect(
+      state([
+        machine({
+          preflight: preflight([
+            { name: "sandbox", ok: true },
+            { name: "checkout quarantined", ok: false },
+            { name: "gh", ok: false },
+          ]),
+        }),
+      ])
+    ).toBe("live");
+  });
+
+  it("is live when the report is not ok but names no failing check", () => {
+    expect(state([machine({ preflight: preflight([], false) })])).toBe("live");
+  });
+
+  it("is paused, not failing, when a paused machine's sandbox check also failed", () => {
+    expect(state([commanded("pause", { preflight: preflight([{ name: "sandbox", ok: false }]) })])).toBe(
+      "paused"
+    );
+  });
+
+  it("keeps the best machine when worse ones come after it", () => {
+    expect(state([machine({}), machine({ lastSeenAt: old })])).toBe("live");
+    expect(state([commanded("pause"), machine({ lastSeenAt: old })])).toBe("paused");
+  });
+
+  it("prefers a live machine over a paused one", () => {
+    expect(state([commanded("pause"), machine({})])).toBe("live");
+  });
+
+  it("is stale, not paused, when a paused machine has also stopped reporting in", () => {
+    expect(state([commanded("pause", { lastSeenAt: old })])).toBe("stale");
   });
 });

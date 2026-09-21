@@ -7,7 +7,13 @@ import { Task } from "@/models/task";
 import { Comment } from "@/models/comment";
 import { ActivityLog } from "@/models/activityLog";
 import { Notification } from "@/models/notification";
-import { toApiExecution, updateTask, taskPopulateFields, heldRunRefusal } from "@/lib/task-service";
+import {
+  toApiExecution,
+  updateTask,
+  taskPopulateFields,
+  heldRunRefusal,
+  MAX_EXECUTION_ATTEMPTS,
+} from "@/lib/task-service";
 import { severLinksToDeletedTask } from "@/lib/task-links";
 import { Project } from "@/models/project";
 import { Worker } from "@/models/worker";
@@ -62,6 +68,7 @@ export const GET = withProjectAccess(async (_request, { params, user }) => {
       }))
   );
 
+  taskObj.attemptsExhausted = (task.execution?.attempts ?? 0) >= MAX_EXECUTION_ATTEMPTS;
   taskObj.execution = toApiExecution(task.execution, await workerNamesFor([task.execution]));
   // Serialised rather than published raw: the stored record carries `patchSha256` and the
   // settlement attempt count, and the panel renders the liveness of the machine that holds the

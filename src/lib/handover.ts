@@ -8,8 +8,8 @@ import { PM_USERNAME } from "@/lib/pm/username";
  * say to somebody who chose an agent and watched nothing happen.
  *
  * Deliberately not a promise that a machine WILL take it. `claimNextTask`'s filter also weighs
- * open blockers, spent attempts, whether the project is enabled for workers, and whether the
- * assignee owns a live machine at all — none of which is on the task in front of the reader. So
+ * open blockers, spent attempts, and the project-level conditions `readinessGaps` judges
+ * (`src/lib/project-readiness.ts`) — none of which is on the task in front of the reader. So
  * `runs: true` means "nothing about this task's own hand-over is stopping it", and every `false`
  * is a definite no. Kept in step by hand: the filter runs inside MongoDB against every task at
  * once, and there is no shared expression the two could be written from.
@@ -20,13 +20,34 @@ export type HandoverReason =
   | "unassigned"
   | "assigner-unrecorded"
   | "assigned-by-someone-else"
-  | "pm-assigned-for-someone-else";
+  | "pm-assigned-for-someone-else"
+  | "blocked"
+  | "attempts-exhausted";
 
-export type Handover =
-  | { runs: true }
-  | { runs: false; reason: HandoverReason; by: string | null };
+export interface HandoverProblem {
+  reason: HandoverReason;
+  by: string | null;
+  /** For "blocked": the task numbers of the unfinished blockers */
+  blockers?: number[];
+}
 
-type Judged = Pick<ApiTask, "agent" | "assignee" | "assignedBy" | "pmAssignedFor" | "status">;
+export type Handover = { runs: true } | { runs: false; problems: HandoverProblem[] };
+
+type Judged = Pick<ApiTask, "agent" | "assignee" | "assignedBy" | "pmAssignedFor" | "status"> &
+  Partial<Pick<ApiTask, "blockedBy" | "attemptsExhausted">>;
+
+// Only blockers whose status arrived with them can be judged; a bare id says nothing either way
+function openBlockers(task: Judged, columns: AnyColumn[]): number[] {
+  return (task.blockedBy ?? [])
+    .filter(
+      (b) =>
+        b &&
+        typeof b === "object" &&
+        typeof b.status === "string" &&
+        columnFor({ columns }, b.status)?.role !== "done"
+    )
+    .map((b) => b.taskNumber);
+}
 
 /**
  * The id behind a reference the API may or may not have populated. Both shapes reach the browser:
@@ -64,25 +85,20 @@ function stillWaitingForApproval(columns: AnyColumn[], status: string): boolean 
   return role === undefined || AWAITING_APPROVAL.includes(role);
 }
 
-/**
- * @param columns the board's own columns, which carry the roles a claim is defined in terms of.
- * Omitted where the caller does not know them, and then this requirement is not judged.
- */
-export function handoverOf(task: Judged, columns?: AnyColumn[]): Handover {
-  if (!task.agent) return { runs: false, reason: "no-agent", by: null };
-  // The everyday false positive without it: pick an agent on a task still in the backlog, assign it
-  // to yourself, and every other requirement passes while no claim ever looks at that column.
-  if (columns && stillWaitingForApproval(columns, task.status)) {
-    return { runs: false, reason: "not-approved-yet", by: null };
-  }
+export function awaitingClaim(columns: AnyColumn[], status: string): boolean {
+  const role = columnFor({ columns }, status)?.role;
+  return role === "approved" || stillWaitingForApproval(columns, status);
+}
+
+function assigneeProblem(task: Judged): HandoverProblem | null {
   // Populate renders a reference to a deleted user as null, and typeof null is "object" — so this
   // has to test the value, not its type, or a deleted assigner reads as a live one.
-  if (!task.assignee) return { runs: false, reason: "unassigned", by: null };
+  if (!task.assignee) return { reason: "unassigned", by: null };
 
   const assigner = refIdOf(task.assignedBy);
   // Absent on every task assigned before BP-358, and deliberately never backfilled: the document
   // does not record whether that person handed it to themselves, and guessing would invent consent.
-  if (!assigner) return { runs: false, reason: "assigner-unrecorded", by: null };
+  if (!assigner) return { reason: "assigner-unrecorded", by: null };
 
   // The PM is not somebody else (BP-419): its assignment is a real hand-over and the claim takes
   // it, so saying "nothing will run this" here would contradict what the server does. Judged on the
@@ -93,11 +109,50 @@ export function handoverOf(task: Judged, columns?: AnyColumn[]): Handover {
     // The claim pairs the PM's hand-over with the person who asked for it, so this has to as well
     // — the dangerous direction is saying "it runs" about a task the server refuses.
     return refIdOf(task.pmAssignedFor) === String(task.assignee._id)
-      ? { runs: true }
-      : { runs: false, reason: "pm-assigned-for-someone-else", by: nameOf(task.assignedBy) };
+      ? null
+      : { reason: "pm-assigned-for-someone-else", by: nameOf(task.assignedBy) };
   }
   if (assigner !== String(task.assignee._id)) {
-    return { runs: false, reason: "assigned-by-someone-else", by: nameOf(task.assignedBy) };
+    return { reason: "assigned-by-someone-else", by: nameOf(task.assignedBy) };
   }
-  return { runs: true };
+  return null;
+}
+
+const FINAL: HandoverReason[] = ["no-agent", "attempts-exhausted"];
+
+/** The reason that stands alone, if there is one: with it, nothing about the board is worth listing */
+export function finalProblem(handover: Handover): HandoverProblem | null {
+  if (handover.runs) return null;
+  return FINAL.includes(handover.problems[0].reason) ? handover.problems[0] : null;
+}
+
+/**
+ * Every requirement the task fails at once, so fixing one does not merely reveal the next (BP-728).
+ * Two reasons stand alone instead: with no agent chosen a person is doing the task, and with its
+ * attempts spent no machine will take it again — either way the rest is moot.
+ *
+ * @param columns the board's own columns, which carry the roles a claim is defined in terms of.
+ * Omitted where the caller does not know them, and then this requirement is not judged.
+ */
+export function handoverOf(task: Judged, columns?: AnyColumn[]): Handover {
+  if (!task.agent) return { runs: false, problems: [{ reason: "no-agent", by: null }] };
+  // Nothing resets a task's attempts and the claim skips one that has spent them, so no other
+  // advice would make it run: the reason stands alone, like choosing no agent
+  if (task.attemptsExhausted) {
+    return { runs: false, problems: [{ reason: "attempts-exhausted", by: null }] };
+  }
+
+  const problems: HandoverProblem[] = [];
+  // The everyday false positive without it: pick an agent on a task still in the backlog, assign it
+  // to yourself, and every other requirement passes while no claim ever looks at that column.
+  if (columns && stillWaitingForApproval(columns, task.status)) {
+    problems.push({ reason: "not-approved-yet", by: null });
+  }
+  const assignee = assigneeProblem(task);
+  if (assignee) problems.push(assignee);
+  // The claim leaves a task with an unfinished blocker alone until that blocker reaches a done column
+  const blockers = columns ? openBlockers(task, columns) : [];
+  if (blockers.length > 0) problems.push({ reason: "blocked", by: null, blockers });
+
+  return problems.length === 0 ? { runs: true } : { runs: false, problems };
 }

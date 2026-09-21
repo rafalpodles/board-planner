@@ -4,6 +4,7 @@ import {
   brokenProblems,
   isRunnable,
   keysOf,
+  mergesWithoutAPerson,
   normaliseComposition,
   sequenceOf,
 } from "./agent-rules";
@@ -401,5 +402,27 @@ describe("composition entries", () => {
       "push",
       "pull-request",
     ]);
+  });
+});
+
+// BP-731. Derived from the sequence, not stored: an agent composed to merge is marked as such
+describe("mergesWithoutAPerson", () => {
+  it("is true for an agent whose sequence contains a Merge step", () => {
+    expect(
+      mergesWithoutAPerson({ delivery: [{ key: "push" }, { key: "pull-request" }, { key: "merge" }] })
+    ).toBe(true);
+  });
+
+  it("is false for one that stops at the pull request", () => {
+    expect(mergesWithoutAPerson({ delivery: [{ key: "push" }, { key: "pull-request" }] })).toBe(false);
+  });
+
+  // Stored before entries existed, and in any bucket: it is the sequence that merges, not delivery
+  it("reads the legacy bare-key shape too", () => {
+    expect(mergesWithoutAPerson({ verification: ["merge"] } as StoredComposition)).toBe(true);
+  });
+
+  it("is false for an absent composition", () => {
+    expect(mergesWithoutAPerson(undefined)).toBe(false);
   });
 });

@@ -7,7 +7,15 @@ import { taskPath } from "@/lib/urls";
 import { duplicatePayload } from "@/lib/task-duplicate";
 import { timeAgo } from "@/lib/time";
 import { useAuth } from "@/hooks/use-auth";
-import { ApiAgent, ApiProject, ApiSprint, ApiTask, ApiUserSummary, RunConflict } from "@/types";
+import {
+  ApiAgent,
+  ApiHandoverReadiness,
+  ApiProject,
+  ApiSprint,
+  ApiTask,
+  ApiUserSummary,
+  RunConflict,
+} from "@/types";
 import { useStore } from "@/app/(app)/agents/store";
 import { effectiveColumns } from "@/lib/columns";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -60,6 +68,7 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
   const [task, setTask] = useState<ApiTask | null>(null);
   const [project, setProject] = useState<ApiProject | null>(null);
   const [sprints, setSprints] = useState<ApiSprint[]>([]);
+  const [readiness, setReadiness] = useState<ApiHandoverReadiness | null>(null);
   const { allAgents: agents } = useStore();
   const [users, setUsers] = useState<ApiUserSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -77,14 +86,16 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
 
   const loadData = useCallback(async () => {
     try {
-      const [t, p, s] = await Promise.all([
+      const [t, p, s, r] = await Promise.all([
         api.get(`/api/projects/${projectId}/tasks/${taskId}`),
         api.get(`/api/projects/${projectId}`),
         api.get(`/api/projects/${projectId}/sprints`),
+        api.get(`/api/projects/${projectId}/handover`).catch(() => null),
       ]);
       setTask(t);
       setProject(p);
       setSprints(s);
+      setReadiness(r ?? null);
       setRefusal(null);
       shown.current = true;
       onLoaded?.(t, p);
@@ -110,6 +121,30 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
       .get(`/api/projects/${projectId}/assignable-users`)
       .then(setUsers)
       .catch(() => setUsers([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+
+  // Connecting or resuming a machine happens in another window; coming back should show it
+  useEffect(() => {
+    // Coming back to the tab fires both events; one read answers both
+    let inFlight = false;
+    function reread() {
+      if (document.visibilityState === "hidden" || inFlight) return;
+      inFlight = true;
+      api
+        .get(`/api/projects/${projectId}/handover`)
+        .then(setReadiness)
+        .catch(() => {})
+        .finally(() => {
+          inFlight = false;
+        });
+    }
+    window.addEventListener("focus", reread);
+    document.addEventListener("visibilitychange", reread);
+    return () => {
+      window.removeEventListener("focus", reread);
+      document.removeEventListener("visibilitychange", reread);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
@@ -155,6 +190,7 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
       sprints={sprints}
       agents={agents}
       users={users}
+      readiness={readiness}
       onClose={onClose}
       onReload={loadData}
       onTaskChange={setTask}
@@ -170,6 +206,7 @@ interface TaskDetailViewProps {
   sprints: ApiSprint[];
   agents: ApiAgent[];
   users: ApiUserSummary[];
+  readiness: ApiHandoverReadiness | null;
   onClose: () => void;
   onReload: () => void;
   onTaskChange: (updater: (prev: ApiTask | null) => ApiTask | null) => void;
@@ -183,6 +220,7 @@ function TaskDetailView({
   sprints,
   agents,
   users,
+  readiness,
   onClose,
   onReload,
   onTaskChange,
@@ -190,7 +228,7 @@ function TaskDetailView({
 }: TaskDetailViewProps) {
   const api = useApi();
   const openTask = useOpenTask();
-  const { user: currentUser } = useAuth();
+  const { user: currentUser, isAdmin } = useAuth();
   const { toast } = useToast();
 
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -510,6 +548,9 @@ function TaskDetailView({
               projectDefaultAgent={projectDefaultAgent}
               stored={task}
               columns={columns}
+              board={readiness}
+              projectKey={project.key}
+              viewerIsInstanceAdmin={isAdmin}
               onRepairAssigner={repairAssigner}
               currentUsername={currentUser?.username ?? null}
               categories={project.categories || []}
@@ -547,6 +588,9 @@ function TaskDetailView({
           projectDefaultAgent={projectDefaultAgent}
           stored={task}
           columns={columns}
+          board={readiness}
+          projectKey={project.key}
+          viewerIsInstanceAdmin={isAdmin}
           onRepairAssigner={repairAssigner}
           currentUsername={currentUser?.username ?? null}
           categories={project.categories || []}

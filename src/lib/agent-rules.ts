@@ -36,6 +36,12 @@ export function keysOf(composition: AgentComposition): string[] {
   return sequenceOf(composition).map((entry) => entry.key);
 }
 
+export const MERGE_STEP = "merge";
+
+export function mergesWithoutAPerson(composition?: StoredComposition | null): boolean {
+  return keysOf(normaliseComposition(composition)).includes(MERGE_STEP);
+}
+
 type Lookup = (key: string) => ApiAgentBlock | undefined;
 
 /**
@@ -79,7 +85,7 @@ export function agentProblems(composition: AgentComposition, lookup: Lookup): Pr
   const lastWriteAt = writesAt[writesAt.length - 1] ?? -1;
 
   const problems: Problem[] = [];
-  const mergeAt = firstAt("merge");
+  const mergeAt = firstAt(MERGE_STEP);
 
   if (mergeAt !== -1) {
     // Reviewed means reviewed *after the last thing that wrote*. A review sitting in an earlier
