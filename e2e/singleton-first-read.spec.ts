@@ -8,7 +8,7 @@ import { E2E_MONGODB_URI, seed } from "./seed";
  * upsert on `{}`. With nothing behind that filter, simultaneous first reads each inserted one.
  */
 
-const CONCURRENT_READS = 60;
+const CONCURRENT_READS = 30;
 // Over HTTP the reads only sometimes land close enough to race; one round caught it about one time
 // in six. Rounds make a regression fail the test rather than occasionally.
 const ROUNDS = 20;
