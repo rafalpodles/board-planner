@@ -1,5 +1,6 @@
 "use client";
 
+import { mayLeave } from "@/hooks/use-leave-guard";
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { isTaskPath, projectRefFromPathname } from "@/lib/urls";
@@ -80,7 +81,7 @@ export function useOpenTask() {
       const anotherBoard = !!here && !!there && here.toLowerCase() !== there.toLowerCase();
 
       if (isTaskPath(href) && (fromTaskPage || anotherBoard)) window.location.assign(href);
-      else router.push(href);
+      else if (mayLeave()) router.push(href);
     },
     [fromTaskPage, pathname, router]
   );

@@ -570,6 +570,7 @@ export function TaskForm({
             value={newChecklistItem}
             onChange={(e) => setNewChecklistItem(e.target.value)}
             placeholder="Add criterion"
+            aria-label="Add criterion"
             className="focus-ring flex-1 bg-bg-input border border-border rounded px-3 py-1.5 text-sm"
             onKeyDown={(e) => {
               if (e.key === "Enter" && newChecklistItem.trim()) {

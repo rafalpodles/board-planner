@@ -101,6 +101,9 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [loadFailure, setLoadFailure] = useState<unknown>(null);
+  // Which board last loaded. A refusal before that replaces the page, which says so itself; a
+  // refusal after it arrives on a poll over a board still on screen, and has to be said out loud.
+  const loadedFor = useRef<string | null>(null);
   const [showNewTask, setShowNewTask] = useState(false);
   const loadSeq = useRef(0);
   // Read after an await, where the render-time `scope` — and the `loadData` closed over it — are
@@ -214,13 +217,14 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
       setSprints(sprintList);
       setLoadError(false);
       setLoadFailure(null);
+      loadedFor.current = projectId;
     } catch (err) {
       if (seq !== loadSeq.current) return;
       setLoadError(true);
       setLoadFailure(err);
-      // A refusal is answered on the page itself; a toast repeating it on every poll says
-      // "something broke" about a board that is working exactly as intended.
-      if (boardLoadFailure(err, "This board").retryable) toast("Failed to load board data", "error");
+      const failure = boardLoadFailure(err, "This board");
+      if (failure.retryable) toast("Failed to load board data", "error");
+      else if (loadedFor.current === projectId) toast(failure.message, "error");
     } finally {
       if (seq === loadSeq.current) setLoading(false);
     }

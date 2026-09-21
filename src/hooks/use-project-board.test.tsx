@@ -491,3 +491,42 @@ describe("moving a task to another sprint", () => {
     await act(async () => release({}));
   });
 });
+
+describe("a board that refuses the reader", () => {
+  const refused = () => Object.assign(new Error("Forbidden"), { status: 403 });
+
+  // The page replaces itself with the refusal, so a toast on top of it would say it twice
+  it("says nothing extra when the board was never on screen", async () => {
+    api.get.mockRejectedValue(refused());
+    render(<Probe />);
+
+    await waitFor(() => expect(board.loadError).toBe(true));
+    expect(board.loadFailure).toMatchObject({ status: 403 });
+    expect(toast).not.toHaveBeenCalled();
+  });
+
+  // A grant withdrawn while the board is open comes back on a poll; the board stays on screen, so
+  // silence here would leave somebody working on a board they can no longer reach
+  it("says so when access goes away under a board already on screen", async () => {
+    await mounted();
+
+    api.get.mockRejectedValue(refused());
+    await act(async () => {
+      await board.reload();
+    });
+
+    expect(toast).toHaveBeenCalledWith("You do not have access to this board.", "error");
+  });
+
+  // The control: an outage still reads as one, whether or not the board was up
+  it("still reports an outage the way it always has", async () => {
+    await mounted();
+
+    api.get.mockRejectedValue(Object.assign(new Error("boom"), { status: 500 }));
+    await act(async () => {
+      await board.reload();
+    });
+
+    expect(toast).toHaveBeenCalledWith("Failed to load board data", "error");
+  });
+});

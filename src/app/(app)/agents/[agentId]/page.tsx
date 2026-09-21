@@ -231,12 +231,14 @@ export default function AgentDetailPage() {
                   }
                 }}
               >
-                {saved ? "Saved" : "Save"}
+                {saved && !unsaved ? "Saved" : "Save"}
               </Button>
             )}
-            {unsaved && !saved && (
+            {/* Mounted empty rather than inserted with its text: a live region that arrives
+                already filled is often not announced at all */}
+            {mayEdit && (
               <span role="status" className="text-[12px] text-warning">
-                Unsaved changes
+                {unsaved ? "Unsaved changes" : ""}
               </span>
             )}
           </>

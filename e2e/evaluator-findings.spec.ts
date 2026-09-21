@@ -178,7 +178,8 @@ test.describe("an agent with unsaved changes", () => {
       });
       await page.getByRole("link", { name: "Back" }).click();
       await expect.poll(() => asked).toContain("not saved");
-      await page.waitForTimeout(500);
+      // "Nothing navigated" is also true of a navigation still compiling on the dev server
+      await page.waitForTimeout(1_000);
       expect(new URL(page.url()).pathname).toBe(`/agents/${agentId}`);
       await expect(page.getByTestId("bucket-implementation")).toContainText("Implement");
     });
