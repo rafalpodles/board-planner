@@ -118,20 +118,22 @@ function assigneeProblem(task: Judged): HandoverProblem | null {
   return null;
 }
 
+const FINAL: HandoverReason[] = ["no-agent", "attempts-exhausted"];
+
+/** The reason that stands alone, if there is one: with it, nothing about the board is worth listing */
+export function finalProblem(handover: Handover): HandoverProblem | null {
+  if (handover.runs) return null;
+  return FINAL.includes(handover.problems[0].reason) ? handover.problems[0] : null;
+}
+
 /**
  * Every requirement the task fails at once, so fixing one does not merely reveal the next (BP-728).
- * With no agent chosen nothing else is reported: a person is doing the task, and the rest is moot.
+ * Two reasons stand alone instead: with no agent chosen a person is doing the task, and with its
+ * attempts spent no machine will take it again — either way the rest is moot.
  *
  * @param columns the board's own columns, which carry the roles a claim is defined in terms of.
  * Omitted where the caller does not know them, and then this requirement is not judged.
  */
-const FINAL: HandoverReason[] = ["no-agent", "attempts-exhausted"];
-
-/** A reason that stands alone: with it, nothing about the board is worth listing */
-export function isFinal(handover: Handover): boolean {
-  return !handover.runs && FINAL.includes(handover.problems[0].reason);
-}
-
 export function handoverOf(task: Judged, columns?: AnyColumn[]): Handover {
   if (!task.agent) return { runs: false, problems: [{ reason: "no-agent", by: null }] };
   // Nothing resets a task's attempts and the claim skips one that has spent them, so no other

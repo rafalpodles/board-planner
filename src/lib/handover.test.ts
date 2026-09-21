@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { awaitingClaim, handoverOf, isFinal } from "./handover";
+import { awaitingClaim, finalProblem, handoverOf } from "./handover";
 import { ApiTask, ApiUser } from "@/types";
 import type { AnyColumn } from "@/lib/columns";
 
@@ -299,13 +299,16 @@ describe("handoverOf and spent attempts", () => {
   });
 });
 
-describe("isFinal", () => {
+describe("finalProblem", () => {
   it.each([
-    [{ runs: true }, false],
-    [{ runs: false, problems: [{ reason: "no-agent", by: null }] }, true],
-    [{ runs: false, problems: [{ reason: "attempts-exhausted", by: null }] }, true],
-    [{ runs: false, problems: [{ reason: "unassigned", by: null }] }, false],
-  ] as const)("judges %o as final: %s", (handover, expected) => {
-    expect(isFinal(handover as never)).toBe(expected);
+    [{ runs: true }, null],
+    [{ runs: false, problems: [{ reason: "no-agent", by: null }] }, { reason: "no-agent", by: null }],
+    [
+      { runs: false, problems: [{ reason: "attempts-exhausted", by: null }] },
+      { reason: "attempts-exhausted", by: null },
+    ],
+    [{ runs: false, problems: [{ reason: "unassigned", by: null }] }, null],
+  ] as const)("finds the reason that stands alone in %o", (handover, expected) => {
+    expect(finalProblem(handover as never)).toEqual(expected);
   });
 });

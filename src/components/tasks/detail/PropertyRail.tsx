@@ -32,7 +32,7 @@ import type { ApiAgent, ApiTask } from "@/types";
 import {
   awaitingClaim,
   handoverOf,
-  isFinal,
+  finalProblem,
   refIdOf,
   type Handover,
   type HandoverProblem,
@@ -253,8 +253,8 @@ function HandoverNotice({
   // repeating it as a warning would put a notice on almost every task on the board. Past the
   // approved column a machine has had its chance, and a run may be holding the task right now.
   if (!handover || !awaiting) return null;
-  if (!handover.runs && handover.problems[0].reason === "no-agent") return null;
-  const final = isFinal(handover);
+  const final = finalProblem(handover);
+  if (final?.reason === "no-agent") return null;
 
   const viewerIsAssignee = !!viewer && assignee?.username === viewer;
   const gaps =

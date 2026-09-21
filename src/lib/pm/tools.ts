@@ -15,7 +15,7 @@ import {
 import { OrToolDefinition } from "./openrouter";
 import { unknownParameterMessage, NOTHING_TO_CHANGE } from "@/lib/mcp/strict-input";
 import { buildBoardDigest } from "./board-review";
-import { handoverOf, isFinal, type HandoverProblem } from "@/lib/handover";
+import { finalProblem, handoverOf, type HandoverProblem } from "@/lib/handover";
 import { missingRolesText, readinessGaps, type ReadinessGap } from "@/lib/project-readiness";
 import { projectRepositoryUrl } from "@/lib/repository";
 import type { AnyColumn } from "@/lib/columns";
@@ -184,9 +184,8 @@ async function whyItWillNotRun(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handover = handoverOf(judged as any, columns);
   // No agent, or no attempts left: nothing about the board would change that
-  if (!handover.runs && isFinal(handover)) {
-    return whyThisProblem(handover.problems[0], project.key);
-  }
+  const final = finalProblem(handover);
+  if (final) return whyThisProblem(final, project.key);
   const reasons = [
     ...(handover.runs ? [] : handover.problems.map((p) => whyThisProblem(p, project.key))),
     ...readinessGaps({
