@@ -107,11 +107,18 @@ test.describe("a member's own task, as the board changes under it", () => {
     await expect(notice(page)).toHaveAttribute("data-reason", "no-machine");
 
     await seedMachine("git@github.com:e2e/handover-board.git");
+    // The whole task is reloaded now and then on its own, which also reads /handover; the focus
+    // re-read is the one that reads /handover and nothing else
+    const reads: string[] = [];
+    page.on("request", (req) => {
+      if (req.method() === "GET" && req.url().includes("/api/")) reads.push(new URL(req.url()).pathname);
+    });
     const reread = page.waitForResponse(
       (res) => res.url().endsWith("/handover") && res.request().method() === "GET"
     );
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
     await reread;
+    expect(reads.filter((p) => p.includes(`/tasks/${MEMBER_HANDOVER_TASK_NUMBER}`))).toEqual([]);
 
     await expect(waiting(page)).toHaveText("Waiting for your machine to take it.", { timeout: 1_000 });
   });
