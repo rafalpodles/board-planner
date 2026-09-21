@@ -5,6 +5,7 @@ import { matchProjects, toHits, groupOf, sortByGroup } from "./use-search";
 import { SearchLayer } from "./SearchLayer";
 import { ApiProject, ApiTask } from "@/types";
 import { openLayerCount, registerLayer } from "@/lib/focus-trap";
+import { useLeaveGuard } from "@/hooks/use-leave-guard";
 
 function project(over: Partial<ApiProject> & { _id: string; key: string }): ApiProject {
   return { name: `Project ${over.key}`, icon: "📋", ...over } as ApiProject;
@@ -482,6 +483,26 @@ describe("SearchLayer", () => {
     act(() => press("Enter"));
     expect(push).toHaveBeenCalledWith("/projects/MOB");
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("stays open with the query kept when the reader decides not to leave unsaved work", async () => {
+    function Unsaved() {
+      useLeaveGuard(true, "Leave without saving?");
+      return null;
+    }
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    projectsState.projects = [{ _id: "p1", key: "MOB", name: "Mobile App", icon: "📱" }];
+    render(<Unsaved />);
+    const { onClose } = renderLayer();
+    const input = await act(async () => type("mobile"));
+    await waitFor(() => expect(screen.getByRole("option")).toBeTruthy());
+
+    act(() => press("Enter"));
+
+    expect(push).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(input.value).toBe("mobile");
+    confirm.mockRestore();
   });
 
   it("closes on Escape without navigating", async () => {
