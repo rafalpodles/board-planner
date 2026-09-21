@@ -76,6 +76,9 @@ export function useTaskEditor(projectId: string, task: ApiTask) {
   // Why the last save was refused. `use-api` puts the server's own message on the Error, and a
   // refusal a person can act on — "Title is required" — is the whole difference from "Save failed".
   const [autoSaveError, setAutoSaveError] = useState<string | null>(null);
+  // Counts accepted writes. Every one of them may have written a history row, and the state above
+  // reads "saved" across consecutive saves, so it cannot tell the history panel that another landed.
+  const [savedCount, setSavedCount] = useState(0);
 
   // What the server last told us each field holds. A field counts as edited only when it
   // differs from this, and auto-save sends edited fields alone — so a concurrent change to
@@ -120,6 +123,7 @@ export function useTaskEditor(projectId: string, task: ApiTask) {
         serverValues.current = { ...serverValues.current, ...edited };
         setAutoSaveError(null);
         setAutoSaveState("saved");
+        setSavedCount((n) => n + 1);
         emitBoardRefresh(projectId);
       } catch (err) {
         setAutoSaveError(err instanceof Error && err.message ? err.message : null);
@@ -190,5 +194,5 @@ export function useTaskEditor(projectId: string, task: ApiTask) {
     [persist]
   );
 
-  return { draft, set, autoSaveState, autoSaveError, retry, resend };
+  return { draft, set, autoSaveState, autoSaveError, retry, resend, savedCount };
 }

@@ -1258,7 +1258,9 @@ export async function updateTask(
   const activities: Promise<void>[] = [];
   // "agent" is on this list because it is the field that decides what runs on somebody's machine.
   // Without it there is no answer to "who pointed the machine at that prompt" (BP-345).
-  const trackFields = ["title", "priority", "category", "status", "agent"];
+  // "description" because the history panel promises what a task said before, and the description
+  // is most of what a task says: without it an audit trail could not answer the question it exists for.
+  const trackFields = ["title", "description", "priority", "category", "status", "agent"];
   for (const field of trackFields) {
     // Through refId, not String(): `oldTask` is lean and holds a raw ObjectId while `task` comes
     // back with `agent` populated, and String() on a populated document is its inspect output —
