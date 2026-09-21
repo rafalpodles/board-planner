@@ -32,8 +32,13 @@ const READY_BOARD = {
 };
 const SOUND = { taskNumber: 9, agent: "a1", status: "todo", assignee: OWNER, assignedBy: OWNER };
 
+// Honours the projection, so a field the tool forgets to select is absent here too
 function board(over: Record<string, unknown> = {}) {
-  projectFindById.mockReturnValue({ lean: async () => ({ ...READY_BOARD, ...over }) });
+  projectFindById.mockImplementation((_id: string, projection: string) => {
+    const keep = new Set(projection.split(/\s+/));
+    const doc = { ...READY_BOARD, ...over } as Record<string, unknown>;
+    return { lean: async () => Object.fromEntries(Object.entries(doc).filter(([k]) => keep.has(k))) };
+  });
 }
 
 async function assign(task: Record<string, unknown> = {}) {
