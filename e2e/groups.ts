@@ -143,6 +143,8 @@ export const GROUPS = {
     "pm-mcp-connections.spec.ts",
     "pm-what-a-turn-costs.spec.ts",
     "pm-mcp-tool-picker.spec.ts",
+    "pm-mcp-oauth.spec.ts",
+    "pm-settings-and-history.spec.ts",
     "stub-survives-a-throw.spec.ts",
     "select-has-a-name.spec.ts",
     "rows-announce-apart.spec.ts",

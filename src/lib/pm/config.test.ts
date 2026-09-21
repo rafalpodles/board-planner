@@ -8,6 +8,7 @@ vi.mock("@/lib/encryption", () => ({
 vi.mock("@/lib/url-validation", () => ({ isAllowedMcpServerUrl: () => true }));
 
 const { mergeMcpServerTokens, validatePmConfig } = await import("./config");
+const { Project } = await import("@/models/project");
 
 function server(overrides: Record<string, unknown> = {}) {
   return {
@@ -188,6 +189,76 @@ describe("mergeMcpServerTokens and moved OAuth credentials", () => {
       expect(result.value[0].oauth?.clientId).toBe("client-1");
       expect(result.value[0].oauth?.status).toBe("connected");
     }
+  });
+});
+
+// BP-707. The PUT hands the merge the project as loaded, so `prior.oauth` is a Mongoose
+// subdocument, and what matters is what the update then writes — not what the merge returned.
+describe("mergeMcpServerTokens against a stored project", () => {
+  const connected = {
+    clientId: "old-client",
+    clientSecret: "enc:old-secret",
+    accessToken: "enc:old-access",
+    refreshToken: "enc:old-refresh",
+    expiresAt: new Date("2030-01-01T00:00:00Z"),
+    status: "connected",
+  };
+
+  function writtenOauth(
+    typed: Record<string, unknown>,
+    stored: Record<string, unknown> = { clientId: "mistyped", clientSecret: "enc:mistyped", status: "unconfigured" }
+  ) {
+    const project = Project.hydrate({
+      _id: "e2e00000000000000000c001",
+      name: "p",
+      key: "P",
+      pm: {
+        mcpServers: [
+          server({ authType: "oauth", oauth: stored }),
+        ],
+      },
+    });
+    const result = mergeMcpServerTokens([server({ authType: "oauth", ...typed })], project.pm!.mcpServers);
+    if (!result.valid) throw new Error(result.error);
+    const query = Project.findByIdAndUpdate(project._id, { pm: { mcpServers: result.value } });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const cast = (query as any)._castUpdate((query as any)._update);
+    return cast.$set.pm.mcpServers[0].oauth;
+  }
+
+  it("writes a client id and secret typed over stored ones", () => {
+    expect(writtenOauth({ oauthClientId: "typed-client", oauthClientSecret: "typed-secret" })).toMatchObject({
+      clientId: "typed-client",
+      clientSecret: "enc:typed-secret",
+    });
+  });
+
+  it("keeps the stored ones when nothing is typed", () => {
+    expect(writtenOauth({})).toMatchObject({ clientId: "mistyped", clientSecret: "enc:mistyped" });
+  });
+
+  it("gives a different client id typed without a secret none of the old client's secret or tokens", () => {
+    expect(writtenOauth({ oauthClientId: "new-client" }, connected)).toMatchObject({
+      clientId: "new-client",
+      clientSecret: "",
+      accessToken: "",
+      refreshToken: "",
+      expiresAt: null,
+      status: "unconfigured",
+    });
+  });
+
+  it("keeps a secret typed in the same save as the new client id", () => {
+    expect(writtenOauth({ oauthClientId: "new-client", oauthClientSecret: "new-secret" }, connected)).toMatchObject({
+      clientId: "new-client",
+      clientSecret: "enc:new-secret",
+      accessToken: "",
+      status: "unconfigured",
+    });
+  });
+
+  it("keeps the connection when the page posts the stored client id back", () => {
+    expect(writtenOauth({ oauthClientId: "old-client" }, connected)).toMatchObject(connected);
   });
 });
 
