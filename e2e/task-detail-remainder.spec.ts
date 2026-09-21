@@ -233,11 +233,16 @@ test.describe("dependency types beyond blocked_by", () => {
     await page.goto(taskUrl(DECOY_TASK_NUMBER));
     await page.getByRole("button", { name: "+ Add dependency" }).click();
     await page.getByLabel("Link type").selectOption("relates");
+    // The list loads from an effect keyed on the picker opening. Proven loaded BEFORE filtering to
+    // absence, or an empty result would just as well mean the fetch had not resolved yet — a
+    // `toHaveCount(0)` right after opening the picker passes on that alone (e2e.md).
+    await expect(page.getByRole("button", { name: new RegExp(FINISHED_TASK_TITLE) })).toBeVisible();
+
     await page.getByLabel("Search tasks to link").fill("Free to move");
     await expect(page.getByRole("button", { name: /Free to move/ })).toHaveCount(0);
 
-    // The control: clearing the search still finds a genuinely unrelated task, so the empty
-    // result above is the exclusion working and not a picker that lists nobody at all.
+    // The control: clearing the search still finds that same, genuinely unrelated task, so the
+    // empty result above is the exclusion working and not a picker that lists nobody at all.
     await page.getByLabel("Search tasks to link").fill("");
     await expect(page.getByRole("button", { name: new RegExp(FINISHED_TASK_TITLE) })).toBeVisible();
   });
