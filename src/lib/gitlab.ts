@@ -30,7 +30,7 @@ export async function fetchMergeRequests(
   );
   if (!res.ok) {
     await logUpstreamFailure("GitLab", res);
-    throw new Error(`GitLab API `);
+    throw new Error(`GitLab answered ${res.status}`);
   }
   return readBoundedJson(res, MAX_RESPONSE_BYTES);
 }
@@ -91,6 +91,7 @@ interface GitLabCommitHit {
   id: string;
   short_id: string;
   title: string;
+  message?: string;
   author_name: string;
   created_at: string;
 }
@@ -110,7 +111,7 @@ async function gitlabGet<T>(url: string, token: string): Promise<T> {
   );
   if (!res.ok) {
     await logUpstreamFailure("GitLab", res);
-    throw new Error(`GitLab API `);
+    throw new Error(`GitLab answered ${res.status}`);
   }
   return readBoundedJson(res, MAX_RESPONSE_BYTES);
 }
@@ -147,14 +148,18 @@ export async function fetchTaskCommits(
     `${apiBase(host, projectPath)}/search?scope=commits&search=${encodeURIComponent(taskKey)}`,
     token
   );
+  // GitLab's search matches substrings, so "GL-3" also finds GL-30's commits
+  const pattern = taskKeyPattern(taskKey);
   const webBase = `${host.replace(/\/+$/, "")}/${projectPath}/-/commit`;
-  return hits.map((c) => ({
-    shortId: c.short_id,
-    title: c.title,
-    authorName: c.author_name,
-    url: `${webBase}/${c.id}`,
-    createdAt: c.created_at ? new Date(c.created_at) : null,
-  }));
+  return hits
+    .filter((c) => pattern.test(c.message ?? c.title))
+    .map((c) => ({
+      shortId: c.short_id,
+      title: c.title,
+      authorName: c.author_name,
+      url: `${webBase}/${c.id}`,
+      createdAt: c.created_at ? new Date(c.created_at) : null,
+    }));
 }
 
 // "CP-5" also matches "cp-5/slug" and "CP 5". Split on the LAST hyphen so a

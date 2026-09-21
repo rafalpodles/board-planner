@@ -11,7 +11,8 @@ import { readBody, serve } from "./stub-guard.mjs";
  *   token         — the PRIVATE-TOKEN it accepts; a missing or different one is a 401
  *   mergeRequests — what `/merge_requests` answers
  *   branches      — what `/repository/branches` answers
- *   commits       — what `/search?scope=commits` searches, by title, for the `search` parameter
+ *   commits       — what `/search?scope=commits` searches for the `search` parameter, by
+ *                   substring of the message as GitLab does, so `GL-3` also finds `GL-30`
  *   fail          — any of "mergeRequests", "branches", "commits": that endpoint answers 500
  *
  * `GET /asked` returns `{ path, search, token }` for every API request since the last reset.
@@ -110,7 +111,9 @@ serve({
       const search = (searchParams.get("search") ?? "").toLowerCase();
       json(
         res,
-        fixture.commits.filter((c) => search && c.title.toLowerCase().includes(search))
+        fixture.commits.filter(
+          (c) => search && (c.message ?? c.title).toLowerCase().includes(search)
+        )
       );
       return;
     }

@@ -38,6 +38,15 @@ const COMMIT = {
   author_name: "Ada Lovelace",
   created_at: "2026-08-01T10:00:00Z",
 };
+// Found by GitLab's substring search for GL-3, and not GL-3's
+const LONGER_KEY_COMMIT = {
+  id: "0123456789abcdef0123456789abcdef01234567",
+  short_id: "01234567",
+  title: `${GITLAB_PROJECT_KEY}-30 another task`,
+  message: `${GITLAB_PROJECT_KEY}-30 another task`,
+  author_name: "Grace Hopper",
+  created_at: "2026-08-01T10:00:00Z",
+};
 const UNRELATED_COMMIT = {
   id: "ffffeeeeddddccccbbbbaaaa9999888877776666",
   short_id: "ffffeeee",
@@ -80,7 +89,7 @@ test.describe("GitLab activity on a task", () => {
   test("lists the branches and commits that carry the task's key", async ({ page, request }) => {
     await stub(request, {
       branches: [BRANCH, OTHER_BRANCH, { ...BRANCH, name: "main", web_url: `${WEB}/-/tree/main` }],
-      commits: [COMMIT, UNRELATED_COMMIT],
+      commits: [COMMIT, LONGER_KEY_COMMIT, UNRELATED_COMMIT],
     });
     await signIn(page);
 
@@ -101,6 +110,14 @@ test.describe("GitLab activity on a task", () => {
     await expect(panel.getByText(OTHER_BRANCH.name)).toHaveCount(0);
     await expect(panel.getByText("main", { exact: true })).toHaveCount(0);
     await expect(panel.getByText(UNRELATED_COMMIT.title)).toHaveCount(0);
+    await expect(panel.getByText(LONGER_KEY_COMMIT.title)).toHaveCount(0);
+    const served = await request.get(
+      `${GITLAB_STUB_URL}/api/v4/projects/${encodeURIComponent(GITLAB_REPO)}/search?scope=commits&search=${GITLAB_TASK_KEY}`,
+      { headers: { "PRIVATE-TOKEN": GITLAB_TOKEN } }
+    );
+    expect((await served.json()).map((c: { title: string }) => c.title)).toContain(
+      LONGER_KEY_COMMIT.title
+    );
     await expect(panel.getByText(/Could not load/)).toHaveCount(0);
 
     // The stored token is sealed; the stub refuses anything but the plaintext, so this is the

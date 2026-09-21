@@ -267,3 +267,63 @@ describe("the loopback carve-out that lets e2e/gitlab-stub.mjs be reached", () =
     }
   });
 });
+
+describe("fetchTaskCommits — which commit belongs to a task", () => {
+  const hit = (title: string, message?: string) => ({
+    id: `${title}-sha`,
+    short_id: title.slice(0, 8),
+    title,
+    ...(message === undefined ? {} : { message }),
+    author_name: "Ada",
+    created_at: "2026-08-01T00:00:00Z",
+  });
+
+  const answering = (hits: ReturnType<typeof hit>[]) =>
+    safeFetch.mockResolvedValue(new Response(JSON.stringify(hits), { status: 200 }));
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("keeps the task's own commit and drops a longer number the search matched as a substring", async () => {
+    answering([hit("GL-3: fix"), hit("GL-30: other")]);
+
+    const commits = await fetchTaskCommits("https://gitlab.com", "g/p", "token", "GL-3");
+
+    expect(commits.map((c) => c.title)).toEqual(["GL-3: fix"]);
+  });
+
+  it("counts a key that appears only in the commit body", async () => {
+    answering([hit("fix the header", "fix the header\n\nRefs GL-3"), hit("GL-30 other", "GL-30 other")]);
+
+    const commits = await fetchTaskCommits("https://gitlab.com", "g/p", "token", "GL-3");
+
+    expect(commits.map((c) => c.title)).toEqual(["fix the header"]);
+  });
+});
+
+describe("a refused GitLab request", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    safeFetch.mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ message: "secret upstream detail" }), { status: 403 })
+      )
+    );
+  });
+
+  it("names the status and not the body, for merge requests", async () => {
+    await expect(fetchMergeRequests("https://gitlab.com", "g/p", "token")).rejects.toThrow(
+      /^GitLab answered 403$/
+    );
+  });
+
+  it("names the status and not the body, for branches and commits", async () => {
+    await expect(fetchTaskBranches("https://gitlab.com", "g/p", "token", "GL-3")).rejects.toThrow(
+      /^GitLab answered 403$/
+    );
+    await expect(fetchTaskCommits("https://gitlab.com", "g/p", "token", "GL-3")).rejects.toThrow(
+      /^GitLab answered 403$/
+    );
+  });
+});
