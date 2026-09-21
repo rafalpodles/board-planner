@@ -93,7 +93,6 @@ export function withAdmin(handler: AuthenticatedHandler) {
 export function withEntitlement(feature: FeatureKey) {
   return (handler: AuthenticatedHandler) =>
     withAuth(async (request, context) => {
-      await connectDB();
       const tenant = await getTenant();
       if (!can(tenant, feature)) {
         return NextResponse.json(

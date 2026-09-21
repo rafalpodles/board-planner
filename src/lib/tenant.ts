@@ -2,10 +2,11 @@ import { cache } from "react";
 import { connectDB } from "./db";
 import { Tenant, ITenant } from "@/models/tenant";
 
-// Same idea as connectDB's cache, one layer up: within a single request, every caller shares
-// one read instead of each paying its own round trip. React's cache() only dedupes inside a
-// request's render/handler lifecycle — a fresh request (or a plain function call outside one,
-// as in a unit test) always reads through.
+// React's cache() only dedupes calls made during a Server Component render — confirmed against
+// this app's own Next config (Route Handlers run the handler as a plain function, with no render
+// dispatcher active), so the two current callers, withEntitlement and GET /api/entitlements, each
+// still pay their own query; a future Server Component reading tenant/plan data would share one.
+// Kept anyway: it costs nothing where it doesn't apply, and is correct where it does.
 export const getTenant = cache(async (): Promise<ITenant> => {
   await connectDB();
   return Tenant.findOneAndUpdate(

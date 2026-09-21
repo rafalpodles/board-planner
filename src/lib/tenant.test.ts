@@ -32,16 +32,20 @@ describe("getTenant", () => {
     expect(tenant.entitlements).toEqual({ plan: "free", features: [], source: "none" });
   });
 
-  it("a second read resolves to the same document the upsert already created", async () => {
-    // findOneAndUpdate with $setOnInsert is idempotent: once the singleton exists, every
-    // further call matches the same {} filter and returns that document untouched.
+  it("issues the exact same idempotent upsert on a second read, not a differently-shaped write", async () => {
+    // What actually makes a second read safe is that every call sends the identical {} filter
+    // and $setOnInsert — a mocked model returns whatever it's told to regardless of arguments,
+    // so asserting only the resolved value here would pass even for a second call that switched
+    // to Tenant.create() or changed the filter, either of which would create a second document
+    // against a real Mongo.
     const existing = { _id: "tenant-1", entitlements: { plan: "pro", features: [], source: "service" } };
     findOneAndUpdate.mockResolvedValue(existing);
 
-    const first = await getTenant();
-    const second = await getTenant();
+    await getTenant();
+    await getTenant();
 
-    expect(first._id).toBe("tenant-1");
-    expect(second._id).toBe(first._id);
+    expect(findOneAndUpdate).toHaveBeenCalledTimes(2);
+    const [firstCall, secondCall] = findOneAndUpdate.mock.calls;
+    expect(secondCall).toEqual(firstCall);
   });
 });
