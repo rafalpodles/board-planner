@@ -260,6 +260,37 @@ describe("mergeMcpServerTokens against a stored project", () => {
   it("keeps the connection when the page posts the stored client id back", () => {
     expect(writtenOauth({ oauthClientId: "old-client" }, connected)).toMatchObject(connected);
   });
+
+  // BP-751: the start route only auto-replaces a client whose `clientSource` says this app
+  // registered it. A client the admin typed here must be marked "typed" the moment it is written,
+  // or the very next callback-address change would silently discard it.
+  describe("and what it records about where the client id came from", () => {
+    it("marks a newly typed client id as typed", () => {
+      expect(writtenOauth({ oauthClientId: "typed-client", oauthClientSecret: "typed-secret" })).toMatchObject({
+        clientSource: "typed",
+      });
+    });
+
+    it("marks a client id typed to replace a connected one as typed too", () => {
+      expect(writtenOauth({ oauthClientId: "new-client" }, connected)).toMatchObject({
+        clientSource: "typed",
+      });
+    });
+
+    it("leaves clientSource alone when nothing is typed", () => {
+      expect(writtenOauth({})).toMatchObject({ clientSource: "" });
+    });
+
+    it("leaves clientSource alone when the page echoes the stored client id back unchanged", () => {
+      expect(writtenOauth({ oauthClientId: "old-client" }, connected)).toMatchObject({ clientSource: "" });
+    });
+
+    it("does not silently mark a real dynamic registration as typed", () => {
+      expect(
+        writtenOauth({}, { ...connected, clientSource: "registered" })
+      ).toMatchObject({ clientSource: "registered" });
+    });
+  });
 });
 
 /**

@@ -44,16 +44,31 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const oauth: any = server.oauth ?? {};
 
-  // The app's public URL changed since registration (e.g. localhost → production):
-  // a dynamically registered client is bound to the old callback, so re-register.
-  // Covers legacy registrations too, where oauth.redirectUri was never stored.
-  if (oauth.clientId && oauth.registrationEndpoint && oauth.redirectUri !== redirectUri) {
-    oauth.clientId = "";
-    oauth.clientSecret = "";
-    oauth.accessToken = "";
-    oauth.refreshToken = "";
-    oauth.expiresAt = null;
-    oauth.status = "unconfigured";
+  // The app's public URL changed since registration (e.g. localhost → production): a dynamically
+  // registered client is bound to the old callback, so re-register. Only for a client this app
+  // registered itself — `clientSource` is unset for every record predating it (including a legacy
+  // one whose `redirectUri` was never stored, so it always differs here) and treated the same as
+  // "typed": a client the admin typed by hand is registered with the provider under the OLD
+  // callback by the admin, not by us, and silently discarding it (registering a fresh one nobody
+  // asked for, without a word) replaced a credential the admin owns with one the provider has
+  // never heard of (BP-751).
+  if (oauth.clientId && oauth.redirectUri !== redirectUri) {
+    if (oauth.clientSource === "registered" && oauth.registrationEndpoint) {
+      oauth.clientId = "";
+      oauth.clientSecret = "";
+      oauth.clientSource = "";
+      oauth.accessToken = "";
+      oauth.refreshToken = "";
+      oauth.expiresAt = null;
+      oauth.status = "unconfigured";
+    } else {
+      return NextResponse.json(
+        {
+          error: `This connection's callback address changed to ${redirectUri}. Register that address with the provider for this client, then update it here — a client id not obtained through dynamic registration here is never replaced automatically.`,
+        },
+        { status: 400 }
+      );
+    }
   }
 
   try {
@@ -76,6 +91,7 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
       const registered = await registerClient(oauth.registrationEndpoint, redirectUri);
       oauth.clientId = registered.clientId;
       oauth.clientSecret = registered.clientSecret ? encryptSecret(registered.clientSecret) : "";
+      oauth.clientSource = "registered";
       if (registered.clientSecret) oauth.tokenAuthMethod = "client_secret_basic";
     }
   } catch (err) {

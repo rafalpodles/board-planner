@@ -198,6 +198,7 @@ export function validatePmConfig(
 const EMPTY_OAUTH = {
   clientId: "",
   clientSecret: "",
+  clientSource: "" as const,
   authorizationEndpoint: "",
   tokenEndpoint: "",
   registrationEndpoint: "",
@@ -212,6 +213,7 @@ const EMPTY_OAUTH = {
 
 const EMPTY_OAUTH_CLIENT = {
   clientSecret: "",
+  clientSource: "typed" as const,
   accessToken: "",
   refreshToken: "",
   expiresAt: null,
