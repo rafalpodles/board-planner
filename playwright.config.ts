@@ -183,7 +183,8 @@ function devServerEnv(origin: string) {
     // sheet's action row (BP-589); it mounts `POST /api/e2e/digest`, which runs a digest tick
     // with nothing authenticating it (`src/lib/e2e-only.ts`, BP-605); and it lets webhooks and
     // chat post to loopback (`WEBHOOK_DESTINATION`, BP-408). So this is not a variable to set on
-    // a deployment to quieten the indicator: outside a production build it opens both of those. Only here; a developer running `next dev` by hand keeps both.
+    // a deployment to quieten the indicator: outside a production build it opens both of those.
+    // Only here; a developer running `next dev` by hand gets none of the three.
     E2E: "1",
   };
 }

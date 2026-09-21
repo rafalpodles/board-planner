@@ -14,7 +14,7 @@ const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 export interface DestinationOptions {
   /**
    * Mirrors the carve-out `isAllowedMcpServerUrl` already makes for local MCP servers.
-   * Callers pass `process.env.NODE_ENV !== "production"`; nothing turns it on by itself.
+   * Never true in a production build: callers derive it from `allowLoopbackIn` or `e2eOnlyMounted`.
    */
   allowLoopback?: boolean;
 }
