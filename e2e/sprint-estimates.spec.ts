@@ -2,6 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import { ADMIN_AUTH } from "./api";
 import {
   ESTIMATE_DONE_NUMERIC_TASK_ID,
+  ESTIMATE_FIELD_ID,
   ESTIMATE_OPEN_STRING_TASK_ID,
   ESTIMATE_SPRINT_ID,
   ESTIMATE_SPRINT_NAME,
@@ -92,9 +93,18 @@ test("the sprint header reads the points done out of the points planned, and a m
   await expect(estimateProgress(page)).toHaveText("8/8 Points", { timeout: 1_000 });
 });
 
-test("the planning pane heads the sprint with its points, and taking a task out takes its points", async ({
+test("the planning pane heads the sprint with its points, and moving tasks in and out moves them", async ({
   page,
+  request,
 }) => {
+  const backlogTitle = "Estimated in the backlog";
+  const created = await request.post(`/api/projects/${PROJECT_ID}/tasks`, {
+    headers: ADMIN_AUTH,
+    data: { title: backlogTitle, customFieldValues: { [String(ESTIMATE_FIELD_ID)]: 2 } },
+  });
+  expect(created.status(), await created.text()).toBe(201);
+  const backlogTaskId = (await created.json())._id as string;
+
   await signIn(page);
   await page.goto(`${SPRINT_URL}&view=planning`);
 
@@ -102,28 +112,38 @@ test("the planning pane heads the sprint with its points, and taking a task out 
   await expect(heading).toHaveText(`${ESTIMATE_SPRINT_NAME} (4) · 8 Points`);
   await expect(estimateProgress(page)).toHaveText("5/8 Points");
 
-  // The board re-reads its sprints after the move, and that answer would carry the new total
-  // too. Held, it leaves the planning view's own list as the only source the header can use.
+  // The board re-reads its tasks and sprints after each move, and those answers would carry the
+  // new totals too. Held, they leave the planning view's own list as the only source — which is
+  // the one place a task pulled in from the backlog exists until the board catches up.
   await page.route(
-    (url) => url.pathname.endsWith("/sprints"),
+    (url) => /\/(sprints|tasks)$/.test(url.pathname),
     async (route) => {
       if (route.request().method() !== "GET") return route.fallback();
       await new Promise(() => {});
     }
   );
-  const removed = page.waitForResponse(
-    (r) =>
-      r.request().method() === "PUT" &&
-      r.url().endsWith(`/tasks/${ESTIMATE_DONE_NUMERIC_TASK_ID}`)
-  );
+  const sprintWrite = (taskId: string) =>
+    page.waitForResponse(
+      (r) => r.request().method() === "PUT" && r.url().endsWith(`/tasks/${taskId}`)
+    );
+
+  const added = sprintWrite(backlogTaskId);
+  await page
+    .getByTestId("planning-pane-backlog")
+    .getByRole("button", { name: `Add ${backlogTitle} to the sprint` })
+    .click();
+  expect((await added).status()).toBe(200);
+  await expect(heading).toHaveText(`${ESTIMATE_SPRINT_NAME} (5) · 10 Points`, { timeout: 1_000 });
+  await expect(estimateProgress(page)).toHaveText("5/10 Points", { timeout: 1_000 });
+
+  const removed = sprintWrite(String(ESTIMATE_DONE_NUMERIC_TASK_ID));
   await sprintPane(page)
     .getByRole("button", { name: "Remove Estimated and done from the sprint" })
     .click();
   expect((await removed).status()).toBe(200);
-
-  await expect(heading).toHaveText(`${ESTIMATE_SPRINT_NAME} (3) · 3 Points`, { timeout: 1_000 });
+  await expect(heading).toHaveText(`${ESTIMATE_SPRINT_NAME} (4) · 5 Points`, { timeout: 1_000 });
   // What is left done is the "TBD" task, worth nothing — not 5 carried over from the one removed
-  await expect(estimateProgress(page)).toHaveText("0/3 Points", { timeout: 1_000 });
+  await expect(estimateProgress(page)).toHaveText("0/5 Points", { timeout: 1_000 });
 });
 
 test("on a board with no Done column the header gives no points-done figure", async ({ page }) => {
