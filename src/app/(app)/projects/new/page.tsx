@@ -23,6 +23,13 @@ export default function NewProjectPage() {
   const router = useRouter();
   const { isAdmin, isLoading: authLoading } = useAuth();
   const { projects } = useProjects();
+  const takenKeys = projects.map((p) => p.key).join(",");
+
+  // The board list can arrive after the name was typed; a suggestion made without it could be taken
+  useEffect(() => {
+    if (!keyTyped) setKey(suggestProjectKey(name, takenKeys.split(",")));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [takenKeys]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -68,7 +75,7 @@ export default function NewProjectPage() {
           onChange={(e) => {
             setName(e.target.value);
             if (!keyTyped) {
-              setKey(suggestProjectKey(e.target.value, projects.map((p) => p.key)));
+              setKey(suggestProjectKey(e.target.value, takenKeys.split(",")));
             }
           }}
           placeholder="My Project"

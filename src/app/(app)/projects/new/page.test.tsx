@@ -128,6 +128,27 @@ describe("a key another board holds", () => {
     expect(keyField().value).toBe("ORB2");
   });
 
+  it("is stepped past when the board list arrives after the name was typed", () => {
+    const { rerender } = render(<NewProjectPage />);
+    fireEvent.change(nameField(), { target: { value: "Orbital" } });
+    expect(keyField().value).toBe("ORB");
+
+    projectsState.projects = [{ key: "ORB" }];
+    rerender(<NewProjectPage />);
+
+    expect(keyField().value).toBe("ORB2");
+  });
+
+  it("leaves a typed key alone when the board list arrives", () => {
+    const { rerender } = render(<NewProjectPage />);
+    fireEvent.change(keyField(), { target: { value: "ORB" } });
+
+    projectsState.projects = [{ key: "ORB" }];
+    rerender(<NewProjectPage />);
+
+    expect(keyField().value).toBe("ORB");
+  });
+
   it("is refused on the form in the server's words when it is typed anyway", async () => {
     api.post.mockRejectedValue(new Error("That key is already used by another board"));
     render(<NewProjectPage />);
