@@ -99,6 +99,7 @@ export const GROUPS = {
     "db-reconnect-leaks.spec.ts",
     "settings-fields-and-templates.spec.ts",
     "picker-search-announces.spec.ts",
+    "agent-block-editing.spec.ts",
   ],
   people: [
     "day-zero.spec.ts",
