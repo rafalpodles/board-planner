@@ -6,6 +6,7 @@ const getAuthUser = vi.fn();
 const check = vi.fn();
 const projectFindById = vi.fn();
 const projectFindOneAndUpdate = vi.fn();
+const projectExists = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({
@@ -14,7 +15,7 @@ vi.mock("@/lib/auth", () => ({
 }));
 vi.mock("@/lib/grants", () => ({ check }));
 vi.mock("@/models/project", () => ({
-  Project: { findById: projectFindById, findOneAndUpdate: projectFindOneAndUpdate },
+  Project: { findById: projectFindById, findOneAndUpdate: projectFindOneAndUpdate, exists: projectExists },
 }));
 
 const { GET, POST } = await import("./route");
@@ -72,6 +73,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   getAuthUser.mockResolvedValue(OWNER);
   check.mockResolvedValue(true);
+  // The ceiling-miss path re-checks this to tell "full" from "deleted out from under the
+  // request" apart (review) — true by default, since every existing scenario's project is there.
+  projectExists.mockResolvedValue(true);
   project([]);
 });
 
@@ -150,6 +154,18 @@ describe("POST /api/projects/:projectId/custom-fields", () => {
 
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: `Maximum ${MAX_FIELDS} custom fields per project` });
+  });
+
+  // A ceiling-filter miss also fires when the project was deleted between the earlier findById
+  // and this write — the two must not both read as "full" (review).
+  it("404s, not 400, when the project vanished between the read and the write", async () => {
+    projectAtTheCeiling();
+    projectExists.mockResolvedValue(false);
+
+    const res = await POST(request("POST", { name: "one too many", fieldType: "text" }), ctx());
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "Project not found" });
   });
 
   it(`still adds the ${MAX_FIELDS}th`, async () => {

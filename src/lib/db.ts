@@ -50,10 +50,13 @@ const SERVER_SELECTION_TIMEOUT_MS = 5_000;
 // Chosen against a measurement, not a guess: this app's heaviest real aggregations (the two under
 // /stats, the per-sprint rollup that runs on the board's poll) timed against 100,000 seeded tasks in
 // one project — far more than any project on this instance holds — on a local mongo:4.4 with no
-// other load. The slowest, the sprint rollup, took ~1.0 s; the rest well under that. 15 s leaves
-// roughly 15x headroom above that ceiling while still cutting the worst case by more than half.
-// Local and unloaded, not a production trace, so the margin is deliberately generous rather than
-// tight against the measured number.
+// other load. The slowest, the sprint rollup, took ~1.0 s; the rest well under that. Checked
+// separately (review): /api/projects' sidebar aggregate has no per-project bound at all for an
+// instance admin, since it matches every project's id — timed at up to 2,000,000 tasks spread
+// across 800 projects, an instance-wide total this deployment's own history is nowhere near, and
+// it stayed under 0.7 s. 15 s leaves well over 10x headroom above the slowest of either shape while
+// still cutting the worst case by more than half. Local and unloaded, not a production trace, so
+// the margin is deliberately generous rather than tight against either measured number.
 const SOCKET_TIMEOUT_MS = 15_000;
 
 // Inside this window a further attempt is not made at all: one caller pays the timeout and the rest

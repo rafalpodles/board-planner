@@ -633,6 +633,28 @@ describe("connectDB — a readyState that lied", () => {
     expect(connect).toHaveBeenCalledTimes(2);
   });
 
+  // The test above proves a bound exists and is at most 2s; this pins it to that value
+  // specifically, so a regression that shrank it — flapping the connection on ordinary
+  // event-loop jitter rather than only a truly dead ping — would not slip through unnoticed
+  // (review: mutation-tested this way, the looser test alone did not catch that).
+  it("waits the full 2 s for the ping before giving up, not less", async () => {
+    vi.useFakeTimers();
+    const { connectDB } = await freshModule();
+    connect.mockResolvedValue({ ok: true });
+    ping.mockImplementation(() => new Promise(() => {})); // never settles
+
+    await connectDB();
+    connection.readyState = 0;
+    const pending = connectDB();
+
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(connect).toHaveBeenCalledTimes(1); // still waiting on the ping
+
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(pending).resolves.toEqual({ ok: true });
+    expect(connect).toHaveBeenCalledTimes(2);
+  });
+
   // Async, unlike the promise-claim it mirrors: without a shared slot, two callers racing a burst
   // would each see readyState still 0 and each start their own ping and their own reconnect.
   it("shares one ping across a concurrent burst instead of starting one per caller", async () => {

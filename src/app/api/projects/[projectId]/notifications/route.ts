@@ -91,12 +91,16 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
     },
     { returnDocument: "after" }
   );
-  // The project was read a moment ago, so a miss here is the ceiling, not a vanished project.
   if (!updated) {
-    return NextResponse.json(
-      { error: `A project can have at most ${MAX_NOTIFICATION_CHANNELS} chat channels` },
-      { status: 400 }
-    );
+    // The project was read a moment ago, so ordinarily a miss here is the ceiling — but it can
+    // also mean the project was deleted in between, and the two answer differently (review).
+    if (await Project.exists({ _id: projectId })) {
+      return NextResponse.json(
+        { error: `A project can have at most ${MAX_NOTIFICATION_CHANNELS} chat channels` },
+        { status: 400 }
+      );
+    }
+    return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
   logProjectAudit(projectId, user._id, "settings_updated", `Notification channel added: ${name.trim()} (${type})`);

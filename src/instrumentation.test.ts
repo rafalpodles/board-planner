@@ -176,6 +176,28 @@ describe("register — a database that is down at boot", () => {
     expect(seedAgents).toHaveBeenCalledTimes(1);
   });
 
+  // The test above proves the retry happens within 30s; this pins it to that value specifically,
+  // so a regression that made it near-instant would not slip through unnoticed (review).
+  it("waits the full 30 s before retrying, not less", async () => {
+    vi.useFakeTimers();
+    process.env.NEXT_RUNTIME = "nodejs";
+    delete process.env.ENCRYPTION_KEY;
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { DatabaseUnavailableError } = await import("@/lib/db");
+    connectDB.mockImplementationOnce(() => Promise.reject(new DatabaseUnavailableError(new Error("down"))));
+    const { register } = await import("./instrumentation");
+
+    await register();
+    expect(connectDB).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(connectDB).toHaveBeenCalledTimes(1); // not yet
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(connectDB).toHaveBeenCalledTimes(2);
+  });
+
   // A plain misconfiguration (a malformed MONGODB_URI, say) will not come right by waiting —
   // retrying it forever would be silent log spam standing in for a fix only a person can make.
   it("does not retry a connection failure that is not a database outage", async () => {

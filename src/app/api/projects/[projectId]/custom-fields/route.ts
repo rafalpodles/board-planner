@@ -91,9 +91,13 @@ export const POST = withProjectAccess(async (request, { params }) => {
     },
     { returnDocument: "after" }
   );
-  // The project was read a moment ago, so a miss here is the ceiling, not a vanished project.
   if (!updated) {
-    return NextResponse.json({ error: `Maximum ${MAX_FIELDS} custom fields per project` }, { status: 400 });
+    // The project was read a moment ago, so ordinarily a miss here is the ceiling — but it can
+    // also mean the project was deleted in between, and the two answer differently (review).
+    if (await Project.exists({ _id: projectId })) {
+      return NextResponse.json({ error: `Maximum ${MAX_FIELDS} custom fields per project` }, { status: 400 });
+    }
+    return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
   return NextResponse.json(updated.customFields, { status: 201 });

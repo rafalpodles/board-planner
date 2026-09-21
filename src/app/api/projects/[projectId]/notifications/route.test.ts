@@ -6,10 +6,11 @@ process.env.ENCRYPTION_KEY = KEY;
 
 const findById = vi.fn();
 const findOneAndUpdate = vi.fn();
+const exists = vi.fn();
 const save = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
-vi.mock("@/models/project", () => ({ Project: { findById, findOneAndUpdate } }));
+vi.mock("@/models/project", () => ({ Project: { findById, findOneAndUpdate, exists } }));
 vi.mock("@/lib/projectAudit", () => ({ logProjectAudit: vi.fn() }));
 vi.mock("@/lib/project-secrets", () => ({ sanitizeProjectSecrets: (p: unknown) => p }));
 vi.mock("@/lib/middleware", () => ({
@@ -51,6 +52,9 @@ beforeEach(() => {
     toObject: () => ({ notificationChannels: project.notificationChannels }),
   };
   findById.mockResolvedValue(project);
+  // The ceiling-miss path re-checks this to tell "full" from "deleted out from under the
+  // request" apart (review) — true by default, since every existing scenario's project is there.
+  exists.mockResolvedValue(true);
   // The add is an atomic $push with the ceiling in its filter, so the stub applies the write
   // the way the database would — including refusing it once the array is full.
   findOneAndUpdate.mockImplementation(
@@ -211,6 +215,21 @@ describe("POST /api/projects/:projectId/notifications", () => {
 
     expect(res.status).toBe(400);
     expect(project.notificationChannels).toHaveLength(MAX_NOTIFICATION_CHANNELS);
+  });
+
+  // A ceiling-filter miss also fires when the project was deleted between the earlier findById
+  // and this write — the two must not both read as "full" (review).
+  it("404s, not 400, when the project vanished between the read and the write", async () => {
+    project.notificationChannels = Array.from({ length: MAX_NOTIFICATION_CHANNELS }, () => ({ ...channel }));
+    exists.mockResolvedValue(false);
+
+    const res = await POST(
+      request("POST", { type: "slack", name: "One more", webhookUrl: "https://hooks.slack.com/new" }),
+      ctx()
+    );
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "Project not found" });
   });
 
   it(`still adds the ${MAX_NOTIFICATION_CHANNELS}th`, async () => {
