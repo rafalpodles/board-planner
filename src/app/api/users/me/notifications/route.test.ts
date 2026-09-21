@@ -20,9 +20,12 @@ vi.mock("@/lib/encryption", () => ({
   encryptSecret: (v: string) => `enc:${v}`,
   isEncryptionConfigured: () => true,
 }));
+const DESTINATION = { allowLoopback: "the webhook destination" };
+const isAllowed = vi.fn((u: string, _o?: unknown) => u.startsWith("https://"));
 vi.mock("@/lib/url-validation", () => ({
-  WEBHOOK_DESTINATION: {}, WEBHOOK_DESTINATION_REFUSED: "refused",
-  isAllowedWebhookUrl: (u: string) => u.startsWith("https://"),
+  WEBHOOK_DESTINATION: DESTINATION,
+  WEBHOOK_DESTINATION_REFUSED: "refused",
+  isAllowedWebhookUrl: (u: string, o: unknown) => isAllowed(u, o),
 }));
 
 const { PUT } = await import("@/app/api/users/me/notifications/route");
@@ -196,5 +199,16 @@ describe("who may change notification preferences", () => {
 
     expect(res.status).toBe(403);
     expect(findById).not.toHaveBeenCalled();
+  });
+});
+
+describe("where a personal chat connection may point", () => {
+  it("checks the address with the webhook destination rule and says why it refused", async () => {
+    const res = await put({ chat: { kind: "slack", webhookUrl: "http://10.0.0.5/hook" } });
+
+    expect(isAllowed).toHaveBeenCalledWith("http://10.0.0.5/hook", DESTINATION);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("refused");
+    expect(findByIdAndUpdate).not.toHaveBeenCalled();
   });
 });
