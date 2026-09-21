@@ -1,10 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+const findOne = vi.fn();
 const findOneAndDelete = vi.fn();
+const getAuthUser = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
-vi.mock("@/models/pmOauthState", () => ({ PmOauthState: { findOneAndDelete } }));
+vi.mock("@/models/pmOauthState", () => ({ PmOauthState: { findOne, findOneAndDelete } }));
 vi.mock("@/models/project", () => ({ Project: { findById: vi.fn() } }));
+vi.mock("@/lib/auth", () => ({ getAuthUser }));
+vi.mock("@/lib/session", () => ({ ProvenanceError: class ProvenanceError extends Error {} }));
 vi.mock("@/lib/encryption", () => ({ decryptSecret: (v: string) => v, encryptSecret: (v: string) => v }));
 vi.mock("@/lib/pm/mcp-oauth", () => ({
   exchangeCode: vi.fn(),
@@ -13,13 +17,17 @@ vi.mock("@/lib/pm/mcp-oauth", () => ({
 
 const { GET } = await import("./route");
 
+const OWNER = { _id: "owner1", viaMachineCredential: false };
+
 function request(headers: Record<string, string> = {}) {
   return new Request("https://board.example.com/api/pm/oauth/callback?state=nope", { headers });
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
+  findOne.mockResolvedValue(null);
   findOneAndDelete.mockResolvedValue(null);
+  getAuthUser.mockResolvedValue(OWNER);
 });
 
 // BP-316: this route is unauthenticated and built its redirect target from x-forwarded-host, so
@@ -46,7 +54,9 @@ describe("GET /api/pm/oauth/callback", () => {
   });
 
   it("keeps the project in the path when the state resolved to one", async () => {
-    findOneAndDelete.mockResolvedValue({ project: "p1", serverName: "notion" });
+    const pending = { project: "p1", serverName: "notion", initiatedBy: "owner1" };
+    findOne.mockResolvedValue(pending);
+    findOneAndDelete.mockResolvedValue(pending);
 
     const res = await GET(
       new Request("https://board.example.com/api/pm/oauth/callback?state=s&error=access_denied")
@@ -55,5 +65,73 @@ describe("GET /api/pm/oauth/callback", () => {
     expect(res.headers.get("location")).toBe(
       "/projects/p1/settings?mcp_oauth=error%3Aaccess_denied"
     );
+  });
+});
+
+// BP-749. `initiatedBy` was written by the start route and never read here, so anyone who
+// presented a valid code+state pair completed the connection — a second signed-in user sent the
+// authorization URL (consent phishing), or an attacker replaying their own authorization against
+// someone else's state.
+describe("GET /api/pm/oauth/callback — binding the flow to whoever started it", () => {
+  const PENDING = { project: "p1", serverName: "notion", initiatedBy: "owner1" };
+
+  function approveRequest() {
+    return new Request("https://board.example.com/api/pm/oauth/callback?state=s&code=c");
+  }
+
+  it("refuses a different signed-in user, and does not consume the state", async () => {
+    findOne.mockResolvedValue(PENDING);
+    getAuthUser.mockResolvedValue({ _id: "attacker9", viaMachineCredential: false });
+
+    const res = await GET(approveRequest());
+
+    expect(res.headers.get("location")).toBe("/projects/p1/settings?mcp_oauth=error%3Awrong_user");
+    expect(findOneAndDelete).not.toHaveBeenCalled();
+  });
+
+  it("refuses when nobody is signed in, and does not consume the state", async () => {
+    findOne.mockResolvedValue(PENDING);
+    getAuthUser.mockResolvedValue(null);
+
+    const res = await GET(approveRequest());
+
+    expect(res.headers.get("location")).toBe("/projects/p1/settings?mcp_oauth=error%3Awrong_user");
+    expect(findOneAndDelete).not.toHaveBeenCalled();
+  });
+
+  it("refuses a machine credential even when its user id matches", async () => {
+    findOne.mockResolvedValue(PENDING);
+    getAuthUser.mockResolvedValue({ _id: "owner1", viaMachineCredential: true });
+
+    const res = await GET(approveRequest());
+
+    expect(res.headers.get("location")).toBe("/projects/p1/settings?mcp_oauth=error%3Awrong_user");
+    expect(findOneAndDelete).not.toHaveBeenCalled();
+  });
+
+  it("admits the user who started the flow, and consumes the state", async () => {
+    findOne.mockResolvedValue(PENDING);
+    findOneAndDelete.mockResolvedValue(PENDING);
+    getAuthUser.mockResolvedValue({ _id: "owner1", viaMachineCredential: false });
+    const { Project } = await import("@/models/project");
+    vi.mocked(Project.findById).mockResolvedValue(null);
+
+    const res = await GET(approveRequest());
+
+    expect(findOneAndDelete).toHaveBeenCalledWith({ state: "s" });
+    expect(res.headers.get("location")).toBe("/projects/p1/settings?mcp_oauth=error%3Aconnection_gone");
+  });
+
+  // ProvenanceError signals a session cookie presented from where session.ts's own provenance
+  // check refuses it — the same refusal withAuth gives every other authenticated route (BP-749).
+  it("refuses rather than throwing when the session fails its provenance check", async () => {
+    findOne.mockResolvedValue(PENDING);
+    const { ProvenanceError } = await import("@/lib/session");
+    getAuthUser.mockRejectedValue(new ProvenanceError("origin mismatch"));
+
+    const res = await GET(approveRequest());
+
+    expect(res.headers.get("location")).toBe("/projects/p1/settings?mcp_oauth=error%3Awrong_user");
+    expect(findOneAndDelete).not.toHaveBeenCalled();
   });
 });
