@@ -407,7 +407,12 @@ async function wouldDescend(
  * parent in the same write, and its bell should say what the task's situation IS — the gain —
  * rather than ring twice. The timeline keeps both halves.
  */
-async function announce(projectId: string, actorId: string, facts: LinkFact[]): Promise<void> {
+async function announce(
+  projectId: string,
+  actorId: string,
+  facts: LinkFact[],
+  opts: { skipTargetRow?: boolean } = {}
+): Promise<void> {
   if (facts.length === 0) return;
 
   const [project, actor] = await Promise.all([
@@ -424,7 +429,11 @@ async function announce(projectId: string, actorId: string, facts: LinkFact[]): 
   }[] = [];
   for (const fact of facts) {
     rows.push({ subject: fact.holder, other: fact.target, direction: fact.type, fact });
-    rows.push({ subject: fact.target, other: fact.holder, direction: INVERSE[fact.type], fact });
+    // Skipped when the target is being deleted: its document is gone by the time this runs, and a
+    // row on it would be unreachable the instant it landed (BP-690).
+    if (!opts.skipTargetRow) {
+      rows.push({ subject: fact.target, other: fact.holder, direction: INVERSE[fact.type], fact });
+    }
   }
 
   const sentence = (row: (typeof rows)[number], self: string) =>
@@ -502,4 +511,102 @@ async function announce(projectId: string, actorId: string, facts: LinkFact[]): 
     dispatchWebhooks(projectId, event, payload);
     dispatchNotifications(projectId, event, payload);
   }
+}
+
+/** How many surviving tasks one deletion may announce a severed link to. See `BOARD_FEED_FANOUT_LIMIT`. */
+const DELETE_LINK_FANOUT_LIMIT = 200;
+
+/**
+ * Detaches every reference to a deleted task from the rest of the board — the two writers the
+ * DELETE route already ran as bare `updateMany` pulls, with nothing to say why a task's blocker or
+ * an epic's child had vanished (BP-690).
+ *
+ * Only the surviving side gets a row: `announce`'s `skipTargetRow` is what makes that true here,
+ * since `deleted`'s document is gone before this function is ever asked to write to it.
+ */
+export async function severLinksToDeletedTask(
+  projectId: string,
+  rawDeletedTaskId: string,
+  deleted: { taskNumber: number; title: string; status: string },
+  actorId: string
+): Promise<void> {
+  const deletedTaskId = canonicalId(rawDeletedTaskId);
+
+  const [blockedCandidates, relatedCandidates] = await Promise.all([
+    Task.find({ project: projectId, blockedBy: deletedTaskId }, SUBJECT_FIELDS)
+      // Ordered, so the cap takes the same tasks every time rather than whichever the storage
+      // engine happened to reach first.
+      .sort({ _id: 1 })
+      .limit(DELETE_LINK_FANOUT_LIMIT)
+      .lean<LinkSubject[]>(),
+    Task.find({ project: projectId, "relations.task": deletedTaskId }, `${SUBJECT_FIELDS} relations`)
+      .sort({ _id: 1 })
+      .limit(DELETE_LINK_FANOUT_LIMIT)
+      .lean<(LinkSubject & { relations: { task: unknown; type: RelationType }[] })[]>(),
+  ]);
+
+  if (
+    blockedCandidates.length === DELETE_LINK_FANOUT_LIMIT ||
+    relatedCandidates.length === DELETE_LINK_FANOUT_LIMIT
+  ) {
+    console.error(
+      `Deleting task ${deletedTaskId} in project ${projectId} hit the ${DELETE_LINK_FANOUT_LIMIT}-task ` +
+        "fan-out cap; some surviving tasks were not told their link to it was severed"
+    );
+  }
+
+  const target: LinkSubject = {
+    _id: deletedTaskId,
+    taskNumber: deleted.taskNumber,
+    title: deleted.title,
+    status: deleted.status,
+  };
+
+  // Each candidate's OWN pull proves what it removed, the same way every other writer in this
+  // module does — the read above can be stale by the time this runs, and a concurrent unlink of
+  // the same reference (an ordinary `removeTaskLink` racing this deletion) would otherwise be
+  // announced twice: once by the request that actually removed it, once by this one reading a
+  // list that no longer matches by the time it acts on it.
+  const blockedFacts = await Promise.all(
+    blockedCandidates.map(async (candidate): Promise<LinkFact | null> => {
+      const before = await Task.findOneAndUpdate(
+        { _id: idOf(candidate), project: projectId, blockedBy: deletedTaskId },
+        { $pull: { blockedBy: deletedTaskId } },
+        { returnDocument: "before", projection: SUBJECT_FIELDS }
+      ).lean<LinkSubject | null>();
+      if (!before) return null;
+      return { action: "removed", type: "blocked_by", holder: before, target };
+    })
+  );
+
+  const relatedFacts = await Promise.all(
+    relatedCandidates.map(async (candidate): Promise<LinkFact | null> => {
+      const type = relationBetween(candidate, deletedTaskId);
+      // The query matched on this, so absent means the array changed between the read above and
+      // here — the same narrow window the atomic pull below closes for the write itself.
+      if (!type) return null;
+      const before = await Task.findOneAndUpdate(
+        { _id: idOf(candidate), project: projectId, relations: { $elemMatch: { task: deletedTaskId, type } } },
+        { $pull: { relations: { task: deletedTaskId, type } } },
+        { returnDocument: "before", projection: SUBJECT_FIELDS }
+      ).lean<LinkSubject | null>();
+      if (!before) return null;
+      return { action: "removed", type, holder: before, target };
+    })
+  );
+
+  const facts = [...blockedFacts, ...relatedFacts].filter((fact): fact is LinkFact => fact !== null);
+
+  // Unconditional and unbounded, unlike the reads above: a dangling reference left behind past the
+  // fan-out cap is worse than a missed notification (BP-690). The two pulls just performed above
+  // make this a no-op for every candidate that already got one.
+  await Promise.all([
+    Task.updateMany({ project: projectId, blockedBy: deletedTaskId }, { $pull: { blockedBy: deletedTaskId } }),
+    Task.updateMany(
+      { project: projectId, "relations.task": deletedTaskId },
+      { $pull: { relations: { task: deletedTaskId } } }
+    ),
+  ]);
+
+  await announce(projectId, actorId, facts, { skipTargetRow: true });
 }

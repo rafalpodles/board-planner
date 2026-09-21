@@ -8,6 +8,7 @@ import { Comment } from "@/models/comment";
 import { ActivityLog } from "@/models/activityLog";
 import { Notification } from "@/models/notification";
 import { toApiExecution, updateTask, taskPopulateFields, heldRunRefusal } from "@/lib/task-service";
+import { severLinksToDeletedTask } from "@/lib/task-links";
 import { Project } from "@/models/project";
 import { Worker } from "@/models/worker";
 import { ITaskExecution } from "@/types";
@@ -149,7 +150,7 @@ export const DELETE = withProjectAccess(async (request, { params, user }) => {
   // and it reaches a strictly stronger outcome than the three that do, since the task is not moved
   // but gone, with the comments the run was writing into it (BP-337).
   const task = await Task.findOne({ _id: taskId, project: projectId })
-    .select("execution taskNumber")
+    .select("execution taskNumber title status")
     .lean();
 
   if (!task) {
@@ -173,8 +174,12 @@ export const DELETE = withProjectAccess(async (request, { params, user }) => {
     Comment.deleteMany({ task: taskId }),
     ActivityLog.deleteMany({ task: taskId }),
     Notification.deleteMany({ task: taskId }),
-    Task.updateMany({ blockedBy: taskId }, { $pull: { blockedBy: taskId } }),
-    Task.updateMany({ "relations.task": taskId }, { $pull: { relations: { task: taskId } } }),
+    severLinksToDeletedTask(
+      projectId,
+      taskId,
+      { taskNumber: task.taskNumber, title: task.title, status: task.status },
+      String(user._id)
+    ),
   ]);
 
   return NextResponse.json({ message: "Task deleted" });

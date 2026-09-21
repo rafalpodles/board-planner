@@ -311,11 +311,16 @@ test.describe("removal", () => {
  * an incoming one into the same "Relates to" section as an outgoing one, × and all — which makes
  * this a click a person can make, not an API-only path.
  *
- * What the × does about the link is BP-657's to settle. What this pins is the half that belongs
- * here: the write removed nothing, so nothing may be recorded as though it had.
+ * BP-657 settled what the × does here: the DELETE used to go to THIS task's own endpoint, which
+ * held nothing to remove — a write that matched but changed nothing, reported as a success with
+ * the row still on screen after a reload. Fixed to address the end that actually stores the
+ * relation, so this click removes the same row a click from the other screen would.
  */
-test.describe("removing from the end that does not hold the link", () => {
-  test("records nothing, because nothing was removed", async ({ page, request }) => {
+test.describe("removing an incoming link", () => {
+  test("removes it from the end that actually holds it, and records it at both ends", async ({
+    page,
+    request,
+  }) => {
     const related = await request.post(
       `/api/projects/${PROJECT_KEY}/tasks/${DECOY_TASK_ID}/links`,
       { headers: ADMIN_AUTH, data: { taskId: String(SIBLING_TASK_ID), type: "relates" } }
@@ -324,21 +329,77 @@ test.describe("removing from the end that does not hold the link", () => {
 
     await signIn(page);
     await page.goto(taskUrl(SIBLING_TASK_NUMBER));
+    // The holder is DECOY, not the task on screen — the fixed behaviour addresses the DELETE
+    // there rather than to this task's own (empty) endpoint.
     const removed = page.waitForResponse(
-      (r) => r.request().method() === "DELETE" && r.url().includes(`/tasks/${SIBLING_TASK_ID}/links`)
+      (r) => r.request().method() === "DELETE" && r.url().includes(`/tasks/${DECOY_TASK_ID}/links`)
     );
     await page
       .getByRole("button", { name: `Unlink ${PROJECT_KEY}-${DECOY_TASK_NUMBER}` })
       .click();
     expect((await removed).status()).toBe(200);
 
-    const history = await openHistory(page, SIBLING_TASK_NUMBER);
-
-    // The control: the row the SETUP wrote against this same task is on this same screen, so the
-    // absence below is this write's silence and not a panel that renders no link rows at all.
+    const mine = await openHistory(page, SIBLING_TASK_NUMBER);
     await expect(
-      exactly(history, `${ADMIN_FULL_NAME} linked this task to ${PROJECT_KEY}-${DECOY_TASK_NUMBER}`)
+      exactly(mine, `${ADMIN_FULL_NAME} unlinked this task from ${PROJECT_KEY}-${DECOY_TASK_NUMBER}`)
     ).toBeVisible();
-    await expect(history.getByText(/unlinked/i)).toHaveCount(0);
+
+    const theirs = await openHistory(page, DECOY_TASK_NUMBER);
+    await expect(
+      exactly(theirs, `${ADMIN_FULL_NAME} unlinked this task from ${PROJECT_KEY}-${SIBLING_TASK_NUMBER}`)
+    ).toBeVisible();
+
+    // The database, not the panel: the row is gone after a reload, not only from an optimistic
+    // render this same click drove.
+    await page.goto(taskUrl(SIBLING_TASK_NUMBER));
+    await expect(page.getByText("Relates to")).toHaveCount(0);
+  });
+});
+
+/**
+ * BP-690. Deleting a task ran the same two `updateMany` pulls this file exists to put a history
+ * row behind for the ordinary writers — with nothing written anywhere: an epic whose child was
+ * deleted, or a task whose blocker was, had no record of why.
+ *
+ * FINISHED is the one deleted here, blocking SIBLING and parented by DECOY, so one delete covers
+ * both writers the ticket names in a single run.
+ */
+test.describe("deleting a task", () => {
+  test("tells a blocked task its blocker is gone, and an epic its child is", async ({
+    page,
+    request,
+  }) => {
+    const blocked = await request.post(
+      `/api/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_ID}/links`,
+      { headers: ADMIN_AUTH, data: { taskId: String(FINISHED_TASK_ID), type: "blocked_by" } }
+    );
+    expect(blocked.status(), await blocked.text()).toBe(200);
+    await parent(request, String(DECOY_TASK_ID), String(FINISHED_TASK_ID));
+
+    await signIn(page);
+    await page.goto(taskUrl(FINISHED_TASK_NUMBER));
+    await page.getByRole("button", { name: "Delete task" }).click();
+    const dialog = page.getByRole("dialog", { name: "Delete Task" });
+    const deleted = page.waitForResponse(
+      (r) => r.request().method() === "DELETE" && r.url().endsWith(`/tasks/${FINISHED_TASK_ID}`)
+    );
+    await dialog.getByRole("button", { name: "Delete" }).click();
+    expect((await deleted).status()).toBe(200);
+
+    const blockedTask = await openHistory(page, SIBLING_TASK_NUMBER);
+    await expect(
+      exactly(
+        blockedTask,
+        `${ADMIN_FULL_NAME} removed ${PROJECT_KEY}-${FINISHED_TASK_NUMBER} as a blocker of this task`
+      )
+    ).toBeVisible();
+
+    const epic = await openHistory(page, DECOY_TASK_NUMBER);
+    await expect(
+      exactly(
+        epic,
+        `${ADMIN_FULL_NAME} removed ${PROJECT_KEY}-${FINISHED_TASK_NUMBER} from this task's children`
+      )
+    ).toBeVisible();
   });
 });

@@ -12,6 +12,7 @@ const commentDeleteMany = vi.fn();
 const activityDeleteMany = vi.fn();
 const notificationDeleteMany = vi.fn();
 const taskUpdateMany = vi.fn();
+const severLinksToDeletedTask = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/task-service", () => ({
@@ -20,6 +21,9 @@ vi.mock("@/lib/task-service", () => ({
   toApiExecution: (e: unknown) => e,
   taskPopulateFields: [],
 }));
+// The severance itself — what it reads, pulls, and announces — is task-links.test.ts's job; this
+// file only has to prove the route hands it the right deleted-task identity.
+vi.mock("@/lib/task-links", () => ({ severLinksToDeletedTask }));
 vi.mock("@/models/task", () => ({
   Task: { findOne: taskFindOne, find: taskFind, updateMany: taskUpdateMany, deleteOne: taskDeleteOne, findOneAndDelete: vi.fn() },
 }));
@@ -83,9 +87,19 @@ const HELD = {
 beforeEach(() => {
   vi.clearAllMocks();
   updateTask.mockResolvedValue({ ok: true, data: { _id: TASK } });
-  // The route reads only the two fields the hold check needs, so the chain is select().lean()
+  // The route reads the hold check's two fields plus what a deletion announces the severed
+  // link with, so the chain is select().lean()
   taskFindOne.mockReturnValue({
-    select: () => ({ lean: () => Promise.resolve({ _id: TASK, taskNumber: 7, execution: {} }) }),
+    select: () => ({
+      lean: () =>
+        Promise.resolve({
+          _id: TASK,
+          taskNumber: 7,
+          title: "Flaky test",
+          status: "in_progress",
+          execution: {},
+        }),
+    }),
   });
   taskDeleteOne.mockResolvedValue({ deletedCount: 1 });
   projectFindById.mockReturnValue({ lean: () => Promise.resolve({ key: "TP" }) });
@@ -235,7 +249,14 @@ describe("DELETE .../tasks/:taskId and the run hold", () => {
     expect(commentDeleteMany).toHaveBeenCalledWith({ task: TASK });
     expect(activityDeleteMany).toHaveBeenCalledWith({ task: TASK });
     expect(notificationDeleteMany).toHaveBeenCalledWith({ task: TASK });
-    expect(taskUpdateMany).toHaveBeenCalledWith({ blockedBy: TASK }, { $pull: { blockedBy: TASK } });
+    // BP-690: severing what the rest of the board held onto this task used to be two bare
+    // `updateMany` pulls here, with nothing to say why a blocker or a child had vanished.
+    expect(severLinksToDeletedTask).toHaveBeenCalledWith(
+      "p1",
+      TASK,
+      { taskNumber: 7, title: "Flaky test", status: "in_progress" },
+      "u1"
+    );
   });
 
   it("still answers 404 for a task that is not there, rather than reading it as held", async () => {

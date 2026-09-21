@@ -83,12 +83,21 @@ export function TaskLinks({
     }
   }
 
-  async function removeLink(targetTaskId: string, type: DependencyType) {
+  // A relation is stored on one end only, so removing it has to ask that end — not always this
+  // task. An incoming "Relates to" row lives on the OTHER task's document, and asking this task's
+  // own endpoint to drop it was a no-op that still reported success (BP-657). A pair can also hold
+  // "relates" from BOTH ends at once — collapsed to one row below — so a removal may have to
+  // address both documents, or the row reappears from its surviving direction after the refetch.
+  async function removeLink(links: { holderId: string; targetId: string }[], type: DependencyType) {
     try {
-      await api.del(`/api/projects/${projectId}/tasks/${task._id}/links`, {
-        taskId: targetTaskId,
-        type,
-      });
+      await Promise.all(
+        links.map((link) =>
+          api.del(`/api/projects/${projectId}/tasks/${link.holderId}/links`, {
+            taskId: link.targetId,
+            type,
+          })
+        )
+      );
       toast("Dependency removed", "success");
       onChanged();
     } catch {
@@ -104,18 +113,48 @@ export function TaskLinks({
   const blocking = task.blocking || [];
   const relations = task.relations || [];
   const relatedFrom = task.relatedFrom || [];
-  const relatesTo = [
-    ...relations.filter((r) => r.type === "relates"),
-    // "relates" is symmetric, so an incoming link belongs in the same list
-    ...relatedFrom.filter((r) => r.type === "relates"),
-  ];
-  const duplicates = relations.filter((r) => r.type === "duplicates");
-  const duplicatedBy = relatedFrom.filter((r) => r.type === "duplicates");
-  const children = relations.filter((r) => r.type === "parent_of");
-  const parents = relatedFrom.filter((r) => r.type === "parent_of");
+  // "relates" is symmetric, so an incoming link belongs in the same list — but a pair can hold it
+  // from BOTH directions at once (pre-existing data, or written through MCP, which documents that
+  // both sides may coexist), and rendering both was two rows for one relationship sharing one React
+  // key (BP-657). Collapsed by task id into one row that carries EVERY backing link, not just one:
+  // removing a row addresses every document behind it, or the row would reappear from whichever
+  // direction survived the first click, reporting a removal that only half happened.
+  const relatesToById = new Map<
+    string,
+    { task: ApiTaskLink; type: "relates"; links: { holderId: string; targetId: string }[] }
+  >();
+  for (const r of relatedFrom.filter((r) => r.type === "relates")) {
+    const link = { holderId: r.task._id, targetId: task._id };
+    const existing = relatesToById.get(r.task._id);
+    if (existing) existing.links.push(link);
+    else relatesToById.set(r.task._id, { task: r.task, type: "relates", links: [link] });
+  }
+  for (const r of relations.filter((r) => r.type === "relates")) {
+    const link = { holderId: task._id, targetId: r.task._id };
+    const existing = relatesToById.get(r.task._id);
+    if (existing) existing.links.push(link);
+    else relatesToById.set(r.task._id, { task: r.task, type: "relates", links: [link] });
+  }
+  const relatesTo = [...relatesToById.values()];
+  const duplicates = relations
+    .filter((r) => r.type === "duplicates")
+    .map((r) => ({ ...r, links: [{ holderId: task._id, targetId: r.task._id }] }));
+  const duplicatedBy = relatedFrom
+    .filter((r) => r.type === "duplicates")
+    .map((r) => ({ ...r, links: [{ holderId: r.task._id, targetId: task._id }] }));
+  const children = relations
+    .filter((r) => r.type === "parent_of")
+    .map((r) => ({ ...r, links: [{ holderId: task._id, targetId: r.task._id }] }));
+  const parents = relatedFrom
+    .filter((r) => r.type === "parent_of")
+    .map((r) => ({ ...r, links: [{ holderId: r.task._id, targetId: task._id }] }));
   const linkedIds = new Set([
     ...blockedBy.map((t) => t._id),
     ...relations.map((r) => r.task._id),
+    // Also excludes what the OTHER end already relates to this task — "duplicates" is deliberately
+    // not folded in here: A-duplicates-B and B-duplicates-A are different claims about which side
+    // is the original, so both existing independently is not the bug this guards against (BP-691).
+    ...relatedFrom.filter((r) => r.type === "relates").map((r) => r.task._id),
   ]);
 
   const filteredTasks = allTasks.filter((t) => {
@@ -173,7 +212,9 @@ export function TaskLinks({
                 title={t.title}
                 status={statusChip(t.status)}
                 onOpen={() => navigateToTask(t.taskNumber)}
-                onRemove={() => removeLink(t._id, "blocked_by")}
+                onRemove={() =>
+                  removeLink([{ holderId: task._id, targetId: t._id }], "blocked_by")
+                }
               />
             ))}
           </div>
@@ -218,9 +259,7 @@ export function TaskLinks({
                   status={statusChip(r.task.status)}
                   onOpen={() => navigateToTask(r.task.taskNumber)}
                   onRemove={
-                    section.removable
-                      ? () => removeLink(r.task._id, section.type)
-                      : undefined
+                    section.removable ? () => removeLink(r.links, section.type) : undefined
                   }
                 />
               ))}

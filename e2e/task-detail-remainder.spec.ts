@@ -8,6 +8,7 @@ import {
   PLANNING_SPRINT_NAME,
   SIBLING_TASK_NUMBER,
   DECOY_TASK_NUMBER,
+  FINISHED_TASK_TITLE,
   NOT_APPROVED_TASK_NUMBER,
   UNASSIGNED_HANDOVER_TASK_NUMBER,
   UNRECORDED_ASSIGNER_TASK_NUMBER,
@@ -220,6 +221,30 @@ test.describe("dependency types beyond blocked_by", () => {
     await section.getByLabel(/Unlink/).click();
     await removed;
     await expect(page.getByText("Duplicates")).toHaveCount(0);
+  });
+
+  // BP-691: the picker's exclusion set only read outgoing relations, so a task already related to
+  // this one from the OTHER end — folded into the same "Relates to" section as an outgoing one —
+  // was still offered, and picking it stored a second, mirrored relation nobody asked for.
+  test("does not offer a task already related to this one from the other end", async ({ page }) => {
+    await openTask(page, SIBLING_TASK_NUMBER, "admin");
+    await addDependency(page, "relates", "Already in review");
+
+    await page.goto(taskUrl(DECOY_TASK_NUMBER));
+    await page.getByRole("button", { name: "+ Add dependency" }).click();
+    await page.getByLabel("Link type").selectOption("relates");
+    // The list loads from an effect keyed on the picker opening. Proven loaded BEFORE filtering to
+    // absence, or an empty result would just as well mean the fetch had not resolved yet — a
+    // `toHaveCount(0)` right after opening the picker passes on that alone (e2e.md).
+    await expect(page.getByRole("button", { name: new RegExp(FINISHED_TASK_TITLE) })).toBeVisible();
+
+    await page.getByLabel("Search tasks to link").fill("Free to move");
+    await expect(page.getByRole("button", { name: /Free to move/ })).toHaveCount(0);
+
+    // The control: clearing the search still finds that same, genuinely unrelated task, so the
+    // empty result above is the exclusion working and not a picker that lists nobody at all.
+    await page.getByLabel("Search tasks to link").fill("");
+    await expect(page.getByRole("button", { name: new RegExp(FINISHED_TASK_TITLE) })).toBeVisible();
   });
 });
 
