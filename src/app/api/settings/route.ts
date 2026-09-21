@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withAuth, withAdmin } from "@/lib/middleware";
 import { getSettings, Settings } from "@/models/settings";
+import { upsertSingleton } from "@/lib/singleton";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 
 const MAX_MODEL_LENGTH = 100;
@@ -61,11 +62,7 @@ export const PUT = withAdmin(async (request, { user }) => {
     return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
   }
 
-  const settings = await Settings.findOneAndUpdate(
-    {},
-    { $set: updates },
-    { upsert: true, returnDocument: "after" }
-  );
+  const settings = await upsertSingleton(Settings, { $set: updates });
 
   void logInstanceAudit({
     action: "instance_settings_changed",
