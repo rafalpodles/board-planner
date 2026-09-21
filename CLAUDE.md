@@ -109,7 +109,8 @@ mcp-server/           # Standalone MCP server (stdio transport)
   subscribed nobody
 - **Recurrence**: When task → done with recurrence config, auto-creates next task
 - **GitHub PR linking**: Matches PRs by branch/title pattern `BP-5`, and by any key the project used to have (case-insensitive)
-- **Autonomous workers**: Opt-in per project (Settings → Workers, instance admin). Enrolling a
+- **Autonomous workers**: Opt-in per project (Settings → Workers, the project owner; an instance
+  admin can lock it off, and the lock wins — `projectRunsWorkers` in `src/lib/worker-gate.ts`). Enrolling a
   machine is self-service and needs no admin approval: whoever connects it owns it, and a machine
   reaches exactly the projects its owner reaches, resolved live from that person's grants rather
   than stored. A worker reports the checkouts it has — resolved from `repos.json` on its own

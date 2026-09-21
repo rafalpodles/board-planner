@@ -184,6 +184,19 @@ describe("PUT the selection", () => {
     expect(json.leftDisabled).toEqual(["SB"]);
   });
 
+  // Its switch is on, but the lock wins — so it is reported as left off, not quietly counted as running
+  it("reports a project whose switch is on but is locked as left switched off", async () => {
+    ownedByCaller = [OFF];
+    projectFind.mockResolvedValue([
+      { _id: OFF, key: "SB", name: "Sandbox", githubRepo: "owner/sandbox", worker: { enabled: true, lockedByInstance: true } },
+    ]);
+
+    const json = await (await PUT(putRequest({ projects: [OFF] }), ctx())).json();
+
+    expect(json.leftDisabled).toEqual(["SB"]);
+    expect(projectUpdateOne).not.toHaveBeenCalled();
+  });
+
   it("switches workers on for a picked project when an instance admin is confirming", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
 

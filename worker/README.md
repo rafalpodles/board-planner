@@ -701,8 +701,8 @@ an agent merges because its sequence ends with a **Merge** step, and a change is
 **Reviewed** gate stands after the last step that writes. The diff limits and the models moved onto
 the blocks that use them.
 
-**On the project** (Settings → Workers, instance admin): whether workers may run it at all,
-`baseBranch`, `taskTimeoutMs` and `runCeilingMs`. These describe the repository, so every machine
+**On the project** (Settings → Workers, the project owner; an instance admin can lock it off, and
+the lock wins): whether workers may run it at all, `baseBranch`, `taskTimeoutMs` and `runCeilingMs`. These describe the repository, so every machine
 serving that project runs under the same values.
 
 **On the worker** (Settings → Workers, the fleet console): what this machine is called, whether it
