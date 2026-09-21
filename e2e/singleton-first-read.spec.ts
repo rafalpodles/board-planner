@@ -3,10 +3,7 @@ import mongoose from "mongoose";
 import { ADMIN_AUTH } from "./api";
 import { E2E_MONGODB_URI, seed } from "./seed";
 
-/**
- * BP-722. The instance settings and the tenant are single documents created on first read by an
- * upsert on `{}`. With nothing behind that filter, simultaneous first reads each inserted one.
- */
+// BP-722: simultaneous first reads of a singleton each inserted their own document
 
 const CONCURRENT_READS = 30;
 // Over HTTP the reads only sometimes land close enough to race; one round caught it about one time
@@ -40,8 +37,7 @@ for (const [path, collection] of [
   ["/api/entitlements", "tenants"],
 ] as const) {
   test(`simultaneous first reads of ${path} leave exactly one document`, async ({ request }) => {
-    // Compiled and connected first, so the reads below arrive together rather than queued behind
-    // the dev server's first compile of the route
+    // Warm-up: otherwise the reads queue behind the route's first compile and never overlap
     expect((await request.get(path, { headers: ADMIN_AUTH })).status()).toBe(200);
     for (let round = 0; round < ROUNDS; round++) {
       await emptyCollection(collection);

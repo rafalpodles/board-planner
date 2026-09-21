@@ -1,8 +1,6 @@
 import mongoose, { Model, UpdateQuery } from "mongoose";
 import { duplicateKeyField } from "./mongo-errors";
 
-// The filter stays `{}` so an instance's existing document, inserted with a random _id, is still
-// the one every read finds.
 export const SINGLETON_ID = new mongoose.Types.ObjectId("000000000000000000000001");
 
 export async function upsertSingleton<T>(model: Model<T>, update: UpdateQuery<T>): Promise<T> {
@@ -10,6 +8,7 @@ export async function upsertSingleton<T>(model: Model<T>, update: UpdateQuery<T>
     ...update,
     $setOnInsert: { ...(update.$setOnInsert ?? {}), _id: SINGLETON_ID },
   } as UpdateQuery<T>;
+  // `{}`, not the fixed id: an instance's existing document was inserted under a random one
   const write = () =>
     model.findOneAndUpdate({}, withFixedId, { upsert: true, returnDocument: "after" }) as Promise<T>;
 

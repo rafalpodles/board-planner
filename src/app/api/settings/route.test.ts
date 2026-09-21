@@ -18,6 +18,7 @@ vi.mock("@/models/settings", () => ({
 }));
 
 const { PUT } = await import("./route");
+const { SINGLETON_ID } = await import("@/lib/singleton");
 
 const ADMIN = { _id: "admin-1", username: "root", role: "admin", viaMachineCredential: false };
 
@@ -64,6 +65,14 @@ describe("PUT /api/settings", () => {
     const res = await put({ pmDefaultDailyTurnCap: 250, pmDefaultModel: "some/model" });
 
     expect(res.status).toBe(200);
+    expect(findOneAndUpdate).toHaveBeenCalledWith(
+      {},
+      {
+        $set: { pmDefaultModel: "some/model", pmDefaultDailyTurnCap: 250 },
+        $setOnInsert: { _id: SINGLETON_ID },
+      },
+      { upsert: true, returnDocument: "after" }
+    );
     expect(logInstanceAudit).toHaveBeenCalledWith({
       action: "instance_settings_changed",
       user: "admin-1",
