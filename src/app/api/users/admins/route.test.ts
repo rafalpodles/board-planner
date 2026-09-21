@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const getAuthUser = vi.fn();
 const userFind = vi.fn();
 const userSelect = vi.fn();
+const userSort = vi.fn();
 const userFindLean = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
@@ -16,7 +17,8 @@ vi.mock("@/models/user", () => ({
       userFind(...a),
       {
         select: (...s: unknown[]) => (
-          userSelect(...s), { sort: () => ({ lean: userFindLean }) }
+          userSelect(...s),
+          { sort: (...o: unknown[]) => (userSort(...o), { lean: userFindLean }) }
         ),
       }
     ),
@@ -54,6 +56,7 @@ describe("GET /api/users/admins", () => {
 
     expect(userFind).toHaveBeenCalledWith({ role: "admin", kind: { $ne: "machine" } });
     expect(userSelect).toHaveBeenCalledWith("fullName");
+    expect(userSort).toHaveBeenCalledWith({ fullName: 1 });
   });
 
   it("refuses somebody who is not signed in", async () => {

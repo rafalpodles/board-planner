@@ -65,7 +65,7 @@ export default function NotificationsPage() {
       n.project && typeof n.project === "object" ? n.project.key : n.project;
     const taskRef =
       n.task && typeof n.task === "object" ? n.task.taskNumber : n.task;
-    if (projectRef && !taskRef) return projectPath(projectRef);
+    if (n.type === "board_access") return projectRef ? projectPath(projectRef) : "/notifications";
     if (!projectRef || !taskRef) return "/notifications";
     return taskPath(projectRef, taskRef);
   }
