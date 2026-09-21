@@ -28,6 +28,7 @@ export const GROUPS = {
     "picker-stays-open.spec.ts",
     "task-detail-remainder.spec.ts",
     "link-leaves-a-trace.spec.ts",
+    "evaluator-findings.spec.ts",
   ],
   "task-fields": [
     "field-history.spec.ts",
