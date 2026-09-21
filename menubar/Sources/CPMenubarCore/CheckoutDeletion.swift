@@ -48,6 +48,8 @@ public struct CheckoutDeletion: Sendable {
         switch await verdict(removal, path: path, busy: await isBusy()) {
         case .refused(let reason):
             return .refused(project: project, reason: reason)
+        case .linkedWorktree:
+            return await dropGrant(project: project, path: path)
         case .go(let worktrees):
             let doomed = doomedPaths(path: path, worktrees: worktrees)
             // Nothing is about to be deleted — the checkout went on its own and left no worktrees,
@@ -71,6 +73,8 @@ public struct CheckoutDeletion: Sendable {
             switch await verdict(removal, path: path, busy: await isBusy()) {
             case .refused(let reason):
                 return .refused(project: project, reason: reason)
+            case .linkedWorktree:
+                return await dropGrant(project: project, path: path)
             case .go(let now):
                 // The operator agreed to a list, not to a removal. Anything else on disk now is
                 // something they were never shown.
@@ -102,6 +106,25 @@ public struct CheckoutDeletion: Sendable {
         project: String, path: String, worktrees: [String]
     ) async -> SyncStep {
         await Task.detached { self.perform(project: project, path: path, worktrees: worktrees) }.value
+    }
+
+    /// A linked worktree can never pass `removal`'s check — the discriminator is structural, not
+    /// the checkout's current state — so leaving it refused would repeat on every reconnect for
+    /// ever. Dropping the grant reaches the resolved state Preferences → Repositories → Remove
+    /// already gives by hand, without deleting anything nobody asked to lose (BP-505).
+    private func dropGrant(project: String, path: String) async -> SyncStep {
+        await Task.detached { self.performDropGrant(project: project, path: path) }.value
+    }
+
+    private func performDropGrant(project: String, path: String) -> SyncStep {
+        do {
+            try forget(path)
+            return .linkedWorktreeDropped(project: project, path: path)
+        } catch {
+            return .failed(
+                project: project,
+                reason: "could not drop the grant for \(path): \(error.localizedDescription)")
+        }
     }
 
     /// `check` spawns half a dozen `git` processes and waits on each; on a large repository that

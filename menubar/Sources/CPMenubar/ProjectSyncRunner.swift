@@ -105,7 +105,7 @@ final class ProjectSyncRunner {
             deletion: deletion,
             removal: removal,
             asking: { project, paths in DeletionPrompt.ask(project: project, paths: paths) },
-            onStep: { step in self.steps.append(step) })
+            onStep: { step in self.steps = ProjectSync.appending(step, to: self.steps) })
     }
 
     func forget() {

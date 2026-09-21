@@ -208,4 +208,34 @@ final class ProjectSyncTests: XCTestCase {
 
         XCTAssertEqual(ProjectSync.withoutNowhereToPut(steps), steps)
     }
+
+    // MARK: - BP-505: a refusal that repeats every reconnect does not pile up
+
+    // The project stays unwanted and held, so an unresolved refusal runs again next reconnect and,
+    // unless something about the checkout changed, says exactly the same sentence. Appended
+    // plainly, that is a line added per reconnect for as long as the operator leaves it be.
+    func testAnIdenticalRefusalIsNotAppendedTwice() {
+        let refusal: SyncStep = .refused(project: "BP", reason: "3 uncommitted changes")
+
+        XCTAssertEqual(
+            ProjectSync.appending(refusal, to: [refusal]), [refusal],
+            "the same guard saying the same thing again names nothing new")
+    }
+
+    // The control: a changed reason is a changed fact about the checkout, and belongs on its own
+    // line rather than being swallowed by a dedupe keyed on the project alone.
+    func testARefusalWithADifferentReasonStillJoinsTheList() {
+        let first: SyncStep = .refused(project: "BP", reason: "3 uncommitted changes")
+        let second: SyncStep = .refused(project: "BP", reason: "5 uncommitted changes")
+
+        XCTAssertEqual(ProjectSync.appending(second, to: [first]), [first, second])
+    }
+
+    // The other control: every non-refusal case is an event, and two identical events are two
+    // events. Without this, widening the dedupe to every case would still pass the test above.
+    func testAnOrdinaryStepIsAppendedEvenWhenItRepeatsExactly() {
+        let added: SyncStep = .added(project: "BP", path: "/checkouts/BP")
+
+        XCTAssertEqual(ProjectSync.appending(added, to: [added]), [added, added])
+    }
 }

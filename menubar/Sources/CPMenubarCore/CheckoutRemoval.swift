@@ -10,6 +10,12 @@ public enum RemovalVerdict: Equatable, Sendable {
     /// another project's worktrees with it.
     case go(worktrees: [String])
     case refused(reason: String)
+    /// The path is a linked worktree of another repository. Its own case rather than a `.refused`
+    /// carrying the same sentence: every other refusal here describes the checkout's *state* —
+    /// busy, dirty, unpushed — which can change on the next reconnect. This one is structural, so
+    /// waiting never helps, and `CheckoutDeletion` answers it differently for exactly that reason
+    /// (BP-505).
+    case linkedWorktree(reason: String)
 }
 
 public struct CheckoutRemoval: Sendable {
@@ -59,8 +65,8 @@ public struct CheckoutRemoval: Sendable {
         let commonDir = run(["-C", path, "rev-parse", "--git-common-dir"], path)
         switch LinkedWorktreeCheck.kind(gitDir: gitDir, commonDir: commonDir, relativeTo: path) {
         case .linkedWorktree:
-            return .refused(
-                reason: "\(path) is a linked worktree, not a repository — this removes a repository together with its worktrees, and cannot remove a worktree from the repository it belongs to. Drop it in Preferences → Repositories → Remove, which gives up the grant and deletes nothing.")
+            return .linkedWorktree(
+                reason: "\(path) is a linked worktree, not a repository — this removes a repository together with its worktrees, and cannot remove a worktree from the repository it belongs to.")
         case nil:
             return .refused(
                 reason: "could not tell whether \(path) is a repository or one of its worktrees")

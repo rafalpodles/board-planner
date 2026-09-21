@@ -35,6 +35,12 @@ public enum SyncStep: Equatable, Sendable {
     /// A removal a guard said no to. Not a failure: the checkout is intact and the reason is one
     /// the operator can act on.
     case refused(project: String, reason: String)
+    /// The grant was dropped and nothing was deleted, because the path is a linked worktree of
+    /// another repository — a shape `CheckoutRemoval` can never say `.go` to, so leaving it as a
+    /// plain `.refused` would repeat on every reconnect for ever. Its own case rather than
+    /// `.forgotten`, whose text says the checkout had already gone: this one is still on disk,
+    /// untouched (BP-505).
+    case linkedWorktreeDropped(project: String, path: String)
     /// A removal the operator said no to when the app asked, on the machine, with the paths in
     /// front of them. Its own case rather than a `.refused` carrying a sentence: a guard saying no
     /// is a fact about the checkout, and this is a fact about the person. It also leaves the
@@ -113,6 +119,22 @@ public enum ProjectSync {
      */
     public static func replacingNowhereToPut(_ steps: [SyncStep], with blocked: SyncStep) -> [SyncStep] {
         withoutNowhereToPut(steps) + [blocked]
+    }
+
+    /**
+     * Where a new step joins `steps`: appended, unless it is a `.refused` identical to one already
+     * there.
+     *
+     * Every other case is a one-time event — `.added`, `.removed`, a `.declined` the operator
+     * answered — so two identical values are two things that happened. `.refused` is the one case
+     * that names an unresolved condition rather than an event: the project stays unwanted and held,
+     * so the same guard runs again next reconnect and, unless something about the checkout changed,
+     * says exactly the same sentence. Appended plainly, that reads as the pane growing one line per
+     * reconnect for as long as the operator leaves it unresolved — for ever, in practice (BP-505).
+     */
+    public static func appending(_ step: SyncStep, to steps: [SyncStep]) -> [SyncStep] {
+        if case .refused = step, steps.contains(step) { return steps }
+        return steps + [step]
     }
 
     public static func plan(
