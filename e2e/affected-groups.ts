@@ -29,7 +29,8 @@ const OWNED: readonly { prefix: string; groups: readonly GroupName[] }[] = [
   // Pages — nested, more specific project subpages before the bare project route
   { prefix: "src/app/(app)/projects/[projectId]/tasks/", groups: ["tasks"] },
   { prefix: "src/app/(app)/projects/[projectId]/sprints/", groups: ["board"] },
-  { prefix: "src/app/(app)/projects/[projectId]/settings/", groups: ["project"] },
+  // Automation too: the PM, MCP and worker sections of project settings are driven by its specs
+  { prefix: "src/app/(app)/projects/[projectId]/settings/", groups: ["project", "automation"] },
   { prefix: "src/app/(app)/projects/[projectId]/dashboard/", groups: ["project"] },
   { prefix: "src/app/(app)/projects/[projectId]/pm/", groups: ["automation"] },
   { prefix: "src/app/(app)/projects/[projectId]/@modal/", groups: ["tasks"] },
