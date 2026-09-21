@@ -3,6 +3,12 @@ import Foundation
 public enum GitCheckoutKind: Equatable, Sendable {
     case repository
     case linkedWorktree
+    /// The working directory of a submodule. `--git-dir` and `--git-common-dir` agree, same as an
+    /// ordinary repository — but the agreed path lives under the superproject's `.git/modules/`,
+    /// not under this directory's own `.git`. Its objects live in the superproject and are not
+    /// lost if this directory goes; the superproject's gitlink is, left pointing at a directory
+    /// that is gone (BP-507).
+    case submodule
 }
 
 /// Telling a repository from one of its linked worktrees.
@@ -46,6 +52,15 @@ public enum LinkedWorktreeCheck {
         guard let git = resolve(gitDir.output), let common = resolve(commonDir.output) else {
             return nil
         }
-        return git == common ? .repository : .linkedWorktree
+        guard git == common else { return .linkedWorktree }
+        return isSubmoduleGitDir(git) ? .submodule : .repository
+    }
+
+    /// Git's own convention for where a submodule's git-dir lives: always a `modules/<name>` child
+    /// of the superproject's `.git`, never a directory's own `.git`. Measured on git 2.50.1 — a
+    /// nested submodule's git-dir nests the same way (`.git/modules/<outer>/modules/<inner>`), so
+    /// containment rather than a suffix match is what generalises to it.
+    private static func isSubmoduleGitDir(_ resolved: String) -> Bool {
+        resolved.contains("/.git/modules/")
     }
 }

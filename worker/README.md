@@ -537,7 +537,10 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   assignment while a decision is open and the marker is kept rather than dropped, since dropping it
   would hand the directory to a reaper equally unable to run. After seven days the hold is released
   anyway and the path is logged: the worktree is then yours to remove, and a later rebind collects
-  anything left.
+  anything left. The menubar's own removal — untick a project in Repositories — honours the same
+  "worktree of your own" boundary: a worktree outside `cp-worktrees` blocks the checkout's removal
+  rather than being taken with it, and a submodule's working directory is left alone too rather
+  than deleted out from under its superproject (BP-507).
 - **Accepting a refused change is the one report that does not go through the outbox.** Everything
   else this worker says is queued and retried until it lands; a decision settlement is not, because
   it can become *permanently* invalid — the decision superseded by a second claim, or given up on —
