@@ -313,6 +313,18 @@ describe("WorkersSection for a project owner who is not an instance admin", () =
     expect(api.put).toHaveBeenCalledWith("/api/projects/TP", { worker: { enabled: false } });
   });
 
+  // Judged on what is stored, not the draft: flipping it off must not lock the owner out of undoing it
+  it("lets the owner flip the switch back on before saving, having flipped it off under the lock", () => {
+    renderWith(false, { worker: { ...project().worker, enabled: true, lockedByInstance: true } });
+
+    fireEvent.click(enableSwitch());
+    expect(enableSwitch().checked).toBe(false);
+    expect(enableSwitch().disabled).toBe(false);
+    fireEvent.click(enableSwitch());
+
+    expect(enableSwitch().checked).toBe(true);
+  });
+
   it("leaves an instance admin's own switch usable under the lock", () => {
     renderWith(true, { worker: { ...project().worker, enabled: false, lockedByInstance: true } });
 

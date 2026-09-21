@@ -291,8 +291,9 @@ export function withProjectAccessOrWorker(handler: AuthenticatedHandler) {
     // routes of a task already in flight, and leave it in the active column until the two-hour
     // lease swept it and spent an attempt.
     // Under an instance admin's lock the exemption narrows to the held task itself: a route naming
-    // any other task is refused, while the run's own status, release, comments and outcome still
-    // land. Project-level routes (the project, its runs) carry no task and stay reachable.
+    // any other task is refused, while the run's own status, release and comments go through for as
+    // long as it holds the task. Its outcome record can still be lost: the outbox sends it after the
+    // final status has cleared execution.runId, and by then nothing exempts it.
     const onlyTheHeldTask = isWorkerLockedByInstance(project?.worker) && !!params.taskId;
     const heldTaskId = onlyTheHeldTask ? await resolveTaskId(projectId, params.taskId) : undefined;
     const exempt =
