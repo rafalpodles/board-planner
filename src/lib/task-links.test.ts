@@ -94,8 +94,21 @@ vi.mock("@/models/task", () => ({
   Task: {
     findOne: (filter: object, fields?: string) =>
       lean(projected(store.find(sift(filter)) ?? null, fields)),
-    find: (filter: object, fields?: string) =>
-      lean(store.filter(sift(filter)).map((d) => projected(d, fields)!)),
+    // Chainable, so severLinksToDeletedTask's `.sort().limit()` — the same shape board-feed.ts
+    // caps its own fan-out with — has something to call. `limit` really slices, since the fan-out
+    // cap test below is worthless against a fake that ignores it.
+    find: (filter: object, fields?: string) => {
+      let results = store.filter(sift(filter)).map((d) => projected(d, fields)!);
+      const chain = {
+        sort: () => chain,
+        limit: (n: number) => {
+          results = results.slice(0, n);
+          return chain;
+        },
+        lean: async () => results,
+      };
+      return chain;
+    },
     // `matchedCount` and `modifiedCount` are both read by the production code, and they are NOT
     // the same answer: a `$pull` whose criteria match nothing still matches its document. A mock
     // that made one a synonym of the other would pass a guard that read the wrong one.
@@ -153,7 +166,7 @@ vi.mock("@/lib/in-app-notifications", () => ({
   assigneeIdOf: (t: { assignee?: string }) => t.assignee,
 }));
 
-const { addTaskLink, removeTaskLink } = await import("./task-links");
+const { addTaskLink, removeTaskLink, severLinksToDeletedTask } = await import("./task-links");
 
 const P = "p1";
 const ACTOR = "u-actor";
@@ -858,5 +871,109 @@ describe("what leaves the building", () => {
       .map((c) => c[0] as { taskId: string; email?: { kicker?: string } })
       .find((n) => n.taskId === "a")!;
     expect(forA.email?.kicker).toBe("Link removed");
+  });
+});
+
+// BP-690: the DELETE route ran these two writers as bare `updateMany` pulls, with nothing to say
+// why a task's blocker or an epic's child had vanished. The deleted task's own document is never
+// in `store` here — the route deletes it before calling this, and it is the point of the fix that
+// nothing tries to write to it.
+describe("severLinksToDeletedTask", () => {
+  const DELETED = { taskNumber: 5, title: "Fix flaky test", status: "todo" };
+
+  it("announces a severed blocker on the surviving task, and pulls the reference", async () => {
+    store = [task("s", 1, { blockedBy: ["d"] })];
+
+    await severLinksToDeletedTask(P, "d", DELETED, ACTOR);
+
+    expect(rows()).toEqual([["s", "link_removed", "blocked_by", "BP-5", ""]]);
+    expect(store.find((d) => d._id === "s")!.blockedBy).toEqual([]);
+  });
+
+  it("announces a severed relation on the surviving end that stored it", async () => {
+    store = [task("s", 1, { relations: [{ task: "d", type: "parent_of" }] })];
+
+    await severLinksToDeletedTask(P, "d", DELETED, ACTOR);
+
+    expect(rows()).toEqual([["s", "link_removed", "parent_of", "BP-5", ""]]);
+    expect(store.find((d) => d._id === "s")!.relations).toEqual([]);
+  });
+
+  it("writes only the surviving end's row — nothing is ever addressed to the deleted task", async () => {
+    store = [task("s", 1, { blockedBy: ["d"] })];
+
+    await severLinksToDeletedTask(P, "d", DELETED, ACTOR);
+
+    expect(rows().some((r) => r[0] === "d")).toBe(false);
+  });
+
+  it("fires one task_unlinked webhook naming the deleted task by key and title", async () => {
+    store = [task("s", 1, { blockedBy: ["d"] })];
+
+    await severLinksToDeletedTask(P, "d", DELETED, ACTOR);
+
+    expect(dispatchWebhooks).toHaveBeenCalledTimes(1);
+    const [projectId, event, payload] = dispatchWebhooks.mock.calls[0];
+    expect([projectId, event]).toEqual([P, "task_unlinked"]);
+    expect(payload).toMatchObject({
+      task: { taskKey: "BP-1" },
+      data: { type: "blocked_by", relatedTaskKey: "BP-5", relatedTaskTitle: "Fix flaky test" },
+    });
+  });
+
+  it("notifies a survivor once even when it held the deleted task two ways", async () => {
+    store = [
+      task("s", 1, {
+        blockedBy: ["d"],
+        relations: [{ task: "d", type: "relates" }],
+        watchers: ["u-owner"],
+      }),
+    ];
+
+    await severLinksToDeletedTask(P, "d", DELETED, ACTOR);
+
+    // Both facts still reach the timeline...
+    expect(rows().map((r) => r[2]).sort()).toEqual(["blocked_by", "relates"]);
+    // ...but the bell rings once, not twice, for the one task whose board changed
+    expect(createNotifications).toHaveBeenCalledTimes(1);
+    expect(createNotifications.mock.calls[0][0]).toMatchObject({ recipientIds: ["u-owner"] });
+  });
+
+  it("leaves an unrelated task and another board's task alone", async () => {
+    store = [
+      task("s", 1, { blockedBy: ["d"] }),
+      task("other", 2),
+      { ...task("elsewhere", 3, { blockedBy: ["d"] }), project: "p2" },
+    ];
+
+    await severLinksToDeletedTask(P, "d", DELETED, ACTOR);
+
+    expect(rows().map((r) => r[0])).toEqual(["s"]);
+    expect(store.find((d) => d._id === "elsewhere")!.blockedBy).toEqual(["d"]);
+  });
+
+  it("does nothing when nobody held a link to the deleted task", async () => {
+    store = [task("s", 1)];
+
+    await severLinksToDeletedTask(P, "d", DELETED, ACTOR);
+
+    expect(rows()).toEqual([]);
+    expect(dispatchWebhooks).not.toHaveBeenCalled();
+  });
+
+  // The fan-out cap board-feed.ts set the precedent for: the cleanup pull is unconditional (a
+  // dangling reference left behind is worse than a missed notification), only the announcement is
+  // bounded.
+  it("bounds the announcement but still cleans up every reference past the cap", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    store = Array.from({ length: 201 }, (_, i) => task(`s${i}`, i + 1, { blockedBy: ["d"] }));
+
+    await severLinksToDeletedTask(P, "d", DELETED, ACTOR);
+
+    expect(rows()).toHaveLength(200);
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("200-task"));
+    // Every one of the 201, not just the announced 200 — the reference itself is gone everywhere
+    expect(store.every((d) => (d.blockedBy ?? []).length === 0)).toBe(true);
+    errorSpy.mockRestore();
   });
 });

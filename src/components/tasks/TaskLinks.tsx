@@ -83,9 +83,12 @@ export function TaskLinks({
     }
   }
 
-  async function removeLink(targetTaskId: string, type: DependencyType) {
+  // A relation is stored on one end only, so removing it has to ask that end — not always this
+  // task. An incoming "Relates to" row lives on the OTHER task's document, and asking this task's
+  // own endpoint to drop it was a no-op that still reported success (BP-657).
+  async function removeLink(holderId: string, targetTaskId: string, type: DependencyType) {
     try {
-      await api.del(`/api/projects/${projectId}/tasks/${task._id}/links`, {
+      await api.del(`/api/projects/${projectId}/tasks/${holderId}/links`, {
         taskId: targetTaskId,
         type,
       });
@@ -104,18 +107,43 @@ export function TaskLinks({
   const blocking = task.blocking || [];
   const relations = task.relations || [];
   const relatedFrom = task.relatedFrom || [];
-  const relatesTo = [
-    ...relations.filter((r) => r.type === "relates"),
-    // "relates" is symmetric, so an incoming link belongs in the same list
-    ...relatedFrom.filter((r) => r.type === "relates"),
-  ];
-  const duplicates = relations.filter((r) => r.type === "duplicates");
-  const duplicatedBy = relatedFrom.filter((r) => r.type === "duplicates");
-  const children = relations.filter((r) => r.type === "parent_of");
-  const parents = relatedFrom.filter((r) => r.type === "parent_of");
+  // "relates" is symmetric, so an incoming link belongs in the same list — but a pair can hold it
+  // from BOTH directions at once (pre-existing data, or written through MCP, which documents that
+  // both sides may coexist), and rendering both was two rows for one relationship sharing one React
+  // key (BP-657). Collapsed by task id; the outgoing copy wins when both exist. `holderId` is
+  // whichever document actually stores the relation — the end removing it has to address — and
+  // `targetId` is always the OTHER end of that same write, which is `task._id` itself when the
+  // holder is the far side.
+  const relatesToById = new Map<
+    string,
+    { task: ApiTaskLink; type: "relates"; holderId: string; targetId: string }
+  >();
+  for (const r of relatedFrom.filter((r) => r.type === "relates")) {
+    relatesToById.set(r.task._id, { task: r.task, type: "relates", holderId: r.task._id, targetId: task._id });
+  }
+  for (const r of relations.filter((r) => r.type === "relates")) {
+    relatesToById.set(r.task._id, { task: r.task, type: "relates", holderId: task._id, targetId: r.task._id });
+  }
+  const relatesTo = [...relatesToById.values()];
+  const duplicates = relations
+    .filter((r) => r.type === "duplicates")
+    .map((r) => ({ ...r, holderId: task._id, targetId: r.task._id }));
+  const duplicatedBy = relatedFrom
+    .filter((r) => r.type === "duplicates")
+    .map((r) => ({ ...r, holderId: r.task._id, targetId: task._id }));
+  const children = relations
+    .filter((r) => r.type === "parent_of")
+    .map((r) => ({ ...r, holderId: task._id, targetId: r.task._id }));
+  const parents = relatedFrom
+    .filter((r) => r.type === "parent_of")
+    .map((r) => ({ ...r, holderId: r.task._id, targetId: task._id }));
   const linkedIds = new Set([
     ...blockedBy.map((t) => t._id),
     ...relations.map((r) => r.task._id),
+    // Also excludes what the OTHER end already relates to this task — "duplicates" is deliberately
+    // not folded in here: A-duplicates-B and B-duplicates-A are different claims about which side
+    // is the original, so both existing independently is not the bug this guards against (BP-691).
+    ...relatedFrom.filter((r) => r.type === "relates").map((r) => r.task._id),
   ]);
 
   const filteredTasks = allTasks.filter((t) => {
@@ -173,7 +201,7 @@ export function TaskLinks({
                 title={t.title}
                 status={statusChip(t.status)}
                 onOpen={() => navigateToTask(t.taskNumber)}
-                onRemove={() => removeLink(t._id, "blocked_by")}
+                onRemove={() => removeLink(task._id, t._id, "blocked_by")}
               />
             ))}
           </div>
@@ -219,7 +247,7 @@ export function TaskLinks({
                   onOpen={() => navigateToTask(r.task.taskNumber)}
                   onRemove={
                     section.removable
-                      ? () => removeLink(r.task._id, section.type)
+                      ? () => removeLink(r.holderId, r.targetId, section.type)
                       : undefined
                   }
                 />

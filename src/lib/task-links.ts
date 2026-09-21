@@ -407,7 +407,12 @@ async function wouldDescend(
  * parent in the same write, and its bell should say what the task's situation IS — the gain —
  * rather than ring twice. The timeline keeps both halves.
  */
-async function announce(projectId: string, actorId: string, facts: LinkFact[]): Promise<void> {
+async function announce(
+  projectId: string,
+  actorId: string,
+  facts: LinkFact[],
+  opts: { skipTargetRow?: boolean } = {}
+): Promise<void> {
   if (facts.length === 0) return;
 
   const [project, actor] = await Promise.all([
@@ -424,7 +429,11 @@ async function announce(projectId: string, actorId: string, facts: LinkFact[]): 
   }[] = [];
   for (const fact of facts) {
     rows.push({ subject: fact.holder, other: fact.target, direction: fact.type, fact });
-    rows.push({ subject: fact.target, other: fact.holder, direction: INVERSE[fact.type], fact });
+    // Skipped when the target is being deleted: its document is gone by the time this runs, and a
+    // row on it would be unreachable the instant it landed (BP-690).
+    if (!opts.skipTargetRow) {
+      rows.push({ subject: fact.target, other: fact.holder, direction: INVERSE[fact.type], fact });
+    }
   }
 
   const sentence = (row: (typeof rows)[number], self: string) =>
@@ -502,4 +511,79 @@ async function announce(projectId: string, actorId: string, facts: LinkFact[]): 
     dispatchWebhooks(projectId, event, payload);
     dispatchNotifications(projectId, event, payload);
   }
+}
+
+/** How many surviving tasks one deletion may announce a severed link to. See `BOARD_FEED_FANOUT_LIMIT`. */
+const DELETE_LINK_FANOUT_LIMIT = 200;
+
+/**
+ * Detaches every reference to a deleted task from the rest of the board — the two writers the
+ * DELETE route already ran as bare `updateMany` pulls, with nothing to say why a task's blocker or
+ * an epic's child had vanished (BP-690). The reads run before the pulls, since a pull cannot be
+ * asked afterwards what it matched.
+ *
+ * Only the surviving side gets a row: `announce`'s `skipTargetRow` is what makes that true here,
+ * since `deleted`'s document is gone before this function is ever asked to write to it.
+ */
+export async function severLinksToDeletedTask(
+  projectId: string,
+  rawDeletedTaskId: string,
+  deleted: { taskNumber: number; title: string; status: string },
+  actorId: string
+): Promise<void> {
+  const deletedTaskId = canonicalId(rawDeletedTaskId);
+
+  const [blockedSurvivors, relatedSurvivors] = await Promise.all([
+    Task.find({ project: projectId, blockedBy: deletedTaskId }, SUBJECT_FIELDS)
+      // Ordered, so the cap takes the same tasks every time rather than whichever the storage
+      // engine happened to reach first.
+      .sort({ _id: 1 })
+      .limit(DELETE_LINK_FANOUT_LIMIT)
+      .lean<LinkSubject[]>(),
+    Task.find({ project: projectId, "relations.task": deletedTaskId }, `${SUBJECT_FIELDS} relations`)
+      .sort({ _id: 1 })
+      .limit(DELETE_LINK_FANOUT_LIMIT)
+      .lean<(LinkSubject & { relations: { task: unknown; type: RelationType }[] })[]>(),
+  ]);
+
+  if (
+    blockedSurvivors.length === DELETE_LINK_FANOUT_LIMIT ||
+    relatedSurvivors.length === DELETE_LINK_FANOUT_LIMIT
+  ) {
+    console.error(
+      `Deleting task ${deletedTaskId} in project ${projectId} hit the ${DELETE_LINK_FANOUT_LIMIT}-task ` +
+        "fan-out cap; some surviving tasks were not told their link to it was severed"
+    );
+  }
+
+  const target: LinkSubject = {
+    _id: deletedTaskId,
+    taskNumber: deleted.taskNumber,
+    title: deleted.title,
+    status: deleted.status,
+  };
+  const facts: LinkFact[] = [
+    ...blockedSurvivors.map((holder) => ({
+      action: "removed" as const,
+      type: "blocked_by" as const,
+      holder,
+      target,
+    })),
+    ...relatedSurvivors
+      .map((holder) => ({ holder, type: relationBetween(holder, deletedTaskId) }))
+      // The query matched on this, so absent would mean the array changed between the read above
+      // and here — never observed, but the filter is what proves the fact, not the query alone.
+      .filter((h): h is { holder: (typeof relatedSurvivors)[number]; type: RelationType } => !!h.type)
+      .map(({ holder, type }) => ({ action: "removed" as const, type, holder, target })),
+  ];
+
+  await Promise.all([
+    Task.updateMany({ project: projectId, blockedBy: deletedTaskId }, { $pull: { blockedBy: deletedTaskId } }),
+    Task.updateMany(
+      { project: projectId, "relations.task": deletedTaskId },
+      { $pull: { relations: { task: deletedTaskId } } }
+    ),
+  ]);
+
+  await announce(projectId, actorId, facts, { skipTargetRow: true });
 }
