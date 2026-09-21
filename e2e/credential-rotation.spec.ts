@@ -274,4 +274,55 @@ test.describe("OAuth credentials", () => {
     await expect(clients).toHaveCount(1);
     await expect(section(page, "Connected apps (OAuth)").getByRole("button", { name: "Revoke" })).toHaveCount(1);
   });
+
+  // BP-747. A refresh already past its own atomic read can still write a fresh token pair after
+  // the client's deletion cascade has started — the click and the refresh are fired together so
+  // the real server decides the order, not this test. Whichever wins, nothing usable must survive:
+  // either the refresh itself is refused, or the pair it minted is already dead.
+  test("a refresh racing the client's own deletion leaves no live credential either way", async ({
+    page,
+    request,
+    browser,
+    baseURL,
+  }) => {
+    const RACER = "E2E Race Client";
+    const racer = await connectApp(browser, baseURL, request, RACER);
+    await expectWorks(request, racer.accessToken);
+
+    await openTokens(page);
+    const confirmed: string[] = [];
+    page.once("dialog", (dialog) => {
+      confirmed.push(dialog.message());
+      void dialog.accept();
+    });
+    const deleted = page.waitForResponse(
+      (r) => r.request().method() === "DELETE" && new URL(r.url()).pathname === "/api/oauth/clients"
+    );
+
+    const [, refreshed] = await Promise.all([
+      row(page, "OAuth clients", RACER).getByRole("button", { name: "Delete" }).click(),
+      request.post("/oauth/token", {
+        form: {
+          grant_type: "refresh_token",
+          refresh_token: racer.refreshToken,
+          client_id: racer.clientId,
+        },
+      }),
+    ]);
+    expect((await deleted).status()).toBe(200);
+    expect(confirmed).toEqual([expect.stringContaining(RACER)]);
+
+    if (refreshed.status() === 200) {
+      const { access_token: mintedInTheRace } = await refreshed.json();
+      const board = await request.get(`/api/projects/${PROJECT_KEY}`, {
+        headers: { Authorization: `Bearer ${mintedInTheRace}` },
+      });
+      expect(board.status(), "a token minted while the client was being deleted must not work").toBe(401);
+    } else {
+      expect(refreshed.status()).toBe(400);
+      expect((await refreshed.json()).error).toBe("invalid_grant");
+    }
+
+    await expect(row(page, "OAuth clients", RACER)).toHaveCount(0);
+  });
 });
