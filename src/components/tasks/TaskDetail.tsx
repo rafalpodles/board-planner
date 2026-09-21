@@ -44,10 +44,12 @@ interface TaskDetailProps {
   onLoaded?: (task: ApiTask, project: ApiProject) => void;
 }
 
-// A 400 on reading the task is a malformed address; on a save it is a refused value, not a refusal
+// On a write only a lost grant replaces the page: a 400 is a refused value, and a 404 mid-edit
+// (the task deleted under you) keeps the editor so what was typed can still be copied
 function taskRefusal(err: unknown, reading: boolean): string | null {
   const status = (err as { status?: number } | null)?.status;
-  if (status === 404 || (reading && status === 400)) return "There is no task here — the link may be stale.";
+  if (!reading) return status === 403 ? boardRefusal(err) : null;
+  if (status === 404 || status === 400) return "There is no task here — the link may be stale.";
   return boardRefusal(err);
 }
 
@@ -96,6 +98,7 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
   }, [projectId, taskId]);
 
   useEffect(() => {
+    shown.current = false;
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId]);
@@ -275,6 +278,7 @@ function TaskDetailView({
         setHeldStatus({ conflict: failure.body.runConflict, retry: () => patch(true) });
         return;
       }
+      if (onRefused(err)) return;
       toast("Failed to update status", "error");
     }
   }

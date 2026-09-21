@@ -83,6 +83,26 @@ describe("ActivityTimeline", () => {
     expect(screen.queryByText("What it said before")).toBeNull();
   });
 
+  it("says a description was removed when the run ended with it empty", async () => {
+    api.get.mockResolvedValue([{ ...log, action: "updated", field: "description", oldValue: "Old words", newValue: "", cleared: true }]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+
+    await waitFor(() => expect(screen.getByText(/removed the description/)).toBeTruthy());
+  });
+
+  it("withdraws its count while it is hidden and out of date, rather than showing a stale number", async () => {
+    api.get.mockResolvedValue([log]);
+    const onCountChange = vi.fn();
+    const { rerender } = render(
+      <ActivityTimeline projectId="TP" taskId="t1" refreshKey={0} visible={false} onCountChange={onCountChange} />
+    );
+    await waitFor(() => expect(onCountChange).toHaveBeenLastCalledWith(1));
+
+    rerender(<ActivityTimeline projectId="TP" taskId="t1" refreshKey={1} visible={false} onCountChange={onCountChange} />);
+
+    expect(onCountChange).toHaveBeenLastCalledWith(null);
+  });
+
   it("waits until it is shown to read again, and then reads once", async () => {
     api.get.mockResolvedValue([log]);
     const { rerender } = render(<ActivityTimeline projectId="TP" taskId="t1" refreshKey={0} visible={false} />);

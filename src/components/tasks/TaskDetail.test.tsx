@@ -1023,6 +1023,36 @@ describe("TaskDetail when a save is refused", () => {
   });
 });
 
+describe("TaskDetail when a status change is refused", () => {
+  it("replaces the task with the refusal, as a refused save does", async () => {
+    api.patch.mockRejectedValue(Object.assign(new Error("Forbidden"), { status: 403 }));
+    renderDetail();
+    await loaded();
+
+    await act(async () => screen.getByRole("combobox", { name: "Status" }).click());
+    await act(async () => screen.getByRole("option", { name: /In Progress/i }).click());
+
+    expect(await screen.findByText("You do not have access to this board.")).toBeTruthy();
+  });
+});
+
+describe("TaskDetail when the task is deleted while being edited", () => {
+  it("keeps the editor, so what was typed can still be copied", async () => {
+    api.put.mockRejectedValue(Object.assign(new Error("Task not found"), { status: 404 }));
+    renderDetail();
+    await loaded();
+
+    const title = screen.getByLabelText("Task title") as HTMLTextAreaElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(title, "Typed a lot");
+      title.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    expect(await screen.findByText(/Task not found/, {}, { timeout: 3000 })).toBeTruthy();
+    expect((screen.getByLabelText("Task title") as HTMLTextAreaElement).value).toBe("Typed a lot");
+  });
+});
+
 describe("TaskDetail when a save's value is refused", () => {
   it("keeps the task on screen and says what was wrong with the value", async () => {
     api.put.mockRejectedValue(Object.assign(new Error("Title is required"), { status: 400 }));
