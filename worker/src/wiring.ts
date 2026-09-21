@@ -352,12 +352,22 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     }
   }
 
+  // The one composition point every git-spawning call site reads its absolute path from, the same
+  // way `githubIdentityToken` reads `preflight?.paths.gh` — resolved once by `establishPreflight`,
+  // read back out fresh rather than cached separately, so a machine that could not find git on its
+  // first pass picks it up the moment a later preflight does (BP-641). Empty before the first
+  // preflight completes, or if git was never found; every reader downstream refuses on empty rather
+  // than falling back to the bare name "git" on PATH.
+  function resolvedGitPath(): string {
+    return preflight?.paths.git ?? "";
+  }
+
   // A failure keeps the previous inventory rather than reporting an empty one: the server would
   // otherwise overwrite what it knows, and this machine would silently stop being offered anything.
   async function refreshInventory(): Promise<void> {
     let result;
     try {
-      result = await repoInventory({ runner: deps.runner, readAllowlist });
+      result = await repoInventory({ runner: deps.runner, gitPath: resolvedGitPath(), readAllowlist });
     } catch (error) {
       result = { ok: false as const, reason: `could not read repos.json: ${String(error)}` };
     }
@@ -406,6 +416,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
         const result = await bindRepository(
           {
             runner: deps.runner,
+            gitPath: resolvedGitPath(),
             readAllowlist,
             realpath: deps.realpath,
             stat: deps.stat,
@@ -466,7 +477,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       // reapOrphans only lists and destroys — it never calls create() — so the fetch parameters
       // stay absent here, same as Ruling 2 intends for any caller that has no use for them.
       const reaped = await reapOrphans(
-        createWorkspace(taskConfig, deps.runner),
+        createWorkspace(taskConfig, deps.runner, resolvedGitPath()),
         taskConfig.worktreeRoot,
         // The one exception: a worktree somebody is being asked about. Keyed on the root rather
         // than on the project, because rebind resolves several projects onto one checkout.
@@ -628,6 +639,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     }
 
     const githubToken = await githubIdentityToken();
+    const gitPath = resolvedGitPath();
     // The same value rebind() matched this project's checkout against — the server's own record
     // of the project's repository, never re-read from repoPath/.git at execution time.
     const remoteUrl = bound.get(task.projectId)?.remote;
@@ -641,11 +653,13 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
           boardColumns: (projectId) => api.boardColumns(projectId),
           createReporter: (client, statusIds) =>
             createReporter(client, statusIds, (message) => deps.logError(message), outbox, releaseComments),
-          createDelivery: (runner, baseBranch) => createDelivery(runner, baseBranch, githubToken),
-          workspace: createWorkspace(taskConfig, deps.runner, remoteFetchEnv(githubToken), remoteUrl),
+          createDelivery: (runner, baseBranch) => createDelivery(runner, gitPath, baseBranch, githubToken),
+          workspace: createWorkspace(taskConfig, deps.runner, gitPath, remoteFetchEnv(githubToken), remoteUrl),
           executor: createExecutor(taskConfig, deps.runner),
-          collectDiff,
-          gateFor: gateFromEntry,
+          collectDiff: (runner, worktreePath, baseSha) => collectDiff(runner, gitPath, worktreePath, baseSha),
+          gateFor: (entry, runner, timeoutMs, fallbacks) =>
+            gateFromEntry(entry, runner, gitPath, timeoutMs, fallbacks),
+          gitPath,
           recordRun: (project, record) => outbox.add({ kind: "run", projectId: project, record }),
           logError: deps.logError,
           openDecision: (input) => openDecision({ markers, api, scrub: scrubPatch }, input),
@@ -669,13 +683,15 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     const taskConfig = configFor(projectId);
     if (!taskConfig) return null;
     const githubToken = await githubIdentityToken();
-    const workspace = createWorkspace(taskConfig, deps.runner);
+    const gitPath = resolvedGitPath();
+    const workspace = createWorkspace(taskConfig, deps.runner, gitPath);
     return {
       worktreeRoot: taskConfig.worktreeRoot,
       destroyWorktree: (taskKey) => workspace.destroy(taskKey),
-      delivery: createDelivery(deps.runner, taskConfig.baseBranch, githubToken),
+      delivery: createDelivery(deps.runner, gitPath, taskConfig.baseBranch, githubToken),
       runner: deps.runner,
-      collectDiff,
+      gitPath,
+      collectDiff: (runner, worktreePath, baseSha) => collectDiff(runner, gitPath, worktreePath, baseSha),
     };
   }
 

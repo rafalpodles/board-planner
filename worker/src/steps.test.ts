@@ -54,6 +54,7 @@ function ctx(over: Partial<StepContext> = {}) {
     onEvent: vi.fn(),
     baseSha,
     runner,
+    gitPath: "git",
     ...over,
   } as unknown as StepContext;
   return context as StepContext & {

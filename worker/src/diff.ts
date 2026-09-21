@@ -1,5 +1,5 @@
 import { Runner, RunOpts } from "./exec.js";
-import { gitArgs, localGitEnv } from "./git-safety.js";
+import { gitArgs, localGitEnv, requireGitPath } from "./git-safety.js";
 import { DiffStats } from "./types.js";
 
 const GIT_TIMEOUT_MS = 60_000;
@@ -8,10 +8,11 @@ const MAX_PATCH_CHARS = 200_000;
 
 async function git(
   runner: Runner,
+  gitPath: string,
   args: string[],
   opts: RunOpts,
 ): Promise<string> {
-  const result = await runner.run("git", gitArgs(args), {
+  const result = await runner.run(requireGitPath(gitPath), gitArgs(args), {
     ...opts,
     // Defence in depth rather than a hole this closes: every diff below already passes
     // `--no-ext-diff --no-textconv`, so neither a global driver nor a global textconv can
@@ -95,6 +96,7 @@ function boundPatch(patch: string): Pick<DiffStats, "patch" | "truncated"> {
 
 export async function collectDiff(
   runner: Runner,
+  gitPath: string,
   worktreePath: string,
   baseSha: string,
 ): Promise<DiffStats> {
@@ -117,7 +119,7 @@ export async function collectDiff(
   // from another was a timing question rather than a guarantee — and the review gate now checks
   // this sha out to read the change (BP-404). Same rule the base already follows two blocks up.
   const headSha = (
-    await git(runner, ["rev-parse", "--verify", "HEAD^{commit}"], opts)
+    await git(runner, gitPath, ["rev-parse", "--verify", "HEAD^{commit}"], opts)
   ).trim();
   if (!BASE_OBJECT_ID.test(headSha)) {
     throw new Error(
@@ -129,6 +131,7 @@ export async function collectDiff(
   // rewrites to hide a file from this diff (BP-382).
   const numstatOutput = await git(
     runner,
+    gitPath,
     [
       "diff",
       "--no-ext-diff",
@@ -158,6 +161,7 @@ export async function collectDiff(
   // for every diff; the cat-file loop runs only when a symlink is actually there.
   const rawOutput = await git(
     runner,
+    gitPath,
     ["diff", "--no-ext-diff", "--no-textconv", "--raw", baseSha, headSha, "--"],
     opts,
   );
@@ -189,12 +193,13 @@ export async function collectDiff(
     }
 
     if (fields[1] !== "120000") continue;
-    const target = await git(runner, ["cat-file", "blob", fields[3]], opts);
+    const target = await git(runner, gitPath, ["cat-file", "blob", fields[3]], opts);
     symlinks.push({ path, target: target.trim() });
   }
 
   const patchOutput = await git(
     runner,
+    gitPath,
     ["diff", "--no-ext-diff", "--no-textconv", baseSha, headSha, "--"],
     opts,
   );

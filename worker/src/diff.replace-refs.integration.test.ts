@@ -90,7 +90,7 @@ describe("collectDiff against a planted refs/replace mapping", () => {
   });
 
   it("collectDiff reports the commit's true content, not the replace ref's decoy", async () => {
-    const diff = await collectDiff(createRunner(), work, baseSha);
+    const diff = await collectDiff(createRunner(), "git", work, baseSha);
 
     expect(diff.patch).toContain(REAL);
     expect(diff.patch).not.toContain(DECOY);

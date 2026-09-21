@@ -7,7 +7,21 @@ import {
   localGitEnv,
   NO_GLOBAL_CONFIG,
   operatorGitEnv,
+  requireGitPath,
 } from "./git-safety.js";
+
+// BP-641. The one composition point every git-spawning call site's "what if there is no resolved
+// path" decision runs through, so it is the same decision everywhere rather than each call site
+// picking its own.
+describe("requireGitPath", () => {
+  it("refuses rather than falling back to the bare name \"git\" on PATH", () => {
+    expect(() => requireGitPath("")).toThrow(/no absolute git path was resolved/);
+  });
+
+  it("passes an already-resolved path through unchanged", () => {
+    expect(requireGitPath("/opt/homebrew/bin/git")).toBe("/opt/homebrew/bin/git");
+  });
+});
 
 describe("gitArgs", () => {
   it("disables the hook path, so a hook the agent wrote never runs", () => {
@@ -60,8 +74,8 @@ describe("gitArgs", () => {
  * and a `//` line in repos.ts carrying `/private/*` opened a block comment the regex closed 183
  * lines later — taking the config scan, the one module this whole change is about, out of the scan
  * entirely. Measured: an unhardened git call added there was invisible to all four assertions. A
- * comment that happens to contain `run("git"` now fails this test instead, which is the direction
- * to fail in.
+ * comment that happens to contain `run(requireGitPath(` now fails this test instead, which is the
+ * direction to fail in.
  */
 const MAY_COMPOSE_A_GIT_ENVIRONMENT = ["delivery.ts", "git-safety.ts"];
 
@@ -89,7 +103,7 @@ const FILES_THAT_RUN_GIT = [
   "workspace.ts",
 ];
 
-const RUNS_GIT = /run\(\s*"git"/g;
+const RUNS_GIT = /run\(\s*requireGitPath\(/g;
 
 // The helper has to be what the call's `env` is built FROM, not a name that happens to appear in
 // the window. Reading the source as it is means a comment inside a call's window would otherwise

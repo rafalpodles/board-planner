@@ -9,6 +9,8 @@ import { acceptability } from "./decisions.js";
 import { isProtectedPath, protectedPathsGate, workflowPaths } from "./gates/protected-paths.js";
 import { GateContext } from "./types.js";
 
+const gitPath = "git";
+
 /**
  * BP-381. Two ways an agent makes the patch a person is asked to accept describe something other
  * than the commit that would be pushed. Neither needs a config key, so neither is closed by
@@ -60,7 +62,7 @@ describe("what the patch shows when something decides how git renders it", () =>
     git(work, "add", "-A");
     git(work, "commit", "--quiet", "-m", "plant");
 
-    const diff = await collectDiff(createRunner(), work, baseSha);
+    const diff = await collectDiff(createRunner(), gitPath, work, baseSha);
 
     // The hole itself, measured rather than assumed: this is what a person would be shown
     expect(diff.patch).toContain("Binary files");
@@ -80,7 +82,7 @@ describe("what the patch shows when something decides how git renders it", () =>
     git(work, "add", "-A");
     git(work, "commit", "--quiet", "-m", "plant");
 
-    const diff = await collectDiff(createRunner(), work, baseSha);
+    const diff = await collectDiff(createRunner(), gitPath, work, baseSha);
 
     expect(diff.patch).not.toContain("preinstall");
     expect(diff.suppressedDiffs).toEqual(["package.json"]);
@@ -98,7 +100,7 @@ describe("what the patch shows when something decides how git renders it", () =>
     git(work, "add", "-A");
     git(work, "commit", "--quiet", "-m", "plant a driver");
 
-    const diff = await collectDiff(createRunner(), work, baseSha);
+    const diff = await collectDiff(createRunner(), gitPath, work, baseSha);
 
     expect(diff.patch).not.toContain("preinstall");
     expect(diff.suppressedDiffs).toEqual(["package.json"]);
@@ -116,7 +118,7 @@ describe("what the patch shows when something decides how git renders it", () =>
     git(work, "add", "-A");
     git(work, "commit", "--quiet", "-m", "plant a NUL");
 
-    const diff = await collectDiff(createRunner(), work, baseSha);
+    const diff = await collectDiff(createRunner(), gitPath, work, baseSha);
 
     expect(diff.patch).not.toContain("child_process");
     expect(diff.suppressedDiffs).toEqual(["build.js"]);
@@ -132,7 +134,7 @@ describe("what the patch shows when something decides how git renders it", () =>
     git(work, "add", "-A");
     git(work, "commit", "--quiet", "-m", "add an image");
 
-    const diff = await collectDiff(createRunner(), work, baseSha);
+    const diff = await collectDiff(createRunner(), gitPath, work, baseSha);
 
     expect(diff.changedFiles).toContain("logo.png");
     expect(diff.patch).toContain("Binary files");
@@ -168,7 +170,7 @@ describe("what the patch shows when something decides how git renders it", () =>
     git(join(work, "sub"), "checkout", "--quiet", "HEAD~1");
     git(work, "commit", "--quiet", "-am", "bump the pointer");
 
-    const diff = await collectDiff(createRunner(), work, withSubmodule);
+    const diff = await collectDiff(createRunner(), gitPath, work, withSubmodule);
 
     expect(diff.changedLines).toBe(2);
     expect(diff.suppressedDiffs).toEqual(["sub"]);
@@ -189,7 +191,7 @@ describe("what the patch shows when something decides how git renders it", () =>
     git(work, "add", "-A");
     git(work, "commit", "--quiet", "-m", "edit");
 
-    const diff = await collectDiff(createRunner(), work, baseSha);
+    const diff = await collectDiff(createRunner(), gitPath, work, baseSha);
 
     expect(diff.patch).toContain('"a":2');
     expect(diff.suppressedDiffs).toEqual([]);
@@ -225,7 +227,7 @@ describe("what a hidden file does to the offer", () => {
     git(work, "add", "-A");
     git(work, "commit", "--quiet", "-m", "plant");
 
-    const verdict = acceptability(await collectDiff(createRunner(), work, baseSha));
+    const verdict = acceptability(await collectDiff(createRunner(), gitPath, work, baseSha));
 
     expect(verdict.acceptable).toBe(false);
     expect(verdict.unacceptableReason).toContain("package.json");
@@ -241,7 +243,7 @@ describe("what a hidden file does to the offer", () => {
     git(work, "add", "-A");
     git(work, "commit", "--quiet", "-m", "ordinary");
 
-    const verdict = acceptability(await collectDiff(createRunner(), work, baseSha));
+    const verdict = acceptability(await collectDiff(createRunner(), gitPath, work, baseSha));
 
     expect(verdict).toEqual({ acceptable: true, unacceptableReason: "" });
   });
@@ -283,7 +285,7 @@ describe("a path git would rather quote", () => {
     git(work, "add", "-A");
     git(work, "commit", "--quiet", "-m", "plant a workflow");
 
-    const diff = await collectDiff(createRunner(), work, baseSha);
+    const diff = await collectDiff(createRunner(), gitPath, work, baseSha);
 
     expect(diff.changedFiles).toEqual([path]);
     expect(isProtectedPath(diff.changedFiles[0])).toBe(true);
@@ -301,6 +303,6 @@ describe("a path git would rather quote", () => {
     git(work, "add", "-A");
     git(work, "commit", "--quiet", "-m", "plant a quoted name");
 
-    await expect(collectDiff(createRunner(), work, baseSha)).rejects.toThrow(/quoted the path/);
+    await expect(collectDiff(createRunner(), gitPath, work, baseSha)).rejects.toThrow(/quoted the path/);
   });
 });

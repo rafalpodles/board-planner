@@ -1,7 +1,7 @@
 import { isGitRefName } from "./config.js";
 import { childEnv } from "./env.js";
 import { CommandResult, Runner } from "./exec.js";
-import { GIT_SAFE_ENV, refuseOptionShapedPositionals, NO_GLOBAL_CONFIG } from "./git-safety.js";
+import { GIT_SAFE_ENV, refuseOptionShapedPositionals, NO_GLOBAL_CONFIG, requireGitPath } from "./git-safety.js";
 import { plantedConfig } from "./repos.js";
 import { ClaimedTask } from "./types.js";
 import { scrub } from "./scrub.js";
@@ -158,6 +158,7 @@ export function hardenedGitConfig(): NodeJS.ProcessEnv {
 // mid-run who this worker pushes as (BP-373).
 export function createDelivery(
   runner: Runner,
+  gitPath: string,
   baseBranch?: string,
   githubToken?: string,
 ): Delivery {
@@ -211,7 +212,7 @@ export function createDelivery(
   // not name. Push is where it is worth paying for, being the call that hands the checkout's own
   // config a credential; gh carries its token in the environment, so openPr and merge do not.
   async function refuseIfPlanted(worktreePath: string): Promise<void> {
-    const planted = await plantedConfig(runner, worktreePath);
+    const planted = await plantedConfig(runner, gitPath, worktreePath);
     if (planted) {
       throw new Error(
         `refusing to push: the checkout's git config sets ${planted}, which was not there when the repository was approved`,
@@ -274,7 +275,7 @@ export function createDelivery(
       // where somebody would type `git push` and find out.
       await refuseIfPlanted(worktreePath);
       const result = await run(
-        "git",
+        requireGitPath(gitPath),
         refuseOptionShapedPositionals([
           "push",
           "--no-verify",

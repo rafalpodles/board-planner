@@ -29,6 +29,7 @@ function ctx(changedLines: number): GateContext {
 }
 
 const idleRunner = { run: vi.fn() } as never;
+const gitPath = "git";
 
 // What a block that names no parameter of its own falls back to: the project's worker policy,
 // deliberately not the built-in constants — a project that pinned a limit before the catalog
@@ -48,13 +49,13 @@ function reviewerArgv(run: { mock: { calls: unknown[][] } }): string[] {
 describe("gateFromEntry", () => {
   // Two Size gates in one agent have to be distinguishable in the comment that refuses
   it("names the gate after the block, not after the kind", () => {
-    expect(gateFromEntry(entry({ key: "size-strict" }), idleRunner, 1000, FALLBACKS)?.name).toBe(
+    expect(gateFromEntry(entry({ key: "size-strict" }), idleRunner, gitPath, 1000, FALLBACKS)?.name).toBe(
       "size-strict"
     );
   });
 
   it("takes the threshold from the entry rather than from the worker's config", async () => {
-    const gate = gateFromEntry(entry({ params: { maxLines: "10" } }), idleRunner, 1000, FALLBACKS);
+    const gate = gateFromEntry(entry({ params: { maxLines: "10" } }), idleRunner, gitPath, 1000, FALLBACKS);
     const verdict = await gate!.run(ctx(50));
 
     expect(verdict.ok).toBe(false);
@@ -64,7 +65,7 @@ describe("gateFromEntry", () => {
   // A threshold of zero refuses every change, which reads as a broken gate rather than a strict one
   it("falls back to the built-in default when a parameter is not a positive number", async () => {
     for (const maxLines of ["lots", "0", "-5", ""]) {
-      const gate = gateFromEntry(entry({ params: { maxLines } }), idleRunner, 1000, FALLBACKS);
+      const gate = gateFromEntry(entry({ params: { maxLines } }), idleRunner, gitPath, 1000, FALLBACKS);
       expect((await gate!.run(ctx(5))).ok).toBe(true);
     }
   });
@@ -72,7 +73,7 @@ describe("gateFromEntry", () => {
   // The project's own setting, not the built-in 400: a project that pinned 2000 before the catalog
   // existed keeps it, and a block that names no limit inherits it
   it("falls back to the project's pinned limit, not to the built-in one", async () => {
-    const gate = gateFromEntry(entry({ params: {} }), idleRunner, 1000, {
+    const gate = gateFromEntry(entry({ params: {} }), idleRunner, gitPath, 1000, {
       ...FALLBACKS,
       maxDiffLines: 2000,
     });
@@ -81,7 +82,7 @@ describe("gateFromEntry", () => {
   });
 
   it("returns null for a kind this worker does not implement", () => {
-    expect(gateFromEntry(entry({ gateKind: "invented" }), idleRunner, 1000, FALLBACKS)).toBeNull();
+    expect(gateFromEntry(entry({ gateKind: "invented" }), idleRunner, gitPath, 1000, FALLBACKS)).toBeNull();
   });
 
   it("passes the entry's model and focus down to a review gate", async () => {
@@ -99,6 +100,7 @@ describe("gateFromEntry", () => {
         params: { model: "sonnet", focus: "security" },
       }),
       { run } as never,
+      gitPath,
       1000,
       FALLBACKS
     );
@@ -121,6 +123,7 @@ describe("gateFromEntry", () => {
     const gate = gateFromEntry(
       entry({ key: "review", gateKind: "review", params: {} }),
       { run } as never,
+      gitPath,
       1000,
       { ...FALLBACKS, reviewModel: "sonnet" }
     );
@@ -136,7 +139,7 @@ describe("gateFromEntry", () => {
   // implements no gate of kind …", after the agent has already done the work.
   it("builds every kind the catalog offers", () => {
     for (const gateKind of ["diff-size", "protected-paths", "test-presence", "build", "test-run", "review"]) {
-      expect(gateFromEntry(entry({ gateKind }), idleRunner, 1000, FALLBACKS)).not.toBeNull();
+      expect(gateFromEntry(entry({ gateKind }), idleRunner, gitPath, 1000, FALLBACKS)).not.toBeNull();
     }
   });
 });

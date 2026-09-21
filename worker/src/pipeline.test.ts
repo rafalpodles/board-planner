@@ -199,6 +199,7 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
     recordRun,
     quarantineProject,
     runner,
+    gitPath: "git",
     ...overrides,
   };
 

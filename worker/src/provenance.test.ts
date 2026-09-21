@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { unexpectedHistory } from "./provenance.js";
 
+const gitPath = "git";
+
 const runnerFor = (revList: string, head: string, code = 0) => ({
   run: async (_c: string, args: string[]) =>
     args.includes("rev-list")
@@ -11,30 +13,30 @@ const runnerFor = (revList: string, head: string, code = 0) => ({
 describe("unexpectedHistory", () => {
   it("passes when the range holds exactly the run's own commits", async () => {
     const runner = runnerFor("sha2\nsha1\n", "sha2\n");
-    expect(await unexpectedHistory(runner as never, "/wt", "base", ["sha1", "sha2"])).toBe("");
+    expect(await unexpectedHistory(runner as never, gitPath, "/wt", "base", ["sha1", "sha2"])).toBe("");
   });
 
   it("refuses a commit the run did not make", async () => {
     const runner = runnerFor("shaX\nsha2\nsha1\n", "shaX\n");
-    const reason = await unexpectedHistory(runner as never, "/wt", "base", ["sha1", "sha2"]);
+    const reason = await unexpectedHistory(runner as never, gitPath, "/wt", "base", ["sha1", "sha2"]);
     expect(reason).toContain("shaX");
   });
 
   it("refuses a HEAD that is not the run's last commit", async () => {
     const runner = runnerFor("sha2\nsha1\n", "sha1\n");
-    expect(await unexpectedHistory(runner as never, "/wt", "base", ["sha1", "sha2"])).toMatch(/HEAD/);
+    expect(await unexpectedHistory(runner as never, gitPath, "/wt", "base", ["sha1", "sha2"])).toMatch(/HEAD/);
   });
 
   it("refuses when the range cannot be read at all", async () => {
     const runner = runnerFor("", "sha2\n", 128);
-    expect(await unexpectedHistory(runner as never, "/wt", "base", ["sha1", "sha2"])).toMatch(/rev-list/);
+    expect(await unexpectedHistory(runner as never, gitPath, "/wt", "base", ["sha1", "sha2"])).toMatch(/rev-list/);
   });
 
   // No foreign sha in sight, but the range is short one of the run's own commits — an amend, a
   // reset, or (per the reviewer's testing) a graft or a planted .git/shallow landing exactly here.
   it("refuses when the range is missing one of the run's own commits", async () => {
     const runner = runnerFor("sha2\n", "sha2\n");
-    const reason = await unexpectedHistory(runner as never, "/wt", "base", ["sha1", "sha2"]);
+    const reason = await unexpectedHistory(runner as never, gitPath, "/wt", "base", ["sha1", "sha2"]);
     expect(reason).toContain("1 commit(s)");
     expect(reason).toContain("this run made 2");
   });

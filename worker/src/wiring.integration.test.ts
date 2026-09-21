@@ -31,6 +31,10 @@ const REPO_ROOT = mkdtempSync(join(tmpdir(), "cp-int-repo-"));
 const REPO = join(REPO_ROOT, "demo");
 const REMOTE = "git@github.com:owner/repo.git";
 const TOOL_DIR = "/opt/cp-integration-bin";
+// What the `-lc "command -v git"` branch below resolves git to; every check further down has to
+// match this rather than the bare name, the same way production reads the resolved path back
+// instead of finding git by name on PATH (BP-641).
+const GIT_PATH = `${TOOL_DIR}/git`;
 const BASE_SHA = "cafef00d";
 
 // What the board resolves the project's default agent into, and sends whole on the claim
@@ -431,15 +435,15 @@ async function runWorkerAgainstTheBoard(opts: { takeTheTask: boolean }): Promise
       // the agent cannot be confined to a worktree that does not exist (BP-349).
       // Who the run commits as, asked once before the agent starts (BP-516). A machine git will
       // not name one for is refused at `create`, so the fake has to answer it.
-      if (command === "git" && args.includes("GIT_AUTHOR_IDENT")) {
+      if (command === GIT_PATH && args.includes("GIT_AUTHOR_IDENT")) {
         return { code: 0, stdout: "The Operator <operator@example.com> 1789000000 +0200\n", stderr: "", timedOut: false };
       }
       // …and whether anybody chose that address, rather than git guessing it from
       // the hostname — which is what a CI runner's dotted name makes it do (BP-516).
-      if (command === "git" && args.includes("user.email")) {
+      if (command === GIT_PATH && args.includes("user.email")) {
         return { code: 0, stdout: "operator@example.com\\n", stderr: "", timedOut: false };
       }
-      if (command === "git" && args.includes("worktree") && args.includes("add")) {
+      if (command === GIT_PATH && args.includes("worktree") && args.includes("add")) {
         const separator = args.indexOf("--");
         if (separator !== -1 && args[separator + 1]) mkdirSync(args[separator + 1], { recursive: true });
       }

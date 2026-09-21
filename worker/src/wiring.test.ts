@@ -214,6 +214,11 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
   const BASE_SHA = "cafef00d";
   const SERVER_RUN_ID = "run-minted-by-the-server";
   const AGENT_SECRET = "cpw_deadbeef0123456789abcdef01234567";
+  // establishPreflight resolves git's absolute path with `<shell> -lc "command -v git"` before any
+  // task is claimed (BP-641), and every git-spawning call site below reads that resolved path back
+  // rather than the bare name — so the runners in this file answer the probe with a fixed path and
+  // match on it, the same way they used to match on the literal "git".
+  const GIT_PATH = "/opt/homebrew/bin/git";
 
   const CLAIMED: ClaimedTask = {
     taskId: "t1",
@@ -326,23 +331,28 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     return {
       async run(command, args, opts) {
         everyCall.push([command, ...args]);
+        // establishPreflight's own resolution call, ahead of everything else: answered with the
+        // fixed path every check below matches on.
+        if (args[0] === "-lc" && args[1] === "command -v git") {
+          return { code: 0, stdout: `${GIT_PATH}\n`, stderr: "", timedOut: false };
+        }
         // Who the run commits as, asked once before the agent starts (BP-516). A machine git will
         // not name one for is refused at `create`, so the fake has to answer it.
-        if (command === "git" && args.includes("GIT_AUTHOR_IDENT")) {
+        if (command === GIT_PATH && args.includes("GIT_AUTHOR_IDENT")) {
           return { code: 0, stdout: "The Operator <operator@example.com> 1789000000 +0200\n", stderr: "", timedOut: false };
         }
         // …and whether anybody chose that address, rather than git guessing it from
         // the hostname — which is what a CI runner's dotted name makes it do (BP-516).
-        if (command === "git" && args.includes("user.email")) {
+        if (command === GIT_PATH && args.includes("user.email")) {
           return { code: 0, stdout: "operator@example.com\\n", stderr: "", timedOut: false };
         }
-        if (command === "git" && args.includes("--show-toplevel")) binding.add(opts.cwd ?? "");
-        if (command === "git" && args.includes("--show-scope")) {
+        if (command === GIT_PATH && args.includes("--show-toplevel")) binding.add(opts.cwd ?? "");
+        if (command === GIT_PATH && args.includes("--show-scope")) {
           return { code: 0, stdout: scopedFor(opts.cwd), stderr: "", timedOut: false };
         }
         // everyCall keeps argv only, and the base lookup's hardening lives entirely in its
         // environment — workspace.ts composes those two calls' env instead of their args.
-        if (command === "git" && (args[0] === "ls-remote" || args[0] === "fetch")) {
+        if (command === GIT_PATH && (args[0] === "ls-remote" || args[0] === "fetch")) {
           remoteCalls.push({ args, env: opts.env ?? {} });
         }
         // A machine whose sandbox row is red claims nothing at all since BP-349, so the probe has
@@ -355,7 +365,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         }
         // Who the run commits as, asked once before the agent starts (BP-516). A machine git will
         // not name one for is refused at `create`, so the fake has to answer it.
-        if (command === "git" && args.includes("GIT_AUTHOR_IDENT")) {
+        if (command === GIT_PATH && args.includes("GIT_AUTHOR_IDENT")) {
           return {
             code: 0,
             stdout: "The Operator <operator@example.com> 1789000000 +0200\n",
@@ -365,12 +375,12 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         }
         // …and whether anybody chose that address, rather than git guessing it from
         // the hostname — which is what a CI runner's dotted name makes it do (BP-516).
-        if (command === "git" && args.includes("user.email")) {
+        if (command === GIT_PATH && args.includes("user.email")) {
           return { code: 0, stdout: "operator@example.com\\n", stderr: "", timedOut: false };
         }
         // git is stubbed here, so the directory `git worktree add` would have made is made here:
         // the agent cannot be confined to a worktree that does not exist (BP-349).
-        if (command === "git" && args.includes("worktree") && args.includes("add")) {
+        if (command === GIT_PATH && args.includes("worktree") && args.includes("add")) {
           const separator = args.indexOf("--");
           if (separator !== -1 && args[separator + 1]) {
             mkdirSync(args[separator + 1], { recursive: true });
@@ -670,11 +680,14 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
 
     const hangingRunner: Runner = {
       async run(command, args, opts) {
+        if (args[0] === "-lc" && args[1] === "command -v git") {
+          return { code: 0, stdout: `${GIT_PATH}\n`, stderr: "", timedOut: false };
+        }
         if (isSandboxProbe(command, args)) {
           answerSandboxProbe(args);
           return { code: 0, stdout: "", stderr: "", timedOut: false };
         }
-        if (command === "git" && args.includes("GIT_AUTHOR_IDENT")) {
+        if (command === GIT_PATH && args.includes("GIT_AUTHOR_IDENT")) {
           return {
             code: 0,
             stdout: "The Operator <operator@example.com> 1789000000 +0200\n",
@@ -684,10 +697,10 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         }
         // …and whether anybody chose that address, rather than git guessing it from
         // the hostname — which is what a CI runner's dotted name makes it do (BP-516).
-        if (command === "git" && args.includes("user.email")) {
+        if (command === GIT_PATH && args.includes("user.email")) {
           return { code: 0, stdout: "operator@example.com\\n", stderr: "", timedOut: false };
         }
-        if (command === "git" && args.includes("worktree") && args.includes("add")) {
+        if (command === GIT_PATH && args.includes("worktree") && args.includes("add")) {
           const separator = args.indexOf("--");
           if (separator !== -1 && args[separator + 1]) {
             mkdirSync(args[separator + 1], { recursive: true });

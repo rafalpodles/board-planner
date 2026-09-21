@@ -37,6 +37,10 @@ const REPO_ROOT = mkdtempSync(join(tmpdir(), "bp381-repo-"));
 const REPO = join(REPO_ROOT, "demo");
 const REMOTE = "git@github.com:owner/repo.git";
 const TOOL_DIR = "/opt/cp-integration-bin";
+// What the `-lc "command -v git"` branch below resolves git to; every check further down has to
+// match this rather than the bare name, the same way production reads the resolved path back
+// instead of finding git by name on PATH (BP-641).
+const GIT_PATH = `${TOOL_DIR}/git`;
 const BASE_SHA = "cafef00dcafef00dcafef00dcafef00dcafef00d";
 const HEAD_SHA = "1234567812345678123456781234567812345678";
 const TASK_KEY = "CP-9";
@@ -271,7 +275,7 @@ function makeRunner(seen: GitCall[], registeredWorktree = ""): Runner {
       // for that instead of for the reason under test. git is stubbed here, so the directory it
       // would have made is made here.
       // Who the run commits as, resolved before the agent starts (BP-516)
-      if (command === "git" && args.includes("GIT_AUTHOR_IDENT")) {
+      if (command === GIT_PATH && args.includes("GIT_AUTHOR_IDENT")) {
         return {
           code: 0,
           stdout: "The Operator <operator@example.com> 1789000000 +0200\n",
@@ -281,10 +285,10 @@ function makeRunner(seen: GitCall[], registeredWorktree = ""): Runner {
       }
       // …and whether anybody chose that address, rather than git guessing it from
       // the hostname — which is what a CI runner's dotted name makes it do (BP-516).
-      if (command === "git" && args.includes("user.email")) {
+      if (command === GIT_PATH && args.includes("user.email")) {
         return { code: 0, stdout: "operator@example.com\\n", stderr: "", timedOut: false };
       }
-      if (command === "git" && args.includes("worktree") && args.includes("add")) {
+      if (command === GIT_PATH && args.includes("worktree") && args.includes("add")) {
         const separator = args.indexOf("--");
         if (separator !== -1 && args[separator + 1]) mkdirSync(args[separator + 1], { recursive: true });
       }

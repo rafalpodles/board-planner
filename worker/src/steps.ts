@@ -59,6 +59,7 @@ export interface StepContext {
   onEvent?: (event: StreamEvent) => void;
   baseSha: string;
   runner: Runner;
+  gitPath: string;
 }
 
 // A push or a merge that throws must not reach the pipeline's outer catch: that requeues and
@@ -82,6 +83,7 @@ async function deliver(
     case "push": {
       const wrong = await unexpectedHistory(
         ctx.runner,
+        ctx.gitPath,
         ctx.worktreePath,
         ctx.baseSha,
         ctx.state.commits,

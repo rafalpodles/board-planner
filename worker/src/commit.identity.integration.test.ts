@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { commitAll, resolveCommitIdentity } from "./commit.js";
 import { createRunner } from "./exec.js";
 
+const gitPath = "git";
+
 /**
  * BP-516. Neutralising `~/.gitconfig` on the calls that stage and commit takes `user.email` with
  * it, and git refuses to commit without one — measured: "Author identity unknown", exit 128, no
@@ -51,7 +53,7 @@ describe("who the worker's commits are by", () => {
   it("has nobody to commit as when the machine names nobody", async () => {
     writeFileSync(join(home, ".gitconfig"), "");
 
-    const resolved = await resolveCommitIdentity(createRunner(), work);
+    const resolved = await resolveCommitIdentity(createRunner(), gitPath, work);
 
     // On this machine git refuses outright ("Author identity unknown"); on a host whose name has a
     // dot in it — every CI runner — it answers with `<unix user>@<hostname>` and exit 0 instead.
@@ -67,21 +69,21 @@ describe("who the worker's commits are by", () => {
   it("takes git's own answer when only the address is configured", async () => {
     writeFileSync(join(home, ".gitconfig"), "[user]\n\temail = operator@example.com\n");
 
-    const resolved = await resolveCommitIdentity(createRunner(), work);
+    const resolved = await resolveCommitIdentity(createRunner(), gitPath, work);
     expect(resolved.ok).toBe(true);
     const identity = (resolved as { identity: { name: string; email: string } }).identity;
 
-    await commitAll(createRunner(), work, "BP-516: work", identity);
+    await commitAll(createRunner(), gitPath, work, "BP-516: work", identity);
 
     expect(git(work, "log", "-1", "--format=%ae").trim()).toBe("operator@example.com");
     expect(git(work, "log", "-1", "--format=%an").trim()).not.toBe("");
   });
 
   it("commits as the identity the operator configured", async () => {
-    const resolved = await resolveCommitIdentity(createRunner(), work);
+    const resolved = await resolveCommitIdentity(createRunner(), gitPath, work);
     const identity = (resolved as { identity: { name: string; email: string } }).identity;
 
-    const sha = await commitAll(createRunner(), work, "BP-516: work", identity);
+    const sha = await commitAll(createRunner(), gitPath, work, "BP-516: work", identity);
 
     expect(identity).toEqual({ name: "The Operator", email: "operator@example.com" });
     expect(sha).toMatch(/^[0-9a-f]{40}$/);
@@ -97,9 +99,9 @@ describe("who the worker's commits are by", () => {
     git(work, "config", "user.name", "Repo Name");
     git(work, "config", "user.email", "repo@example.com");
 
-    const resolved = await resolveCommitIdentity(createRunner(), work);
+    const resolved = await resolveCommitIdentity(createRunner(), gitPath, work);
     const identity = (resolved as { identity: { name: string; email: string } }).identity;
-    await commitAll(createRunner(), work, "BP-516: work", identity);
+    await commitAll(createRunner(), gitPath, work, "BP-516: work", identity);
 
     // Both halves: what was resolved, and what the commit carries. The local config would supply
     // the second on its own — it survives `GIT_CONFIG_GLOBAL=/dev/null` — so without the first

@@ -3,7 +3,7 @@ import { homedir } from "os";
 import { dirname, isAbsolute, join, resolve, sep } from "path";
 import { RepoInventory } from "./config.js";
 import { Runner } from "./exec.js";
-import { gitArgs, localGitEnv } from "./git-safety.js";
+import { gitArgs, localGitEnv, requireGitPath } from "./git-safety.js";
 
 // A repository path is a capability grant, not configuration: a .git/config the operator didn't
 // write can make `git status` alone run an attacker's command via core.fsmonitor, core.pager,
@@ -12,6 +12,7 @@ import { gitArgs, localGitEnv } from "./git-safety.js";
 
 export interface RepoDeps {
   runner: Runner;
+  gitPath: string;
   readAllowlist: () => string;
   realpath: (p: string) => string;
   stat: (p: string) => { uid: number; mode: number };
@@ -120,8 +121,8 @@ function usesExtTransport(value: string): boolean {
   return value.trim().toLowerCase().startsWith("ext::");
 }
 
-function git(runner: Runner, cwd: string, args: string[]) {
-  return runner.run("git", gitArgs(args), {
+function git(runner: Runner, gitPath: string, cwd: string, args: string[]) {
+  return runner.run(requireGitPath(gitPath), gitArgs(args), {
     cwd,
     timeoutMs: GIT_TIMEOUT_MS,
     env: localGitEnv(),
@@ -244,16 +245,16 @@ export const UNREADABLE_CONFIG = "an unreadable git config";
  * The same function at bind time and at run time, deliberately: they used to be two lists, and the
  * checkout that bound under one and was refused by the other cost the project (BP-517).
  */
-export async function plantedConfig(runner: Runner, cwd: string): Promise<string> {
+export async function plantedConfig(runner: Runner, gitPath: string, cwd: string): Promise<string> {
   // Two questions, two calls. `--local --list` fails outside a checkout and `--list` does not:
   // measured, with the global and system files out of the picture it exits 0 and prints this
   // module's own `-c` flags, which read as a repository with nothing planted in it. So widening the
   // scan would turn "this is not a repository" into "this repository is clean" without anything
   // going red — exit 128 became exit 0 (BP-346), and still does.
-  const readable = await git(runner, cwd, ["config", "--local", "--list"]);
+  const readable = await git(runner, gitPath, cwd, ["config", "--local", "--list"]);
   if (readable.code !== 0 || readable.timedOut) return UNREADABLE_CONFIG;
 
-  const result = await git(runner, cwd, CONFIG_LIST_ARGS);
+  const result = await git(runner, gitPath, cwd, CONFIG_LIST_ARGS);
   // Unreadable is not the same as clean: a config this cannot read is one it cannot clear either.
   if (result.code !== 0 || result.timedOut) return UNREADABLE_CONFIG;
 
@@ -325,7 +326,7 @@ export async function bindRepository(
     return { ok: false, reason: `${proposedPath} is group- or world-writable` };
   }
 
-  const toplevel = await git(deps.runner, proposedPath, [
+  const toplevel = await git(deps.runner, deps.gitPath, proposedPath, [
     "rev-parse",
     "--show-toplevel",
   ]);
@@ -342,7 +343,7 @@ export async function bindRepository(
   // project and every other project bound to that path with it. Bind time is where it belongs:
   // the operator is watching, nothing has been claimed, and the reason reaches them as a refusal
   // to approve rather than as a comment on a task (BP-517).
-  const planted = await plantedConfig(deps.runner, proposedPath);
+  const planted = await plantedConfig(deps.runner, deps.gitPath, proposedPath);
   if (planted === UNREADABLE_CONFIG) {
     return { ok: false, reason: `could not read git config in ${proposedPath}` };
   }
@@ -394,7 +395,7 @@ export type InventoryResult =
   { ok: true; repos: RepoInventory[] } | { ok: false; reason: string };
 
 export async function repoInventory(
-  deps: Pick<RepoDeps, "runner" | "readAllowlist">,
+  deps: Pick<RepoDeps, "runner" | "gitPath" | "readAllowlist">,
 ): Promise<InventoryResult> {
   let allowlist: unknown;
   try {
@@ -417,7 +418,7 @@ export async function repoInventory(
     if (typeof path !== "string" || !isAbsolute(path)) continue;
     // A directory that has gone away, or has no origin, is simply not offered — one bad entry must
     // not cost this machine every other checkout it could serve.
-    const result = await git(deps.runner, path, [
+    const result = await git(deps.runner, deps.gitPath, path, [
       "remote",
       "get-url",
       "origin",

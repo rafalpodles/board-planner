@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { unexpectedHistory } from "./provenance.js";
 import { createRunner } from "./exec.js";
 
+const gitPath = "git";
+
 /**
  * provenance.test.ts proves the comparison logic against a mocked runner that answers to
  * `args.includes("rev-list")` — it never exercises the actual range expression, the `cwd`, or the
@@ -50,7 +52,7 @@ describe("unexpectedHistory against a real repository", () => {
     git(work, "commit", "--quiet", "-m", "implement");
     const ownSha = git(work, "rev-parse", "HEAD").trim();
 
-    const reason = await unexpectedHistory(createRunner(), work, baseSha, [ownSha]);
+    const reason = await unexpectedHistory(createRunner(), gitPath, work, baseSha, [ownSha]);
 
     expect(reason).toBe("");
   });
@@ -68,7 +70,7 @@ describe("unexpectedHistory against a real repository", () => {
     git(work, "commit", "--quiet", "-m", "not tracked by this run");
     const plantedSha = git(work, "rev-parse", "HEAD").trim();
 
-    const reason = await unexpectedHistory(createRunner(), work, baseSha, [ownSha]);
+    const reason = await unexpectedHistory(createRunner(), gitPath, work, baseSha, [ownSha]);
 
     expect(reason).toContain(plantedSha);
   });
@@ -96,7 +98,7 @@ describe("unexpectedHistory against a real repository", () => {
     expect(git(work, "rev-list", `${baseSha}..HEAD`).trim().split("\n")).toEqual([ownSha]);
     expect(git(work, "rev-parse", "HEAD").trim()).toBe(ownSha);
 
-    const reason = await unexpectedHistory(createRunner(), work, baseSha, [ownSha]);
+    const reason = await unexpectedHistory(createRunner(), gitPath, work, baseSha, [ownSha]);
 
     expect(reason).toContain(foreignSha);
   });

@@ -1,5 +1,5 @@
 import { Runner } from "./exec.js";
-import { gitArgs, localGitEnv } from "./git-safety.js";
+import { gitArgs, localGitEnv, requireGitPath } from "./git-safety.js";
 
 const GIT_TIMEOUT_MS = 60_000;
 
@@ -7,12 +7,13 @@ const GIT_TIMEOUT_MS = 60_000;
 // Anything else between the base and HEAD was put there by the thing being judged.
 export async function unexpectedHistory(
   runner: Runner,
+  gitPath: string,
   worktreePath: string,
   baseSha: string,
   expected: string[]
 ): Promise<string> {
   const git = (args: string[]) =>
-    runner.run("git", gitArgs(args), {
+    runner.run(requireGitPath(gitPath), gitArgs(args), {
       cwd: worktreePath,
       timeoutMs: GIT_TIMEOUT_MS,
       env: localGitEnv(),

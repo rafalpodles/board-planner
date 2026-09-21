@@ -53,6 +53,7 @@ const KNOWN_EXTRAS = [
   ...Object.keys(hardenedGitConfig()), // delivery.ts's git hardening
 ];
 const PERMITTED = new Set<string>([...ALLOWED, ...KNOWN_EXTRAS]);
+const gitPath = "git";
 
 interface RecordedCall {
   command: string;
@@ -143,17 +144,17 @@ describe("every real env-building call site stays inside the allowlist, across a
         baseBranch: "main",
       } as WorkerConfig;
 
-      const workspace = createWorkspace(config, runner, () => ({}), remoteUrl);
+      const workspace = createWorkspace(config, runner, gitPath, () => ({}), remoteUrl);
       const worktree = await workspace.create("BP-1", "worker");
 
       writeFileSync(join(worktree.path, "change.txt"), "hello\n");
-      const sha = await commitAll(runner, worktree.path, "a change", worktree.commitIdentity);
+      const sha = await commitAll(runner, gitPath, worktree.path, "a change", worktree.commitIdentity);
       expect(sha).not.toBe("");
 
-      const diff = await collectDiff(runner, worktree.path, worktree.baseSha);
+      const diff = await collectDiff(runner, gitPath, worktree.path, worktree.baseSha);
       expect(diff.changedFiles).toContain("change.txt");
 
-      await createDelivery(runner, config.baseBranch).push(worktree.path, "bp-310/child-env-test", sha);
+      await createDelivery(runner, gitPath, config.baseBranch).push(worktree.path, "bp-310/child-env-test", sha);
       const pushed = execFileSync("git", ["ls-remote", remoteUrl, "refs/heads/bp-310/child-env-test"], {
         encoding: "utf8",
       });
