@@ -176,3 +176,23 @@ describe("Dashboard charts with partial data", () => {
     expect(screen.queryByText(/the S\/M\/L\/XL split shows up once tasks exist/i)).toBeNull();
   });
 });
+
+describe("Dashboard that cannot be read", () => {
+  it("names a refusal and offers no Try again", async () => {
+    api.get.mockRejectedValue(Object.assign(new Error("Forbidden"), { status: 403 }));
+    render(<DashboardPage />);
+
+    const error = await screen.findByTestId("dashboard-error");
+    expect(error.textContent).toContain("You do not have access to this board.");
+    expect(within(error).queryByRole("button")).toBeNull();
+  });
+
+  it("keeps Try again for an outage", async () => {
+    api.get.mockRejectedValue(Object.assign(new Error("boom"), { status: 500 }));
+    render(<DashboardPage />);
+
+    const error = await screen.findByTestId("dashboard-error");
+    expect(error.textContent).toContain("The dashboard could not be loaded: boom");
+    expect(within(error).getByRole("button", { name: "Try again" })).toBeTruthy();
+  });
+});

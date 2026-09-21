@@ -79,6 +79,16 @@ test("a board with no grant says so on every screen of it, and offers no Retry",
   }
 });
 
+test("the dashboard of a board with no grant says so, and offers no Try again", async ({ page }) => {
+  await seedAssignmentOutsider();
+  await signInThroughForm(page, OUTSIDER_USERNAME, OUTSIDER_PASSWORD);
+  await page.goto(`/projects/${PROJECT_KEY}/dashboard`);
+
+  const error = page.getByTestId("dashboard-error");
+  await expect(error).toContainText("You do not have access to this board.");
+  await expect(error.getByRole("button", { name: "Try again" })).toHaveCount(0);
+});
+
 // As an admin: to anybody without a grant a missing board and a refused one answer the same
 test("a board that does not exist gets a different sentence from a refused one", async ({ page }) => {
   await signIn(page);
@@ -244,6 +254,10 @@ test("a save that lands is not reported as unsaved when the catalog cannot be re
 
   await expect(page.getByTestId("agent-editor-stale")).toBeVisible();
   await expect(page.getByText("Unsaved changes")).toHaveCount(0);
+
+  // Back to what the stale copy says is stored: the server holds the saved version, so this is a change
+  await page.getByRole("button", { name: /Remove Review/ }).click();
+  await expect(page.getByText("Unsaved changes")).toBeVisible();
 });
 
 test("the new-task form calls acceptance criteria by the name the task shows them under", async ({

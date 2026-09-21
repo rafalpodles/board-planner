@@ -203,3 +203,21 @@ describe("a board the reader cannot open", () => {
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
   });
 });
+
+describe("a PM page that could not read its board", () => {
+  it("reads it again on Retry, and opens once it can", async () => {
+    let fail = true;
+    api.get.mockImplementation((path: string) => {
+      if (path.includes("/pm/messages")) return Promise.resolve({ messages: [], nextCursor: null });
+      if (path.includes("/tasks")) return Promise.resolve([]);
+      return fail ? Promise.reject(Object.assign(new Error("boom"), { status: 500 })) : Promise.resolve(PROJECT);
+    });
+    render(<PmChat projectId="p1" />);
+
+    const retry = await screen.findByRole("button", { name: "Retry" });
+    fail = false;
+    await act(async () => retry.click());
+
+    expect(await screen.findByRole("textbox")).toBeTruthy();
+  });
+});
