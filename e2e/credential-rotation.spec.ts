@@ -291,10 +291,25 @@ test.describe("OAuth credentials", () => {
     const RACER = "E2E Race Client";
     const racer = await connectApp(browser, baseURL, request, RACER);
     await expectWorks(request, racer.accessToken);
+    // Not vacuous: there is a live row here before the delete below, so a null after it means the
+    // delete actually ran — not that nothing was ever there (test-quality review).
+    expect(
+      await (await db()).collection("oauthtokens").findOne({ clientId: racer.clientId })
+    ).not.toBeNull();
 
     // The state a client's deletion cascade leaves mid-flight if it dies right after removing the
     // client row: the client is gone, the token row this refresh is about to consume is not.
-    await (await db()).collection("oauthclients").deleteOne({ clientId: racer.clientId });
+    const { deletedCount } = await (await db())
+      .collection("oauthclients")
+      .deleteOne({ clientId: racer.clientId });
+    expect(deletedCount, "the setup must actually remove the client row").toBe(1);
+
+    // Free coverage for the other half of the same fix (auth.ts's verifyOAuthAccessToken): the
+    // still-live access token this same client issued is refused too, once the client is gone.
+    const board = await request.get(`/api/projects/${PROJECT_KEY}`, {
+      headers: { Authorization: `Bearer ${racer.accessToken}` },
+    });
+    expect(board.status()).toBe(401);
 
     const refreshed = await request.post("/oauth/token", {
       form: {
