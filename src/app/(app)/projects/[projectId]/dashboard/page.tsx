@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
+import { boardLoadFailure } from "@/lib/board-load-failure";
 import { ApiProject, ROLE_LABELS, STATUS_LABELS, TaskStatus } from "@/types";
 import { columnIdsWithRole, effectiveColumns } from "@/lib/columns";
 import { Button } from "@/components/ui/Button";
@@ -239,19 +240,8 @@ function CreatedVsCompletedChart({ data }: { data: Stats["createdOverTime"] }) {
   );
 }
 
-/**
- * The refusal in words, from the status the API already reports. The server's own text is
- * deliberately unhelpful for two of these — `withProjectAccess` answers "Forbidden" or "Project
- * not found" and the split between them is a security decision, not a message (`middleware.ts`),
- * so the sentence a reader gets is made here rather than echoed.
- */
 function whyItFailed(reason: unknown): string {
-  const { status, message } = (reason ?? {}) as { status?: number; message?: string };
-  if (status === 403) return "You do not have access to this board.";
-  if (status === 404) return "There is no board here — the link may be stale.";
-  return message
-    ? `The dashboard could not be loaded: ${message}`
-    : "The dashboard could not be loaded.";
+  return boardLoadFailure(reason, "The dashboard").message;
 }
 
 export default function DashboardPage() {

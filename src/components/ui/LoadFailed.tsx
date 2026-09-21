@@ -19,7 +19,8 @@ export function LoadFailed({
   testId,
 }: {
   message: string;
-  onRetry: () => void;
+  /** Omitted when reading again cannot change the answer, such as a refusal. */
+  onRetry?: () => void;
   busy?: boolean;
   variant?: "block" | "row";
   className?: string;
@@ -38,15 +39,17 @@ export function LoadFailed({
       className={`${shape} ${className || (variant === "row" ? "mb-4" : "py-8")}`}
     >
       <p className="text-sm text-text-muted">{message}</p>
-      <Button
-        size="sm"
-        className="shrink-0"
-        disabled={busy}
-        variant={variant === "row" ? "secondary" : "primary"}
-        onClick={onRetry}
-      >
-        {busy ? "Retrying…" : "Retry"}
-      </Button>
+      {onRetry && (
+        <Button
+          size="sm"
+          className="shrink-0"
+          disabled={busy}
+          variant={variant === "row" ? "secondary" : "primary"}
+          onClick={onRetry}
+        >
+          {busy ? "Retrying…" : "Retry"}
+        </Button>
+      )}
     </div>
   );
 }

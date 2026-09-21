@@ -1,5 +1,6 @@
 "use client";
 
+import { boardLoadFailure } from "@/lib/board-load-failure";
 import { Dispatch, SetStateAction, useCallback, useEffect, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
@@ -18,6 +19,8 @@ export interface ProjectBoard {
   // succeeds. The page only acts on this when there is nothing else to show — a poll
   // failing once the board is already up leaves the last good state on screen instead.
   loadError: boolean;
+  /** What the failed load threw, so the page can tell a refusal from an outage. */
+  loadFailure?: unknown;
   reload: () => Promise<void>;
   viewMode: "board" | "list";
   setViewMode: (mode: "board" | "list") => void;
@@ -97,6 +100,7 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
   const [tasks, setTasks] = useState<ApiTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [loadFailure, setLoadFailure] = useState<unknown>(null);
   const [showNewTask, setShowNewTask] = useState(false);
   const loadSeq = useRef(0);
   // Read after an await, where the render-time `scope` — and the `loadData` closed over it — are
@@ -209,10 +213,14 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
       }
       setSprints(sprintList);
       setLoadError(false);
-    } catch {
+      setLoadFailure(null);
+    } catch (err) {
       if (seq !== loadSeq.current) return;
       setLoadError(true);
-      toast("Failed to load board data", "error");
+      setLoadFailure(err);
+      // A refusal is answered on the page itself; a toast repeating it on every poll says
+      // "something broke" about a board that is working exactly as intended.
+      if (boardLoadFailure(err, "This board").retryable) toast("Failed to load board data", "error");
     } finally {
       if (seq === loadSeq.current) setLoading(false);
     }
@@ -633,6 +641,7 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
     assignableUsers,
     loading,
     loadError,
+    loadFailure,
     reload: loadData,
     viewMode,
     setViewMode,

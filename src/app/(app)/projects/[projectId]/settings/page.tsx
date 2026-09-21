@@ -25,6 +25,8 @@ import {
   type SettingsNavGroup,
 } from "@/components/settings/SettingsShell";
 import { SettingsStats } from "./sections/types";
+import { LoadFailed } from "@/components/ui/LoadFailed";
+import { boardLoadFailure } from "@/lib/board-load-failure";
 
 type Access = "member" | "projectAdmin" | "instanceAdmin";
 
@@ -161,6 +163,8 @@ export default function ProjectSettingsPage() {
 
   const [project, setProject] = useState<ApiProject | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadFailure, setLoadFailure] = useState<unknown>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [section, setSection] = useState("");
   const [query, setQuery] = useState("");
   const [stats, setStats] = useState<SettingsStats | null>(null);
@@ -192,10 +196,13 @@ export default function ProjectSettingsPage() {
     api
       .get(`/api/projects/${projectId}`)
       .then(setProject)
-      .catch(() => toast("Failed to load project", "error"))
+      .catch((err) => {
+        setLoadFailure(err);
+        if (boardLoadFailure(err, "This board").retryable) toast("Failed to load project", "error");
+      })
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
+  }, [projectId, loadAttempt]);
 
   const patchProject = useCallback(
     (
@@ -270,6 +277,25 @@ export default function ProjectSettingsPage() {
     () => new Set(pending.map((g) => g.section)),
     [pending]
   );
+
+  function retryLoad() {
+    setLoadFailure(null);
+    setLoading(true);
+    setLoadAttempt((n) => n + 1);
+  }
+
+  // Without this the page waited on a project that was never coming: `!project` held the spinner up
+  // forever after a refusal, and a reader could not tell no access from a page still loading.
+  if (!loading && !project && loadFailure) {
+    const failure = boardLoadFailure(loadFailure, "This board");
+    return (
+      <LoadFailed
+        className="py-16"
+        message={failure.message}
+        onRetry={failure.retryable ? retryLoad : undefined}
+      />
+    );
+  }
 
   if (loading || !project) {
     return (

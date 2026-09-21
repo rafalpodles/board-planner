@@ -17,6 +17,8 @@ import { SprintFormModal, SprintFormValues } from "@/components/sprints/SprintFo
 import { CompleteSprintDialog } from "@/components/sprints/CompleteSprintDialog";
 import { NewTaskModal } from "@/components/tasks/NewTaskModal";
 import { Button } from "@/components/ui/Button";
+import { LoadFailed } from "@/components/ui/LoadFailed";
+import { boardLoadFailure } from "@/lib/board-load-failure";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
@@ -218,13 +220,13 @@ export default function SprintsPage() {
   if (board.loading || (!board.project && !board.loadError)) return <Spinner />;
 
   if (!board.project) {
+    const failure = boardLoadFailure(board.loadFailure, "This board");
     return (
-      <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
-        <p className="text-sm text-text-muted">Failed to load this board.</p>
-        <Button size="sm" onClick={board.reload}>
-          Retry
-        </Button>
-      </div>
+      <LoadFailed
+        className="py-16"
+        message={failure.message}
+        onRetry={failure.retryable ? board.reload : undefined}
+      />
     );
   }
 
