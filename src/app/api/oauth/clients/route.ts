@@ -47,11 +47,16 @@ export const DELETE = withAdmin(async (request) => {
     return NextResponse.json({ error: "Client not found" }, { status: 404 });
   }
 
-  // Cascade: revoke everything issued to this client so no orphaned tokens keep working.
+  // Cascade: revoke everything issued to this client so no orphaned tokens keep working. The
+  // client goes first — a refresh or code exchange racing this handler checks OAuthClient.exists
+  // after it writes its own new row (token/route.ts), and that check is only reliable once this
+  // delete has committed. Deleting the client last (the old order) left a window between the token
+  // cleanup below and this line where a concurrent grant's existence check still saw the client and
+  // handed out a credential nothing here would ever revoke (BP-747).
+  await OAuthClient.deleteOne({ _id: client._id });
   await OAuthToken.deleteMany({ clientId: client.clientId });
   await OAuthCode.deleteMany({ clientId: client.clientId });
   await OAuthConsent.deleteMany({ clientId: client.clientId });
-  await OAuthClient.deleteOne({ _id: client._id });
 
   return NextResponse.json({ ok: true });
 });
