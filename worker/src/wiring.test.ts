@@ -458,6 +458,9 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       // Replaces the default 200-with-assignments response — a server this worker cannot reach at
       // all, rather than one answering something to parse.
       fetchImpl?: typeof fetch;
+      // Run between passes, after the clock jump — the one hook point available to change what is
+      // on disk mid-run, for a test about recovering from a failure and then repeating it.
+      onSleep?: (stateDir: string, sleepIndex: number) => void;
     } = {}
   ) {
     let seenHeartbeat: HeartbeatDeps | undefined;
@@ -529,6 +532,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       // the loop only sleeps once it has nothing left to claim, which is one pass after the run
       sleep: async () => {
         clockOffset += opts.clockJumpOnSleepMs ?? 0;
+        opts.onSleep?.(stateDir, slept);
         if (++slept >= (opts.passes ?? 1)) stop();
       },
       log: vi.fn(),
@@ -1328,6 +1332,55 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
           typeof line === "string" && line.includes("could not refresh worker policy")
       );
       expect(failures).toHaveLength(1);
+    });
+
+    // BP-688 review. The dedupe's other half, unverified until now: a reason that comes back after
+    // recovering has to be said again, not swallowed forever because it happens to match the last
+    // one this process ever logged. Mutating repos.json mid-run is the only way to see it, since
+    // recovering means the read has to actually start succeeding.
+    it("says a broken repos.json again after it recovers and breaks the same way", async () => {
+      const run = await runOneTask(undefined, undefined, {
+        stateFiles: { "repos.json": "not json" },
+        passes: 3,
+        clockJumpOnSleepMs: 31_000,
+        onSleep: (stateDir, sleepIndex) => {
+          const path = join(stateDir, "repos.json");
+          if (sleepIndex === 0) writeFileSync(path, JSON.stringify({ repos: [REPO] }), { mode: 0o600 });
+          if (sleepIndex === 1) writeFileSync(path, "not json", { mode: 0o600 });
+        },
+      });
+
+      const failures = run.logError.mock.calls.filter(
+        ([line]) => typeof line === "string" && line.includes("could not read repos.json")
+      );
+      expect(failures).toHaveLength(2);
+    });
+
+    // The same half, for the neighbouring site: a server that comes back and then goes away again
+    // with the identical message must not go silent the second time.
+    it("says an unreachable server again after it recovers and fails the same way", async () => {
+      let call = 0;
+      const run = await runOneTask(undefined, undefined, {
+        fetchImpl: async () => {
+          call += 1;
+          if (call === 2) {
+            return {
+              ok: true,
+              status: 200,
+              json: async () => ({ assignments: [] }),
+            } as unknown as Response;
+          }
+          throw new Error("fetch failed: ECONNREFUSED");
+        },
+        passes: 3,
+        clockJumpOnSleepMs: 31_000,
+      });
+
+      const failures = run.logError.mock.calls.filter(
+        ([line]) =>
+          typeof line === "string" && line.includes("could not refresh worker policy")
+      );
+      expect(failures).toHaveLength(2);
     });
 
     // "Why is this machine sitting on a project and doing nothing" has to be answerable from the

@@ -211,7 +211,17 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // Why the inventory could not be read, surfaced on the heartbeat so a broken repos.json shows up
   // in the console instead of looking like a machine that simply has nothing.
   let inventoryError = "";
-  let bound = new Map<string, { path: string; worktreeRoot: string; config: EffectiveConfig; remote: string }>();
+  let bound = new Map<
+    string,
+    {
+      path: string;
+      worktreeRoot: string;
+      config: EffectiveConfig;
+      remote: string;
+      key: string;
+      name: string;
+    }
+  >();
   const reapedProjects = new Set<string>();
 
   // What this machine can actually do, established once at startup. Null until then, and reported
@@ -373,7 +383,14 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     const identity = loadIdentity(identityStore);
     const nextBound = new Map<
       string,
-      { path: string; worktreeRoot: string; config: EffectiveConfig; remote: string }
+      {
+        path: string;
+        worktreeRoot: string;
+        config: EffectiveConfig;
+        remote: string;
+        key: string;
+        name: string;
+      }
     >();
     const errors: string[] = [];
 
@@ -405,6 +422,8 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
             worktreeRoot: result.worktreeRoot,
             config: applyPolicy(policy, assignment.policy),
             remote: assignment.remote,
+            key: assignment.key ?? "",
+            name: assignment.name ?? "",
           });
         } else {
           errors.push(`${assignment.project}: ${result.reason}`);
@@ -487,6 +506,10 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       if (!response.ok) {
         decisions = [];
         decisionsAsOf = 0;
+        // The server answered, so it is reachable — a 403 is not the "could not refresh worker
+        // policy" condition the dedupe above guards, and leaving it set would silence a genuine
+        // reconnection failure that happens to produce the same message after this clears (BP-688).
+        lastPolicyRefreshError = "";
         return;
       }
       const body = (await response.json()) as {
@@ -778,8 +801,11 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
         project,
         // What the operator recognises the project by, the way an offer already names one — falls
         // back to the id in the pane itself when a server predating this carries neither (BP-377).
-        key: assignments.find((a) => a.project === project)?.key ?? "",
-        name: assignments.find((a) => a.project === project)?.name ?? "",
+        // Captured into `bound` at rebind time, the same as `remote` is, rather than looked up live
+        // from `assignments` here: `assignments` is replaced by the next refresh before `rebind`
+        // catches up, so a live lookup could momentarily miss a project `bound` still lists.
+        key: repo.key,
+        name: repo.name,
         // Empty when the project is claimable. Non-empty is the answer to "why is this machine
         // sitting on a project and doing nothing", which otherwise has no answer anywhere — a
         // poisoned checkout, the checkout failing the gates' own checks, or the board refusing the
