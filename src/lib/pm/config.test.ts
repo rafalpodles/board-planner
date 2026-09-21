@@ -8,6 +8,7 @@ vi.mock("@/lib/encryption", () => ({
 vi.mock("@/lib/url-validation", () => ({ isAllowedMcpServerUrl: () => true }));
 
 const { mergeMcpServerTokens, validatePmConfig } = await import("./config");
+const { Project } = await import("@/models/project");
 
 function server(overrides: Record<string, unknown> = {}) {
   return {
@@ -188,6 +189,40 @@ describe("mergeMcpServerTokens and moved OAuth credentials", () => {
       expect(result.value[0].oauth?.clientId).toBe("client-1");
       expect(result.value[0].oauth?.status).toBe("connected");
     }
+  });
+});
+
+// BP-707. The PUT hands the merge the project as loaded, so `prior.oauth` is a Mongoose
+// subdocument, and what matters is what the update then writes — not what the merge returned.
+describe("mergeMcpServerTokens against a stored project", () => {
+  function writtenOauth(typed: Record<string, unknown>) {
+    const project = Project.hydrate({
+      _id: "e2e00000000000000000c001",
+      name: "p",
+      key: "P",
+      pm: {
+        mcpServers: [
+          server({ authType: "oauth", oauth: { clientId: "mistyped", clientSecret: "enc:mistyped", status: "unconfigured" } }),
+        ],
+      },
+    });
+    const result = mergeMcpServerTokens([server({ authType: "oauth", ...typed })], project.pm!.mcpServers);
+    if (!result.valid) throw new Error(result.error);
+    const query = Project.findByIdAndUpdate(project._id, { pm: { mcpServers: result.value } });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const cast = (query as any)._castUpdate((query as any)._update);
+    return cast.$set.pm.mcpServers[0].oauth;
+  }
+
+  it("writes a client id and secret typed over stored ones", () => {
+    expect(writtenOauth({ oauthClientId: "typed-client", oauthClientSecret: "typed-secret" })).toMatchObject({
+      clientId: "typed-client",
+      clientSecret: "enc:typed-secret",
+    });
+  });
+
+  it("keeps the stored ones when nothing is typed", () => {
+    expect(writtenOauth({})).toMatchObject({ clientId: "mistyped", clientSecret: "enc:mistyped" });
   });
 });
 

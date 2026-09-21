@@ -1,6 +1,7 @@
 import {
   IPmAutonomy,
   IPmConfig,
+  IPmMcpOauth,
   IPmMcpServer,
   DEFAULT_PM_AUTONOMY,
   PM_MCP_AUTH_TYPES,
@@ -209,6 +210,12 @@ const EMPTY_OAUTH = {
   status: "unconfigured" as const,
 };
 
+// Mongoose quirk: a spread subdocument keeps its `_doc`, which an update casts from instead of the new fields
+function plainOauth(oauth: IPmMcpOauth): IPmMcpOauth {
+  const subdocument = oauth as IPmMcpOauth & { toObject?: () => IPmMcpOauth };
+  return typeof subdocument.toObject === "function" ? subdocument.toObject() : { ...oauth };
+}
+
 export function mergeMcpServerTokens(
   incoming: IPmMcpServer[],
   existing: IPmMcpServer[] | undefined
@@ -249,7 +256,7 @@ export function mergeMcpServerTokens(
     // whatever token endpoint the new server advertises (BP-315 review).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const transient = server as any;
-    let oauth = prior?.oauth && sameServer ? { ...prior.oauth } : undefined;
+    let oauth = prior?.oauth && sameServer ? plainOauth(prior.oauth) : undefined;
     if (server.authType === "oauth") {
       oauth = oauth ?? { ...EMPTY_OAUTH };
       // `oauthClientId` is not a secret, so sanitizeMcpServers returns it and the settings page
