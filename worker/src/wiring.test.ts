@@ -455,6 +455,9 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       // The probe preflight runs is left unanswered, which is what a machine with no working
       // sandbox looks like from here (BP-349)
       sandboxBroken?: boolean;
+      // Replaces the default 200-with-assignments response — a server this worker cannot reach at
+      // all, rather than one answering something to parse.
+      fetchImpl?: typeof fetch;
     } = {}
   ) {
     let seenHeartbeat: HeartbeatDeps | undefined;
@@ -535,31 +538,34 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       stat: () => ({ uid: 501, mode: 0o40700 }),
       // Held rather than inlined: refreshServerState is this call's only caller, so the count is
       // how a test says whether a rebind actually happened instead of assuming the clock got it there.
-      fetchImpl: (serverFetch = vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          // What this machine could set up but has not — read only by the socket, never by the
-          // claim loop
-          offers: [
-            {
-              project: "p2",
-              key: "SB",
-              name: "Sandbox",
-              repositoryUrl: "https://github.com/owner/sandbox",
-            },
-          ],
-          // Work policy travels with the assignment now: it describes the project, so two projects
-          // on one machine can resolve differently.
-          assignments: (
-            opts.assignments ?? [{ project: "p1", remote: opts.assignmentRemote ?? REMOTE }]
-          ).map((assignment) => ({
-            ...assignment,
-            ...(opts.extraAssignmentFields ?? {}),
-            ...(policy ? { policy } : {}),
-          })),
-        }),
-      })) as unknown as typeof fetch,
+      fetchImpl: (serverFetch = vi.fn(
+        opts.fetchImpl ??
+          (async () => ({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              // What this machine could set up but has not — read only by the socket, never by the
+              // claim loop
+              offers: [
+                {
+                  project: "p2",
+                  key: "SB",
+                  name: "Sandbox",
+                  repositoryUrl: "https://github.com/owner/sandbox",
+                },
+              ],
+              // Work policy travels with the assignment now: it describes the project, so two
+              // projects on one machine can resolve differently.
+              assignments: (
+                opts.assignments ?? [{ project: "p1", remote: opts.assignmentRemote ?? REMOTE }]
+              ).map((assignment) => ({
+                ...assignment,
+                ...(opts.extraAssignmentFields ?? {}),
+                ...(policy ? { policy } : {}),
+              })),
+            }),
+          }))
+      )) as unknown as typeof fetch,
       createStore: (path) => memoryStore(path.endsWith("worker.json") ? IDENTITY : ""),
       createApi: () => api as unknown as ApiClient,
       createTelemetry: () => telemetry,
@@ -1286,6 +1292,42 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         ([line]) => typeof line === "string" && line.includes("not claiming for project p1")
       );
       expect(refusals).toHaveLength(1);
+    });
+
+    // BP-688. The same class PR #415 fixed for a gate refusal, on the neighbouring site: a
+    // repos.json this worker cannot read is asked about again every refresh, and used to be logged
+    // every time — the identical every-30s pileup, just from a file read rather than a gate.
+    it("says a broken repos.json once while the reason has not changed, not once every refresh", async () => {
+      const run = await runOneTask(undefined, undefined, {
+        // Written after the harness's own valid repos.json, so this is what repoInventory actually
+        // reads: invalid JSON, which fails the same way on every pass.
+        stateFiles: { "repos.json": "not json" },
+        passes: 2,
+        clockJumpOnSleepMs: 31_000,
+      });
+
+      const failures = run.logError.mock.calls.filter(
+        ([line]) => typeof line === "string" && line.includes("could not read repos.json")
+      );
+      expect(failures).toHaveLength(1);
+    });
+
+    // BP-688. The third site of the same class: a server this worker cannot reach at all (as
+    // opposed to one that answers 403) is asked about again every refresh too.
+    it("says an unreachable server once while the reason has not changed, not once every refresh", async () => {
+      const run = await runOneTask(undefined, undefined, {
+        fetchImpl: async () => {
+          throw new Error("fetch failed: ECONNREFUSED");
+        },
+        passes: 2,
+        clockJumpOnSleepMs: 31_000,
+      });
+
+      const failures = run.logError.mock.calls.filter(
+        ([line]) =>
+          typeof line === "string" && line.includes("could not refresh worker policy")
+      );
+      expect(failures).toHaveLength(1);
     });
 
     // "Why is this machine sitting on a project and doing nothing" has to be answerable from the

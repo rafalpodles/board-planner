@@ -229,6 +229,9 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // reported. An entry is dropped once the project binds cleanly, so a reason that comes back is
   // said again.
   const reportedUnusable = new Map<string, string>();
+  // What was last said about a broken repos.json — said once per reason rather than once per
+  // refresh, the same shape as reportedUnusable above (BP-688).
+  let lastInventoryError = "";
   /**
    * Projects this machine has stopped offering because their checkout itself is the problem — a
    * git config carrying a key git runs on checkout, found by the run that refused to make one
@@ -351,10 +354,16 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     if (result.ok) {
       inventory = result.repos;
       inventoryError = "";
+      lastInventoryError = "";
       return;
     }
+    // Said once per reason rather than once per refresh: a repos.json that stays broken (a
+    // permissions problem, say) would otherwise write the same line every ~30s forever (BP-688).
+    if (result.reason !== lastInventoryError) {
+      deps.logError(result.reason);
+      lastInventoryError = result.reason;
+    }
     inventoryError = result.reason;
-    deps.logError(result.reason);
   }
 
   // A refusal here must not crash the worker or touch any other assignment: it is recorded and
@@ -454,6 +463,9 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // reusing a stored identity from a previous run (Task 5's GET, since no register() response
   // exists to read this from in that case), or is picking up a change made after startup.
   let lastRefresh = 0;
+  // What was last said about a server this worker could not reach — said once per reason rather
+  // than once per refresh, the same shape as reportedUnusable above (BP-688).
+  let lastPolicyRefreshError = "";
   async function refreshServerState(): Promise<void> {
     if (Date.now() - lastRefresh < MIN_REFRESH_INTERVAL_MS) return;
     lastRefresh = Date.now();
@@ -490,8 +502,15 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       catalogue = parseCatalogue(body.catalogue);
       decisions = parseDecisions(body.decisions);
       decisionsAsOf = Date.now();
+      lastPolicyRefreshError = "";
     } catch (error) {
-      deps.logError(`could not refresh worker policy: ${String(error)}`);
+      // Said once per reason rather than once per refresh: a server that stays unreachable would
+      // otherwise write the same line every ~30s forever (BP-688).
+      const reason = `could not refresh worker policy: ${String(error)}`;
+      if (reason !== lastPolicyRefreshError) {
+        deps.logError(reason);
+        lastPolicyRefreshError = reason;
+      }
       return;
     }
 
