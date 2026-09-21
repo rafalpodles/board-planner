@@ -93,6 +93,7 @@ export const GROUPS = {
     "pr-link-replacement.spec.ts",
     "pr-link-pruning.spec.ts",
     "mcp-oauth.spec.ts",
+    "credential-rotation.spec.ts",
     "mcp-tools.spec.ts",
     "db-reconnect-leaks.spec.ts",
     "settings-fields-and-templates.spec.ts",
