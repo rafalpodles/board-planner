@@ -24,6 +24,7 @@ const HEADLINE: Record<NotificationType, string> = {
   status_changed: "A task you follow moved",
   comment_added: "New comment on a task you follow",
   task_linked: "A dependency changed on a task you follow",
+  board_access: "Your access to a board changed",
   // Not the project channel's "New task created in <board>": that announces a board to a room,
   // this is addressed to one person who asked to watch the board rather than a task.
   task_created: "New task on a board you watch",

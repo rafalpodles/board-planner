@@ -34,7 +34,7 @@ type MailRecipient = { _id: unknown; email: string; fullName?: string };
 
 interface NotifyParams {
   type: NotificationType;
-  taskId: string;
+  taskId?: string;
   projectId: string;
   actorId: string;
   title: string;
@@ -117,7 +117,7 @@ async function notify({
       allowed.map((recipientId) => ({
         recipient: new Types.ObjectId(recipientId),
         type,
-        task: new Types.ObjectId(taskId),
+        task: taskId ? new Types.ObjectId(taskId) : undefined,
         project: new Types.ObjectId(projectId),
         actor: new Types.ObjectId(actorId),
         title,

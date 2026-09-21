@@ -15,6 +15,8 @@ const userFindByIdSelect = vi.fn();
 const check = vi.fn();
 const recipientsWithAccess = vi.fn(async (_ids?: unknown, _project?: unknown): Promise<string[]> => []);
 const notificationDeleteMany = vi.fn(async (_filter?: unknown) => ({ deletedCount: 0 }));
+const createNotifications = vi.fn(async (_params: unknown) => {});
+const projectFindByIdLean = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({
@@ -40,7 +42,12 @@ vi.mock("@/models/user", () => ({
     findById: (...a: unknown[]) => (userFindById(...a), { select: userFindByIdSelect }),
   },
 }));
-vi.mock("@/models/project", () => ({ Project: { findOne: vi.fn() } }));
+vi.mock("@/models/project", () => ({
+  Project: { findOne: vi.fn(), findById: () => ({ select: () => ({ lean: projectFindByIdLean }) }) },
+}));
+vi.mock("@/lib/in-app-notifications", () => ({
+  createNotifications: (params: unknown) => createNotifications(params),
+}));
 vi.mock("@/models/task", () => ({ Task: {} }));
 vi.mock("@/models/notification", () => ({
   Notification: { deleteMany: (filter: unknown) => notificationDeleteMany(filter) },
@@ -66,7 +73,8 @@ function put(body: unknown) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  getAuthUser.mockResolvedValue({ _id: "o1", role: "member" });
+  getAuthUser.mockResolvedValue({ _id: "o1", role: "member", username: "olga", fullName: "Olga Owner" });
+  projectFindByIdLean.mockResolvedValue({ name: "Orbit" });
   check.mockResolvedValue(true);
   grantFindLean.mockResolvedValue([]);
   grantFindOneLean.mockResolvedValue(null);
@@ -312,5 +320,61 @@ describe("DELETE members", () => {
     await DELETE(new Request(url, { method: "DELETE" }), { params });
 
     expect(notificationDeleteMany).not.toHaveBeenCalled();
+  });
+});
+
+// BP-753: being given a board, or a different role on one, used to arrive in silence
+describe("PUT members tells the person", () => {
+  const announced = async () => {
+    await vi.waitFor(() => expect(createNotifications).toHaveBeenCalled());
+    return createNotifications.mock.calls[0][0];
+  };
+
+  it("that they were added, by whom and as what", async () => {
+    grantFindOneLean.mockResolvedValue(null);
+
+    const res = await PUT(put({ userId: U1, relation: "member" }), { params });
+
+    expect(res.status).toBe(200);
+    expect(await announced()).toEqual({
+      type: "board_access",
+      projectId: PROJECT,
+      actorId: "o1",
+      recipientIds: [U1],
+      title: "Olga Owner added you to Orbit as a member",
+    });
+  });
+
+  it("that their role changed", async () => {
+    grantFindOneLean.mockResolvedValue({ relation: "member" });
+
+    await PUT(put({ userId: U1, relation: "owner" }), { params });
+
+    expect((await announced()) as { title: string }).toMatchObject({
+      type: "board_access",
+      title: "Olga Owner made you an owner of Orbit",
+    });
+  });
+
+  it("nothing when the role they already hold is sent again", async () => {
+    grantFindOneLean.mockResolvedValue({ relation: "member" });
+
+    const res = await PUT(put({ userId: U1, relation: "member" }), { params });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(res.status).toBe(200);
+    expect(grantUpdateOne).toHaveBeenCalled();
+    expect(createNotifications).not.toHaveBeenCalled();
+  });
+
+  it("nothing when the change was refused", async () => {
+    grantFindOneLean.mockResolvedValue({ relation: "owner" });
+    grantCountDocuments.mockResolvedValue(1);
+
+    const res = await PUT(put({ userId: U1, relation: "member" }), { params });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(res.status).toBe(409);
+    expect(createNotifications).not.toHaveBeenCalled();
   });
 });

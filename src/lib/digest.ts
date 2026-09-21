@@ -5,7 +5,7 @@ import { isEmailConfigured, sendEmail } from "@/lib/email";
 import { renderEmail } from "@/lib/email-template";
 import { selfOrigin } from "@/lib/session";
 import { dayKeyInTimezone, hourInTimezone, isValidTimezone } from "@/lib/time";
-import { taskPath } from "@/lib/urls";
+import { projectPath, taskPath } from "@/lib/urls";
 import { Notification } from "@/models/notification";
 import { User } from "@/models/user";
 import { resolveChannels, wantsMailSomewhere, PrefsSource } from "@/lib/notification-prefs";
@@ -75,6 +75,9 @@ export function lineFor(notification: any, origin: string | null): DigestLine {
   // already named TP-4. Left fully alone; BP-725 covers this type entirely, not only its
   // mid-sentence directions.
   const title = notification.type === "task_linked" ? notification.title : stripKey(notification.title, key);
+  if (notification.type === "board_access" && project?.key) {
+    return { key: project.key, title, url: origin ? `${origin}${projectPath(project.key)}` : undefined };
+  }
   return {
     key: key || "—",
     title,

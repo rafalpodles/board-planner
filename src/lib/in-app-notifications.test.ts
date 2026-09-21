@@ -277,6 +277,23 @@ describe("notification emails", () => {
     await expect(createNotifications(NOTIFICATION)).resolves.toBeUndefined();
   });
 
+  // BP-753: being given a board is about the board, and a row naming a task that does not exist
+  // would send the bell to a task page that 404s
+  it("stores a notification that names no task when it is about a board", async () => {
+    const { taskId: _taskId, email: _email, ...boardEvent } = NOTIFICATION;
+    await createNotifications({
+      ...boardEvent,
+      type: "board_access",
+      title: "owner added you to Orbit as a member",
+      recipientIds: [WATCHER],
+    });
+
+    expect(insertMany).toHaveBeenCalledTimes(1);
+    const [row] = insertMany.mock.calls[0][0];
+    expect(row).toMatchObject({ type: "board_access", inApp: true });
+    expect(row.task).toBeUndefined();
+  });
+
   it("never writes to the person who caused the notification", async () => {
     await createNotifications({ ...NOTIFICATION, actorId: ASSIGNEE });
 

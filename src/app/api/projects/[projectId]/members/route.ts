@@ -6,6 +6,8 @@ import { audienceFilterFrom, recipientsWithAccess } from "@/lib/grants";
 import { User } from "@/models/user";
 import { Grant } from "@/models/grant";
 import { Notification } from "@/models/notification";
+import { Project } from "@/models/project";
+import { createNotifications } from "@/lib/in-app-notifications";
 import { GRANT_RELATIONS, GrantRelation } from "@/types";
 
 async function ownerCount(projectId: string): Promise<number> {
@@ -62,10 +64,10 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
+  const current = await Grant.findOne({ subject: userId, objectType: "project", object: projectId })
+    .select("relation")
+    .lean();
   if (relation !== "owner") {
-    const current = await Grant.findOne({ subject: userId, objectType: "project", object: projectId })
-      .select("relation")
-      .lean();
     if (current?.relation === "owner" && (await ownerCount(projectId)) <= 1) {
       return NextResponse.json(
         { error: "A board must keep at least one owner" },
@@ -85,8 +87,45 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     if ((e as { code?: number }).code !== 11000) throw e;
   }
 
+  if (current?.relation !== relation) {
+    void announceAccess({
+      projectId,
+      recipientId: userId,
+      actorId: String(user._id),
+      actorName: user.fullName || user.username,
+      relation,
+      added: !current,
+    });
+  }
+
   return NextResponse.json({ ok: true });
 });
+
+async function announceAccess(change: {
+  projectId: string;
+  recipientId: string;
+  actorId: string;
+  actorName: string;
+  relation: GrantRelation;
+  added: boolean;
+}): Promise<void> {
+  try {
+    const project = await Project.findById(change.projectId).select("name").lean();
+    const board = project?.name ?? "a board";
+    const role = change.relation === "owner" ? "an owner" : "a member";
+    await createNotifications({
+      type: "board_access",
+      projectId: change.projectId,
+      actorId: change.actorId,
+      recipientIds: [change.recipientId],
+      title: change.added
+        ? `${change.actorName} added you to ${board} as ${role}`
+        : `${change.actorName} made you ${role} of ${board}`,
+    });
+  } catch (err) {
+    console.error("Failed to announce a board access change:", err);
+  }
+}
 
 export const DELETE = withProjectOwner(async (request, { params }) => {
   const { projectId } = await params;

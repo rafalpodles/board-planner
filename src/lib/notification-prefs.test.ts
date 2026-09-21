@@ -119,6 +119,26 @@ describe("a row nobody has been asked about", () => {
     expect(m.status_changed).toEqual({ inApp: false, email: false, chat: false });
   });
 
+  // BP-753: every grid saved so far predates the row, and being given a board must still reach the bell
+  it("rings the bell for board_access on a grid saved before the row existed", () => {
+    const stored = allOff();
+    delete (stored as Partial<NotificationMatrix>).board_access;
+
+    expect(resolveChannels({ notifications: { defaults: stored } }, P1, "board_access")).toEqual({
+      inApp: true,
+      email: false,
+      chat: false,
+    });
+  });
+
+  it("stays quiet for board_access once somebody has unticked it", () => {
+    const stored = allOff();
+
+    expect(resolveChannels({ notifications: { defaults: stored } }, P1, "board_access").inApp).toBe(
+      false
+    );
+  });
+
   // The firehose row is the exception everywhere, including here
   it("leaves the board-wide row off", () => {
     const stored = allOff();
