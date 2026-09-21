@@ -9,6 +9,8 @@ export const E2E_MONGODB_URI =
   process.env.E2E_MONGODB_URI ?? "mongodb://localhost:27017/boardplanner_e2e";
 
 export const BOOTSTRAP_TOKEN = "e2e-operator-setup-code";
+// The dev server's ENCRYPTION_KEY, here so a seeded secret is sealed with the key that opens it.
+export const E2E_ENCRYPTION_KEY = "e2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee";
 export const ADMIN_USERNAME = "admin";
 export const ADMIN_PASSWORD = "test1234";
 
@@ -1729,10 +1731,9 @@ export async function seedRepository(fields: {
   await mongoose.disconnect();
 }
 
-// What a sync leaves on a task once a pull request has been matched to its key. Written here
-// rather than fetched, because the fetch is the one hop of this integration that cannot be run
-// locally: fetchPullRequests names api.github.com in the code, and safe-fetch refuses a loopback
-// address for GitLab — see the note at the top of external-integrations.spec.ts.
+// What a sync leaves on a task once a pull request has been matched to its key, planted directly
+// so a rendering test does not depend on either sync — those run against the stubs in
+// pr-status.spec.ts and gitlab-activity.spec.ts.
 export const LINKED_PR_NUMBER = 178;
 export const LINKED_PR_TITLE = "fix(board): keep the header visible";
 export const LINKED_MR_NUMBER = 9;
@@ -2303,5 +2304,76 @@ export async function seedManyMentionCandidates() {
       createdAt: now,
     }))
   );
+  await mongoose.disconnect();
+}
+
+/**
+ * BP-695. A board whose repository is on GitLab — the stub at `host` — with one task for the stub
+ * to report branches, commits and merge requests about. Its own project, so no spec counting the
+ * seeded boards sees it unless it asks for it.
+ */
+export const GITLAB_PROJECT_ID = id("e2e00000000000000000c901");
+export const GITLAB_PROJECT_KEY = "GL";
+export const GITLAB_REPO = "e2e-group/e2e-project";
+export const GITLAB_TOKEN = "glpat-e2e";
+export const GITLAB_TASK_ID = id("e2e00000000000000000d901");
+export const GITLAB_TASK_NUMBER = 3;
+export const GITLAB_TASK_KEY = `${GITLAB_PROJECT_KEY}-${GITLAB_TASK_NUMBER}`;
+export const GITLAB_TASK_TITLE = "Mirror the fix on GitLab";
+
+// Imported lazily and under the server's key: encryption.ts checks the variable when it loads, and
+// the runner's own environment has none, or whatever the developer's shell exported.
+async function sealedWithTheServersKey(secret: string): Promise<string> {
+  const own = process.env.ENCRYPTION_KEY;
+  process.env.ENCRYPTION_KEY = E2E_ENCRYPTION_KEY;
+  try {
+    const { encryptSecret } = await import("@/lib/encryption");
+    return encryptSecret(secret);
+  } finally {
+    if (own === undefined) delete process.env.ENCRYPTION_KEY;
+    else process.env.ENCRYPTION_KEY = own;
+  }
+}
+
+export async function seedGitlabProject(host: string) {
+  const db = (await connect()).db!;
+  const now = new Date();
+
+  await db.collection("projects").insertOne({
+    _id: GITLAB_PROJECT_ID,
+    name: "E2E GitLab Board",
+    key: GITLAB_PROJECT_KEY,
+    description: "",
+    icon: "",
+    categories: CATEGORIES,
+    columns: COLUMNS,
+    taskTemplates: [],
+    customFields: [],
+    webhooks: [],
+    notificationChannels: [],
+    worker: { enabled: false, policy: {}, policyOverrides: [] },
+    repositoryUrl: "",
+    githubRepo: "",
+    githubToken: "",
+    gitlabRepo: GITLAB_REPO,
+    gitlabHost: host,
+    gitlabToken: await sealedWithTheServersKey(GITLAB_TOKEN),
+    taskCounter: GITLAB_TASK_NUMBER,
+    sortOrder: 2,
+    createdBy: ADMIN_ID,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  await db.collection("tasks").insertOne(
+    taskFactory(now)({
+      _id: GITLAB_TASK_ID,
+      project: GITLAB_PROJECT_ID,
+      taskNumber: GITLAB_TASK_NUMBER,
+      title: GITLAB_TASK_TITLE,
+      status: "in_progress",
+    })
+  );
+
   await mongoose.disconnect();
 }

@@ -21,7 +21,7 @@ import { signIn as arriveSignedIn } from "./session";
  * BP-396 — what this instance does at its edges: webhook delivery, and the repository sync that
  * links a pull request to the task whose key it names.
  *
- * **Two of the four scenarios the task lists cannot be driven here, and are not faked.**
+ * **One of the four scenarios the task lists cannot be driven here, and is not faked.**
  *
  * *Webhook delivery to a local receiver.* A receiver on this machine cannot be delivered to at
  * all. `dispatchWebhooks` gates on `isAllowedWebhookUrl`, whose first line refuses anything that is
@@ -43,10 +43,10 @@ import { signIn as arriveSignedIn } from "./session";
  * (`.catch(() => {})`). The task's "retry after failure" describes behaviour the code does not
  * have; it is reported on the task rather than invented here.
  *
- * *GitHub/GitLab sync against a stubbed service.* `fetchPullRequests` names `api.github.com` in
- * the source with no injectable base, and GitLab's host, though configurable, goes through the
- * same `safeFetch` refusal. What is reachable is asserted: every guard the sync route applies
- * before the fetch, and the linking those calls exist to produce.
+ * *GitHub/GitLab sync against a stubbed service* is driven elsewhere, against `e2e/github-stub.mjs`
+ * (`GITHUB_API_BASE_URL`, BP-443 — `pr-status.spec.ts`, `pr-link-pruning.spec.ts`) and
+ * `e2e/gitlab-stub.mjs` (a project's own `gitlabHost`, BP-695 — `gitlab-activity.spec.ts`). This
+ * file keeps the guards the sync routes apply before any fetch, and the rendering of a link.
  */
 
 const SETTINGS = `/projects/${PROJECT_KEY}/settings`;
@@ -171,9 +171,9 @@ test.describe("repository sync", () => {
     expect(response.status()).toBe(401);
   });
 
-  // Named for the rendering, not for the matching: the links are written to the task by the seed,
-  // because the fetch that would produce them cannot run here. `matchPRsToTasks` could return
-  // nothing at all and this would stay green — its own tests are in src/lib/github.test.ts.
+  // Named for the rendering, not for the matching: the links are written to the task by the seed.
+  // `matchPRsToTasks` could return nothing at all and this would stay green — the syncs that
+  // produce links are driven in pr-status.spec.ts and gitlab-activity.spec.ts.
   test("linked pull requests are shown on the task, both providers, with their state", async ({
     page,
   }) => {
