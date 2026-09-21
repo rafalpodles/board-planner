@@ -6,6 +6,33 @@ private struct Boom: Error, LocalizedError {
     var errorDescription: String? { "could not remove \(path)" }
 }
 
+/// Real git, for the one test in this file that needs its actual symlink resolution rather than a
+/// mocked answer — `CheckoutRemovalReachTests.swift` has its own copy for the same reason.
+@Sendable private func reachGitForDeletionTests(_ cwd: String, _ args: [String]) -> (code: Int32, output: String) {
+    let task = Process()
+    task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+    task.arguments = ["git"] + args
+    task.currentDirectoryURL = URL(fileURLWithPath: cwd)
+    task.environment = [
+        "PATH": ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin",
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_SYSTEM": "/dev/null",
+        "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
+    ]
+    let pipe = Pipe()
+    task.standardOutput = pipe
+    task.standardError = pipe
+    do {
+        try task.run()
+    } catch {
+        return (127, "could not run git: \(error.localizedDescription)")
+    }
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    task.waitUntilExit()
+    return (task.terminationStatus, String(data: data, encoding: .utf8) ?? "")
+}
+
 // @MainActor for `removeIfSafe`, which is isolated to it because asking the operator is a modal.
 // `perform` is not, and the tests above it would compile either way.
 @MainActor
@@ -30,17 +57,21 @@ final class CheckoutDeletionTests: XCTestCase {
         }
     }
 
-    private func deletion(_ r: Recorder, exists: @escaping @Sendable (String) -> Bool = { _ in true })
-        -> CheckoutDeletion
-    {
-        CheckoutDeletion(remove: { try r.remove($0) }, exists: exists, forget: { try r.forget($0) })
+    private func deletion(
+        _ r: Recorder,
+        exists: @escaping @Sendable (String) -> Bool = { _ in true },
+        isSymlink: @escaping @Sendable (String) -> Bool = { _ in false }
+    ) -> CheckoutDeletion {
+        CheckoutDeletion(
+            remove: { try r.remove($0) }, exists: exists, forget: { try r.forget($0) },
+            isSymlink: isSymlink)
     }
 
     func testItTakesTheWorktreesFirst_thenTheCheckout_thenTheGrant() {
         let r = Recorder()
 
         let step = deletion(r).perform(
-            project: "BP", path: "/co", worktrees: ["/wt/one", "/wt/two"])
+            project: "BP", path: "/co", root: "/co", worktrees: ["/wt/one", "/wt/two"])
 
         XCTAssertEqual(step, .removed(project: "BP", path: "/co"))
         XCTAssertEqual(r.removed, ["/wt/one", "/wt/two", "/co"], "worktrees before the checkout")
@@ -54,7 +85,7 @@ final class CheckoutDeletionTests: XCTestCase {
         r.failOn = "/wt/two"
 
         let step = deletion(r).perform(
-            project: "BP", path: "/co", worktrees: ["/wt/one", "/wt/two", "/wt/three"])
+            project: "BP", path: "/co", root: "/co", worktrees: ["/wt/one", "/wt/two", "/wt/three"])
 
         // Partial, not failed: /wt/one is gone and saying only "/wt/two could not be removed"
         // reads as nothing having happened (BP-427).
@@ -74,7 +105,7 @@ final class CheckoutDeletionTests: XCTestCase {
         let r = Recorder()
         r.failOn = "/co"
 
-        let step = deletion(r).perform(project: "BP", path: "/co", worktrees: [])
+        let step = deletion(r).perform(project: "BP", path: "/co", root: "/co", worktrees: [])
 
         guard case .failed = step else {
             XCTFail("expected a failure, got \(step)")
@@ -91,11 +122,26 @@ final class CheckoutDeletionTests: XCTestCase {
         let r = Recorder()
 
         let step = deletion(r, exists: { _ in false }).perform(
-            project: "BP", path: "/co", worktrees: [])
+            project: "BP", path: "/co", root: "/co", worktrees: [])
 
         XCTAssertEqual(step, .forgotten(project: "BP", path: "/co"))
         XCTAssertEqual(r.removed, [], "nothing to delete")
         XCTAssertEqual(r.forgotten, ["/co"], "but the allowlist entry is still stale")
+    }
+
+    // BP-428 review. A symlinked grant whose target is already gone: `exists` follows the link
+    // and reads it as absent, same as the case above, but unlike an ordinary stale entry there is
+    // still a link on disk — and nothing else in this file's success path touches `path` when
+    // `wasThere` is false.
+    func testADanglingSymlinkedGrantIsCleanedUpEvenWithNoTargetLeft() {
+        let r = Recorder()
+
+        let step = deletion(r, exists: { _ in false }, isSymlink: { _ in true }).perform(
+            project: "BP", path: "/co", root: "/co", worktrees: [])
+
+        XCTAssertEqual(step, .forgotten(project: "BP", path: "/co"))
+        XCTAssertEqual(r.removed, ["/co"], "the dangling link itself still has to go")
+        XCTAssertEqual(r.forgotten, ["/co"])
     }
 
     /// The other side of the same distinction, so neither outcome can drift into the other.
@@ -103,10 +149,98 @@ final class CheckoutDeletionTests: XCTestCase {
         let r = Recorder()
 
         let step = deletion(r, exists: { _ in true }).perform(
-            project: "BP", path: "/co", worktrees: [])
+            project: "BP", path: "/co", root: "/co", worktrees: [])
 
         XCTAssertEqual(step, .removed(project: "BP", path: "/co"))
         XCTAssertEqual(r.removed, ["/co"])
+    }
+
+    // BP-428 review. A recorder cannot tell a symlink from the directory it points to — both are
+    // just a string — so this runs `remove` for real, the way ProjectSyncRunner wires it
+    // (`FileManager.removeItem(atPath:)`), against a real symlink on disk. `root` is what
+    // `CheckoutRemoval.check` would have resolved the link to — computed the same way here as a
+    // caller receives it from the verdict, not re-derived inside `perform`.
+    func testASymlinkedCheckoutIsActuallyDeletedRatherThanJustItsLink() throws {
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bp428-deletion-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+
+        let real = base.appendingPathComponent("real")
+        try FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+        let link = base.appendingPathComponent("link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+        let root = ((real.path as NSString).standardizingPath as NSString).resolvingSymlinksInPath
+
+        let deletion = CheckoutDeletion(
+            remove: { try FileManager.default.removeItem(atPath: $0) },
+            exists: { FileManager.default.fileExists(atPath: $0) },
+            forget: { _ in })
+
+        let step = deletion.perform(project: "BP", path: link.path, root: root, worktrees: [])
+
+        XCTAssertEqual(step, .removed(project: "BP", path: link.path))
+        // The bug: `removeItem` on `path` deletes only the link, so without deleting `root`
+        // instead, this directory — just confirmed deleted — would still be sitting on disk,
+        // orphaned.
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: real.path),
+            "the real checkout must be deleted, not merely the symlink that pointed at it")
+        // The other half of the same review: the link itself must not be left dangling. This has
+        // to ask with `destinationOfSymbolicLink`, not `fileExists` — `fileExists` follows a
+        // symlink to its target, so it already reads a dangling one as absent whether or not the
+        // link entry itself is still sitting there, and would pass this assertion either way.
+        XCTAssertNil(
+            try? FileManager.default.destinationOfSymbolicLink(atPath: link.path),
+            "the symlink itself must not survive as a dangling leftover")
+    }
+
+    // BP-428 review, the regression the test above cannot catch: `root != path` is also true for
+    // an ordinary checkout reached only through an ancestor symlink the OS maintains (`/tmp` →
+    // `/private/tmp`), where deleting `root` already removed the one real directory and a second
+    // `remove(path)` fails against what the first call just deleted — turning a clean `.removed`
+    // into `.partiallyRemoved`. Gating the second delete on `isSymlink(path)` instead is what
+    // avoids that; this is the control that pins the gate to the right signal without touching a
+    // real filesystem.
+    func testANonSymlinkedRootMismatchDoesNotAttemptASecondRemove() {
+        let r = Recorder()
+
+        let step = deletion(r, isSymlink: { _ in false }).perform(
+            project: "BP", path: "/co", root: "/private/co", worktrees: [])
+
+        XCTAssertEqual(step, .removed(project: "BP", path: "/co"))
+        XCTAssertEqual(
+            r.removed, ["/private/co"],
+            "only the resolved root is deleted — path is not a symlink, so there is no separate link entry to clean up")
+    }
+
+    // BP-428 review, round 4. An earlier version of this fix let a failed link cleanup turn a
+    // completed deletion into `.failed` — the checkout genuinely gone, the operator told nothing
+    // happened. The one place a false negative is worse than the truth: nothing else records
+    // that the irreversible act already succeeded.
+    func testAFailedLinkCleanupDoesNotTurnACompletedDeletionIntoAFailure() {
+        let r = Recorder()
+        r.failOn = "/link"
+
+        let step = deletion(r, isSymlink: { $0 == "/link" }).perform(
+            project: "BP", path: "/link", root: "/real", worktrees: [])
+
+        XCTAssertEqual(step, .removed(project: "BP", path: "/link"))
+        XCTAssertEqual(r.removed, ["/real"], "the checkout itself is gone regardless of what happened to the link")
+    }
+
+    // BP-428 review, round 5. The `else if isSymlink(path)` branch's own `try?`, unguarded by the
+    // test above: a dangling grant whose link cannot be removed either must still drop the stale
+    // allowlist entry, or every later pass hits this same branch and fails the same way, forever.
+    func testAStaleGrantWhoseLinkCleanupFailsIsStillForgotten() {
+        let r = Recorder()
+        r.failOn = "/link"
+
+        let step = deletion(r, exists: { _ in false }, isSymlink: { $0 == "/link" }).perform(
+            project: "BP", path: "/link", root: "/link", worktrees: [])
+
+        XCTAssertEqual(step, .forgotten(project: "BP", path: "/link"))
+        XCTAssertEqual(r.forgotten, ["/link"], "or every later pass hits the same branch and fails the same way")
     }
 
     // MARK: - removeIfSafe: the seam that used to live in an untested app target
@@ -265,6 +399,42 @@ final class CheckoutDeletionTests: XCTestCase {
             "the checkout first, then what goes with it — nothing deleted goes unnamed")
     }
 
+    // BP-428 review. What the operator actually confirms deleting when the grant is a symlink —
+    // the granted path alone would let them agree without ever seeing where the delete really
+    // lands. Real git and a real symlink throughout: `sameDirectory` only agrees a mismatched
+    // root and path name the same directory once it can resolve one — a mock pair, neither of
+    // which exists on disk, cannot exercise that the way a real checkout can.
+    func testTheOperatorIsShownWhatASymlinkedGrantActuallyResolvesTo() async throws {
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bp428-dialog-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+
+        let real = base.appendingPathComponent("real")
+        try FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+        _ = reachGitForDeletionTests(real.path, ["init", "-q", "-b", "main"])
+        let link = base.appendingPathComponent("link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+        let root = reachGitForDeletionTests(link.path, ["rev-parse", "--show-toplevel"]).output
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let r = Recorder()
+        let asked = Asked()
+        let removal = CheckoutRemoval(run: { args, cwd in reachGitForDeletionTests(cwd, args) })
+
+        // The default `isSymlink` in `deletion(_:)` answers `{ _ in false }`, deliberately, for
+        // every other test in this file's synthetic paths — here the point is a real one, so the
+        // real check is asked instead.
+        _ = await deletion(r, isSymlink: CheckoutDeletion.realIsSymlink).removeIfSafe(
+            project: "BP", path: link.path, isBusy: idle(),
+            checking: removal,
+            asking: { asked.ask($0, $1) })
+
+        XCTAssertEqual(
+            asked.calls.first?.paths, ["\(link.path) → \(root)"],
+            "the dialog names both the grant and what it resolves to, not only the allowlist's own bookkeeping")
+    }
+
     func testDecliningDeletesNothingAndKeepsTheGrant() async {
         let r = Recorder()
         let asked = Asked()
@@ -371,7 +541,7 @@ final class CheckoutDeletionTests: XCTestCase {
         r.failOn = "/co"
 
         let step = deletion(r).perform(
-            project: "BP", path: "/co", worktrees: ["/wt/one", "/wt/two"])
+            project: "BP", path: "/co", root: "/co", worktrees: ["/wt/one", "/wt/two"])
 
         XCTAssertEqual(
             step,
@@ -386,7 +556,7 @@ final class CheckoutDeletionTests: XCTestCase {
         let r = Recorder()
         r.failForget = true
 
-        let step = deletion(r).perform(project: "BP", path: "/co", worktrees: ["/wt/one"])
+        let step = deletion(r).perform(project: "BP", path: "/co", root: "/co", worktrees: ["/wt/one"])
 
         guard case .partiallyRemoved(_, let removed, _) = step else {
             return XCTFail("expected a partial removal, got \(step)")
@@ -400,7 +570,7 @@ final class CheckoutDeletionTests: XCTestCase {
         let r = Recorder()
         r.failOn = "/wt/one"
 
-        let step = deletion(r).perform(project: "BP", path: "/co", worktrees: ["/wt/one", "/wt/two"])
+        let step = deletion(r).perform(project: "BP", path: "/co", root: "/co", worktrees: ["/wt/one", "/wt/two"])
 
         XCTAssertEqual(step, .failed(project: "BP", reason: "could not remove /wt/one"))
         XCTAssertEqual(r.removed, [], "and nothing reached the disk")
@@ -410,7 +580,7 @@ final class CheckoutDeletionTests: XCTestCase {
     func testACompleteRemovalIsUnchanged() {
         let r = Recorder()
 
-        let step = deletion(r).perform(project: "BP", path: "/co", worktrees: ["/wt/one"])
+        let step = deletion(r).perform(project: "BP", path: "/co", root: "/co", worktrees: ["/wt/one"])
 
         XCTAssertEqual(step, .removed(project: "BP", path: "/co"))
         XCTAssertEqual(r.removed, ["/wt/one", "/co"])

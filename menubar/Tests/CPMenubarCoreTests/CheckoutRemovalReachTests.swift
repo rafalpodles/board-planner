@@ -80,6 +80,18 @@ final class CheckoutRemovalReachTests: XCTestCase {
         removal().check(path: path, workerIsBusy: false)
     }
 
+    /// What `check` itself resolves `path` to — asked of git directly, the same way `check` does,
+    /// rather than reimplemented: `standardizingPath` documents that it strips a leading
+    /// `/private`, which is what makes `sameDirectory`'s own comparison agree that these are the
+    /// same directory, but the `root` a verdict carries is git's raw, unstripped answer — and
+    /// `NSTemporaryDirectory()` lives under `/var`, itself resolving to `/private/var`, so that
+    /// answer differs from the literal `path` for every checkout in this file, not only a
+    /// symlinked one.
+    private func resolved(_ path: String) -> String {
+        reachGit(path, ["rev-parse", "--show-toplevel"]).output
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private func refusal(_ path: String, file: StaticString = #filePath, line: UInt = #line) -> String {
         guard case .refused(let reason) = verdict(path) else {
             XCTFail("expected a refusal, got \(verdict(path))", file: file, line: line)
@@ -93,7 +105,7 @@ final class CheckoutRemovalReachTests: XCTestCase {
     func testAGenuinelyCleanCheckoutIsStillRemovable() {
         let checkout = cleanCheckout()
 
-        XCTAssertEqual(verdict(checkout), .go(worktrees: []))
+        XCTAssertEqual(verdict(checkout), .go(root: resolved(checkout), worktrees: []))
     }
 
     /// The trap this whole ticket walks beside: a clean checkout still holds ignored files. If the
@@ -112,7 +124,7 @@ final class CheckoutRemovalReachTests: XCTestCase {
 
         // Deliberate, and the gap owner chose to leave: that .env is unrecoverable and goes with the
         // directory. No git flag separates it from build/out.o, so the guard does not try.
-        XCTAssertEqual(verdict(checkout), .go(worktrees: []))
+        XCTAssertEqual(verdict(checkout), .go(root: resolved(checkout), worktrees: []))
     }
 
     // MARK: - a commit reachable only from a detached HEAD
@@ -199,7 +211,7 @@ final class CheckoutRemovalReachTests: XCTestCase {
             !FileManager.default.fileExists(atPath: checkout + "/sub/s.txt"),
             "this git refused a file-protocol submodule")
 
-        XCTAssertEqual(verdict(checkout), .go(worktrees: []))
+        XCTAssertEqual(verdict(checkout), .go(root: resolved(checkout), worktrees: []))
     }
 
     // MARK: - a worktree the operator locked by hand
@@ -291,7 +303,7 @@ final class CheckoutRemovalReachTests: XCTestCase {
         _ = git(nested, ["remote", "add", "origin", nestedOrigin])
         _ = git(nested, ["push", "-q", "-u", "origin", "HEAD"])
 
-        XCTAssertEqual(verdict(checkout), .go(worktrees: []))
+        XCTAssertEqual(verdict(checkout), .go(root: resolved(checkout), worktrees: []))
     }
 
     // MARK: - the widening that nearly refused everything
@@ -325,7 +337,7 @@ final class CheckoutRemovalReachTests: XCTestCase {
             git(checkout, ["log", "--all", "--not", "--remotes", "--oneline"]).output.isEmpty,
             "the premise: a bare --all counts the prefetched commit as unpushed")
 
-        XCTAssertEqual(verdict(checkout), .go(worktrees: []))
+        XCTAssertEqual(verdict(checkout), .go(root: resolved(checkout), worktrees: []))
     }
 
     /// Notes are not pushed by default, and one of them refused the whole checkout.
@@ -336,7 +348,7 @@ final class CheckoutRemovalReachTests: XCTestCase {
         XCTAssertTrue(
             git(checkout, ["notes", "list"]).code == 0,
             "the premise: this git supports notes")
-        XCTAssertEqual(verdict(checkout), .go(worktrees: []))
+        XCTAssertEqual(verdict(checkout), .go(root: resolved(checkout), worktrees: []))
     }
 
     /// A tag on a pushed commit is not unpushed work either — the control on the other side of the
@@ -346,7 +358,7 @@ final class CheckoutRemovalReachTests: XCTestCase {
         _ = git(checkout, ["tag", "v1"])
         _ = git(checkout, ["tag", "-a", "v2", "-m", "annotated"])
 
-        XCTAssertEqual(verdict(checkout), .go(worktrees: []))
+        XCTAssertEqual(verdict(checkout), .go(root: resolved(checkout), worktrees: []))
     }
 
     // MARK: - shapes the first cut skipped
@@ -403,7 +415,7 @@ final class CheckoutRemovalReachTests: XCTestCase {
             git(nested, ["log", "--all", "--not", "--remotes", "--oneline"]).output.isEmpty,
             "the premise: a bare --all inside the nested repository counts it as unpushed")
 
-        XCTAssertEqual(verdict(checkout), .go(worktrees: []))
+        XCTAssertEqual(verdict(checkout), .go(root: resolved(checkout), worktrees: []))
     }
 
     func testANoteInsideANestedRepositoryDoesNotRefuseTheParent() {
@@ -418,14 +430,14 @@ final class CheckoutRemovalReachTests: XCTestCase {
         _ = git(nested, ["push", "-q", "-u", "origin", "HEAD"])
         _ = git(nested, ["notes", "add", "-m", "read this first"])
 
-        XCTAssertEqual(verdict(checkout), .go(worktrees: []))
+        XCTAssertEqual(verdict(checkout), .go(root: resolved(checkout), worktrees: []))
     }
 
 }
 
 private extension RemovalVerdict {
     var goWorktrees: [String]? {
-        if case .go(let worktrees) = self { return worktrees }
+        if case .go(_, let worktrees) = self { return worktrees }
         return nil
     }
 }

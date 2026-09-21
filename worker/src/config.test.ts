@@ -270,7 +270,9 @@ describe("parseAssignments", () => {
   // the server has no way to point this machine at a directory.
   it("keeps a well-formed assignment", () => {
     const assignments = parseAssignments([{ project: "p1", remote: "git@github.com:o/r.git" }]);
-    expect(assignments).toEqual([{ project: "p1", remote: "git@github.com:o/r.git" }]);
+    expect(assignments).toEqual([
+      { project: "p1", remote: "git@github.com:o/r.git", key: "", name: "" },
+    ]);
   });
 
   it("carries the project's own policy alongside it", () => {
@@ -280,12 +282,35 @@ describe("parseAssignments", () => {
     expect(assignments[0].policy).toEqual({ autoMerge: true });
   });
 
+  // BP-377. Named the same way an offer already is, so the pane this worker serves over the local
+  // socket has something an operator recognises rather than the id alone.
+  it("carries the project's key and name alongside it", () => {
+    const assignments = parseAssignments([
+      { project: "p1", remote: "git@github.com:o/r.git", key: "TP", name: "Test Project" },
+    ]);
+    expect(assignments[0].key).toBe("TP");
+    expect(assignments[0].name).toBe("Test Project");
+  });
+
+  // The same reason parseOffers already normalises its own key/name (config.ts): Swift's
+  // `String?` throws typeMismatch on a non-string, non-null value, which fails the WHOLE config
+  // decode over the local socket rather than just this one project's name.
+  it("falls back to an empty string for a key or name that is not a string", () => {
+    const assignments = parseAssignments([
+      { project: "p1", remote: "git@github.com:o/r.git", key: 42, name: ["not", "a", "string"] },
+    ]);
+    expect(assignments[0].key).toBe("");
+    expect(assignments[0].name).toBe("");
+  });
+
   it("drops an entry missing a remote, keeping the rest", () => {
     const assignments = parseAssignments([
       { project: "p1" },
       { project: "p2", remote: "git@github.com:o/r2.git" },
     ]);
-    expect(assignments).toEqual([{ project: "p2", remote: "git@github.com:o/r2.git" }]);
+    expect(assignments).toEqual([
+      { project: "p2", remote: "git@github.com:o/r2.git", key: "", name: "" },
+    ]);
   });
 
   it("returns an empty list for anything that is not an array", () => {

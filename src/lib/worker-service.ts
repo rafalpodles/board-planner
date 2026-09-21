@@ -109,6 +109,10 @@ export function verdictFor(
 
 export interface ResolvedAssignment {
   project: string;
+  // What the project is called, the same way an offer already names one (BP-375) — so a pane
+  // rendering an assignment has something an operator recognises rather than the id above.
+  key: string;
+  name: string;
   // Exactly the string the worker reported. Never a path: the worker looks its own checkout up by
   // this, so the server has no way to name a directory on someone else's machine.
   remote: string;
@@ -116,6 +120,8 @@ export interface ResolvedAssignment {
 }
 
 export interface AssignableProject extends MatchableProject {
+  key?: string;
+  name?: string;
   worker?: {
     enabled?: boolean;
     policy?: Record<string, unknown>;
@@ -165,6 +171,8 @@ export function assignmentsFor(
     if (!remote) continue;
     out.push({
       project: String(project._id),
+      key: project.key ?? "",
+      name: project.name ?? "",
       remote,
       policy: overriddenPolicy(
         { policy: project.worker.policy, policyOverrides: project.worker.policyOverrides },
@@ -267,10 +275,9 @@ export interface ProjectOffer {
   repositoryUrl: string;
 }
 
-export interface OfferableProject extends AssignableProject {
-  key?: string;
-  name?: string;
-}
+// key/name now live on AssignableProject itself — assignmentsFor needs them for exactly the same
+// reason offersFor always has (BP-377).
+export type OfferableProject = AssignableProject;
 
 export interface CheckoutClaimant {
   _id: unknown;

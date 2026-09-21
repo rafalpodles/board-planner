@@ -7,6 +7,12 @@ import Foundation
 public struct CheckoutDeletion: Sendable {
     public typealias Remove = @Sendable (String) throws -> Void
     public typealias Exists = @Sendable (String) -> Bool
+    /// Whether the granted path itself is a symlink — distinct from `root != path`, which also
+    /// fires for an ordinary checkout reached through an ancestor symlink the OS maintains
+    /// (`/tmp` → `/private/tmp`, `/var` → `/private/var`): real git and Foundation both resolve
+    /// those too, so `root` differs from `path` there even though `path`'s own leaf is a plain
+    /// directory with no link entry to clean up or to warn an operator about.
+    public typealias IsSymlink = @Sendable (String) -> Bool
     /// Drops the path from the allowlist. Separate from `remove` because it is the one act that
     /// leaves the disk alone.
     public typealias Forget = @Sendable (String) throws -> Void
@@ -18,16 +24,23 @@ public struct CheckoutDeletion: Sendable {
 
     private let remove: Remove
     private let exists: Exists
+    private let isSymlink: IsSymlink
     private let forget: Forget
 
     public init(
         remove: @escaping Remove,
         exists: @escaping Exists,
-        forget: @escaping Forget
+        forget: @escaping Forget,
+        isSymlink: @escaping IsSymlink = CheckoutDeletion.realIsSymlink
     ) {
         self.remove = remove
         self.exists = exists
         self.forget = forget
+        self.isSymlink = isSymlink
+    }
+
+    public static func realIsSymlink(_ path: String) -> Bool {
+        (try? FileManager.default.destinationOfSymbolicLink(atPath: path)) != nil
     }
 
     /// The whole removal: ask the guards, ask the operator, and delete only what both allowed. One
@@ -50,12 +63,12 @@ public struct CheckoutDeletion: Sendable {
             return .refused(project: project, reason: reason)
         case .linkedWorktree:
             return await dropGrant(project: project, path: path)
-        case .go(let worktrees):
-            let doomed = doomedPaths(path: path, worktrees: worktrees)
+        case .go(let root, let worktrees):
+            let doomed = doomedPaths(path: path, root: root, worktrees: worktrees)
             // Nothing is about to be deleted — the checkout went on its own and left no worktrees,
             // so all that happens is a stale grant being dropped. There is no question to ask.
             guard !doomed.isEmpty else {
-                return await performOffTheActor(project: project, path: path, worktrees: worktrees)
+                return await performOffTheActor(project: project, path: path, root: root, worktrees: worktrees)
             }
 
             guard await ask(project, doomed) else {
@@ -75,10 +88,12 @@ public struct CheckoutDeletion: Sendable {
                 return .refused(project: project, reason: reason)
             case .linkedWorktree:
                 return await dropGrant(project: project, path: path)
-            case .go(let now):
+            case .go(let root2, let now):
                 // The operator agreed to a list, not to a removal. Anything else on disk now is
-                // something they were never shown.
-                let second = doomedPaths(path: path, worktrees: now)
+                // something they were never shown — root2 included: a symlink retargeted while
+                // the dialog was open is exactly the kind of change this comparison exists to
+                // catch, not a reason to resolve it again and delete whatever it points to now.
+                let second = doomedPaths(path: path, root: root2, worktrees: now)
                 guard second == doomed else {
                     // Named both ways. This line lands in the Repositories pane as something to
                     // act on, and "something changed" is not something anybody can act on.
@@ -86,7 +101,7 @@ public struct CheckoutDeletion: Sendable {
                         project: project,
                         reason: changedReason(from: doomed, to: second))
                 }
-                return await performOffTheActor(project: project, path: path, worktrees: now)
+                return await performOffTheActor(project: project, path: path, root: root2, worktrees: now)
             }
         }
     }
@@ -94,8 +109,18 @@ public struct CheckoutDeletion: Sendable {
     /// Everything the operator is about to lose, in reading order: the checkout, then the worktrees
     /// that go with it. `perform` deletes in the opposite order for its own reasons; this is the
     /// list that gets named, and the list the second verdict is compared against.
-    private func doomedPaths(path: String, worktrees: [String]) -> [String] {
-        (exists(path) ? [path] : []) + worktrees
+    ///
+    /// The checkout entry names both the granted path and, when the grant is itself a symlink,
+    /// what it actually resolves to — that deletes its target, not the link, and an operator
+    /// confirming a deletion is the one place that has to say so rather than only the allowlist
+    /// bookkeeping, which is content to keep naming the link. Gated on `isSymlink` rather than
+    /// `root != path`: an ordinary checkout reached only through an ancestor symlink the OS
+    /// maintains (`/tmp`, `/var`) resolves to a differently-spelled `root` too, and showing an
+    /// arrow there would be true of nearly every checkout under a temp directory and misleading
+    /// about none of them being a symlink.
+    private func doomedPaths(path: String, root: String, worktrees: [String]) -> [String] {
+        guard exists(path) else { return worktrees }
+        return [isSymlink(path) ? "\(path) → \(root)" : path] + worktrees
     }
 
     /// Deleting is the heavier half of the two: a recursive `removeItem` over a checkout carrying
@@ -103,9 +128,9 @@ public struct CheckoutDeletion: Sendable {
     /// would have left the menubar frozen at exactly the moment somebody has just pressed Delete
     /// and is watching to see what happens.
     private func performOffTheActor(
-        project: String, path: String, worktrees: [String]
+        project: String, path: String, root: String, worktrees: [String]
     ) async -> SyncStep {
-        await Task.detached { self.perform(project: project, path: path, worktrees: worktrees) }.value
+        await Task.detached { self.perform(project: project, path: path, root: root, worktrees: worktrees) }.value
     }
 
     /// A linked worktree can never pass `removal`'s check — the discriminator is structural, not
@@ -154,7 +179,7 @@ public struct CheckoutDeletion: Sendable {
 
     // Not public: the comment above argues for one entry point, and `internal` is what makes
     // that true rather than merely asserted. The tests reach it through @testable.
-    func perform(project: String, path: String, worktrees: [String]) -> SyncStep {
+    func perform(project: String, path: String, root: String, worktrees: [String]) -> SyncStep {
         // What is already gone, in the order it went. A throw stops everything after it, and the
         // step used to name only the path that failed — so a live worktree could be destroyed and
         // the operator told about a different path entirely (BP-427). Deletion is the one act
@@ -176,8 +201,45 @@ public struct CheckoutDeletion: Sendable {
 
             let wasThere = exists(path)
             if wasThere {
-                try remove(path)
+                // `remove` is `FileManager.removeItem`, which deletes the directory entry it is
+                // given rather than what it points to — handing it `path` when the operator's
+                // grant is itself a symlink (BP-428) would remove only the link and leave the
+                // real checkout, just confirmed for deletion, sitting on disk with no grant
+                // pointing at it any more. `root` is what the verdict this run started from
+                // resolved that to; deleting it rather than `path` is what actually removes it.
+                try remove(root)
+
+                // The link itself, left dangling once its target is gone: `exists` follows
+                // symlinks, so a dangling one already reads as absent and nothing would ever
+                // notice it again to clean it up, and a later grant of the same path fails
+                // against the leftover entry with a confusing "already exists" rather than a
+                // clean clone. Gated on `isSymlink` rather than `root != path` — the latter is
+                // also true of an ordinary checkout reached through an ancestor symlink the OS
+                // maintains (`/tmp`, `/var`), where `path` and `root` name the same directory
+                // under two spellings and a second `remove` would just fail against whichever one
+                // the first call already deleted.
+                //
+                // `try?`, not `try`: `remove(root)` above already succeeded by the time this
+                // runs, so this is best-effort bookkeeping on top of a deletion that already
+                // happened, not the removal itself. Review of an earlier version of this commit
+                // measured what `try` does here: a failed link cleanup reported `.failed` for a
+                // checkout `r.removed` shows was actually gone — the one place a false "nothing
+                // happened" is worse than the truth, since nothing else records that the deletion
+                // did happen. An unremoved link surfaces on its own later — failing, loudly and
+                // recoverably, the next clone attempted under the same name.
+                if isSymlink(path) {
+                    try? remove(path)
+                }
                 gone.append(path)
+            } else if isSymlink(path) {
+                // A grant whose target is already gone but whose link survives as a dangling
+                // entry: `exists` above reads it as absent (it follows the link), so the branch
+                // above never runs and nothing would otherwise clean this up either. Also
+                // best-effort: `forget` below drops the grant regardless, and a `try` here would
+                // leave the stale grant stuck forever the moment this cleanup itself fails —
+                // every later pass hitting the same branch and failing the same way, which is
+                // worse than the leftover link this exists to clean up in the first place.
+                try? remove(path)
             }
 
             // The grant goes last. Dropped first, a failed delete would leave a directory the

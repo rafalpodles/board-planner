@@ -102,6 +102,8 @@ beforeEach(() => {
   projectFind.mockResolvedValue([
     {
       _id: "p1",
+      key: "BP",
+      name: "Board Planner",
       githubRepo: "owner/repo",
       worker: { enabled: true, policy: { model: "sonnet" }, policyOverrides: ["model"] },
     },
@@ -344,7 +346,14 @@ describe("GET /api/workers/:workerId", () => {
     const json = await (await GET(getRequest(), ctx())).json();
 
     expect(json.assignments).toEqual([
-      { project: "p1", remote: "git@github.com:owner/repo.git", policy: { model: "sonnet" } },
+      {
+        project: "p1",
+        // BP-377. The Policy pane's only way to name this block by something other than the id.
+        key: "BP",
+        name: "Board Planner",
+        remote: "git@github.com:owner/repo.git",
+        policy: { model: "sonnet" },
+      },
     ]);
   });
 

@@ -50,6 +50,7 @@ const {
   DIGEST_RETRY_WINDOW_MS,
   MAX_DIGEST_ATTEMPTS,
   digestAttemptLimit,
+  lineFor,
 } = await import("@/lib/digest");
 
 /** What the module's own interval allows, so the fixtures below cannot drift from the rule. */
@@ -142,6 +143,127 @@ describe("when the digest is due", () => {
     expect(digestHour()).toBe(23);
     process.env.DIGEST_HOUR = "-3";
     expect(digestHour()).toBe(0);
+  });
+});
+
+// BP-692. `lineFor` strips the row's own key from the title so it is not printed twice — once as
+// the row's key, once inside the sentence — at either end of the title, where stripping it is
+// unambiguously safe. One case per shape here is what would have caught the original bug (only
+// the leading shape was stripped); the mid-sentence cases below are the control that keeps a
+// blanket "strip anywhere" from coming back — two independent reviews found it corrupts
+// task_linked's sentences (see the comment on stripKey and BP-725).
+describe("lineFor", () => {
+  const PROJECT_REF = { _id: PROJECT, key: "TP" };
+  const origin = "https://app.example.com";
+
+  it("strips a leading key (assigned)", () => {
+    const line = lineFor(
+      { title: "TP-2 assigned to you", task: { taskNumber: 2 }, project: PROJECT_REF },
+      origin
+    );
+    expect(line).toEqual({
+      key: "TP-2",
+      title: "assigned to you",
+      url: "https://app.example.com/projects/TP/tasks/2",
+    });
+  });
+
+  it("strips a leading key (moved)", () => {
+    const line = lineFor(
+      { title: "TP-2 moved to In Review", task: { taskNumber: 2 }, project: PROJECT_REF },
+      origin
+    );
+    expect(line.title).toBe("moved to In Review");
+  });
+
+  it("strips a trailing key (comment)", () => {
+    const line = lineFor(
+      { title: "New comment on TP-2", task: { taskNumber: 2 }, project: PROJECT_REF },
+      origin
+    );
+    expect(line.title).toBe("New comment on");
+  });
+
+  it("strips a trailing key (mention)", () => {
+    const line = lineFor(
+      { title: "admin mentioned you in TP-2", task: { taskNumber: 2 }, project: PROJECT_REF },
+      origin
+    );
+    expect(line.title).toBe("admin mentioned you in");
+  });
+
+  // task_linked is left alone entirely, at every position — not just mid-sentence. Its sentences
+  // name two tasks (link-phrasing.ts), so even a key at the very end is ambiguous: "rafal marked
+  // TP-4 as blocked by" already named a different task earlier in the sentence, so a reader
+  // cannot tell whether the missing word is this row's own key or a third one. Every other
+  // stripped type names exactly one task, which is what makes stripping safe for them.
+  it("leaves a mid-sentence key alone (task_linked), rather than corrupting the sentence", () => {
+    const line = lineFor(
+      {
+        type: "task_linked",
+        title: "rafal marked TP-3 as blocked by TP-4",
+        task: { taskNumber: 3 },
+        project: PROJECT_REF,
+      },
+      origin
+    );
+    expect(line.title).toBe("rafal marked TP-3 as blocked by TP-4");
+  });
+
+  // The other direction puts the row's own key last — still not stripped, for the reason above:
+  // the sentence already names TP-4, so a reader cannot tell a trailing gap apart from one.
+  it("leaves a trailing task_linked key alone too, since the sentence already names another task", () => {
+    const line = lineFor(
+      {
+        type: "task_linked",
+        title: "rafal marked TP-4 as blocked by TP-3",
+        task: { taskNumber: 3 },
+        project: PROJECT_REF,
+      },
+      origin
+    );
+    expect(line.title).toBe("rafal marked TP-4 as blocked by TP-3");
+  });
+
+  it("leaves a mid-sentence key alone (board feed)", () => {
+    const line = lineFor(
+      { title: "New task TP-5 in Board Planner", task: { taskNumber: 5 }, project: PROJECT_REF },
+      origin
+    );
+    expect(line.title).toBe("New task TP-5 in Board Planner");
+  });
+
+  // The apostrophe case a blanket mid-sentence strip could not survive: "…TP-3's children" would
+  // lose the key and leave "…'s children" behind. Left alone here for the same reason as above.
+  it("leaves a possessive mid-sentence key alone", () => {
+    const line = lineFor(
+      {
+        type: "task_linked",
+        title: "rafal removed TP-4 from TP-3's children",
+        task: { taskNumber: 3 },
+        project: PROJECT_REF,
+      },
+      origin
+    );
+    expect(line.title).toBe("rafal removed TP-4 from TP-3's children");
+  });
+
+  // TP-2 must not eat the leading digit of TP-20 — a plain substring replace would
+  it("does not touch a different key that merely starts with the same digits", () => {
+    const line = lineFor(
+      {
+        title: "TP-2 mentions TP-20 in its description",
+        task: { taskNumber: 2 },
+        project: PROJECT_REF,
+      },
+      origin
+    );
+    expect(line.title).toBe("mentions TP-20 in its description");
+  });
+
+  it("leaves the title untouched when the project cannot be resolved", () => {
+    const line = lineFor({ title: "New comment on #42", task: { taskNumber: 42 }, project: null }, origin);
+    expect(line).toEqual({ key: "—", title: "New comment on #42", url: undefined });
   });
 });
 

@@ -50,6 +50,8 @@ const SOME_CONFIG: LocalConfigView = {
   projects: [
     {
       project: "p1",
+      key: "TP",
+      name: "Test Project",
       blocked: "",
       baseBranch: "main",
       model: "opus",
@@ -374,6 +376,8 @@ describe("the progress stream", () => {
         projects: [
           {
             project: "BP",
+            key: "BP",
+            name: "Board Planner",
             blocked: "",
             baseBranch: "main",
             model: "opus",
@@ -400,6 +404,8 @@ describe("the progress stream", () => {
       projects: [
         {
           project: "BP",
+          key: "BP",
+          name: "Board Planner",
           blocked: "",
           baseBranch: "main",
           model: "opus",
@@ -438,6 +444,8 @@ describe("the progress stream", () => {
         projects: [
           {
             project: "BP",
+            key: "BP",
+            name: "Board Planner",
             blocked: "",
             baseBranch: "main",
             model,

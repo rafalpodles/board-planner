@@ -211,7 +211,17 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // Why the inventory could not be read, surfaced on the heartbeat so a broken repos.json shows up
   // in the console instead of looking like a machine that simply has nothing.
   let inventoryError = "";
-  let bound = new Map<string, { path: string; worktreeRoot: string; config: EffectiveConfig; remote: string }>();
+  let bound = new Map<
+    string,
+    {
+      path: string;
+      worktreeRoot: string;
+      config: EffectiveConfig;
+      remote: string;
+      key: string;
+      name: string;
+    }
+  >();
   const reapedProjects = new Set<string>();
 
   // What this machine can actually do, established once at startup. Null until then, and reported
@@ -229,6 +239,9 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // reported. An entry is dropped once the project binds cleanly, so a reason that comes back is
   // said again.
   const reportedUnusable = new Map<string, string>();
+  // What was last said about a broken repos.json — said once per reason rather than once per
+  // refresh, the same shape as reportedUnusable above (BP-688).
+  let lastInventoryError = "";
   /**
    * Projects this machine has stopped offering because their checkout itself is the problem — a
    * git config carrying a key git runs on checkout, found by the run that refused to make one
@@ -351,10 +364,16 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     if (result.ok) {
       inventory = result.repos;
       inventoryError = "";
+      lastInventoryError = "";
       return;
     }
+    // Said once per reason rather than once per refresh: a repos.json that stays broken (a
+    // permissions problem, say) would otherwise write the same line every ~30s forever (BP-688).
+    if (result.reason !== lastInventoryError) {
+      deps.logError(result.reason);
+      lastInventoryError = result.reason;
+    }
     inventoryError = result.reason;
-    deps.logError(result.reason);
   }
 
   // A refusal here must not crash the worker or touch any other assignment: it is recorded and
@@ -364,7 +383,14 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     const identity = loadIdentity(identityStore);
     const nextBound = new Map<
       string,
-      { path: string; worktreeRoot: string; config: EffectiveConfig; remote: string }
+      {
+        path: string;
+        worktreeRoot: string;
+        config: EffectiveConfig;
+        remote: string;
+        key: string;
+        name: string;
+      }
     >();
     const errors: string[] = [];
 
@@ -396,6 +422,8 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
             worktreeRoot: result.worktreeRoot,
             config: applyPolicy(policy, assignment.policy),
             remote: assignment.remote,
+            key: assignment.key ?? "",
+            name: assignment.name ?? "",
           });
         } else {
           errors.push(`${assignment.project}: ${result.reason}`);
@@ -454,6 +482,9 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // reusing a stored identity from a previous run (Task 5's GET, since no register() response
   // exists to read this from in that case), or is picking up a change made after startup.
   let lastRefresh = 0;
+  // What was last said about a server this worker could not reach — said once per reason rather
+  // than once per refresh, the same shape as reportedUnusable above (BP-688).
+  let lastPolicyRefreshError = "";
   async function refreshServerState(): Promise<void> {
     if (Date.now() - lastRefresh < MIN_REFRESH_INTERVAL_MS) return;
     lastRefresh = Date.now();
@@ -475,6 +506,10 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       if (!response.ok) {
         decisions = [];
         decisionsAsOf = 0;
+        // The server answered, so it is reachable — a 403 is not the "could not refresh worker
+        // policy" condition the dedupe above guards, and leaving it set would silence a genuine
+        // reconnection failure that happens to produce the same message after this clears (BP-688).
+        lastPolicyRefreshError = "";
         return;
       }
       const body = (await response.json()) as {
@@ -490,8 +525,15 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       catalogue = parseCatalogue(body.catalogue);
       decisions = parseDecisions(body.decisions);
       decisionsAsOf = Date.now();
+      lastPolicyRefreshError = "";
     } catch (error) {
-      deps.logError(`could not refresh worker policy: ${String(error)}`);
+      // Said once per reason rather than once per refresh: a server that stays unreachable would
+      // otherwise write the same line every ~30s forever (BP-688).
+      const reason = `could not refresh worker policy: ${String(error)}`;
+      if (reason !== lastPolicyRefreshError) {
+        deps.logError(reason);
+        lastPolicyRefreshError = reason;
+      }
       return;
     }
 
@@ -757,6 +799,13 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       pollIntervalMs: policy.pollIntervalMs,
       projects: [...bound.entries()].map(([project, repo]) => ({
         project,
+        // What the operator recognises the project by, the way an offer already names one — falls
+        // back to the id in the pane itself when a server predating this carries neither (BP-377).
+        // Captured into `bound` at rebind time, the same as `remote` is, rather than looked up live
+        // from `assignments` here: `assignments` is replaced by the next refresh before `rebind`
+        // catches up, so a live lookup could momentarily miss a project `bound` still lists.
+        key: repo.key,
+        name: repo.name,
         // Empty when the project is claimable. Non-empty is the answer to "why is this machine
         // sitting on a project and doing nothing", which otherwise has no answer anywhere — a
         // poisoned checkout, the checkout failing the gates' own checks, or the board refusing the

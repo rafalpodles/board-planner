@@ -18,6 +18,10 @@ final class CheckoutRemovalTests: XCTestCase {
         var answers: [String: (Int32, String)] = [:]
         var present: Set<String> = ["/checkouts/SB"]
         var calls: [[String]] = []
+        /// Real, filesystem-backed `resolvingSymlinksInPath`/`standardizingPath` cannot fold case —
+        /// that needs the volume, which a mock has none of — so this stands in for it, defaulting to
+        /// off (a case-sensitive volume), which is the strict comparison the file used before BP-428.
+        var volumeFoldsCase: (String) -> Bool = { _ in false }
 
         func removal() -> CheckoutRemoval {
             CheckoutRemoval(
@@ -35,12 +39,15 @@ final class CheckoutRemovalTests: XCTestCase {
                     }
                     return (0, "")
                 },
-                exists: { self.present.contains($0) })
+                exists: { self.present.contains($0) },
+                volumeFoldsCase: { self.volumeFoldsCase($0) })
         }
     }
 
     func testItAllowsRemovingACleanCheckout() {
-        XCTAssertEqual(Git().removal().check(path: "/checkouts/SB", workerIsBusy: false), .go(worktrees: []))
+        XCTAssertEqual(
+            Git().removal().check(path: "/checkouts/SB", workerIsBusy: false),
+            .go(root: "/checkouts/SB", worktrees: []))
     }
 
     // First, and regardless of what the directory looks like: a run whose worktree vanishes fails
@@ -114,6 +121,92 @@ final class CheckoutRemovalTests: XCTestCase {
         XCTAssertTrue(reason.contains("inside the checkout"), reason)
     }
 
+    // BP-428. A checkout granted through a symlink: git resolves it and answers `--show-toplevel`
+    // with the real path, so the old textual comparison read a checkout looking at itself as a
+    // subdirectory of somewhere else and refused it for ever. Built against a real symlink on disk,
+    // because `resolvingSymlinksInPath` is a filesystem call a mocked path cannot exercise.
+    func testACheckoutReachedThroughASymlinkCanBeRemoved() throws {
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bp428-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+
+        let real = base.appendingPathComponent("real")
+        try FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+        let link = base.appendingPathComponent("link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+
+        let linkPath = link.path
+        let realPath = ((real.path as NSString).standardizingPath as NSString).resolvingSymlinksInPath
+
+        let git = Git()
+        git.present = [linkPath]
+        // What git actually does: resolves the symlink and answers with the real path, even though
+        // the operator granted the symlink.
+        git.answers["--show-toplevel"] = (0, realPath + "\n")
+        // Otherwise inherited from the default fixture, which is keyed to /checkouts/SB and would
+        // list it as a worktree to take along — irrelevant to this test, so pinned to just the main
+        // entry, which `dropFirst()` empties.
+        git.answers["worktree"] = (0, porcelainZ("worktree \(linkPath)\nHEAD abc"))
+
+        let verdict = git.removal().check(path: linkPath, workerIsBusy: false)
+
+        // The point of BP-428's second half: the verdict hands back what to actually delete, not
+        // just permission to delete the granted path.
+        XCTAssertEqual(verdict, .go(root: realPath, worktrees: []))
+    }
+
+    // The control on the fix above: a path that really is a subdirectory — reached through no
+    // symlink at all — must still be refused, with the message naming what was actually found.
+    func testASymlinkFreeSubdirectoryIsStillRefused() throws {
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bp428-control-\(UUID().uuidString)")
+        let src = base.appendingPathComponent("src")
+        try FileManager.default.createDirectory(at: src, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+
+        let basePath = ((base.path as NSString).standardizingPath as NSString).resolvingSymlinksInPath
+        let srcPath = src.path
+
+        let git = Git()
+        git.present = [srcPath]
+        git.answers["--show-toplevel"] = (0, basePath + "\n")
+
+        let verdict = git.removal().check(path: srcPath, workerIsBusy: false)
+
+        guard case .refused(let reason) = verdict else { return XCTFail("expected a refusal, got \(verdict)") }
+        XCTAssertTrue(reason.contains("inside the checkout at \(basePath)"), reason)
+    }
+
+    // BP-428's other half: two paths differing only in case name the same directory on a volume
+    // that folds case — the default on macOS — and must be treated as the checkout looking at
+    // itself, not as a subdirectory.
+    func testTwoPathsDifferingOnlyInCaseAreTheSameDirectoryOnAVolumeThatFoldsCase() {
+        let git = Git()
+        git.present = ["/checkouts/sb"]
+        git.answers["--show-toplevel"] = (0, "/checkouts/SB\n")
+        git.volumeFoldsCase = { _ in true }
+        git.answers["worktree"] = (0, porcelainZ("worktree /checkouts/sb\nHEAD abc"))
+
+        XCTAssertEqual(
+            git.removal().check(path: "/checkouts/sb", workerIsBusy: false),
+            .go(root: "/checkouts/SB", worktrees: []))
+    }
+
+    // The control: on a volume that does NOT fold case, the same two strings really do name two
+    // different directories, and merging them would be the over-refusal this file exists to avoid
+    // — refused here, correctly, as a directory that looks like a subdirectory of the checkout.
+    func testTwoPathsDifferingOnlyInCaseStayDistinctOnACaseSensitiveVolume() {
+        let git = Git()
+        git.present = ["/checkouts/sb"]
+        git.answers["--show-toplevel"] = (0, "/checkouts/SB\n")
+        git.volumeFoldsCase = { _ in false }
+
+        guard case .refused = git.removal().check(path: "/checkouts/sb", workerIsBusy: false) else {
+            return XCTFail("a case-sensitive volume must not fold these into the same directory")
+        }
+    }
+
     // Deleting the shared cp-worktrees root wholesale would take another project's worktrees with
     // it, so the ones belonging to THIS checkout are named instead.
     func testItNamesTheLinkedWorktreesToTakeWithIt() {
@@ -139,7 +232,9 @@ final class CheckoutRemovalTests: XCTestCase {
 
         XCTAssertEqual(
             verdict,
-            .go(worktrees: ["/checkouts/cp-worktrees/w1/bp-1", "/checkouts/cp-worktrees/w1/bp-2"]))
+            .go(
+                root: "/checkouts/SB",
+                worktrees: ["/checkouts/cp-worktrees/w1/bp-1", "/checkouts/cp-worktrees/w1/bp-2"]))
     }
 
 
@@ -184,7 +279,8 @@ final class CheckoutRemovalTests: XCTestCase {
 
         let verdict = git.removal().check(path: "/checkouts/SB", workerIsBusy: false)
 
-        XCTAssertEqual(verdict, .go(worktrees: ["/checkouts/cp-worktrees/w1/bp-1"]))
+        XCTAssertEqual(
+            verdict, .go(root: "/checkouts/SB", worktrees: ["/checkouts/cp-worktrees/w1/bp-1"]))
     }
 
     /// A worktree somebody removed with `rm -rf` and never pruned. It is still registered, and
@@ -211,7 +307,7 @@ final class CheckoutRemovalTests: XCTestCase {
 
         XCTAssertEqual(
             git.removal().check(path: "/checkouts/SB", workerIsBusy: false),
-            .go(worktrees: ["/checkouts/cp-worktrees/w1/live"]))
+            .go(root: "/checkouts/SB", worktrees: ["/checkouts/cp-worktrees/w1/live"]))
     }
 
     /// The file's own rule, applied to the arm this branch added: a check that cannot be run is a
@@ -251,7 +347,8 @@ final class CheckoutRemovalTests: XCTestCase {
         git.present = []
 
         XCTAssertEqual(
-            git.removal().check(path: "/checkouts/SB", workerIsBusy: false), .go(worktrees: []))
+            git.removal().check(path: "/checkouts/SB", workerIsBusy: false),
+            .go(root: "/checkouts/SB", worktrees: []))
     }
 
     // Cheapest first, and nothing runs after a no: a refusal must not leave git commands running

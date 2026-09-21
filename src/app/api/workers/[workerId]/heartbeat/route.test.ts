@@ -33,6 +33,8 @@ const REMOTE = "git@github.com:owner/repo.git";
 function enabledProject() {
   return {
     _id: PROJECT_ID,
+    key: "BP",
+    name: "Board Planner",
     githubRepo: "owner/repo",
     worker: { enabled: true, policy: { model: "sonnet" }, policyOverrides: ["model"] },
   };
@@ -146,7 +148,7 @@ describe("POST /api/workers/:workerId/heartbeat", () => {
     const json = await (await POST(req, ctx)).json();
 
     expect(json.assignments).toEqual([
-      { project: PROJECT_ID, remote: REMOTE, policy: { model: "sonnet" } },
+      { project: PROJECT_ID, key: "BP", name: "Board Planner", remote: REMOTE, policy: { model: "sonnet" } },
     ]);
   });
 

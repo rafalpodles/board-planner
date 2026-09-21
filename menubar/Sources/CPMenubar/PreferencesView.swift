@@ -353,7 +353,7 @@ private struct PolicyTab: View {
             // One row per bound project: these settings describe a repository, so a machine serving
             // two projects genuinely has two answers.
             ForEach(model.config?.projects ?? [], id: \.project) { project in
-                Section("Project \(project.project)") {
+                Section(project.label) {
                     // The answer to "why is this machine sitting on a project and doing nothing",
                     // which the worker has served since BP-379 and nothing here showed (BP-512)
                     if let blocked = project.blocked, !blocked.isEmpty {
