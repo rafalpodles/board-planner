@@ -101,6 +101,24 @@ final class CloneStepTests: XCTestCase {
         XCTAssertFalse(git.calls.contains { $0.contains("fetch") }, "and it refuses before touching the network")
     }
 
+    /// BP-507. `--git-dir` and `--git-common-dir` agree inside a submodule's working directory too
+    /// (both resolve to the superproject's `.git/modules/<name>`), so left unguarded this would
+    /// adopt a submodule as if it were the project's own checkout.
+    func testItRefusesToAdoptASubmoduleWorkingDirectory() {
+        let git = Git()
+        git.present = ["/p/TP/.git"]
+        git.results["--git-dir"] = (0, "/elsewhere/super/.git/modules/vendor")
+        git.results["--git-common-dir"] = (0, "/elsewhere/super/.git/modules/vendor")
+
+        let outcome = git.step().run(repositoryURL: "https://github.com/o/r", parent: "/p", projectKey: "TP")
+
+        guard case .failed(let reason) = outcome else {
+            return XCTFail("expected a refusal, got \(outcome)")
+        }
+        XCTAssertTrue(reason.contains("submodule"), "the refusal has to say what it found: \(reason)")
+        XCTAssertFalse(git.calls.contains { $0.contains("fetch") }, "and it refuses before touching the network")
+    }
+
     /// An answer git could not give is not an ordinary checkout — the same rule CheckoutRemoval
     /// applies, and for the same reason: unexamined is not clean.
     func testItRefusesToAdoptADirectoryGitWillNotDescribe() {

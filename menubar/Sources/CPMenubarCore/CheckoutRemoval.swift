@@ -271,7 +271,7 @@ public struct CheckoutRemoval: Sendable {
             // and is handled by the `.filter(exists)` below the same as today (BP-507).
             if exists(entry.path), !isOwnWorktree(entry.path, checkout: root) {
                 return .refused(
-                    reason: "the worktree at \(entry.path) was not made by this app — leaving worktrees of your own alone. Remove it yourself, or move it under cp-worktrees, before this checkout can be removed.")
+                    reason: "the worktree at \(entry.path) is not one the worker made — leaving worktrees of your own alone. Remove it yourself before this checkout can be removed; `git worktree move` it under cp-worktrees instead and it goes with the checkout.")
             }
         }
 
@@ -378,11 +378,16 @@ public struct CheckoutRemoval: Sendable {
     /// `cp-worktrees` root beside `checkout`'s own parent directory — the sibling layout
     /// `worker/src/repos.ts` places one under. Anything else is a worktree the operator added by
     /// hand, wherever they put it (BP-507).
+    /// Strictly under the root, never the root itself: this app never registers a worktree AT
+    /// `cp-worktrees` — every one it makes nests under `<workerId>/<taskKey>` — so an entry
+    /// answering the root exactly is not one of ours, and treating it as foreign (rather than
+    /// matching it and risking `RemovalVerdict.go`'s own warning about taking the shared root
+    /// wholesale) costs nothing (BP-507 review).
     private func isOwnWorktree(_ candidate: String, checkout: String) -> Bool {
         let parent = (checkout as NSString).deletingLastPathComponent
         let root = normalisedPath((parent as NSString).appendingPathComponent("cp-worktrees"))
         let path = normalisedPath(candidate)
-        return path == root || path.hasPrefix(root + "/")
+        return path.hasPrefix(root + "/")
     }
 
     private func normalisedPath(_ path: String) -> String {

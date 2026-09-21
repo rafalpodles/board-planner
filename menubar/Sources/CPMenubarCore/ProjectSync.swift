@@ -35,11 +35,11 @@ public enum SyncStep: Equatable, Sendable {
     /// A removal a guard said no to. Not a failure: the checkout is intact and the reason is one
     /// the operator can act on.
     case refused(project: String, reason: String)
-    /// The grant was dropped and nothing was deleted, because the path is a linked worktree of
-    /// another repository — a shape `CheckoutRemoval` can never say `.go` to, so leaving it as a
-    /// plain `.refused` would repeat on every reconnect for ever. Its own case rather than
-    /// `.forgotten`, whose text says the checkout had already gone: this one is still on disk,
-    /// untouched (BP-505).
+    /// The grant was dropped and nothing was deleted, because the path is not a repository of its
+    /// own — a linked worktree of one elsewhere, or (BP-507) a submodule's working directory —
+    /// a shape `CheckoutRemoval` can never say `.go` to, so leaving it as a plain `.refused` would
+    /// repeat on every reconnect for ever. Its own case rather than `.forgotten`, whose text says
+    /// the checkout had already gone: this one is still on disk, untouched (BP-505).
     case linkedWorktreeDropped(project: String, path: String)
     /// A removal the operator said no to when the app asked, on the machine, with the paths in
     /// front of them. Its own case rather than a `.refused` carrying a sentence: a guard saying no
