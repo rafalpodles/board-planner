@@ -2376,3 +2376,105 @@ export async function seedGitlabProject(host: string) {
 
   await mongoose.disconnect();
 }
+
+// BP-727, BP-728, BP-731. A task the member handed to themselves, with an agent, in the approved
+// column: every requirement on the task itself is met, so whatever the notice says is the board's.
+export const MEMBER_HANDOVER_TASK_NUMBER = 727;
+export const MEMBER_HANDOVER_TASK_ID = id("e2e00000000000000000d727");
+export const MEMBER_BACKLOG_TASK_NUMBER = 728;
+export const MEMBER_BACKLOG_TASK_ID = id("e2e00000000000000000d728");
+export const MERGING_AGENT_ID = id("e2e00000000000000000ab04");
+export const MERGING_AGENT_NAME = "Ships it";
+export const MERGING_AGENT_DESCRIPTION = "Implements, opens a pull request and merges it.";
+export const PROJECT_AGENT_DESCRIPTION = "Implements and pushes a branch for a person to review.";
+export const HANDOVER_REPOSITORY = "https://github.com/e2e/handover-board";
+export const MEMBER_MACHINE_ID = id("e2e00000000000000000b727");
+
+/** Requires seedAgents() for PROJECT_AGENT_ID. */
+export async function seedMemberHandover() {
+  const db = (await connect()).db!;
+  const now = new Date();
+  const task = taskFactory(now);
+  await db.collection("tasks").insertMany([
+    task({
+      _id: MEMBER_HANDOVER_TASK_ID,
+      taskNumber: MEMBER_HANDOVER_TASK_NUMBER,
+      title: "Handed to a machine by the member",
+      status: "todo",
+      agent: PROJECT_AGENT_ID,
+      assignee: MEMBER_ID,
+      assignedBy: MEMBER_ID,
+    }),
+    task({
+      _id: MEMBER_BACKLOG_TASK_ID,
+      taskNumber: MEMBER_BACKLOG_TASK_NUMBER,
+      title: "Not approved and handed to nobody",
+      status: "planned",
+      agent: PROJECT_AGENT_ID,
+      assignee: null,
+    }),
+  ]);
+  await db
+    .collection("agents")
+    .updateOne({ _id: PROJECT_AGENT_ID }, { $set: { description: PROJECT_AGENT_DESCRIPTION } });
+  await db.collection("agents").insertOne({
+    _id: MERGING_AGENT_ID,
+    name: MERGING_AGENT_NAME,
+    description: MERGING_AGENT_DESCRIPTION,
+    scope: "project",
+    owner: null,
+    project: PROJECT_ID,
+    builtIn: false,
+    composition: {
+      analysis: [],
+      implementation: [{ key: "implement" }],
+      verification: [],
+      delivery: [{ key: "push" }, { key: "pull-request" }, { key: "merge" }],
+    },
+    createdAt: now,
+    updatedAt: now,
+  });
+  await db
+    .collection("projects")
+    .updateOne({ _id: PROJECT_ID }, { $max: { taskCounter: MEMBER_BACKLOG_TASK_NUMBER } });
+  await mongoose.disconnect();
+}
+
+export async function setBoardReadiness(fields: { repositoryUrl?: string; workerEnabled?: boolean }) {
+  const db = (await connect()).db!;
+  const $set: Record<string, unknown> = {};
+  if (fields.repositoryUrl !== undefined) $set.repositoryUrl = fields.repositoryUrl;
+  if (fields.workerEnabled !== undefined) $set["worker.enabled"] = fields.workerEnabled;
+  await db.collection("projects").updateOne({ _id: PROJECT_ID }, { $set });
+  await mongoose.disconnect();
+}
+
+/** A machine `owner` enrolled, holding a checkout of `remote`, last seen `seenAgoMs` ago. */
+export async function seedMachine(
+  remote: string,
+  { owner = MEMBER_ID, seenAgoMs = 0 }: { owner?: mongoose.Types.ObjectId; seenAgoMs?: number } = {}
+) {
+  const db = (await connect()).db!;
+  const now = new Date();
+  await db.collection("workers").insertOne({
+    _id: owner.equals(MEMBER_ID) ? MEMBER_MACHINE_ID : new mongoose.Types.ObjectId(),
+    name: `laptop-${owner}`,
+    host: `host-${owner}`,
+    platform: "darwin",
+    version: "0.0.0-e2e",
+    protocolVersion: 1,
+    credentialHash: WORKER_CREDENTIAL_HASH,
+    repos: [{ remote, path: "/Users/someone/handover-board" }],
+    owner,
+    policy: { pollIntervalMs: 30_000 },
+    policyOverrides: [],
+    enabled: true,
+    lastSeenAt: new Date(now.getTime() - seenAgoMs),
+    identity: null,
+    bindingError: "",
+    preflight: null,
+    createdAt: now,
+    updatedAt: now,
+  });
+  await mongoose.disconnect();
+}
