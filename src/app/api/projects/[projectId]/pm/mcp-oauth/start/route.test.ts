@@ -118,6 +118,7 @@ describe("POST /api/projects/[projectId]/pm/mcp-oauth/start — a client whose c
         redirectUri: "https://old.example.com/api/pm/oauth/callback",
         accessToken: "enc:stale-access",
         refreshToken: "enc:stale-refresh",
+        expiresAt: new Date(Date.now() + 3600_000),
         status: "connected",
       })
     );
@@ -134,6 +135,7 @@ describe("POST /api/projects/[projectId]/pm/mcp-oauth/start — a client whose c
       status: "unconfigured",
       accessToken: "",
       refreshToken: "",
+      expiresAt: null,
     });
   });
 
@@ -228,6 +230,30 @@ describe("POST /api/projects/[projectId]/pm/mcp-oauth/start — a client whose c
     const res = await POST(request(), ctx());
 
     expect(res.status).toBe(200);
+    const oauth = (await projectFindById.mock.results[0].value).pm.mcpServers[0].oauth;
+    expect(oauth).toMatchObject({ clientId: "fresh-registered-id", clientSource: "registered" });
+  });
+
+  // Test-quality review: the leading `oauth.clientId &&` had no fixture pairing an empty
+  // clientId with a set authorizationEndpoint and a stale redirectUri — a real, if unusual, shape
+  // (a client disconnected and cleared by hand, on a server that had already discovered once).
+  // Nothing to reset or refuse when there is no clientId; this just registers a fresh one.
+  it("registers fresh rather than refusing when the client id is empty but discovery already ran", async () => {
+    projectFindById.mockResolvedValue(
+      projectWithServer({
+        clientId: "",
+        authorizationEndpoint: "https://provider.example/authorize",
+        tokenEndpoint: "https://provider.example/token",
+        registrationEndpoint: "https://provider.example/register",
+        redirectUri: "https://old.example.com/api/pm/oauth/callback",
+        status: "unconfigured",
+      })
+    );
+
+    const res = await POST(request(), ctx());
+
+    expect(res.status).toBe(200);
+    expect(registerClient).toHaveBeenCalledWith("https://provider.example/register", REDIRECT_URI);
     const oauth = (await projectFindById.mock.results[0].value).pm.mcpServers[0].oauth;
     expect(oauth).toMatchObject({ clientId: "fresh-registered-id", clientSource: "registered" });
   });
