@@ -20,6 +20,17 @@ export interface McpCallResult {
   isError: boolean;
 }
 
+// Distinct from the JSON-RPC-level `MCP error <code>: <message>` thrown below: `message` there is
+// server-controlled text an MCP peer chooses, and a caller matching on it (mcp-tools.ts's
+// force-refresh trigger) would fire on a peer that merely mentions "401" in a message of its own.
+// This one carries the transport status HTTP itself reported, which the peer does not compose.
+export class McpHttpError extends Error {
+  constructor(public readonly status: number) {
+    super(`MCP server responded ${status}`);
+    this.name = "McpHttpError";
+  }
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type JsonRpcMessage = { jsonrpc: "2.0"; id?: number; result?: any; error?: { code: number; message: string } };
 
@@ -102,7 +113,7 @@ export class McpClient {
       const sid = res.headers.get("mcp-session-id");
       if (sid) this.sessionId = sid;
       if (!res.ok) {
-        throw new Error(`MCP server responded ${res.status}`);
+        throw new McpHttpError(res.status);
       }
       const contentType = res.headers.get("content-type") || "";
       const message = contentType.includes("text/event-stream")

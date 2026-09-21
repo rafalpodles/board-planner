@@ -3,7 +3,7 @@ import { Project } from "@/models/project";
 import { decryptSecret, encryptSecret } from "@/lib/encryption";
 import { resolveMcpAuthToken } from "./config";
 import { refreshTokens } from "./mcp-oauth";
-import { McpClient, McpToolDef } from "./mcp-client";
+import { McpClient, McpHttpError, McpToolDef } from "./mcp-client";
 import { isReadSafe } from "./read-safe";
 import { OrToolDefinition } from "./openrouter";
 
@@ -87,12 +87,20 @@ async function resolveOauthAccessToken(
         refreshToken: decryptSecret(oauth.refreshToken),
         resource: server.url,
       });
-      await persistOauthFields(projectId, server, {
+      const fields = {
         accessToken: encryptSecret(tokens.accessToken),
         refreshToken: tokens.refreshToken ? encryptSecret(tokens.refreshToken) : oauth.refreshToken,
         expiresAt: tokens.expiresAt,
-        status: "connected",
-      });
+        status: "connected" as const,
+      };
+      await persistOauthFields(projectId, server, fields);
+      // Mongo has the rotated pair now, but nothing makes a second reader of this same `server`
+      // object notice — and there is one: a forced refresh (`force: true`, below) called moments
+      // later in the same discoverMcpTools run, after this promise has already left
+      // refreshInFlight, reads oauth.refreshToken directly. Left unmutated it would replay the
+      // token the provider just rotated away from — invalid_grant on a rotating provider, or
+      // revocation of the whole family on one with reuse detection (BP-750 review).
+      Object.assign(oauth, fields);
       return tokens.accessToken;
     } catch (err) {
       console.warn(`[pm/mcp] token refresh failed for "${server.name}": ${err instanceof Error ? err.message : err}`);
@@ -116,11 +124,13 @@ export async function resolveServerToken(
   return resolveMcpAuthToken(server);
 }
 
-// The shape McpClient's rpc() throws for a non-ok response (`mcp-client.ts`): "MCP server
-// responded 401". A stored expiry saying the token is still good does not mean the provider
+// The transport status, not the message: a JSON-RPC-level error's `message` is text the MCP peer
+// itself composed (mcp-client.ts's `MCP error <code>: <message>`), and matching on that would let
+// any server that merely mentions "401" trigger a token refresh it has no business triggering
+// (BP-750 review). A stored expiry saying the token is still good does not mean the provider
 // agrees — it may have revoked the token early, and this is the only place that finds out.
 function isUnauthorized(err: unknown): boolean {
-  return err instanceof Error && /\bresponded 401\b/.test(err.message);
+  return err instanceof McpHttpError && err.status === 401;
 }
 
 async function connectAndList(url: string, token: string | undefined) {
@@ -158,7 +168,12 @@ export async function discoverMcpTools(projectId: string, servers: IPmMcpServer[
           const { client, tools } = await connectAndList(server.url, refreshed);
           return { server, client, tools };
         } catch (retryErr) {
-          await persistOauthFields(projectId, server, { status: "needs_reauth" }).catch(() => {});
+          // Only a confirmed second 401 means the freshly refreshed token itself does not work —
+          // anything else (a timeout, a 5xx, a network blip) is the server having a bad moment,
+          // not a reason to disable the connection until a human reconnects it (BP-750 review).
+          if (isUnauthorized(retryErr)) {
+            await persistOauthFields(projectId, server, { status: "needs_reauth" }).catch(() => {});
+          }
           throw retryErr;
         }
       }

@@ -10,7 +10,7 @@ vi.mock("@/lib/safe-fetch", async (importOriginal) => ({
 }));
 vi.mock("@/lib/url-validation", () => ({ isAllowedMcpServerUrl: () => true }));
 
-const { McpClient } = await import("./mcp-client");
+const { McpClient, McpHttpError } = await import("./mcp-client");
 
 function sse(chunks: string[], onCancel?: () => void): Response {
   const encoder = new TextEncoder();
@@ -114,5 +114,31 @@ describe("reading a non-streamed MCP response", () => {
     // 4 MB budget over 1 KB chunks: bounded well below the 10 MB the server was willing to send
     expect(pulled.count).toBeLessThanOrEqual(4097);
     expect(pulled.count).toBeLessThan(10_000);
+  });
+});
+
+// BP-750 review: mcp-tools.ts decides whether to force a token refresh by checking for this
+// specific error, and it must be able to tell a real transport-level 401 apart from a JSON-RPC
+// error a remote server composed and could make say anything, including "401".
+describe("a non-ok HTTP response", () => {
+  it("throws McpHttpError carrying the real status, distinct from a JSON-RPC-level error", async () => {
+    safeFetch.mockResolvedValue(new Response("", { status: 401 }));
+
+    const rejection = client().listTools();
+    await expect(rejection).rejects.toBeInstanceOf(McpHttpError);
+    await expect(rejection).rejects.toMatchObject({ status: 401 });
+  });
+
+  it("a JSON-RPC error whose own message mentions 401 is a plain Error, not McpHttpError", async () => {
+    safeFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32000, message: "upstream responded 401" } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+
+    const rejection = client().listTools();
+    await expect(rejection).rejects.toThrow(/upstream responded 401/);
+    await expect(rejection).rejects.not.toBeInstanceOf(McpHttpError);
   });
 });

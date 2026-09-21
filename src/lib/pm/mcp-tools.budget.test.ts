@@ -7,7 +7,12 @@ vi.mock("@/models/project", () => ({ Project: { updateOne: vi.fn() } }));
 vi.mock("@/lib/encryption", () => ({ decryptSecret: vi.fn(), encryptSecret: vi.fn() }));
 vi.mock("./mcp-oauth", () => ({ refreshTokens: vi.fn() }));
 vi.mock("./config", () => ({ resolveMcpAuthToken: vi.fn(async () => "token") }));
-vi.mock("./mcp-client", () => ({ McpClient: McpClientMock }));
+class McpHttpError extends Error {
+  constructor(public readonly status: number) {
+    super(`MCP server responded ${status}`);
+  }
+}
+vi.mock("./mcp-client", () => ({ McpClient: McpClientMock, McpHttpError }));
 
 const { discoverMcpTools } = await import("./mcp-tools");
 

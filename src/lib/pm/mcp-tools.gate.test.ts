@@ -14,7 +14,12 @@ vi.mock("@/lib/encryption", () => ({
 }));
 vi.mock("./mcp-oauth", () => ({ refreshTokens }));
 vi.mock("./config", () => ({ resolveMcpAuthToken: vi.fn(async () => "bearer-token") }));
-vi.mock("./mcp-client", () => ({ McpClient: McpClientMock }));
+class McpHttpError extends Error {
+  constructor(public readonly status: number) {
+    super(`MCP server responded ${status}`);
+  }
+}
+vi.mock("./mcp-client", () => ({ McpClient: McpClientMock, McpHttpError }));
 
 const { discoverMcpTools, callMcpTool } = await import("./mcp-tools");
 
@@ -222,7 +227,7 @@ describe("discoverMcpTools — an OAuth server's token", () => {
 // revoke an access token early, and the only way to learn that is the 401 it answers with.
 describe("discoverMcpTools — a 401 despite a stored expiry that still looked fresh", () => {
   const rejecting401 = () => ({
-    initialize: vi.fn().mockRejectedValue(new Error("MCP server responded 401")),
+    initialize: vi.fn().mockRejectedValue(new McpHttpError(401)),
     listTools: vi.fn(),
   });
 
@@ -297,6 +302,71 @@ describe("discoverMcpTools — a 401 despite a stored expiry that still looked f
     expect(refreshTokens).not.toHaveBeenCalled();
     expect(updateOne).not.toHaveBeenCalled();
     expect(runtime.serverNames).toEqual([]);
+  });
+
+  // BP-750 review: `MCP error <code>: <message>` (mcp-client.ts) carries a message the remote
+  // server composed. Matching on that text, rather than the transport status, would let a server
+  // trigger a refresh it has no business triggering just by mentioning "401" in a message of its
+  // own — this one never gets past the initial handshake, let alone into `oauth.status`.
+  it("does not force-refresh on a JSON-RPC error that merely mentions 401 in its own message", async () => {
+    McpClientMock.mockImplementation(() => ({
+      initialize: vi.fn().mockRejectedValue(new Error("MCP error -32000: upstream responded 401")),
+      listTools: vi.fn(),
+    }));
+
+    const runtime = await discoverMcpTools("p1", [oauthServer({ expiresAt: new Date(Date.now() + hour) })]);
+
+    expect(refreshTokens).not.toHaveBeenCalled();
+    expect(updateOne).not.toHaveBeenCalled();
+    expect(runtime.serverNames).toEqual([]);
+  });
+
+  // BP-750 review: the first attempt's own catch leaves the status untouched on a non-401 (the
+  // test above this one, and "does not retry a failure that is not a 401"); the retry's catch had
+  // not been held to the same rule — any failure there, transient or not, permanently disabled
+  // the connection until a human reconnected it.
+  it("does not mark needs_reauth when the retry fails for a reason that is not a 401", async () => {
+    let call = 0;
+    McpClientMock.mockImplementation(() =>
+      call++ === 0
+        ? rejecting401()
+        : { initialize: vi.fn().mockRejectedValue(new Error("fetch failed")), listTools: vi.fn() }
+    );
+    refreshTokens.mockResolvedValue({ accessToken: "new-access", expiresAt: new Date(Date.now() + hour) });
+
+    const runtime = await discoverMcpTools("p1", [oauthServer({ expiresAt: new Date(Date.now() + hour) })]);
+
+    // The refresh's own write says connected; nothing overwrites it for a transient retry failure.
+    const statuses = updateOne.mock.calls.map(([, update]) => update.$set["pm.mcpServers.$.oauth.status"]);
+    expect(statuses).toEqual(["connected"]);
+    expect(runtime.serverNames).toEqual([]);
+  });
+
+  // BP-750 review: an expired token triggers an ordinary refresh inside resolveServerToken before
+  // discoverMcpTools ever gets to try connecting — so the freshly-issued token 401ing too, forcing
+  // a *second* refresh in the same call, is not a made-up scenario. persistOauthFields writes the
+  // rotated pair to Mongo (the mocked updateOne) but that write alone does not change what the
+  // second refresh reads: `oauth` in resolveOauthAccessToken is `server.oauth`, so it has to be
+  // the object the first refresh mutated, or the second refresh replays the token the provider
+  // already rotated away from.
+  it("refreshes with the token the previous refresh in this same call actually rotated to", async () => {
+    McpClientMock.mockImplementation(rejecting401);
+    let call = 0;
+    refreshTokens.mockImplementation(async ({ refreshToken }) => {
+      call++;
+      if (call === 1) {
+        expect(refreshToken).toBe("the-refresh");
+        return { accessToken: "access-1", refreshToken: "rotated-refresh", expiresAt: new Date(Date.now() + hour) };
+      }
+      expect(refreshToken).toBe("rotated-refresh");
+      return { accessToken: "access-2", refreshToken: "rotated-refresh-2", expiresAt: new Date(Date.now() + hour) };
+    });
+
+    // Already expired: resolveServerToken's own "is it fresh" check triggers refresh #1 before
+    // discoverMcpTools makes its first connection attempt at all.
+    await discoverMcpTools("p1", [oauthServer({ expiresAt: new Date(Date.now() - 1000) })]);
+
+    expect(refreshTokens).toHaveBeenCalledTimes(2);
   });
 });
 
