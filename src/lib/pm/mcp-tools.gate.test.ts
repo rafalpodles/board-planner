@@ -350,23 +350,27 @@ describe("discoverMcpTools — a 401 despite a stored expiry that still looked f
   // the object the first refresh mutated, or the second refresh replays the token the provider
   // already rotated away from.
   it("refreshes with the token the previous refresh in this same call actually rotated to", async () => {
+    // Test-quality review: an expect() inside an async mock rejects that promise on failure, and
+    // resolveOauthAccessToken's own try/catch (production) swallows that rejection the same way it
+    // swallows a real refresh failure — so an assertion in here can never fail the test. Assert on
+    // what was actually recorded, after the call, instead.
     McpClientMock.mockImplementation(rejecting401);
     let call = 0;
-    refreshTokens.mockImplementation(async ({ refreshToken }) => {
+    refreshTokens.mockImplementation(async () => {
       call++;
-      if (call === 1) {
-        expect(refreshToken).toBe("the-refresh");
-        return { accessToken: "access-1", refreshToken: "rotated-refresh", expiresAt: new Date(Date.now() + hour) };
-      }
-      expect(refreshToken).toBe("rotated-refresh");
-      return { accessToken: "access-2", refreshToken: "rotated-refresh-2", expiresAt: new Date(Date.now() + hour) };
+      return call === 1
+        ? { accessToken: "access-1", refreshToken: "rotated-refresh", expiresAt: new Date(Date.now() + hour) }
+        : { accessToken: "access-2", refreshToken: "rotated-refresh-2", expiresAt: new Date(Date.now() + hour) };
     });
 
     // Already expired: resolveServerToken's own "is it fresh" check triggers refresh #1 before
     // discoverMcpTools makes its first connection attempt at all.
     await discoverMcpTools("p1", [oauthServer({ expiresAt: new Date(Date.now() - 1000) })]);
 
-    expect(refreshTokens).toHaveBeenCalledTimes(2);
+    expect(refreshTokens.mock.calls.map(([args]) => args.refreshToken)).toEqual([
+      "the-refresh",
+      "rotated-refresh",
+    ]);
   });
 });
 
