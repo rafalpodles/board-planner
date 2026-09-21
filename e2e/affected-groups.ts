@@ -63,7 +63,7 @@ const OWNED: readonly { prefix: string; groups: readonly GroupName[] }[] = [
   { prefix: "src/app/reset/", groups: ["people"] },
   { prefix: "src/app/confirm-email/", groups: ["people"] },
   { prefix: "src/app/enrol/", groups: ["people"] },
-  { prefix: "src/app/oauth/", groups: ["people"] },
+  { prefix: "src/app/oauth/", groups: ["people", "project"] },
 
   // API routes
   { prefix: "src/app/api/projects/[projectId]/tasks/", groups: ["tasks"] },

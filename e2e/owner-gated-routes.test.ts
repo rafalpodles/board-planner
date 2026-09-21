@@ -19,6 +19,19 @@ describe("the owner-gated route scan", () => {
     expect(ownerGatedMethods(source).methods).toEqual(["PUT", "DELETE"]);
   });
 
+  it("counts only the wrapper itself, not one whose name merely starts the same", () => {
+    const source = "export const GET = withProjectOwnerAndWorker(async () => ok);";
+    expect(ownerGatedMethods(source)).toEqual({ methods: [], unread: 0 });
+  });
+
+  it("refuses the wrapper imported under another name", () => {
+    const source = [
+      'import { withProjectOwner as ownerOnly } from "@/lib/middleware";',
+      "export const GET = ownerOnly(async () => ok);",
+    ].join("\n");
+    expect(ownerGatedMethods(source).unread).toBe(1);
+  });
+
   it("refuses a shape it cannot read rather than skipping it", () => {
     expect(ownerGatedMethods("export const GET = withAuth(withProjectOwner(handler));").unread).toBe(1);
     expect(

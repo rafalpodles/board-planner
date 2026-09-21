@@ -12,10 +12,12 @@ export type OwnerGatedRoute = { method: string; path: string; key: string };
 
 const GATED_EXPORT = /^export const (GET|POST|PUT|PATCH|DELETE)\s*=\s*withProjectOwner\(/gm;
 const ANY_CALL = /\bwithProjectOwner\(/g;
+const ALIASED = /\bwithProjectOwner\s+as\s+\w+/g;
 
 export function ownerGatedMethods(source: string): { methods: string[]; unread: number } {
   const methods = [...source.matchAll(GATED_EXPORT)].map((m) => m[1]);
-  return { methods, unread: (source.match(ANY_CALL) ?? []).length - methods.length };
+  const aliases = (source.match(ALIASED) ?? []).length;
+  return { methods, unread: (source.match(ANY_CALL) ?? []).length - methods.length + aliases };
 }
 
 export function scanOwnerGatedRoutes(root = API_ROOT): OwnerGatedRoute[] {

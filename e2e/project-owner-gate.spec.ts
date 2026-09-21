@@ -1,7 +1,7 @@
 import { test, expect, type APIRequestContext, type APIResponse, type Browser } from "@playwright/test";
 import mongoose from "mongoose";
 import { SAME_ORIGIN } from "./api";
-import { E2E_MONGODB_URI, OWNER_USERNAME, PROJECT_ID, PROJECT_KEY, seed } from "./seed";
+import { ADMIN_USERNAME, E2E_MONGODB_URI, MEMBER_USERNAME, OWNER_USERNAME, PROJECT_ID, PROJECT_KEY, seed } from "./seed";
 import { signInContext } from "./session";
 import { scanOwnerGatedRoutes } from "./owner-gated-routes";
 
@@ -106,8 +106,9 @@ const RECIPES: Record<string, Recipe> = {
     handled: { status: 400, body: /userId is required/ },
   },
   "GET /api/projects/[projectId]/members/candidates": {
-    send: get,
-    handled: { status: 200, body: /^\[\]$/ },
+    // The instance admin holds no grant on the board, so the lookup must offer it
+    send: (request, path) => request.get(`${path}?q=${ADMIN_USERNAME.slice(0, 3)}`),
+    handled: { status: 200, body: new RegExp(`"username":"${ADMIN_USERNAME}"`) },
   },
   "GET /api/projects/[projectId]/notifications": { send: get, handled: { status: 200, body: JSON_ARRAY } },
   "POST /api/projects/[projectId]/notifications": {
@@ -190,16 +191,24 @@ test("the scan found the owner-gated routes, and every one of them has a recipe"
   expect(Object.keys(RECIPES).filter((key) => !scanned.includes(key)), "recipes for routes no longer owner-gated").toEqual([]);
 });
 
-test("the owner persona holds no instance standing, only the board grant", async ({ browser, baseURL }) => {
-  const owner = await signedIn(browser, baseURL, "owner");
-  try {
-    const me = await owner.request.get("/api/auth/me");
-    expect(me.status()).toBe(200);
-    expect(await me.json()).toMatchObject({ username: OWNER_USERNAME, role: "member" });
-  } finally {
-    await owner.close();
-  }
-});
+// Both personas stand on the board through a grant alone, so the member's 403 below is the owner
+// gate and not a missing grant
+for (const [who, username] of [["owner", OWNER_USERNAME], ["member", MEMBER_USERNAME]] as const) {
+  test(`the ${who} persona holds no instance standing, and reaches the board`, async ({ browser, baseURL }) => {
+    const context = await signedIn(browser, baseURL, who);
+    try {
+      const me = await context.request.get("/api/auth/me");
+      expect(me.status()).toBe(200);
+      expect(await me.json()).toMatchObject({ username, role: "member" });
+
+      const board = await context.request.get(`/api/projects/${PROJECT_KEY}`);
+      expect(board.status(), await board.text()).toBe(200);
+      expect((await board.json()).key).toBe(PROJECT_KEY);
+    } finally {
+      await context.close();
+    }
+  });
+}
 
 for (const route of ROUTES) {
   test(`${route.key}: a plain member is refused, the board owner gets through`, async ({ browser, baseURL }) => {

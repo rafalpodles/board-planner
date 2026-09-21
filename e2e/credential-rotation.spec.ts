@@ -162,6 +162,8 @@ test.describe("OAuth credentials", () => {
     });
     expect(res.status()).toBe(200);
     expect((await res.json()).name).toBe(PROJECT_NAME);
+    const { status } = await new McpSession(request, accessToken).call("tools/list");
+    expect(status).toBe(200);
   }
 
   async function expectDead(request: APIRequestContext, issued: { accessToken: string; refreshToken: string; clientId: string }) {
@@ -171,11 +173,20 @@ test.describe("OAuth credentials", () => {
     expect(board.status()).toBe(401);
     const { status } = await new McpSession(request, issued.accessToken).call("tools/list");
     expect(status).toBe(401);
+    expect(issued.refreshToken).toMatch(/^cprt_./);
     const refreshed = await request.post("/oauth/token", {
       form: { grant_type: "refresh_token", refresh_token: issued.refreshToken, client_id: issued.clientId },
     });
     expect(refreshed.status()).toBe(400);
     expect((await refreshed.json()).error).toBe("invalid_grant");
+  }
+
+  async function expectRefreshes(request: APIRequestContext, issued: { refreshToken: string; clientId: string }) {
+    expect(issued.refreshToken).toMatch(/^cprt_./);
+    const refreshed = await request.post("/oauth/token", {
+      form: { grant_type: "refresh_token", refresh_token: issued.refreshToken, client_id: issued.clientId },
+    });
+    expect(refreshed.status(), await refreshed.text()).toBe(200);
   }
 
   async function openTokens(page: Page) {
@@ -216,6 +227,7 @@ test.describe("OAuth credentials", () => {
 
     await expectDead(request, revoked);
     await expectWorks(request, survivor.accessToken);
+    await expectRefreshes(request, survivor);
 
     await page.reload();
     await expect(row(page, "Connected apps (OAuth)", SECOND)).toBeVisible();
@@ -255,6 +267,7 @@ test.describe("OAuth credentials", () => {
 
     await expectDead(request, revoked);
     await expectWorks(request, survivor.accessToken);
+    await expectRefreshes(request, survivor);
 
     await page.reload();
     await expect(row(page, "OAuth clients", SECOND)).toBeVisible();
