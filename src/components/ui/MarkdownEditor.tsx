@@ -148,17 +148,18 @@ export function MarkdownEditor({
         // A heading or a list marker only means anything at the start of a line, so the action
         // takes every whole line the caret or the selection touches
         const last = end > start && value[end - 1] === "\n" ? end - 1 : end;
-        from = value.lastIndexOf("\n", start - 1) + 1;
+        // lastIndexOf clamps a negative fromIndex to 0, so a leading "\n" would read as this line's
+        from = start === 0 ? 0 : value.lastIndexOf("\n", start - 1) + 1;
         const lineEnd = value.indexOf("\n", last);
         to = lineEnd === -1 ? value.length : lineEnd;
         const lines = value.slice(from, to);
-        const empty = !lines.trim();
-        replacement = (empty ? action.placeholder : lines)
+        const prefixOf = (i: number) => (action.kind === "ordered" ? `${i + 1}. ` : action.prefix);
+        replacement = (lines.trim() ? lines : action.placeholder)
           .split("\n")
-          .map((line, i) => (action.kind === "ordered" ? `${i + 1}. ${line}` : `${action.prefix}${line}`))
+          .map((line, i) => `${prefixOf(i)}${line}`)
           .join("\n");
+        cursorStart = from + prefixOf(0).length;
         cursorEnd = from + replacement.length;
-        cursorStart = empty ? cursorEnd - action.placeholder.length : from;
       }
 
       pendingSelection.current = [cursorStart, cursorEnd];

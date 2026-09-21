@@ -68,6 +68,29 @@ describe("the line formats", () => {
     expect(textarea.value).toBe(`intro\n${marked}\noutro`);
   });
 
+  it.each([
+    ["Heading", "## Scope"],
+    ["Numbered list", "1. Scope"],
+  ])("%s on a written line selects the text and not the marker, so typing keeps the marker", (title, marked) => {
+    const textarea = mount("intro\nScope", [8, 8]);
+    press(title);
+    expect(textarea.value).toBe(`intro\n${marked}`);
+    expect(selected(textarea)).toBe("Scope");
+  });
+
+  it("a caret at the very start of text that opens with a line break takes that empty line", () => {
+    const textarea = mount("\nfoo", [0, 0]);
+    press("Heading");
+    expect(textarea.value).toBe("## Heading\nfoo");
+    expect(selected(textarea)).toBe("Heading");
+  });
+
+  it("a selection from the very start that opens on an empty line prefixes that line too", () => {
+    const textarea = mount("\nfoo", [0, 4]);
+    press("Heading");
+    expect(textarea.value).toBe("## \n## foo");
+  });
+
   it("a selection inside a line marks the whole line", () => {
     const textarea = mount("hello world", [6, 11]);
     press("Heading");

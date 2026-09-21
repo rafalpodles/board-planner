@@ -38,4 +38,13 @@ describe("the checklist box", () => {
 
     expect(enter, "Enter on an empty checklist box was left to submit the form").toBe(false);
   });
+
+  it("leaves an Enter that confirms an IME candidate to the IME, and adds nothing", () => {
+    const { input } = mount();
+    fireEvent.change(input, { target: { value: "かくにん" } });
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+
+    expect((input as HTMLInputElement).value).toBe("かくにん");
+    expect(screen.getAllByDisplayValue("かくにん")).toEqual([input]);
+  });
 });
