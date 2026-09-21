@@ -23,6 +23,7 @@ const TASK_URL = `/api/projects/${PROJECT_ID}/tasks/${HELD_TASK_ID}`;
 
 interface Door {
   name: string;
+  deletes: boolean;
   send: (
     request: APIRequestContext,
     headers: Record<string, string>,
@@ -33,16 +34,19 @@ interface Door {
 const DOORS: Door[] = [
   {
     name: "PATCH …/status",
+    deletes: false,
     send: (request, headers, force = true) =>
       request.patch(`${TASK_URL}/status`, { headers, data: { status: TARGET_COLUMN.id, force } }),
   },
   {
     name: "PUT …/tasks/[taskId]",
+    deletes: false,
     send: (request, headers, force = true) =>
       request.put(TASK_URL, { headers, data: { status: TARGET_COLUMN.id, force } }),
   },
   {
     name: "DELETE …/tasks/[taskId]",
+    deletes: true,
     send: (request, headers, force = true) => request.delete(TASK_URL, { headers, data: { force } }),
   },
 ];
@@ -85,10 +89,11 @@ for (const door of DOORS) {
 
       expect(response.status(), await response.text()).toBe(200);
       const task = await storedTask();
-      if (door.name.startsWith("DELETE")) {
+      if (door.deletes) {
         expect(task).toBeNull();
       } else {
         expect(task).toMatchObject({ status: TARGET_COLUMN.id });
+        expect((await storedExecution(HELD_TASK_ID))?.runId).not.toBe("e2e-run-0001");
       }
     });
   });
