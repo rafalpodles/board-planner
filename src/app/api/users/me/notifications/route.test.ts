@@ -21,6 +21,7 @@ vi.mock("@/lib/encryption", () => ({
   isEncryptionConfigured: () => true,
 }));
 vi.mock("@/lib/url-validation", () => ({
+  WEBHOOK_DESTINATION: {}, WEBHOOK_DESTINATION_REFUSED: "refused",
   isAllowedWebhookUrl: (u: string) => u.startsWith("https://"),
 }));
 

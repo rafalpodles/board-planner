@@ -6,6 +6,7 @@ import { logProjectAudit } from "@/lib/projectAudit";
 import { NOTIFICATION_CHANNEL_TYPES, WEBHOOK_EVENTS, NotificationChannelType } from "@/types";
 import { sanitizeProjectSecrets } from "@/lib/project-secrets";
 import { parseWebhookUrl, parseWebhookEvents, MAX_CHANNEL_NAME_LENGTH, MAX_NOTIFICATION_CHANNELS } from "@/lib/webhook-input";
+import { isAllowedWebhookUrl, WEBHOOK_DESTINATION, WEBHOOK_DESTINATION_REFUSED } from "@/lib/url-validation";
 import { encryptSecret, isEncryptedSecret, isEncryptionConfigured } from "@/lib/encryption";
 
 // Built per call: a Response's body is a one-shot stream, so one shared instance answers the
@@ -49,6 +50,9 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
   const parsedUrl = parseWebhookUrl(webhookUrl);
   if (!parsedUrl) {
     return NextResponse.json({ error: "A valid webhook URL is required" }, { status: 400 });
+  }
+  if (!isAllowedWebhookUrl(parsedUrl, WEBHOOK_DESTINATION)) {
+    return NextResponse.json({ error: WEBHOOK_DESTINATION_REFUSED }, { status: 400 });
   }
 
   if (!name || typeof name !== "string" || !name.trim()) {
@@ -142,6 +146,9 @@ export const PUT = withProjectOwner(async (request, { params }) => {
     const parsedUrl = parseWebhookUrl(updates.webhookUrl);
     if (!parsedUrl) {
       return NextResponse.json({ error: "A valid webhook URL is required" }, { status: 400 });
+    }
+    if (!isAllowedWebhookUrl(parsedUrl, WEBHOOK_DESTINATION)) {
+      return NextResponse.json({ error: WEBHOOK_DESTINATION_REFUSED }, { status: 400 });
     }
     if (!isEncryptionConfigured()) return noKey();
     channel.webhookUrl = encryptSecret(parsedUrl);

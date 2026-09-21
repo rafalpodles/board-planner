@@ -1,6 +1,6 @@
 import { Project } from "@/models/project";
 import { WebhookEvent, NotificationChannelType, STATUS_LABELS } from "@/types";
-import { isAllowedWebhookUrl } from "./url-validation";
+import { isAllowedWebhookUrl, WEBHOOK_DESTINATION } from "./url-validation";
 import { safeFetch } from "./safe-fetch";
 import { OUTBOUND_CONCURRENCY, runBounded } from "./bounded";
 import { decryptSecret } from "./encryption";
@@ -285,7 +285,7 @@ export async function dispatchNotifications(
         );
         return;
       }
-      if (!isAllowedWebhookUrl(webhookUrl)) return;
+      if (!isAllowedWebhookUrl(webhookUrl, WEBHOOK_DESTINATION)) return;
       const body = JSON.stringify(formatPayload(channel.type, event, payload, appUrl));
 
       await safeFetch(webhookUrl, {
@@ -293,7 +293,7 @@ export async function dispatchNotifications(
         headers: { "Content-Type": "application/json" },
         body,
         signal: AbortSignal.timeout(10_000),
-      }).catch(() => {
+      }, WEBHOOK_DESTINATION).catch(() => {
         // Notification delivery failures are silently ignored
       });
     });

@@ -281,3 +281,20 @@ describe("POST /api/projects/:projectId/notifications", () => {
     expect(save).not.toHaveBeenCalled();
   });
 });
+
+describe("where a project chat channel may point", () => {
+  it.each(["http://127.0.0.1:3990/hook", "https://10.0.0.5/hook", "http://hooks.slack.com/x"])(
+    "refuses %s on create and on edit, before anything is written",
+    async (webhookUrl) => {
+      const created = await POST(request("POST", { type: "slack", name: "Releases", webhookUrl }), ctx());
+      const edited = await PUT(request("PUT", { channelId: "c1", webhookUrl }), ctx());
+
+      for (const res of [created, edited]) {
+        expect(res.status).toBe(400);
+        expect((await res.json()).error).toMatch(/must be https and reachable on the public internet/);
+      }
+      expect(findOneAndUpdate).not.toHaveBeenCalled();
+      expect(save).not.toHaveBeenCalled();
+    }
+  );
+});

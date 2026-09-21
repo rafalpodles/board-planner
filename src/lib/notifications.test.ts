@@ -5,9 +5,10 @@ const OTHER_KEY = "c".repeat(64);
 process.env.ENCRYPTION_KEY = KEY;
 
 const findById = vi.fn();
-const safeFetch = vi.fn((url: string, init?: RequestInit) => {
+const safeFetch = vi.fn((url: string, init?: RequestInit, options?: unknown) => {
   void url;
   void init;
+  void options;
   return Promise.resolve(new Response("ok"));
 });
 
@@ -16,6 +17,7 @@ vi.mock("./safe-fetch", () => ({ safeFetch }));
 
 const { dispatchNotifications } = await import("./notifications");
 const { encryptSecret } = await import("./encryption");
+const { WEBHOOK_DESTINATION } = await import("./url-validation");
 
 const PAYLOAD = { project: { key: "BP", name: "Board" }, task: { taskKey: "BP-1", title: "T", status: "todo" } };
 
@@ -340,5 +342,16 @@ describe("dispatchNotifications — which channels are eligible", () => {
 
     expect(safeFetch).toHaveBeenCalledTimes(1);
     expect(safeFetch.mock.calls[0][0]).toBe("https://hooks.slack.com/services/T/B/2");
+  });
+});
+
+describe("where a project channel message may go", () => {
+  it("fetches with the webhook destination rule", async () => {
+    projectWith(encryptSecret("https://hooks.slack.com/services/T/B/secret"));
+
+    await dispatchNotifications("p1", "task_created", PAYLOAD);
+
+    await vi.waitFor(() => expect(safeFetch).toHaveBeenCalledTimes(1));
+    expect(safeFetch.mock.calls[0][2]).toBe(WEBHOOK_DESTINATION);
   });
 });

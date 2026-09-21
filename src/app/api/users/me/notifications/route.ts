@@ -5,7 +5,7 @@ import { User } from "@/models/user";
 import { defaultMatrix, matrixInForce, normaliseMatrix } from "@/lib/notification-prefs";
 import { PERSONAL_CHAT_KINDS, PersonalChatKind } from "@/types";
 import { encryptSecret, isEncryptionConfigured } from "@/lib/encryption";
-import { isAllowedWebhookUrl } from "@/lib/url-validation";
+import { isAllowedWebhookUrl, WEBHOOK_DESTINATION, WEBHOOK_DESTINATION_REFUSED } from "@/lib/url-validation";
 
 const WEBHOOK_KEPT = "__kept__";
 
@@ -97,8 +97,8 @@ function resolveChat(
     return { writes: { kind } };
   }
 
-  if (!isAllowedWebhookUrl(url)) {
-    return { error: "That webhook address is not allowed", status: 400 };
+  if (!isAllowedWebhookUrl(url, WEBHOOK_DESTINATION)) {
+    return { error: WEBHOOK_DESTINATION_REFUSED, status: 400 };
   }
   if (!isEncryptionConfigured()) {
     return {
