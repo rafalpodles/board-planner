@@ -1,5 +1,5 @@
 import { NotificationType, PersonalChatKind } from "@/types";
-import { isAllowedWebhookUrl } from "./url-validation";
+import { isAllowedWebhookUrl, WEBHOOK_DESTINATION } from "./url-validation";
 import { safeFetch } from "./safe-fetch";
 import { OUTBOUND_CONCURRENCY, runBounded } from "./bounded";
 import { decryptSecret } from "./encryption";
@@ -78,14 +78,14 @@ export async function sendPersonalChat(n: {
       console.error("Personal chat webhook could not be decrypted");
       return;
     }
-    if (!isAllowedWebhookUrl(webhookUrl)) return;
+    if (!isAllowedWebhookUrl(webhookUrl, WEBHOOK_DESTINATION)) return;
 
     await safeFetch(webhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: bodyFor(kind, n.type, n.title, url),
       signal: AbortSignal.timeout(10_000),
-    }).catch(() => {
+    }, WEBHOOK_DESTINATION).catch(() => {
       // Delivery failures are not the notification's problem, same as the project channels
     });
   });

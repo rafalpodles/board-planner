@@ -15,9 +15,8 @@ import { SIGNATURE_HEADER, TIMESTAMP_HEADER } from "./webhook-signature";
  * carries the signature at all, that only an enabled webhook subscribed to this event is sent one,
  * or that the destination guard is applied per webhook rather than once for the list.
  *
- * This is the only level at which the signature can be asserted: a delivery cannot be received in
- * the e2e run, because `safeFetch` takes https and a public address only (BP-408). `safe-fetch` is
- * the seam, so everything above it — selection, body, headers — is the real module.
+ * `safe-fetch` is the seam, so everything above it — selection, body, headers — is the real module.
+ * A received delivery's signature is asserted end to end in `e2e/outbound-delivery.spec.ts`.
  *
  * It is also the only level at which `isAllowedWebhookUrl`'s own branches are covered.
  * `safe-fetch.test.ts` exercises `assertPublicDestination`, which is the *second* gate; the first

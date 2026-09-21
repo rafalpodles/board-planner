@@ -88,6 +88,7 @@ export const GROUPS = {
     "gitlab-activity.spec.ts",
     "pr-status.spec.ts",
     "project-channel-secret.spec.ts",
+    "outbound-delivery.spec.ts",
     "pr-link-replacement.spec.ts",
     "pr-link-pruning.spec.ts",
     "mcp-oauth.spec.ts",

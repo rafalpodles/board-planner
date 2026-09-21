@@ -1,5 +1,4 @@
-import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
-import { WEBHOOK_RECEIVER_URL } from "../playwright.config";
+import { test, expect, type Page } from "@playwright/test";
 import { ADMIN_AUTH } from "./api";
 import {
   ADMIN_PASSWORD,
@@ -13,35 +12,18 @@ import {
   seed,
   seedLinkedPRs,
   seedRepository,
-  seedWebhook,
 } from "./seed";
 import { signIn as arriveSignedIn } from "./session";
 
 /**
- * BP-396 — what this instance does at its edges: webhook delivery, and the repository sync that
- * links a pull request to the task whose key it names.
+ * BP-396 — what this instance does at its edges: the repository sync that links a pull request to
+ * the task whose key it names.
  *
- * **One of the four scenarios the task lists cannot be driven here, and is not faked.**
+ * *Webhook delivery* is received for real in `outbound-delivery.spec.ts` (BP-408), signature
+ * included; the production refusal of a loopback or http address is `url-validation.test.ts`.
  *
- * *Webhook delivery to a local receiver.* A receiver on this machine cannot be delivered to at
- * all. `dispatchWebhooks` gates on `isAllowedWebhookUrl`, whose first line refuses anything that is
- * not https (`src/lib/url-validation.ts`), and `safeFetch` behind it refuses loopback and private
- * addresses by literal, by name, and by resolving every redirect hop (BP-303 — the sibling
- * `isAllowedMcpServerUrl` shows the loopback carve-out was a deliberate choice made for MCP and not
- * for webhooks). So no delivery can be received here and the signature it would carry cannot be
- * inspected.
- *
- * **Exactly one of those layers is asserted below, and it is the scheme.** A plain-HTTP receiver is
- * refused before the address is ever looked at, and giving the receiver an https face does not help:
- * with the address guards removed the app would open TLS against a plain-HTTP socket and record
- * nothing, so a delivered/not-delivered instrument cannot tell a fired guard from a failed
- * handshake. The address and name branches are unit-tested in `src/lib/safe-fetch.test.ts` and
- * `src/lib/private-address.ts`'s callers; claiming them here would be a second copy of a test this
- * file cannot actually run.
- *
- * There is also no retry to test: `dispatchWebhooks` fires once and swallows the outcome
- * (`.catch(() => {})`). The task's "retry after failure" describes behaviour the code does not
- * have; it is reported on the task rather than invented here.
+ * There is no retry to test: delivery is single-shot by decision (BP-407), and its one outcome is
+ * recorded on the webhook's row.
  *
  * *GitHub/GitLab sync against a stubbed service* is driven elsewhere, against `e2e/github-stub.mjs`
  * (`GITHUB_API_BASE_URL`, BP-443 — `pr-status.spec.ts`, `pr-link-pruning.spec.ts`) and
@@ -51,71 +33,9 @@ import { signIn as arriveSignedIn } from "./session";
 
 const SETTINGS = `/projects/${PROJECT_KEY}/settings`;
 
-interface Delivery {
-  method: string;
-  url: string;
-  headers: Record<string, string>;
-  body: string;
-}
-
-/**
- * A delivery that never happens has no event to wait for, so the window has to be spent rather
- * than polled: `expect.poll(...).toBe(0)` is satisfied by the first reading and returns before the
- * app has had a chance to send anything. Measured against a build with both destination guards
- * removed, the delivery lands in single-digit milliseconds; two seconds is three orders of
- * magnitude of room.
- */
-const SETTLE_MS = 2_000;
-
-/** What the receiver has been sent since the last reset. */
-async function deliveries(request: APIRequestContext): Promise<Delivery[]> {
-  const response = await request.get(`${WEBHOOK_RECEIVER_URL}/deliveries`);
-  expect(response.status()).toBe(200);
-  return response.json();
-}
-
 const signIn = arriveSignedIn;
 
 test.beforeEach(seed);
-
-test.describe("webhook delivery", () => {
-  test.beforeEach(async ({ request }) => {
-    await request.post(`${WEBHOOK_RECEIVER_URL}/reset`);
-  });
-
-  test("a board event is never delivered to an http endpoint", async ({ request }) => {
-    // The control, first: the receiver records what reaches it, so the silence below is the app's
-    // silence rather than an instrument that was never listening.
-    const direct = await request.post(`${WEBHOOK_RECEIVER_URL}/control`, {
-      headers: { "Content-Type": "application/json" },
-      data: { probe: true },
-    });
-    expect(direct.status()).toBe(200);
-    expect(await deliveries(request)).toHaveLength(1);
-
-    // http, so `isAllowedWebhookUrl` refuses it on the scheme — see the note at the top of this
-    // file for the layers below that one, and why they cannot be reached from here
-    await seedWebhook(`${WEBHOOK_RECEIVER_URL}/hook`);
-
-    const created = await request.post(`/api/projects/${PROJECT_KEY}/tasks`, {
-      headers: ADMIN_AUTH,
-      data: { title: "An event with a webhook configured", status: "todo" },
-    });
-    expect(created.status(), await created.text()).toBe(201);
-
-    await new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
-
-    expect((await deliveries(request)).filter((d) => d.url === "/hook")).toHaveLength(0);
-
-    // Still recording, after the window the app had
-    await request.post(`${WEBHOOK_RECEIVER_URL}/control`, {
-      headers: { "Content-Type": "application/json" },
-      data: { probe: "again" },
-    });
-    expect((await deliveries(request)).filter((d) => d.url === "/control")).toHaveLength(2);
-  });
-
-});
 
 test.describe("repository sync", () => {
   test("a project that names no repository is told so rather than reaching for one", async ({

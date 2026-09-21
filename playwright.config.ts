@@ -18,15 +18,11 @@ export const PM_STUB_URL = `http://localhost:${PM_STUB_PORT}`;
 const AI_STUB_PORT = Number(process.env.AI_STUB_PORT ?? PORT + 2);
 export const AI_STUB_URL = `http://localhost:${AI_STUB_PORT}`;
 
-// No test asserts a signature: no delivery can be received here, so there is no header to read
-// (see the note at the top of external-integrations.spec.ts, and BP-408). It is set because
-// signatureHeaders() sends nothing at all without one — so the day a delivery can be received, the
-// first run would otherwise read an unsigned one and call that the behaviour.
+// outbound-delivery.spec.ts verifies a received delivery against it (BP-408)
 export const WEBHOOK_SECRET = "e2e-webhook-signing-secret";
 
-// A webhook endpoint on this machine, in its own process. A receiver hosted inside the Playwright
-// worker is reachable from the browser and not from the dev server, so a test that opened one
-// would read an empty delivery log whatever the app did.
+// A webhook endpoint on this machine, in its own process: deliveries are sent after the request
+// that caused them has answered. Reachable only because `E2E=1` below widens WEBHOOK_DESTINATION.
 const WEBHOOK_RECEIVER_PORT = Number(process.env.WEBHOOK_RECEIVER_PORT ?? PORT + 3);
 export const WEBHOOK_RECEIVER_URL = `http://127.0.0.1:${WEBHOOK_RECEIVER_PORT}`;
 
@@ -182,12 +178,13 @@ function devServerEnv(origin: string) {
     // notification grid offers. Without it those routes answer 503 and the specs that drive
     // them assert a refusal instead of the encryption they exist to prove.
     ENCRYPTION_KEY: E2E_ENCRYPTION_KEY,
-    // Two things now, and the second is not cosmetic. It turns off Next's dev indicator, which
+    // Three things now, and two are not cosmetic. It turns off Next's dev indicator, which
     // paints over the bottom-left of every page and takes a real click meant for a bottom
-    // sheet's action row (BP-589) — and it mounts `POST /api/e2e/digest`, which runs a digest
-    // tick with nothing authenticating it (`src/lib/e2e-only.ts`, BP-605). So this is not a
-    // variable to set on a deployment to quieten the indicator: outside a production build it
-    // opens that route too. Only here; a developer running `next dev` by hand keeps both.
+    // sheet's action row (BP-589); it mounts `POST /api/e2e/digest`, which runs a digest tick
+    // with nothing authenticating it (`src/lib/e2e-only.ts`, BP-605); and it lets webhooks and
+    // chat post to loopback (`WEBHOOK_DESTINATION`, BP-408). So this is not a variable to set on
+    // a deployment to quieten the indicator: outside a production build it opens both of those.
+    // Only here; a developer running `next dev` by hand gets none of the three.
     E2E: "1",
   };
 }

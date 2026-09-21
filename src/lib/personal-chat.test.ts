@@ -2,7 +2,12 @@ import { describe, it, expect, vi } from "vitest";
 
 const safeFetch = vi.fn().mockResolvedValue({ ok: true });
 vi.mock("@/lib/safe-fetch", () => ({ safeFetch: (...a: unknown[]) => safeFetch(...a) }));
-vi.mock("@/lib/url-validation", () => ({ isAllowedWebhookUrl: () => true }));
+const DESTINATION = { allowLoopback: "the webhook destination" };
+const isAllowed = vi.fn().mockReturnValue(true);
+vi.mock("@/lib/url-validation", () => ({
+  WEBHOOK_DESTINATION: DESTINATION,
+  isAllowedWebhookUrl: (u: string, o: unknown) => isAllowed(u, o),
+}));
 vi.mock("@/lib/encryption", () => ({ decryptSecret: (v: string) => v }));
 vi.mock("@/lib/session", () => ({ selfOrigin: () => "https://app.example.com" }));
 
@@ -111,5 +116,18 @@ describe("personal chat fan-out", () => {
     landers.shift()!({ ok: true });
     await vi.waitFor(() => expect(safeFetch).toHaveBeenCalledTimes(5));
     safeFetch.mockImplementation(() => Promise.resolve({ ok: true }));
+  });
+});
+
+describe("where a personal chat message may go", () => {
+  it("checks and fetches with the webhook destination rule", async () => {
+    safeFetch.mockClear();
+    isAllowed.mockClear();
+
+    await sendPersonalChat({ users: [slackUser], type: "mentioned", title: "T" });
+
+    await vi.waitFor(() => expect(safeFetch).toHaveBeenCalledTimes(1));
+    expect(isAllowed).toHaveBeenCalledWith("https://hooks.example/x", DESTINATION);
+    expect(safeFetch.mock.calls[0][2]).toBe(DESTINATION);
   });
 });

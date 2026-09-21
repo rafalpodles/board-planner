@@ -199,3 +199,19 @@ describe("DELETE /api/projects/:projectId/webhooks", () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe("where a webhook may point", () => {
+  it.each(["http://127.0.0.1:3990/hook", "https://10.0.0.5/hook", "http://hooks.example.com/b"])(
+    "refuses %s on create and on edit, before anything is written",
+    async (url) => {
+      const created = await POST(request("POST", { url }), ctx());
+      const edited = await PUT(request("PUT", { webhookId: "w1", url }), ctx());
+
+      for (const res of [created, edited]) {
+        expect(res.status).toBe(400);
+        expect((await res.json()).error).toMatch(/must be https and reachable on the public internet/);
+      }
+      expect(findOneAndUpdate).not.toHaveBeenCalled();
+    }
+  );
+});

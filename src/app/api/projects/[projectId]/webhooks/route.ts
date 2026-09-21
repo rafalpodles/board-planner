@@ -6,6 +6,7 @@ import { logProjectAudit } from "@/lib/projectAudit";
 import { maskSecretUrl, sanitizeProjectSecrets } from "@/lib/project-secrets";
 import { parseWebhookUrl, parseWebhookEvents, MAX_WEBHOOK_URL_LENGTH, MAX_WEBHOOKS } from "@/lib/webhook-input";
 import { WEBHOOK_EVENTS } from "@/types";
+import { isAllowedWebhookUrl, WEBHOOK_DESTINATION, WEBHOOK_DESTINATION_REFUSED } from "@/lib/url-validation";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function masked(project: any) {
@@ -27,6 +28,9 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
       { error: `A valid URL of at most ${MAX_WEBHOOK_URL_LENGTH} characters is required` },
       { status: 400 }
     );
+  }
+  if (!isAllowedWebhookUrl(parsedUrl, WEBHOOK_DESTINATION)) {
+    return NextResponse.json({ error: WEBHOOK_DESTINATION_REFUSED }, { status: 400 });
   }
 
   const parsedEvents = events === undefined ? [...WEBHOOK_EVENTS] : parseWebhookEvents(events);
@@ -70,6 +74,9 @@ export const PUT = withProjectOwner(async (request, { params }) => {
     const parsedUrl = parseWebhookUrl(updates.url);
     if (!parsedUrl) {
       return NextResponse.json({ error: "A valid URL is required" }, { status: 400 });
+    }
+    if (!isAllowedWebhookUrl(parsedUrl, WEBHOOK_DESTINATION)) {
+      return NextResponse.json({ error: WEBHOOK_DESTINATION_REFUSED }, { status: 400 });
     }
     setFields["webhooks.$.url"] = parsedUrl;
   }

@@ -1,6 +1,6 @@
 import { Project } from "@/models/project";
 import { WebhookEvent } from "@/types";
-import { isAllowedWebhookUrl } from "./url-validation";
+import { isAllowedWebhookUrl, WEBHOOK_DESTINATION } from "./url-validation";
 import { safeFetch, BlockedDestinationError } from "./safe-fetch";
 import { OUTBOUND_CONCURRENCY, runBounded } from "./bounded";
 import { signatureHeaders } from "./webhook-signature";
@@ -103,7 +103,7 @@ export async function dispatchWebhooks(
 
       // Refused before ever reaching the network — still an attempt whose outcome must be
       // recorded, or a URL that stops passing this check reads as "still delivering" forever.
-      if (!isAllowedWebhookUrl(webhook.url)) {
+      if (!isAllowedWebhookUrl(webhook.url, WEBHOOK_DESTINATION)) {
         recordDelivery(projectId, webhookId, attemptStartedAt, "failed", "Blocked destination");
         return;
       }
@@ -113,7 +113,7 @@ export async function dispatchWebhooks(
         headers: { "Content-Type": "application/json", ...signatureHeaders(body) },
         body,
         signal: AbortSignal.timeout(10_000),
-      }).then(
+      }, WEBHOOK_DESTINATION).then(
         // A rejected safeFetch is a network/timeout/blocked-destination failure; a RESOLVED one
         // whose status isn't 2xx is the receiver saying no — the original `.catch(() => {})` only
         // ever saw the first kind, so a webhook receiver answering 500 read as delivered.

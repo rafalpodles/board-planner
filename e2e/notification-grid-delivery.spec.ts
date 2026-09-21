@@ -36,13 +36,9 @@ import {
  * carry that end to end — `e2e/smtp-stub.mjs` is a real SMTP peer, so the message goes through
  * nodemailer, STARTTLS, AUTH and the production template.
  *
- * **The chat column stops at storage, and not by choice.** `isAllowedWebhookUrl` requires https and
- * refuses a private address, and `safeFetch` refuses it again at delivery — so a receiver on this
- * machine cannot be named as a personal webhook without weakening the guard that exists to stop
- * exactly that. The same wall is why no project webhook delivery is asserted anywhere in this suite
- * (see the note on WEBHOOK_SECRET in `playwright.config.ts`). What is driven here is the half that
- * can be: the connection saved through its own form, and the `"__kept__"` sentinel that decides
- * whether a stored webhook survives the next save.
+ * **The chat column's deliveries are received in `outbound-delivery.spec.ts`** (BP-696). What is
+ * driven here is storage: the connection saved through its own form, and the `"__kept__"` sentinel
+ * that decides whether a stored webhook survives the next save.
  */
 
 const MEMBER_MAILBOX = "member@e2e.invalid";

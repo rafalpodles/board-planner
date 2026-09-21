@@ -9,13 +9,8 @@ import { signIn } from "./session";
  * shared Slack/Discord channels, Coda, GitLab's host/token handling, a refused sync as a person
  * sees it, and the Connections picker itself — was not.
  *
- * **What no spec here can reach: a real chat-channel delivery.** `isAllowedWebhookUrl` demands
- * `https:` and refuses a private address, with no non-production carve-out — the same wall
- * `project-channel-secret.spec.ts` and `notification-grid-delivery.spec.ts` already document for
- * this exact screen. So "enable/disable and the per-event chips decide whether a delivery is
- * attempted" is proven at the point that wall makes reachable: the settings themselves persist
- * correctly, and `dispatchNotifications`'s eligibility filter is pinned in `notifications.test.ts`
- * ("which channels are eligible").
+ * **A real chat-channel delivery is received in `outbound-delivery.spec.ts`** (BP-696); this file
+ * covers the settings themselves persisting correctly.
  *
  * **Coda is different, and reachable.** Its host goes through `isAllowedMcpServerUrl` at save
  * time (a public-https-or-loopback-outside-production rule already shared with the MCP server

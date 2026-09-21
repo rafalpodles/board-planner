@@ -15,7 +15,8 @@ vi.mock("@/lib/safe-fetch", () => ({
   BlockedDestinationError: class BlockedDestinationError extends Error {},
 }));
 const allowUrl = vi.fn().mockReturnValue(true);
-vi.mock("@/lib/url-validation", () => ({ isAllowedWebhookUrl: (u: string) => allowUrl(u) }));
+const DESTINATION = { allowLoopback: "the webhook destination" };
+vi.mock("@/lib/url-validation", () => ({ WEBHOOK_DESTINATION: DESTINATION, WEBHOOK_DESTINATION_REFUSED: "refused", isAllowedWebhookUrl: (u: string, o: unknown) => allowUrl(u, o) }));
 
 const { dispatchWebhooks } = await import("./webhooks");
 const { BlockedDestinationError } = await import("@/lib/safe-fetch");
@@ -54,6 +55,8 @@ describe("what a successful delivery records", () => {
     await dispatchWebhooks("p1", "task_created", PAYLOAD);
     await vi.waitFor(() => expect(callsFor("w1")).toHaveLength(1));
 
+    expect(allowUrl).toHaveBeenCalledWith("https://a.example/hook", DESTINATION);
+    expect(safeFetch.mock.calls[0][2]).toBe(DESTINATION);
     const [filter, update] = callsFor("w1")[0];
     expect(filter._id).toBe("p1");
     expect(filter.webhooks.$elemMatch._id).toBe("w1");

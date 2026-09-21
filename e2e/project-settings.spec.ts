@@ -868,9 +868,8 @@ test.describe("Integrations · the save bar", () => {
 
   /**
    * BP-407. Delivery stays single-shot (owner's call, see the ticket) — what changed is that the one
-   * attempt's outcome is no longer silent. Not exercised through a real delivery (BP-408 blocks
-   * that): the seed writes the outcome `dispatchWebhooks` itself would have written, and this only
-   * asserts the settings page reads it back correctly.
+   * attempt's outcome is no longer silent. The seed writes both outcomes, so this asserts the page
+   * reads each back; a real delivery writing them is `outbound-delivery.spec.ts`.
    */
   test("the webhooks panel shows what the last delivery attempt did", async ({ page }) => {
     await seedWebhookDeliveryOutcomes();

@@ -14,10 +14,8 @@ import { signIn } from "./session";
  * value without decrypting first yields `null/••••` plus a tail of ciphertext — a settings screen on
  * which no owner can tell one channel from another, and nothing below the browser notices.
  *
- * **What no spec in this suite can reach: the delivery.** `isAllowedWebhookUrl` demands `https:` and
- * refuses private addresses, and `webhook-receiver.mjs` is http on 127.0.0.1 — the same wall
- * `external-integrations.spec.ts` documents. So a channel here can never be posted to, encrypted or
- * not, and the decrypt-at-dispatch half is proven in `src/lib/notifications.test.ts` instead.
+ * **The delivery itself** is received in `outbound-delivery.spec.ts` (BP-696), through a channel
+ * saved the same way; the decrypt-at-dispatch half is also pinned in `src/lib/notifications.test.ts`.
  */
 test.beforeEach(seed);
 
