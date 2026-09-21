@@ -24,47 +24,67 @@ export const BOARD_FEED_FANOUT_LIMIT = 200;
 
 const OBJECT_ID = /^[0-9a-fA-F]{24}$/;
 
-/** The cells that count as opting in, for the query that has to find them by path. */
-function subscribedTo(prefix: string): Record<string, unknown>[] {
+const CHAT_CONNECTED = {
+  "notifications.chat.kind": { $nin: ["", null] },
+  "notifications.chat.webhookUrl": { $nin: ["", null] },
+};
+
+const HAS_ADDRESS = { email: { $gt: "" } };
+
+type Clause = Record<string, unknown>;
+
+function prefixed(prefix: string, clause: Clause): Clause {
+  return Object.fromEntries(Object.entries(clause).map(([path, v]) => [`${prefix}.${path}`, v]));
+}
+
+/**
+ * The cells that make resolveChannels answer yes, for the query that has to find them by path —
+ * and, for mail, an address to send it to, since a tick with none delivers nothing either.
+ * `within` is where the row lives relative to the user document.
+ */
+function deliverable(row: string, within: (clause: Clause) => Clause): Clause[] {
   return [
-    { [`${prefix}.inApp`]: true },
-    { [`${prefix}.email`]: true },
-    { [`${prefix}.chat`]: true },
+    within({ [`${row}.inApp`]: true }),
+    { $and: [within({ [`${row}.email`]: true }), HAS_ADDRESS] },
+    { $and: [within({ [`${row}.chat`]: true }), CHAT_CONNECTED] },
   ];
 }
 
 /**
  * Everyone who asked to hear about every task on this board.
  *
- * Two filters, both of which have to be in the query rather than in code after it. Access, because
- * a cap applied to people who cannot reach the board could spend itself entirely on them and leave
- * the members who subscribed outside the limit; and the opt-in itself, for the same reason.
- *
- * The query only narrows. A project override wins over the global grid even when it wins by
- * switching the row *off*, and no filter expressed in paths can say that — so resolveChannels
- * makes the actual decision, once per candidate, exactly as it does for the other four rows.
- * The residue is that a truncated fan-out can end up a little under the cap. It takes more than
- * BOARD_FEED_FANOUT_LIMIT people on one board who subscribed globally and unsubscribed here, and
- * the alternative is a second query per creation.
+ * The whole of resolveChannels' verdict is in the query, not sifted afterwards, because the cap
+ * is applied by the query: a candidate dropped after it — a global tick this board's override
+ * switches off, a chat tick with nothing connected, a mail tick with no address, the actor —
+ * would spend a place that somebody who did qualify was then refused (BP-705). resolveChannels
+ * still runs on what comes back, and a candidate the query admitted but it refuses is logged.
  */
-export async function boardFeedSubscribers(projectId: string): Promise<string[]> {
+export async function boardFeedSubscribers(
+  projectId: string,
+  exceptUserId?: string
+): Promise<string[]> {
   if (!OBJECT_ID.test(projectId)) return [];
+  const project = new Types.ObjectId(projectId);
+  const override = (clause: Clause) => ({
+    "notifications.projects": { $elemMatch: { project, ...prefixed("matrix", clause) } },
+  });
+  // `overrideFor` treats an entry with no matrix as no override at all
+  const noOverride = {
+    $nor: [{ "notifications.projects": { $elemMatch: { project, matrix: { $type: "object" } } } }],
+  };
+  const global = (clause: Clause) => prefixed("notifications.defaults", clause);
 
   const candidates = await User.find(
     {
       $and: [
         await projectAudienceFilter(projectId),
+        ...(exceptUserId && OBJECT_ID.test(exceptUserId)
+          ? [{ _id: { $ne: new Types.ObjectId(exceptUserId) } }]
+          : []),
         {
           $or: [
-            ...subscribedTo("notifications.defaults.task_created"),
-            {
-              "notifications.projects": {
-                $elemMatch: {
-                  project: new Types.ObjectId(projectId),
-                  $or: subscribedTo("matrix.task_created"),
-                },
-              },
-            },
+            ...deliverable("task_created", override),
+            { $and: [noOverride, { $or: deliverable("task_created", global) }] },
           ],
         },
       ],
@@ -74,22 +94,28 @@ export async function boardFeedSubscribers(projectId: string): Promise<string[]>
     // Ordered, so the cap takes the same people every time rather than whichever the storage
     // engine happened to reach first.
     .sort({ _id: 1 })
-    .limit(BOARD_FEED_FANOUT_LIMIT)
+    .limit(BOARD_FEED_FANOUT_LIMIT + 1)
     .lean();
 
-  if (candidates.length === BOARD_FEED_FANOUT_LIMIT) {
+  if (candidates.length > BOARD_FEED_FANOUT_LIMIT) {
+    candidates.length = BOARD_FEED_FANOUT_LIMIT;
     console.error(
       `Board feed for project ${projectId} hit the ${BOARD_FEED_FANOUT_LIMIT}-recipient cap; ` +
         "anybody beyond it was not told about this task"
     );
   }
 
-  return candidates
-    .filter((user) => {
-      const channels = resolveChannels(user, projectId, "task_created");
-      return channels.inApp || channels.email || channels.chat;
-    })
-    .map((user) => String(user._id));
+  const subscribers = candidates.filter((user) => {
+    const channels = resolveChannels(user, projectId, "task_created");
+    return channels.inApp || channels.email || channels.chat;
+  });
+  if (subscribers.length < candidates.length) {
+    console.error(
+      `Board feed for project ${projectId}: ${candidates.length - subscribers.length} ` +
+        "candidate(s) matched the subscriber query but not resolveChannels"
+    );
+  }
+  return subscribers.map((user) => String(user._id));
 }
 
 /**
@@ -112,11 +138,9 @@ export async function notifyBoardFeed(params: {
 }): Promise<void> {
   try {
     // Nobody hears about a task they created themselves. createNotifications refuses the actor
-    // anyway and stays the authority on it; dropping them here is only so a board whose one
-    // subscriber is the person creating the task does not assemble a mail for an empty audience.
-    const recipientIds = (await boardFeedSubscribers(params.projectId)).filter(
-      (id) => id !== params.actorId
-    );
+    // anyway and stays the authority on it; leaving them out of the query is so they neither take
+    // a place under the cap nor get a mail assembled for an audience of one.
+    const recipientIds = await boardFeedSubscribers(params.projectId, params.actorId);
     if (recipientIds.length === 0) return;
     await createNotifications({
       ...params,

@@ -1,14 +1,17 @@
 import { test, expect, type Page } from "@playwright/test";
 import mongoose from "mongoose";
 import {
+  ADMIN_ID,
   ADMIN_PASSWORD,
   ADMIN_USERNAME,
   BYSTANDER_ID,
   BYSTANDER_PASSWORD,
   BYSTANDER_USERNAME,
   E2E_MONGODB_URI,
+  MEMBER_ID,
   MEMBER_PASSWORD,
   MEMBER_USERNAME,
+  PROJECT_ID,
   PROJECT_KEY,
   seed,
   seedBoardFeedBystander,
@@ -180,6 +183,201 @@ test("the board feed reaches the member who ticked the row and nobody else", asy
 
   await memberContext.close();
   await bystanderContext.close();
+  await adminContext.close();
+});
+
+/**
+ * BP-705. `BOARD_FEED_FANOUT_LIMIT`, written out rather than imported: a spec that read the
+ * constant would follow it down, and lowering it is exactly the change this has to notice.
+ */
+const FANOUT_LIMIT = 200;
+
+type Cell = { inApp: boolean; email: boolean; chat: boolean };
+const cell = (over: Partial<Cell> = {}): Cell => ({
+  inApp: false,
+  email: false,
+  chat: false,
+  ...over,
+});
+
+/** Sorts before every seeded account, the member included — `_id` is the order the cap takes. */
+const aheadOfTheMember = (n: number) =>
+  new mongoose.Types.ObjectId(`e2e00000000000000000${n.toString(16).padStart(4, "0")}`);
+/** Sorts after every seeded account. */
+const behindTheMember = (n: number) =>
+  new mongoose.Types.ObjectId(`e2e00000000000000001${n.toString(16).padStart(4, "0")}`);
+
+/**
+ * Accounts on this board with a grid already saved — setup straight into Mongo, since a few
+ * hundred people ticking a box through the screen is the membership under test, not the gesture.
+ */
+type SeededMember = {
+  _id: mongoose.Types.ObjectId;
+  defaults: Cell;
+  override?: Cell | "unanswered";
+  chat?: { kind: string; webhookUrl: string };
+};
+
+async function seedMembers(people: SeededMember[]) {
+  const handle = await db();
+  const now = new Date();
+  await handle.collection("users").insertMany(
+    people.map((p) => ({
+      _id: p._id,
+      username: `crowd-${p._id.toHexString()}`,
+      fullName: `Crowd ${p._id.toHexString()}`,
+      email: "",
+      emailNotifications: false,
+      collapseEmptyColumns: false,
+      kind: "human",
+      role: "member",
+      createdAt: now,
+      notifications: {
+        defaults: { task_created: p.defaults },
+        projects: p.override
+          ? [
+              {
+                project: PROJECT_ID,
+                matrix: p.override === "unanswered" ? {} : { task_created: p.override },
+              },
+            ]
+          : [],
+        chat: p.chat ?? { kind: "", webhookUrl: "" },
+      },
+    }))
+  );
+  await handle.collection("grants").insertMany(
+    people.map((p) => ({
+      subject: p._id,
+      relation: "member",
+      objectType: "project",
+      object: PROJECT_ID,
+      createdBy: ADMIN_ID,
+      createdAt: now,
+      updatedAt: now,
+    }))
+  );
+}
+
+async function announcedTo(title: string): Promise<string[]> {
+  const handle = await db();
+  const task = await handle.collection("tasks").findOne({ title });
+  if (!task) return [];
+  const rows = await handle
+    .collection("notifications")
+    .find({ task: task._id, type: "task_created" })
+    .toArray();
+  return rows.map((r) => String(r.recipient)).sort();
+}
+
+/**
+ * Each crowd matched the subscriber query before BP-705 and was dropped only after the limit, so
+ * it spent the cap on nobody. One crowd per clause, each a full cap on its own and all sorted
+ * ahead of the member: taking any single clause back out of the query lets that crowd alone fill
+ * the cap again.
+ */
+const TRAPS: { name: string; person: (_id: mongoose.Types.ObjectId) => SeededMember }[] = [
+  {
+    name: "a global tick this board's own grid switches off",
+    person: (_id) => ({ _id, defaults: cell({ inApp: true }), override: cell() }),
+  },
+  {
+    name: "a global tick this board's own grid leaves unanswered",
+    person: (_id) => ({ _id, defaults: cell({ inApp: true }), override: "unanswered" }),
+  },
+  {
+    name: "a chat tick with no connection",
+    person: (_id) => ({
+      _id,
+      defaults: cell({ chat: true }),
+      chat: { kind: "slack", webhookUrl: "" },
+    }),
+  },
+  {
+    name: "a mail tick with no address",
+    person: (_id) => ({ _id, defaults: cell({ email: true }) }),
+  },
+];
+
+for (const trap of TRAPS) {
+  test(`${trap.name} does not spend the cap meant for somebody who subscribed`, async ({
+    browser,
+  }) => {
+    await seedMembers(
+      Array.from({ length: FANOUT_LIMIT }, (_, i) => trap.person(aheadOfTheMember(i + 1)))
+    );
+
+    const memberContext = await browser.newContext();
+    const adminContext = await browser.newContext();
+    const member = await memberContext.newPage();
+    const admin = await adminContext.newPage();
+
+    await signIn(member, MEMBER_USERNAME, MEMBER_PASSWORD);
+    await member.goto("/notifications");
+    await subscribeToTheBoard(member);
+
+    const title = "Announced past a crowd that is not listening";
+    await signIn(admin, ADMIN_USERNAME, ADMIN_PASSWORD);
+    await createTask(admin, title);
+
+    await test.step("the one subscriber hears about it", async () => {
+      await expectFeedToCarry(member, title);
+    });
+
+    await test.step("and nobody the grid turned away was written to", async () => {
+      expect(await announcedTo(title)).toEqual([String(MEMBER_ID)]);
+    });
+
+    await memberContext.close();
+    await adminContext.close();
+  });
+}
+
+test("a board with more subscribers than the cap tells the first of them, and exactly that many", async ({
+  browser,
+}) => {
+  const crowd = Array.from({ length: FANOUT_LIMIT }, (_, i) => behindTheMember(i + 1));
+  await seedMembers(crowd.map((_id) => ({ _id, defaults: cell({ inApp: true }) })));
+  // The admin creates the task and sorts ahead of everybody, so a query that let the actor in would
+  // spend the first place on the one person createNotifications is bound to refuse
+  const actorSubscribed = await (await db())
+    .collection("users")
+    .updateOne(
+      { _id: ADMIN_ID },
+      { $set: { "notifications.defaults.task_created": cell({ inApp: true }) } }
+    );
+  expect(actorSubscribed.matchedCount).toBe(1);
+
+  const memberContext = await browser.newContext();
+  const adminContext = await browser.newContext();
+  const member = await memberContext.newPage();
+  const admin = await adminContext.newPage();
+
+  await signIn(member, MEMBER_USERNAME, MEMBER_PASSWORD);
+  await member.goto("/notifications");
+  await subscribeToTheBoard(member);
+
+  const title = "Announced to a board over its fan-out cap";
+  await signIn(admin, ADMIN_USERNAME, ADMIN_PASSWORD);
+  await createTask(admin, title);
+
+  // The member sorts first, so they are inside the cap and see it on their own screen
+  await test.step("the subscriber at the front of the queue hears about it", async () => {
+    await expectFeedToCarry(member, title);
+  });
+
+  await test.step("FANOUT_LIMIT are told, from the front of the queue", async () => {
+    await expect.poll(() => announcedTo(title), { timeout: 30_000 }).toHaveLength(FANOUT_LIMIT);
+    // Settled, then read again: all the rows go in one insertMany, but a count that is still
+    // climbing would pass the poll above on its way past
+    await member.waitForTimeout(1_000);
+    const told = await announcedTo(title);
+    expect(told).toHaveLength(FANOUT_LIMIT);
+    expect(told).toContain(String(MEMBER_ID));
+    expect(told).not.toContain(String(crowd[crowd.length - 1]));
+  });
+
+  await memberContext.close();
   await adminContext.close();
 });
 

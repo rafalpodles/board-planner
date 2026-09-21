@@ -14,8 +14,9 @@ let granted: string[] = [];
 
 /**
  * Enough of a query engine to answer the filter this module actually sends, and no more. It
- * honours $and/$or/$elemMatch and dotted paths, so a query that forgot the access half, or looked
- * up the wrong project's override, returns the wrong people here rather than passing anyway.
+ * honours $and/$or/$nor/$elemMatch/$ne/$nin/$gt/$type and dotted paths, so a query that forgot the
+ * access half, or looked up the wrong project's override, returns the wrong people here rather
+ * than passing anyway.
  */
 function valueAt(doc: unknown, path: string): unknown {
   return path.split(".").reduce<unknown>((node, key) => {
@@ -28,6 +29,7 @@ function matches(doc: Record<string, unknown>, filter: Record<string, unknown>):
   return Object.entries(filter).every(([key, condition]) => {
     if (key === "$and") return (condition as Record<string, unknown>[]).every((f) => matches(doc, f));
     if (key === "$or") return (condition as Record<string, unknown>[]).some((f) => matches(doc, f));
+    if (key === "$nor") return !(condition as Record<string, unknown>[]).some((f) => matches(doc, f));
 
     const actual = key === "_id" ? doc._id : valueAt(doc, key);
 
@@ -35,6 +37,17 @@ function matches(doc: Record<string, unknown>, filter: Record<string, unknown>):
       const clause = condition as Record<string, unknown>;
       if ("$in" in clause) {
         return (clause.$in as unknown[]).map(String).includes(String(actual));
+      }
+      if ("$ne" in clause) return String(actual) !== String(clause.$ne);
+      if ("$gt" in clause) return typeof actual === "string" && actual > String(clause.$gt);
+      if ("$type" in clause) {
+        if (clause.$type !== "object") throw new Error(`mock does not model $type ${clause.$type}`);
+        return actual !== null && typeof actual === "object" && !Array.isArray(actual);
+      }
+      if ("$nin" in clause) {
+        return !(clause.$nin as unknown[]).some((v) =>
+          v === null ? actual === null || actual === undefined : String(v) === String(actual)
+        );
       }
       if ("$elemMatch" in clause) {
         const inner = clause.$elemMatch as Record<string, unknown>;
@@ -160,9 +173,12 @@ describe("who hears that a task was created", () => {
 
   it("picks somebody who ticked it for this board only", async () => {
     stored = [
-      member(1, {
-        projects: [{ project: PROJECT, matrix: { task_created: row({ email: true }) } }],
-      }),
+      {
+        ...member(1, {
+          projects: [{ project: PROJECT, matrix: { task_created: row({ email: true }) } }],
+        }),
+        email: "someone@example.com",
+      },
     ];
     granted = [id(1)];
 
@@ -180,9 +196,8 @@ describe("who hears that a task was created", () => {
     expect(await boardFeedSubscribers(PROJECT)).toEqual([]);
   });
 
-  // The case no query over paths can express: the candidate matches on the global grid, and the
-  // project's own grid — which is the one in force — switches the row off. Only resolveChannels
-  // knows that, which is why it and not the query makes the decision.
+  // The candidate's global grid has the row on, and the project's own grid — which is the one in
+  // force — switches it off.
   it("obeys an override that switches the row off for this board", async () => {
     stored = [
       member(1, {
@@ -296,6 +311,124 @@ describe("a board with more subscribers than the cap", () => {
     expect(await boardFeedSubscribers(PROJECT)).toEqual([String(subscriber._id)]);
   });
 
+  // BP-705. Each of these matched the query before it carried resolveChannels' whole verdict, was
+  // dropped after the limit, and so spent a place the subscriber behind them was refused.
+  describe("candidates the grid turns away do not spend the cap", () => {
+    const subscriber = () =>
+      member(BOARD_FEED_FANOUT_LIMIT + 1, { defaults: { task_created: row({ inApp: true }) } });
+
+    it("an override that switches the row off for this board", async () => {
+      const unsubscribedHere = Array.from({ length: BOARD_FEED_FANOUT_LIMIT }, (_, i) =>
+        member(i + 1, {
+          defaults: { task_created: row({ inApp: true }) },
+          projects: [{ project: PROJECT, matrix: { task_created: row() } }],
+        })
+      );
+      stored = [...unsubscribedHere, subscriber()];
+      granted = stored.map((u) => String(u._id));
+
+      expect(await boardFeedSubscribers(PROJECT)).toEqual([id(BOARD_FEED_FANOUT_LIMIT + 1)]);
+    });
+
+    it("an override that leaves the row unanswered, which for this row is off", async () => {
+      const unsubscribedHere = Array.from({ length: BOARD_FEED_FANOUT_LIMIT }, (_, i) =>
+        member(i + 1, {
+          defaults: { task_created: row({ inApp: true }) },
+          projects: [{ project: PROJECT, matrix: {} }],
+        })
+      );
+      stored = [...unsubscribedHere, subscriber()];
+      granted = stored.map((u) => String(u._id));
+
+      expect(await boardFeedSubscribers(PROJECT)).toEqual([id(BOARD_FEED_FANOUT_LIMIT + 1)]);
+    });
+
+    it("a chat tick with nothing connected, globally or on this board", async () => {
+      const unconnected = Array.from({ length: BOARD_FEED_FANOUT_LIMIT }, (_, i) =>
+        i % 2
+          ? member(i + 1, { defaults: { task_created: row({ chat: true }) } })
+          : member(i + 1, {
+              projects: [{ project: PROJECT, matrix: { task_created: row({ chat: true }) } }],
+              chat: { kind: "slack", webhookUrl: "" },
+            })
+      );
+      stored = [...unconnected, subscriber()];
+      granted = stored.map((u) => String(u._id));
+
+      expect(await boardFeedSubscribers(PROJECT)).toEqual([id(BOARD_FEED_FANOUT_LIMIT + 1)]);
+    });
+
+    it("a mail tick with no address to send it to", async () => {
+      const unreachable = Array.from({ length: BOARD_FEED_FANOUT_LIMIT }, (_, i) =>
+        member(i + 1, { defaults: { task_created: row({ email: true }) } })
+      );
+      stored = [...unreachable, subscriber()];
+      granted = stored.map((u) => String(u._id));
+
+      expect(await boardFeedSubscribers(PROJECT)).toEqual([id(BOARD_FEED_FANOUT_LIMIT + 1)]);
+    });
+
+    it("still counts a mail tick from somebody with an address", async () => {
+      stored = [
+        {
+          ...member(1, { defaults: { task_created: row({ email: true }) } }),
+          email: "someone@example.com",
+        },
+      ];
+      granted = [id(1)];
+
+      expect(await boardFeedSubscribers(PROJECT)).toEqual([id(1)]);
+    });
+
+    // overrideFor reads an entry without a matrix as no override, so the global grid is in force
+    it("an entry for this board with no matrix leaves the global tick in force", async () => {
+      stored = [
+        member(1, {
+          defaults: { task_created: row({ inApp: true }) },
+          projects: [{ project: PROJECT, matrix: undefined as unknown as Record<string, unknown> }],
+        }),
+      ];
+      granted = [id(1)];
+
+      expect(await boardFeedSubscribers(PROJECT)).toEqual([id(1)]);
+    });
+
+    it("the person who created the task", async () => {
+      stored = crowd(BOARD_FEED_FANOUT_LIMIT + 1);
+      granted = stored.map((u) => String(u._id));
+
+      const told = await boardFeedSubscribers(PROJECT, id(1));
+
+      expect(told).toHaveLength(BOARD_FEED_FANOUT_LIMIT);
+      expect(told).not.toContain(id(1));
+      expect(told).toContain(id(BOARD_FEED_FANOUT_LIMIT + 1));
+    });
+
+    it("still counts a connected chat tick, on this board, as a subscription", async () => {
+      stored = [
+        member(1, {
+          projects: [{ project: PROJECT, matrix: { task_created: row({ chat: true }) } }],
+          chat: { kind: "discord", webhookUrl: "enc:abc" },
+        }),
+      ];
+      granted = [id(1)];
+
+      expect(await boardFeedSubscribers(PROJECT)).toEqual([id(1)]);
+    });
+  });
+
+  // Exactly at the cap nobody was left out, and a log line saying otherwise sends an operator
+  // looking for people who were never missing.
+  it("stays quiet with exactly BOARD_FEED_FANOUT_LIMIT subscribers", async () => {
+    const reported = vi.spyOn(console, "error").mockImplementation(() => {});
+    stored = crowd(BOARD_FEED_FANOUT_LIMIT);
+    granted = stored.map((u) => String(u._id));
+
+    expect(await boardFeedSubscribers(PROJECT)).toHaveLength(BOARD_FEED_FANOUT_LIMIT);
+    expect(reported).not.toHaveBeenCalled();
+    reported.mockRestore();
+  });
+
   it("stays quiet when everybody fitted", async () => {
     const reported = vi.spyOn(console, "error").mockImplementation(() => {});
     stored = crowd(3);
@@ -364,7 +497,12 @@ describe("dispatching it", () => {
   it("assembles it once, and hands it on, when somebody did", async () => {
     const built = { kicker: "New on the board", taskKey: "BP-7", taskTitle: "Bound the fan-out" };
     const email = vi.fn().mockResolvedValue(built);
-    stored = [member(1, { defaults: { task_created: row({ email: true }) } })];
+    stored = [
+      {
+        ...member(1, { defaults: { task_created: row({ email: true }) } }),
+        email: "someone@example.com",
+      },
+    ];
     granted = [id(1)];
 
     await notifyBoardFeed({ ...params, email });

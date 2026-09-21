@@ -176,6 +176,19 @@ describe("lineFor", () => {
     expect(line.title).toBe("moved to In Review");
   });
 
+  it("strips a leading key (a run abandoned, which is also status_changed)", () => {
+    const line = lineFor(
+      {
+        type: "status_changed",
+        title: "TP-2 needs a human — the run was abandoned",
+        task: { taskNumber: 2 },
+        project: PROJECT_REF,
+      },
+      origin
+    );
+    expect(line.title).toBe("needs a human — the run was abandoned");
+  });
+
   it("strips a trailing key (comment)", () => {
     const line = lineFor(
       { title: "New comment on TP-2", task: { taskNumber: 2 }, project: PROJECT_REF },
@@ -259,6 +272,21 @@ describe("lineFor", () => {
       origin
     );
     expect(line.title).toBe("mentions TP-20 in its description");
+  });
+
+  // taskKeyOf spells an unresolved key `#42`, and a leading one is no more the row's key than a
+  // trailing one: there is no key to label the row with, so the title keeps it
+  it("leaves a leading #42 alone when the project cannot be resolved", () => {
+    const line = lineFor(
+      {
+        type: "task_assigned",
+        title: "#42 assigned to you",
+        task: { taskNumber: 42 },
+        project: null,
+      },
+      origin
+    );
+    expect(line).toEqual({ key: "—", title: "#42 assigned to you", url: undefined });
   });
 
   it("leaves the title untouched when the project cannot be resolved", () => {

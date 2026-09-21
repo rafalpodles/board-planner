@@ -1,18 +1,22 @@
 import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 import mongoose from "mongoose";
 import {
+  ADMIN_ID,
   ADMIN_PASSWORD,
   ADMIN_USERNAME,
   BYSTANDER_PASSWORD,
   BYSTANDER_USERNAME,
+  MEMBER_ID,
   MEMBER_PASSWORD,
   MEMBER_USERNAME,
   PROJECT_KEY,
+  PROJECT_NAME,
+  SIBLING_TASK_NUMBER,
   seed,
   seedBoardFeedBystander,
 } from "./seed";
 import { signIn as arriveSignedIn, signInThroughForm } from "./session";
-import { bodyOf, refuseMailFor, stopRefusing, type StubMessage } from "./mailbox";
+import { refuseMailFor, stopRefusing, type StubMessage } from "./mailbox";
 import {
   assignANewTask,
   clearTheMailbox,
@@ -21,6 +25,7 @@ import {
   expectMailFor,
   giveThemMailboxes,
   mail,
+  saved,
   setGlobalCell,
 } from "./notification-grid";
 
@@ -100,7 +105,7 @@ async function digestsFor(address: string): Promise<string[]> {
   const arrived: StubMessage[] = await mail();
   return arrived
     .filter((m) => m.to.includes(address))
-    .map(bodyOf)
+    .map((m) => decoded(m.data))
     .filter((body) => body.includes(DIGEST_KICKER));
 }
 
@@ -124,6 +129,26 @@ async function keyOf(title: string): Promise<string> {
 
 /** A key on a line of its own terms: `TP-7` must not be satisfied by `TP-70`. */
 const mentions = (body: string, key: string) => new RegExp(`${key}(?![0-9])`).test(body);
+
+/**
+ * Quoted-printable undone in one pass, soft breaks and `=XX` alike, from the raw message. The
+ * mailbox's `bodyOf` only reverses soft breaks and `=3D`, which leaves the em dash an unresolved
+ * row is labelled with as `=E2=80=94` and a whole-line match on it impossible.
+ */
+function decoded(data: string): string {
+  const bytes = data.replace(/=(?:\r?\n|([0-9A-F]{2}))/g, (_, hex?: string) =>
+    hex ? String.fromCharCode(parseInt(hex, 16)) : ""
+  );
+  return Buffer.from(bytes, "latin1").toString("utf8");
+}
+
+const linesOf = (body: string) => body.split(/\r?\n/);
+
+/** One digest row as the text part composes it, `key: title`, and nothing else on the line. */
+const row = (line: string) => new RegExp(`^${line.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
+
+/** Every line of the text part that is a digest row: a task key, or an unresolved row's dash. */
+const rowsIn = (lines: string[]) => lines.filter((l) => /^([A-Z]+-\d+|—): /.test(l));
 
 test.beforeEach(async () => {
   await seed();
@@ -204,9 +229,9 @@ test("the morning message carries the day the reader banked, and reaches only th
       expect(body).toMatch(/(^|[^0-9])2 updates on your tasks/);
       for (const key of keys) {
         expect(mentions(body, key), `${key} is not in the digest`).toBe(true);
-        // The line as the text part composes it: the key labels the row, so `lineFor` takes the
-        // key off the front of the stored title rather than printing "TP-8: TP-8 assigned to you"
-        expect(body).toContain(`${key}: assigned to you`);
+        // The line as the text part composes it, as a whole line: `lineFor` takes the key off the
+        // front of the stored title, and "TP-8: TP-8 assigned to you" contains the substring too
+        expect(linesOf(body)).toContainEqual(expect.stringMatching(row(`${key}: assigned to you`)));
       }
       // Assembled from the stored rows, each of which keeps the link its own mail would have had
       expect(body).toContain(`/projects/${PROJECT_KEY}/tasks/`);
@@ -300,6 +325,164 @@ test("a row the reader has already opened is not repeated in the morning", async
 
   await memberContext.close();
   await adminContext.close();
+});
+
+/**
+ * BP-697. The test above asserts one row shape out of the six a digest can carry, and asserted it
+ * as a substring — which "TP-2: TP-2 assigned to you", the doubled key BP-692 fixed, satisfies.
+ * Each notification type is produced here by the gesture that produces it, and every row is
+ * matched as a whole line of the text part, so a key printed twice fails wherever it sits.
+ *
+ * Three rows are not affected by `lineFor`'s key strip at all, and that is by design rather than a
+ * gap in this test: the board feed's key sits mid-sentence ("New task TP-9 in …"), task_linked is
+ * exempt by type because its sentence names two tasks, and an unresolved row has no key to strip.
+ *
+ * The admin reads the digest and the member does everything, because the one row no gesture can
+ * produce — a project that no longer resolves — is planted, and only an instance admin's digest
+ * is not narrowed to boards that still exist.
+ */
+test("every kind of row reaches the morning message as a line of its own", async ({
+  browser,
+  request,
+}) => {
+  const ADMIN_MAILBOX = "admin@e2e.invalid";
+  await giveThemMailboxes({ [ADMIN_USERNAME]: ADMIN_MAILBOX });
+
+  const adminContext = await browser.newContext();
+  const memberContext = await browser.newContext();
+  const admin = await adminContext.newPage();
+  const member = await memberContext.newPage();
+  await signIn(admin, ADMIN_USERNAME, ADMIN_PASSWORD);
+  await signIn(member, MEMBER_USERNAME, MEMBER_PASSWORD);
+
+  await test.step("the admin takes every row by mail, collected into a digest", async () => {
+    await admin.goto("/settings/notifications");
+    for (const label of [
+      ASSIGNED_ROW,
+      "Somebody mentions you",
+      "A task you follow changes column",
+      "A task you follow gets a comment",
+      "A task you follow gains or loses a dependency",
+      "Anybody creates a task on a board",
+    ]) {
+      await admin.getByRole("checkbox", { name: `${label} — E-mail` }).check();
+    }
+    const written = saved(admin);
+    await admin.getByRole("button", { name: "Save" }).click();
+    await written;
+
+    const stored = admin.waitForResponse(
+      (r) => r.request().method() === "PUT" && r.url().includes("/api/users/me") && r.status() < 400
+    );
+    await admin.getByLabel(DIGEST_BOX).check();
+    await stored;
+  });
+
+  const title = "Every shape of row on one task";
+  await test.step("the member creates a task and hands it to the admin", async () => {
+    await assignANewTask(member, title, ADMIN_USERNAME);
+  });
+  const key = await keyOf(title);
+  const taskUrl = `/projects/${PROJECT_KEY}/tasks/${key.split("-")[1]}`;
+
+  await test.step("moves it", async () => {
+    await member.goto(taskUrl);
+    const moved = member.waitForResponse(
+      (r) =>
+        r.request().method() === "PATCH" &&
+        r.status() < 400 &&
+        /\/tasks\/.*\/status$/.test(new URL(r.url()).pathname)
+    );
+    await member.getByRole("combobox", { name: "Status" }).click();
+    await member.getByRole("option", { name: "In Progress" }).click();
+    await moved;
+  });
+
+  const comment = async (text: string) => {
+    const posted = member.waitForResponse(
+      (r) =>
+        r.request().method() === "POST" &&
+        /\/tasks\/[^/]+\/comments$/.test(new URL(r.url()).pathname) &&
+        r.status() < 400
+    );
+    await member.getByPlaceholder("Write a comment, @mention someone…").fill(text);
+    await member.getByRole("button", { name: "Comment" }).click();
+    await posted;
+  };
+  await test.step("comments on it, then mentions the admin", async () => {
+    await comment("Picked this up for the morning");
+    await comment(`@${ADMIN_USERNAME} one more for your list`);
+  });
+
+  const other = `${PROJECT_KEY}-${SIBLING_TASK_NUMBER}`;
+  await test.step("and links it to another task", async () => {
+    await member.getByRole("button", { name: "+ Add dependency" }).click();
+    await member.getByLabel("Link type").selectOption("relates");
+    await member.getByLabel("Search tasks to link").fill(other);
+    const linked = member.waitForResponse(
+      (r) => r.request().method() === "POST" && /\/links$/.test(new URL(r.url()).pathname)
+    );
+    await member.getByRole("button", { name: new RegExp(other) }).click();
+    expect((await linked).status()).toBe(200);
+  });
+
+  const handle = await db();
+  const task = await handle.collection("tasks").findOne({ title });
+  // Setup, not subject: no gesture leaves a row pointing at a project that no longer resolves, so
+  // one is written the way a writer would have spelt it — `taskKeyOf` gives `#42` without a key
+  const unresolved = `#${task!.taskNumber} assigned to you`;
+  await handle.collection("notifications").insertOne({
+    recipient: ADMIN_ID,
+    type: "task_assigned",
+    task: task!._id,
+    project: new mongoose.Types.ObjectId(),
+    actor: MEMBER_ID,
+    title: unresolved,
+    body: title,
+    read: false,
+    inApp: true,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+
+  const expected = [
+    `${key}: New task ${key} in ${PROJECT_NAME}`,
+    `${key}: assigned to you`,
+    `${key}: moved to In Progress`,
+    `${key}: New comment on`,
+    `${key}: ${MEMBER_USERNAME} mentioned you in`,
+    `${key}: ${MEMBER_USERNAME} linked ${key} to ${other}`,
+    `—: ${unresolved}`,
+  ];
+
+  // Each dispatch is fire-and-forget; the rows are what the digest is built from
+  await expect
+    .poll(() => handle.collection("notifications").countDocuments({ recipient: ADMIN_ID }), {
+      timeout: 30_000,
+    })
+    .toBe(expected.length);
+
+  await test.step("the scheduler runs, and writes to the admin", async () => {
+    expect(await runTheDigest(request)).toBe(1);
+  });
+
+  let lines: string[] = [];
+  await expect(async () => {
+    const digests = await digestsFor(ADMIN_MAILBOX);
+    expect(digests, "the admin was sent no digest").toHaveLength(1);
+    lines = linesOf(digests[0]);
+  }).toPass({ timeout: 30_000 });
+
+  // Soft, so one run names every shape that broke rather than the first
+  for (const line of expected) {
+    expect.soft(lines, `no whole line "${line}"`).toContainEqual(expect.stringMatching(row(line)));
+  }
+  // And nothing besides: a row printed twice, or one this list forgot, is a line too many
+  expect(rowsIn(lines).sort()).toEqual([...expected].sort());
+  expect(lines).toContainEqual(expect.stringMatching(/(^|[^0-9])7 updates on your tasks/));
+
+  await adminContext.close();
+  await memberContext.close();
 });
 
 /**
