@@ -41,6 +41,7 @@ function matches(doc: Record<string, unknown>, filter: Record<string, unknown>):
       if ("$ne" in clause) return String(actual) !== String(clause.$ne);
       if ("$gt" in clause) return typeof actual === "string" && actual > String(clause.$gt);
       if ("$type" in clause) {
+        if (clause.$type !== "object") throw new Error(`mock does not model $type ${clause.$type}`);
         return actual !== null && typeof actual === "object" && !Array.isArray(actual);
       }
       if ("$nin" in clause) {
