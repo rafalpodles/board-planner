@@ -465,3 +465,57 @@ describe("where a toast lands", () => {
     expect(trayClasses()).toContain("z-50");
   });
 });
+
+// BP-753: a toast that offers the next step, rather than only reporting the last one
+describe("a toast with an action", () => {
+  function ActionRaiser({ onAction }: { onAction: () => void }) {
+    const { toast } = useToast();
+    raiseWithAction = () =>
+      toast("Ada's account is ready.", "success", {
+        action: { label: "Add to a board", onClick: onAction },
+      });
+    return null;
+  }
+  let raiseWithAction: () => void;
+
+  function mountWithAction(onAction = vi.fn()) {
+    stateViewport(800);
+    render(
+      <ToastProvider>
+        <Raiser />
+        <ActionRaiser onAction={onAction} />
+      </ToastProvider>
+    );
+    return onAction;
+  }
+
+  it("runs the action and closes the toast", () => {
+    const onAction = mountWithAction();
+    act(() => raiseWithAction());
+
+    act(() => screen.getByRole("button", { name: "Add to a board" }).click());
+
+    expect(onAction).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("toast")).toBeNull();
+  });
+
+  it("stays long enough to be acted on, where a plain toast has gone", () => {
+    vi.useFakeTimers();
+    try {
+      mountWithAction();
+      act(() => raiseWithAction());
+      act(() => raise("Saved"));
+      expect(screen.getAllByTestId("toast")).toHaveLength(2);
+
+      act(() => vi.advanceTimersByTime(3000));
+      expect(screen.getAllByTestId("toast").map((t) => t.textContent)).toEqual([
+        "Ada's account is ready.Add to a board",
+      ]);
+
+      act(() => vi.advanceTimersByTime(7000));
+      expect(screen.queryByTestId("toast")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

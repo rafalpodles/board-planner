@@ -14,6 +14,15 @@ vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/hooks/use-auth", () => ({ useAuth: () => auth }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast }) }));
+vi.mock("@/hooks/use-projects", () => ({
+  useProjects: () => ({
+    projects: [
+      { _id: "p1", key: "TP", name: "Test Project" },
+      { _id: "p2", key: "ORB", name: "Orbit" },
+    ],
+    isLoading: false,
+  }),
+}));
 
 const OTHER = { _id: "u2", username: "ada", fullName: "Ada", role: "member", email: "" };
 
@@ -88,7 +97,7 @@ describe("the users page, after a save that is followed by a refetch", () => {
 
   it("does the same after a create, which is a different flag on a different dialog", async () => {
     let releaseList: (value: unknown) => void = () => {};
-    api.post.mockResolvedValue({ _id: "u3" });
+    api.post.mockResolvedValue({ _id: "u3", fullName: "Grace Hopper" });
 
     render(<UsersPage />);
     await screen.findByText("Ada");
@@ -225,7 +234,7 @@ describe("the users page, after a save that is followed by a refetch", () => {
   });
 
   it("says a user was created, and says separately when only the list is stale", async () => {
-    api.post.mockResolvedValue({ _id: "u3" });
+    api.post.mockResolvedValue({ _id: "u3", fullName: "Grace Hopper" });
 
     render(<UsersPage />);
     await screen.findByText("Ada");
@@ -245,8 +254,80 @@ describe("the users page, after a save that is followed by a refetch", () => {
 
     // The account exists. Without its own line, the only thing a create ever said was that the
     // list is stale — which reads as the create having failed.
-    expect(toast).toHaveBeenCalledWith("User created", "success");
+    expect(toast).toHaveBeenCalledWith(
+      "Grace Hopper's account is ready. They will see no board until you add them to one.",
+      "success",
+      { action: { label: "Add to a board", onClick: expect.any(Function) } }
+    );
     expect(toast).toHaveBeenCalledWith(LIST_REFRESH_FAILED, "error");
     expect(screen.queryByRole("dialog", { name: "New User" })).toBeNull();
+  });
+});
+
+// BP-753: a new account reaches no board, and the create toast is where the admin learns that
+describe("adding a new account to a board", () => {
+  async function createGrace() {
+    api.post.mockResolvedValue({ _id: "u3", fullName: "Grace Hopper" });
+    render(<UsersPage />);
+    await screen.findByText("Ada");
+    act(() => screen.getByRole("button", { name: /new user/i }).click());
+    type(screen.getByLabelText("Username") as HTMLInputElement, "grace");
+    type(screen.getByLabelText("Password") as HTMLInputElement, "hopper-1906");
+    type(screen.getByLabelText("Full Name") as HTMLInputElement, "Grace Hopper");
+    await act(async () => {
+      screen.getByRole("button", { name: "Create User" }).click();
+    });
+    const [, , options] = toast.mock.calls.find(([message]) =>
+      String(message).startsWith("Grace Hopper's account is ready")
+    )!;
+    return options as { action: { onClick: () => void } };
+  }
+
+  it("the toast's action opens a board picker for that person, and adding grants the chosen role", async () => {
+    api.put.mockResolvedValue({ ok: true });
+    const { action } = await createGrace();
+
+    act(() => action.onClick());
+    const dialog = await screen.findByRole("dialog", { name: "Add Grace Hopper to a board" });
+    expect(dialog).toBeTruthy();
+
+    const board = screen.getByLabelText("Board") as HTMLSelectElement;
+    const role = screen.getByLabelText("Role") as HTMLSelectElement;
+    act(() => {
+      board.value = "p2";
+      board.dispatchEvent(new Event("change", { bubbles: true }));
+      role.value = "owner";
+      role.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await act(async () => {
+      screen.getByRole("button", { name: "Add to board" }).click();
+    });
+
+    expect(api.put).toHaveBeenCalledWith("/api/projects/p2/members", {
+      userId: "u3",
+      relation: "owner",
+    });
+    expect(toast).toHaveBeenCalledWith("Grace Hopper is now an owner of Orbit", "success");
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Add Grace Hopper to a board" })).toBeNull()
+    );
+  });
+
+  it("keeps the picker open and says why when the grant is refused", async () => {
+    api.put.mockRejectedValue(new Error("Forbidden"));
+    const { action } = await createGrace();
+
+    act(() => action.onClick());
+    await screen.findByRole("dialog", { name: "Add Grace Hopper to a board" });
+    await act(async () => {
+      screen.getByRole("button", { name: "Add to board" }).click();
+    });
+
+    expect(api.put).toHaveBeenCalledWith("/api/projects/p1/members", {
+      userId: "u3",
+      relation: "member",
+    });
+    expect(await screen.findByText("Forbidden")).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Add Grace Hopper to a board" })).toBeTruthy();
   });
 });
