@@ -102,6 +102,15 @@ test("the planning pane heads the sprint with its points, and taking a task out 
   await expect(heading).toHaveText(`${ESTIMATE_SPRINT_NAME} (4) · 8 Points`);
   await expect(estimateProgress(page)).toHaveText("5/8 Points");
 
+  // The board re-reads its sprints after the move, and that answer would carry the new total
+  // too. Held, it leaves the planning view's own list as the only source the header can use.
+  await page.route(
+    (url) => url.pathname.endsWith("/sprints"),
+    async (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      await new Promise(() => {});
+    }
+  );
   const removed = page.waitForResponse(
     (r) =>
       r.request().method() === "PUT" &&
