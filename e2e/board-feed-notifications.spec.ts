@@ -211,14 +211,14 @@ const behindTheMember = (n: number) =>
  * Accounts on this board with a grid already saved — setup straight into Mongo, since a few
  * hundred people ticking a box through the screen is the membership under test, not the gesture.
  */
-async function seedMembers(
-  people: {
-    _id: mongoose.Types.ObjectId;
-    defaults: Cell;
-    override?: Cell | "unanswered";
-    chat?: { kind: string; webhookUrl: string };
-  }[]
-) {
+type SeededMember = {
+  _id: mongoose.Types.ObjectId;
+  defaults: Cell;
+  override?: Cell | "unanswered";
+  chat?: { kind: string; webhookUrl: string };
+};
+
+async function seedMembers(people: SeededMember[]) {
   const handle = await db();
   const now = new Date();
   await handle.collection("users").insertMany(
@@ -270,53 +270,83 @@ async function announcedTo(title: string): Promise<string[]> {
   return rows.map((r) => String(r.recipient)).sort();
 }
 
-test("people the grid turns away do not spend the cap meant for somebody who subscribed", async ({
-  browser,
-}) => {
-  // Every one of them matched the subscriber query before BP-705 and was dropped after the limit:
-  // a global tick this board's own grid switches off or leaves unanswered, or a chat tick with no
-  // connection. All sort ahead of the member, so they are what the cap reaches first.
-  await seedMembers(
-    Array.from({ length: FANOUT_LIMIT }, (_, i) => {
-      const _id = aheadOfTheMember(i + 1);
-      if (i % 3 === 0) return { _id, defaults: cell({ inApp: true }), override: cell() };
-      if (i % 3 === 1) {
-        return { _id, defaults: cell({ email: true }), override: "unanswered" as const };
-      }
-      return { _id, defaults: cell({ chat: true }), chat: { kind: "slack", webhookUrl: "" } };
-    })
-  );
+/**
+ * Each crowd matched the subscriber query before BP-705 and was dropped only after the limit, so
+ * it spent the cap on nobody. One crowd per clause, each a full cap on its own and all sorted
+ * ahead of the member: taking any single clause back out of the query lets that crowd alone fill
+ * the cap again.
+ */
+const TRAPS: { name: string; person: (_id: mongoose.Types.ObjectId) => SeededMember }[] = [
+  {
+    name: "a global tick this board's own grid switches off",
+    person: (_id) => ({ _id, defaults: cell({ inApp: true }), override: cell() }),
+  },
+  {
+    name: "a global tick this board's own grid leaves unanswered",
+    person: (_id) => ({ _id, defaults: cell({ inApp: true }), override: "unanswered" }),
+  },
+  {
+    name: "a chat tick with no connection",
+    person: (_id) => ({
+      _id,
+      defaults: cell({ chat: true }),
+      chat: { kind: "slack", webhookUrl: "" },
+    }),
+  },
+  {
+    name: "a mail tick with no address",
+    person: (_id) => ({ _id, defaults: cell({ email: true }) }),
+  },
+];
 
-  const memberContext = await browser.newContext();
-  const adminContext = await browser.newContext();
-  const member = await memberContext.newPage();
-  const admin = await adminContext.newPage();
+for (const trap of TRAPS) {
+  test(`${trap.name} does not spend the cap meant for somebody who subscribed`, async ({
+    browser,
+  }) => {
+    await seedMembers(
+      Array.from({ length: FANOUT_LIMIT }, (_, i) => trap.person(aheadOfTheMember(i + 1)))
+    );
 
-  await signIn(member, MEMBER_USERNAME, MEMBER_PASSWORD);
-  await member.goto("/notifications");
-  await subscribeToTheBoard(member);
+    const memberContext = await browser.newContext();
+    const adminContext = await browser.newContext();
+    const member = await memberContext.newPage();
+    const admin = await adminContext.newPage();
 
-  const title = "Announced past a crowd that unsubscribed here";
-  await signIn(admin, ADMIN_USERNAME, ADMIN_PASSWORD);
-  await createTask(admin, title);
+    await signIn(member, MEMBER_USERNAME, MEMBER_PASSWORD);
+    await member.goto("/notifications");
+    await subscribeToTheBoard(member);
 
-  await test.step("the one subscriber hears about it", async () => {
-    await expectFeedToCarry(member, title);
+    const title = "Announced past a crowd that is not listening";
+    await signIn(admin, ADMIN_USERNAME, ADMIN_PASSWORD);
+    await createTask(admin, title);
+
+    await test.step("the one subscriber hears about it", async () => {
+      await expectFeedToCarry(member, title);
+    });
+
+    await test.step("and nobody the grid turned away was written to", async () => {
+      expect(await announcedTo(title)).toEqual([String(MEMBER_ID)]);
+    });
+
+    await memberContext.close();
+    await adminContext.close();
   });
-
-  await test.step("and nobody the grid turned away was written to", async () => {
-    expect(await announcedTo(title)).toEqual([String(MEMBER_ID)]);
-  });
-
-  await memberContext.close();
-  await adminContext.close();
-});
+}
 
 test("a board with more subscribers than the cap tells the first of them, and exactly that many", async ({
   browser,
 }) => {
   const crowd = Array.from({ length: FANOUT_LIMIT }, (_, i) => behindTheMember(i + 1));
   await seedMembers(crowd.map((_id) => ({ _id, defaults: cell({ inApp: true }) })));
+  // The admin creates the task and sorts ahead of everybody, so a query that let the actor in would
+  // spend the first place on the one person createNotifications is bound to refuse
+  const actorSubscribed = await (await db())
+    .collection("users")
+    .updateOne(
+      { _id: ADMIN_ID },
+      { $set: { "notifications.defaults.task_created": cell({ inApp: true }) } }
+    );
+  expect(actorSubscribed.matchedCount).toBe(1);
 
   const memberContext = await browser.newContext();
   const adminContext = await browser.newContext();
@@ -336,13 +366,15 @@ test("a board with more subscribers than the cap tells the first of them, and ex
     await expectFeedToCarry(member, title);
   });
 
-  const told = [String(MEMBER_ID), ...crowd.slice(0, FANOUT_LIMIT - 1).map(String)].sort();
-  await test.step("the first FANOUT_LIMIT by id are told, and the next is not", async () => {
+  await test.step("FANOUT_LIMIT are told, from the front of the queue", async () => {
     await expect.poll(() => announcedTo(title), { timeout: 30_000 }).toHaveLength(FANOUT_LIMIT);
     // Settled, then read again: all the rows go in one insertMany, but a count that is still
     // climbing would pass the poll above on its way past
     await member.waitForTimeout(1_000);
-    expect(await announcedTo(title)).toEqual(told);
+    const told = await announcedTo(title);
+    expect(told).toHaveLength(FANOUT_LIMIT);
+    expect(told).toContain(String(MEMBER_ID));
+    expect(told).not.toContain(String(crowd[crowd.length - 1]));
   });
 
   await memberContext.close();

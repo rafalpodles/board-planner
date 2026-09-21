@@ -16,7 +16,7 @@ import {
   seedBoardFeedBystander,
 } from "./seed";
 import { signIn as arriveSignedIn, signInThroughForm } from "./session";
-import { bodyOf, refuseMailFor, stopRefusing, type StubMessage } from "./mailbox";
+import { refuseMailFor, stopRefusing, type StubMessage } from "./mailbox";
 import {
   assignANewTask,
   clearTheMailbox,
@@ -105,7 +105,7 @@ async function digestsFor(address: string): Promise<string[]> {
   const arrived: StubMessage[] = await mail();
   return arrived
     .filter((m) => m.to.includes(address))
-    .map(bodyOf)
+    .map((m) => decoded(m.data))
     .filter((body) => body.includes(DIGEST_KICKER));
 }
 
@@ -131,16 +131,18 @@ async function keyOf(title: string): Promise<string> {
 const mentions = (body: string, key: string) => new RegExp(`${key}(?![0-9])`).test(body);
 
 /**
- * The digest's plain-text part as lines, quoted-printable undone in full. `bodyOf` only reverses
- * soft breaks and `=3D`, which leaves the em dash an unresolved row is labelled with as
- * `=E2=80=94` and a whole-line match on it impossible.
+ * Quoted-printable undone in one pass, soft breaks and `=XX` alike, from the raw message. The
+ * mailbox's `bodyOf` only reverses soft breaks and `=3D`, which leaves the em dash an unresolved
+ * row is labelled with as `=E2=80=94` and a whole-line match on it impossible.
  */
-function linesOf(body: string): string[] {
-  const bytes = body.replace(/=([0-9A-F]{2})/g, (_, hex) =>
-    String.fromCharCode(parseInt(hex, 16))
+function decoded(data: string): string {
+  const bytes = data.replace(/=(?:\r?\n|([0-9A-F]{2}))/g, (_, hex?: string) =>
+    hex ? String.fromCharCode(parseInt(hex, 16)) : ""
   );
-  return Buffer.from(bytes, "latin1").toString("utf8").split(/\r?\n/);
+  return Buffer.from(bytes, "latin1").toString("utf8");
 }
+
+const linesOf = (body: string) => body.split(/\r?\n/);
 
 /** One digest row as the text part composes it, `key: title`, and nothing else on the line. */
 const row = (line: string) => new RegExp(`^${line.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);

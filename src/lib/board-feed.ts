@@ -29,6 +29,8 @@ const CHAT_CONNECTED = {
   "notifications.chat.webhookUrl": { $nin: ["", null] },
 };
 
+const HAS_ADDRESS = { email: { $gt: "" } };
+
 type Clause = Record<string, unknown>;
 
 function prefixed(prefix: string, clause: Clause): Clause {
@@ -36,13 +38,14 @@ function prefixed(prefix: string, clause: Clause): Clause {
 }
 
 /**
- * The cells that make resolveChannels answer yes, for the query that has to find them by path.
- * `within` is where the row lives relative to the user document; the chat connection never moves.
+ * The cells that make resolveChannels answer yes, for the query that has to find them by path —
+ * and, for mail, an address to send it to, since a tick with none delivers nothing either.
+ * `within` is where the row lives relative to the user document.
  */
 function deliverable(row: string, within: (clause: Clause) => Clause): Clause[] {
   return [
     within({ [`${row}.inApp`]: true }),
-    within({ [`${row}.email`]: true }),
+    { $and: [within({ [`${row}.email`]: true }), HAS_ADDRESS] },
     { $and: [within({ [`${row}.chat`]: true }), CHAT_CONNECTED] },
   ];
 }
@@ -52,9 +55,9 @@ function deliverable(row: string, within: (clause: Clause) => Clause): Clause[] 
  *
  * The whole of resolveChannels' verdict is in the query, not sifted afterwards, because the cap
  * is applied by the query: a candidate dropped after it — a global tick this board's override
- * switches off, a chat tick with nothing connected, the actor — would spend a place that somebody
- * who did qualify was then refused (BP-705). resolveChannels still runs on what comes back, as the
- * authority, and a disagreement between the two is logged rather than absorbed.
+ * switches off, a chat tick with nothing connected, a mail tick with no address, the actor —
+ * would spend a place that somebody who did qualify was then refused (BP-705). resolveChannels
+ * still runs on what comes back, and a candidate the query admitted but it refuses is logged.
  */
 export async function boardFeedSubscribers(
   projectId: string,
@@ -65,7 +68,10 @@ export async function boardFeedSubscribers(
   const override = (clause: Clause) => ({
     "notifications.projects": { $elemMatch: { project, ...prefixed("matrix", clause) } },
   });
-  const noOverride = { $nor: [{ "notifications.projects": { $elemMatch: { project } } }] };
+  // `overrideFor` treats an entry with no matrix as no override at all
+  const noOverride = {
+    $nor: [{ "notifications.projects": { $elemMatch: { project, matrix: { $type: "object" } } } }],
+  };
   const global = (clause: Clause) => prefixed("notifications.defaults", clause);
 
   const candidates = await User.find(
