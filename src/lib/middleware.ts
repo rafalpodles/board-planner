@@ -14,7 +14,7 @@ import { PROJECT_KEY_PATTERN } from "./urls";
 import { matchRepo } from "./repo-match";
 import { getTenant } from "./tenant";
 import { can, FeatureKey } from "./entitlements";
-import { projectRunsWorkers } from "@/lib/worker-gate";
+import { isWorkerLockedByInstance, projectRunsWorkers } from "@/lib/worker-gate";
 
 type AuthenticatedHandler = (
   request: Request,
@@ -242,9 +242,10 @@ export function withProjectOwner(handler: AuthenticatedHandler) {
 // would strand that task — the failure this whole design keeps working to avoid.
 // Keyed on runId, not workerId: workerId is left behind as history when a run ends, so a finished
 // task would otherwise go on granting its worker access to the project for good.
-async function holdsARunIn(projectId: string, workerId: string): Promise<boolean> {
+async function holdsARunIn(projectId: string, workerId: string, taskId?: string): Promise<boolean> {
   return (
     (await Task.exists({
+      ...(taskId ? { _id: taskId } : {}),
       project: projectId,
       "execution.workerId": workerId,
       "execution.runId": { $nin: ["", null] },
@@ -289,7 +290,15 @@ export function withProjectAccessOrWorker(handler: AuthenticatedHandler) {
     // enrolled before BP-358 has no owner — would otherwise 403 the status, release and comment
     // routes of a task already in flight, and leave it in the active column until the two-hour
     // lease swept it and spent an attempt.
-    if (!assigned && !(await holdsARunIn(projectId, String(worker._id)))) {
+    // Under an instance admin's lock the exemption narrows to the held task itself: a route naming
+    // any other task is refused, while the run's own status, release, comments and outcome still
+    // land. Project-level routes (the project, its runs) carry no task and stay reachable.
+    const onlyTheHeldTask = isWorkerLockedByInstance(project?.worker) && !!params.taskId;
+    const heldTaskId = onlyTheHeldTask ? await resolveTaskId(projectId, params.taskId) : undefined;
+    const exempt =
+      !(onlyTheHeldTask && !heldTaskId) &&
+      (await holdsARunIn(projectId, String(worker._id), heldTaskId ?? undefined));
+    if (!assigned && !exempt) {
       return NextResponse.json(
         { error: "this worker is not assigned to this project" },
         { status: 403 }

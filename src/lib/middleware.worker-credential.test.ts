@@ -281,6 +281,51 @@ describe("the grant is re-derived on every call", () => {
       });
     });
 
+    // BP-736: a lock landing mid-run lets that run finish and report, and nothing else
+    describe("when an instance admin has locked the project", () => {
+      const HELD = "69a52e3b399b27d3cbb2c5d1";
+      const OTHER = "69a52e3b399b27d3cbb2c5d2";
+      const lockedContext = (taskId?: string) => ({
+        params: Promise.resolve({ projectId: PROJECT_ID, ...(taskId ? { taskId } : {}) }),
+      });
+
+      beforeEach(() => {
+        projectFindById.mockReturnValue({
+          select: () => ({
+            lean: () =>
+              Promise.resolve(projectDoc({ worker: { enabled: true, lockedByInstance: true } })),
+          }),
+        });
+        taskExists.mockImplementation(async (query: { _id?: string }) =>
+          query._id === undefined || query._id === HELD ? { _id: HELD } : null
+        );
+      });
+
+      it("lets the held task's own routes through", async () => {
+        const handler = vi.fn().mockResolvedValue(new Response("ok"));
+
+        const res = await withProjectAccessOrWorker(handler)(workerRequest(), lockedContext(HELD));
+
+        expect(res.status).toBe(200);
+        expect(taskExists).toHaveBeenCalledWith(expect.objectContaining({ _id: HELD }));
+      });
+
+      it("refuses a route about any other task on the project", async () => {
+        const handler = vi.fn();
+
+        const res = await withProjectAccessOrWorker(handler)(workerRequest(), lockedContext(OTHER));
+
+        expect(res.status).toBe(403);
+        expect(handler).not.toHaveBeenCalled();
+      });
+
+      it("keeps the project-level routes the run reports its outcome on", async () => {
+        const handler = vi.fn().mockResolvedValue(new Response("ok"));
+
+        expect((await withProjectAccessOrWorker(handler)(workerRequest(), lockedContext())).status).toBe(200);
+      });
+    });
+
     // The exemption is for a task in flight, not a standing grant: with nothing held, an
     // unreachable project is still refused
     it("does not become a way in once the run has ended", async () => {
