@@ -1383,6 +1383,31 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       expect(failures).toHaveLength(2);
     });
 
+    // Review of the test above: it only exercised the reset on the full-success path
+    // (decisionsAsOf/lastPolicyRefreshError inside the try block), never the one added to the
+    // !response.ok branch — a 403 answers the fetch (the server IS reachable), which is exactly
+    // when a stale "could not refresh worker policy" must not go on silencing a genuine one.
+    it("says an unreachable server again after a 403 in between, not only after a 200", async () => {
+      let call = 0;
+      const run = await runOneTask(undefined, undefined, {
+        fetchImpl: async () => {
+          call += 1;
+          if (call === 2) {
+            return { ok: false, status: 403 } as unknown as Response;
+          }
+          throw new Error("fetch failed: ECONNREFUSED");
+        },
+        passes: 3,
+        clockJumpOnSleepMs: 31_000,
+      });
+
+      const failures = run.logError.mock.calls.filter(
+        ([line]) =>
+          typeof line === "string" && line.includes("could not refresh worker policy")
+      );
+      expect(failures).toHaveLength(2);
+    });
+
     // "Why is this machine sitting on a project and doing nothing" has to be answerable from the
     // cockpit, not only from a log line that scrolled past.
     it("says on the socket why the project is not being worked on", async () => {
