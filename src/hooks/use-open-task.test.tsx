@@ -136,6 +136,31 @@ describe("useOpenTask", () => {
 });
 
 describe("useOpenTask with unsaved work on screen", () => {
+  let clock = Date.parse("2026-09-21T10:00:00Z");
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    clock += 60_000;
+    vi.setSystemTime(clock);
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("asks before a full page load too, and stays when told no", () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(
+      <>
+        <TaskPage />
+        <Unsaved />
+        <Opener />
+      </>
+    );
+
+    open();
+
+    expect(confirm).toHaveBeenCalled();
+    expect(assign).not.toHaveBeenCalled();
+    confirm.mockRestore();
+  });
+
   it("stays when the reader says no", () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     render(

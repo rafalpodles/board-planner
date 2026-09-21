@@ -42,11 +42,12 @@ export function useComposition(source: AgentComposition | undefined, lookup: Loo
   const [entries, setEntries] = useState<Entries>(() => toEntries(source ?? emptyComposition()));
   const [dragging, setDragging] = useState<ApiAgentBlock | null>(null);
 
-  // Seeded once and during render: an effect's first frame would read as unsaved
-  const [seeded, setSeeded] = useState(!!source);
-  if (source && !seeded) {
-    setSeeded(true);
-    setEntries(toEntries(source));
+  // Seeded during render: an effect's first frame would read as unsaved. A newer agent replaces
+  // the editor only while nothing was changed here, so a refetch never undoes somebody's work
+  const [seededFrom, setSeededFrom] = useState(source);
+  if (source && source !== seededFrom) {
+    if (!seededFrom || sameComposition(toComposition(entries), seededFrom)) setEntries(toEntries(source));
+    setSeededFrom(source);
   }
 
   const bucketOf = (uid: string) =>

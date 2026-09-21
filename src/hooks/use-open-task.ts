@@ -80,12 +80,9 @@ export function useOpenTask() {
       // genuinely cross-board task into the modal of the board being left, which is the bug.
       const anotherBoard = !!here && !!there && here.toLowerCase() !== there.toLowerCase();
 
-      if (isTaskPath(href) && (fromTaskPage || anotherBoard)) {
-        window.location.assign(href);
-        return true;
-      }
       if (!mayLeave()) return false;
-      router.push(href);
+      if (isTaskPath(href) && (fromTaskPage || anotherBoard)) window.location.assign(href);
+      else router.push(href);
       return true;
     },
     [fromTaskPage, pathname, router]

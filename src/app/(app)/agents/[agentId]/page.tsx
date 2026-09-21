@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
@@ -150,12 +150,11 @@ export default function AgentDetailPage() {
   const [naming, setNaming] = useState<{ name: string; description: string } | null>(null);
   const problems = agentProblems(composition, lookup);
 
+  // What this page last saved, until the catalog reports the agent again: a save can land while the
+  // read after it fails, and the stale copy is then no baseline to compare against
   const [savedAs, setSavedAs] = useState<AgentComposition | null>(null);
-  const unsaved =
-    mayEdit &&
-    !!agent &&
-    !sameComposition(composition, agent.composition) &&
-    !(savedAs && sameComposition(composition, savedAs));
+  useEffect(() => setSavedAs(null), [agent?.composition]);
+  const unsaved = mayEdit && !!agent && !sameComposition(composition, savedAs ?? agent.composition);
   useLeaveGuard(unsaved, "This agent has changes that are not saved. Leave without saving them?");
 
   const sensors = useSensors(

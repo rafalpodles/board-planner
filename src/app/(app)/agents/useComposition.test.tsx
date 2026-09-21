@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect } from "vitest";
 import { useLayoutEffect } from "react";
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { sameComposition, useComposition } from "./useComposition";
 import type { AgentComposition } from "@/types";
 
@@ -57,6 +57,40 @@ describe("useComposition", () => {
 
     expect(commits.at(-1)).toEqual(stored);
     expect(commits.slice(1).every((c) => sameComposition(c, stored))).toBe(true);
+  });
+
+  const theirs: AgentComposition = { ...empty, verification: [{ key: "review" }] };
+  const hook = () =>
+    renderHook(({ source }: { source?: AgentComposition }) => useComposition(source, () => undefined), {
+      initialProps: { source: stored },
+    });
+
+  it("takes a newer agent when nothing was changed here", () => {
+    const { result, rerender } = hook();
+
+    rerender({ source: theirs });
+
+    expect(sameComposition(result.current.composition, theirs)).toBe(true);
+  });
+
+  it("keeps what was changed here when a newer agent arrives", () => {
+    const { result, rerender } = hook();
+    act(() => result.current.addTo("delivery", "push"));
+
+    rerender({ source: theirs });
+
+    expect(result.current.composition.delivery).toEqual([{ key: "push" }]);
+  });
+
+  it("is not reset by the read that follows its own save", () => {
+    const { result, rerender } = hook();
+    act(() => result.current.addTo("delivery", "push"));
+    const saved = structuredClone(result.current.composition);
+
+    rerender({ source: saved });
+    rerender({ source: structuredClone(saved) });
+
+    expect(result.current.composition.delivery).toEqual([{ key: "push" }]);
   });
 
   it("reads an agent stored before entries existed as the same composition", () => {

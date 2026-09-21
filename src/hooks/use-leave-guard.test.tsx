@@ -27,12 +27,19 @@ function click(text: string, init: MouseEventInit = {}) {
   fireEvent(anchor, new MouseEvent("click", { bubbles: true, cancelable: true, button: 0, ...init }));
 }
 
+// An approval lasts a moment, so each test starts on a clock well past the last one's
+let clock = Date.parse("2026-09-21T10:00:00Z");
+
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  clock += 60_000;
+  vi.setSystemTime(clock);
   // A path left behind by one test would satisfy another's "same page" early return
   window.history.replaceState(null, "", "/agents/a1");
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
   vi.restoreAllMocks();
 });
@@ -93,7 +100,56 @@ describe("useLeaveGuard", () => {
 });
 
 describe("mayLeave", () => {
-  it("does not ask again for a link whose own handler navigates in code", async () => {
+  it("lets the browser's own prompt stand down for a leave already agreed to", () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<Page dirty navigate={vi.fn()} />);
+
+    expect(mayLeave()).toBe(true);
+    const event = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("asks with the guard still mounted when another one goes away", () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    function Other({ on }: { on: boolean }) {
+      useLeaveGuard(on, "Other page's question");
+      return null;
+    }
+    const { rerender } = render(
+      <>
+        <Page dirty navigate={vi.fn()} />
+        <Other on />
+      </>
+    );
+    rerender(
+      <>
+        <Page dirty navigate={vi.fn()} />
+        <Other on={false} />
+      </>
+    );
+
+    expect(mayLeave()).toBe(false);
+    expect(confirm).toHaveBeenCalledWith("Leave without saving?");
+  });
+
+  it("holds a plain link with no handler of its own when the answer is no", () => {
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<Page dirty navigate={vi.fn()} />);
+    const plain = document.createElement("a");
+    plain.href = "/somewhere";
+    plain.textContent = "Plain";
+    document.body.appendChild(plain);
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
+
+    plain.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    plain.remove();
+  });
+
+  it("does not ask again for a link whose own handler navigates in code", () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     const navigate = vi.fn();
     function CodedLink() {
@@ -116,8 +172,8 @@ describe("mayLeave", () => {
 
     expect(confirm).toHaveBeenCalledTimes(1);
     expect(navigate).toHaveBeenCalled();
-    // The approval lasts for that click only
-    await new Promise((r) => setTimeout(r));
+    // The approval lasts a moment, not for the rest of the page's life
+    vi.setSystemTime(clock + 2_000);
     confirm.mockReturnValue(false);
     expect(mayLeave()).toBe(false);
   });
