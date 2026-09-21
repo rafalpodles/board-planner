@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, waitFor } from "@testing-library/react";
+import { render, screen, cleanup } from "@testing-library/react";
 import type { ApiProject } from "@/types";
 
 const { api, auth, projectsState } = vi.hoisted(() => ({
@@ -31,39 +31,22 @@ beforeEach(() => {
   projectsState.projects = [];
   projectsState.loadFailed = false;
   projectsState.retrying = false;
-  api.get.mockResolvedValue([{ fullName: "Agnieszka Nowak" }, { fullName: "Tomasz Wójcik" }]);
 });
 
 afterEach(cleanup);
 
 describe("a member on no board", () => {
-  it("is told who to ask, by name", async () => {
+  it("is told only that there are no boards, and reads no other accounts", () => {
     render(<ProjectsPage />);
 
-    const notice = screen.getByTestId("not-on-any-board");
-    await waitFor(() =>
-      expect(notice.textContent).toBe(
-        "You are not on any board yet.Boards are opened to you by their owners. Ask one of the admins: Agnieszka Nowak, Tomasz Wójcik."
-      )
-    );
-    expect(api.get).toHaveBeenCalledWith("/api/users/admins");
+    expect(screen.getByTestId("not-on-any-board").textContent).toBe("You are not on any board yet.");
+    expect(api.get).not.toHaveBeenCalled();
     expect(screen.queryByText("No projects yet")).toBeNull();
-  });
-
-  it("still explains where boards come from when the names cannot be read", async () => {
-    api.get.mockRejectedValue(new Error("offline"));
-
-    render(<ProjectsPage />);
-
-    const notice = screen.getByTestId("not-on-any-board");
-    await waitFor(() => expect(notice.getAttribute("data-admins")).toBe("unknown"));
-    expect(notice.textContent).toContain("Boards are opened to you by their owners.");
-    expect(notice.textContent).not.toContain("Ask one of the admins");
   });
 });
 
 describe("an admin on an instance with no boards", () => {
-  it("is offered the first board rather than a list of admins", () => {
+  it("is offered the first board", () => {
     auth.isAdmin = true;
 
     render(<ProjectsPage />);

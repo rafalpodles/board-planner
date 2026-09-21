@@ -1,8 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { useApi } from "@/hooks/use-api";
 import { DEFAULT_PROJECT_ICON } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { useAuth } from "@/hooks/use-auth";
@@ -97,32 +95,9 @@ export default function ProjectsPage() {
 }
 
 function NotOnAnyBoard() {
-  const api = useApi();
-  const [admins, setAdmins] = useState<string[] | "unknown" | null>(null);
-
-  useEffect(() => {
-    api
-      .get("/api/users/admins")
-      .then((list: { fullName: string }[]) => setAdmins(list.map((admin) => admin.fullName)))
-      .catch(() => setAdmins("unknown"));
-  }, [api]);
-
   return (
-    <div
-      className="mx-auto max-w-md py-12 text-center text-text-muted"
-      data-testid="not-on-any-board"
-      data-admins={admins === "unknown" ? "unknown" : admins ? "named" : "pending"}
-    >
-      <p className="mb-2 font-medium text-text">You are not on any board yet.</p>
-      <p>
-        Boards are opened to you by their owners.
-        {Array.isArray(admins) && admins.length > 0 && (
-          <>
-            {" "}
-            Ask one of the admins: <span className="text-text">{admins.join(", ")}</span>.
-          </>
-        )}
-      </p>
+    <div className="mx-auto max-w-md py-12 text-center text-text-muted" data-testid="not-on-any-board">
+      <p>You are not on any board yet.</p>
     </div>
   );
 }
