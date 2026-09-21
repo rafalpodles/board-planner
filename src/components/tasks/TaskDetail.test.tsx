@@ -752,6 +752,49 @@ describe("TaskDetail, the Agent row's handover notice", () => {
     ).toBe("no-repository");
   });
 
+  it("names agent runs switched off from the board's own worker setting", async () => {
+    serve(selfAssigned, { ...readyBoard, worker: { enabled: false } }, ownedByAda);
+    renderDetail();
+    await loaded();
+
+    expect(
+      within(screen.getByRole("complementary")).getByTestId("handover-notice").dataset.reason
+    ).toBe("runs-off");
+  });
+
+  it("tells the assignee they have no machine, from the readiness read", async () => {
+    serve(selfAssigned, readyBoard, { owners: [], machine: "none" });
+    renderDetail();
+    await loaded();
+
+    expect(
+      within(screen.getByRole("complementary")).getByTestId("handover-notice").dataset.reason
+    ).toBe("no-machine");
+  });
+
+  // Connecting a machine happens in another window; coming back must show it without a reopen
+  it("reads the machine again when the window regains focus", async () => {
+    let machine = "none";
+    api.get.mockImplementation((url: string) => {
+      if (url === "/api/projects/TP/assignable-users") return Promise.resolve([]);
+      if (url.startsWith("/api/agent")) return Promise.resolve([]);
+      if (url.includes("/tasks/")) return Promise.resolve({ ...handedOver, ...selfAssigned });
+      if (url.includes("/sprints")) return Promise.resolve([]);
+      if (url === "/api/projects/TP/handover") return Promise.resolve({ owners: [], machine });
+      return Promise.resolve(readyBoard);
+    });
+    renderDetail();
+    await loaded();
+    const rail = within(screen.getByRole("complementary"));
+    expect(rail.getByTestId("handover-notice").dataset.reason).toBe("no-machine");
+
+    machine = "live";
+    await act(async () => window.dispatchEvent(new Event("focus")));
+
+    await waitFor(() => expect(rail.queryByTestId("handover-notice")).toBeNull());
+    expect(rail.getByTestId("handover-waiting").textContent).toBe("Waiting for your machine to take it.");
+  });
+
   // The endpoint failing must not take the task with it, and then the board is simply not judged
   it("still opens the task when the readiness read fails, and judges only the task", async () => {
     api.get.mockImplementation((url: string) => {

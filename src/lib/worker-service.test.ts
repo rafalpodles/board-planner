@@ -870,34 +870,118 @@ describe("machineStateFor", () => {
     ({ enabled: true, lastSeenAt: fresh, repos: orbit, ...over }) as never;
 
   it("is none with no machine at all", () => {
-    expect(machineStateFor([], board, NOW)).toBe("none");
+    expect(machineStateFor([], board, NOW).machine).toBe("none");
   });
 
   // A live machine that does not serve this repository cannot take this task
   it("is none when the only live machine has no checkout of this repository", () => {
-    expect(machineStateFor([machine({ repos: other })], board, NOW)).toBe("none");
+    expect(machineStateFor([machine({ repos: other })], board, NOW).machine).toBe("none");
   });
 
   it("is live when a machine with the checkout reported in recently", () => {
-    expect(machineStateFor([machine({})], board, NOW)).toBe("live");
+    expect(machineStateFor([machine({})], board, NOW).machine).toBe("live");
   });
 
   it("is stale when the machine with the checkout has not reported in", () => {
-    expect(machineStateFor([machine({ lastSeenAt: old })], board, NOW)).toBe("stale");
+    expect(machineStateFor([machine({ lastSeenAt: old })], board, NOW).machine).toBe("stale");
   });
 
   it("is stale when the machine with the checkout is switched off", () => {
-    expect(machineStateFor([machine({ enabled: false })], board, NOW)).toBe("stale");
+    expect(machineStateFor([machine({ enabled: false })], board, NOW).machine).toBe("stale");
   });
 
   it("is live when any one of several machines serves it", () => {
     expect(
       machineStateFor([machine({ lastSeenAt: old }), machine({ repos: other }), machine({})], board, NOW)
+        .machine
     ).toBe("live");
+  });
+
+  // A live machine elsewhere cannot take this task; the one that could has gone quiet
+  it("is stale when the machine with the checkout is stale and the live one lacks it", () => {
+    expect(
+      machineStateFor([machine({ lastSeenAt: old }), machine({ repos: other })], board, NOW).machine
+    ).toBe("stale");
+  });
+
+  const issued = new Date(NOW.getTime() - 60_000);
+  const acked = new Date(NOW.getTime() - 30_000);
+
+  it("is paused when a pause was issued and the machine acknowledged it", () => {
+    expect(
+      machineStateFor(
+        [machine({ command: "pause", commandIssuedAt: issued, commandAckedAt: acked })],
+        board,
+        NOW
+      ).machine
+    ).toBe("paused");
+  });
+
+  // Not yet proven: a machine asked to pause may still be finishing a run
+  it("is still live while a pause is issued but not acknowledged", () => {
+    expect(
+      machineStateFor(
+        [machine({ command: "pause", commandIssuedAt: acked, commandAckedAt: issued })],
+        board,
+        NOW
+      ).machine
+    ).toBe("live");
+  });
+
+  it("is live again once resumed", () => {
+    expect(
+      machineStateFor(
+        [machine({ command: "resume", commandIssuedAt: issued, commandAckedAt: acked })],
+        board,
+        NOW
+      ).machine
+    ).toBe("live");
+  });
+
+  it("is failing, naming the checks, when its preflight failed", () => {
+    const preflight = {
+      ok: false,
+      account: "",
+      checks: [
+        { name: "git", ok: true, detail: "" },
+        { name: "sandbox", ok: false, detail: "/Users/ada/secret path" },
+      ],
+      reportedAt: NOW,
+    };
+    expect(machineStateFor([machine({ preflight })], board, NOW)).toEqual({
+      machine: "failing",
+      failingChecks: ["sandbox"],
+    });
+  });
+
+  it("is live with a passing preflight", () => {
+    const preflight = { ok: true, account: "", checks: [{ name: "git", ok: true, detail: "" }], reportedAt: NOW };
+    expect(machineStateFor([machine({ preflight })], board, NOW).machine).toBe("live");
+  });
+
+  it("prefers a live machine over a paused one", () => {
+    expect(
+      machineStateFor(
+        [machine({ command: "pause", commandIssuedAt: issued, commandAckedAt: acked }), machine({})],
+        board,
+        NOW
+      ).machine
+    ).toBe("live");
+  });
+
+  // A stale machine cannot be paused in any sense the reader can act on; silence comes first
+  it("is stale, not paused, when a paused machine has also stopped reporting in", () => {
+    expect(
+      machineStateFor(
+        [machine({ lastSeenAt: old, command: "pause", commandIssuedAt: issued, commandAckedAt: acked })],
+        board,
+        NOW
+      ).machine
+    ).toBe("stale");
   });
 
   // Nothing to match against: the board-level gap says so, and no machine can serve it
   it("is none on a board that names no repository", () => {
-    expect(machineStateFor([machine({})], { _id: "p1", repositoryUrl: "" }, NOW)).toBe("none");
+    expect(machineStateFor([machine({})], { _id: "p1", repositoryUrl: "" }, NOW).machine).toBe("none");
   });
 });

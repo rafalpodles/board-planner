@@ -28,7 +28,8 @@ const BOARD: AnyColumn[] = [
   { id: "someday", label: "Someday", color: "#888", role: "backlog", order: 0 },
   { id: "ready", label: "Ready", color: "#888", role: "approved", order: 1 },
   { id: "doing", label: "Doing", color: "#888", role: "active", order: 2 },
-  { id: "shipped", label: "Shipped", color: "#888", role: "done", order: 3 },
+  { id: "checking", label: "Checking", color: "#888", role: "review", order: 3 },
+  { id: "shipped", label: "Shipped", color: "#888", role: "done", order: 4 },
 ];
 
 const users = [
@@ -696,6 +697,13 @@ describe("the Agent row", () => {
     });
 
     // Two muted lines under one row, and the second is about a list that is not on screen
+    // The rules explain a picker; where the row is a read-only name there is nothing to choose
+    it("does not offer the hand-over rules where the agent is not the reader's to choose", () => {
+      renderCarried();
+
+      expect(screen.queryByTestId("handover-rules")).toBeNull();
+    });
+
     it("does not also explain a shortened list where there is no list", () => {
       renderCarried({ agents: MINE_AND_THEIRS });
 
@@ -1044,10 +1052,78 @@ describe("the hand-over notice, with the board judged too", () => {
     );
   });
 
-  it("tells the assignee their machine has gone quiet", () => {
+  it("tells the assignee their machine has gone quiet, with where to look", () => {
     withBoard({ machine: "stale" });
 
     expect(notice().dataset.reason).toBe("machine-stale");
+    expect(screen.getByRole("link", { name: "Check it is running" }).getAttribute("href")).toBe(
+      "https://board-planner.com/docs/ai/execution-workers/#setting-one-up"
+    );
+  });
+
+  it("tells the assignee their machine is paused", () => {
+    withBoard({ machine: "paused" });
+
+    expect(notice().dataset.reason).toBe("machine-paused");
+    expect(notice().textContent).toContain(
+      "Your machine is connected but not taking work: it is paused."
+    );
+    expect(screen.queryByTestId("handover-waiting")).toBeNull();
+  });
+
+  // The sandbox check is the one that stops the claim itself
+  it("says a machine whose sandbox check failed is not taking work", () => {
+    withBoard({ machine: "failing", failingChecks: ["sandbox"] });
+
+    expect(notice().dataset.reason).toBe("machine-failing");
+    expect(notice().textContent).toContain(
+      "Your machine is connected but not taking work: its sandbox check failed."
+    );
+  });
+
+  // Any other failed check: the machine still claims, and the run would fail — said as that
+  it("names other failed checks without claiming the machine takes no work", () => {
+    withBoard({ machine: "failing", failingChecks: ["gh", "git"] });
+
+    expect(notice().textContent).toContain("its preflight checks failed (gh, git)");
+    expect(notice().textContent).not.toContain("not taking work");
+  });
+
+  it("names a board missing a column a run needs, and who can add it", () => {
+    withBoard(READY, {}, { columns: BOARD.filter((c) => c.role !== "review") });
+
+    expect(notice().dataset.reason).toBe("missing-columns");
+    expect(notice().textContent).toContain(
+      "This board has no Awaiting review column, so no machine can run work on it — its owner, Ada, can give a column that role in Settings → Board."
+    );
+  });
+
+  it("names unfinished blockers by key", () => {
+    withBoard(
+      READY,
+      {
+        blockedBy: [
+          { _id: "b3", taskNumber: 3, title: "", status: "doing" },
+          { _id: "b4", taskNumber: 4, title: "", status: "shipped" },
+        ],
+      } as never,
+      { projectKey: "TP" }
+    );
+
+    expect(notice().dataset.reason).toBe("blocked");
+    expect(notice().textContent).toContain(
+      "It waits on an unfinished blocker, TP-3 — a machine takes it once that is done."
+    );
+    expect(screen.queryByTestId("handover-waiting")).toBeNull();
+  });
+
+  it("names three owners as a list, and an owner with no display name by username", () => {
+    withBoard({
+      repositoryUrl: "",
+      owners: [ADA, TOMEK, { _id: "u7", username: "kasia", fullName: "" }],
+    });
+
+    expect(notice().textContent).toContain("its owners, Ada, Tomek and kasia, can add one");
   });
 
   it("says it is waiting for the assignee's own machine when everything is in place", () => {
@@ -1096,6 +1172,25 @@ describe("the hand-over notice, with the board judged too", () => {
     expect(screen.queryByTestId("handover-waiting")).toBeNull();
   });
 
+  // Nor the task's own: a finished task with nobody on it is not one that "nothing will run yet"
+  it.each(["doing", "shipped"])("says nothing of the task's own gaps in %s either", (status) => {
+    withBoard(READY, { status, assignee: null });
+
+    expect(screen.queryByTestId("handover-notice")).toBeNull();
+  });
+
+  // A machine has had its chance at it; "waiting" would claim one is about to
+  it.each([
+    ["doing", "owner"],
+    ["shipped", "owner"],
+    ["doing", "claude"],
+    ["shipped", "claude"],
+  ])("does not wait for a machine on a task in %s, read by %s", (status, viewer) => {
+    withBoard({ machine: "live" }, { status }, { currentUsername: viewer });
+
+    expect(screen.queryByTestId("handover-waiting")).toBeNull();
+  });
+
   it("says nothing about the board on a task with no agent", () => {
     withBoard({ repositoryUrl: "" }, { agent: null }, { draft: { ...draft, assignee: "owner" } });
 
@@ -1130,7 +1225,15 @@ describe("the Agent row explains itself", () => {
     },
   };
   const BARE = { ...PROPOSER, _id: "a3", name: "Bare", description: "" };
-  const agents = [MERGER, PROPOSER, BARE] as unknown as React.ComponentProps<
+  const SILENT_MERGER = { ...MERGER, _id: "a4", name: "Quiet merger", description: "" };
+  const LONG = {
+    ...PROPOSER,
+    _id: "a5",
+    name: "Talkative",
+    description:
+      "Reads the task, writes a plan, implements it in small steps, runs the tests after each, opens a pull request and leaves a summary of every decision for the reviewer.",
+  };
+  const agents = [MERGER, PROPOSER, BARE, SILENT_MERGER, LONG] as unknown as React.ComponentProps<
     typeof PropertyRail
   >["agents"];
 
@@ -1167,6 +1270,29 @@ describe("the Agent row explains itself", () => {
     expect(screen.getByRole("option", { name: "Ships it" })).toBe(ships);
   });
 
+  // The marker alone is still a description, and must be read out as one
+  it("describes an option with a marker and no description", async () => {
+    renderRail({ agents });
+    await openRow("Agent");
+
+    const quiet = option("Quiet merger");
+    expect(document.getElementById(quiet.getAttribute("aria-describedby")!)!.textContent).toBe(
+      "Merges without a person"
+    );
+    expect(document.getElementById(quiet.getAttribute("aria-labelledby")!)!.textContent).toBe(
+      "Quiet merger"
+    );
+  });
+
+  it("shows a long description whole, not cut after two lines", async () => {
+    renderRail({ agents });
+    await openRow("Agent");
+
+    const description = option("Talkative").querySelector('[data-testid="option-description"]')!;
+    expect(description.textContent).toBe(LONG.description);
+    expect(description.className).not.toMatch(/line-clamp/);
+  });
+
   it("leaves an option with nothing to describe exactly as it was", async () => {
     renderRail({ agents });
     await openRow("Agent");
@@ -1185,10 +1311,11 @@ describe("the Agent row explains itself", () => {
     expect(set).toHaveBeenCalledWith("agent", "a1");
   });
 
-  it("offers the hand-over rules and the docs beside the field", () => {
+  it("offers the hand-over rules and the docs beside the field, collapsed", () => {
     renderRail({ agents });
 
-    const rules = screen.getByTestId("handover-rules");
+    const rules = screen.getByTestId("handover-rules") as HTMLDetailsElement;
+    expect(rules.open).toBe(false);
     expect(rules.querySelector("summary")?.textContent).toBe("How handing work to an agent works");
     expect(rules.querySelectorAll("li")).toHaveLength(3);
     expect(rules.querySelector("a")?.getAttribute("href")).toBe(

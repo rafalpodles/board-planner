@@ -514,7 +514,7 @@ export function Combobox(props: ComboboxProps) {
                           className="flex flex-col items-start gap-1 text-[11px] leading-snug text-text-muted"
                         >
                           {option.description && (
-                            <span data-testid="option-description" className="line-clamp-2">
+                            <span data-testid="option-description" className="whitespace-pre-line break-words">
                               {option.description}
                             </span>
                           )}

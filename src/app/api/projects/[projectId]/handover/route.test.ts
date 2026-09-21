@@ -19,8 +19,19 @@ vi.mock("@/lib/grants", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/grants")>();
   return { ...actual, check, accessibleProjectIds: vi.fn() };
 });
+// Honours the projection it is given, so a field the route forgets to select is absent here too
+function projected(doc: Record<string, unknown> | null, projection: string) {
+  if (!doc) return null;
+  const keep = new Set(["_id", ...projection.split(/\s+/).filter(Boolean)]);
+  return Object.fromEntries(Object.entries(doc).filter(([k]) => keep.has(k)));
+}
 vi.mock("@/models/project", () => ({
-  Project: { findById: () => ({ lean: projectLean }), findOne: vi.fn() },
+  Project: {
+    findById: (_id: string, projection: string) => ({
+      lean: async () => projected(await projectLean(), projection),
+    }),
+    findOne: vi.fn(),
+  },
 }));
 vi.mock("@/models/grant", () => ({
   Grant: { find: (...a: unknown[]) => (grantFind(...a), { select: () => ({ lean: grantLean }) }) },
@@ -65,7 +76,7 @@ describe("GET handover readiness", () => {
   it("asks only about the reader's own machines", async () => {
     await read();
 
-    expect(workerFind).toHaveBeenCalledWith({ owner: READER }, "enabled lastSeenAt repos");
+    expect(workerFind.mock.calls[0][0]).toEqual({ owner: READER });
   });
 
   it("names the board's owners, and only their names", async () => {
@@ -89,6 +100,65 @@ describe("GET handover readiness", () => {
     const { body } = await read();
 
     expect(body).toEqual({ owners: [{ username: "ada", fullName: "Ada" }], machine: "live" });
+  });
+
+  // A board migrated from before repositoryUrl names its repository only in githubRepo
+  it("matches a legacy board that names its repository only in githubRepo", async () => {
+    projectLean.mockResolvedValue({
+      _id: PROJECT,
+      name: "not selected",
+      githubRepo: "acme/orbit",
+    });
+    workerLean.mockResolvedValue([
+      {
+        enabled: true,
+        lastSeenAt: new Date(),
+        repos: [{ remote: "git@github.com:acme/orbit.git", path: "/Users/ada/orbit" }],
+      },
+    ]);
+
+    expect((await read()).body.machine).toBe("live");
+  });
+
+  // The control for the projection: the same board with the field left out of the select
+  it("reads nothing the projection does not select", async () => {
+    projectLean.mockResolvedValue({ _id: PROJECT, gitlabHost: "acme/orbit" });
+    workerLean.mockResolvedValue([
+      {
+        enabled: true,
+        lastSeenAt: new Date(),
+        repos: [{ remote: "git@github.com:acme/orbit.git", path: "/Users/ada/orbit" }],
+      },
+    ]);
+
+    expect((await read()).body.machine).toBe("none");
+  });
+
+  it("names the failed checks of the reader's own paused-or-failing machine, and no detail", async () => {
+    workerLean.mockResolvedValue([
+      {
+        enabled: true,
+        lastSeenAt: new Date(),
+        repos: [{ remote: "git@github.com:acme/orbit.git", path: "/Users/ada/orbit" }],
+        preflight: { ok: false, checks: [{ name: "sandbox", ok: false, detail: "/private/path" }] },
+      },
+    ]);
+
+    const { body } = await read();
+
+    expect(body).toEqual({
+      owners: [{ username: "ada", fullName: "Ada" }],
+      machine: "failing",
+      failingChecks: ["sandbox"],
+    });
+  });
+
+  it("selects what pause and preflight are read from", async () => {
+    await read();
+
+    expect(workerFind.mock.calls[0][1].split(" ").sort()).toEqual(
+      ["enabled", "lastSeenAt", "repos", "preflight", "command", "commandIssuedAt", "commandAckedAt"].sort()
+    );
   });
 
   it("answers none when the reader has no machine", async () => {

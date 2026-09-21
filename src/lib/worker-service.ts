@@ -143,14 +143,58 @@ function isLive(worker: IWorker, now: Date): boolean {
   return Number.isFinite(seenAt) && now.getTime() - seenAt <= WORKER_STALE_MS;
 }
 
+type ServingMachine = Pick<IWorker, "enabled" | "lastSeenAt" | "repos"> &
+  Partial<Pick<IWorker, "preflight" | "command" | "commandIssuedAt" | "commandAckedAt">>;
+
+// Proven only by the machine's acknowledgement, the way the fleet console reads it: a pause issued
+// and not yet acked may still be finishing a run, so it is not reported as paused.
+function pauseAcknowledged(worker: ServingMachine): boolean {
+  if (worker.command !== "pause" || !worker.commandAckedAt) return false;
+  const ackedAt = new Date(worker.commandAckedAt).getTime();
+  const issuedAt = worker.commandIssuedAt ? new Date(worker.commandIssuedAt).getTime() : null;
+  return issuedAt === null || ackedAt > issuedAt;
+}
+
+function failingChecksOf(worker: ServingMachine): string[] {
+  if (!worker.preflight || worker.preflight.ok !== false) return [];
+  const names = (worker.preflight.checks ?? []).filter((c) => !c.ok).map((c) => c.name);
+  return names.length > 0 ? names : ["preflight"];
+}
+
+const MACHINE_RANK: Record<MachineState, number> = {
+  none: 0,
+  stale: 1,
+  failing: 2,
+  paused: 3,
+  live: 4,
+};
+
+/**
+ * The best of these machines, for this project's repository. A machine that reports in but will
+ * not take work — paused, or with a failed preflight — is not `live`, and says why.
+ */
 export function machineStateFor(
-  workers: Pick<IWorker, "enabled" | "lastSeenAt" | "repos">[],
+  workers: ServingMachine[],
   project: MatchableProject,
   now = new Date()
-): MachineState {
-  const serving = workers.filter((w) => matchRepo(project, w.repos ?? []));
-  if (serving.some((w) => isLive(w as IWorker, now))) return "live";
-  return serving.length > 0 ? "stale" : "none";
+): { machine: MachineState; failingChecks?: string[] } {
+  let best: { machine: MachineState; failingChecks?: string[] } = { machine: "none" };
+  for (const worker of workers) {
+    if (!matchRepo(project, worker.repos ?? [])) continue;
+    const failing = failingChecksOf(worker);
+    const candidate: { machine: MachineState; failingChecks?: string[] } = !isLive(
+      worker as IWorker,
+      now
+    )
+      ? { machine: "stale" }
+      : pauseAcknowledged(worker)
+        ? { machine: "paused" }
+        : failing.length > 0
+          ? { machine: "failing", failingChecks: failing }
+          : { machine: "live" };
+    if (MACHINE_RANK[candidate.machine] > MACHINE_RANK[best.machine]) best = candidate;
+  }
+  return best;
 }
 
 // Only what an operator actually set. Sending the stored policy would pin every field forever,

@@ -22,7 +22,10 @@ export const GET = withProjectAccess(async (_request, { params, user }) => {
     Grant.find({ objectType: "project", object: projectId, relation: "owner" })
       .select("subject")
       .lean(),
-    Worker.find({ owner: user._id }, "enabled lastSeenAt repos").lean(),
+    Worker.find(
+      { owner: user._id },
+      "enabled lastSeenAt repos preflight command commandIssuedAt commandAckedAt"
+    ).lean(),
   ]);
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
@@ -35,6 +38,6 @@ export const GET = withProjectAccess(async (_request, { params, user }) => {
 
   return NextResponse.json({
     owners: owners.map((o) => ({ username: o.username, fullName: o.fullName })),
-    machine: machineStateFor(workers, project),
+    ...machineStateFor(workers, project),
   });
 });

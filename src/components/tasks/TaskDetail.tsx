@@ -124,6 +124,24 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
+  // Connecting or resuming a machine happens in another window; coming back should show it
+  useEffect(() => {
+    function reread() {
+      if (document.visibilityState === "hidden") return;
+      api
+        .get(`/api/projects/${projectId}/handover`)
+        .then(setReadiness)
+        .catch(() => {});
+    }
+    window.addEventListener("focus", reread);
+    document.addEventListener("visibilitychange", reread);
+    return () => {
+      window.removeEventListener("focus", reread);
+      document.removeEventListener("visibilitychange", reread);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+
   // The board was not the only view going stale on a PM write — this view never reloaded
   // at all, so it kept editing a task that had moved underneath it
   useEffect(() => subscribeBoardRefresh(projectId, loadData), [projectId, loadData]);
@@ -253,6 +271,7 @@ function TaskDetailView({
         workerEnabled: project.worker?.enabled === true,
         owners: readiness.owners,
         machine: readiness.machine,
+        failingChecks: readiness.failingChecks,
       }
     : null;
 
@@ -533,6 +552,7 @@ function TaskDetailView({
               stored={task}
               columns={columns}
               board={board}
+              projectKey={project.key}
               onRepairAssigner={repairAssigner}
               currentUsername={currentUser?.username ?? null}
               categories={project.categories || []}
@@ -571,6 +591,7 @@ function TaskDetailView({
           stored={task}
           columns={columns}
           board={board}
+          projectKey={project.key}
           onRepairAssigner={repairAssigner}
           currentUsername={currentUser?.username ?? null}
           categories={project.categories || []}

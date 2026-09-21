@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readinessGaps } from "./project-readiness";
+import { missingRunRoles, readinessGaps } from "./project-readiness";
 
 const READY = { repositoryUrl: "https://github.com/acme/orbit", workerEnabled: true, machine: "live" as const };
 
@@ -21,6 +21,27 @@ describe("readinessGaps", () => {
     expect(readinessGaps({ ...READY, machine: "none" })).toEqual(["no-machine"]);
   });
 
+  it.each([
+    ["paused", "machine-paused"],
+    ["failing", "machine-failing"],
+  ] as const)("names a %s machine", (machine, gap) => {
+    expect(readinessGaps({ ...READY, machine })).toEqual([gap]);
+  });
+
+  // With no repository no machine can serve the board; "connect one" would be advice that cannot work
+  it("does not also name the machine on a board with no repository", () => {
+    expect(readinessGaps({ ...READY, repositoryUrl: "", machine: "none" })).toEqual(["no-repository"]);
+  });
+
+  it.each([
+    [["approved", "active", "review", "done"], []],
+    [["approved", "active", "done"], ["missing-columns"]],
+    [["backlog", "approved", "active", "review"], ["missing-columns"]],
+  ] as const)("judges a board with the roles %o", (roles, expected) => {
+    const columns = roles.map((role, order) => ({ id: role, label: role, color: "#888", role, order }));
+    expect(readinessGaps({ ...READY, columns })).toEqual(expected);
+  });
+
   it("names a machine that has stopped reporting in", () => {
     expect(readinessGaps({ ...READY, machine: "stale" })).toEqual(["machine-stale"]);
   });
@@ -31,10 +52,15 @@ describe("readinessGaps", () => {
   });
 
   it("lists every gap at once, board-level first", () => {
-    expect(readinessGaps({ repositoryUrl: "", workerEnabled: false, machine: "none" })).toEqual([
-      "no-repository",
-      "runs-off",
-      "no-machine",
-    ]);
+    expect(
+      readinessGaps({ repositoryUrl: "", workerEnabled: false, columns: [], machine: "stale" })
+    ).toEqual(["no-repository", "runs-off", "missing-columns"]);
+  });
+});
+
+describe("missingRunRoles", () => {
+  it("lists the roles a run needs that no column carries, in the order a run needs them", () => {
+    const columns = [{ id: "a", label: "a", color: "#888", role: "active" as const, order: 0 }];
+    expect(missingRunRoles(columns)).toEqual(["approved", "review", "done"]);
   });
 });

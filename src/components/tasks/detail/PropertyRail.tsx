@@ -10,6 +10,7 @@ import {
   PRIORITIES,
   PRIORITY_LABELS,
   Priority,
+  ROLE_LABELS,
   RecurrenceFrequency,
 } from "@/types";
 import { activeFields, orderedOptions, sortedFields } from "@/lib/custom-fields";
@@ -32,9 +33,14 @@ import {
   handoverOf,
   refIdOf,
   type Handover,
-  type HandoverReason,
+  type HandoverProblem,
 } from "@/lib/handover";
-import { readinessGaps, type MachineState, type ReadinessGap } from "@/lib/project-readiness";
+import {
+  missingRunRoles,
+  readinessGaps,
+  type MachineState,
+  type ReadinessGap,
+} from "@/lib/project-readiness";
 import { mergesWithoutAPerson } from "@/lib/agent-rules";
 import { assigneeToShow } from "./assignee-display";
 import type { AnyColumn } from "@/lib/columns";
@@ -69,13 +75,14 @@ export interface BoardReadiness {
   repositoryUrl: string;
   workerEnabled: boolean;
   owners: ApiUserSummary[];
-  /** The reader's own machines; null when that has not been read */
-  machine: MachineState | null;
+  /** The reader's own machines, against this board's repository */
+  machine: MachineState;
+  failingChecks?: string[];
 }
 
-type Blocker = { reason: HandoverReason; by: string | null } | { reason: ReadinessGap };
+type Blocker = HandoverProblem | { reason: ReadinessGap };
 
-function namesOf(people: ApiUserSummary[]): string {
+export function namesOf(people: ApiUserSummary[]): string {
   const names = people.map((p) => p.fullName || p.username);
   return names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 }
@@ -86,15 +93,24 @@ function whoFixes(owners: ApiUserSummary[], viewer: string | null): string {
   return `${owners.length === 1 ? "its owner" : "its owners"}, ${namesOf(owners)},`;
 }
 
-function BlockerText({
-  blocker,
-  owners,
-  viewer,
-}: {
-  blocker: Blocker;
+function MachineLink({ children }: { children: string }) {
+  return (
+    <a href={CONNECT_MACHINE_URL} target="_blank" rel="noreferrer" className="underline">
+      {children}
+    </a>
+  );
+}
+
+interface BlockerContext {
   owners: ApiUserSummary[];
   viewer: string | null;
-}) {
+  projectKey: string | null;
+  columns: AnyColumn[];
+  failingChecks: string[];
+}
+
+function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }) {
+  const who = whoFixes(ctx.owners, ctx.viewer);
   switch (blocker.reason) {
     case "not-approved-yet":
       return <>A machine only looks at the column work is approved in — move it there when it is ready.</>;
@@ -123,37 +139,71 @@ function BlockerText({
           work its owner assigned to themselves.
         </>
       );
+    case "blocked": {
+      const keys = (("blockers" in blocker && blocker.blockers) || []).map((n) =>
+        ctx.projectKey ? `${ctx.projectKey}-${n}` : `#${n}`
+      );
+      return (
+        <>
+          It waits on {keys.length === 1 ? "an unfinished blocker" : "unfinished blockers"},{" "}
+          {keys.join(", ")} — a machine takes it once {keys.length === 1 ? "that is" : "they are"}{" "}
+          done.
+        </>
+      );
+    }
     case "no-repository":
       return (
         <>
-          This board names no repository, so no machine can match it — {whoFixes(owners, viewer)}{" "}
-          can add one in Settings → Integrations.
+          This board names no repository, so no machine can match it — {who} can add one in
+          Settings → Integrations.
         </>
       );
     case "runs-off":
       return (
         <>
-          Agent runs are off for this board — {whoFixes(owners, viewer)} can switch them on in
-          Settings → Workers.
+          Agent runs are off for this board — {who} can switch them on in Settings → Workers.
         </>
       );
+    case "missing-columns": {
+      const roles = missingRunRoles(ctx.columns).map((r) => ROLE_LABELS[r].label);
+      return (
+        <>
+          This board has no {roles.join(", ")} column, so no machine can run work on it — {who}{" "}
+          can give a column that role in Settings → Board.
+        </>
+      );
+    }
     case "no-machine":
       return (
         <>
           You have no machine connected with this board&apos;s repository checked out.{" "}
-          <a href={CONNECT_MACHINE_URL} target="_blank" rel="noreferrer" className="underline">
-            How to connect one
-          </a>
+          <MachineLink>How to connect one</MachineLink>
         </>
       );
     case "machine-stale":
       return (
         <>
           Your machine with this board&apos;s repository has not reported in for over five minutes,
-          or is switched off.{" "}
-          <a href={CONNECT_MACHINE_URL} target="_blank" rel="noreferrer" className="underline">
-            Check it is running
-          </a>
+          or is switched off. <MachineLink>Check it is running</MachineLink>
+        </>
+      );
+    case "machine-paused":
+      return (
+        <>
+          Your machine is connected but not taking work: it is paused. Resume it from the menubar
+          app or Settings → Workers.
+        </>
+      );
+    case "machine-failing":
+      return ctx.failingChecks.includes("sandbox") ? (
+        <>
+          Your machine is connected but not taking work: its sandbox check failed. The menubar app
+          says what to fix.
+        </>
+      ) : (
+        <>
+          Your machine is connected, but its preflight checks failed ({ctx.failingChecks.join(", ")}
+          ), so a run on it would not succeed. The menubar app says what to fix.
         </>
       );
     default:
@@ -167,37 +217,48 @@ function HandoverNotice({
   handover,
   awaiting,
   board,
+  columns,
   assignee,
   viewer,
+  projectKey,
 }: {
   handover: Handover | null;
   awaiting: boolean;
   board: BoardReadiness | null;
+  columns: AnyColumn[] | undefined;
   assignee: ApiUserSummary | null;
   viewer: string | null;
+  projectKey: string | null;
 }) {
   // "No agent" is the ordinary case and the default — it is what the picker already says, and
-  // repeating it as a warning would put a notice on almost every task on the board.
-  if (!handover || (!handover.runs && handover.problems[0].reason === "no-agent")) return null;
+  // repeating it as a warning would put a notice on almost every task on the board. Past the
+  // approved column a machine has had its chance, and a run may be holding the task right now.
+  if (!handover || !awaiting) return null;
+  if (!handover.runs && handover.problems[0].reason === "no-agent") return null;
 
   const viewerIsAssignee = !!viewer && assignee?.username === viewer;
-  const gaps =
-    board && awaiting
-      ? readinessGaps({
-          repositoryUrl: board.repositoryUrl,
-          workerEnabled: board.workerEnabled,
-          machine: viewerIsAssignee ? board.machine : null,
-        })
-      : [];
+  const gaps = board
+    ? readinessGaps({
+        repositoryUrl: board.repositoryUrl,
+        workerEnabled: board.workerEnabled,
+        columns,
+        machine: viewerIsAssignee ? board.machine : null,
+      })
+    : [];
   const blockers: Blocker[] = [
     ...(handover.runs ? [] : handover.problems),
     ...gaps.map((reason) => ({ reason })),
   ];
-  const owners = board?.owners ?? [];
+  const ctx: BlockerContext = {
+    owners: board?.owners ?? [],
+    viewer,
+    projectKey,
+    columns: columns ?? [],
+    failingChecks: board?.failingChecks ?? [],
+  };
 
   if (blockers.length === 0) {
-    if (!board || !awaiting || !assignee) return null;
-    if (viewerIsAssignee && board.machine !== "live") return null;
+    if (!board || !assignee) return null;
     return (
       <p data-testid="handover-waiting" className="mt-1 text-xs text-muted">
         {viewerIsAssignee
@@ -211,8 +272,7 @@ function HandoverNotice({
   if (blockers.length === 1) {
     return (
       <p data-testid="handover-notice" data-reason={reasons} className="mt-1 text-xs text-warning">
-        Nothing will run this yet.{" "}
-        <BlockerText blocker={blockers[0]} owners={owners} viewer={viewer} />
+        Nothing will run this yet. <BlockerText blocker={blockers[0]} ctx={ctx} />
       </p>
     );
   }
@@ -222,7 +282,7 @@ function HandoverNotice({
       <ul className="mt-1 flex list-disc flex-col gap-1 pl-4">
         {blockers.map((b) => (
           <li key={b.reason} data-testid="handover-problem" data-reason={b.reason}>
-            <BlockerText blocker={b} owners={owners} viewer={viewer} />
+            <BlockerText blocker={b} ctx={ctx} />
           </li>
         ))}
       </ul>
@@ -276,11 +336,14 @@ interface PropertyRailProps {
    * which only the server writes — so a draft mid-edit has no answer, and judging one would
    * describe a state that has never existed.
    */
-  stored: Pick<ApiTask, "agent" | "assignee" | "assignedBy" | "status">;
+  stored: Pick<ApiTask, "agent" | "assignee" | "assignedBy" | "status"> &
+    Partial<Pick<ApiTask, "pmAssignedFor" | "blockedBy">>;
   /** The board's own columns — a claim is defined in terms of their roles, not their names */
   columns?: AnyColumn[];
   /** What the board itself lacks for any run; null until read, and then nothing is judged */
   board?: BoardReadiness | null;
+  /** Names blockers by key; without it they read as #N */
+  projectKey?: string | null;
   /**
    * Writes the assignee a task already carries. Auto-save sends the diff, so re-picking the person
    * already on the task sends nothing at all — and that is the repair the notice below prints for a
@@ -312,6 +375,7 @@ export function PropertyRail({
   stored,
   columns,
   board = null,
+  projectKey = null,
   onRepairAssigner,
   currentUsername,
   categories,
@@ -344,7 +408,7 @@ export function PropertyRail({
     (draft.agent ?? null) !== storedAgent ||
     (draft.assignee ?? null) !== (stored.assignee?.username ?? null);
   const handover = pending ? null : handoverOf(stored, columns);
-  const awaiting = !!columns && awaitingClaim(columns, stored.status);
+  const awaiting = !columns || awaitingClaim(columns, stored.status);
   // Read off the stored task rather than off `handover`, which is suppressed mid-edit and orders
   // the column requirement first: the repair is about what the document is missing, not about
   // which sentence won the right to be shown.
@@ -476,8 +540,10 @@ export function PropertyRail({
           handover={handover}
           awaiting={awaiting}
           board={board}
+          columns={columns}
           assignee={stored.assignee ?? null}
           viewer={currentUsername}
+          projectKey={projectKey}
         />
         {!notOffered && <HandoverRules />}
 

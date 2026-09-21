@@ -5,6 +5,10 @@ import {
   seedMemberHandover,
   seedMachine,
   setBoardReadiness,
+  blockTask,
+  setTaskStatus,
+  MEMBER_HANDOVER_TASK_ID,
+  MEMBER_BACKLOG_TASK_ID,
   PROJECT_KEY,
   PROJECT_AGENT_NAME,
   PROJECT_AGENT_DESCRIPTION,
@@ -43,20 +47,16 @@ async function openAs(page: Page, who: "admin" | "member", taskNumber = MEMBER_H
 }
 
 test.describe("a member's own task, as the board changes under it", () => {
-  test("a board with no repository says so, names its owner, and lists the missing machine", async ({
+  // No machine can serve a board with no repository, so connecting one is not yet the advice
+  test("a board with no repository says so and names its owner, and nothing about machines", async ({
     page,
   }) => {
     await openAs(page, "member");
 
-    await expect(notice(page)).toHaveAttribute("data-reason", "no-repository no-machine");
-    await expect(problems(page)).toHaveCount(2);
-    await expect(problems(page).first()).toContainText(
-      "This board names no repository, so no machine can match it — its owner, E2E Owner, can add one"
-    );
-    await expect(problems(page).nth(1)).toContainText("You have no machine connected");
-    await expect(problems(page).nth(1).getByRole("link", { name: "How to connect one" })).toHaveAttribute(
-      "href",
-      "https://board-planner.com/docs/ai/execution-workers/#setting-one-up"
+    await expect(notice(page)).toHaveAttribute("data-reason", "no-repository");
+    await expect(problems(page)).toHaveCount(0);
+    await expect(notice(page)).toHaveText(
+      "Nothing will run this yet. This board names no repository, so no machine can match it — its owner, E2E Owner, can add one in Settings → Integrations."
     );
   });
 
@@ -91,6 +91,53 @@ test.describe("a member's own task, as the board changes under it", () => {
 
     await expect(notice(page)).toHaveAttribute("data-reason", "no-machine");
     await expect(notice(page)).toContainText("You have no machine connected");
+    await expect(notice(page).getByRole("link", { name: "How to connect one" })).toHaveAttribute(
+      "href",
+      "https://board-planner.com/docs/ai/execution-workers/#setting-one-up"
+    );
+    await expect(waiting(page)).toHaveCount(0);
+  });
+
+  // The machine connects while the task is open in another window; coming back shows it
+  test("a machine connected while the task is open shows up when the window regains focus", async ({
+    page,
+  }) => {
+    await setBoardReadiness({ repositoryUrl: HANDOVER_REPOSITORY, workerEnabled: true });
+    await openAs(page, "member");
+    await expect(notice(page)).toHaveAttribute("data-reason", "no-machine");
+
+    await seedMachine("git@github.com:e2e/handover-board.git");
+    const reread = page.waitForResponse(
+      (res) => res.url().endsWith("/handover") && res.request().method() === "GET"
+    );
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await reread;
+
+    await expect(waiting(page)).toHaveText("Waiting for your machine to take it.", { timeout: 1_000 });
+  });
+
+  test("a paused machine is named as connected but not taking work", async ({ page }) => {
+    await setBoardReadiness({ repositoryUrl: HANDOVER_REPOSITORY, workerEnabled: true });
+    await seedMachine("git@github.com:e2e/handover-board.git", { paused: true });
+    await openAs(page, "member");
+
+    await expect(notice(page)).toHaveAttribute("data-reason", "machine-paused");
+    await expect(notice(page)).toContainText("connected but not taking work: it is paused");
+    await expect(waiting(page)).toHaveCount(0);
+  });
+
+  test("a task waiting on an unfinished blocker is not said to be waiting for a machine", async ({
+    page,
+  }) => {
+    await setBoardReadiness({ repositoryUrl: HANDOVER_REPOSITORY, workerEnabled: true });
+    await seedMachine("git@github.com:e2e/handover-board.git");
+    await blockTask(MEMBER_HANDOVER_TASK_ID, MEMBER_BACKLOG_TASK_ID);
+    await openAs(page, "member");
+
+    await expect(notice(page)).toHaveAttribute("data-reason", "blocked");
+    await expect(notice(page)).toContainText(
+      `It waits on an unfinished blocker, ${PROJECT_KEY}-${MEMBER_BACKLOG_TASK_NUMBER}`
+    );
     await expect(waiting(page)).toHaveCount(0);
   });
 
@@ -111,6 +158,16 @@ test.describe("a member's own task, as the board changes under it", () => {
     await expect(waiting(page)).toHaveText("Waiting for E2E Member's machine.");
     await expect(notice(page)).toHaveCount(0);
   });
+});
+
+// A machine has had its chance at a finished task; "nothing will run this yet" would be nonsense
+test("a finished task on an unready board says nothing about running", async ({ page }) => {
+  await setTaskStatus(MEMBER_HANDOVER_TASK_ID, "done");
+  await openAs(page, "member");
+
+  await expect(page.getByRole("complementary").getByRole("combobox", { name: "Agent" })).toBeVisible();
+  await expect(notice(page)).toHaveCount(0);
+  await expect(waiting(page)).toHaveCount(0);
 });
 
 test("every missing requirement is listed at once, the task's and the board's", async ({ page }) => {
@@ -171,6 +228,7 @@ test.describe("the agent picker", () => {
   test("the hand-over rules open beside the field and link to the docs", async ({ page }) => {
     await openAs(page, "member");
     const rules = page.getByRole("complementary").getByTestId("handover-rules");
+    await expect(rules.getByRole("listitem").first()).toBeHidden();
 
     await rules.getByText("How handing work to an agent works").click();
     await expect(rules.getByRole("listitem")).toHaveCount(3);

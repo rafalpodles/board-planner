@@ -2452,7 +2452,11 @@ export async function setBoardReadiness(fields: { repositoryUrl?: string; worker
 /** A machine `owner` enrolled, holding a checkout of `remote`, last seen `seenAgoMs` ago. */
 export async function seedMachine(
   remote: string,
-  { owner = MEMBER_ID, seenAgoMs = 0 }: { owner?: mongoose.Types.ObjectId; seenAgoMs?: number } = {}
+  {
+    owner = MEMBER_ID,
+    seenAgoMs = 0,
+    paused = false,
+  }: { owner?: mongoose.Types.ObjectId; seenAgoMs?: number; paused?: boolean } = {}
 ) {
   const db = (await connect()).db!;
   const now = new Date();
@@ -2473,8 +2477,24 @@ export async function seedMachine(
     identity: null,
     bindingError: "",
     preflight: null,
+    command: paused ? "pause" : "",
+    commandIssuedAt: paused ? new Date(now.getTime() - 60_000) : null,
+    commandAckedAt: paused ? new Date(now.getTime() - 30_000) : null,
     createdAt: now,
     updatedAt: now,
   });
+  await mongoose.disconnect();
+}
+
+export async function setTaskStatus(taskId: mongoose.Types.ObjectId, status: string) {
+  const db = (await connect()).db!;
+  await db.collection("tasks").updateOne({ _id: taskId }, { $set: { status } });
+  await mongoose.disconnect();
+}
+
+/** Makes `blocked` wait on `blocker`, both on the seeded board. */
+export async function blockTask(blocked: mongoose.Types.ObjectId, blocker: mongoose.Types.ObjectId) {
+  const db = (await connect()).db!;
+  await db.collection("tasks").updateOne({ _id: blocked }, { $set: { blockedBy: [blocker] } });
   await mongoose.disconnect();
 }

@@ -14,7 +14,10 @@ import {
 import { OrToolDefinition } from "./openrouter";
 import { unknownParameterMessage, NOTHING_TO_CHANGE } from "@/lib/mcp/strict-input";
 import { buildBoardDigest } from "./board-review";
-import { handoverOf, type HandoverReason } from "@/lib/handover";
+import { handoverOf, type HandoverProblem } from "@/lib/handover";
+import { missingRunRoles, readinessGaps, type ReadinessGap } from "@/lib/project-readiness";
+import { projectRepositoryUrl } from "@/lib/repository";
+import type { AnyColumn } from "@/lib/columns";
 import { getProjectColumns } from "@/lib/columns";
 import { echo } from "@/lib/echo";
 import { isWorkerLockedByInstance, projectRunsWorkers } from "@/lib/worker-gate";
@@ -151,19 +154,48 @@ export function refuseUndeclaredArgs(tool: PmTool, args: Record<string, unknown>
  */
 async function whyItWillNotRun(
   projectId: string,
-  task: { agent?: unknown; assignee?: unknown; assignedBy?: unknown; status?: unknown }
+  task: {
+    agent?: unknown;
+    assignee?: unknown;
+    assignedBy?: unknown;
+    status?: unknown;
+    blockedBy?: unknown;
+  }
 ): Promise<string> {
-  const project = await Project.findById(projectId, "columns worker").lean();
-  if (project && isWorkerLockedByInstance(project.worker)) {
-    return "an instance admin has locked workers off for this project, so nothing will run it";
-  }
-  if (!project || !projectRunsWorkers(project.worker)) {
-    return "this project is not enabled for workers, so nothing will run it";
-  }
+  const project = await Project.findById(
+    projectId,
+    "key columns worker repositoryUrl githubRepo gitlabRepo"
+  ).lean();
+  if (!project) return "this project is not enabled for workers, so nothing will run it";
+  const columns = getProjectColumns(project);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const handover = handoverOf(task as any, getProjectColumns(project));
-  if (handover.runs) return "";
-  return handover.problems.map((p) => whyThisProblem(p.reason)).join("; and ");
+  const handover = handoverOf(task as any, columns);
+  // No agent means a person is doing it, and nothing about the board matters to that
+  if (!handover.runs && handover.problems[0].reason === "no-agent") {
+    return whyThisProblem(handover.problems[0], project.key);
+  }
+  const reasons = [
+    ...(handover.runs ? [] : handover.problems.map((p) => whyThisProblem(p, project.key))),
+    ...readinessGaps({
+      repositoryUrl: projectRepositoryUrl(project),
+      workerEnabled: project.worker?.enabled === true,
+      columns,
+    }).map((gap) => whyThisGap(gap, columns)),
+  ];
+  return reasons.join("; and ");
+}
+
+function whyThisGap(gap: ReadinessGap, columns: AnyColumn[]): string {
+  switch (gap) {
+    case "no-repository":
+      return "this project names no repository, so no machine can match it";
+    case "runs-off":
+      return "this project is not enabled for workers, so nothing will run it";
+    case "missing-columns":
+      return `the board has no ${missingRunRoles(columns).join(", ")} column, so no machine can claim from it`;
+    default:
+      return "";
+  }
 }
 
 // A switch with no fall-through on purpose: the first version of this returned "" for the three
@@ -173,8 +205,10 @@ async function whyItWillNotRun(
 // and re-assigning a task somebody else handed over leaves theirs. Both then answered
 // "BP-x → @owner" with no caveat and were never claimed: the exact silence this ticket exists to
 // end, reproduced inside the feature written to end it.
-function whyThisProblem(reason: HandoverReason): string {
+function whyThisProblem({ reason, blockers }: HandoverProblem, key: string): string {
   switch (reason) {
+    case "blocked":
+      return `it waits on unfinished blockers (${(blockers ?? []).map((n) => `${key}-${n}`).join(", ")})`;
     case "no-agent":
       return "no agent is named on it, so nothing will run it — a task naming none is one a person is doing";
     case "not-approved-yet":

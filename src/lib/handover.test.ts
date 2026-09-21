@@ -228,3 +228,40 @@ describe("awaitingClaim", () => {
     expect(awaitingClaim(BOARD, status)).toBe(expected);
   });
 });
+
+/** BP-727 review: the claim leaves a task alone while a blocker is unfinished. */
+describe("handoverOf and blockers", () => {
+  const link = (taskNumber: number, status: string) => ({
+    _id: `b${taskNumber}`,
+    taskNumber,
+    title: "",
+    status,
+  });
+
+  it("names the unfinished blockers, not the finished ones", () => {
+    expect(
+      handoverOf(task({ blockedBy: [link(3, "doing"), link(4, "shipped"), link(5, "parked")] } as never), BOARD)
+    ).toEqual({ runs: false, problems: [{ reason: "blocked", by: null, blockers: [3, 5] }] });
+  });
+
+  it("runs once every blocker is done", () => {
+    expect(handoverOf(task({ blockedBy: [link(4, "shipped")] } as never), BOARD)).toEqual({ runs: true });
+  });
+
+  // A bare id carries no status, and guessing would invent a blocker or hide one
+  it("does not judge a blocker that arrived as a bare id", () => {
+    expect(handoverOf(task({ blockedBy: ["b9"] } as never), BOARD)).toEqual({ runs: true });
+  });
+
+  it("does not judge blockers without the board's columns", () => {
+    expect(handoverOf(task({ blockedBy: [link(3, "doing")] } as never))).toEqual({ runs: true });
+  });
+
+  it("lists a blocker alongside the task's other problems", () => {
+    expect(
+      handoverOf(task({ status: "someday", assignee: null, blockedBy: [link(3, "doing")] } as never), BOARD)
+    ).toMatchObject({
+      problems: [{ reason: "not-approved-yet" }, { reason: "unassigned" }, { reason: "blocked" }],
+    });
+  });
+});

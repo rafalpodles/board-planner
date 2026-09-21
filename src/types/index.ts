@@ -1731,12 +1731,14 @@ export interface ApiAgentBlock {
   deterministic: boolean;
 }
 
-export type MachineState = "none" | "stale" | "live";
+export type MachineState = "none" | "stale" | "paused" | "failing" | "live";
 
 export interface ApiHandoverReadiness {
   owners: ApiUserSummary[];
   /** The reader's own machines only, against this board's repository */
   machine: MachineState;
+  /** Names of the preflight checks the reader's own machine reports failing, when `failing` */
+  failingChecks?: string[];
 }
 
 export interface ApiAgent {
