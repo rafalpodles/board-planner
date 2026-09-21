@@ -114,6 +114,7 @@ export const GROUPS = {
     "instance-outage.spec.ts",
   ],
   automation: [
+    "machine-force-refusal.spec.ts",
     "workers-enrolment.spec.ts",
     "worker-controls.spec.ts",
     "worker-enrolment-name.spec.ts",
