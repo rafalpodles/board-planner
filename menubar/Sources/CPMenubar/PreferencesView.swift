@@ -188,6 +188,9 @@ private struct RepositoriesTab: View {
                 case .forgotten(let project, let path):
                     Text("Dropped \(project) — \(path) was already gone")
                         .font(.caption2).foregroundStyle(.secondary)
+                case .linkedWorktreeDropped(let project, let path):
+                    Text("Dropped \(project) — \(path) is a linked worktree, so nothing on disk was touched")
+                        .font(.caption2).foregroundStyle(.secondary)
                 case .refused(let project, let reason):
                     Text("Left \(project) alone: \(reason)").font(.caption2).foregroundStyle(.orange)
                 case .declined(let project, let paths):
@@ -299,14 +302,30 @@ private struct RepositoriesTab: View {
     }
 
     // A folder picker is the only way in, matching repos.ts: a path the operator did not choose
-    // from disk is exactly what the allowlist exists to refuse.
+    // from disk is exactly what the allowlist exists to refuse. A linked worktree is refused too
+    // (BP-505): it sits right beside its checkout, in the same folder this picker opens on, and
+    // granting one here is the likeliest way it ends up stuck in the allowlist later.
     private func add() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let path = panel.url?.path else { return }
-        save(paths.contains(path) ? paths : paths + [path])
+
+        let toolPath = Onboarding.load().toolPath
+        Task.detached {
+            let verdict = CheckoutGrant.check(path: path) { args, cwd in
+                WorkerProcess.git(args, cwd: cwd, toolPath: toolPath)
+            }
+            await MainActor.run {
+                switch verdict {
+                case .allowed:
+                    save(paths.contains(path) ? paths : paths + [path])
+                case .refused(let reason):
+                    error = reason
+                }
+            }
+        }
     }
 
     private func remove() {

@@ -180,13 +180,17 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
     /// The bug. `repos.json` holds the worktree, the operator unticks the project, and the list
     /// handed back for deletion opens with the repository nobody named — whose `.git` holds the
     /// object store every other worktree of it shares.
-    func testItRefusesToRemoveAPathThatIsItselfALinkedWorktree() {
+    ///
+    /// `.linkedWorktree` rather than plain `.refused` since BP-505: the two used to be the same
+    /// case, and `CheckoutDeletion` could not tell "no, not now" from "no, not ever" without
+    /// parsing the sentence.
+    func testItTellsAPathThatIsItselfALinkedWorktreeApartFromARemovableRepository() {
         let (checkout, worktree) = repoWithWorktree()
 
         let verdict = removal().check(path: worktree, workerIsBusy: false)
 
-        guard case .refused(let reason) = verdict else {
-            XCTFail("expected a refusal, got \(verdict) — the repository at \(checkout) would be deleted")
+        guard case .linkedWorktree(let reason) = verdict else {
+            XCTFail("expected a linked-worktree verdict, got \(verdict) — the repository at \(checkout) would be deleted")
             return
         }
         // Not `contains("worktree")`: every neighbouring refusal in this file says that word too —
@@ -194,7 +198,7 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
         // that had stopped telling the two apart (BP-422 review)
         XCTAssertTrue(
             reason.contains("is a linked worktree"),
-            "the refusal has to say what the path is, not just that it is not allowed: \(reason)")
+            "the reason has to say what the path is, not just that it is not allowed: \(reason)")
     }
 
     /// Belt and braces, and the second half of the ticket: whatever the verdict, the list of things
@@ -213,6 +217,11 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
             XCTAssertFalse(
                 reason.contains(resolved(checkout)),
                 "the refusal names the repository rather than the path it was asked about: \(reason)")
+        case .linkedWorktree(let reason):
+            // The shape this fixture actually hits: naming the worktree, not the repository.
+            XCTAssertFalse(
+                reason.contains(resolved(checkout)),
+                "the reason names the repository rather than the path it was asked about: \(reason)")
         case .go(let worktrees):
             XCTAssertFalse(
                 worktrees.map(resolved).contains(resolved(checkout)),

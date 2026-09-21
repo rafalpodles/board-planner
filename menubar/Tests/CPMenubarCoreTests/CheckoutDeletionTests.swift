@@ -128,6 +128,20 @@ final class CheckoutDeletionTests: XCTestCase {
             exists: { _ in true })
     }
 
+    /// `/co` answers as a linked worktree of a repository elsewhere — the shape `check` can never
+    /// say `.go` to (BP-505). `--git-dir` and `--git-common-dir` differ, matching
+    /// `LinkedWorktreeCheckTests`' own fixture for the same discriminator.
+    private func linkedWorktree() -> CheckoutRemoval {
+        CheckoutRemoval(
+            run: { args, _ in
+                if args.contains("--show-toplevel") { return (0, "/co\n") }
+                if args.contains("--git-dir") { return (0, "/repo/.git/worktrees/co\n") }
+                if args.contains("--git-common-dir") { return (0, "/repo/.git\n") }
+                return (0, "")
+            },
+            exists: { _ in true })
+    }
+
     /// Records what the operator was asked, so "it named every path" can be asserted rather than
     /// described, and answers whatever the test told it to.
     private final class Asked: @unchecked Sendable {
@@ -154,6 +168,66 @@ final class CheckoutDeletionTests: XCTestCase {
         XCTAssertEqual(r.removed, [], "nothing is deleted when the guard says no")
         XCTAssertEqual(r.forgotten, [], "and the grant stays, so the worker may still clean up")
         XCTAssertEqual(asked.calls.count, 0, "nobody is asked about a deletion that is not going to happen")
+    }
+
+    // MARK: - BP-505: a linked worktree converges instead of refusing for ever
+
+    /// The fix. Left as a plain refusal, this repeats identically on every reconnect: the shape is
+    /// structural, so nothing about waiting changes the guard's answer. Dropping the grant is the
+    /// only path that reaches a resolved state, and it deletes nothing — the same outcome
+    /// Preferences → Repositories → Remove already gives by hand.
+    func testALinkedWorktreeDropsTheGrantWithoutDeletingAnything() async {
+        let r = Recorder()
+        let asked = Asked()
+
+        let step = await deletion(r).removeIfSafe(
+            project: "BP", path: "/co", isBusy: idle(), checking: linkedWorktree(),
+            asking: { asked.ask($0, $1) })
+
+        XCTAssertEqual(step, .linkedWorktreeDropped(project: "BP", path: "/co"))
+        XCTAssertEqual(r.removed, [], "the checkout it belongs to is untouched")
+        XCTAssertEqual(r.forgotten, ["/co"], "but the grant goes, so this does not repeat forever")
+        XCTAssertEqual(asked.calls.count, 0, "nothing is being deleted, so there is nothing to ask about")
+    }
+
+    /// The control that keeps the case above honest: a step naming success requires the write to
+    /// have actually happened.
+    func testALinkedWorktreeWhoseGrantCannotBeDroppedIsReportedFailed() async {
+        let r = Recorder()
+        r.failForget = true
+        let asked = Asked()
+
+        let step = await deletion(r).removeIfSafe(
+            project: "BP", path: "/co", isBusy: idle(), checking: linkedWorktree(),
+            asking: { asked.ask($0, $1) })
+
+        guard case .failed(let project, let reason) = step else {
+            return XCTFail("expected a failure, got \(step)")
+        }
+        XCTAssertEqual(project, "BP")
+        XCTAssertTrue(reason.contains("/co"), reason)
+        XCTAssertEqual(r.removed, [])
+    }
+
+    /// The exotic half: `removeIfSafe` re-checks right before deleting, in case the operator's
+    /// confirmation dialog sat on screen long enough for something to change (BP-378/BP-424). This
+    /// answers a linked worktree only on the *second* look — a transition nothing in this app's own
+    /// flow produces, since the shape is structural rather than a state that changes underneath a
+    /// modal, but the switch has to answer for it, and only this test drives that arm.
+    func testABecomingLinkedWorktreeBetweenTheTwoLooksStillDropsTheGrantRatherThanDeleting() async {
+        let r = Recorder()
+        let asked = Asked()
+        let git = BecomesALinkedWorktreeOnItsSecondLook()
+
+        let step = await deletion(r).removeIfSafe(
+            project: "BP", path: "/co", isBusy: idle(),
+            checking: CheckoutRemoval(run: { args, cwd in git.run(args, cwd) }, exists: { _ in true }),
+            asking: { asked.ask($0, $1) })
+
+        XCTAssertEqual(step, .linkedWorktreeDropped(project: "BP", path: "/co"))
+        XCTAssertEqual(asked.calls.count, 1, "asked on the first look, before anything changed")
+        XCTAssertEqual(r.removed, [], "the second look says linked worktree, so nothing is deleted")
+        XCTAssertEqual(r.forgotten, ["/co"])
     }
 
     /// What the guard found is what gets deleted. The two used to be wired together by hand in the
@@ -383,4 +457,26 @@ private final class Growing: @unchecked Sendable {
         return (0, porcelainZ((["/co"] + listed).map { "worktree \($0)" }.joined(separator: "\n\n")))
     }
     return (0, "")
+}
+
+/// An ordinary, clean repository on the first `check`, a linked worktree on the second —
+/// `--show-toplevel` is the first git call inside every `check` invocation, so counting it (not
+/// deferred: every later call in *this same* invocation must still see the bumped count) tells the
+/// rest of the stub which invocation it is answering for.
+private final class BecomesALinkedWorktreeOnItsSecondLook: @unchecked Sendable {
+    private var invocation = 0
+
+    func run(_ args: [String], _ cwd: String) -> (code: Int32, output: String) {
+        if args.contains("--show-toplevel") {
+            invocation += 1
+            return (0, "/co\n")
+        }
+        guard invocation >= 2 else {
+            if args.contains("--git-dir") || args.contains("--git-common-dir") { return (0, ".git") }
+            return (0, "")
+        }
+        if args.contains("--git-dir") { return (0, "/repo/.git/worktrees/co\n") }
+        if args.contains("--git-common-dir") { return (0, "/repo/.git\n") }
+        return (0, "")
+    }
 }

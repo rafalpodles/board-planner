@@ -17,7 +17,10 @@ public enum GitCheckoutKind: Equatable, Sendable {
 /// so deleting it takes them all, including ones nobody named (BP-422).
 public enum LinkedWorktreeCheck {
     /// `nil` when either answer could not be read. Deciding what an unexamined directory means is
-    /// the caller's, and both callers here answer it the same way: no.
+    /// the caller's: refusing an irreversible act on it (`CloneStep` adopting one, `CheckoutRemoval`
+    /// deleting one) answers no; granting it access (`CheckoutGrant`, BP-505) is not irreversible,
+    /// and answers yes — the picker accepted every such folder before this discriminator existed
+    /// too, and widening that is a decision for its own ticket.
     public static func kind(
         gitDir: (code: Int32, output: String),
         commonDir: (code: Int32, output: String),
