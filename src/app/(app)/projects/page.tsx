@@ -9,9 +9,10 @@ import { useAuth } from "@/hooks/use-auth";
 import { useProjects } from "@/hooks/use-projects";
 import { projectPath } from "@/lib/urls";
 import { PageHeader } from "@/components/shell/PageHeader";
+import { LoadFailed } from "@/components/ui/LoadFailed";
 
 export default function ProjectsPage() {
-  const { projects, isLoading: loading } = useProjects();
+  const { projects, isLoading: loading, loadFailed, reload } = useProjects();
   const { isAdmin } = useAuth();
 
   if (loading) {
@@ -27,7 +28,11 @@ export default function ProjectsPage() {
       <PageHeader
         title="Projects"
         subtitle={
-          projects.length === 1 ? "1 project" : `${projects.length} projects`
+          loadFailed
+            ? undefined
+            : projects.length === 1
+              ? "1 project"
+              : `${projects.length} projects`
         }
         actions={
           isAdmin ? (
@@ -38,7 +43,13 @@ export default function ProjectsPage() {
         }
       />
 
-      {projects.length === 0 && !isAdmin ? (
+      {loadFailed ? (
+        <LoadFailed
+          message="Your boards could not be loaded."
+          onRetry={reload}
+          testId="projects-load-failed"
+        />
+      ) : projects.length === 0 && !isAdmin ? (
         <NotOnAnyBoard />
       ) : projects.length === 0 ? (
         <div className="text-center py-12 text-text-muted">
@@ -86,21 +97,25 @@ export default function ProjectsPage() {
 
 function NotOnAnyBoard() {
   const api = useApi();
-  const [admins, setAdmins] = useState<string[] | null>(null);
+  const [admins, setAdmins] = useState<string[] | "unknown" | null>(null);
 
   useEffect(() => {
     api
       .get("/api/users/admins")
       .then((list: { fullName: string }[]) => setAdmins(list.map((admin) => admin.fullName)))
-      .catch(() => setAdmins([]));
+      .catch(() => setAdmins("unknown"));
   }, [api]);
 
   return (
-    <div className="mx-auto max-w-md py-12 text-center text-text-muted" data-testid="not-on-any-board">
+    <div
+      className="mx-auto max-w-md py-12 text-center text-text-muted"
+      data-testid="not-on-any-board"
+      data-admins={admins === "unknown" ? "unknown" : admins ? "named" : "pending"}
+    >
       <p className="mb-2 font-medium text-text">You are not on any board yet.</p>
       <p>
         Boards are opened to you by their owners.
-        {admins && admins.length > 0 && (
+        {Array.isArray(admins) && admins.length > 0 && (
           <>
             {" "}
             Ask one of the admins: <span className="text-text">{admins.join(", ")}</span>.

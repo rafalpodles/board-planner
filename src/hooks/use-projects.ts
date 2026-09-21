@@ -16,6 +16,7 @@ import { useAuth } from "@/hooks/use-auth";
 interface ProjectsState {
   projects: ApiProject[];
   isLoading: boolean;
+  loadFailed: boolean;
   reload: () => Promise<void>;
   reorder: (orderedIds: string[]) => Promise<void>;
 }
@@ -29,6 +30,7 @@ export function useProjectsProvider(): ProjectsState {
   const { user } = useAuth();
   const [projects, setProjects] = useState<ApiProject[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const appliedSeq = useRef(0);
 
   // A read carries the order of the moment it was answered, so one overtaken by a later read or by
@@ -39,10 +41,12 @@ export function useProjectsProvider(): ProjectsState {
       const list = await api.get("/api/projects");
       if (seq !== appliedSeq.current) return;
       setProjects(list);
+      setLoadFailed(false);
     } catch {
       // The shell must still render if this fails; pages surface their own errors
       if (seq !== appliedSeq.current) return;
       setProjects([]);
+      setLoadFailed(true);
     } finally {
       if (seq === appliedSeq.current) setIsLoading(false);
     }
@@ -83,8 +87,8 @@ export function useProjectsProvider(): ProjectsState {
   );
 
   return useMemo(
-    () => ({ projects, isLoading, reload, reorder }),
-    [projects, isLoading, reload, reorder]
+    () => ({ projects, isLoading, loadFailed, reload, reorder }),
+    [projects, isLoading, loadFailed, reload, reorder]
   );
 }
 
