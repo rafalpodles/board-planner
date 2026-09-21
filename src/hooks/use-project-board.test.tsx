@@ -21,6 +21,7 @@ const { api, toast } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
+const poll = vi.hoisted(() => ({ ms: 0 }));
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast }) }));
 // The real one reads on mount and then on an interval. Kept honest about the first read — it is
 // what puts the board on screen — and silent afterwards, so the tests fire each further read
@@ -28,7 +29,8 @@ vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast }) }));
 vi.mock("@/hooks/use-poll-while-visible", async () => {
   const { useEffect } = await import("react");
   return {
-    usePollWhileVisible: (callback: () => void) => {
+    usePollWhileVisible: (callback: () => void, ms: number) => {
+      poll.ms = ms;
       useEffect(() => {
         callback();
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -80,13 +82,15 @@ beforeEach(() => {
   // Module-level, so a test that renders <Probe /> without mounted()/mountedScoped() would
   // otherwise inherit the previous test's scope
   probeScope = "all";
-  api.get.mockImplementation((path: string) => {
-    if (path.endsWith("/tasks")) return Promise.resolve([task("t1", 0), task("t2", 1)]);
-    if (path.endsWith("/sprints")) return Promise.resolve([]);
-    return Promise.resolve(PROJECT);
-  });
+  api.get.mockImplementation(defaultGet);
   api.put.mockResolvedValue({});
 });
+
+function defaultGet(path: string) {
+  if (path.endsWith("/tasks")) return Promise.resolve([task("t1", 0), task("t2", 1)]);
+  if (path.endsWith("/sprints")) return Promise.resolve([]);
+  return Promise.resolve(PROJECT);
+}
 afterEach(cleanup);
 
 /** The board filtered to one sprint, which is where an optimistic move is visible */
@@ -489,5 +493,61 @@ describe("moving a task to another sprint", () => {
 
     expect(board.tasks.find((t) => t._id === "t1")!.sprint).toBe("s2");
     await act(async () => release({}));
+  });
+});
+
+describe("a board that refuses the reader", () => {
+  const refused = () => Object.assign(new Error("Forbidden"), { status: 403 });
+
+  it("reports the refusal and toasts nothing, since the page says it in place of the board", async () => {
+    api.get.mockRejectedValue(refused());
+    render(<Probe />);
+
+    await waitFor(() => expect(board.loadError).toBe(true));
+    expect(board.loadFailure).toMatchObject({ status: 403 });
+    expect(toast).not.toHaveBeenCalled();
+  });
+
+  it("takes a board already on screen away when access goes, so nothing on it can be edited", async () => {
+    await mounted();
+    expect(board.project).not.toBeNull();
+
+    api.get.mockRejectedValue(refused());
+    await act(async () => {
+      await board.reload();
+    });
+
+    expect(board.project).toBeNull();
+    expect(board.tasks).toEqual([]);
+    expect(board.loadFailure).toMatchObject({ status: 403 });
+    expect(toast).not.toHaveBeenCalled();
+  });
+
+  it("asks a refusing board again less often, and puts it back when access returns", async () => {
+    api.get.mockRejectedValue(refused());
+    render(<Probe />);
+    await waitFor(() => expect(board.loadError).toBe(true));
+    expect(poll.ms).toBe(60_000);
+
+    api.get.mockImplementation(defaultGet);
+    await act(async () => {
+      await board.reload();
+    });
+
+    expect(board.loadError).toBe(false);
+    expect(board.project).not.toBeNull();
+    expect(poll.ms).toBe(10_000);
+  });
+
+  it("still reports an outage the way it always has, and keeps the board", async () => {
+    await mounted();
+
+    api.get.mockRejectedValue(Object.assign(new Error("boom"), { status: 500 }));
+    await act(async () => {
+      await board.reload();
+    });
+
+    expect(toast).toHaveBeenCalledWith("Failed to load board data", "error");
+    expect(board.project).not.toBeNull();
   });
 });

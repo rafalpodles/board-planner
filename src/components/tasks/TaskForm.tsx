@@ -524,7 +524,7 @@ export function TaskForm({
       />
 
       <div>
-        <label className="block text-sm font-medium mb-1">Checklist</label>
+        <label className="block text-sm font-medium mb-1">Acceptance criteria</label>
         <div className="space-y-1 mb-2">
           {checklist.map((item, i) => (
             <div key={i} className="flex items-center gap-2 group">
@@ -569,7 +569,8 @@ export function TaskForm({
             type="text"
             value={newChecklistItem}
             onChange={(e) => setNewChecklistItem(e.target.value)}
-            placeholder="Add checklist item..."
+            placeholder="Add criterion"
+            aria-label="Add criterion"
             className="focus-ring flex-1 bg-bg-input border border-border rounded px-3 py-1.5 text-sm"
             onKeyDown={(e) => {
               if (e.key === "Enter" && newChecklistItem.trim()) {

@@ -1,5 +1,6 @@
 "use client";
 
+import { mayLeave } from "@/hooks/use-leave-guard";
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { isTaskPath, projectRefFromPathname } from "@/lib/urls";
@@ -69,7 +70,7 @@ export function useOpenTask() {
   const pathname = usePathname();
 
   return useCallback(
-    (href: string) => {
+    (href: string): boolean => {
       const here = projectRefFromPathname(pathname);
       const there = projectRefFromPathname(href);
       // An id against a key cannot be told from two different boards, so a disagreement takes the
@@ -79,8 +80,10 @@ export function useOpenTask() {
       // genuinely cross-board task into the modal of the board being left, which is the bug.
       const anotherBoard = !!here && !!there && here.toLowerCase() !== there.toLowerCase();
 
+      if (!mayLeave()) return false;
       if (isTaskPath(href) && (fromTaskPage || anotherBoard)) window.location.assign(href);
       else router.push(href);
+      return true;
     },
     [fromTaskPage, pathname, router]
   );

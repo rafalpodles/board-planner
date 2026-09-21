@@ -91,7 +91,10 @@ mcp-server/           # Standalone MCP server (stdio transport)
 - **Middleware**: `withAuth` → `withAdmin` → `withProjectAccess` (composable)
 - **Task numbers**: Auto-increment per project via atomic `$inc` on `Project.taskCounter`
 - **Task keys**: `PROJECT_KEY-NUMBER` (e.g., `CP-5`), used in MCP and GitHub matching
-- **Activity logging**: Fire-and-forget, doesn't block the main request
+- **Activity logging**: a failed write never breaks the request, but `updateTask` awaits its rows
+  before answering, because the task view refetches History on the response. Rows are append-only;
+  one person's consecutive edits to a typed field (title, description, a project field) are folded
+  into one entry when read (`editSessions`, `EDIT_SESSION_MS`), not merged when written
 - **Notifications**: a per-user grid of `event × channel` (`src/lib/notification-prefs.ts`),
   resolved by `resolveChannels(user, projectId, event)` — global, with a per-project override whose
   presence in `user.notifications.projects` *is* the override switch. Channels are the bell, e-mail

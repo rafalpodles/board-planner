@@ -1,5 +1,6 @@
 "use client";
 
+import { boardRefusal } from "@/lib/board-load-failure";
 import { Dispatch, SetStateAction, useCallback, useEffect, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
@@ -18,6 +19,7 @@ export interface ProjectBoard {
   // succeeds. The page only acts on this when there is nothing else to show — a poll
   // failing once the board is already up leaves the last good state on screen instead.
   loadError: boolean;
+  loadFailure?: unknown;
   reload: () => Promise<void>;
   viewMode: "board" | "list";
   setViewMode: (mode: "board" | "list") => void;
@@ -96,7 +98,8 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
   const [project, setProject] = useState<ApiProject | null>(null);
   const [tasks, setTasks] = useState<ApiTask[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(false);
+  const [loadFailure, setLoadFailure] = useState<unknown>(null);
+  const refused = boardRefusal(loadFailure) !== null;
   const [showNewTask, setShowNewTask] = useState(false);
   const loadSeq = useRef(0);
   // Read after an await, where the render-time `scope` — and the `loadData` closed over it — are
@@ -208,11 +211,18 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
         setTasks([]);
       }
       setSprints(sprintList);
-      setLoadError(false);
-    } catch {
+      setLoadFailure(null);
+    } catch (err) {
       if (seq !== loadSeq.current) return;
-      setLoadError(true);
-      toast("Failed to load board data", "error");
+      setLoadFailure(err);
+      // A refused board is taken off the screen, so the page says so in place of it
+      if (boardRefusal(err)) {
+        setProject(null);
+        setTasks([]);
+        setSprints([]);
+      } else {
+        toast("Failed to load board data", "error");
+      }
     } finally {
       if (seq === loadSeq.current) setLoading(false);
     }
@@ -234,7 +244,8 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
     scopeRef.current = scope;
   }, [loadData, scope]);
 
-  usePollWhileVisible(loadData, 10_000);
+  // A refused board is asked again, only less often, so a grant given back is picked up
+  usePollWhileVisible(loadData, refused ? 60_000 : 10_000);
 
   // Instant refresh when the PM chat reports a write action (poll stays as fallback).
   // Bursts are coalesced inside subscribeBoardRefresh.
@@ -632,7 +643,8 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
     sprints,
     assignableUsers,
     loading,
-    loadError,
+    loadError: loadFailure !== null,
+    loadFailure,
     reload: loadData,
     viewMode,
     setViewMode,

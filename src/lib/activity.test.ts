@@ -5,7 +5,9 @@ const insertMany = vi.fn();
 
 vi.mock("@/models/activityLog", () => ({ ActivityLog: { create, insertMany } }));
 
-const { logActivity, logActivities } = await import("./activity");
+const { logActivity, logActivities, editSessions, presentSessions, EDIT_SESSION_MS } = await import(
+  "./activity"
+);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -46,6 +48,18 @@ describe("logActivities", () => {
     expect(insertMany.mock.calls[0][0]).toEqual([
       { task: "a", user: "u1", action: "link_removed", field: "parent_of", oldValue: "BP-9", newValue: "" },
     ]);
+  });
+
+  it("marks a project's field and its type, and only that", async () => {
+    await logActivities([
+      { taskId: "a", userId: "u1", action: "updated", field: "Notes", oldValue: "x", newValue: "y", customField: true, fieldType: "text" },
+      { taskId: "a", userId: "u1", action: "updated", field: "title", oldValue: "x", newValue: "y" },
+    ]);
+
+    const [custom, builtIn] = insertMany.mock.calls[0][0];
+    expect(custom).toMatchObject({ customField: true, fieldType: "text" });
+    expect(builtIn).not.toHaveProperty("customField");
+    expect(builtIn).not.toHaveProperty("fieldType");
   });
 
   it("writes nothing rather than an empty batch", async () => {
@@ -111,5 +125,115 @@ describe("logActivity", () => {
     create.mockRejectedValue(new Error("no"));
 
     await expect(logActivity("a", "u1", "created")).resolves.toBeUndefined();
+  });
+});
+
+describe("editSessions", () => {
+  const t0 = new Date("2026-09-21T10:00:00Z").getTime();
+  let n = 0;
+  const row = (minutesAgo: number, over: Record<string, unknown> = {}) => ({
+    _id: `r${++n}`,
+    user: "u1",
+    action: "updated",
+    field: "description",
+    customField: false,
+    createdAt: new Date(t0 - minutesAgo * 60_000),
+    ...over,
+  });
+  const ids = (sessions: ReturnType<typeof editSessions>) =>
+    sessions.map((s) => [String(s.newest._id), String(s.oldest._id)]);
+
+  it("folds one person's saves of one typed field into a session", () => {
+    const a = row(1);
+    const b = row(3);
+    const c = row(5);
+    expect(ids(editSessions([a, b, c] as never))).toEqual([[a._id, c._id]]);
+  });
+
+  it("measures the gap between saves, not the length of the session", () => {
+    const rows = [row(0), row(8), row(16), row(24)];
+    expect(editSessions(rows as never)).toHaveLength(1);
+  });
+
+  it.each([
+    ["somebody else's save", { user: "u2" }],
+    ["another field", { field: "title" }],
+    ["a project field that happens to share the name", { customField: true }],
+    ["a change that is not a typed edit", { action: "status_changed", field: "status" }],
+    ["a pick from a list", { field: "priority" }],
+  ])("keeps %s apart", (_label, over) => {
+    const rows = [row(1), row(2, over), row(3)];
+    expect(editSessions(rows as never)).toHaveLength(3);
+  });
+
+  it("ends a session after a pause longer than the window", () => {
+    const rows = [row(0), row(EDIT_SESSION_MS / 60_000 + 1)];
+    expect(editSessions(rows as never)).toHaveLength(2);
+  });
+
+  it.each(["text", "number"])("folds a project's own %s field as well", (fieldType) => {
+    const rows = [
+      row(1, { field: "Notes", customField: true, fieldType }),
+      row(2, { field: "Notes", customField: true, fieldType }),
+    ];
+    expect(editSessions(rows as never)).toHaveLength(1);
+  });
+
+  it.each(["checkbox", "dropdown", "multiselect", "date"])(
+    "keeps every change to a project's %s field, since each one is a choice",
+    (fieldType) => {
+      const rows = [
+        row(1, { field: "Approved", customField: true, fieldType }),
+        row(2, { field: "Approved", customField: true, fieldType }),
+      ];
+      expect(editSessions(rows as never)).toHaveLength(2);
+    }
+  );
+});
+
+describe("presentSessions", () => {
+  const full = (id: string, oldValue: string, newValue: string, over: Record<string, unknown> = {}) => ({
+    _id: id,
+    field: "title",
+    customField: false,
+    oldValue,
+    newValue,
+    ...over,
+  });
+  const session = (newest: string, oldest: string) => ({
+    newest: { _id: newest },
+    oldest: { _id: oldest },
+  });
+
+  it("shows a session as what the field said before it and what it says after", () => {
+    const shown = presentSessions([session("b", "a")] as never, [full("a", "one", "two"), full("b", "two", "three")]);
+    expect(shown).toEqual([expect.objectContaining({ _id: "b", oldValue: "one", newValue: "three" })]);
+  });
+
+  it("drops a session that ended where it began", () => {
+    const shown = presentSessions([session("b", "a")] as never, [full("a", "one", "two"), full("b", "two", "one")]);
+    expect(shown).toEqual([]);
+  });
+
+  // A single row is a real change whatever it says
+  it("keeps a single row as written", () => {
+    const shown = presentSessions([session("a", "a")] as never, [full("a", "one", "two")]);
+    expect(shown).toEqual([expect.objectContaining({ oldValue: "one", newValue: "two" })]);
+  });
+
+  it("says when a description run ended with the description gone", () => {
+    const shown = presentSessions(
+      [{ newest: { _id: "b" }, oldest: { _id: "a" } }] as never,
+      [full("a", "old", "mid", { field: "description" }), full("b", "mid", "", { field: "description" })]
+    );
+    expect(shown).toEqual([expect.objectContaining({ oldValue: "old", newValue: "", cleared: true })]);
+  });
+
+  it("omits the description's new text, which the history never shows", () => {
+    const shown = presentSessions(
+      [session("a", "a"), session("c", "c")] as never,
+      [full("a", "old", "new", { field: "description" }), full("c", "x", "y", { field: "description", customField: true })]
+    );
+    expect(shown.map((r) => r.newValue)).toEqual(["", "y"]);
   });
 });

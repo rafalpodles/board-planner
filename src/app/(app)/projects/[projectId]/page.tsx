@@ -11,7 +11,7 @@ import { projectPath } from "@/lib/urls";
 import { BoardHeader } from "@/components/kanban/BoardHeader";
 import { sprintScopeFromParam, sprintScopeToQuery, isSprintScopeShape } from "@/lib/sprint-scope";
 import { APP_NAME } from "@/lib/brand";
-import { Button } from "@/components/ui/Button";
+import { BoardLoadFailed } from "@/components/ui/LoadFailed";
 
 function useBoardDocumentTitle(project: ApiProject | null, tasks: ApiTask[]) {
   useEffect(() => {
@@ -63,18 +63,8 @@ export default function KanbanPage() {
     );
   }
 
-  // Nothing loaded and nothing to retry automatically: the poll already tried and
-  // toasted once, so re-showing a spinner here would spin forever without ever
-  // telling the person there is a problem to act on
   if (!board.project) {
-    return (
-      <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
-        <p className="text-sm text-text-muted">Failed to load this board.</p>
-        <Button size="sm" onClick={board.reload}>
-          Retry
-        </Button>
-      </div>
-    );
+    return <BoardLoadFailed reason={board.loadFailure} onRetry={board.reload} />;
   }
 
   return (

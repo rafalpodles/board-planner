@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
@@ -21,13 +21,15 @@ import {
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { useAuth } from "@/hooks/use-auth";
 import { useProjects } from "@/hooks/use-projects";
+import { useLeaveGuard } from "@/hooks/use-leave-guard";
 import { PageHeader } from "@/components/shell/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { LoadFailed } from "@/components/ui/LoadFailed";
 import { agentProblems } from "@/lib/agent-rules";
+import type { AgentComposition } from "@/types";
 import { BUCKETS } from "../catalog";
 import { useStore } from "../store";
-import { useComposition } from "../useComposition";
+import { sameComposition, useComposition } from "../useComposition";
 import { BlockBody, Bucket, Palette } from "../components/blocks";
 
 // Corner distance picks a neighbouring bucket's first row over the bucket the cursor is actually
@@ -148,6 +150,13 @@ export default function AgentDetailPage() {
   const [naming, setNaming] = useState<{ name: string; description: string } | null>(null);
   const problems = agentProblems(composition, lookup);
 
+  // What this page last saved, until the catalog reports the agent again: a save can land while the
+  // read after it fails, and the stale copy is then no baseline to compare against
+  const [savedAs, setSavedAs] = useState<AgentComposition | null>(null);
+  useEffect(() => setSavedAs(null), [agent?.composition]);
+  const unsaved = mayEdit && !!agent && !sameComposition(composition, savedAs ?? agent.composition);
+  useLeaveGuard(unsaved, "This agent has changes that are not saved. Leave without saving them?");
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: keyboardCoordinates })
@@ -218,6 +227,7 @@ export default function AgentDetailPage() {
                   setRefusal("");
                   try {
                     await store.saveComposition(agent._id, composition);
+                    setSavedAs(composition);
                     setSaved(true);
                     window.setTimeout(() => setSaved(false), 2000);
                   } catch (error) {
@@ -225,8 +235,14 @@ export default function AgentDetailPage() {
                   }
                 }}
               >
-                {saved ? "Saved" : "Save"}
+                {saved && !unsaved ? "Saved" : "Save"}
               </Button>
+            )}
+            {/* Mounted empty: a live region that arrives already filled is often not announced */}
+            {mayEdit && (
+              <span role="status" className="text-[12px] text-warning">
+                {unsaved ? "Unsaved changes" : ""}
+              </span>
             )}
           </>
         }

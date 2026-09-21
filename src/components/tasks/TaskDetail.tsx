@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { subscribeBoardRefresh } from "@/lib/board-refresh";
 import { taskPath } from "@/lib/urls";
@@ -32,6 +32,9 @@ import { useTaskEditor } from "@/components/tasks/detail/useTaskEditor";
 import type { Trigger } from "@/hooks/use-trigger-autocomplete";
 import { useEditorTriggers } from "@/hooks/use-editor-triggers";
 import { useOpenTask } from "@/hooks/use-open-task";
+import { LoadFailed } from "@/components/ui/LoadFailed";
+import { Button } from "@/components/ui/Button";
+import { boardRefusal } from "@/lib/board-load-failure";
 
 interface TaskDetailProps {
   projectId: string;
@@ -39,6 +42,15 @@ interface TaskDetailProps {
   /** Back to the board: the page navigates, the modal just closes */
   onClose: () => void;
   onLoaded?: (task: ApiTask, project: ApiProject) => void;
+}
+
+// On a write only a lost grant replaces the page: a 400 is a refused value, and a 404 mid-edit
+// (the task deleted under you) keeps the editor so what was typed can still be copied
+function taskRefusal(err: unknown, reading: boolean): string | null {
+  const status = (err as { status?: number } | null)?.status;
+  if (!reading) return status === 403 ? boardRefusal(err) : null;
+  if (status === 404 || status === 400) return "There is no task here — the link may be stale.";
+  return boardRefusal(err);
 }
 
 export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailProps) {
@@ -51,6 +63,17 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
   const { allAgents: agents } = useStore();
   const [users, setUsers] = useState<ApiUserSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refusal, setRefusal] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
+  const shown = useRef(false);
+
+  const refuse = useCallback((err: unknown, reading = false) => {
+    const refused = taskRefusal(err, reading);
+    if (!refused) return false;
+    setRefusal(refused);
+    setTask(null);
+    return true;
+  }, []);
 
   const loadData = useCallback(async () => {
     try {
@@ -62,9 +85,12 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
       setTask(t);
       setProject(p);
       setSprints(s);
+      setRefusal(null);
+      shown.current = true;
       onLoaded?.(t, p);
-    } catch {
-      toast("Failed to load task", "error");
+    } catch (err) {
+      // With nothing on screen the page itself says so; a toast would say it twice
+      if (!refuse(err, true) && shown.current) toast("Failed to load task", "error");
     } finally {
       setLoading(false);
     }
@@ -72,6 +98,7 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
   }, [projectId, taskId]);
 
   useEffect(() => {
+    shown.current = false;
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId]);
@@ -89,6 +116,27 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
   // The board was not the only view going stale on a PM write — this view never reloaded
   // at all, so it kept editing a task that had moved underneath it
   useEffect(() => subscribeBoardRefresh(projectId, loadData), [projectId, loadData]);
+
+  const failed = (message: string, onRetry?: () => void) => (
+    <div>
+      <div className="flex justify-end px-4 pt-3">
+        <Button size="sm" variant="secondary" onClick={onClose}>
+          Close
+        </Button>
+      </div>
+      <LoadFailed className="py-12" message={message} onRetry={onRetry} busy={retrying} />
+    </div>
+  );
+
+  if (refusal) return failed(refusal);
+
+  if (!loading && (!task || !project)) {
+    return failed("Failed to load this task.", async () => {
+      setRetrying(true);
+      await loadData();
+      setRetrying(false);
+    });
+  }
 
   if (loading || !task || !project) {
     return (
@@ -110,6 +158,7 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
       onClose={onClose}
       onReload={loadData}
       onTaskChange={setTask}
+      onRefused={(err) => refuse(err)}
     />
   );
 }
@@ -124,6 +173,7 @@ interface TaskDetailViewProps {
   onClose: () => void;
   onReload: () => void;
   onTaskChange: (updater: (prev: ApiTask | null) => ApiTask | null) => void;
+  onRefused: (err: unknown) => boolean;
 }
 
 function TaskDetailView({
@@ -136,6 +186,7 @@ function TaskDetailView({
   onClose,
   onReload,
   onTaskChange,
+  onRefused,
 }: TaskDetailViewProps) {
   const api = useApi();
   const openTask = useOpenTask();
@@ -159,11 +210,13 @@ function TaskDetailView({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [commentRefreshKey, setCommentRefreshKey] = useState(0);
-  const [linkRefreshKey, setLinkRefreshKey] = useState(0);
+  const [historyWrites, setHistoryWrites] = useState(0);
+  const wroteHistory = () => setHistoryWrites((n) => n + 1);
 
-  const { draft, set, autoSaveState, autoSaveError, retry, resend } = useTaskEditor(
+  const { draft, set, autoSaveState, autoSaveError, retry, resend, savedCount } = useTaskEditor(
     projectId,
-    task
+    task,
+    onRefused
   );
 
   const columns = effectiveColumns(project.columns);
@@ -211,6 +264,7 @@ function TaskDetailView({
       });
     try {
       await patch();
+      wroteHistory();
       // A status change ends any run the task was under, and the server clears the execution phase
       // in the same write — so patching status alone would leave the panel asserting a live run the
       // user just stopped, counting up from a snapshot that is no longer true
@@ -224,6 +278,7 @@ function TaskDetailView({
         setHeldStatus({ conflict: failure.body.runConflict, retry: () => patch(true) });
         return;
       }
+      if (onRefused(err)) return;
       toast("Failed to update status", "error");
     }
   }
@@ -236,6 +291,7 @@ function TaskDetailView({
     setForcingStatus(true);
     try {
       await pending.retry();
+      wroteHistory();
       toast(`${taskKey} taken from the worker`, "success");
     } catch {
       toast("Failed to update status", "error");
@@ -424,7 +480,7 @@ function TaskDetailView({
               task={task}
               columns={columns}
               onChanged={() => {
-                setLinkRefreshKey((k) => k + 1);
+                wroteHistory();
                 onReload();
               }}
               onAddChild={() => setAddingChild(true)}
@@ -438,7 +494,7 @@ function TaskDetailView({
                 taskId={task._id}
                 scope={scope}
                 commentRefreshKey={commentRefreshKey}
-                historyRefreshKey={linkRefreshKey}
+                historyRefreshKey={historyWrites + savedCount}
               />
             </section>
           </div>
@@ -468,7 +524,10 @@ function TaskDetailView({
           projectId={projectId}
           projectKey={project.key}
           taskId={task._id}
-          onPosted={() => setCommentRefreshKey((k) => k + 1)}
+          onPosted={() => {
+            setCommentRefreshKey((k) => k + 1);
+            wroteHistory();
+          }}
         />
       </div>
 
@@ -515,6 +574,7 @@ function TaskDetailView({
           customFields={project.customFields || []}
           onSaved={() => {
             setAddingChild(false);
+            wroteHistory();
             onReload();
           }}
           onCancel={() => setAddingChild(false)}

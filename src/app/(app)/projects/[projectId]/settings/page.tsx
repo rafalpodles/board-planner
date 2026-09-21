@@ -25,6 +25,8 @@ import {
   type SettingsNavGroup,
 } from "@/components/settings/SettingsShell";
 import { SettingsStats } from "./sections/types";
+import { BoardLoadFailed } from "@/components/ui/LoadFailed";
+import { useLeaveGuard } from "@/hooks/use-leave-guard";
 
 type Access = "member" | "projectAdmin" | "instanceAdmin";
 
@@ -160,7 +162,8 @@ export default function ProjectSettingsPage() {
   const { toast } = useToast();
 
   const [project, setProject] = useState<ApiProject | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loadFailure, setLoadFailure] = useState<unknown>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [section, setSection] = useState("");
   const [query, setQuery] = useState("");
   const [stats, setStats] = useState<SettingsStats | null>(null);
@@ -188,14 +191,13 @@ export default function ProjectSettingsPage() {
       const requested = params.get("section");
       if (requested) setSection(requested);
     }
-
-    api
-      .get(`/api/projects/${projectId}`)
-      .then(setProject)
-      .catch(() => toast("Failed to load project", "error"))
-      .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
+  }, []);
+
+  useEffect(() => {
+    api.get(`/api/projects/${projectId}`).then(setProject).catch(setLoadFailure);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, loadAttempt]);
 
   const patchProject = useCallback(
     (
@@ -256,22 +258,26 @@ export default function ProjectSettingsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, stats, projectId]);
 
-  // The redesign moved channels, webhooks, categories and templates out of instant-save,
-  // so an accidental reload now costs real work. main guarded one button; this guards the
-  // exits a browser actually offers.
-  useEffect(() => {
-    if (total === 0) return;
-    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
-    window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
-  }, [total]);
+  useLeaveGuard(total > 0, "Some settings are not saved. Leave without saving them?");
 
   const dirtySections = useMemo(
     () => new Set(pending.map((g) => g.section)),
     [pending]
   );
 
-  if (loading || !project) {
+  if (loadFailure) {
+    return (
+      <BoardLoadFailed
+        reason={loadFailure}
+        onRetry={() => {
+          setLoadFailure(null);
+          setLoadAttempt((n) => n + 1);
+        }}
+      />
+    );
+  }
+
+  if (!project) {
     return (
       <div className="flex justify-center py-12">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />

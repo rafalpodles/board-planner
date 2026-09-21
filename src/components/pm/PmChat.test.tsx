@@ -192,3 +192,32 @@ describe("Retry after a failed turn", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy());
   });
 });
+
+describe("a board the reader cannot open", () => {
+  it("says so, rather than blaming the server's configuration", async () => {
+    api.get.mockRejectedValue(Object.assign(new Error("Forbidden"), { status: 403 }));
+    render(<PmChat projectId="p1" />);
+
+    expect(await screen.findByText("You do not have access to this board.")).toBeTruthy();
+    expect(screen.queryByText(/not configured on the server/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+});
+
+describe("a PM page that could not read its board", () => {
+  it("reads it again on Retry, and opens once it can", async () => {
+    let fail = true;
+    api.get.mockImplementation((path: string) => {
+      if (path.includes("/pm/messages")) return Promise.resolve({ messages: [], nextCursor: null });
+      if (path.includes("/tasks")) return Promise.resolve([]);
+      return fail ? Promise.reject(Object.assign(new Error("boom"), { status: 500 })) : Promise.resolve(PROJECT);
+    });
+    render(<PmChat projectId="p1" />);
+
+    const retry = await screen.findByRole("button", { name: "Retry" });
+    fail = false;
+    await act(async () => retry.click());
+
+    expect(await screen.findByRole("textbox")).toBeTruthy();
+  });
+});

@@ -24,6 +24,8 @@ export async function logActivities(
     field?: string;
     oldValue?: string;
     newValue?: string;
+    customField?: boolean;
+    fieldType?: string;
   }[]
 ): Promise<void> {
   if (rows.length === 0) return;
@@ -36,6 +38,8 @@ export async function logActivities(
         field: row.field || "",
         oldValue: row.oldValue || "",
         newValue: row.newValue || "",
+        ...(row.customField && { customField: true }),
+        ...(row.fieldType && { fieldType: row.fieldType }),
       }))
     );
   } catch (err) {
@@ -71,4 +75,64 @@ export async function logActivity(
     // Activity logging should never break the main operation
     console.warn("Failed to log activity");
   }
+}
+
+export const EDIT_SESSION_MS = 10 * 60_000;
+
+const TYPED_FIELDS = new Set(["title", "description"]);
+const TYPED_PROJECT_FIELDS = new Set(["text", "number"]);
+
+export interface ActivityHeader {
+  _id: Types.ObjectId;
+  user: unknown;
+  action: string;
+  field: string;
+  customField?: boolean;
+  fieldType?: string;
+  createdAt: Date;
+}
+
+export interface EditSession<T extends ActivityHeader = ActivityHeader> {
+  newest: T;
+  oldest: T;
+}
+
+function typedEdit(row: ActivityHeader) {
+  if (row.action !== "updated") return false;
+  return row.customField ? TYPED_PROJECT_FIELDS.has(row.fieldType ?? "") : TYPED_FIELDS.has(row.field);
+}
+
+function sameEdit(a: ActivityHeader, b: ActivityHeader) {
+  return (
+    a.field === b.field &&
+    !!a.customField === !!b.customField &&
+    String(a.user) === String(b.user) &&
+    Math.abs(a.createdAt.getTime() - b.createdAt.getTime()) < EDIT_SESSION_MS
+  );
+}
+
+export function editSessions<T extends ActivityHeader>(newestFirst: T[]): EditSession<T>[] {
+  const sessions: EditSession<T>[] = [];
+  for (const row of newestFirst) {
+    const open = sessions.at(-1);
+    if (open && typedEdit(row) && typedEdit(open.oldest) && sameEdit(open.oldest, row)) open.oldest = row;
+    else sessions.push({ newest: row, oldest: row });
+  }
+  return sessions;
+}
+
+export function presentSessions<R extends { _id: unknown; field: string; customField?: boolean; oldValue: string; newValue: string }>(
+  sessions: EditSession[],
+  rows: R[]
+): R[] {
+  const byId = new Map(rows.map((r) => [String(r._id), r]));
+  return sessions.flatMap(({ newest, oldest }) => {
+    const last = byId.get(String(newest._id));
+    const first = byId.get(String(oldest._id));
+    if (!last || !first) return [];
+    if (first !== last && first.oldValue === last.newValue) return [];
+    const row = { ...last, oldValue: first.oldValue };
+    if (row.field !== "description" || row.customField) return [row];
+    return [{ ...row, newValue: "", cleared: !last.newValue }];
+  });
 }

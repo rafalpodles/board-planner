@@ -21,7 +21,7 @@ import { escalationColumnId } from "@/lib/escalation";
 import { isRunnable, normaliseComposition } from "@/lib/agent-rules";
 import { taskKeyOf } from "@/lib/task-key";
 import { usernameOf } from "@/lib/usernames";
-import { logActivity } from "@/lib/activity";
+import { logActivities, logActivity } from "@/lib/activity";
 import { dispatchWebhooks } from "@/lib/webhooks";
 import { dispatchNotifications } from "@/lib/notifications";
 import {
@@ -1258,7 +1258,7 @@ export async function updateTask(
   const activities: Promise<void>[] = [];
   // "agent" is on this list because it is the field that decides what runs on somebody's machine.
   // Without it there is no answer to "who pointed the machine at that prompt" (BP-345).
-  const trackFields = ["title", "priority", "category", "status", "agent"];
+  const trackFields = ["title", "description", "priority", "category", "status", "agent"];
   for (const field of trackFields) {
     // Through refId, not String(): `oldTask` is lean and holds a raw ObjectId while `task` comes
     // back with `agent` populated, and String() on a populated document is its inspect output —
@@ -1273,15 +1273,22 @@ export async function updateTask(
 
   // Since CP-213 the fields a project defines are most of what people actually edit, so a
   // fixed trackFields list leaves the bulk of every change unrecorded.
-  for (const change of customFieldActivityChanges(
-    oldTask.customFieldValues,
-    task.customFieldValues,
-    fieldDefs
-  )) {
-    activities.push(
-      logActivity(taskId, actorId, "updated", change.name, change.before, change.after)
-    );
-  }
+  activities.push(
+    logActivities(
+      customFieldActivityChanges(oldTask.customFieldValues, task.customFieldValues, fieldDefs).map(
+        (change) => ({
+          taskId,
+          userId: actorId,
+          action: "updated" as const,
+          field: change.name,
+          oldValue: change.before,
+          newValue: change.after,
+          customField: true,
+          fieldType: fieldDefs.find((def) => def.name === change.name)?.fieldType,
+        })
+      )
+    )
+  );
 
   if (updates.assignee !== undefined) {
     const oldAssignee = oldTask.assignee && typeof oldTask.assignee === "object"

@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import { AGENT_BUCKETS, AgentBucket, AgentComposition, ApiAgentBlock } from "@/types";
 import { BUCKET_PREFIX, Entry, Lookup, NEW_PREFIX } from "./components/blocks";
 import { emptyComposition } from "./catalog";
+import { normaliseComposition } from "@/lib/agent-rules";
 
 type Entries = Record<AgentBucket, Entry[]>;
 
@@ -33,18 +34,21 @@ function toComposition(entries: Entries): AgentComposition {
   return out;
 }
 
+export function sameComposition(a: AgentComposition, b: AgentComposition | undefined): boolean {
+  return JSON.stringify(normaliseComposition(a)) === JSON.stringify(normaliseComposition(b));
+}
+
 export function useComposition(source: AgentComposition | undefined, lookup: Lookup) {
   const [entries, setEntries] = useState<Entries>(() => toEntries(source ?? emptyComposition()));
   const [dragging, setDragging] = useState<ApiAgentBlock | null>(null);
 
-  // The agent arrives after the first render, so the editor is seeded when it does — and exactly
-  // once, or the refetch that follows a save would undo the save.
-  const seeded = useRef(false);
-  useEffect(() => {
-    if (!source || seeded.current) return;
-    seeded.current = true;
-    setEntries(toEntries(source));
-  }, [source]);
+  // Seeded during render: an effect's first frame would read as unsaved. A newer agent replaces
+  // the editor only while nothing was changed here, so a refetch never undoes somebody's work
+  const [seededFrom, setSeededFrom] = useState(source);
+  if (source && source !== seededFrom) {
+    if (!seededFrom || sameComposition(toComposition(entries), seededFrom)) setEntries(toEntries(source));
+    setSeededFrom(source);
+  }
 
   const bucketOf = (uid: string) =>
     AGENT_BUCKETS.find((bucket) => entries[bucket].some((e) => e.uid === uid));

@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { useDeclareTaskPage, useOpenTask } from "./use-open-task";
+import { useLeaveGuard } from "./use-leave-guard";
 
 const push = vi.fn();
 let pathname = "/projects/TP";
@@ -40,6 +41,11 @@ beforeEach(() => {
 });
 
 afterEach(() => cleanup());
+
+function Unsaved() {
+  useLeaveGuard(true, "Leave without saving?");
+  return null;
+}
 
 describe("useOpenTask", () => {
   it("pushes when no task page is on screen, so the board keeps its modal", () => {
@@ -126,5 +132,62 @@ describe("useOpenTask", () => {
       expect(push).toHaveBeenCalledWith("/projects/SB");
       expect(assign).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("useOpenTask with unsaved work on screen", () => {
+  let clock = Date.parse("2026-09-21T10:00:00Z");
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    clock += 60_000;
+    vi.setSystemTime(clock);
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("asks before a full page load too, and stays when told no", () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(
+      <>
+        <TaskPage />
+        <Unsaved />
+        <Opener />
+      </>
+    );
+
+    open();
+
+    expect(confirm).toHaveBeenCalled();
+    expect(assign).not.toHaveBeenCalled();
+    confirm.mockRestore();
+  });
+
+  it("stays when the reader says no", () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(
+      <>
+        <Unsaved />
+        <Opener />
+      </>
+    );
+
+    open();
+
+    expect(push).not.toHaveBeenCalled();
+    confirm.mockRestore();
+  });
+
+  it("goes when the reader says yes", () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(
+      <>
+        <Unsaved />
+        <Opener />
+      </>
+    );
+
+    open();
+
+    expect(push).toHaveBeenCalledWith(TASK);
+    confirm.mockRestore();
   });
 });

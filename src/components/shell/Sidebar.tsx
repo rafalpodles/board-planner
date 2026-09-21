@@ -1,5 +1,6 @@
 "use client";
 
+import { mayLeave } from "@/hooks/use-leave-guard";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
@@ -375,6 +376,7 @@ export function Sidebar({
               <button
                 onClick={async () => {
                   setMenuOpen(false);
+                  if (!mayLeave()) return;
                   await logout();
                   router.replace("/login");
                 }}

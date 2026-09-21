@@ -14,6 +14,7 @@ interface ActivityTimelineProps {
   onCountChange?: (count: number | null) => void;
   // Bumped by the parent when something outside this component wrote an activity entry
   refreshKey?: number;
+  visible?: boolean;
 }
 
 function actionIcon(action: string) {
@@ -119,6 +120,10 @@ function describeAction(log: ApiActivityLog): string {
       if (log.field === "recurrence" && !log.oldValue && log.newValue) {
         return `${userName} — ${log.newValue}`;
       }
+      if (log.field === "description" && !log.customField) {
+        if (!log.oldValue) return `${userName} added a description`;
+        return log.cleared ? `${userName} removed the description` : `${userName} edited the description`;
+      }
       // A field entry that carries values says what changed; one that does not still reads.
       // Project fields are the reason this matters — "updated Difficulty" alone tells you nothing.
       if (log.oldValue || log.newValue) {
@@ -166,6 +171,7 @@ export function ActivityTimeline({
   hideHeading,
   onCountChange,
   refreshKey = 0,
+  visible = true,
 }: ActivityTimelineProps) {
   const [logs, setLogs] = useState<ApiActivityLog[]>([]);
   const [expanded, setExpanded] = useState(false);
@@ -175,6 +181,7 @@ export function ActivityTimeline({
   const [reading, setReading] = useState(true);
   const api = useApi();
   const loadSeq = useRef(0);
+  const loadedKey = useRef(refreshKey);
 
   function load() {
     // A task switch reconciles this panel in place, so the previous task's read is still in
@@ -208,16 +215,20 @@ export function ActivityTimeline({
     setReading(true);
     setExpanded(false);
     onCountChange?.(null);
+    loadedKey.current = refreshKey;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId]);
 
   useEffect(() => {
     // A refresh keeps what is on screen: the rows are this task's either way
-    if (refreshKey === 0) return;
+    if (loadedKey.current === refreshKey) return;
+    // The count on the tab would be stale until the history is read again
+    if (!visible) return void onCountChange?.(null);
+    loadedKey.current = refreshKey;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshKey]);
+  }, [refreshKey, visible]);
 
   const displayLogs = expanded ? logs : logs.slice(0, 5);
 
@@ -260,9 +271,17 @@ export function ActivityTimeline({
             >
               {actionIcon(log.action)}
             </span>
-            <span className="flex-1 text-text-muted">
+            <div className="flex-1 min-w-0 text-text-muted">
               {describeAction(log)}
-            </span>
+              {log.action === "updated" && log.field === "description" && !log.customField && log.oldValue && (
+                <details className="mt-1">
+                  <summary className="cursor-pointer text-xs text-primary">What it said before</summary>
+                  <p className="mt-1 max-h-60 overflow-y-auto whitespace-pre-wrap break-words rounded-lg bg-bg-input p-2 text-xs text-text">
+                    {log.oldValue}
+                  </p>
+                </details>
+              )}
+            </div>
             <time
               dateTime={log.createdAt}
               title={new Date(log.createdAt).toLocaleString()}
