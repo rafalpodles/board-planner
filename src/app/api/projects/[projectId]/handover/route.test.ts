@@ -123,6 +123,12 @@ describe("GET handover readiness", () => {
     expect(JSON.stringify(body)).not.toContain("secret");
   });
 
+  it("answers runs switched off and no lock for a board with neither", async () => {
+    projectLean.mockResolvedValue({ _id: PROJECT, worker: { enabled: false } });
+
+    expect((await read()).body).toMatchObject({ workerEnabled: false, lockedByInstance: false });
+  });
+
   it.each([
     [true, true],
     [false, false],
