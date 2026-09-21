@@ -278,9 +278,18 @@ function isAssignment(value: unknown): value is Assignment {
 }
 
 // Drops malformed entries rather than refusing the whole list — one bad assignment must not take
-// every other project this worker serves down with it
+// every other project this worker serves down with it. key/name are normalised the same way
+// parseOffers already does its own: unlike project/remote, a malformed one must not drop the
+// whole assignment (the claim loop needs it), but it does still reach the app's local socket —
+// and Swift's `String?` throws typeMismatch on anything but a string or null, which fails the
+// WHOLE config decode, blanking every pane rather than just this one project's name (BP-377 review).
 export function parseAssignments(value: unknown): Assignment[] {
-  return Array.isArray(value) ? value.filter(isAssignment) : [];
+  if (!Array.isArray(value)) return [];
+  return value.filter(isAssignment).map((assignment) => ({
+    ...assignment,
+    key: typeof assignment.key === "string" ? assignment.key : "",
+    name: typeof assignment.name === "string" ? assignment.name : "",
+  }));
 }
 
 function isOffer(value: unknown): value is ProjectOffer {

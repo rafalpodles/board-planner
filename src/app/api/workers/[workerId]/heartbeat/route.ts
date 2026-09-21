@@ -154,7 +154,7 @@ export const POST = withWorker(async (request, { worker }) => {
 
   const [projects, reachable] = await Promise.all([
     Project.find({ "worker.enabled": true })
-      .select("_id repositoryUrl githubRepo gitlabRepo gitlabHost worker")
+      .select("_id key name repositoryUrl githubRepo gitlabRepo gitlabHost worker")
       .lean(),
     ownerReachableProjectIds(worker),
   ]);

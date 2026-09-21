@@ -16,6 +16,8 @@ private let SERVED = """
   "projects": [
     {
       "project": "6a86bbe7c3cd8d57941081c6",
+      "key": "BP",
+      "name": "Board Planner",
       "blocked": "",
       "baseBranch": "main",
       "model": "opus",
@@ -47,6 +49,7 @@ private let SERVED = """
     #expect(config.projects.count == 1)
     #expect(config.projects.first?.baseBranch == "main")
     #expect(config.projects.first?.blocked == "")
+    #expect(config.projects.first?.label == "Board Planner · BP")
     #expect(config.offers?.count == 1)
     #expect(config.offers?.first?.label == "Sandbox Rig · SBR")
     #expect(config.githubAccount == "owner")
@@ -74,6 +77,20 @@ private let SERVED = """
     let config = try JSONDecoder().decode(ConfigResponse.self, from: Data(older.utf8))
 
     #expect(config.projects.first?.blocked == nil)
+}
+
+// A worker older than BP-377 sends neither field — the same shape decodesAProjectRowWithoutBlocked
+// exists for. Falls back to the id in the pane itself (PreferencesView), not here.
+@Test func decodesAProjectRowWithoutKeyOrName() throws {
+    let older = SERVED
+        .replacingOccurrences(of: "\"key\": \"BP\",\n", with: "")
+        .replacingOccurrences(of: "\"name\": \"Board Planner\",\n", with: "")
+
+    let config = try JSONDecoder().decode(ConfigResponse.self, from: Data(older.utf8))
+
+    #expect(config.projects.first?.key == nil)
+    #expect(config.projects.first?.name == nil)
+    #expect(config.projects.first?.label == "6a86bbe7c3cd8d57941081c6")
 }
 
 // A worker older than this app sends neither field. It must still decode, or upgrading the app
