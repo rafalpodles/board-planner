@@ -25,8 +25,8 @@ import {
   type SettingsNavGroup,
 } from "@/components/settings/SettingsShell";
 import { SettingsStats } from "./sections/types";
-import { LoadFailed } from "@/components/ui/LoadFailed";
-import { boardLoadFailure } from "@/lib/board-load-failure";
+import { BoardLoadFailed } from "@/components/ui/LoadFailed";
+import { useLeaveGuard } from "@/hooks/use-leave-guard";
 
 type Access = "member" | "projectAdmin" | "instanceAdmin";
 
@@ -162,7 +162,6 @@ export default function ProjectSettingsPage() {
   const { toast } = useToast();
 
   const [project, setProject] = useState<ApiProject | null>(null);
-  const [loading, setLoading] = useState(true);
   const [loadFailure, setLoadFailure] = useState<unknown>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [section, setSection] = useState("");
@@ -192,15 +191,11 @@ export default function ProjectSettingsPage() {
       const requested = params.get("section");
       if (requested) setSection(requested);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-    api
-      .get(`/api/projects/${projectId}`)
-      .then(setProject)
-      .catch((err) => {
-        setLoadFailure(err);
-        if (boardLoadFailure(err, "This board").retryable) toast("Failed to load project", "error");
-      })
-      .finally(() => setLoading(false));
+  useEffect(() => {
+    api.get(`/api/projects/${projectId}`).then(setProject).catch(setLoadFailure);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, loadAttempt]);
 
@@ -263,41 +258,26 @@ export default function ProjectSettingsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, stats, projectId]);
 
-  // The redesign moved channels, webhooks, categories and templates out of instant-save,
-  // so an accidental reload now costs real work. main guarded one button; this guards the
-  // exits a browser actually offers.
-  useEffect(() => {
-    if (total === 0) return;
-    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
-    window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
-  }, [total]);
+  useLeaveGuard(total > 0, "Some settings are not saved. Leave without saving them?");
 
   const dirtySections = useMemo(
     () => new Set(pending.map((g) => g.section)),
     [pending]
   );
 
-  function retryLoad() {
-    setLoadFailure(null);
-    setLoading(true);
-    setLoadAttempt((n) => n + 1);
-  }
-
-  // Without this the page waited on a project that was never coming: `!project` held the spinner up
-  // forever after a refusal, and a reader could not tell no access from a page still loading.
-  if (!loading && !project && loadFailure) {
-    const failure = boardLoadFailure(loadFailure, "This board");
+  if (loadFailure) {
     return (
-      <LoadFailed
-        className="py-16"
-        message={failure.message}
-        onRetry={failure.retryable ? retryLoad : undefined}
+      <BoardLoadFailed
+        reason={loadFailure}
+        onRetry={() => {
+          setLoadFailure(null);
+          setLoadAttempt((n) => n + 1);
+        }}
       />
     );
   }
 
-  if (loading || !project) {
+  if (!project) {
     return (
       <div className="flex justify-center py-12">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />

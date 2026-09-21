@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
-import { boardLoadFailure } from "@/lib/board-load-failure";
+import { boardRefusal } from "@/lib/board-load-failure";
 import { ApiProject, ROLE_LABELS, STATUS_LABELS, TaskStatus } from "@/types";
 import { columnIdsWithRole, effectiveColumns } from "@/lib/columns";
 import { Button } from "@/components/ui/Button";
@@ -241,7 +241,8 @@ function CreatedVsCompletedChart({ data }: { data: Stats["createdOverTime"] }) {
 }
 
 function whyItFailed(reason: unknown): string {
-  return boardLoadFailure(reason, "The dashboard").message;
+  const message = (reason as { message?: string } | null)?.message;
+  return message ? `The dashboard could not be loaded: ${message}` : "The dashboard could not be loaded.";
 }
 
 export default function DashboardPage() {
@@ -253,6 +254,7 @@ export default function DashboardPage() {
   const projectName = project?.name ?? "";
   const [loading, setLoading] = useState(true);
   const [failure, setFailure] = useState("");
+  const [refused, setRefused] = useState(false);
   const [settingsFailed, setSettingsFailed] = useState(false);
 
   /**
@@ -280,7 +282,9 @@ export default function DashboardPage() {
         setProject(p.status === "fulfilled" ? p.value : null);
         setSettingsFailed(p.status === "rejected");
         setStats(s.status === "fulfilled" ? s.value : null);
-        setFailure(s.status === "rejected" ? whyItFailed(s.reason) : "");
+        const refusal = s.status === "rejected" ? boardRefusal(s.reason) : null;
+        setRefused(refusal !== null);
+        setFailure(s.status === "rejected" ? (refusal ?? whyItFailed(s.reason)) : "");
       })
       .finally(() => {
         if (mine === generation.current) setLoading(false);
@@ -311,9 +315,11 @@ export default function DashboardPage() {
           className="rounded-xl border border-danger/40 bg-danger/10 px-4 py-6 text-center"
         >
           <p className="text-sm">{failure || "The dashboard could not be loaded."}</p>
-          <Button variant="secondary" className="mt-4" onClick={load}>
-            Try again
-          </Button>
+          {!refused && (
+            <Button variant="secondary" className="mt-4" onClick={load}>
+              Try again
+            </Button>
+          )}
         </div>
       </div>
     );

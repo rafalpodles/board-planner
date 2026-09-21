@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import { AGENT_BUCKETS, AgentBucket, AgentComposition, ApiAgentBlock } from "@/types";
 import { BUCKET_PREFIX, Entry, Lookup, NEW_PREFIX } from "./components/blocks";
 import { emptyComposition } from "./catalog";
+import { normaliseComposition } from "@/lib/agent-rules";
 
 type Entries = Record<AgentBucket, Entry[]>;
 
@@ -33,24 +34,21 @@ function toComposition(entries: Entries): AgentComposition {
   return out;
 }
 
-/** Whether two compositions hold the same blocks in the same places with the same parameters. */
 export function sameComposition(a: AgentComposition, b: AgentComposition | undefined): boolean {
-  const normal = (c: AgentComposition) => JSON.stringify(toComposition(toEntries(c)));
-  return normal(a) === normal(b ?? emptyComposition());
+  return JSON.stringify(normaliseComposition(a)) === JSON.stringify(normaliseComposition(b));
 }
 
 export function useComposition(source: AgentComposition | undefined, lookup: Lookup) {
   const [entries, setEntries] = useState<Entries>(() => toEntries(source ?? emptyComposition()));
   const [dragging, setDragging] = useState<ApiAgentBlock | null>(null);
 
-  // The agent arrives after the first render, so the editor is seeded when it does — and exactly
-  // once, or the refetch that follows a save would undo the save.
-  const seeded = useRef(false);
-  useEffect(() => {
-    if (!source || seeded.current) return;
-    seeded.current = true;
+  // Seeded once, during render: in an effect the first frame compared an empty editor with the
+  // agent and read as unsaved; and a second seed would let the refetch after a save undo it
+  const [seeded, setSeeded] = useState(!!source);
+  if (source && !seeded) {
+    setSeeded(true);
     setEntries(toEntries(source));
-  }, [source]);
+  }
 
   const bucketOf = (uid: string) =>
     AGENT_BUCKETS.find((bucket) => entries[bucket].some((e) => e.uid === uid));

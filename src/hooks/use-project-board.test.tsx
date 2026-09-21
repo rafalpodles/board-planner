@@ -21,6 +21,7 @@ const { api, toast } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
+const poll = vi.hoisted(() => ({ enabled: true }));
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast }) }));
 // The real one reads on mount and then on an interval. Kept honest about the first read — it is
 // what puts the board on screen — and silent afterwards, so the tests fire each further read
@@ -28,7 +29,8 @@ vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast }) }));
 vi.mock("@/hooks/use-poll-while-visible", async () => {
   const { useEffect } = await import("react");
   return {
-    usePollWhileVisible: (callback: () => void) => {
+    usePollWhileVisible: (callback: () => void, _ms: number, enabled = true) => {
+      poll.enabled = enabled;
       useEffect(() => {
         callback();
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -495,8 +497,7 @@ describe("moving a task to another sprint", () => {
 describe("a board that refuses the reader", () => {
   const refused = () => Object.assign(new Error("Forbidden"), { status: 403 });
 
-  // The page replaces itself with the refusal, so a toast on top of it would say it twice
-  it("says nothing extra when the board was never on screen", async () => {
+  it("reports the refusal and toasts nothing, since the page says it in place of the board", async () => {
     api.get.mockRejectedValue(refused());
     render(<Probe />);
 
@@ -505,30 +506,35 @@ describe("a board that refuses the reader", () => {
     expect(toast).not.toHaveBeenCalled();
   });
 
-  // A grant withdrawn while the board is open comes back on a poll; the board stays on screen, so
-  // silence here would leave somebody working on a board they can no longer reach
-  it("says so when access goes away under a board already on screen", async () => {
+  it("takes a board already on screen away when access goes, so nothing on it can be edited", async () => {
     await mounted();
+    expect(board.project).not.toBeNull();
 
     api.get.mockRejectedValue(refused());
     await act(async () => {
       await board.reload();
     });
 
-    expect(toast).toHaveBeenCalledWith("You do not have access to this board.", "error");
-
-    // …once: every later poll gets the same refusal
-    await act(async () => {
-      await board.reload();
-    });
-    await act(async () => {
-      await board.reload();
-    });
-    expect(toast).toHaveBeenCalledTimes(1);
+    expect(board.project).toBeNull();
+    expect(board.tasks).toEqual([]);
+    expect(board.loadFailure).toMatchObject({ status: 403 });
+    expect(toast).not.toHaveBeenCalled();
   });
 
-  // The control: an outage still reads as one, whether or not the board was up
-  it("still reports an outage the way it always has", async () => {
+  it("stops polling a board that refuses, and keeps polling through an outage", async () => {
+    api.get.mockRejectedValue(refused());
+    render(<Probe />);
+    await waitFor(() => expect(board.loadError).toBe(true));
+    expect(poll.enabled).toBe(false);
+
+    api.get.mockRejectedValue(Object.assign(new Error("boom"), { status: 500 }));
+    await act(async () => {
+      await board.reload();
+    });
+    expect(poll.enabled).toBe(true);
+  });
+
+  it("still reports an outage the way it always has, and keeps the board", async () => {
     await mounted();
 
     api.get.mockRejectedValue(Object.assign(new Error("boom"), { status: 500 }));
@@ -537,5 +543,6 @@ describe("a board that refuses the reader", () => {
     });
 
     expect(toast).toHaveBeenCalledWith("Failed to load board data", "error");
+    expect(board.project).not.toBeNull();
   });
 });

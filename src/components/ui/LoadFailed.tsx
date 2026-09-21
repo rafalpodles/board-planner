@@ -1,5 +1,6 @@
 "use client";
 
+import { boardRefusal } from "@/lib/board-load-failure";
 import { Button } from "@/components/ui/Button";
 
 /**
@@ -19,7 +20,6 @@ export function LoadFailed({
   testId,
 }: {
   message: string;
-  /** Omitted when reading again cannot change the answer, such as a refusal. */
   onRetry?: () => void;
   busy?: boolean;
   variant?: "block" | "row";
@@ -51,5 +51,16 @@ export function LoadFailed({
         </Button>
       )}
     </div>
+  );
+}
+
+export function BoardLoadFailed({ reason, onRetry }: { reason: unknown; onRetry: () => void }) {
+  const refusal = boardRefusal(reason);
+  return (
+    <LoadFailed
+      className="py-16"
+      message={refusal ?? "Failed to load this board."}
+      onRetry={refusal ? undefined : onRetry}
+    />
   );
 }

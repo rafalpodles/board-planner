@@ -17,8 +17,7 @@ import { SprintFormModal, SprintFormValues } from "@/components/sprints/SprintFo
 import { CompleteSprintDialog } from "@/components/sprints/CompleteSprintDialog";
 import { NewTaskModal } from "@/components/tasks/NewTaskModal";
 import { Button } from "@/components/ui/Button";
-import { LoadFailed } from "@/components/ui/LoadFailed";
-import { boardLoadFailure } from "@/lib/board-load-failure";
+import { BoardLoadFailed } from "@/components/ui/LoadFailed";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
@@ -220,15 +219,7 @@ export default function SprintsPage() {
   if (board.loading || (!board.project && !board.loadError)) return <Spinner />;
 
   if (!board.project) {
-    const failure = boardLoadFailure(board.loadFailure, "This board");
-    return (
-      <LoadFailed
-        className="py-16"
-        // Only a refusal gets its own sentence; an outage keeps the one this page always gave
-        message={failure.retryable ? "Failed to load this board." : failure.message}
-        onRetry={failure.retryable ? board.reload : undefined}
-      />
-    );
+    return <BoardLoadFailed reason={board.loadFailure} onRetry={board.reload} />;
   }
 
   if (!initialLoadDone) return <Spinner />;

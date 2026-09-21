@@ -1,6 +1,6 @@
 "use client";
 
-import { boardLoadFailure } from "@/lib/board-load-failure";
+import { boardRefusal } from "@/lib/board-load-failure";
 import { Dispatch, SetStateAction, useCallback, useEffect, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { usePollWhileVisible } from "@/hooks/use-poll-while-visible";
@@ -19,7 +19,6 @@ export interface ProjectBoard {
   // succeeds. The page only acts on this when there is nothing else to show — a poll
   // failing once the board is already up leaves the last good state on screen instead.
   loadError: boolean;
-  /** What the failed load threw, so the page can tell a refusal from an outage. */
   loadFailure?: unknown;
   reload: () => Promise<void>;
   viewMode: "board" | "list";
@@ -99,14 +98,8 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
   const [project, setProject] = useState<ApiProject | null>(null);
   const [tasks, setTasks] = useState<ApiTask[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(false);
   const [loadFailure, setLoadFailure] = useState<unknown>(null);
-  // Which board last loaded. A refusal before that replaces the page, which says so itself; a
-  // refusal after it arrives on a poll over a board still on screen, and has to be said out loud.
-  const loadedFor = useRef<string | null>(null);
-  // Said once per refusal: the poll keeps getting the same answer every ten seconds, and each toast
-  // would be another announcement of something the reader already knows
-  const refusalAnnounced = useRef(false);
+  const refused = boardRefusal(loadFailure) !== null;
   const [showNewTask, setShowNewTask] = useState(false);
   const loadSeq = useRef(0);
   // Read after an await, where the render-time `scope` — and the `loadData` closed over it — are
@@ -218,19 +211,17 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
         setTasks([]);
       }
       setSprints(sprintList);
-      setLoadError(false);
       setLoadFailure(null);
-      loadedFor.current = projectId;
-      refusalAnnounced.current = false;
     } catch (err) {
       if (seq !== loadSeq.current) return;
-      setLoadError(true);
       setLoadFailure(err);
-      const failure = boardLoadFailure(err, "This board");
-      if (failure.retryable) toast("Failed to load board data", "error");
-      else if (loadedFor.current === projectId && !refusalAnnounced.current) {
-        refusalAnnounced.current = true;
-        toast(failure.message, "error");
+      // A refused board is taken off the screen, so the page says so in place of it
+      if (boardRefusal(err)) {
+        setProject(null);
+        setTasks([]);
+        setSprints([]);
+      } else {
+        toast("Failed to load board data", "error");
       }
     } finally {
       if (seq === loadSeq.current) setLoading(false);
@@ -253,7 +244,7 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
     scopeRef.current = scope;
   }, [loadData, scope]);
 
-  usePollWhileVisible(loadData, 10_000);
+  usePollWhileVisible(loadData, 10_000, !refused);
 
   // Instant refresh when the PM chat reports a write action (poll stays as fallback).
   // Bursts are coalesced inside subscribeBoardRefresh.
@@ -651,7 +642,7 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
     sprints,
     assignableUsers,
     loading,
-    loadError,
+    loadError: loadFailure !== null,
     loadFailure,
     reload: loadData,
     viewMode,

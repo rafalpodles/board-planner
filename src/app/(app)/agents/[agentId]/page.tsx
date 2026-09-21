@@ -26,6 +26,7 @@ import { PageHeader } from "@/components/shell/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { LoadFailed } from "@/components/ui/LoadFailed";
 import { agentProblems } from "@/lib/agent-rules";
+import type { AgentComposition } from "@/types";
 import { BUCKETS } from "../catalog";
 import { useStore } from "../store";
 import { sameComposition, useComposition } from "../useComposition";
@@ -149,9 +150,12 @@ export default function AgentDetailPage() {
   const [naming, setNaming] = useState<{ name: string; description: string } | null>(null);
   const problems = agentProblems(composition, lookup);
 
-  // Placing a step looks final — it appears in its phase at once — so a reader who leaves without
-  // pressing Save loses it believing it was kept. Four of four evaluators did exactly that.
-  const unsaved = mayEdit && !!agent && !sameComposition(composition, agent.composition);
+  const [savedAs, setSavedAs] = useState<AgentComposition | null>(null);
+  const unsaved =
+    mayEdit &&
+    !!agent &&
+    !sameComposition(composition, agent.composition) &&
+    !(savedAs && sameComposition(composition, savedAs));
   useLeaveGuard(unsaved, "This agent has changes that are not saved. Leave without saving them?");
 
   const sensors = useSensors(
@@ -224,6 +228,7 @@ export default function AgentDetailPage() {
                   setRefusal("");
                   try {
                     await store.saveComposition(agent._id, composition);
+                    setSavedAs(composition);
                     setSaved(true);
                     window.setTimeout(() => setSaved(false), 2000);
                   } catch (error) {
