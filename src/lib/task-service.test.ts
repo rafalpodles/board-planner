@@ -1737,7 +1737,7 @@ describe("updateTask writing project fields to the history", () => {
 
     expect(result.ok).toBe(true);
     expect(fieldEntries()).toEqual([
-      { taskId: "t1", userId: "actor", action: "updated", field: "Difficulty", oldValue: "M", newValue: "L", customField: true },
+      { taskId: "t1", userId: "actor", action: "updated", field: "Difficulty", oldValue: "M", newValue: "L", customField: true, fieldType: "dropdown" },
     ]);
   });
 

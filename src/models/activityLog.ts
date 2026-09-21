@@ -49,11 +49,16 @@ const activityLogSchema = new Schema<IActivityLog>(
       type: Boolean,
       default: false,
     },
+    fieldType: {
+      type: String,
+      default: "",
+    },
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );
 
 activityLogSchema.index({ task: 1, createdAt: -1 });
+activityLogSchema.index({ task: 1, createdAt: -1, _id: -1 });
 
 export const ActivityLog: Model<IActivityLog> =
   mongoose.models.ActivityLog ||

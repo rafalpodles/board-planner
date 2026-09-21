@@ -25,6 +25,7 @@ export async function logActivities(
     oldValue?: string;
     newValue?: string;
     customField?: boolean;
+    fieldType?: string;
   }[]
 ): Promise<void> {
   if (rows.length === 0) return;
@@ -38,6 +39,7 @@ export async function logActivities(
         oldValue: row.oldValue || "",
         newValue: row.newValue || "",
         ...(row.customField && { customField: true }),
+        ...(row.fieldType && { fieldType: row.fieldType }),
       }))
     );
   } catch (err) {
@@ -78,6 +80,7 @@ export async function logActivity(
 export const EDIT_SESSION_MS = 10 * 60_000;
 
 const TYPED_FIELDS = new Set(["title", "description"]);
+const TYPED_PROJECT_FIELDS = new Set(["text", "number"]);
 
 export interface ActivityHeader {
   _id: Types.ObjectId;
@@ -85,6 +88,7 @@ export interface ActivityHeader {
   action: string;
   field: string;
   customField?: boolean;
+  fieldType?: string;
   createdAt: Date;
 }
 
@@ -94,7 +98,8 @@ export interface EditSession<T extends ActivityHeader = ActivityHeader> {
 }
 
 function typedEdit(row: ActivityHeader) {
-  return row.action === "updated" && (row.customField === true || TYPED_FIELDS.has(row.field));
+  if (row.action !== "updated") return false;
+  return row.customField ? TYPED_PROJECT_FIELDS.has(row.fieldType ?? "") : TYPED_FIELDS.has(row.field);
 }
 
 function sameEdit(a: ActivityHeader, b: ActivityHeader) {
@@ -127,6 +132,7 @@ export function presentSessions<R extends { _id: unknown; field: string; customF
     if (!last || !first) return [];
     if (first !== last && first.oldValue === last.newValue) return [];
     const row = { ...last, oldValue: first.oldValue };
-    return row.field === "description" && !row.customField ? [{ ...row, newValue: "" }] : [row];
+    if (row.field !== "description" || row.customField) return [row];
+    return [{ ...row, newValue: "", cleared: !last.newValue }];
   });
 }

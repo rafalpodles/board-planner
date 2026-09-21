@@ -50,6 +50,18 @@ describe("logActivities", () => {
     ]);
   });
 
+  it("marks a project's field and its type, and only that", async () => {
+    await logActivities([
+      { taskId: "a", userId: "u1", action: "updated", field: "Notes", oldValue: "x", newValue: "y", customField: true, fieldType: "text" },
+      { taskId: "a", userId: "u1", action: "updated", field: "title", oldValue: "x", newValue: "y" },
+    ]);
+
+    const [custom, builtIn] = insertMany.mock.calls[0][0];
+    expect(custom).toMatchObject({ customField: true, fieldType: "text" });
+    expect(builtIn).not.toHaveProperty("customField");
+    expect(builtIn).not.toHaveProperty("fieldType");
+  });
+
   it("writes nothing rather than an empty batch", async () => {
     await logActivities([]);
 
@@ -159,10 +171,24 @@ describe("editSessions", () => {
     expect(editSessions(rows as never)).toHaveLength(2);
   });
 
-  it("folds a project's own text fields as well", () => {
-    const rows = [row(1, { field: "Notes", customField: true }), row(2, { field: "Notes", customField: true })];
+  it.each(["text", "number"])("folds a project's own %s field as well", (fieldType) => {
+    const rows = [
+      row(1, { field: "Notes", customField: true, fieldType }),
+      row(2, { field: "Notes", customField: true, fieldType }),
+    ];
     expect(editSessions(rows as never)).toHaveLength(1);
   });
+
+  it.each(["checkbox", "dropdown", "multiselect", "date"])(
+    "keeps every change to a project's %s field, since each one is a choice",
+    (fieldType) => {
+      const rows = [
+        row(1, { field: "Approved", customField: true, fieldType }),
+        row(2, { field: "Approved", customField: true, fieldType }),
+      ];
+      expect(editSessions(rows as never)).toHaveLength(2);
+    }
+  );
 });
 
 describe("presentSessions", () => {
@@ -193,6 +219,14 @@ describe("presentSessions", () => {
   it("keeps a single row as written", () => {
     const shown = presentSessions([session("a", "a")] as never, [full("a", "one", "two")]);
     expect(shown).toEqual([expect.objectContaining({ oldValue: "one", newValue: "two" })]);
+  });
+
+  it("says when a description run ended with the description gone", () => {
+    const shown = presentSessions(
+      [{ newest: { _id: "b" }, oldest: { _id: "a" } }] as never,
+      [full("a", "old", "mid", { field: "description" }), full("b", "mid", "", { field: "description" })]
+    );
+    expect(shown).toEqual([expect.objectContaining({ oldValue: "old", newValue: "", cleared: true })]);
   });
 
   it("omits the description's new text, which the history never shows", () => {

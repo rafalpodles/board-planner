@@ -23,10 +23,13 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   const headers = await ActivityLog.find({ task: taskId })
     .sort({ createdAt: -1, _id: -1 })
     .limit(SCANNED)
-    .select("user action field customField createdAt")
+    .select("user action field customField fieldType createdAt")
     .lean<ActivityHeader[]>();
 
-  const sessions = editSessions(headers).slice(0, SHOWN);
+  const all = editSessions(headers);
+  // A session reaching the end of the scan may have begun before it, so its "before" is unknown
+  if (headers.length === SCANNED && all.length > 1) all.pop();
+  const sessions = all.slice(0, SHOWN);
   const ids = new Set(sessions.flatMap((s) => [String(s.newest._id), String(s.oldest._id)]));
   const rows = await ActivityLog.find({ _id: { $in: [...ids] } })
     .populate("user", "username fullName")

@@ -1284,6 +1284,7 @@ export async function updateTask(
           oldValue: change.before,
           newValue: change.after,
           customField: true,
+          fieldType: fieldDefs.find((def) => def.name === change.name)?.fieldType,
         })
       )
     )

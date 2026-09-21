@@ -121,7 +121,8 @@ function describeAction(log: ApiActivityLog): string {
         return `${userName} — ${log.newValue}`;
       }
       if (log.field === "description" && !log.customField) {
-        return log.oldValue ? `${userName} edited the description` : `${userName} added a description`;
+        if (!log.oldValue) return `${userName} added a description`;
+        return log.cleared ? `${userName} removed the description` : `${userName} edited the description`;
       }
       // A field entry that carries values says what changed; one that does not still reads.
       // Project fields are the reason this matters — "updated Difficulty" alone tells you nothing.
@@ -221,7 +222,9 @@ export function ActivityTimeline({
 
   useEffect(() => {
     // A refresh keeps what is on screen: the rows are this task's either way
-    if (!visible || loadedKey.current === refreshKey) return;
+    if (loadedKey.current === refreshKey) return;
+    // The count on the tab would be stale until the history is read again
+    if (!visible) return void onCountChange?.(null);
     loadedKey.current = refreshKey;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
