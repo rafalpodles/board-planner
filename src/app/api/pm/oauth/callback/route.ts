@@ -4,6 +4,7 @@ import { Project } from "@/models/project";
 import { PmOauthState } from "@/models/pmOauthState";
 import { getAuthUser } from "@/lib/auth";
 import { ProvenanceError } from "@/lib/session";
+import { check } from "@/lib/grants";
 import { decryptSecret, encryptSecret } from "@/lib/encryption";
 import { exchangeCode, getPmOauthRedirectUri } from "@/lib/pm/mcp-oauth";
 import { IUser } from "@/types";
@@ -39,6 +40,16 @@ export async function GET(request: Request) {
   }
   const projectId = String(pending.project);
 
+  // A code here means a real authorization already happened, by whoever presented it. Leaving the
+  // state alive on a refusal below would let that same code be redeemed later by the flow's real
+  // owner, attaching whichever third-party identity approved it — not necessarily the owner's own
+  // — to this project (BP-749 review). Costs the owner only a re-click of Connect; a state-only
+  // probe (no code at all) is what "do not consume" above is actually for.
+  const refuseWrongUser = async () => {
+    if (code) await PmOauthState.findOneAndDelete({ state });
+    return settingsRedirect(projectId, "error:wrong_user");
+  };
+
   // Binds the flow to whoever started it. Without this, anyone who presents the code+state pair
   // completes the connection — a second signed-in user who only received the authorization URL
   // (consent phishing), or an attacker replaying their own authorization against someone else's
@@ -48,12 +59,18 @@ export async function GET(request: Request) {
     user = await getAuthUser(request);
   } catch (e) {
     if (e instanceof ProvenanceError) {
-      return settingsRedirect(projectId, "error:wrong_user");
+      return refuseWrongUser();
     }
     throw e;
   }
   if (!user || user.viaMachineCredential || String(user._id) !== String(pending.initiatedBy)) {
-    return settingsRedirect(projectId, "error:wrong_user");
+    return refuseWrongUser();
+  }
+  // The grant this flow started under might not hold anymore — the state's TTL bounds how long
+  // the window stays open, not whether the person is still a project owner inside it (BP-749
+  // review).
+  if (!(await check(user, projectId, "admin"))) {
+    return refuseWrongUser();
   }
 
   const consumed = await PmOauthState.findOneAndDelete({ state });

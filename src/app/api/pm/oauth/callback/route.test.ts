@@ -3,12 +3,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const findOne = vi.fn();
 const findOneAndDelete = vi.fn();
 const getAuthUser = vi.fn();
+const check = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/pmOauthState", () => ({ PmOauthState: { findOne, findOneAndDelete } }));
 vi.mock("@/models/project", () => ({ Project: { findById: vi.fn() } }));
 vi.mock("@/lib/auth", () => ({ getAuthUser }));
 vi.mock("@/lib/session", () => ({ ProvenanceError: class ProvenanceError extends Error {} }));
+vi.mock("@/lib/grants", () => ({ check }));
 vi.mock("@/lib/encryption", () => ({ decryptSecret: (v: string) => v, encryptSecret: (v: string) => v }));
 vi.mock("@/lib/pm/mcp-oauth", () => ({
   exchangeCode: vi.fn(),
@@ -28,6 +30,7 @@ beforeEach(() => {
   findOne.mockResolvedValue(null);
   findOneAndDelete.mockResolvedValue(null);
   getAuthUser.mockResolvedValue(OWNER);
+  check.mockResolvedValue(true);
 });
 
 // BP-316: this route is unauthenticated and built its redirect target from x-forwarded-host, so
@@ -79,24 +82,28 @@ describe("GET /api/pm/oauth/callback — binding the flow to whoever started it"
     return new Request("https://board.example.com/api/pm/oauth/callback?state=s&code=c");
   }
 
-  it("refuses a different signed-in user, and does not consume the state", async () => {
+  // A code here means a real authorization already happened — review: leaving the state alive
+  // would let it be redeemed later by the flow's real owner, attaching whichever third-party
+  // identity approved it rather than the owner's own. Consumed on refusal specifically because
+  // code is present; the no-code probes further down are the actual "does not consume" case.
+  it("refuses a different signed-in user, and consumes the state since a real code was presented", async () => {
     findOne.mockResolvedValue(PENDING);
     getAuthUser.mockResolvedValue({ _id: "attacker9", viaMachineCredential: false });
 
     const res = await GET(approveRequest());
 
     expect(res.headers.get("location")).toBe("/projects/p1/settings?mcp_oauth=error%3Awrong_user");
-    expect(findOneAndDelete).not.toHaveBeenCalled();
+    expect(findOneAndDelete).toHaveBeenCalledWith({ state: "s" });
   });
 
-  it("refuses when nobody is signed in, and does not consume the state", async () => {
+  it("refuses when nobody is signed in, and consumes the state since a real code was presented", async () => {
     findOne.mockResolvedValue(PENDING);
     getAuthUser.mockResolvedValue(null);
 
     const res = await GET(approveRequest());
 
     expect(res.headers.get("location")).toBe("/projects/p1/settings?mcp_oauth=error%3Awrong_user");
-    expect(findOneAndDelete).not.toHaveBeenCalled();
+    expect(findOneAndDelete).toHaveBeenCalledWith({ state: "s" });
   });
 
   it("refuses a machine credential even when its user id matches", async () => {
@@ -106,7 +113,32 @@ describe("GET /api/pm/oauth/callback — binding the flow to whoever started it"
     const res = await GET(approveRequest());
 
     expect(res.headers.get("location")).toBe("/projects/p1/settings?mcp_oauth=error%3Awrong_user");
+  });
+
+  it("does not consume the state on refusal when there is no code — nothing was authorized yet", async () => {
+    findOne.mockResolvedValue(PENDING);
+    getAuthUser.mockResolvedValue({ _id: "attacker9", viaMachineCredential: false });
+
+    const res = await GET(
+      new Request("https://board.example.com/api/pm/oauth/callback?state=s")
+    );
+
+    expect(res.headers.get("location")).toBe("/projects/p1/settings?mcp_oauth=error%3Awrong_user");
     expect(findOneAndDelete).not.toHaveBeenCalled();
+  });
+
+  // BP-749 review: identity alone is not enough if the grant it depended on is gone — the state's
+  // TTL bounds the window, not project membership inside it.
+  it("refuses when the initiator is no longer a project owner, even with the right identity", async () => {
+    findOne.mockResolvedValue(PENDING);
+    getAuthUser.mockResolvedValue({ _id: "owner1", viaMachineCredential: false });
+    check.mockResolvedValue(false);
+
+    const res = await GET(approveRequest());
+
+    expect(check).toHaveBeenCalledWith({ _id: "owner1", viaMachineCredential: false }, "p1", "admin");
+    expect(res.headers.get("location")).toBe("/projects/p1/settings?mcp_oauth=error%3Awrong_user");
+    expect(findOneAndDelete).toHaveBeenCalledWith({ state: "s" });
   });
 
   it("admits the user who started the flow, and consumes the state", async () => {
@@ -130,6 +162,18 @@ describe("GET /api/pm/oauth/callback — binding the flow to whoever started it"
     getAuthUser.mockRejectedValue(new ProvenanceError("origin-mismatch"));
 
     const res = await GET(approveRequest());
+
+    expect(res.headers.get("location")).toBe("/projects/p1/settings?mcp_oauth=error%3Awrong_user");
+    // A real code was presented, same as any other refusal here — consumed for the same reason.
+    expect(findOneAndDelete).toHaveBeenCalledWith({ state: "s" });
+  });
+
+  it("does not consume the state on a provenance failure when there is no code", async () => {
+    findOne.mockResolvedValue(PENDING);
+    const { ProvenanceError } = await import("@/lib/session");
+    getAuthUser.mockRejectedValue(new ProvenanceError("origin-mismatch"));
+
+    const res = await GET(new Request("https://board.example.com/api/pm/oauth/callback?state=s"));
 
     expect(res.headers.get("location")).toBe("/projects/p1/settings?mcp_oauth=error%3Awrong_user");
     expect(findOneAndDelete).not.toHaveBeenCalled();
