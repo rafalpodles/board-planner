@@ -253,6 +253,13 @@ describe("handoverOf and blockers", () => {
     expect(handoverOf(task({ blockedBy: ["b9"] } as never), BOARD)).toEqual({ runs: true });
   });
 
+  // Populated without its status (a narrower projection somewhere) is as unknown as a bare id
+  it("does not judge a blocker that arrived without its status", () => {
+    expect(handoverOf(task({ blockedBy: [{ _id: "b9", taskNumber: 9 }] } as never), BOARD)).toEqual({
+      runs: true,
+    });
+  });
+
   it("does not judge blockers without the board's columns", () => {
     expect(handoverOf(task({ blockedBy: [link(3, "doing")] } as never))).toEqual({ runs: true });
   });
