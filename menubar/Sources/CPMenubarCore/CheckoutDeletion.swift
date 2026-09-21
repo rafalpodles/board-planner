@@ -142,6 +142,13 @@ public struct CheckoutDeletion: Sendable {
         await CheckoutDeletion.verdict(removal, path: path, busy: busy)
     }
 
+    // The same resolution CheckoutRemoval.sameDirectory and LinkedWorktreeCheck already use —
+    // matching it here rather than inventing a second way to answer "what does this path really
+    // point at".
+    private static func resolvedPath(_ path: String) -> String {
+        ((path as NSString).standardizingPath as NSString).resolvingSymlinksInPath
+    }
+
     private func changedReason(from before: [String], to after: [String]) -> String {
         let appeared = after.filter { !before.contains($0) }
         let vanished = before.filter { !after.contains($0) }
@@ -176,7 +183,15 @@ public struct CheckoutDeletion: Sendable {
 
             let wasThere = exists(path)
             if wasThere {
-                try remove(path)
+                // Resolved right before the delete, not earlier: `gone`, `forget` and the step
+                // returned all still name the path the operator granted and was asked about.
+                // `remove` is `FileManager.removeItem`, which deletes the directory entry it is
+                // given rather than what it points to — handing it a symlink (BP-428's case,
+                // which `CheckoutRemoval.check` now allows past this point) would remove only the
+                // link and leave the real checkout, just confirmed for deletion, sitting on disk
+                // with no grant pointing at it any more. A no-op for a path with nothing to
+                // resolve, since there is nothing to follow.
+                try remove(CheckoutDeletion.resolvedPath(path))
                 gone.append(path)
             }
 

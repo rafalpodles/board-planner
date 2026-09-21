@@ -109,6 +109,35 @@ final class CheckoutDeletionTests: XCTestCase {
         XCTAssertEqual(r.removed, ["/co"])
     }
 
+    // BP-428 review. A recorder cannot tell a symlink from the directory it points to — both are
+    // just a string — so this runs `remove` for real, the way ProjectSyncRunner wires it
+    // (`FileManager.removeItem(atPath:)`), against a real symlink on disk.
+    func testASymlinkedCheckoutIsActuallyDeletedRatherThanJustItsLink() throws {
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bp428-deletion-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+
+        let real = base.appendingPathComponent("real")
+        try FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+        let link = base.appendingPathComponent("link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+
+        let deletion = CheckoutDeletion(
+            remove: { try FileManager.default.removeItem(atPath: $0) },
+            exists: { FileManager.default.fileExists(atPath: $0) },
+            forget: { _ in })
+
+        let step = deletion.perform(project: "BP", path: link.path, worktrees: [])
+
+        XCTAssertEqual(step, .removed(project: "BP", path: link.path))
+        // The bug: `removeItem` on a symlink deletes only the link, so without resolving first
+        // this directory — just confirmed deleted — would still be sitting on disk, orphaned.
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: real.path),
+            "the real checkout must be deleted, not merely the symlink that pointed at it")
+    }
+
     // MARK: - removeIfSafe: the seam that used to live in an untested app target
 
     private func alwaysRefusing() -> CheckoutRemoval {
