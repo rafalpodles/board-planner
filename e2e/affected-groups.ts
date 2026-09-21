@@ -24,6 +24,7 @@ const OWNED: readonly { prefix: string; groups: readonly GroupName[] }[] = [
   // Also imported by kanban/TaskCard.tsx, ProjectBoardView.tsx and ListView.tsx (board renders task
   // cards using these) — verified via grep, not assumed from the directory name alone.
   { prefix: "src/components/tasks/", groups: ["tasks", "task-fields", "board"] },
+  { prefix: "src/components/tasks/GitlabActivity", groups: ["tasks", "task-fields", "board", "project"] },
 
   // Pages — nested, more specific project subpages before the bare project route
   { prefix: "src/app/(app)/projects/[projectId]/tasks/", groups: ["tasks"] },
@@ -66,6 +67,7 @@ const OWNED: readonly { prefix: string; groups: readonly GroupName[] }[] = [
 
   // API routes
   { prefix: "src/app/api/projects/[projectId]/tasks/", groups: ["tasks"] },
+  { prefix: "src/app/api/projects/[projectId]/tasks/[taskId]/gitlab-activity/", groups: ["tasks", "project"] },
   { prefix: "src/app/api/projects/[projectId]/sprints/", groups: ["board"] },
   { prefix: "src/app/api/projects/[projectId]/custom-fields/", groups: ["task-fields"] },
   { prefix: "src/app/api/projects/[projectId]/ai/", groups: ["task-fields"] },

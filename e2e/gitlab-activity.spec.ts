@@ -111,6 +111,7 @@ test.describe("GitLab activity on a task", () => {
     await expect(panel.getByText("main", { exact: true })).toHaveCount(0);
     await expect(panel.getByText(UNRELATED_COMMIT.title)).toHaveCount(0);
     await expect(panel.getByText(LONGER_KEY_COMMIT.title)).toHaveCount(0);
+    const requests = await asked(request);
     const served = await request.get(
       `${GITLAB_STUB_URL}/api/v4/projects/${encodeURIComponent(GITLAB_REPO)}/search?scope=commits&search=${GITLAB_TASK_KEY}`,
       { headers: { "PRIVATE-TOKEN": GITLAB_TOKEN } }
@@ -121,8 +122,7 @@ test.describe("GitLab activity on a task", () => {
     await expect(panel.getByText(/Could not load/)).toHaveCount(0);
 
     // The stored token is sealed; the stub refuses anything but the plaintext, so this is the
-    // server's decryption and not a fixture passing through
-    const requests = await asked(request);
+    // server's decryption and not a fixture passing through. Read before the direct query above.
     expect(requests.length).toBeGreaterThanOrEqual(2);
     for (const r of requests) expect(r.token).toBe(GITLAB_TOKEN);
     expect(requests.find((r) => r.path.endsWith("/search"))?.search).toBe(GITLAB_TASK_KEY);
@@ -197,7 +197,7 @@ test.describe("the merge-request sync", () => {
     await expect(picker.or(row).first()).toBeVisible();
     const syncButton = page.getByRole("button", { name: "Sync merge requests now" });
     await expect(async () => {
-      if (!(await syncButton.isVisible())) await row.first().click();
+      if ((await row.first().getAttribute("aria-expanded")) !== "true") await row.first().click();
       await expect(syncButton).toBeVisible({ timeout: 2_000 });
     }).toPass({ timeout: 20_000 });
 
