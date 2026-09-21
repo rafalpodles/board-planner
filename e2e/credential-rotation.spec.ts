@@ -275,12 +275,15 @@ test.describe("OAuth credentials", () => {
     await expect(section(page, "Connected apps (OAuth)").getByRole("button", { name: "Revoke" })).toHaveCount(1);
   });
 
-  // BP-747. A refresh already past its own atomic read can still write a fresh token pair after
-  // the client's deletion cascade has started — the click and the refresh are fired together so
-  // the real server decides the order, not this test. Whichever wins, nothing usable must survive:
-  // either the refresh itself is refused, or the pair it minted is already dead.
-  test("a refresh racing the client's own deletion leaves no live credential either way", async ({
-    page,
+  // BP-747. issueTokens now checks the client still exists before handing back a fresh pair. The
+  // race this closes is "the client's deletion cascade has already run by the time this insert
+  // lands" — reproduced directly here rather than actually raced, because two real HTTP requests'
+  // relative timing cannot be trusted to land in the one order that would exercise the new check
+  // at all (test-quality review: a version of this test that fired a UI delete-click and a raw
+  // refresh call together via Promise.all passed regardless of which one the fix removed — the
+  // refresh almost always finished before the click's several round trips even started, so it was
+  // proving only the pre-existing `deleteMany` cleanup, not the new `OAuthClient.exists` check).
+  test("a refresh for a client that is already gone is refused, and leaves no orphaned token", async ({
     request,
     browser,
     baseURL,
@@ -289,40 +292,21 @@ test.describe("OAuth credentials", () => {
     const racer = await connectApp(browser, baseURL, request, RACER);
     await expectWorks(request, racer.accessToken);
 
-    await openTokens(page);
-    const confirmed: string[] = [];
-    page.once("dialog", (dialog) => {
-      confirmed.push(dialog.message());
-      void dialog.accept();
+    // The state a client's deletion cascade leaves mid-flight if it dies right after removing the
+    // client row: the client is gone, the token row this refresh is about to consume is not.
+    await (await db()).collection("oauthclients").deleteOne({ clientId: racer.clientId });
+
+    const refreshed = await request.post("/oauth/token", {
+      form: {
+        grant_type: "refresh_token",
+        refresh_token: racer.refreshToken,
+        client_id: racer.clientId,
+      },
     });
-    const deleted = page.waitForResponse(
-      (r) => r.request().method() === "DELETE" && new URL(r.url()).pathname === "/api/oauth/clients"
-    );
 
-    const [, refreshed] = await Promise.all([
-      row(page, "OAuth clients", RACER).getByRole("button", { name: "Delete" }).click(),
-      request.post("/oauth/token", {
-        form: {
-          grant_type: "refresh_token",
-          refresh_token: racer.refreshToken,
-          client_id: racer.clientId,
-        },
-      }),
-    ]);
-    expect((await deleted).status()).toBe(200);
-    expect(confirmed).toEqual([expect.stringContaining(RACER)]);
-
-    if (refreshed.status() === 200) {
-      const { access_token: mintedInTheRace } = await refreshed.json();
-      const board = await request.get(`/api/projects/${PROJECT_KEY}`, {
-        headers: { Authorization: `Bearer ${mintedInTheRace}` },
-      });
-      expect(board.status(), "a token minted while the client was being deleted must not work").toBe(401);
-    } else {
-      expect(refreshed.status()).toBe(400);
-      expect((await refreshed.json()).error).toBe("invalid_grant");
-    }
-
-    await expect(row(page, "OAuth clients", RACER)).toHaveCount(0);
+    expect(refreshed.status()).toBe(400);
+    expect((await refreshed.json()).error).toBe("invalid_grant");
+    const orphan = await (await db()).collection("oauthtokens").findOne({ clientId: racer.clientId });
+    expect(orphan, "no live row survives — not the consumed old one, not a freshly minted one").toBeNull();
   });
 });
