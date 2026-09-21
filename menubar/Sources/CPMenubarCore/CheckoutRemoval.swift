@@ -23,13 +23,28 @@ public struct CheckoutRemoval: Sendable {
 
     private let run: RunGit
     private let exists: @Sendable (String) -> Bool
+    private let volumeFoldsCase: @Sendable (String) -> Bool
 
     public init(
         run: @escaping RunGit,
-        exists: @escaping @Sendable (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+        exists: @escaping @Sendable (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
+        volumeFoldsCase: @escaping @Sendable (String) -> Bool = CheckoutRemoval.realVolumeFoldsCase
     ) {
         self.run = run
         self.exists = exists
+        self.volumeFoldsCase = volumeFoldsCase
+    }
+
+    // Whether the volume holding `path` treats two names differing only in case as the same file —
+    // true on a default macOS (APFS case-insensitive) volume, false on a case-sensitive one. Read
+    // through the volume rather than assumed, because a case-sensitive volume is a real option an
+    // operator can format one on. Unreadable (nothing at that path yet, or a volume that will not
+    // answer) counts as case-sensitive — the file's own rule applied here: unexamined is a no, and
+    // a no here means comparing the two strings as given, exactly what the code already did.
+    public static func realVolumeFoldsCase(_ path: String) -> Bool {
+        let values = try? URL(fileURLWithPath: path).resourceValues(forKeys: [.volumeSupportsCaseSensitiveNamesKey])
+        guard let supportsCaseSensitive = values?.volumeSupportsCaseSensitiveNames else { return false }
+        return !supportsCaseSensitive
     }
 
     public func check(path: String, workerIsBusy: Bool) -> RemovalVerdict {
@@ -322,11 +337,20 @@ public struct CheckoutRemoval: Sendable {
         return entries.dropFirst().filter { !sameDirectory($0.path, root) }
     }
 
+    // `standardizingPath` alone collapses `.`, `..`, `//`, a trailing slash and `/private` — it does
+    // not resolve a symlink, so a granted path reached through one never reads as the checkout git
+    // itself resolves it to (BP-428). Resolved the same way `LinkedWorktreeCheck` already does.
     private func sameDirectory(_ a: String, _ b: String) -> Bool {
         let normalise: (String) -> String = { path in
-            let standardised = (path as NSString).standardizingPath
-            return standardised.hasSuffix("/") ? String(standardised.dropLast()) : standardised
+            let resolved = ((path as NSString).standardizingPath as NSString).resolvingSymlinksInPath
+            return resolved.hasSuffix("/") ? String(resolved.dropLast()) : resolved
         }
-        return normalise(a) == normalise(b)
+        let normalisedA = normalise(a)
+        let normalisedB = normalise(b)
+        if normalisedA == normalisedB { return true }
+        // Only folded when the volume itself does not distinguish case — on one that does, two
+        // differently-cased strings really do name two different directories.
+        guard volumeFoldsCase(normalisedA) else { return false }
+        return normalisedA.caseInsensitiveCompare(normalisedB) == .orderedSame
     }
 }
