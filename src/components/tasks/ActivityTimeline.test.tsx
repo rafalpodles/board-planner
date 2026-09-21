@@ -50,6 +50,30 @@ describe("ActivityTimeline", () => {
     );
   });
 
+  // Sixty characters of a before and an after usually match, so the sentence said "from X… to X…"
+  it("offers the whole of what a description said before, rather than a clipped sentence", async () => {
+    const before = "A long first paragraph that is well over sixty characters in length.\nAnd a second line.";
+    api.get.mockResolvedValue([
+      { ...log, action: "updated", field: "description", oldValue: before, newValue: `${before} More.` },
+    ]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() => expect(screen.getByText(/edited the description/)).toBeTruthy());
+
+    expect(screen.queryByText(/changed description from/)).toBeNull();
+    expect(screen.getByText("What it said before")).toBeTruthy();
+    expect(screen.getByText(/And a second line\./).textContent).toBe(before);
+  });
+
+  it("says a description was added when there was none before, with nothing to expand", async () => {
+    api.get.mockResolvedValue([
+      { ...log, action: "updated", field: "description", oldValue: "", newValue: "Now it says this" },
+    ]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() => expect(screen.getByText(/added a description/)).toBeTruthy());
+
+    expect(screen.queryByText("What it said before")).toBeNull();
+  });
+
   it("marks a cleared value as empty rather than trailing off", async () => {
     api.get.mockResolvedValue([
       { ...log, action: "updated", field: "Difficulty", oldValue: "M", newValue: "" },

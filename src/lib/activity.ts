@@ -72,3 +72,48 @@ export async function logActivity(
     console.warn("Failed to log activity");
   }
 }
+
+/** How long one person's consecutive edits to one field count as a single change. */
+export const EDIT_SESSION_MS = 10 * 60_000;
+
+/**
+ * Records a change to a field that saves while it is being typed into.
+ *
+ * The description autosaves on every pause in typing, so logging each save wrote a row per pause —
+ * dozens for one paragraph, each carrying the whole text twice, pushing the task's older history
+ * out of the hundred rows the panel reads. One person's edits to one field within
+ * `EDIT_SESSION_MS` are one change: the task's latest row is extended while it is that same edit,
+ * keeping what the field said before the session began. A session that ends where it started
+ * changed nothing, and leaves no row.
+ */
+export async function logEditSession(
+  taskId: Types.ObjectId | string,
+  userId: Types.ObjectId | string,
+  field: string,
+  oldValue: string,
+  newValue: string
+): Promise<void> {
+  try {
+    const latest = await ActivityLog.findOne({ task: taskId })
+      .sort({ createdAt: -1, _id: -1 })
+      .select("user action field oldValue createdAt")
+      .lean<{ _id: Types.ObjectId; user: unknown; action: string; field: string; oldValue: string; createdAt: Date }>();
+
+    const sameSession =
+      !!latest &&
+      latest.action === "updated" &&
+      latest.field === field &&
+      String(latest.user) === String(userId) &&
+      Date.now() - new Date(latest.createdAt).getTime() < EDIT_SESSION_MS;
+
+    if (sameSession && latest) {
+      if (latest.oldValue === newValue) await ActivityLog.deleteOne({ _id: latest._id });
+      else await ActivityLog.updateOne({ _id: latest._id }, { $set: { newValue } });
+      return;
+    }
+
+    await ActivityLog.create({ task: taskId, user: userId, action: "updated", field, oldValue, newValue });
+  } catch {
+    console.warn("Failed to log activity");
+  }
+}

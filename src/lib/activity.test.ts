@@ -2,15 +2,29 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const create = vi.fn();
 const insertMany = vi.fn();
+const updateOne = vi.fn();
+const deleteOne = vi.fn();
+const latestRow = vi.fn();
 
-vi.mock("@/models/activityLog", () => ({ ActivityLog: { create, insertMany } }));
+vi.mock("@/models/activityLog", () => ({
+  ActivityLog: {
+    create,
+    insertMany,
+    updateOne,
+    deleteOne,
+    findOne: () => ({ sort: () => ({ select: () => ({ lean: latestRow }) }) }),
+  },
+}));
 
-const { logActivity, logActivities } = await import("./activity");
+const { logActivity, logActivities, logEditSession, EDIT_SESSION_MS } = await import("./activity");
 
 beforeEach(() => {
   vi.clearAllMocks();
   create.mockReset();
   insertMany.mockReset();
+  updateOne.mockReset();
+  deleteOne.mockReset();
+  latestRow.mockReset();
 });
 
 /**
@@ -111,5 +125,65 @@ describe("logActivity", () => {
     create.mockRejectedValue(new Error("no"));
 
     await expect(logActivity("a", "u1", "created")).resolves.toBeUndefined();
+  });
+});
+
+describe("logEditSession", () => {
+  const row = (over: Record<string, unknown> = {}) => ({
+    _id: "row1",
+    user: "u1",
+    action: "updated",
+    field: "description",
+    oldValue: "before the session",
+    createdAt: new Date(Date.now() - 60_000),
+    ...over,
+  });
+
+  it("writes a new row when nothing is in progress", async () => {
+    latestRow.mockResolvedValue(null);
+
+    await logEditSession("t1", "u1", "description", "a", "b");
+
+    expect(create).toHaveBeenCalledWith({
+      task: "t1",
+      user: "u1",
+      action: "updated",
+      field: "description",
+      oldValue: "a",
+      newValue: "b",
+    });
+  });
+
+  // Typing a paragraph saved it dozens of times; each save was a row with the whole text in it
+  it("extends the same person's edit instead of adding a row, keeping what it said before", async () => {
+    latestRow.mockResolvedValue(row());
+
+    await logEditSession("t1", "u1", "description", "half typed", "fully typed");
+
+    expect(create).not.toHaveBeenCalled();
+    expect(updateOne).toHaveBeenCalledWith({ _id: "row1" }, { $set: { newValue: "fully typed" } });
+  });
+
+  it("leaves no row when the session ends where it began", async () => {
+    latestRow.mockResolvedValue(row());
+
+    await logEditSession("t1", "u1", "description", "something", "before the session");
+
+    expect(deleteOne).toHaveBeenCalledWith({ _id: "row1" });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["somebody else's edit", { user: "u2" }],
+    ["an edit of another field", { field: "title" }],
+    ["an older edit", { createdAt: new Date(Date.now() - EDIT_SESSION_MS - 1_000) }],
+    ["a row that is not an edit", { action: "status_changed" }],
+  ])("starts a new row after %s", async (_label, over) => {
+    latestRow.mockResolvedValue(row(over));
+
+    await logEditSession("t1", "u1", "description", "a", "b");
+
+    expect(updateOne).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledOnce();
   });
 });

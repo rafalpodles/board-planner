@@ -119,6 +119,11 @@ function describeAction(log: ApiActivityLog): string {
       if (log.field === "recurrence" && !log.oldValue && log.newValue) {
         return `${userName} — ${log.newValue}`;
       }
+      // Too long for the sentence, and the first sixty characters of a before and an after usually
+      // match, so the row said "from X… to X…". The text it replaced is offered below the row.
+      if (log.field === "description") {
+        return log.oldValue ? `${userName} edited the description` : `${userName} added a description`;
+      }
       // A field entry that carries values says what changed; one that does not still reads.
       // Project fields are the reason this matters — "updated Difficulty" alone tells you nothing.
       if (log.oldValue || log.newValue) {
@@ -260,8 +265,16 @@ export function ActivityTimeline({
             >
               {actionIcon(log.action)}
             </span>
-            <span className="flex-1 text-text-muted">
+            <span className="flex-1 min-w-0 text-text-muted">
               {describeAction(log)}
+              {log.action === "updated" && log.field === "description" && log.oldValue && (
+                <details className="mt-1">
+                  <summary className="cursor-pointer text-xs text-primary">What it said before</summary>
+                  <p className="mt-1 max-h-60 overflow-y-auto whitespace-pre-wrap break-words rounded-lg bg-bg-input p-2 text-xs text-text">
+                    {log.oldValue}
+                  </p>
+                </details>
+              )}
             </span>
             <time
               dateTime={log.createdAt}

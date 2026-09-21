@@ -39,12 +39,13 @@ test("an edit appears in History without a reload, and so does a description cha
   page,
 }) => {
   await signIn(page);
+  // Armed before the navigation: both tab panels mount with the page, so the history is read then,
+  // not when its tab is clicked
+  const historyLoaded = page.waitForResponse((r) => r.url().includes("/activity") && r.ok());
   await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
   await expect(page.getByLabel("Task title")).toBeVisible();
-
-  const historyLoaded = page.waitForResponse((r) => r.url().includes("/activity") && r.ok());
-  await page.getByRole("tab", { name: /^History/ }).click();
   await historyLoaded;
+  await page.getByRole("tab", { name: /^History/ }).click();
   const history = page.locator("#task-panel-history");
 
   await test.step("a title change is listed as soon as it is saved", async () => {
@@ -62,7 +63,7 @@ test("an edit appears in History without a reload, and so does a description cha
     const saved = write(page, "PUT", `/tasks/${SIBLING_TASK_ID}`);
     await field.blur();
     expect((await saved).status()).toBe(200);
-    await expect(history).toContainText("changed description", { timeout: 3_000 });
+    await expect(history).toContainText(/edited the description|added a description/, { timeout: 3_000 });
   });
 });
 

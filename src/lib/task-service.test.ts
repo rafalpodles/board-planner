@@ -160,7 +160,7 @@ vi.mock("@/models/comment", () => ({
 }));
 const sprintExists = vi.fn();
 vi.mock("@/models/sprint", () => ({ Sprint: { exists: sprintExists } }));
-vi.mock("@/lib/activity", () => ({ logActivity: vi.fn() }));
+vi.mock("@/lib/activity", () => ({ logActivity: vi.fn(), logEditSession: vi.fn() }));
 vi.mock("@/lib/webhooks", () => ({ dispatchWebhooks: vi.fn() }));
 vi.mock("@/lib/notifications", () => ({ dispatchNotifications: vi.fn() }));
 vi.mock("@/lib/in-app-notifications", () => ({
@@ -216,7 +216,7 @@ const {
   heldRunRefusal,
 } = await import("./task-service");
 
-const { logActivity } = await import("@/lib/activity");
+const { logActivity, logEditSession } = await import("@/lib/activity");
 const { dispatchWebhooks } = await import("@/lib/webhooks");
 const { dispatchNotifications } = await import("@/lib/notifications");
 
@@ -5090,8 +5090,10 @@ describe("updateTask writing a description change to the history", () => {
     findOneAndUpdate.mockReturnValue({ populate: () => Promise.resolve(stored(after)) });
   }
 
-  const descriptionEntries = () =>
-    (logActivity as ReturnType<typeof vi.fn>).mock.calls.filter((call) => call[3] === "description");
+  const descriptionEntries = () => [
+    ...(logActivity as ReturnType<typeof vi.fn>).mock.calls.filter((call) => call[3] === "description"),
+    ...(logEditSession as ReturnType<typeof vi.fn>).mock.calls,
+  ];
 
   // The history panel promises what a task said before, and the description is most of what a task
   // says. Found by an evaluation in which every role edited one and saw nothing recorded.
@@ -5100,14 +5102,10 @@ describe("updateTask writing a description change to the history", () => {
 
     await updateTask("p1", "t1", { description: "the new words" }, "actor");
 
-    expect(logActivity).toHaveBeenCalledWith(
-      "t1",
-      "actor",
-      "updated",
-      "description",
-      "the old words",
-      "the new words"
-    );
+    // As an edit session: the description saves on every pause in typing, and a row per save
+    // flooded the history and pushed its older entries out of the window the panel reads
+    expect(logEditSession).toHaveBeenCalledWith("t1", "actor", "description", "the old words", "the new words");
+    expect(logActivity).not.toHaveBeenCalledWith("t1", "actor", "updated", "description", expect.anything(), expect.anything());
   });
 
   it("records nothing about a description the update left alone", async () => {
