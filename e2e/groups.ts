@@ -110,6 +110,7 @@ export const GROUPS = {
     "user-card-names.spec.ts",
     "assignee-access.spec.ts",
     "admin-only-screens.spec.ts",
+    "users-include-machines.spec.ts",
     "instance-outage.spec.ts",
   ],
   automation: [

@@ -5,13 +5,17 @@ const create = vi.fn();
 const countDocuments = vi.fn();
 const getAuthUser = vi.fn();
 const logInstanceAudit = vi.fn();
+const find = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/user", () => ({
   User: {
     create: (...a: unknown[]) => create(...a),
     countDocuments: () => countDocuments(),
-    find: () => ({ sort: async () => [] }),
+    find: (...a: unknown[]) => {
+      find(...a);
+      return { sort: async () => [] };
+    },
   },
 }));
 vi.mock("@/lib/auth", () => ({
@@ -37,7 +41,7 @@ vi.mock("@/lib/middleware", () => ({
   withAdmin: (h: (r: Request, c: unknown) => unknown) => (r: Request) => h(r, { user: { _id: "a1" } }),
 }));
 
-const { POST } = await import("@/app/api/users/route");
+const { GET, POST } = await import("@/app/api/users/route");
 
 const post = (body: unknown) =>
   POST(new Request("http://x/api/users", { method: "POST", body: JSON.stringify(body) }));
@@ -252,5 +256,27 @@ describe("claiming an instance nobody has claimed", () => {
 
     expect(res.status).toBe(201);
     expect(create.mock.calls[0][0].role).toBe("member");
+  });
+});
+
+describe("which accounts the list returns", () => {
+  const list = (query = "") =>
+    GET(new Request(`http://x/api/users${query}`), { params: Promise.resolve({}) });
+
+  beforeEach(() => find.mockReset());
+
+  it("leaves machine accounts out by default", async () => {
+    await list();
+    expect(find).toHaveBeenCalledWith({ kind: { $ne: "machine" } });
+  });
+
+  it("includes them when asked for machines", async () => {
+    await list("?include=machines");
+    expect(find).toHaveBeenCalledWith({});
+  });
+
+  it("does not read any other value as the opt-in", async () => {
+    await list("?include=machine");
+    expect(find).toHaveBeenCalledWith({ kind: { $ne: "machine" } });
   });
 });

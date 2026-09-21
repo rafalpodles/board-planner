@@ -22,10 +22,13 @@ import { IUser } from "@/types";
 
 // Machines are excluded: worker identities are accounts, but not people to invite, permission or
 // delete from here, and a team that connects five machines would otherwise have a user list that is
-// half machines.
-export const GET = withAdmin(async () => {
+// half machines. `?include=machines` is the one way an admin can still read those accounts (BP-718).
+export const GET = withAdmin(async (request) => {
   await connectDB();
-  const users = await User.find({ kind: { $ne: "machine" } }).sort({ createdAt: 1 });
+  const includeMachines = new URL(request.url).searchParams.get("include") === "machines";
+  const users = await User.find(includeMachines ? {} : { kind: { $ne: "machine" } }).sort({
+    createdAt: 1,
+  });
   return NextResponse.json(users);
 });
 
