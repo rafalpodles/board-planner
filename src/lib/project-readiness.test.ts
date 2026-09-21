@@ -17,6 +17,23 @@ describe("readinessGaps", () => {
     expect(readinessGaps({ ...READY, workerEnabled })).toEqual(["runs-off"]);
   });
 
+  // BP-736: the owner's switch is on, and an instance admin's lock wins over it
+  it("names a lock on a board its owner switched on, and not as switched off", () => {
+    expect(readinessGaps({ ...READY, lockedByInstance: true })).toEqual(["runs-locked"]);
+  });
+
+  // Switching runs on alone would not be enough, so both are said
+  it("names both when the board is switched off and locked", () => {
+    expect(readinessGaps({ ...READY, workerEnabled: false, lockedByInstance: true })).toEqual([
+      "runs-off",
+      "runs-locked",
+    ]);
+  });
+
+  it.each([false, undefined, null])("reads lockedByInstance %o as no lock", (lockedByInstance) => {
+    expect(readinessGaps({ ...READY, lockedByInstance })).toEqual([]);
+  });
+
   it("names a reader with no machine serving the repository", () => {
     expect(readinessGaps({ ...READY, machine: "none" })).toEqual(["no-machine"]);
   });

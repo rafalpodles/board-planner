@@ -1024,6 +1024,30 @@ describe("the hand-over notice, with the board judged too", () => {
     expect(notice().textContent).toContain("its owners, Ada and Tomek, can switch them on");
   });
 
+  // Only an instance admin lifts the lock: never the owners, and "you" only for an instance admin
+  it("names a lock on agent runs as an instance admin's, not the owners'", () => {
+    withBoard({ lockedByInstance: true });
+
+    expect(notice().dataset.reason).toBe("runs-locked");
+    expect(notice().textContent).toBe(
+      "Nothing will run this yet. An instance admin has locked agent runs off for this board — an instance admin can lift the lock in Settings → Workers."
+    );
+    expect(notice().textContent).not.toContain("Ada");
+    expect(screen.queryByTestId("handover-waiting")).toBeNull();
+  });
+
+  it("tells an owner the lock is not theirs to lift", () => {
+    withBoard({ lockedByInstance: true, owners: [OWNER, ADA] });
+
+    expect(notice().textContent).toContain("— an instance admin can lift the lock");
+  });
+
+  it("tells an instance admin they can lift the lock", () => {
+    withBoard({ lockedByInstance: true }, {}, { viewerIsInstanceAdmin: true });
+
+    expect(notice().textContent).toContain("— you can lift the lock");
+  });
+
   it("tells an owner reading it that they can fix it themselves", () => {
     withBoard({ repositoryUrl: "", owners: [OWNER, ADA] });
 

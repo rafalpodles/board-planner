@@ -1,12 +1,14 @@
 import type { AnyColumn } from "@/lib/columns";
 import { ROLES_A_RUN_NEEDS } from "@/lib/claim-refusal";
 import type { ColumnRole, MachineState } from "@/types";
+import { isWorkerLockedByInstance, projectRunsWorkers } from "@/lib/worker-gate";
 
 export type { MachineState };
 
 export type ReadinessGap =
   | "no-repository"
   | "runs-off"
+  | "runs-locked"
   | "missing-columns"
   | "no-machine"
   | "machine-stale"
@@ -16,6 +18,8 @@ export type ReadinessGap =
 export interface ReadinessFacts {
   repositoryUrl?: string | null;
   workerEnabled?: boolean | null;
+  /** An instance admin's lock, which wins over `workerEnabled` (see projectRunsWorkers) */
+  lockedByInstance?: boolean | null;
   /** Omitted, the board's columns are not judged */
   columns?: AnyColumn[];
   /** Unknown (`null`/omitted) is not judged: only the machine's own owner is ever told its state. */
@@ -41,7 +45,13 @@ export function readinessGaps(facts: ReadinessFacts): ReadinessGap[] {
   const gaps: ReadinessGap[] = [];
   const noRepository = !facts.repositoryUrl?.trim();
   if (noRepository) gaps.push("no-repository");
-  if (facts.workerEnabled !== true) gaps.push("runs-off");
+  const enabled = facts.workerEnabled === true;
+  const worker = { enabled, lockedByInstance: facts.lockedByInstance === true };
+  if (!projectRunsWorkers(worker)) {
+    // Both when both: the owners switching runs on changes nothing while the lock stands
+    if (!enabled) gaps.push("runs-off");
+    if (isWorkerLockedByInstance(worker)) gaps.push("runs-locked");
+  }
   if (facts.columns && missingRunRoles(facts.columns).length > 0) gaps.push("missing-columns");
   // With no repository no machine can serve the board, and "connect a machine" would be advice
   // that cannot work until the repository is named

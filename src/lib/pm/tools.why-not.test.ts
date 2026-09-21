@@ -86,6 +86,16 @@ describe("the PM says every reason its hand-over will not run", () => {
     expect(note).toContain("not enabled for workers");
   });
 
+  // BP-736's lock wins over the owner's switch, and is named as the lock
+  it("names an instance admin's lock on a board its owner switched on", async () => {
+    board({ worker: { enabled: true, lockedByInstance: true } });
+
+    const note = ((await assign()).result as { note: string }).note;
+    expect(note).toBe(
+      "Assigned, but an instance admin has locked workers off for this project, so nothing will run it."
+    );
+  });
+
   it("names a board missing a column a run needs", async () => {
     board({ columns: COLUMNS.filter((c) => c.role !== "review") });
 

@@ -74,6 +74,36 @@ test.describe("a member's own task, as the board changes under it", () => {
     );
   });
 
+  // BP-736: the owner switched runs on and an instance admin locked them off; the lock wins, and
+  // only an instance admin can lift it — the board's owners are not named for it
+  test("a locked board whose owner switched runs on does not read as ready", async ({ page }) => {
+    await setBoardReadiness({
+      repositoryUrl: HANDOVER_REPOSITORY,
+      workerEnabled: true,
+      lockedByInstance: true,
+    });
+    await seedMachine("git@github.com:e2e/handover-board.git");
+    await openAs(page, "member");
+
+    await expect(notice(page)).toHaveAttribute("data-reason", "runs-locked");
+    await expect(notice(page)).toHaveText(
+      "Nothing will run this yet. An instance admin has locked agent runs off for this board — an instance admin can lift the lock in Settings → Workers."
+    );
+    await expect(waiting(page)).toHaveCount(0);
+  });
+
+  test("an instance admin reading a locked board is told they can lift it", async ({ page }) => {
+    await setBoardReadiness({
+      repositoryUrl: HANDOVER_REPOSITORY,
+      workerEnabled: true,
+      lockedByInstance: true,
+    });
+    await openAs(page, "admin");
+
+    await expect(notice(page)).toHaveAttribute("data-reason", "runs-locked");
+    await expect(notice(page)).toContainText("— you can lift the lock");
+  });
+
   test("with everything in place, the rail says it is waiting for the member's machine", async ({
     page,
   }) => {

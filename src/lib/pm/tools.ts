@@ -20,7 +20,7 @@ import { projectRepositoryUrl } from "@/lib/repository";
 import type { AnyColumn } from "@/lib/columns";
 import { getProjectColumns } from "@/lib/columns";
 import { echo } from "@/lib/echo";
-import { isWorkerLockedByInstance, projectRunsWorkers } from "@/lib/worker-gate";
+import { isWorkerLockedByInstance } from "@/lib/worker-gate";
 
 export interface PmToolContext {
   projectId: string;
@@ -178,7 +178,8 @@ async function whyItWillNotRun(
     ...(handover.runs ? [] : handover.problems.map((p) => whyThisProblem(p, project.key))),
     ...readinessGaps({
       repositoryUrl: projectRepositoryUrl(project),
-      workerEnabled: project.worker?.enabled === true,
+      workerEnabled: !!project.worker?.enabled,
+      lockedByInstance: isWorkerLockedByInstance(project.worker),
       columns,
     }).map((gap) => whyThisGap(gap, columns)),
   ];
@@ -191,6 +192,8 @@ function whyThisGap(gap: ReadinessGap, columns: AnyColumn[]): string {
       return "this project names no repository, so no machine can match it";
     case "runs-off":
       return "this project is not enabled for workers, so nothing will run it";
+    case "runs-locked":
+      return "an instance admin has locked workers off for this project, so nothing will run it";
     case "missing-columns":
       return `the board has no ${missingRunRoles(columns).join(", ")} column, so no machine can claim from it`;
     default:

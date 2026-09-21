@@ -73,7 +73,9 @@ const CONNECT_MACHINE_URL = `${EXECUTION_DOCS_URL}#setting-one-up`;
 
 export interface BoardReadiness {
   repositoryUrl: string;
+  /** The owner's switch; whether runs happen is that AND no instance lock (projectRunsWorkers) */
   workerEnabled: boolean;
+  lockedByInstance?: boolean;
   owners: ApiUserSummary[];
   /** The reader's own machines, against this board's repository */
   machine: MachineState;
@@ -104,6 +106,7 @@ function MachineLink({ children }: { children: string }) {
 interface BlockerContext {
   owners: ApiUserSummary[];
   viewer: string | null;
+  viewerIsInstanceAdmin: boolean;
   projectKey: string | null;
   columns: AnyColumn[];
   failingChecks: string[];
@@ -164,6 +167,14 @@ function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }
           Agent runs are off for this board — {who} can switch them on in Settings → Workers.
         </>
       );
+    case "runs-locked":
+      return (
+        <>
+          An instance admin has locked agent runs off for this board —{" "}
+          {ctx.viewerIsInstanceAdmin ? "you" : "an instance admin"} can lift the lock in Settings →
+          Workers.
+        </>
+      );
     case "missing-columns": {
       const roles = missingRunRoles(ctx.columns).map((r) => ROLE_LABELS[r].label);
       return (
@@ -220,6 +231,7 @@ function HandoverNotice({
   columns,
   assignee,
   viewer,
+  viewerIsInstanceAdmin,
   projectKey,
 }: {
   handover: Handover | null;
@@ -228,6 +240,7 @@ function HandoverNotice({
   columns: AnyColumn[] | undefined;
   assignee: ApiUserSummary | null;
   viewer: string | null;
+  viewerIsInstanceAdmin: boolean;
   projectKey: string | null;
 }) {
   // "No agent" is the ordinary case and the default — it is what the picker already says, and
@@ -241,6 +254,7 @@ function HandoverNotice({
     ? readinessGaps({
         repositoryUrl: board.repositoryUrl,
         workerEnabled: board.workerEnabled,
+        lockedByInstance: board.lockedByInstance,
         columns,
         machine: viewerIsAssignee ? board.machine : null,
       })
@@ -252,6 +266,7 @@ function HandoverNotice({
   const ctx: BlockerContext = {
     owners: board?.owners ?? [],
     viewer,
+    viewerIsInstanceAdmin,
     projectKey,
     columns: columns ?? [],
     failingChecks: board?.failingChecks ?? [],
@@ -344,6 +359,8 @@ interface PropertyRailProps {
   board?: BoardReadiness | null;
   /** Names blockers by key; without it they read as #N */
   projectKey?: string | null;
+  /** Only an instance admin lifts a lock on agent runs */
+  viewerIsInstanceAdmin?: boolean;
   /**
    * Writes the assignee a task already carries. Auto-save sends the diff, so re-picking the person
    * already on the task sends nothing at all — and that is the repair the notice below prints for a
@@ -376,6 +393,7 @@ export function PropertyRail({
   columns,
   board = null,
   projectKey = null,
+  viewerIsInstanceAdmin = false,
   onRepairAssigner,
   currentUsername,
   categories,
@@ -543,6 +561,7 @@ export function PropertyRail({
           columns={columns}
           assignee={stored.assignee ?? null}
           viewer={currentUsername}
+          viewerIsInstanceAdmin={viewerIsInstanceAdmin}
           projectKey={projectKey}
         />
         {!notOffered && <HandoverRules />}

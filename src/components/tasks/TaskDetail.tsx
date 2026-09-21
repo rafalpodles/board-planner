@@ -18,6 +18,7 @@ import {
 } from "@/types";
 import { useStore } from "@/app/(app)/agents/store";
 import { effectiveColumns } from "@/lib/columns";
+import { isWorkerLockedByInstance } from "@/lib/worker-gate";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Modal } from "@/components/ui/Modal";
 import { TaskForm } from "@/components/tasks/TaskForm";
@@ -222,7 +223,7 @@ function TaskDetailView({
 }: TaskDetailViewProps) {
   const api = useApi();
   const openTask = useOpenTask();
-  const { user: currentUser } = useAuth();
+  const { user: currentUser, isAdmin } = useAuth();
   const { toast } = useToast();
 
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -268,7 +269,8 @@ function TaskDetailView({
   const board = readiness
     ? {
         repositoryUrl: project.repositoryUrl ?? "",
-        workerEnabled: project.worker?.enabled === true,
+        workerEnabled: !!project.worker?.enabled,
+        lockedByInstance: isWorkerLockedByInstance(project.worker),
         owners: readiness.owners,
         machine: readiness.machine,
         failingChecks: readiness.failingChecks,
@@ -553,6 +555,7 @@ function TaskDetailView({
               columns={columns}
               board={board}
               projectKey={project.key}
+              viewerIsInstanceAdmin={isAdmin}
               onRepairAssigner={repairAssigner}
               currentUsername={currentUser?.username ?? null}
               categories={project.categories || []}
@@ -592,6 +595,7 @@ function TaskDetailView({
           columns={columns}
           board={board}
           projectKey={project.key}
+          viewerIsInstanceAdmin={isAdmin}
           onRepairAssigner={repairAssigner}
           currentUsername={currentUser?.username ?? null}
           categories={project.categories || []}

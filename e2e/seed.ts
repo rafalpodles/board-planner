@@ -2440,9 +2440,14 @@ export async function seedMemberHandover() {
   await mongoose.disconnect();
 }
 
-export async function setBoardReadiness(fields: { repositoryUrl?: string; workerEnabled?: boolean }) {
+export async function setBoardReadiness(fields: {
+  repositoryUrl?: string;
+  workerEnabled?: boolean;
+  lockedByInstance?: boolean;
+}) {
   const db = (await connect()).db!;
   const $set: Record<string, unknown> = {};
+  if (fields.lockedByInstance !== undefined) $set["worker.lockedByInstance"] = fields.lockedByInstance;
   if (fields.repositoryUrl !== undefined) $set.repositoryUrl = fields.repositoryUrl;
   if (fields.workerEnabled !== undefined) $set["worker.enabled"] = fields.workerEnabled;
   await db.collection("projects").updateOne({ _id: PROJECT_ID }, { $set });

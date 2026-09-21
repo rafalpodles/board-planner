@@ -140,10 +140,14 @@ describe("the PM's assign_task on a project an instance admin locked off", () =>
 
     const { result } = await PM_TOOLS.assign_task.execute({ taskKey: "BP-9", username: "kuba" }, ctx);
 
+    // One of several reasons since BP-727 lists them all; the lock is named, and not as switched off
     expect(result).toMatchObject({
       willRun: false,
-      note: "Assigned, but an instance admin has locked workers off for this project, so nothing will run it.",
+      note: expect.stringContaining(
+        "an instance admin has locked workers off for this project, so nothing will run it"
+      ),
     });
+    expect((result as { note: string }).note).not.toContain("not enabled for workers");
   });
 
   it("does not blame a lock on a project that is merely switched off", async () => {
@@ -154,7 +158,8 @@ describe("the PM's assign_task on a project an instance admin locked off", () =>
     const { result } = await PM_TOOLS.assign_task.execute({ taskKey: "BP-9", username: "kuba" }, ctx);
 
     expect(result).toMatchObject({
-      note: "Assigned, but this project is not enabled for workers, so nothing will run it.",
+      note: expect.stringContaining("this project is not enabled for workers, so nothing will run it"),
     });
+    expect((result as { note: string }).note).not.toContain("locked");
   });
 });

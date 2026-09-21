@@ -762,6 +762,17 @@ describe("TaskDetail, the Agent row's handover notice", () => {
     ).toBe("runs-off");
   });
 
+  // A locked board whose owner switched runs on must not read as ready
+  it("names a lock on a board whose owner switched runs on", async () => {
+    serve(selfAssigned, { ...readyBoard, worker: { enabled: true, lockedByInstance: true } }, ownedByAda);
+    renderDetail();
+    await loaded();
+
+    const notice = within(screen.getByRole("complementary")).getByTestId("handover-notice");
+    expect(notice.dataset.reason).toBe("runs-locked");
+    expect(screen.queryByTestId("handover-waiting")).toBeNull();
+  });
+
   it("tells the assignee they have no machine, from the readiness read", async () => {
     serve(selfAssigned, readyBoard, { owners: [], machine: "none" });
     renderDetail();
