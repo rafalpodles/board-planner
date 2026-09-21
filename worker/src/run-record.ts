@@ -47,7 +47,11 @@ export function recordFor(
   detail: string,
   startedAt: number,
   finishedAt: number,
-  costUsd: number
+  costUsd: number,
+  /** The gate's own reason, for a rejection — see BP-289. Read back at the next claim so that
+   * attempt does not start cold; `detail` used to be left blank here for exactly the field it now
+   * fills. */
+  reason?: string
 ): RunRecord {
   const refused = kind === "gateRejected";
   return {
@@ -59,7 +63,7 @@ export function recordFor(
     agentName: task.agent.name,
     outcome: OUTCOMES[kind] ?? "failed",
     refusedBy: refused ? detail.slice(0, MAX_DETAIL_CHARS) : "",
-    detail: refused ? "" : detail.slice(0, MAX_DETAIL_CHARS),
+    detail: refused ? (reason ?? "").slice(0, MAX_DETAIL_CHARS) : detail.slice(0, MAX_DETAIL_CHARS),
     startedAt: new Date(startedAt).toISOString(),
     finishedAt: new Date(finishedAt).toISOString(),
     costUsd,

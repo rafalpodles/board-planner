@@ -73,26 +73,39 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  const channels = project.notificationChannels || [];
-  if (channels.length >= MAX_NOTIFICATION_CHANNELS) {
-    return NextResponse.json(
-      { error: `A project can have at most ${MAX_NOTIFICATION_CHANNELS} chat channels` },
-      { status: 400 }
-    );
+  // The ceiling goes in the write's own filter, not in a count read against the document
+  // above: every concurrent racer sees the same pre-write length, so a check up there
+  // bounds nothing — the same fix already applied to the webhook writers (BP-719).
+  const updated = await Project.findOneAndUpdate(
+    { _id: projectId, [`notificationChannels.${MAX_NOTIFICATION_CHANNELS - 1}`]: { $exists: false } },
+    {
+      $push: {
+        notificationChannels: {
+          type: type as NotificationChannelType,
+          name: name.trim(),
+          webhookUrl: encryptSecret(parsedUrl),
+          events: parsedEvents,
+          enabled: true,
+        },
+      },
+    },
+    { returnDocument: "after" }
+  );
+  if (!updated) {
+    // The project was read a moment ago, so ordinarily a miss here is the ceiling — but it can
+    // also mean the project was deleted in between, and the two answer differently (review).
+    if (await Project.exists({ _id: projectId })) {
+      return NextResponse.json(
+        { error: `A project can have at most ${MAX_NOTIFICATION_CHANNELS} chat channels` },
+        { status: 400 }
+      );
+    }
+    return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
-  channels.push({
-    type: type as NotificationChannelType,
-    name: name.trim(),
-    webhookUrl: encryptSecret(parsedUrl),
-    events: parsedEvents,
-    enabled: true,
-  } as typeof channels[number]);
-  project.notificationChannels = channels;
-  await project.save();
 
   logProjectAudit(projectId, user._id, "settings_updated", `Notification channel added: ${name.trim()} (${type})`);
 
-  return NextResponse.json(masked(project), { status: 201 });
+  return NextResponse.json(masked(updated), { status: 201 });
 });
 
 export const PUT = withProjectOwner(async (request, { params }) => {

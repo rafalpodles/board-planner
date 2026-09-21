@@ -26,6 +26,22 @@ vi.mock("@/lib/worker-service", () => ({
 }));
 const releaseTask = vi.fn();
 vi.mock("@/lib/task-service", () => ({ claimNextTask, releaseExpiredTasks, releaseTask }));
+const agentRunFindOne = vi.fn();
+const agentRunFindOneArgs = vi.fn();
+const agentRunSort = vi.fn();
+vi.mock("@/models/agentRun", () => ({
+  AgentRun: {
+    findOne: (...args: unknown[]) => {
+      agentRunFindOneArgs(...args);
+      return {
+        sort: (...sortArgs: unknown[]) => {
+          agentRunSort(...sortArgs);
+          return { lean: agentRunFindOne };
+        },
+      };
+    },
+  },
+}));
 // Which agent a project resolves to is agent-snapshot.test.ts's subject. What matters here is the
 // branch where it resolves to none, which no test reached while this always succeeded.
 const snapshotFor = vi.fn(async () => ({ agentId: "a1", name: "Default", sequence: [] }));
@@ -97,6 +113,7 @@ beforeEach(() => {
   snapshotFor.mockResolvedValue({ agentId: "a1", name: "Default", sequence: [] });
   releaseExpiredTasks.mockResolvedValue(0);
   releaseTask.mockResolvedValue(undefined);
+  agentRunFindOne.mockResolvedValue(null);
 });
 
 describe("POST /tasks/claim", () => {
@@ -182,6 +199,50 @@ describe("POST /tasks/claim", () => {
     expect(body).toMatchObject({ _id: "t1", taskNumber: 1 });
     expect(body.agent).toMatchObject({ agentId: "a1", name: "Default" });
     expect(body._doc).toBeUndefined();
+  });
+
+  // BP-289: a retry used to start cold. The claim is where the server hands back what the last run
+  // on this task actually was, so the worker can carry it into the coding step's own prompt.
+  describe("previousRejectionReason", () => {
+    it("is empty when this task has no prior run at all", async () => {
+      agentRunFindOne.mockResolvedValue(null);
+
+      const response = await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
+
+      expect((await response.json()).previousRejectionReason).toBe("");
+    });
+
+    it("is empty when the last run was not a rejection", async () => {
+      agentRunFindOne.mockResolvedValue({ outcome: "delivered", detail: "" });
+
+      const response = await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
+
+      expect((await response.json()).previousRejectionReason).toBe("");
+    });
+
+    it("carries the reason forward when the last run was a rejection", async () => {
+      agentRunFindOne.mockResolvedValue({
+        outcome: "refused",
+        detail: "the diff touched auth.ts with no accompanying test",
+      });
+
+      const response = await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
+
+      expect((await response.json()).previousRejectionReason).toBe(
+        "the diff touched auth.ts with no accompanying test"
+      );
+    });
+
+    // Whichever machine ran last, and however long ago: it is the most recent thing that happened
+    // to this task, not this worker's own history, that a cold retry is missing.
+    it("looks up the task's own most recent run by id, newest first", async () => {
+      claimNextTask.mockResolvedValue(hydrated({ _id: "t-specific", taskNumber: 1 }));
+
+      await POST(request(authed), { params: Promise.resolve({ projectId: "CP" }) });
+
+      expect(agentRunFindOneArgs).toHaveBeenCalledWith({ task: "t-specific" }, "outcome detail");
+      expect(agentRunSort).toHaveBeenCalledWith({ finishedAt: -1 });
+    });
   });
 
   // Holding a task no machine can run parks it behind the two-hour lease. 204 rather than an error

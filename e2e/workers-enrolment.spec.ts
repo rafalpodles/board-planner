@@ -538,8 +538,9 @@ test("what a finished run said is read from the fleet page, not out of the datab
 
   const REASON = "the build failed: 2 tests red in src/lib/gates.test.ts";
   await machineRecordsRun(request, machine, { outcome: "failed", detail: REASON });
-  // The control: a refusal files its reason as the gate's name and leaves the detail empty, so a
-  // blank there is expected rather than a detail that failed to render
+  // The control: a run from before BP-289, or a gate that somehow gave no reason, still leaves
+  // the detail empty — the screen has to render that gap as a gap, not as a detail that failed to
+  // load. A current refusal does carry a reason in detail (BP-289); this exercises the older shape.
   await machineRecordsRun(request, machine, { outcome: "refused", refusedBy: "diff-size" });
 
   await signIn(page, ADMIN_USERNAME, ADMIN_PASSWORD);

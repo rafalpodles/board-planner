@@ -37,7 +37,13 @@ repository's own scripts. The first rejection stops the run:
 | `review` | a second Claude, with a clean context, rejects the diff — present because the agent carries a Reviewed gate |
 
 A rejection pushes the branch — unless the run committed nothing, the provenance check refuses the
-history, or `protected-paths` is what refused, which withholds the push deliberately — comments which gate said no, and routes the task to the review column.
+history, or `protected-paths` is what refused, which withholds the push deliberately — comments which gate said no, and routes the task to the review column, every time: there is no automatic retry
+of a rejected change the way there is for a crash or a timeout below. Whoever reclaims the task next
+(a person, or the PM) does start with more than the last attempt had, though: the gate's reason
+travels with the claim as `previousRejectionReason` and reaches the coding step's own prompt, though
+never the review gate's — a retry knows what it was rejected for, and the gate stays as blind to
+there having been one as it always was. A second attempt rejected for the exact same reason gets a
+comment saying so, rather than one that reads like a fresh finding.
 A `protected-paths` rejection also records the change on the task, so that a person can read it
 there and **accept** it: the machine then pushes that exact commit and opens a pull request. See
 [Accepting a refused change](#accepting-a-refused-change). A usage limit returns the task to the queue with its attempt refunded — it is not the

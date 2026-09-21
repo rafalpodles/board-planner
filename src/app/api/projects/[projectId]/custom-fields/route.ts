@@ -63,28 +63,42 @@ export const POST = withProjectAccess(async (request, { params }) => {
   }
 
   const fields = project.customFields || [];
-  if (fields.length >= MAX_FIELDS) {
-    return NextResponse.json({ error: `Maximum ${MAX_FIELDS} custom fields per project` }, { status: 400 });
-  }
   if (fields.some((f) => f.name.toLowerCase() === name.trim().toLowerCase())) {
     return NextResponse.json({ error: "Field with this name already exists" }, { status: 409 });
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  fields.push({
-    name: name.trim(),
-    fieldType,
-    options: parsedOptions,
-    required: !!isRequired,
-    // A new field lands at the end of the form rather than jumping to the top
-    order: fields.length,
-    showOnCard: !!showOnCard,
-    showInList: !!showInList,
-    filterable: !!filterable,
-    archived: false,
-  } as any);
-  project.customFields = fields;
-  await project.save();
+  // The ceiling goes in the write's own filter, not in a count read against the document
+  // above: every concurrent racer sees the same pre-write length, so a check up there
+  // bounds nothing — the same fix already applied to the webhook writers (BP-719).
+  const updated = await Project.findOneAndUpdate(
+    { _id: projectId, [`customFields.${MAX_FIELDS - 1}`]: { $exists: false } },
+    {
+      $push: {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        customFields: {
+          name: name.trim(),
+          fieldType,
+          options: parsedOptions,
+          required: !!isRequired,
+          // A new field lands at the end of the form rather than jumping to the top
+          order: fields.length,
+          showOnCard: !!showOnCard,
+          showInList: !!showInList,
+          filterable: !!filterable,
+          archived: false,
+        } as any,
+      },
+    },
+    { returnDocument: "after" }
+  );
+  if (!updated) {
+    // The project was read a moment ago, so ordinarily a miss here is the ceiling — but it can
+    // also mean the project was deleted in between, and the two answer differently (review).
+    if (await Project.exists({ _id: projectId })) {
+      return NextResponse.json({ error: `Maximum ${MAX_FIELDS} custom fields per project` }, { status: 400 });
+    }
+    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+  }
 
-  return NextResponse.json(project.customFields, { status: 201 });
+  return NextResponse.json(updated.customFields, { status: 201 });
 });

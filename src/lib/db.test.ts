@@ -4,10 +4,11 @@ const connect = vi.fn();
 const close = vi.fn();
 // `client` rather than the connection's own `close`: the code closes the MongoClient, because
 // closing the connection would make mongoose rebuild every model's indexes on the reconnect.
+type FakeClient = { close: () => Promise<void>; db?: () => { command: (cmd: unknown) => Promise<unknown> } };
 const connection: {
   readyState: number;
-  client?: { close: () => Promise<void> };
-  getClient: () => { close: () => Promise<void> } | undefined;
+  client?: FakeClient;
+  getClient: () => FakeClient | undefined;
 } = {
   readyState: 1,
   client: { close },
@@ -308,6 +309,20 @@ describe("connectDB — the state the tests could not see", () => {
     );
   });
 
+  // BP-366: a request already dispatched on a socket that looks live but never answers had no
+  // bound at all before this — measured at 36.5 s against a suspended (not killed) proxy.
+  it("bounds an already-dispatched operation too, not only the initial connect", async () => {
+    const { connectDB } = await freshModule();
+    connect.mockResolvedValue({ ok: true });
+
+    await connectDB();
+
+    expect(connect).toHaveBeenCalledWith(
+      "mongodb://127.0.0.1:27017/test",
+      expect.objectContaining({ socketTimeoutMS: 15_000 })
+    );
+  });
+
   // Without the cooldown each request in a burst pays the connect timeout in full — the price of no
   // longer serving a cached rejection, which is worth paying once and not eight times
   it("answers a burst from one attempt rather than attempting per request", async () => {
@@ -546,5 +561,112 @@ describe("connectDB — the client a reconnect abandons", () => {
     // One reconnect between them: the second caller waits on the promise the first one put in the
     // cache, rather than opening a client of its own
     expect(order).toEqual(["connect", "connect", "close"]);
+  });
+});
+
+// BP-366: readyState synthesises disconnected from stale-heartbeat arithmetic alone, which a
+// blocked event loop triggers as easily as a dead server — measured, a query still succeeded on a
+// connection whose readyState had read 0 for a full minute. Every fixture elsewhere in this file
+// gives its fake client no `db()`, so the ping always fails there and every one of those tests
+// still exercises the "confirmed dead" path unchanged; these are the ones that pin the ping itself.
+describe("connectDB — a readyState that lied", () => {
+  const ping = vi.fn();
+
+  beforeEach(() => {
+    process.env.MONGODB_URI = "mongodb://127.0.0.1:27017/test";
+    connect.mockReset();
+    close.mockReset();
+    close.mockResolvedValue(undefined);
+    ping.mockReset();
+    connection.client = { close, db: () => ({ command: ping }) };
+    connection.readyState = 1;
+    delete (globalThis as { mongooseCache?: unknown }).mongooseCache;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("keeps the live connection when a ping answers despite readyState reading 0", async () => {
+    const { connectDB } = await freshModule();
+    connect.mockResolvedValue({ ok: true });
+    ping.mockResolvedValue({ ok: 1 });
+
+    await connectDB();
+    connection.readyState = 0;
+    const result = await connectDB();
+
+    expect(result).toEqual({ ok: true });
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(close).not.toHaveBeenCalled();
+  });
+
+  it("still reconnects when the ping fails too", async () => {
+    connect.mockImplementationOnce(async () => ({ ok: true })).mockImplementationOnce(async () => {
+      connection.client = { close: vi.fn(), db: () => ({ command: ping }) };
+      return { ok: true };
+    });
+    ping.mockRejectedValue(named("MongoNetworkError", "no route to host"));
+    const { connectDB } = await freshModule();
+
+    await connectDB();
+    connection.readyState = 0;
+    await connectDB();
+
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives up on a ping that never answers, rather than waiting on it forever", async () => {
+    vi.useFakeTimers();
+    const { connectDB } = await freshModule();
+    connect.mockResolvedValue({ ok: true });
+    ping.mockImplementation(() => new Promise(() => {})); // never settles
+
+    await connectDB();
+    connection.readyState = 0;
+    const pending = connectDB();
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    await expect(pending).resolves.toEqual({ ok: true });
+    expect(connect).toHaveBeenCalledTimes(2);
+  });
+
+  // The test above proves a bound exists and is at most 2s; this pins it to that value
+  // specifically, so a regression that shrank it — flapping the connection on ordinary
+  // event-loop jitter rather than only a truly dead ping — would not slip through unnoticed
+  // (review: mutation-tested this way, the looser test alone did not catch that).
+  it("waits the full 2 s for the ping before giving up, not less", async () => {
+    vi.useFakeTimers();
+    const { connectDB } = await freshModule();
+    connect.mockResolvedValue({ ok: true });
+    ping.mockImplementation(() => new Promise(() => {})); // never settles
+
+    await connectDB();
+    connection.readyState = 0;
+    const pending = connectDB();
+
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(connect).toHaveBeenCalledTimes(1); // still waiting on the ping
+
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(pending).resolves.toEqual({ ok: true });
+    expect(connect).toHaveBeenCalledTimes(2);
+  });
+
+  // Async, unlike the promise-claim it mirrors: without a shared slot, two callers racing a burst
+  // would each see readyState still 0 and each start their own ping and their own reconnect.
+  it("shares one ping across a concurrent burst instead of starting one per caller", async () => {
+    const { connectDB } = await freshModule();
+    connect.mockResolvedValue({ ok: true });
+    ping.mockResolvedValue({ ok: 1 });
+
+    await connectDB();
+    connection.readyState = 0;
+    await Promise.all([connectDB(), connectDB(), connectDB()]);
+
+    expect(ping).toHaveBeenCalledTimes(1);
+    expect(connect).toHaveBeenCalledTimes(1);
   });
 });

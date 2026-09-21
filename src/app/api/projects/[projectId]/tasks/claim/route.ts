@@ -8,6 +8,7 @@ import { Worker } from "@/models/worker";
 import { ownerReachableProjectIds, verdictFor } from "@/lib/worker-service";
 import { snapshotFor } from "@/lib/agent-snapshot";
 import { releaseTask } from "@/lib/task-service";
+import { AgentRun } from "@/models/agentRun";
 
 // The ref, never a populated document: `IWorker["owner"]` admits both since the fleet route
 // populates it, and `String(<document>)` yields something that is not an id — which claimNextTask
@@ -82,7 +83,14 @@ export const POST = withWorker(async (request, { params, worker }) => {
   // The owner goes with it: a personal agent is a composition nobody vetted, and this is the last
   // point before it runs at which anyone can ask whether the machine about to run it is that
   // person's own.
-  const agent = await snapshotFor(projectId, task.agent, machineOwnerId);
+  const [agent, lastRun] = await Promise.all([
+    snapshotFor(projectId, task.agent, machineOwnerId),
+    // The one thing that happened to this task most recently, so a retry knows whether it is one
+    // at all. Not scoped to this worker or this attempt: whichever machine ran last, and whatever
+    // it was rejected for, is what this attempt starts from (BP-289).
+    AgentRun.findOne({ task: task._id }, "outcome detail").sort({ finishedAt: -1 }).lean(),
+  ]);
+  const previousRejectionReason = lastRun?.outcome === "refused" ? lastRun.detail : "";
   if (!agent) {
     // Holding a task a machine cannot run would park it behind a lease for two hours. Hand it back
     // at once instead.
@@ -117,5 +125,5 @@ export const POST = withWorker(async (request, { params, worker }) => {
   // read taskNumber as undefined, refused the key "BP-undefined", and left the task held for the
   // full lease. This route used to hand the document straight to NextResponse.json, which called
   // toJSON itself; adding a field alongside it is what removed that.
-  return NextResponse.json({ ...task.toJSON(), agent });
+  return NextResponse.json({ ...task.toJSON(), agent, previousRejectionReason });
 });

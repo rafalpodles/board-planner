@@ -367,7 +367,9 @@ export async function runTask(
   let costUsd = 0;
 
   // Every exit goes through here, which is what makes it the one place a run can be recorded from.
-  const settle = (outcome: OutcomeKind, detail?: string): void => {
+  // `reason` only ever accompanies "gateRejected" — the gate's own verdict, read back at the next
+  // claim so that attempt does not start cold (BP-289).
+  const settle = (outcome: OutcomeKind, detail?: string, reason?: string): void => {
     telemetry?.emit(
       detail === undefined
         ? { outcome, taskKey: task.taskKey }
@@ -379,7 +381,7 @@ export async function runTask(
     );
     deps.recordRun(
       task.projectId,
-      recordFor(task, outcome, scrub(detail ?? ""), startedAt, now(), costUsd),
+      recordFor(task, outcome, scrub(detail ?? ""), startedAt, now(), costUsd, reason ? scrub(reason) : undefined),
     );
   };
 
@@ -804,15 +806,24 @@ export async function runTask(
               );
           if (withholdsPush || pushFailed) keepWorktree = true;
 
-          settle("gateRejected", gate.name);
+          // The comparison is against the raw verdict, before either annotation below: a decorated
+          // copy fed back as next attempt's "previous reason" would never equal itself again, and
+          // the repeat this is meant to catch would go unnoticed a second time running (BP-289).
+          const repeatsLastRejection =
+            task.previousRejectionReason !== "" && verdict.reason === task.previousRejectionReason;
+          const reasonForPerson = repeatsLastRejection
+            ? `A previous attempt at this task was already rejected for this same reason, which was in this attempt's brief — it made no difference:\n\n${verdict.reason}`
+            : verdict.reason;
+
+          settle("gateRejected", gate.name, verdict.reason);
           await reporter.gateRejected(
             task,
             gate.name,
             withholdsPush
-              ? `${verdict.reason}\n\n**The branch was not pushed**, on purpose: what it carries is exactly what this gate refused. The work is in the worktree at \`${worktree.path}\` on the worker host.`
+              ? `${reasonForPerson}\n\n**The branch was not pushed**, on purpose: what it carries is exactly what this gate refused. The work is in the worktree at \`${worktree.path}\` on the worker host.`
               : pushFailed
-                ? `${verdict.reason}\n\n**The branch was not pushed**: ${pushFailed}. \`${branch}\` is not on the remote — this work exists only in the worktree at \`${worktree.path}\` on the worker host.`
-                : verdict.reason,
+                ? `${reasonForPerson}\n\n**The branch was not pushed**: ${pushFailed}. \`${branch}\` is not on the remote — this work exists only in the worktree at \`${worktree.path}\` on the worker host.`
+                : reasonForPerson,
             // Neither refusal reached the remote, so neither may promise a branch there — the
             // pushFailed message already says as much, and repeating it as "pushed for inspection"
             // is the exact contradiction a human reading the comment would have to untangle.

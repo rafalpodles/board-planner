@@ -224,6 +224,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     description: "body",
     acceptanceCriteria: [],
     attempts: 1,
+    previousRejectionReason: "",
     runId: SERVER_RUN_ID,
     // The default agent, as the server resolves it: today's pipeline, one entry per stage. The
     // blocks name no model, so the project's policy is still what these tests are reading.

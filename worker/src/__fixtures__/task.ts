@@ -18,6 +18,7 @@ export function claimedTask(over: Partial<ClaimedTask> = {}): ClaimedTask {
     description: "body",
     acceptanceCriteria: [],
     attempts: 1,
+    previousRejectionReason: "",
     runId: "run-1",
     agent: {
       agentId: "a1",
