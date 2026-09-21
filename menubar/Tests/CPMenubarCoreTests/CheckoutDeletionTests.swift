@@ -229,6 +229,20 @@ final class CheckoutDeletionTests: XCTestCase {
         XCTAssertEqual(r.removed, ["/real"], "the checkout itself is gone regardless of what happened to the link")
     }
 
+    // BP-428 review, round 5. The `else if isSymlink(path)` branch's own `try?`, unguarded by the
+    // test above: a dangling grant whose link cannot be removed either must still drop the stale
+    // allowlist entry, or every later pass hits this same branch and fails the same way, forever.
+    func testAStaleGrantWhoseLinkCleanupFailsIsStillForgotten() {
+        let r = Recorder()
+        r.failOn = "/link"
+
+        let step = deletion(r, exists: { _ in false }, isSymlink: { $0 == "/link" }).perform(
+            project: "BP", path: "/link", root: "/link", worktrees: [])
+
+        XCTAssertEqual(step, .forgotten(project: "BP", path: "/link"))
+        XCTAssertEqual(r.forgotten, ["/link"], "or every later pass hits the same branch and fails the same way")
+    }
+
     // MARK: - removeIfSafe: the seam that used to live in an untested app target
 
     private func alwaysRefusing() -> CheckoutRemoval {
