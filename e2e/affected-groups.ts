@@ -20,6 +20,10 @@ const OWNED: readonly { prefix: string; groups: readonly GroupName[] }[] = [
   // BoardSection, ...) — traced via a real import-grep, not guessed. All three moved to
   // CRITICAL_PREFIXES below rather than chase their true footprint file by file.
   { prefix: "src/components/kanban/", groups: ["board"] },
+  // project-settings-controls.spec.ts reads a settings change back from these two: the icon and
+  // description in the header, and a Filterable field in the filter panel
+  { prefix: "src/components/kanban/BoardHeader", groups: ["board", "project"] },
+  { prefix: "src/components/kanban/BoardFilters", groups: ["board", "project"] },
   { prefix: "src/components/sprints/", groups: ["board"] },
   // Also imported by kanban/TaskCard.tsx, ProjectBoardView.tsx and ListView.tsx (board renders task
   // cards using these) — verified via grep, not assumed from the directory name alone.

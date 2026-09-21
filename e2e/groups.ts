@@ -29,6 +29,7 @@ export const GROUPS = {
     "task-detail-remainder.spec.ts",
     "link-leaves-a-trace.spec.ts",
     "first-use-gaps.spec.ts",
+    "task-composing-controls.spec.ts",
   ],
   "task-fields": [
     "field-history.spec.ts",
@@ -58,6 +59,7 @@ export const GROUPS = {
     "board-irreversible.spec.ts",
     "list-view-seams.spec.ts",
     "card-shows-its-parent.spec.ts",
+    "board-scope-and-filters.spec.ts",
   ],
   project: [
     "project-lifecycle.spec.ts",
@@ -101,6 +103,8 @@ export const GROUPS = {
     "db-reconnect-leaks.spec.ts",
     "settings-fields-and-templates.spec.ts",
     "picker-search-announces.spec.ts",
+    "agent-block-editing.spec.ts",
+    "project-settings-controls.spec.ts",
   ],
   people: [
     "day-zero.spec.ts",

@@ -134,6 +134,8 @@ export function MarkdownEditor({
       const selected = value.slice(start, end);
 
       let replacement: string;
+      let from = start;
+      let to = end;
       let cursorStart: number;
       let cursorEnd: number;
 
@@ -143,18 +145,25 @@ export function MarkdownEditor({
         cursorStart = start + action.before.length;
         cursorEnd = cursorStart + text.length;
       } else {
-        // Line-based actions prefix every selected line, so a multi-line
-        // selection becomes a list rather than one long item
-        const lines = (selected || action.placeholder).split("\n");
-        replacement = lines
-          .map((line, i) => (action.kind === "ordered" ? `${i + 1}. ${line}` : `${action.prefix}${line}`))
+        // A heading or a list marker only means anything at the start of a line, so the action
+        // takes every whole line the caret or the selection touches
+        const last = end > start && value[end - 1] === "\n" ? end - 1 : end;
+        // lastIndexOf clamps a negative fromIndex to 0, so a leading "\n" would read as this line's
+        from = start === 0 ? 0 : value.lastIndexOf("\n", start - 1) + 1;
+        const lineEnd = value.indexOf("\n", last);
+        to = lineEnd === -1 ? value.length : lineEnd;
+        const lines = value.slice(from, to);
+        const prefixOf = (i: number) => (action.kind === "ordered" ? `${i + 1}. ` : action.prefix);
+        replacement = (lines.trim() ? lines : action.placeholder)
+          .split("\n")
+          .map((line, i) => `${prefixOf(i)}${line}`)
           .join("\n");
-        cursorStart = start;
-        cursorEnd = start + replacement.length;
+        cursorStart = from + prefixOf(0).length;
+        cursorEnd = from + replacement.length;
       }
 
       pendingSelection.current = [cursorStart, cursorEnd];
-      onChange(value.slice(0, start) + replacement + value.slice(end));
+      onChange(value.slice(0, from) + replacement + value.slice(to));
     },
     [value, onChange]
   );
