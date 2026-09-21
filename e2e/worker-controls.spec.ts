@@ -881,7 +881,7 @@ test("a member picks for their own machine; what they cannot switch on is said, 
   await expect(page.getByRole("heading", { name: `Projects for ${WORKER_NAME}` })).toBeVisible();
   const ib = pickerRow(page, SECOND_PROJECT_NAME);
   await expect(
-    ib.getByText("does not run machines yet, and only an instance admin can turn that on")
+    ib.getByText("does not run machines yet, and you cannot turn that on")
   ).toBeVisible();
 
   await ib.getByRole("checkbox").check();
@@ -889,7 +889,7 @@ test("a member picks for their own machine; what they cannot switch on is said, 
   expect(saved.leftDisabled).toEqual([SECOND_PROJECT_KEY]);
   await expect(
     page.getByText(
-      `Saved. ${SECOND_PROJECT_KEY} does not run machines yet, and only an instance admin can turn that on — the machine will leave it alone until somebody does.`
+      `Saved. ${SECOND_PROJECT_KEY} does not run machines yet, and you cannot turn that on — the machine will leave it alone until somebody does.`
     )
   ).toBeVisible();
   // The wish is recorded and the switch is not thrown
