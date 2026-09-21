@@ -29,8 +29,10 @@ const label = (n: number) => `history message ${String(n).padStart(2, "0")}`;
 
 test.beforeEach(seed);
 
-test("project context, tokens per day and the on/off switch are saved and read back", async ({ page }) => {
-  expect(await storedPm()).toMatchObject({ enabled: true, contextNotes: "" });
+test("project context, tokens per day, the on/off switch and the review schedule are saved and read back", async ({ page }) => {
+  const before = await storedPm();
+  expect(before).toMatchObject({ enabled: true, contextNotes: "", autonomy: { dailyReview: false } });
+  expect(before.dailyTokenCap ?? 0).toBe(0);
   await signIn(page, "admin");
   await page.goto(SETTINGS_URL);
   await expect(page.getByRole("heading", { name: "MCP connections" })).toBeVisible();
@@ -41,6 +43,10 @@ test("project context, tokens per day and the on/off switch are saved and read b
   await page.getByLabel("Tokens per day").fill("123456");
   await onOff.locator("xpath=ancestor::label[1]").click();
   await expect(onOff).not.toBeChecked();
+  const review = page.getByRole("switch", { name: "Review the board on a schedule" });
+  await expect(review).not.toBeChecked();
+  await review.locator("xpath=ancestor::label[1]").click();
+  await expect(review).toBeChecked();
 
   const saved = page.waitForResponse(
     (r) => r.request().method() === "PUT" && r.url().endsWith(`/api/projects/${PROJECT_KEY}`)
@@ -52,6 +58,7 @@ test("project context, tokens per day and the on/off switch are saved and read b
     enabled: false,
     contextNotes: "Payments team; English only; ship on Thursdays.",
     dailyTokenCap: 123456,
+    autonomy: { dailyReview: true },
   });
 
   await page.reload();
@@ -59,6 +66,7 @@ test("project context, tokens per day and the on/off switch are saved and read b
   await expect(page.getByLabel("Project context")).toHaveValue("Payments team; English only; ship on Thursdays.");
   await expect(page.getByLabel("Tokens per day")).toHaveValue("123456");
   await expect(page.getByRole("switch", { name: "Run the PM agent on this project" })).not.toBeChecked();
+  await expect(page.getByRole("switch", { name: "Review the board on a schedule" })).toBeChecked();
 });
 
 test("a thread longer than a page shows its older messages only after Load older messages", async ({ page }) => {

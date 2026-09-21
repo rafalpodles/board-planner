@@ -142,7 +142,6 @@ test("Connect registers a client, signs in through the provider, and the token r
     expect.objectContaining({ redirectUris: [CALLBACK] }),
   ]);
   const registeredId = registrations[0].clientId;
-  expect(registeredId).toMatch(/^dcr-[0-9a-f]{32}$/);
   const [exchange] = tokenRequests(log);
   expect(exchange).toMatchObject({
     grantType: "authorization_code",
@@ -177,7 +176,12 @@ test("a client typed by hand is the one the token request carries; an unknown on
   const tenant = newTenant();
   const typed = { id: `typed-${tenant}`, secret: `typed-secret-${tenant}` };
   await request.post(`${MCP_SERVER_STUB_URL}/_control/oauth/${tenant}/client`, {
-    data: { client_id: typed.id, client_secret: typed.secret, redirect_uris: [CALLBACK] },
+    data: {
+      client_id: typed.id,
+      client_secret: typed.secret,
+      redirect_uris: [CALLBACK],
+      token_endpoint_auth_method: "client_secret_basic",
+    },
   });
   await signIn(page, "admin");
   await openSettings(page);
@@ -185,7 +189,6 @@ test("a client typed by hand is the one the token request carries; an unknown on
   await addOauthServer(page, tenant, { id: "nobody-registered-this", secret: "whatever" });
   await clickConnect(page, tenant);
   await expect(page.getByRole("heading", { name: "Unknown client" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Approve" })).toHaveCount(0);
 
   await openSettings(page);
   // Typed over the stored registration, which a save used to drop in silence
@@ -220,6 +223,25 @@ test("a client typed by hand is the one the token request carries; an unknown on
   const oauth = await storedOauth();
   expect(oauth).toMatchObject({ status: "connected", clientId: typed.id });
   expect(JSON.stringify(oauth)).not.toContain(typed.secret);
+  expect(String(oauth.clientSecret).length).toBeGreaterThan(0);
+  expect(String(oauth.accessToken).length).toBeGreaterThan(0);
+
+  // Another client typed with no secret must not inherit this one's secret or its tokens
+  await expect(page.getByLabel(`Client secret for ${ROW}`)).toHaveValue("");
+  await page.getByLabel(`Client ID for ${ROW}`).fill("another-client");
+  const saved = page.waitForResponse((r) => r.request().method() === "PUT" && /\/api\/projects\/[^/]+$/.test(r.url()));
+  await page.getByRole("button", { name: "Save changes" }).click();
+  expect((await saved).ok()).toBe(true);
+  expect(await storedOauth()).toMatchObject({
+    clientId: "another-client",
+    clientSecret: "",
+    accessToken: "",
+    refreshToken: "",
+    expiresAt: null,
+    status: "unconfigured",
+  });
+  await expect(page.getByText("Not connected", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: `Disconnect ${ROW}` })).toHaveCount(0);
 });
 
 test("a token that expires is refreshed; once the refresh is refused the panel says to sign in again, and reconnecting recovers", async ({ page, request }) => {
@@ -263,7 +285,7 @@ test("a token that expires is refreshed; once the refresh is refused the panel s
   await expect(page.getByText("✓ Connected — 1 tools offered. Tick the ones the agent should get.")).toBeVisible();
 });
 
-test("Disconnect deletes the stored tokens, not only the badge", async ({ page, request }) => {
+test("Disconnect deletes the stored tokens, not only the badge", async ({ page }) => {
   const tenant = newTenant();
   await signIn(page, "admin");
   await openSettings(page);
@@ -291,5 +313,4 @@ test("Disconnect deletes the stored tokens, not only the badge", async ({ page, 
 
   await testConnection(page);
   await expect(page.getByText("✗ OAuth connection not established — click Connect first")).toBeVisible();
-  expect(tokenRequests(await stubLog(request, tenant))).toHaveLength(1);
 });

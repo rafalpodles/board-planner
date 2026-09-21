@@ -77,7 +77,7 @@ function issue(t, clientId) {
   return { accessToken, refreshToken };
 }
 
-async function handleToken(req, res, t) {
+async function handleToken(req, res, t, resource) {
   const form = new URLSearchParams(await readBody(req));
   const creds = clientCredentials(req, form);
   const grantType = form.get("grant_type");
@@ -97,7 +97,9 @@ async function handleToken(req, res, t) {
 
   const client = t.clients.get(creds.clientId);
   if (!client) return refuse(401, "invalid_client");
+  if (creds.method !== client.authMethod) return refuse(401, "invalid_client");
   if (client.secret && creds.secret !== client.secret) return refuse(401, "invalid_client");
+  if (form.get("resource") !== resource) return refuse(400, "invalid_target");
 
   if (grantType === "authorization_code") {
     const code = t.codes.get(form.get("code") ?? "");
@@ -169,6 +171,7 @@ export async function handleOauth(req, res, origin, answerRpc) {
       t.clients.set(body.client_id, {
         secret: body.client_secret ?? "",
         redirectUris: body.redirect_uris ?? [],
+        authMethod: body.token_endpoint_auth_method ?? "client_secret_basic",
       });
       json(res, 200, { ok: true });
     } else if (m[2] === "revoke") {
@@ -184,6 +187,12 @@ export async function handleOauth(req, res, origin, answerRpc) {
   m = path.match(/^\/oauth\/([\w-]+)\/(mcp|register|authorize|approve|token)$/);
   if (!m) return false;
   const t = tenantOf(m[1]);
+  const resource = `${origin}/oauth/${m[1]}/mcp`;
+  const badAuthorizationRequest = (q) =>
+    q.get("response_type") !== "code" ||
+    q.get("code_challenge_method") !== "S256" ||
+    !q.get("code_challenge") ||
+    q.get("resource") !== resource;
 
   switch (m[2]) {
     case "mcp": {
@@ -205,7 +214,7 @@ export async function handleOauth(req, res, origin, answerRpc) {
     case "register": {
       const body = JSON.parse((await readBody(req)) || "{}");
       const clientId = token("dcr");
-      t.clients.set(clientId, { secret: "", redirectUris: body.redirect_uris ?? [] });
+      t.clients.set(clientId, { secret: "", redirectUris: body.redirect_uris ?? [], authMethod: "none" });
       t.log.push({ type: "register", clientId, redirectUris: body.redirect_uris ?? [] });
       json(res, 201, {
         client_id: clientId,
@@ -228,8 +237,8 @@ export async function handleOauth(req, res, origin, answerRpc) {
         page(res, 400, "Unregistered redirect", "<h1>Unregistered redirect</h1>");
         return true;
       }
-      if (q.get("response_type") !== "code" || q.get("code_challenge_method") !== "S256" || !q.get("code_challenge")) {
-        page(res, 400, "Bad request", "<h1>PKCE with S256 is required</h1>");
+      if (badAuthorizationRequest(q)) {
+        page(res, 400, "Bad request", "<h1>A code request with PKCE S256 for this resource is required</h1>");
         return true;
       }
       const hidden = [...q.entries()]
@@ -251,6 +260,10 @@ export async function handleOauth(req, res, origin, answerRpc) {
         page(res, 400, "Unknown client", "<h1>Unknown client</h1>");
         return true;
       }
+      if (badAuthorizationRequest(q)) {
+        page(res, 400, "Bad request", "<h1>A code request with PKCE S256 for this resource is required</h1>");
+        return true;
+      }
       const code = token("code");
       t.codes.set(code, {
         clientId: q.get("client_id"),
@@ -265,7 +278,7 @@ export async function handleOauth(req, res, origin, answerRpc) {
     }
 
     case "token":
-      await handleToken(req, res, t);
+      await handleToken(req, res, t, resource);
       return true;
   }
   return false;
