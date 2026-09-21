@@ -33,6 +33,16 @@ export function taskPath(projectRef: string, taskRef: string | number): string {
   return `/projects/${projectRef}/tasks/${taskRef}`;
 }
 
+export function notificationPath(link: {
+  projectRef?: string;
+  taskNumber?: number;
+}): string | undefined {
+  if (!link.projectRef) return undefined;
+  return link.taskNumber === undefined
+    ? projectPath(link.projectRef)
+    : taskPath(link.projectRef, link.taskNumber);
+}
+
 export function isTaskPath(pathname: string | null | undefined): boolean {
   if (!pathname) return false;
   const [, base, ref, tasks, taskRef] = pathname.split("/");

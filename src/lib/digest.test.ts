@@ -168,6 +168,31 @@ describe("lineFor", () => {
     });
   });
 
+  it("links a board_access row to the board, since it names no task (BP-753)", () => {
+    const line = lineFor(
+      {
+        type: "board_access",
+        title: "Admin added you to Test Project as a member",
+        task: undefined,
+        project: PROJECT_REF,
+      },
+      origin
+    );
+    expect(line).toEqual({
+      key: "TP",
+      title: "Admin added you to Test Project as a member",
+      url: "https://app.example.com/projects/TP",
+    });
+  });
+
+  it("gives a board_access row no link when the instance does not know its own address", () => {
+    const line = lineFor(
+      { type: "board_access", title: "Admin added you", task: undefined, project: PROJECT_REF },
+      null
+    );
+    expect(line).toEqual({ key: "TP", title: "Admin added you", url: undefined });
+  });
+
   it("strips a leading key (moved)", () => {
     const line = lineFor(
       { title: "TP-2 moved to In Review", task: { taskNumber: 2 }, project: PROJECT_REF },

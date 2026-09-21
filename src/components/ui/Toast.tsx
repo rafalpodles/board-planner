@@ -20,15 +20,26 @@ import {
 
 type ToastType = "success" | "error" | "info";
 
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
 interface Toast {
   id: number;
   message: string;
   type: ToastType;
+  action?: ToastAction;
 }
 
 interface ToastContextValue {
-  toast: (message: string, type?: ToastType) => void;
+  toast: (message: string, type?: ToastType, options?: { action?: ToastAction }) => number;
+  dismiss: (id: number) => void;
 }
+
+const TOAST_MS = 3000;
+// Long enough to read a sentence and reach the button; three seconds is gone before either
+const TOAST_WITH_ACTION_MS = 10000;
 
 const ToastContext = createContext<ToastContextValue | null>(null);
 
@@ -95,11 +106,13 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const toast = useCallback(
-    (message: string, type: ToastType = "info") => {
+    (message: string, type: ToastType = "info", options?: { action?: ToastAction }) => {
       const id = ++nextId;
-      setToasts((prev) => [...prev, { id, message, type }]);
-      const timer = setTimeout(() => removeToast(id), 3000);
+      const action = options?.action;
+      setToasts((prev) => [...prev, { id, message, type, action }]);
+      const timer = setTimeout(() => removeToast(id), action ? TOAST_WITH_ACTION_MS : TOAST_MS);
       timersRef.current.set(id, timer);
+      return id;
     },
     [removeToast]
   );
@@ -236,7 +249,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <ToastContext.Provider value={{ toast }}>
+    <ToastContext.Provider value={{ toast, dismiss: removeToast }}>
       {children}
       {toasts.length > 0 && (
         <div
@@ -267,6 +280,19 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
               onClick={() => removeToast(t.id)}
             >
               {t.message}
+              {t.action && (
+                <button
+                  type="button"
+                  className="focus-ring mt-2 block rounded font-semibold underline underline-offset-2"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeToast(t.id);
+                    t.action!.onClick();
+                  }}
+                >
+                  {t.action.label}
+                </button>
+              )}
             </div>
           ))}
         </div>

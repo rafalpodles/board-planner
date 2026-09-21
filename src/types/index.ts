@@ -1562,17 +1562,19 @@ export type NotificationType =
   | "comment_added"
   | "mentioned"
   | "task_created"
-  | "task_linked";
+  | "task_linked"
+  | "board_access";
 
 // The order the settings grid renders them in. task_created is last because it is the only row
-// whose recipients are not derived from a task: the others filter a list the system already
-// computed from an assignee and watchers, this one selects people by the tick itself.
+// that selects its recipients by the tick itself; board_access has exactly one, the person whose
+// grant changed, and is the one row that names no task.
 export const NOTIFICATION_TYPES: NotificationType[] = [
   "task_assigned",
   "mentioned",
   "status_changed",
   "comment_added",
   "task_linked",
+  "board_access",
   "task_created",
 ];
 
@@ -1604,7 +1606,7 @@ export interface INotification {
   _id: Types.ObjectId;
   recipient: Types.ObjectId;
   type: NotificationType;
-  task: Types.ObjectId | ITask;
+  task?: Types.ObjectId | ITask;
   project: Types.ObjectId | IProject;
   actor: Types.ObjectId | IUser;
   title: string;
@@ -1622,7 +1624,7 @@ export interface ApiNotification {
   _id: string;
   recipient: string;
   type: NotificationType;
-  task: { _id: string; taskNumber: number; title: string } | string;
+  task?: { _id: string; taskNumber: number; title: string } | string | null;
   project: { _id: string; key: string; name: string } | string;
   actor: { _id: string; username: string; fullName: string } | string;
   title: string;

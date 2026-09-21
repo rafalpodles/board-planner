@@ -8,6 +8,7 @@ const ROW_LABEL: Record<NotificationType, string> = {
   status_changed: "A task you follow changes column",
   comment_added: "A task you follow gets a comment",
   task_linked: "A task you follow gains or loses a dependency",
+  board_access: "You are added to a board, or your role on one changes",
   // Replaced on the project screen, where "a board" has an answer — see PROJECT_ROW_LABEL
   task_created: "Anybody creates a task on a board",
 };
@@ -15,6 +16,7 @@ const ROW_LABEL: Record<NotificationType, string> = {
 /** The rows whose wording depends on which screen the grid is on. */
 const PROJECT_ROW_LABEL: Partial<Record<NotificationType, string>> = {
   task_created: "Anybody creates a task on this board",
+  board_access: "Your role on this board changes",
 };
 
 const OFF = { inApp: false, email: false, chat: false };

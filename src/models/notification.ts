@@ -9,7 +9,8 @@ const notificationSchema = new Schema<INotification>(
       enum: NOTIFICATION_TYPES,
       required: true,
     },
-    task: { type: Schema.Types.ObjectId, ref: "Task", required: true },
+    // Absent only on board_access, which is about a board rather than any task on it
+    task: { type: Schema.Types.ObjectId, ref: "Task" },
     project: { type: Schema.Types.ObjectId, ref: "Project", required: true },
     actor: { type: Schema.Types.ObjectId, ref: "User", required: true },
     title: { type: String, required: true },

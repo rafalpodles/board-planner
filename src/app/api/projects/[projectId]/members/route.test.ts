@@ -5,7 +5,8 @@ const grantFind = vi.fn();
 const grantFindLean = vi.fn();
 const grantFindOne = vi.fn();
 const grantFindOneLean = vi.fn();
-const grantUpdateOne = vi.fn();
+const grantUpsert = vi.fn();
+const grantUpsertLean = vi.fn();
 const grantDeleteOne = vi.fn();
 const grantCountDocuments = vi.fn();
 const userFind = vi.fn();
@@ -15,6 +16,8 @@ const userFindByIdSelect = vi.fn();
 const check = vi.fn();
 const recipientsWithAccess = vi.fn(async (_ids?: unknown, _project?: unknown): Promise<string[]> => []);
 const notificationDeleteMany = vi.fn(async (_filter?: unknown) => ({ deletedCount: 0 }));
+const createNotifications = vi.fn(async (_params: unknown) => {});
+const projectFindByIdLean = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({
@@ -29,7 +32,9 @@ vi.mock("@/models/grant", () => ({
   Grant: {
     find: (...a: unknown[]) => (grantFind(...a), { select: () => ({ lean: grantFindLean }) }),
     findOne: (...a: unknown[]) => (grantFindOne(...a), { select: () => ({ lean: grantFindOneLean }) }),
-    updateOne: grantUpdateOne,
+    findOneAndUpdate: (...a: unknown[]) => (
+      grantUpsert(...a), { select: () => ({ lean: grantUpsertLean }) }
+    ),
     deleteOne: grantDeleteOne,
     countDocuments: grantCountDocuments,
   },
@@ -40,7 +45,12 @@ vi.mock("@/models/user", () => ({
     findById: (...a: unknown[]) => (userFindById(...a), { select: userFindByIdSelect }),
   },
 }));
-vi.mock("@/models/project", () => ({ Project: { findOne: vi.fn() } }));
+vi.mock("@/models/project", () => ({
+  Project: { findOne: vi.fn(), findById: () => ({ select: () => ({ lean: projectFindByIdLean }) }) },
+}));
+vi.mock("@/lib/in-app-notifications", () => ({
+  createNotifications: (params: unknown) => createNotifications(params),
+}));
 vi.mock("@/models/task", () => ({ Task: {} }));
 vi.mock("@/models/notification", () => ({
   Notification: { deleteMany: (filter: unknown) => notificationDeleteMany(filter) },
@@ -66,7 +76,8 @@ function put(body: unknown) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  getAuthUser.mockResolvedValue({ _id: "o1", role: "member" });
+  getAuthUser.mockResolvedValue({ _id: "o1", role: "member", username: "olga", fullName: "Olga Owner" });
+  projectFindByIdLean.mockResolvedValue({ name: "Orbit", key: "ORB" });
   check.mockResolvedValue(true);
   grantFindLean.mockResolvedValue([]);
   grantFindOneLean.mockResolvedValue(null);
@@ -74,6 +85,7 @@ beforeEach(() => {
   userFindByIdSelect.mockResolvedValue({ _id: "u1", role: "member", kind: "human" });
   grantCountDocuments.mockResolvedValue(2);
   recipientsWithAccess.mockResolvedValue([]);
+  grantUpsertLean.mockResolvedValue(null);
 });
 
 describe("GET members", () => {
@@ -125,38 +137,38 @@ describe("PUT members", () => {
   it("upserts one grant for the named user", async () => {
     const res = await PUT(put({ userId: U1, relation: "owner" }), { params });
     expect(res.status).toBe(200);
-    expect(grantUpdateOne).toHaveBeenCalledWith(
+    expect(grantUpsert).toHaveBeenCalledWith(
       { subject: U1, objectType: "project", object: PROJECT },
       { $set: { relation: "owner" }, $setOnInsert: { createdBy: "o1" } },
-      { upsert: true }
+      { upsert: true, returnDocument: "before" }
     );
   });
 
   it("rejects a relation that is not owner or member", async () => {
     const res = await PUT(put({ userId: U1, relation: "root" }), { params });
     expect(res.status).toBe(400);
-    expect(grantUpdateOne).not.toHaveBeenCalled();
+    expect(grantUpsert).not.toHaveBeenCalled();
   });
 
   it("refuses anyone who is not an owner of this project", async () => {
     check.mockResolvedValue(false);
     const res = await PUT(put({ userId: U1, relation: "owner" }), { params });
     expect(res.status).toBe(403);
-    expect(grantUpdateOne).not.toHaveBeenCalled();
+    expect(grantUpsert).not.toHaveBeenCalled();
   });
 
   it("404s when the target user does not exist", async () => {
     userFindByIdSelect.mockResolvedValue(null);
     const res = await PUT(put({ userId: GHOST, relation: "member" }), { params });
     expect(res.status).toBe(404);
-    expect(grantUpdateOne).not.toHaveBeenCalled();
+    expect(grantUpsert).not.toHaveBeenCalled();
   });
 
   it("404s when the target is a machine identity", async () => {
     userFindByIdSelect.mockResolvedValue({ _id: W1, role: "member", kind: "machine" });
     const res = await PUT(put({ userId: W1, relation: "member" }), { params });
     expect(res.status).toBe(404);
-    expect(grantUpdateOne).not.toHaveBeenCalled();
+    expect(grantUpsert).not.toHaveBeenCalled();
   });
 
   it("allows granting member to someone who was never an owner, even with only one owner on the board", async () => {
@@ -164,10 +176,10 @@ describe("PUT members", () => {
     grantCountDocuments.mockResolvedValue(1);
     const res = await PUT(put({ userId: U2, relation: "member" }), { params });
     expect(res.status).toBe(200);
-    expect(grantUpdateOne).toHaveBeenCalledWith(
+    expect(grantUpsert).toHaveBeenCalledWith(
       { subject: U2, objectType: "project", object: PROJECT },
       { $set: { relation: "member" }, $setOnInsert: { createdBy: "o1" } },
-      { upsert: true }
+      { upsert: true, returnDocument: "before" }
     );
   });
 
@@ -177,7 +189,7 @@ describe("PUT members", () => {
     const res = await PUT(put({ userId: U1, relation: "member" }), { params });
     expect(res.status).toBe(409);
     expect(grantFindOne).toHaveBeenCalledWith({ subject: U1, objectType: "project", object: PROJECT });
-    expect(grantUpdateOne).not.toHaveBeenCalled();
+    expect(grantUpsert).not.toHaveBeenCalled();
   });
 
   it("lets one owner demote another, leaving the board with one owner", async () => {
@@ -185,15 +197,15 @@ describe("PUT members", () => {
     grantCountDocuments.mockResolvedValue(2);
     const res = await PUT(put({ userId: U2, relation: "member" }), { params });
     expect(res.status).toBe(200);
-    expect(grantUpdateOne).toHaveBeenCalledWith(
+    expect(grantUpsert).toHaveBeenCalledWith(
       { subject: U2, objectType: "project", object: PROJECT },
       { $set: { relation: "member" }, $setOnInsert: { createdBy: "o1" } },
-      { upsert: true }
+      { upsert: true, returnDocument: "before" }
     );
   });
 
   it("survives a concurrent double submit", async () => {
-    grantUpdateOne.mockRejectedValueOnce(Object.assign(new Error("dup"), { code: 11000 }));
+    grantUpsertLean.mockRejectedValueOnce(Object.assign(new Error("dup"), { code: 11000 }));
     const res = await PUT(put({ userId: U1, relation: "owner" }), { params });
     expect(res.status).toBe(200);
   });
@@ -205,13 +217,13 @@ describe("PUT members", () => {
     const res = await PUT(put({ userId: { $ne: null }, relation: "member" }), { params });
     expect(res.status).toBe(400);
     expect(userFindById).not.toHaveBeenCalled();
-    expect(grantUpdateOne).not.toHaveBeenCalled();
+    expect(grantUpsert).not.toHaveBeenCalled();
   });
 
   it("refuses a string that is not an object id", async () => {
     const res = await PUT(put({ userId: "not-an-object-id", relation: "member" }), { params });
     expect(res.status).toBe(400);
-    expect(grantUpdateOne).not.toHaveBeenCalled();
+    expect(grantUpsert).not.toHaveBeenCalled();
   });
 });
 
@@ -312,5 +324,131 @@ describe("DELETE members", () => {
     await DELETE(new Request(url, { method: "DELETE" }), { params });
 
     expect(notificationDeleteMany).not.toHaveBeenCalled();
+  });
+});
+
+// BP-753: being given a board, or a different role on one, used to arrive in silence
+describe("PUT members tells the person", () => {
+  const announced = async () => {
+    await vi.waitFor(() => expect(createNotifications).toHaveBeenCalled());
+    return createNotifications.mock.calls[0][0] as Record<string, unknown>;
+  };
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+  it("that they were added, by whom and as what, with a link to the board", async () => {
+    grantUpsertLean.mockResolvedValue(null);
+
+    const res = await PUT(put({ userId: U1, relation: "member" }), { params });
+
+    expect(res.status).toBe(200);
+    expect(await announced()).toEqual({
+      type: "board_access",
+      projectId: PROJECT,
+      actorId: "o1",
+      recipientIds: [U1],
+      title: "Olga Owner added you to Orbit as a member",
+      email: {
+        kicker: "Added to a board",
+        taskKey: "ORB",
+        taskTitle: "Orbit",
+        taskMeta: "You are a member of this board",
+        projectRef: "ORB",
+      },
+    });
+  });
+
+  it("that their role changed, judged by what the write replaced", async () => {
+    grantFindOneLean.mockResolvedValue(null);
+    grantUpsertLean.mockResolvedValue({ relation: "member" });
+
+    await PUT(put({ userId: U1, relation: "owner" }), { params });
+
+    expect(await announced()).toMatchObject({
+      type: "board_access",
+      title: "Olga Owner made you an owner of Orbit",
+    });
+  });
+
+  it("nothing when the write replaced the role it wrote, whatever was read before it", async () => {
+    grantFindOneLean.mockResolvedValue(null);
+    grantUpsertLean.mockResolvedValue({ relation: "member" });
+
+    const res = await PUT(put({ userId: U1, relation: "member" }), { params });
+    await settle();
+
+    expect(res.status).toBe(200);
+    expect(grantUpsert).toHaveBeenCalled();
+    expect(createNotifications).not.toHaveBeenCalled();
+  });
+
+  it("nothing when a concurrent grant of the same pair won the insert", async () => {
+    grantUpsertLean.mockRejectedValueOnce(Object.assign(new Error("dup"), { code: 11000 }));
+
+    const res = await PUT(put({ userId: U1, relation: "owner" }), { params });
+    await settle();
+
+    expect(res.status).toBe(200);
+    expect(createNotifications).not.toHaveBeenCalled();
+  });
+
+  it("nothing when the change was refused", async () => {
+    grantFindOneLean.mockResolvedValue({ relation: "owner" });
+    grantCountDocuments.mockResolvedValue(1);
+
+    const res = await PUT(put({ userId: U1, relation: "member" }), { params });
+    await settle();
+
+    expect(res.status).toBe(409);
+    expect(createNotifications).not.toHaveBeenCalled();
+  });
+
+  it("the same person however the id is cased", async () => {
+    const res = await PUT(put({ userId: U1.toUpperCase(), relation: "member" }), { params });
+
+    expect(res.status).toBe(200);
+    expect(grantUpsert.mock.calls[0][0]).toMatchObject({ subject: U1 });
+    expect((await announced()).recipientIds).toEqual([U1]);
+  });
+
+  it("by username when the actor has no full name", async () => {
+    getAuthUser.mockResolvedValue({ _id: "o1", role: "member", username: "olga", fullName: "" });
+
+    await PUT(put({ userId: U1, relation: "member" }), { params });
+
+    expect((await announced()).title).toBe("olga added you to Orbit as a member");
+  });
+
+  it("without naming a board it cannot read, and without a link", async () => {
+    projectFindByIdLean.mockResolvedValue(null);
+
+    await PUT(put({ userId: U1, relation: "member" }), { params });
+
+    const sent = await announced();
+    expect(sent.title).toBe("Olga Owner added you to a board as a member");
+    expect(sent.email).toBeUndefined();
+  });
+
+  it("still answers 200, notifying nobody and rejecting nothing, when the board read fails", async () => {
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    projectFindByIdLean.mockRejectedValue(new Error("mongo is having a bad afternoon"));
+    try {
+      const res = await PUT(put({ userId: U1, relation: "member" }), { params });
+      await vi.waitFor(() =>
+        expect(logged).toHaveBeenCalledWith(
+          "Failed to announce a board access change:",
+          expect.any(Error)
+        )
+      );
+      await settle();
+
+      expect(res.status).toBe(200);
+      expect(createNotifications).not.toHaveBeenCalled();
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off("unhandledRejection", unhandled);
+      logged.mockRestore();
+    }
   });
 });

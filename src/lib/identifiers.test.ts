@@ -13,6 +13,7 @@ import {
   isValidTaskTitle,
   isValidUsername,
   normaliseFullName,
+  suggestProjectKey,
 } from "@/lib/identifiers";
 
 /**
@@ -257,5 +258,39 @@ describe("the per-project ceilings the docs publish", () => {
     expect(MAX_CATEGORIES).toBe(50);
     expect(MAX_TASK_TEMPLATES).toBe(50);
     expect(TEMPLATE_NAME_MAX_LENGTH).toBe(100);
+  });
+});
+
+describe("suggestProjectKey", () => {
+  it.each([
+    ["Orbit", "ORB"],
+    ["My Project", "MP"],
+    ["board planner", "BP"],
+    ["Zażółć gęślą jaźń", "ZGJ"],
+    ["Øresund", "ORE"],
+    ["Ærø Ferry", "AF"],
+    ["Æther", "AET"],
+    ["Œuvre", "OEU"],
+    ["Customer Support Help Desk Team", "CSHD"],
+    ["2026 roadmap", "ROA"],
+    ["Q3 launch", "QL"],
+    ["", ""],
+    ["  --  ", ""],
+    ["123", ""],
+  ])("suggests %j → %j", (name, key) => {
+    expect(suggestProjectKey(name)).toBe(key);
+  });
+
+  it("steps past keys other boards already hold", () => {
+    expect(suggestProjectKey("Orbital", ["ORB"])).toBe("ORB2");
+    expect(suggestProjectKey("Orbital", ["orb", "ORB2"])).toBe("ORB3");
+    expect(suggestProjectKey("Orbital", ["TP"])).toBe("ORB");
+  });
+
+  it("only ever suggests a key the server accepts", () => {
+    for (const name of ["Orbit", "My Project", "Q3 launch", "a", "Ω mega"]) {
+      const key = suggestProjectKey(name);
+      if (key) expect(isValidProjectKey(key)).toBe(true);
+    }
   });
 });

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { duplicateKeyField } from "@/lib/mongo-errors";
 import { isValidProjectKey, PROJECT_KEY_RULE } from "@/lib/identifiers";
 import { connectDB } from "@/lib/db";
 import { withAuth, withAdmin } from "@/lib/middleware";
@@ -75,15 +76,26 @@ export const POST = withAdmin(async (request, { user }) => {
     return NextResponse.json({ error: PROJECT_KEY_RULE }, { status: 400 });
   }
 
-  const project = await Project.create({
-    name,
-    key: storedKey,
-    description: description || "",
-    createdBy: user._id,
-    // A fresh project looks like a fresh project always did — the difference is
-    // that all three are now editable and removable (CP-213)
-    customFields: legacyFieldSeeds({}),
-  });
+  let project;
+  try {
+    project = await Project.create({
+      name,
+      key: storedKey,
+      description: description || "",
+      createdBy: user._id,
+      // A fresh project looks like a fresh project always did — the difference is
+      // that all three are now editable and removable (CP-213)
+      customFields: legacyFieldSeeds({}),
+    });
+  } catch (e) {
+    if (duplicateKeyField(e)) {
+      return NextResponse.json(
+        { error: "That key is already used by another board" },
+        { status: 409 }
+      );
+    }
+    throw e;
+  }
 
   try {
     await Grant.create({

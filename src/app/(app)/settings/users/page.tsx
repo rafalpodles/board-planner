@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, FormEvent } from "react";
+import { useEffect, useRef, useState, FormEvent } from "react";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
 import { useRouter } from "next/navigation";
@@ -11,6 +11,7 @@ import { Card } from "@/components/ui/Card";
 import { Modal } from "@/components/ui/Modal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
+import { AddToBoardModal } from "@/components/settings/AddToBoardModal";
 import { generatePassword } from "@/lib/password-generator";
 import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
 
@@ -45,9 +46,18 @@ export default function UsersPage() {
   );
   const [deleting, setDeleting] = useState(false);
   const [mailWorks, setMailWorks] = useState(false);
+  const [addingToBoard, setAddingToBoard] = useState<ApiUser | null>(null);
 
   const api = useApi();
-  const { toast } = useToast();
+  const { toast, dismiss } = useToast();
+  const actionToasts = useRef<number[]>([]);
+
+  // The action opens a dialog on this page, so it must not outlive the page it would open it on
+  useEffect(() => {
+    const ids = actionToasts.current;
+    return () => ids.forEach((id) => dismiss(id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (authLoading) return;
@@ -93,8 +103,9 @@ export default function UsersPage() {
     // The flag ends with the write, and the list refetch below is deliberately outside its life.
     // It gates the dialog's own ways out, so a flag still set across that fetch belonged to a
     // dialog that had already closed — and the next one opened into it (BP-565).
+    let created: ApiUser;
     try {
-      await api.post("/api/users", { username, password, fullName, email: newUserEmail });
+      created = await api.post("/api/users", { username, password, fullName, email: newUserEmail });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create user");
       setSaving(false);
@@ -105,7 +116,13 @@ export default function UsersPage() {
     // Before the refresh, so it does not wait on a slow list — and said at all, which it was not:
     // a create used to produce no line of its own, leaving a failed refresh as the only thing a new
     // account ever said.
-    toast("User created", "success");
+    actionToasts.current.push(
+      toast(
+        `${created.fullName}'s account is ready. They will see no board until you add them to one.`,
+        "success",
+        { action: { label: "Add to a board", onClick: () => setAddingToBoard(created) } }
+      )
+    );
     await refreshUsers();
   }
 
@@ -257,6 +274,8 @@ export default function UsersPage() {
           </Card>
         ))}
       </div>
+
+      <AddToBoardModal person={addingToBoard} onClose={() => setAddingToBoard(null)} />
 
       {/* Create User Modal */}
       <Modal

@@ -1,48 +1,49 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, waitFor } from "@testing-library/react";
-import NotificationsPage from "./page";
+import { render, screen, cleanup } from "@testing-library/react";
 
-const { api } = vi.hoisted(() => ({
-  api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn() },
-}));
+const { api } = vi.hoisted(() => ({ api: { get: vi.fn(), patch: vi.fn() } }));
 
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn() }),
+  usePathname: () => "/notifications",
+}));
 
-const notification = {
-  _id: "n1",
-  type: "task_assigned",
+const { default: NotificationsPage } = await import("./page");
+
+const base = {
+  recipient: "u1",
+  actor: { _id: "a1", username: "olga", fullName: "Olga" },
+  project: { _id: "p1", key: "ORB", name: "Orbit" },
+  body: "",
   read: false,
-  actor: { _id: "u2", username: "kasia", fullName: "Kasia Nowak" },
-  project: { _id: "p1", key: "TP" },
-  task: { _id: "t1", taskNumber: 4 },
-  message: "assigned you a task",
-  createdAt: "2026-08-01T00:00:00Z",
+  createdAt: new Date().toISOString(),
 };
 
-beforeEach(() => {
-  api.get.mockReset();
-});
-
+beforeEach(() => vi.clearAllMocks());
 afterEach(cleanup);
 
-describe("NotificationsPage", () => {
-  it("names the actor", async () => {
-    api.get.mockResolvedValue([notification]);
+describe("where a row leads", () => {
+  it("takes a board_access row to the board", async () => {
+    api.get.mockResolvedValue([
+      { ...base, _id: "n1", type: "board_access", task: null, title: "Olga added you to Orbit" },
+    ]);
     render(<NotificationsPage />);
-    await waitFor(() => expect(screen.getByText(/Kasia Nowak/)).toBeTruthy());
+
+    const link = await screen.findByRole("link", { name: /Olga added you to Orbit/ });
+    expect(link.getAttribute("href")).toBe("/projects/ORB");
+    expect(link.textContent).toContain("Board access");
   });
 
-  // typeof null === "object", so a deleted actor or project used to be dereferenced
-  it("renders a notification whose actor was deleted", async () => {
-    api.get.mockResolvedValue([{ ...notification, actor: null }]);
+  // A task that has since been deleted populates as null; that row is about the task, not the board
+  it("does not send a task row whose task is gone to the board", async () => {
+    api.get.mockResolvedValue([
+      { ...base, _id: "n2", type: "comment_added", task: null, title: "New comment on ORB-4" },
+    ]);
     render(<NotificationsPage />);
-    await waitFor(() => expect(screen.getByText(/Assigned/)).toBeTruthy());
-  });
 
-  it("renders a notification whose project was deleted", async () => {
-    api.get.mockResolvedValue([{ ...notification, project: null }]);
-    render(<NotificationsPage />);
-    await waitFor(() => expect(screen.getByText(/Assigned/)).toBeTruthy());
+    const link = await screen.findByRole("link", { name: /New comment on ORB-4/ });
+    expect(link.getAttribute("href")).toBe("/notifications");
   });
 });

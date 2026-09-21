@@ -109,7 +109,8 @@ test.describe("creating a board", () => {
 
     // Asserted on the status, not only on a message: an error paragraph appears for any failure,
     // and "the key is taken" has to be told apart from "the request fell over"
-    expect(refused.ok()).toBe(false);
+    expect(refused.status()).toBe(409);
+    await expect(page.getByText("That key is already used by another board")).toBeVisible();
     await expect(page).toHaveURL(/\/projects\/new$/);
     await expect(sidebarLink(page, "Second board on a taken key")).toHaveCount(0);
 

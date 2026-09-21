@@ -69,6 +69,7 @@ export const GROUPS = {
     "project-dashboard.spec.ts",
     "my-tasks.spec.ts",
     "projects-list.spec.ts",
+    "onboarding-next-step.spec.ts",
     "project-audit-log.spec.ts",
     "project-owner-persona.spec.ts",
     "project-owner-gate.spec.ts",

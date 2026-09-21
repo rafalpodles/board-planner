@@ -277,6 +277,47 @@ describe("notification emails", () => {
     await expect(createNotifications(NOTIFICATION)).resolves.toBeUndefined();
   });
 
+  // BP-753: being given a board is about the board, and a row naming a task that does not exist
+  // would send the bell to a task page that 404s
+  it("stores a notification that names no task when it is about a board", async () => {
+    const { taskId: _taskId, email: _email, ...boardEvent } = NOTIFICATION;
+    await createNotifications({
+      ...boardEvent,
+      type: "board_access",
+      title: "owner added you to Orbit as a member",
+      recipientIds: [WATCHER],
+    });
+
+    expect(insertMany).toHaveBeenCalledTimes(1);
+    const [row] = insertMany.mock.calls[0][0];
+    expect(row).toMatchObject({ type: "board_access", inApp: true });
+    expect(row.task).toBeUndefined();
+  });
+
+  it("mails a board_access row with a button to the board and its own reason", async () => {
+    await createNotifications({
+      type: "board_access",
+      projectId: NOTIFICATION.projectId,
+      actorId: ACTOR,
+      title: "owner added you to Orbit as a member",
+      recipientIds: [WATCHER],
+      email: {
+        kicker: "Added to a board",
+        taskKey: "ORB",
+        taskTitle: "Orbit",
+        taskMeta: "You are a member of this board",
+        projectRef: "ORB",
+      },
+    });
+    const [mail] = await sentMails();
+
+    expect(mail.html).toContain('href="https://app.example.com/projects/ORB"');
+    expect(mail.text).toContain("https://app.example.com/projects/ORB");
+    expect(mail.text).not.toContain("/projects/ORB/tasks");
+    expect(mail.text).toContain("You're getting this because your access to Orbit changed.");
+    expect(mail.subject).toBe("[Board Planner] owner added you to Orbit as a member");
+  });
+
   it("never writes to the person who caused the notification", async () => {
     await createNotifications({ ...NOTIFICATION, actorId: ASSIGNEE });
 

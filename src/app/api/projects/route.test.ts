@@ -104,6 +104,27 @@ describe("GET /api/projects", () => {
 // new board comes from the owner grant, so a board created without one is a board nobody but an
 // instance admin can administer.
 describe("POST /api/projects", () => {
+  // BP-753: the form now suggests keys, so two similar names collide far more often than before
+  it("answers a key another board holds with 409, not 500, and grants nothing", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    projectCreate.mockRejectedValueOnce(
+      Object.assign(new Error("E11000 duplicate key"), { code: 11000, keyPattern: { key: 1 } })
+    );
+
+    const response = await POST(post({ name: "Orbital", key: "ORB" }), ctx());
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "That key is already used by another board" });
+    expect(grantCreate).not.toHaveBeenCalled();
+  });
+
+  it("still fails loudly on a write error that is not a collision", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    projectCreate.mockRejectedValueOnce(new Error("disk full"));
+
+    await expect(POST(post({ name: "Orbital", key: "ORB" }), ctx())).rejects.toThrow("disk full");
+  });
+
   it("grants the creator ownership of the board it just created", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
 

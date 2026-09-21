@@ -6,7 +6,7 @@ import { useApi } from "@/hooks/use-api";
 import { ApiNotification, NotificationType } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { timeAgo } from "@/lib/time";
-import { taskPath } from "@/lib/urls";
+import { projectPath, taskPath } from "@/lib/urls";
 import { PageHeader } from "@/components/shell/PageHeader";
 
 const TYPE_LABELS: Record<NotificationType, string> = {
@@ -16,6 +16,7 @@ const TYPE_LABELS: Record<NotificationType, string> = {
   mentioned: "Mentioned",
   task_created: "New task",
   task_linked: "Dependency",
+  board_access: "Board access",
 };
 
 export default function NotificationsPage() {
@@ -64,6 +65,7 @@ export default function NotificationsPage() {
       n.project && typeof n.project === "object" ? n.project.key : n.project;
     const taskRef =
       n.task && typeof n.task === "object" ? n.task.taskNumber : n.task;
+    if (n.type === "board_access") return projectRef ? projectPath(projectRef) : "/notifications";
     if (!projectRef || !taskRef) return "/notifications";
     return taskPath(projectRef, taskRef);
   }
