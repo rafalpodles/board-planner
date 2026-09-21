@@ -24,6 +24,7 @@ vi.mock("@/models/grant", () => ({ Grant: { find: grantFind } }));
 
 const {
   assignmentsFor,
+  machineStateFor,
   catalogueFor,
   offersFor,
   lostCheckouts,
@@ -851,5 +852,52 @@ describe("an instance admin's lock on the project", () => {
 
     expect(verdictFor(worker(), unlocked, PROTOCOL_VERSION, now)).toEqual({ ok: true });
     expect(assignmentsFor(reported, [unlocked], [PROJECT_ID])).toHaveLength(1);
+  });
+});
+
+/**
+ * BP-727. What the task screen tells a reader about their own machines, for this board's repository
+ * only. Coarse on purpose: no name, no host, no time.
+ */
+describe("machineStateFor", () => {
+  const NOW = new Date("2026-09-21T12:00:00Z");
+  const board = { _id: "p1", repositoryUrl: "https://github.com/acme/orbit" };
+  const fresh = new Date(NOW.getTime() - 1000);
+  const old = new Date(NOW.getTime() - WORKER_STALE_MS - 1000);
+  const orbit = [{ remote: "git@github.com:acme/orbit.git", path: "/w/orbit" }];
+  const other = [{ remote: "git@github.com:acme/other.git", path: "/w/other" }];
+  const machine = (over: Record<string, unknown>) =>
+    ({ enabled: true, lastSeenAt: fresh, repos: orbit, ...over }) as never;
+
+  it("is none with no machine at all", () => {
+    expect(machineStateFor([], board, NOW)).toBe("none");
+  });
+
+  // A live machine that does not serve this repository cannot take this task
+  it("is none when the only live machine has no checkout of this repository", () => {
+    expect(machineStateFor([machine({ repos: other })], board, NOW)).toBe("none");
+  });
+
+  it("is live when a machine with the checkout reported in recently", () => {
+    expect(machineStateFor([machine({})], board, NOW)).toBe("live");
+  });
+
+  it("is stale when the machine with the checkout has not reported in", () => {
+    expect(machineStateFor([machine({ lastSeenAt: old })], board, NOW)).toBe("stale");
+  });
+
+  it("is stale when the machine with the checkout is switched off", () => {
+    expect(machineStateFor([machine({ enabled: false })], board, NOW)).toBe("stale");
+  });
+
+  it("is live when any one of several machines serves it", () => {
+    expect(
+      machineStateFor([machine({ lastSeenAt: old }), machine({ repos: other }), machine({})], board, NOW)
+    ).toBe("live");
+  });
+
+  // Nothing to match against: the board-level gap says so, and no machine can serve it
+  it("is none on a board that names no repository", () => {
+    expect(machineStateFor([machine({})], { _id: "p1", repositoryUrl: "" }, NOW)).toBe("none");
   });
 });

@@ -7,7 +7,15 @@ import { taskPath } from "@/lib/urls";
 import { duplicatePayload } from "@/lib/task-duplicate";
 import { timeAgo } from "@/lib/time";
 import { useAuth } from "@/hooks/use-auth";
-import { ApiAgent, ApiProject, ApiSprint, ApiTask, ApiUserSummary, RunConflict } from "@/types";
+import {
+  ApiAgent,
+  ApiHandoverReadiness,
+  ApiProject,
+  ApiSprint,
+  ApiTask,
+  ApiUserSummary,
+  RunConflict,
+} from "@/types";
 import { useStore } from "@/app/(app)/agents/store";
 import { effectiveColumns } from "@/lib/columns";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -60,6 +68,7 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
   const [task, setTask] = useState<ApiTask | null>(null);
   const [project, setProject] = useState<ApiProject | null>(null);
   const [sprints, setSprints] = useState<ApiSprint[]>([]);
+  const [readiness, setReadiness] = useState<ApiHandoverReadiness | null>(null);
   const { allAgents: agents } = useStore();
   const [users, setUsers] = useState<ApiUserSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -77,14 +86,16 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
 
   const loadData = useCallback(async () => {
     try {
-      const [t, p, s] = await Promise.all([
+      const [t, p, s, r] = await Promise.all([
         api.get(`/api/projects/${projectId}/tasks/${taskId}`),
         api.get(`/api/projects/${projectId}`),
         api.get(`/api/projects/${projectId}/sprints`),
+        api.get(`/api/projects/${projectId}/handover`).catch(() => null),
       ]);
       setTask(t);
       setProject(p);
       setSprints(s);
+      setReadiness(r ?? null);
       setRefusal(null);
       shown.current = true;
       onLoaded?.(t, p);
@@ -155,6 +166,7 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
       sprints={sprints}
       agents={agents}
       users={users}
+      readiness={readiness}
       onClose={onClose}
       onReload={loadData}
       onTaskChange={setTask}
@@ -170,6 +182,7 @@ interface TaskDetailViewProps {
   sprints: ApiSprint[];
   agents: ApiAgent[];
   users: ApiUserSummary[];
+  readiness: ApiHandoverReadiness | null;
   onClose: () => void;
   onReload: () => void;
   onTaskChange: (updater: (prev: ApiTask | null) => ApiTask | null) => void;
@@ -183,6 +196,7 @@ function TaskDetailView({
   sprints,
   agents,
   users,
+  readiness,
   onClose,
   onReload,
   onTaskChange,
@@ -233,6 +247,14 @@ function TaskDetailView({
     task.createdBy && typeof task.createdBy === "object" ? task.createdBy.fullName : null;
   const watching = !!currentUser && (task.watchers || []).includes(currentUser._id);
   const projectDefaultAgent = project.worker?.agent ? String(project.worker.agent) : undefined;
+  const board = readiness
+    ? {
+        repositoryUrl: project.repositoryUrl ?? "",
+        workerEnabled: project.worker?.enabled === true,
+        owners: readiness.owners,
+        machine: readiness.machine,
+      }
+    : null;
 
   // Forces the write the diff-based auto-save would drop, which is how "assign it again" repairs a
   // task whose assigner was never recorded. Reloaded straight after: that write is what clears the
@@ -510,6 +532,7 @@ function TaskDetailView({
               projectDefaultAgent={projectDefaultAgent}
               stored={task}
               columns={columns}
+              board={board}
               onRepairAssigner={repairAssigner}
               currentUsername={currentUser?.username ?? null}
               categories={project.categories || []}
@@ -547,6 +570,7 @@ function TaskDetailView({
           projectDefaultAgent={projectDefaultAgent}
           stored={task}
           columns={columns}
+          board={board}
           onRepairAssigner={repairAssigner}
           currentUsername={currentUser?.username ?? null}
           categories={project.categories || []}

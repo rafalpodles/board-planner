@@ -11,6 +11,7 @@ import { ensureWorkerUser } from "@/lib/worker-user";
 import { accessibleProjectIds } from "@/lib/grants";
 import { User } from "@/models/user";
 import { isWorkerLockedByInstance, projectRunsWorkers } from "@/lib/worker-gate";
+import type { MachineState } from "@/types";
 
 export const PROTOCOL_VERSION = 1;
 export const WORKER_STALE_MS = 5 * 60 * 1000;
@@ -140,6 +141,16 @@ function isLive(worker: IWorker, now: Date): boolean {
   if (!worker.enabled) return false;
   const seenAt = worker.lastSeenAt ? new Date(worker.lastSeenAt).getTime() : NaN;
   return Number.isFinite(seenAt) && now.getTime() - seenAt <= WORKER_STALE_MS;
+}
+
+export function machineStateFor(
+  workers: Pick<IWorker, "enabled" | "lastSeenAt" | "repos">[],
+  project: MatchableProject,
+  now = new Date()
+): MachineState {
+  const serving = workers.filter((w) => matchRepo(project, w.repos ?? []));
+  if (serving.some((w) => isLive(w as IWorker, now))) return "live";
+  return serving.length > 0 ? "stale" : "none";
 }
 
 // Only what an operator actually set. Sending the stored policy would pin every field forever,

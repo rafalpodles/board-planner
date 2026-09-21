@@ -940,3 +940,259 @@ describe("re-assigning to record an assigner the board never had", () => {
     expect(repair).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * BP-727, BP-728. Every requirement at once, the board's own among them, each naming who fixes it
+ * — and, when nothing is missing, a line saying what it is waiting for instead of silence.
+ */
+describe("the hand-over notice, with the board judged too", () => {
+  const OWNER = { _id: "u1", username: "owner", fullName: "Owner Name" } as ApiUser;
+  const ADA = { _id: "u9", username: "ada", fullName: "Ada" };
+  const TOMEK = { _id: "u8", username: "tomek", fullName: "Tomek" };
+  const AGENT = [{ _id: "a1", name: "Default" }] as React.ComponentProps<
+    typeof PropertyRail
+  >["agents"];
+  const READY: NonNullable<React.ComponentProps<typeof PropertyRail>["board"]> = {
+    repositoryUrl: "https://github.com/acme/orbit",
+    workerEnabled: true,
+    owners: [ADA],
+    machine: "live",
+  };
+
+  function withBoard(
+    board: Partial<typeof READY> | null,
+    stored: Partial<Omit<ApiTask, "status">> & { status?: string } = {},
+    over: Partial<React.ComponentProps<typeof PropertyRail>> = {}
+  ) {
+    const assignee = "assignee" in stored ? stored.assignee : OWNER;
+    renderRail({
+      agents: AGENT,
+      columns: BOARD,
+      board: board === null ? null : { ...READY, ...board },
+      draft: { ...draft, agent: "a1", assignee: assignee?.username ?? null },
+      stored: {
+        agent: "a1",
+        assignee: OWNER,
+        assignedBy: { ...OWNER },
+        status: "ready",
+        ...stored,
+      } as ApiTask,
+      ...over,
+    });
+  }
+
+  const notice = () => screen.getByTestId("handover-notice");
+  const problems = () => screen.getAllByTestId("handover-problem").map((li) => li.dataset.reason);
+
+  it("lists a backlog task with nobody on it as two problems at once", () => {
+    withBoard(READY, { status: "someday", assignee: null });
+
+    expect(problems()).toEqual(["not-approved-yet", "unassigned"]);
+    expect(notice().textContent).toMatch(/^Nothing will run this yet:/);
+  });
+
+  // One problem is a sentence, not a one-item list
+  it("keeps a single problem as one sentence", () => {
+    withBoard(READY, { status: "someday" });
+
+    expect(notice().tagName).toBe("P");
+    expect(screen.queryAllByTestId("handover-problem")).toHaveLength(0);
+    expect(notice().textContent).toMatch(/^Nothing will run this yet\. A machine only looks/);
+  });
+
+  it("names a board with no repository and its owner", () => {
+    withBoard({ repositoryUrl: "" });
+
+    expect(notice().dataset.reason).toBe("no-repository");
+    expect(notice().textContent).toContain(
+      "This board names no repository, so no machine can match it — its owner, Ada, can add one in Settings → Integrations."
+    );
+  });
+
+  it("names agent runs switched off, and every owner", () => {
+    withBoard({ workerEnabled: false, owners: [ADA, TOMEK] });
+
+    expect(notice().dataset.reason).toBe("runs-off");
+    expect(notice().textContent).toContain("its owners, Ada and Tomek, can switch them on");
+  });
+
+  it("tells an owner reading it that they can fix it themselves", () => {
+    withBoard({ repositoryUrl: "", owners: [OWNER, ADA] });
+
+    expect(notice().textContent).toContain("— you can add one");
+  });
+
+  it("falls back to an admin for a board with no owner on record", () => {
+    withBoard({ workerEnabled: false, owners: [] });
+
+    expect(notice().textContent).toContain("— an admin can switch them on");
+  });
+
+  it("lists the task's problems and the board's together", () => {
+    withBoard({ repositoryUrl: "", workerEnabled: false }, { assignee: null });
+
+    expect(problems()).toEqual(["unassigned", "no-repository", "runs-off"]);
+  });
+
+  it("tells the assignee they have no machine, with where to get one", () => {
+    withBoard({ machine: "none" });
+
+    expect(notice().dataset.reason).toBe("no-machine");
+    expect(notice().textContent).toContain("You have no machine connected");
+    expect(screen.getByRole("link", { name: "How to connect one" }).getAttribute("href")).toBe(
+      "https://board-planner.com/docs/ai/execution-workers/#setting-one-up"
+    );
+  });
+
+  it("tells the assignee their machine has gone quiet", () => {
+    withBoard({ machine: "stale" });
+
+    expect(notice().dataset.reason).toBe("machine-stale");
+  });
+
+  it("says it is waiting for the assignee's own machine when everything is in place", () => {
+    withBoard(READY);
+
+    expect(screen.queryByTestId("handover-notice")).toBeNull();
+    expect(screen.getByTestId("handover-waiting").textContent).toBe(
+      "Waiting for your machine to take it."
+    );
+  });
+
+  // The reader's own machine state is all the server tells anyone; a colleague's task never
+  // reads it, whatever it says, and waits on their machine by name
+  it.each(["none", "stale", "live"] as const)(
+    "waits for a colleague's machine by name, whatever the reader's own is (%s)",
+    (machine) => {
+      withBoard({ machine }, {}, { currentUsername: "claude" });
+
+      expect(screen.queryByTestId("handover-notice")).toBeNull();
+      expect(screen.getByTestId("handover-waiting").textContent).toBe(
+        "Waiting for Owner Name's machine."
+      );
+    }
+  );
+
+  // Not read yet, or the read failed: nothing about the board is claimed either way
+  it("judges only the task until the board has been read", () => {
+    withBoard(null, { status: "someday" });
+
+    expect(notice().dataset.reason).toBe("not-approved-yet");
+    expect(screen.queryByTestId("handover-waiting")).toBeNull();
+  });
+
+  it("says nothing more when the board is unread and the task is sound", () => {
+    withBoard(null);
+
+    expect(screen.queryByTestId("handover-notice")).toBeNull();
+    expect(screen.queryByTestId("handover-waiting")).toBeNull();
+  });
+
+  // Past the approved column the machine has had its chance; a run may hold it right now
+  it.each(["doing", "shipped"])("judges no board gap on a task in %s", (status) => {
+    withBoard({ repositoryUrl: "", workerEnabled: false, machine: "none" }, { status });
+
+    expect(screen.queryByTestId("handover-notice")).toBeNull();
+    expect(screen.queryByTestId("handover-waiting")).toBeNull();
+  });
+
+  it("says nothing about the board on a task with no agent", () => {
+    withBoard({ repositoryUrl: "" }, { agent: null }, { draft: { ...draft, assignee: "owner" } });
+
+    expect(screen.queryByTestId("handover-notice")).toBeNull();
+    expect(screen.queryByTestId("handover-waiting")).toBeNull();
+  });
+});
+
+describe("the Agent row explains itself", () => {
+  const MERGER = {
+    _id: "a1",
+    name: "Ships it",
+    description: "Implements, opens a pull request and merges it.",
+    scope: "global",
+    composition: {
+      analysis: [],
+      implementation: [{ key: "implement" }],
+      verification: [],
+      delivery: [{ key: "push" }, { key: "pull-request" }, { key: "merge" }],
+    },
+  };
+  const PROPOSER = {
+    _id: "a2",
+    name: "Proposes",
+    description: "Opens a pull request for a person to merge.",
+    scope: "global",
+    composition: {
+      analysis: [],
+      implementation: [{ key: "implement" }],
+      verification: [],
+      delivery: [{ key: "push" }, { key: "pull-request" }],
+    },
+  };
+  const BARE = { ...PROPOSER, _id: "a3", name: "Bare", description: "" };
+  const agents = [MERGER, PROPOSER, BARE] as unknown as React.ComponentProps<
+    typeof PropertyRail
+  >["agents"];
+
+  function option(name: string) {
+    return screen.getAllByRole("option").find((o) => o.id && o.textContent?.startsWith(name))!;
+  }
+
+  it("shows each agent's description under its name", async () => {
+    renderRail({ agents });
+    await openRow("Agent");
+
+    expect(option("Ships it").textContent).toContain("Implements, opens a pull request and merges it.");
+    expect(option("Proposes").textContent).toContain("Opens a pull request for a person to merge.");
+  });
+
+  it("marks the agent with a Merge step, and only that one", async () => {
+    renderRail({ agents });
+    await openRow("Agent");
+
+    expect(option("Ships it").textContent).toContain("Merges without a person");
+    expect(option("Proposes").textContent).not.toContain("Merges without a person");
+  });
+
+  // The name stays the name; the description and marker are read as its description
+  it("keeps the option's accessible name to the agent's name", async () => {
+    renderRail({ agents });
+    await openRow("Agent");
+
+    const ships = option("Ships it");
+    const name = document.getElementById(ships.getAttribute("aria-labelledby")!)!;
+    const described = document.getElementById(ships.getAttribute("aria-describedby")!)!;
+    expect(name.textContent).toBe("Ships it");
+    expect(described.textContent).toContain("Merges without a person");
+    expect(screen.getByRole("option", { name: "Ships it" })).toBe(ships);
+  });
+
+  it("leaves an option with nothing to describe exactly as it was", async () => {
+    renderRail({ agents });
+    await openRow("Agent");
+
+    expect(option("Bare").hasAttribute("aria-describedby")).toBe(false);
+    expect(option("Bare").hasAttribute("aria-labelledby")).toBe(false);
+  });
+
+  it("still picks an agent with a description by keyboard", async () => {
+    const set = renderRail({ agents });
+    await openRow("Agent");
+
+    const list = screen.getByRole("listbox");
+    fireEvent.keyDown(list, { key: "ArrowDown" });
+    fireEvent.keyDown(list, { key: "Enter" });
+    expect(set).toHaveBeenCalledWith("agent", "a1");
+  });
+
+  it("offers the hand-over rules and the docs beside the field", () => {
+    renderRail({ agents });
+
+    const rules = screen.getByTestId("handover-rules");
+    expect(rules.querySelector("summary")?.textContent).toBe("How handing work to an agent works");
+    expect(rules.querySelectorAll("li")).toHaveLength(3);
+    expect(rules.querySelector("a")?.getAttribute("href")).toBe(
+      "https://board-planner.com/docs/ai/execution-workers/"
+    );
+  });
+});

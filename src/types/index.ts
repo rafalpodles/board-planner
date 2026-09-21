@@ -1731,6 +1731,14 @@ export interface ApiAgentBlock {
   deterministic: boolean;
 }
 
+export type MachineState = "none" | "stale" | "live";
+
+export interface ApiHandoverReadiness {
+  owners: ApiUserSummary[];
+  /** The reader's own machines only, against this board's repository */
+  machine: MachineState;
+}
+
 export interface ApiAgent {
   _id: string;
   name: string;

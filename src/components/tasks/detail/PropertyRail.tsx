@@ -27,7 +27,15 @@ import {
 } from "./FieldRow";
 import type { TaskDraft } from "./useTaskEditor";
 import type { ApiAgent, ApiTask } from "@/types";
-import { handoverOf, refIdOf, type Handover } from "@/lib/handover";
+import {
+  awaitingClaim,
+  handoverOf,
+  refIdOf,
+  type Handover,
+  type HandoverReason,
+} from "@/lib/handover";
+import { readinessGaps, type MachineState, type ReadinessGap } from "@/lib/project-readiness";
+import { mergesWithoutAPerson } from "@/lib/agent-rules";
 import { assigneeToShow } from "./assignee-display";
 import type { AnyColumn } from "@/lib/columns";
 import { MAX_RECURRENCE_INTERVAL, clampInterval } from "@/lib/recurrence";
@@ -54,38 +62,202 @@ function formatDate(value: string): string {
   });
 }
 
+export const EXECUTION_DOCS_URL = "https://board-planner.com/docs/ai/execution-workers/";
+const CONNECT_MACHINE_URL = `${EXECUTION_DOCS_URL}#setting-one-up`;
+
+export interface BoardReadiness {
+  repositoryUrl: string;
+  workerEnabled: boolean;
+  owners: ApiUserSummary[];
+  /** The reader's own machines; null when that has not been read */
+  machine: MachineState | null;
+}
+
+type Blocker = { reason: HandoverReason; by: string | null } | { reason: ReadinessGap };
+
+function namesOf(people: ApiUserSummary[]): string {
+  const names = people.map((p) => p.fullName || p.username);
+  return names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+}
+
+function whoFixes(owners: ApiUserSummary[], viewer: string | null): string {
+  if (viewer && owners.some((o) => o.username === viewer)) return "you";
+  if (owners.length === 0) return "an admin";
+  return `${owners.length === 1 ? "its owner" : "its owners"}, ${namesOf(owners)},`;
+}
+
+function BlockerText({
+  blocker,
+  owners,
+  viewer,
+}: {
+  blocker: Blocker;
+  owners: ApiUserSummary[];
+  viewer: string | null;
+}) {
+  switch (blocker.reason) {
+    case "not-approved-yet":
+      return <>A machine only looks at the column work is approved in — move it there when it is ready.</>;
+    case "unassigned":
+      return <>A machine takes only work its owner assigned to themselves — assign it to yourself.</>;
+    case "assigner-unrecorded":
+      // Named rather than addressed to the reader: the server records the assigner only when the
+      // person doing the assigning is the one being assigned
+      return (
+        <>
+          It was assigned before the board recorded who hands work over; its assignee can record
+          that by assigning it to themselves again.
+        </>
+      );
+    case "pm-assigned-for-someone-else":
+      return (
+        <>
+          The PM assigned it on somebody else&apos;s instruction — a machine runs a PM hand-over
+          only for the person who asked for it.
+        </>
+      );
+    case "assigned-by-someone-else":
+      return (
+        <>
+          {("by" in blocker && blocker.by) || "Somebody else"} assigned it, and a machine takes only
+          work its owner assigned to themselves.
+        </>
+      );
+    case "no-repository":
+      return (
+        <>
+          This board names no repository, so no machine can match it — {whoFixes(owners, viewer)}{" "}
+          can add one in Settings → Integrations.
+        </>
+      );
+    case "runs-off":
+      return (
+        <>
+          Agent runs are off for this board — {whoFixes(owners, viewer)} can switch them on in
+          Settings → Workers.
+        </>
+      );
+    case "no-machine":
+      return (
+        <>
+          You have no machine connected with this board&apos;s repository checked out.{" "}
+          <a href={CONNECT_MACHINE_URL} target="_blank" rel="noreferrer" className="underline">
+            How to connect one
+          </a>
+        </>
+      );
+    case "machine-stale":
+      return (
+        <>
+          Your machine with this board&apos;s repository has not reported in for over five minutes,
+          or is switched off.{" "}
+          <a href={CONNECT_MACHINE_URL} target="_blank" rel="noreferrer" className="underline">
+            Check it is running
+          </a>
+        </>
+      );
+    default:
+      return null;
+  }
+}
+
 // The claim takes a task or it does not, and logs nothing either way. An agent chosen on a task no
 // machine will touch is the one state nobody could diagnose: the card looks entirely normal.
-function HandoverNotice({ handover }: { handover: Handover | null }) {
+function HandoverNotice({
+  handover,
+  awaiting,
+  board,
+  assignee,
+  viewer,
+}: {
+  handover: Handover | null;
+  awaiting: boolean;
+  board: BoardReadiness | null;
+  assignee: ApiUserSummary | null;
+  viewer: string | null;
+}) {
   // "No agent" is the ordinary case and the default — it is what the picker already says, and
   // repeating it as a warning would put a notice on almost every task on the board.
-  if (!handover || handover.runs || handover.reason === "no-agent") return null;
+  if (!handover || (!handover.runs && handover.problems[0].reason === "no-agent")) return null;
 
-  const message =
-    handover.reason === "not-approved-yet"
-      ? "Nothing will run this yet. A machine only looks at the column work is approved in — move it there when it is ready."
-      : handover.reason === "unassigned"
-      ? "Nothing will run this. A machine takes only work its owner assigned to themselves — assign it to yourself."
-      : handover.reason === "assigner-unrecorded"
-        // Named rather than addressed to the reader: the server records the assigner only when the
-        // person doing the assigning is the one being assigned, so telling a colleague to "assign
-        // it again" would be handing them a gesture that writes nothing.
-        ? "Nothing will run this. It was assigned before the board recorded who hands work over; its assignee can record that by assigning it to themselves again."
-        : handover.reason === "pm-assigned-for-someone-else"
-        // The PM may hand work over, but only on the assignee's own instruction: the chat is open
-        // to every project member, and otherwise asking it to assign a colleague's task would
-        // start a run on that colleague's machine.
-        ? "Nothing will run this. The PM assigned it on somebody else's instruction — a machine runs a PM hand-over only for the person who asked for it."
-        : `Nothing will run this. ${handover.by ?? "Somebody else"} assigned it, and a machine takes only work its owner assigned to themselves.`;
+  const viewerIsAssignee = !!viewer && assignee?.username === viewer;
+  const gaps =
+    board && awaiting
+      ? readinessGaps({
+          repositoryUrl: board.repositoryUrl,
+          workerEnabled: board.workerEnabled,
+          machine: viewerIsAssignee ? board.machine : null,
+        })
+      : [];
+  const blockers: Blocker[] = [
+    ...(handover.runs ? [] : handover.problems),
+    ...gaps.map((reason) => ({ reason })),
+  ];
+  const owners = board?.owners ?? [];
 
+  if (blockers.length === 0) {
+    if (!board || !awaiting || !assignee) return null;
+    if (viewerIsAssignee && board.machine !== "live") return null;
+    return (
+      <p data-testid="handover-waiting" className="mt-1 text-xs text-muted">
+        {viewerIsAssignee
+          ? "Waiting for your machine to take it."
+          : `Waiting for ${assignee.fullName || assignee.username}'s machine.`}
+      </p>
+    );
+  }
+
+  const reasons = blockers.map((b) => b.reason).join(" ");
+  if (blockers.length === 1) {
+    return (
+      <p data-testid="handover-notice" data-reason={reasons} className="mt-1 text-xs text-warning">
+        Nothing will run this yet.{" "}
+        <BlockerText blocker={blockers[0]} owners={owners} viewer={viewer} />
+      </p>
+    );
+  }
   return (
-    <p
-      data-testid="handover-notice"
-      data-reason={handover.reason}
-      className="mt-1 text-xs text-warning"
-    >
-      {message}
-    </p>
+    <div data-testid="handover-notice" data-reason={reasons} className="mt-1 text-xs text-warning">
+      <p>Nothing will run this yet:</p>
+      <ul className="mt-1 flex list-disc flex-col gap-1 pl-4">
+        {blockers.map((b) => (
+          <li key={b.reason} data-testid="handover-problem" data-reason={b.reason}>
+            <BlockerText blocker={b} owners={owners} viewer={viewer} />
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function HandoverRules() {
+  return (
+    <details data-testid="handover-rules" className="mt-1 text-xs text-muted">
+      <summary className="focus-ring cursor-pointer rounded select-none hover:text-text">
+        How handing work to an agent works
+      </summary>
+      <ol className="mt-1 flex list-decimal flex-col gap-1 pl-4">
+        <li>
+          Pick an agent, assign the task to yourself, and move it to the column work is approved
+          in. A task somebody else assigned to you is a proposal; nothing runs it unattended.
+        </li>
+        <li>
+          It runs on your own machine, which needs a checkout of the board&apos;s repository, and
+          only while agent runs are on for the board.
+        </li>
+        <li>
+          An agent with a Merge step merges its own pull request — no person looks before it lands.
+        </li>
+      </ol>
+      <a
+        href={EXECUTION_DOCS_URL}
+        target="_blank"
+        rel="noreferrer"
+        className="mt-1 inline-block underline hover:text-text"
+      >
+        Read more about execution workers
+      </a>
+    </details>
   );
 }
 
@@ -107,6 +279,8 @@ interface PropertyRailProps {
   stored: Pick<ApiTask, "agent" | "assignee" | "assignedBy" | "status">;
   /** The board's own columns — a claim is defined in terms of their roles, not their names */
   columns?: AnyColumn[];
+  /** What the board itself lacks for any run; null until read, and then nothing is judged */
+  board?: BoardReadiness | null;
   /**
    * Writes the assignee a task already carries. Auto-save sends the diff, so re-picking the person
    * already on the task sends nothing at all — and that is the repair the notice below prints for a
@@ -137,6 +311,7 @@ export function PropertyRail({
   projectDefaultAgent,
   stored,
   columns,
+  board = null,
   onRepairAssigner,
   currentUsername,
   categories,
@@ -169,6 +344,7 @@ export function PropertyRail({
     (draft.agent ?? null) !== storedAgent ||
     (draft.assignee ?? null) !== (stored.assignee?.username ?? null);
   const handover = pending ? null : handoverOf(stored, columns);
+  const awaiting = !!columns && awaitingClaim(columns, stored.status);
   // Read off the stored task rather than off `handover`, which is suppressed mid-edit and orders
   // the column requirement first: the repair is about what the document is missing, not about
   // which sentence won the right to be shown.
@@ -263,7 +439,12 @@ export function PropertyRail({
               .sort((a, b) =>
                 a._id === projectDefaultAgent ? -1 : b._id === projectDefaultAgent ? 1 : 0
               )
-              .map((a) => ({ value: a._id, label: a.name }))}
+              .map((a) => ({
+                value: a._id,
+                label: a.name,
+                description: a.description || undefined,
+                marker: mergesWithoutAPerson(a.composition) ? "Merges without a person" : undefined,
+              }))}
             emptyOption="No agent — a person does it"
             onChange={(id) => set("agent", id || null)}
           >
@@ -291,7 +472,14 @@ export function PropertyRail({
           </p>
         )}
 
-        <HandoverNotice handover={handover} />
+        <HandoverNotice
+          handover={handover}
+          awaiting={awaiting}
+          board={board}
+          assignee={stored.assignee ?? null}
+          viewer={currentUsername}
+        />
+        {!notOffered && <HandoverRules />}
 
         <ComboboxRow
           label="Priority"

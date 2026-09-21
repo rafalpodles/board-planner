@@ -613,13 +613,24 @@ describe("TaskDetail, the Agent row's handover notice", () => {
     assignedBy: { _id: "u2", username: "kmk", fullName: "Krzysiek" },
   };
 
-  function serve(over: Record<string, unknown> = {}) {
+  const readyBoard = {
+    ...project,
+    repositoryUrl: "https://github.com/acme/tp",
+    worker: { enabled: true },
+  };
+
+  function serve(
+    over: Record<string, unknown> = {},
+    board: Record<string, unknown> = readyBoard,
+    readiness: unknown = { owners: [], machine: "live" }
+  ) {
     api.get.mockImplementation((url: string) => {
       if (url === "/api/projects/TP/assignable-users") return Promise.resolve([]);
       if (url.startsWith("/api/agent")) return Promise.resolve([]);
       if (url.includes("/tasks/")) return Promise.resolve({ ...handedOver, ...over });
       if (url.includes("/sprints")) return Promise.resolve([]);
-      return Promise.resolve(project);
+      if (url === "/api/projects/TP/handover") return Promise.resolve(readiness);
+      return Promise.resolve(board);
     });
   }
 
@@ -702,14 +713,60 @@ describe("TaskDetail, the Agent row's handover notice", () => {
     }
   );
 
-  // Nothing to say about a task whose assignee handed it to themselves — the everyday case, and a
-  // notice on it would be on almost every task on the board
+  // Nothing to warn about a task whose assignee handed it to themselves on a ready board — the
+  // everyday case, and a warning on it would be on almost every task on the board
   it("says nothing when the hand-over is sound", async () => {
     serve({ assignedBy: { _id: "u1", username: "owner", fullName: "Owner Name" } });
     renderDetail();
     await loaded();
 
     expect(screen.queryByTestId("handover-notice")).toBeNull();
+    expect(
+      within(screen.getByRole("complementary")).getByTestId("handover-waiting").textContent
+    ).toBe("Waiting for your machine to take it.");
+  });
+
+  // BP-727. The board's own gaps reach both call sites, with the owners the endpoint named
+  const selfAssigned = { assignedBy: { _id: "u1", username: "owner", fullName: "Owner Name" } };
+  const noRepository = { ...readyBoard, repositoryUrl: "" };
+  const ownedByAda = { owners: [{ _id: "u9", username: "ada", fullName: "Ada" }], machine: "live" };
+
+  it("names a board with no repository, and its owner, on the rail", async () => {
+    serve(selfAssigned, noRepository, ownedByAda);
+    renderDetail();
+    await loaded();
+
+    const notice = within(screen.getByRole("complementary")).getByTestId("handover-notice");
+    expect(notice.dataset.reason).toBe("no-repository");
+    expect(notice.textContent).toContain("its owner, Ada,");
+  });
+
+  it("names it in the mobile sheet too", async () => {
+    serve(selfAssigned, noRepository, ownedByAda);
+    renderDetail();
+    await loaded();
+    await act(async () => screen.getByRole("button", { name: "All details" }).click());
+
+    expect(
+      within(screen.getByRole("dialog")).getByTestId("handover-notice").dataset.reason
+    ).toBe("no-repository");
+  });
+
+  // The endpoint failing must not take the task with it, and then the board is simply not judged
+  it("still opens the task when the readiness read fails, and judges only the task", async () => {
+    api.get.mockImplementation((url: string) => {
+      if (url === "/api/projects/TP/assignable-users") return Promise.resolve([]);
+      if (url.startsWith("/api/agent")) return Promise.resolve([]);
+      if (url.includes("/tasks/")) return Promise.resolve({ ...handedOver, ...selfAssigned });
+      if (url.includes("/sprints")) return Promise.resolve([]);
+      if (url === "/api/projects/TP/handover") return Promise.reject(new Error("boom"));
+      return Promise.resolve(noRepository);
+    });
+    renderDetail();
+    await loaded();
+
+    expect(screen.queryByTestId("handover-notice")).toBeNull();
+    expect(screen.queryByTestId("handover-waiting")).toBeNull();
   });
 });
 

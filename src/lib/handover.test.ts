@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { handoverOf } from "./handover";
+import { awaitingClaim, handoverOf } from "./handover";
 import { ApiTask, ApiUser } from "@/types";
 import type { AnyColumn } from "@/lib/columns";
 
@@ -37,11 +37,7 @@ describe("handoverOf", () => {
    * it to yourself, and every other requirement passes while no claim ever looks at that column.
    */
   it("names a task sitting in a column the work has not been approved out of", () => {
-    expect(handoverOf(task({ status: "someday" }), BOARD)).toEqual({
-      runs: false,
-      reason: "not-approved-yet",
-      by: null,
-    });
+    expect(handoverOf(task({ status: "someday" }), BOARD)).toEqual({ runs: false, problems: [{ reason: "not-approved-yet", by: null }] });
   });
 
   /**
@@ -63,23 +59,17 @@ describe("handoverOf", () => {
   // Parked, not taken: nothing claims it, and moving it back to the approved column is exactly
   // what would
   it("still names a blocked task as one nothing will pick up", () => {
-    expect(handoverOf(task({ status: "parked" }), BOARD)).toMatchObject({
-      reason: "not-approved-yet",
-    });
+    expect(handoverOf(task({ status: "parked" }), BOARD)).toMatchObject({ problems: [{ reason: "not-approved-yet" }] });
   });
 
   // What a task left behind by a deleted column carries. Nowhere a claim looks either.
   it("names a task whose status matches no column this board has", () => {
-    expect(handoverOf(task({ status: "a-column-somebody-deleted" }), BOARD)).toMatchObject({
-      reason: "not-approved-yet",
-    });
+    expect(handoverOf(task({ status: "a-column-somebody-deleted" }), BOARD)).toMatchObject({ problems: [{ reason: "not-approved-yet" }] });
   });
 
   // Choosing no agent is the more useful thing to say, and the ordinary case besides
   it("still names the missing agent first, wherever the task sits", () => {
-    expect(handoverOf(task({ agent: null, status: "someday" }), BOARD)).toMatchObject({
-      reason: "no-agent",
-    });
+    expect(handoverOf(task({ agent: null, status: "someday" }), BOARD)).toMatchObject({ problems: [{ reason: "no-agent" }] });
   });
 
   // A caller that does not know the board's columns must not have that requirement invented for
@@ -100,57 +90,35 @@ describe("handoverOf", () => {
 
   it("compares by id, so an unpopulated reference is read the same way", () => {
     expect(handoverOf(task({ assignedBy: "u1" }))).toEqual({ runs: true });
-    expect(handoverOf(task({ assignedBy: "u2" }))).toMatchObject({
-      reason: "assigned-by-someone-else",
-    });
+    expect(handoverOf(task({ assignedBy: "u2" }))).toMatchObject({ problems: [{ reason: "assigned-by-someone-else" }] });
   });
 
   it("names choosing no agent as the reason before anything else", () => {
-    expect(handoverOf(task({ agent: null, assignee: null }))).toEqual({
-      runs: false,
-      reason: "no-agent",
-      by: null,
-    });
+    expect(handoverOf(task({ agent: null, assignee: null }))).toEqual({ runs: false, problems: [{ reason: "no-agent", by: null }] });
   });
 
   it("names an unassigned task, which belongs to nobody", () => {
-    expect(handoverOf(task({ assignee: null }))).toEqual({
-      runs: false,
-      reason: "unassigned",
-      by: null,
-    });
+    expect(handoverOf(task({ assignee: null }))).toEqual({ runs: false, problems: [{ reason: "unassigned", by: null }] });
   });
 
   // The whole of the legacy case: every task stored before BP-358 has no assignedBy key, nothing
   // backfills it, and the claim refuses it. This is where the product says so.
   it("names a task assigned before the board recorded who assigns", () => {
-    expect(handoverOf(task({ assignedBy: undefined }))).toEqual({
-      runs: false,
-      reason: "assigner-unrecorded",
-      by: null,
-    });
+    expect(handoverOf(task({ assignedBy: undefined }))).toEqual({ runs: false, problems: [{ reason: "assigner-unrecorded", by: null }] });
   });
 
   // Populate renders a reference to a deleted user as null, and typeof null is "object" — a check
   // on the type rather than the value would read this as a live assigner and promise a run
   it("treats an assigner whose account is gone as unrecorded, not as the assignee", () => {
-    expect(handoverOf(task({ assignedBy: null }))).toMatchObject({
-      reason: "assigner-unrecorded",
-    });
+    expect(handoverOf(task({ assignedBy: null }))).toMatchObject({ problems: [{ reason: "assigner-unrecorded" }] });
   });
 
   it("names who handed it over when somebody else did", () => {
-    expect(handoverOf(task({ assignedBy: KRZYSIEK }))).toEqual({
-      runs: false,
-      reason: "assigned-by-someone-else",
-      by: "Krzysiek",
-    });
+    expect(handoverOf(task({ assignedBy: KRZYSIEK }))).toEqual({ runs: false, problems: [{ reason: "assigned-by-someone-else", by: "Krzysiek" }] });
   });
 
   it("falls back to the username when that account has no display name", () => {
-    expect(handoverOf(task({ assignedBy: { ...KRZYSIEK, fullName: "" } }))).toMatchObject({
-      by: "kmk",
-    });
+    expect(handoverOf(task({ assignedBy: { ...KRZYSIEK, fullName: "" } }))).toMatchObject({ problems: [{ by: "kmk" }] });
   });
 });
 
@@ -171,16 +139,12 @@ describe("handoverOf and a PM hand-over", () => {
   it("refuses when the PM assigned it on somebody else's instruction", () => {
     expect(
       handoverOf(task({ assignedBy: { ...PM }, pmAssignedFor: { ...KRZYSIEK } }), BOARD)
-    ).toEqual({ runs: false, reason: "pm-assigned-for-someone-else", by: "PM Agent" });
+    ).toEqual({ runs: false, problems: [{ reason: "pm-assigned-for-someone-else", by: "PM Agent" }] });
   });
 
   // An unattended turn — a board review, a needs-human-review trigger — records nobody
   it("refuses when the PM assigned it with nobody driving the turn", () => {
-    expect(handoverOf(task({ assignedBy: { ...PM }, pmAssignedFor: null }), BOARD)).toEqual({
-      runs: false,
-      reason: "pm-assigned-for-someone-else",
-      by: "PM Agent",
-    });
+    expect(handoverOf(task({ assignedBy: { ...PM }, pmAssignedFor: null }), BOARD)).toEqual({ runs: false, problems: [{ reason: "pm-assigned-for-someone-else", by: "PM Agent" }] });
   });
 
   /**
@@ -190,17 +154,77 @@ describe("handoverOf and a PM hand-over", () => {
    * "nothing will run this" about a task that might, never the reverse.
    */
   it("cannot recognise the PM through a bare id, and errs towards refusing", () => {
-    expect(handoverOf(task({ assignedBy: "pm1", pmAssignedFor: "u1" }), BOARD)).toEqual({
-      runs: false,
-      reason: "assigned-by-someone-else",
-      by: null,
-    });
+    expect(handoverOf(task({ assignedBy: "pm1", pmAssignedFor: "u1" }), BOARD)).toEqual({ runs: false, problems: [{ reason: "assigned-by-someone-else", by: null }] });
   });
 
   // The control: a person is still not the PM, whatever pmAssignedFor happens to say
   it("does not let a stray pmAssignedFor turn a colleague's assignment into a hand-over", () => {
     expect(
       handoverOf(task({ assignedBy: { ...KRZYSIEK }, pmAssignedFor: { ...OWNER } }), BOARD)
-    ).toEqual({ runs: false, reason: "assigned-by-someone-else", by: "Krzysiek" });
+    ).toEqual({ runs: false, problems: [{ reason: "assigned-by-someone-else", by: "Krzysiek" }] });
+  });
+});
+
+/**
+ * BP-728. Fixing one requirement used to reveal the next, one at a time. The column and the
+ * assignee are independent requirements, so both are reported together; the assignee-side reasons
+ * exclude each other, so there are never more than two.
+ */
+describe("handoverOf, several requirements at once", () => {
+  it("names a backlog task with nobody on it for both", () => {
+    expect(handoverOf(task({ status: "someday", assignee: null }), BOARD)).toEqual({
+      runs: false,
+      problems: [
+        { reason: "not-approved-yet", by: null },
+        { reason: "unassigned", by: null },
+      ],
+    });
+  });
+
+  it.each([
+    [{ assignedBy: undefined }, "assigner-unrecorded", null],
+    [{ assignedBy: KRZYSIEK }, "assigned-by-someone-else", "Krzysiek"],
+    [
+      { assignedBy: { _id: "pm1", username: "pm", fullName: "PM Agent" }, pmAssignedFor: KRZYSIEK },
+      "pm-assigned-for-someone-else",
+      "PM Agent",
+    ],
+  ])("pairs the column with %o", (over, reason, by) => {
+    expect(handoverOf(task({ status: "parked", ...over }), BOARD)).toEqual({
+      runs: false,
+      problems: [
+        { reason: "not-approved-yet", by: null },
+        { reason, by },
+      ],
+    });
+  });
+
+  // The control for each pairing above: in the approved column only the assignee-side reason is left
+  it("reports only the assignee side once the column is right", () => {
+    expect(handoverOf(task({ assignee: null }), BOARD)).toEqual({
+      runs: false,
+      problems: [{ reason: "unassigned", by: null }],
+    });
+  });
+
+  it("reports nothing else when no agent is chosen, however much else is missing", () => {
+    expect(handoverOf(task({ agent: null, status: "someday", assignee: null }), BOARD)).toEqual({
+      runs: false,
+      problems: [{ reason: "no-agent", by: null }],
+    });
+  });
+});
+
+describe("awaitingClaim", () => {
+  it.each([
+    ["someday", true],
+    ["ready", true],
+    ["parked", true],
+    ["a-column-somebody-deleted", true],
+    ["doing", false],
+    ["checking", false],
+    ["shipped", false],
+  ])("treats %s as awaiting a claim: %s", (status, expected) => {
+    expect(awaitingClaim(BOARD, status)).toBe(expected);
   });
 });

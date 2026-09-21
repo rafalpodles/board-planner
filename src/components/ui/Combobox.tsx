@@ -19,6 +19,10 @@ export interface ComboboxOption {
   color?: string;
   /** Replaces the colour dot when a row needs more than one — an avatar, priority bars */
   adornment?: ReactNode;
+  /** A muted line under the label, read out as the option's description rather than its name */
+  description?: string;
+  /** A short warning chip beside the description, read out with it */
+  marker?: string;
 }
 
 interface SharedProps {
@@ -456,21 +460,42 @@ export function Combobox(props: ComboboxProps) {
               {filtered.map((option, index) => {
                 // The clear row reads as selected only while nothing else is
                 const on = option.value ? pickedSet.has(option.value) : picked.length === 0;
+                const optionId = `${listboxId}-${index}`;
+                const described = !!(option.description || option.marker);
+                const tick = (
+                  // Reserved rather than conditional, so the labels do not shift as the tick
+                  // appears and disappears under the cursor. Drawn rather than typed: a "✓"
+                  // character would join every option's textContent and be read out with the label
+                  <svg
+                    aria-hidden
+                    viewBox="0 0 16 16"
+                    className={`ml-auto h-3.5 w-3.5 shrink-0 text-primary ${on ? "" : "opacity-0"}`}
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2.25}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M3.5 8.5l3 3 6-7" />
+                  </svg>
+                );
                 return (
                   <button
                     key={option.value || "__empty"}
-                    id={`${listboxId}-${index}`}
+                    id={optionId}
                     type="button"
                     role="option"
                     aria-selected={on}
+                    aria-labelledby={described ? `${optionId}-label` : undefined}
+                    aria-describedby={described ? `${optionId}-description` : undefined}
                     onMouseEnter={() => setActive(index)}
                     onClick={(e) => {
                       e.stopPropagation();
                       pick(option);
                     }}
-                    className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs transition-colors ${
-                      index === active ? "bg-bg-hover text-text" : "text-text-muted"
-                    }`}
+                    className={`flex w-full gap-2 px-2.5 py-1.5 text-left text-xs transition-colors ${
+                      described ? "items-start" : "items-center"
+                    } ${index === active ? "bg-bg-hover text-text" : "text-text-muted"}`}
                   >
                     {option.adornment ??
                       (option.color && (
@@ -479,23 +504,34 @@ export function Combobox(props: ComboboxProps) {
                           style={{ backgroundColor: option.color }}
                         />
                       ))}
-                    <span className="truncate">{option.label}</span>
-                    {/* Reserved rather than conditional, so the labels do not shift as
-                        the tick appears and disappears under the cursor. Drawn rather
-                        than typed: a "✓" character would join every option's
-                        textContent, selected or not, and be read out with the label */}
-                    <svg
-                      aria-hidden
-                      viewBox="0 0 16 16"
-                      className={`ml-auto h-3.5 w-3.5 shrink-0 text-primary ${on ? "" : "opacity-0"}`}
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth={2.25}
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M3.5 8.5l3 3 6-7" />
-                    </svg>
+                    {described ? (
+                      <span className="flex min-w-0 flex-col gap-0.5">
+                        <span id={`${optionId}-label`} className="truncate">
+                          {option.label}
+                        </span>
+                        <span
+                          id={`${optionId}-description`}
+                          className="flex flex-col items-start gap-1 text-[11px] leading-snug text-text-muted"
+                        >
+                          {option.description && (
+                            <span data-testid="option-description" className="line-clamp-2">
+                              {option.description}
+                            </span>
+                          )}
+                          {option.marker && (
+                            <span
+                              data-testid="option-marker"
+                              className="rounded bg-warning/15 px-1.5 py-0.5 font-medium text-warning"
+                            >
+                              {option.marker}
+                            </span>
+                          )}
+                        </span>
+                      </span>
+                    ) : (
+                      <span className="truncate">{option.label}</span>
+                    )}
+                    {tick}
                   </button>
                 );
               })}

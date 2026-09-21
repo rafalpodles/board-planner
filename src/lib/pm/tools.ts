@@ -14,7 +14,7 @@ import {
 import { OrToolDefinition } from "./openrouter";
 import { unknownParameterMessage, NOTHING_TO_CHANGE } from "@/lib/mcp/strict-input";
 import { buildBoardDigest } from "./board-review";
-import { handoverOf } from "@/lib/handover";
+import { handoverOf, type HandoverReason } from "@/lib/handover";
 import { getProjectColumns } from "@/lib/columns";
 import { echo } from "@/lib/echo";
 import { isWorkerLockedByInstance, projectRunsWorkers } from "@/lib/worker-gate";
@@ -163,14 +163,18 @@ async function whyItWillNotRun(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handover = handoverOf(task as any, getProjectColumns(project));
   if (handover.runs) return "";
-  // A switch with no fall-through on purpose: the first version of this returned "" for the three
-  // reasons it did not name, and two of them are reachable *immediately after a successful
-  // assignment* — `updateTask` stamps `assignedBy` only when the assignee actually moves, so
-  // re-assigning a legacy task to the person who already holds it leaves the assigner unrecorded,
-  // and re-assigning a task somebody else handed over leaves theirs. Both then answered
-  // "BP-x → @owner" with no caveat and were never claimed: the exact silence this ticket exists to
-  // end, reproduced inside the feature written to end it.
-  switch (handover.reason) {
+  return handover.problems.map((p) => whyThisProblem(p.reason)).join("; and ");
+}
+
+// A switch with no fall-through on purpose: the first version of this returned "" for the three
+// reasons it did not name, and two of them are reachable *immediately after a successful
+// assignment* — `updateTask` stamps `assignedBy` only when the assignee actually moves, so
+// re-assigning a legacy task to the person who already holds it leaves the assigner unrecorded,
+// and re-assigning a task somebody else handed over leaves theirs. Both then answered
+// "BP-x → @owner" with no caveat and were never claimed: the exact silence this ticket exists to
+// end, reproduced inside the feature written to end it.
+function whyThisProblem(reason: HandoverReason): string {
+  switch (reason) {
     case "no-agent":
       return "no agent is named on it, so nothing will run it — a task naming none is one a person is doing";
     case "not-approved-yet":
