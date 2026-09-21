@@ -28,6 +28,17 @@ export const PROJECT_POLICY_DEFAULTS = {
   reviewModel: "opus",
 } as const;
 
+// Moved onto the blocks that use them — the Size gate, the Reviewed gate, the steps' models — and
+// kept only as the fallback a project pinned before agents existed. The screen no longer offers
+// them, so only an instance admin may still write one; anybody who may edit the project may clear it.
+export const PROJECT_POLICY_FIELDS_MOVED_TO_BLOCKS: ReadonlySet<string> = new Set([
+  "maxDiffLines",
+  "maxDiffFiles",
+  "model",
+  "fallbackModel",
+  "reviewModel",
+]);
+
 export type WorkerPolicyField = keyof typeof WORKER_POLICY_DEFAULTS;
 export type ProjectPolicyField = keyof typeof PROJECT_POLICY_DEFAULTS;
 

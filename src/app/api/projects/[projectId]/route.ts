@@ -5,6 +5,7 @@ import { check } from "@/lib/grants";
 import { Project } from "@/models/project";
 import { parseProjectWorkerConfig } from "@/lib/project-worker-config";
 import { isWorkerLockedByInstance, WORKERS_LOCKED_MESSAGE } from "@/lib/worker-gate";
+import { PROJECT_POLICY_FIELDS_MOVED_TO_BLOCKS } from "@/lib/worker-policy";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { InstanceAuditAction } from "@/types";
 import { Task } from "@/models/task";
@@ -125,6 +126,17 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     if ("worker.lockedByInstance" in parsed.update && !isInstanceAdmin) {
       return NextResponse.json(
         { error: "Only an instance admin can lock or unlock workers for a project" },
+        { status: 403 }
+      );
+    }
+    const blockFields = Object.keys(
+      (body.worker as { policy?: Record<string, unknown> }).policy ?? {}
+    ).filter((field) => PROJECT_POLICY_FIELDS_MOVED_TO_BLOCKS.has(field));
+    if (blockFields.length > 0 && !isInstanceAdmin) {
+      return NextResponse.json(
+        {
+          error: `Only an instance admin can set ${blockFields.join(", ")} — they belong to the agent's steps and gates now`,
+        },
         { status: 403 }
       );
     }

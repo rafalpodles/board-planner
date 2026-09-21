@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/Input";
 import { Switch } from "@/components/ui/Switch";
 import { SettingsCard } from "@/components/settings/SettingsCard";
 import { useDirtyGroup } from "@/components/settings/settings-context";
-import { PROJECT_POLICY_DEFAULTS } from "@/lib/worker-policy";
+import { PROJECT_POLICY_DEFAULTS, PROJECT_POLICY_FIELDS_MOVED_TO_BLOCKS } from "@/lib/worker-policy";
 import { projectRemotes, sameRepo } from "@/lib/repo-match";
 import { ApiAgentRun, ApiProject, ApiWorker } from "@/types";
 import { SectionProps } from "./types";
@@ -38,12 +38,8 @@ type Draft = Record<string, PolicyValue>;
 // Reviewed gate's presence and parameters, and the models belong to the step that calls them.
 const MOVED_TO_BLOCKS = new Set([
   "autoMerge",
-  "maxDiffLines",
-  "maxDiffFiles",
   "reviewGate",
-  "reviewModel",
-  "model",
-  "fallbackModel",
+  ...PROJECT_POLICY_FIELDS_MOVED_TO_BLOCKS,
 ]);
 
 const FIELDS = Object.keys(PROJECT_POLICY_DEFAULTS).filter((f) => !MOVED_TO_BLOCKS.has(f));

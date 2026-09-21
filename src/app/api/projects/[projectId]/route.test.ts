@@ -367,8 +367,14 @@ describe("PUT /api/projects/[projectId] worker settings", () => {
     return projectFindByIdAndUpdate.mock.calls.at(-1)?.[1] as Record<string, unknown> | undefined;
   }
 
+  // Honours `need` and the caller, the way grants.check does: OWNER holds the owner grant, MEMBER
+  // only the member one, and an instance admin passes everything
   beforeEach(() => {
-    check.mockResolvedValue(true);
+    check.mockImplementation(async (user: { _id: string; role: string }, _id: string, need: string) => {
+      if (user.role === "admin") return true;
+      if (user._id === OWNER._id) return true;
+      return user._id === MEMBER._id && need === "access";
+    });
     stored({ enabled: false });
   });
 
@@ -396,7 +402,6 @@ describe("PUT /api/projects/[projectId] worker settings", () => {
   });
 
   it("refuses a member who does not own the project", async () => {
-    check.mockResolvedValue(false);
     getAuthUser.mockResolvedValue(MEMBER);
 
     const response = await PUT(putRequest({ worker: { enabled: true } }), ctx());
@@ -455,6 +460,70 @@ describe("PUT /api/projects/[projectId] worker settings", () => {
     expect(logInstanceAudit).toHaveBeenCalledWith(
       expect.objectContaining({ action: "project_workers_locked", target: "TP" })
     );
+  });
+
+  it("lets an instance admin switch a locked project on, since the lock is theirs", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    stored({ enabled: false, lockedByInstance: true });
+
+    const response = await PUT(putRequest({ worker: { enabled: true } }), ctx());
+
+    expect(response.status).toBe(200);
+    expect(lastUpdate()).toMatchObject({ "worker.enabled": true });
+  });
+
+  it("records an unlock for the instance", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    stored({ enabled: true, lockedByInstance: true });
+
+    await PUT(putRequest({ worker: { lockedByInstance: false } }), ctx());
+
+    expect(logInstanceAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "project_workers_unlocked", target: "TP" })
+    );
+  });
+
+  it("records nothing when the lock is re-sent with the value it already has", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    stored({ enabled: true, lockedByInstance: true });
+
+    const response = await PUT(putRequest({ worker: { lockedByInstance: true } }), ctx());
+
+    expect(response.status).toBe(200);
+    expect(logInstanceAudit).not.toHaveBeenCalled();
+  });
+
+  // The screen no longer offers these — they moved to the agent's blocks — but each still reaches
+  // every machine serving the project as a fallback, so the owner must not set one through the API
+  it.each(["model", "fallbackModel", "reviewModel", "maxDiffLines", "maxDiffFiles"])(
+    "refuses the owner %s, a field that moved to the agent's blocks",
+    async (field) => {
+      const value = field.startsWith("maxDiff") ? 5 : "sonnet";
+
+      const response = await PUT(putRequest({ worker: { policy: { [field]: value } } }), ctx());
+
+      expect(response.status).toBe(403);
+      expect((await response.json()).error).toContain(field);
+      expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+    }
+  );
+
+  it("lets the owner clear one of those fields back to the default", async () => {
+    stored({ enabled: true, policyOverrides: ["model"] });
+
+    const response = await PUT(putRequest({ worker: { reset: ["model"] } }), ctx());
+
+    expect(response.status).toBe(200);
+    expect(lastUpdate()).toMatchObject({ "worker.policy.model": "opus", "worker.policyOverrides": [] });
+  });
+
+  it("still lets an instance admin set one", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+
+    const response = await PUT(putRequest({ worker: { policy: { model: "sonnet" } } }), ctx());
+
+    expect(response.status).toBe(200);
+    expect(lastUpdate()).toMatchObject({ "worker.policy.model": "sonnet" });
   });
 
   it("refuses an instance admin's API token the lock", async () => {
