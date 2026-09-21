@@ -5,6 +5,8 @@ const insertMany = vi.fn();
 const updateOne = vi.fn();
 const deleteOne = vi.fn();
 const latestRow = vi.fn();
+const findOne = vi.fn();
+const sort = vi.fn();
 
 vi.mock("@/models/activityLog", () => ({
   ActivityLog: {
@@ -12,7 +14,7 @@ vi.mock("@/models/activityLog", () => ({
     insertMany,
     updateOne,
     deleteOne,
-    findOne: () => ({ sort: () => ({ select: () => ({ lean: latestRow }) }) }),
+    findOne,
   },
 }));
 
@@ -25,6 +27,10 @@ beforeEach(() => {
   updateOne.mockReset();
   deleteOne.mockReset();
   latestRow.mockReset();
+  findOne.mockReset();
+  sort.mockReset();
+  sort.mockReturnValue({ select: () => ({ lean: latestRow }) });
+  findOne.mockReturnValue({ sort });
 });
 
 /**
@@ -137,6 +143,17 @@ describe("logEditSession", () => {
     oldValue: "before the session",
     createdAt: new Date(Date.now() - 60_000),
     ...over,
+  });
+
+  // The query is the whole of what makes a session: any task's latest row, or the oldest, would fold
+  // one task's edit into another's history
+  it("looks at this task's newest row and no other", async () => {
+    latestRow.mockResolvedValue(null);
+
+    await logEditSession("t1", "u1", "description", "a", "b");
+
+    expect(findOne).toHaveBeenCalledWith({ task: "t1" });
+    expect(sort).toHaveBeenCalledWith({ createdAt: -1, _id: -1 });
   });
 
   it("writes a new row when nothing is in progress", async () => {

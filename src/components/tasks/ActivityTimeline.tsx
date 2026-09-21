@@ -265,7 +265,7 @@ export function ActivityTimeline({
             >
               {actionIcon(log.action)}
             </span>
-            <span className="flex-1 min-w-0 text-text-muted">
+            <div className="flex-1 min-w-0 text-text-muted">
               {describeAction(log)}
               {log.action === "updated" && log.field === "description" && log.oldValue && (
                 <details className="mt-1">
@@ -275,7 +275,7 @@ export function ActivityTimeline({
                   </p>
                 </details>
               )}
-            </span>
+            </div>
             <time
               dateTime={log.createdAt}
               title={new Date(log.createdAt).toLocaleString()}

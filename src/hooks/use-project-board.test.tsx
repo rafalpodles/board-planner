@@ -516,6 +516,15 @@ describe("a board that refuses the reader", () => {
     });
 
     expect(toast).toHaveBeenCalledWith("You do not have access to this board.", "error");
+
+    // …once: every later poll gets the same refusal
+    await act(async () => {
+      await board.reload();
+    });
+    await act(async () => {
+      await board.reload();
+    });
+    expect(toast).toHaveBeenCalledTimes(1);
   });
 
   // The control: an outage still reads as one, whether or not the board was up
