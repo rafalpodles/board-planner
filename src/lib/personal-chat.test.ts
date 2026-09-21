@@ -54,6 +54,24 @@ describe("a personal chat message", () => {
   });
 });
 
+// BP-753: board_access is about a board, so its link is the board rather than no link at all
+describe("a message about a board", () => {
+  it("links the board", async () => {
+    safeFetch.mockClear();
+
+    await sendPersonalChat({
+      users: [slackUser],
+      type: "board_access",
+      title: "Olga added you to Orbit as a member",
+      email: { kicker: "", taskKey: "ORB", taskTitle: "Orbit", projectRef: "ORB" },
+    });
+
+    expect(bodySent().text).toBe(
+      "*Your access to a board changed*\n<https://app.example.com/projects/ORB|Olga added you to Orbit as a member>"
+    );
+  });
+});
+
 describe("what the message may not do", () => {
   // The URL half carries project.key, which this instance constrains nowhere — so a project owner
   // choosing a key is choosing part of the link expression

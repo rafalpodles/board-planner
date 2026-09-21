@@ -49,14 +49,17 @@ export const GET = withProjectOwner(async (_request, { params }) => {
 export const PUT = withProjectOwner(async (request, { params, user }) => {
   const { projectId } = await params;
   const body = (await request.json().catch(() => null)) ?? {};
-  const { userId, relation } = body as { userId?: string; relation?: GrantRelation };
+  const { userId: rawUserId, relation } = body as { userId?: string; relation?: GrantRelation };
 
-  if (typeof userId !== "string" || !isValidObjectId(userId) || !relation || !GRANT_RELATIONS.includes(relation)) {
+  if (typeof rawUserId !== "string" || !isValidObjectId(rawUserId) || !relation || !GRANT_RELATIONS.includes(relation)) {
     return NextResponse.json(
       { error: "userId and a relation of owner or member are required" },
       { status: 400 }
     );
   }
+  // Normalised for the same reason as DELETE: an upper-case id is the same row to BSON and a
+  // different string to everything downstream that compares ids as strings
+  const userId = new Types.ObjectId(rawUserId).toString();
 
   await connectDB();
   const target = await User.findById(userId).select("_id role kind");
@@ -76,25 +79,30 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     }
   }
 
+  let before: { relation: GrantRelation } | null;
   try {
-    await Grant.updateOne(
+    before = await Grant.findOneAndUpdate(
       { subject: userId, objectType: "project", object: projectId },
       { $set: { relation }, $setOnInsert: { createdBy: user._id } },
-      { upsert: true }
-    );
+      { upsert: true, new: false }
+    )
+      .select("relation")
+      .lean();
   } catch (e) {
-    // Two concurrent grants of the same pair race the unique index; the row exists either way
+    // Two concurrent grants of the same pair race the unique index; the row exists either way,
+    // holding whatever the other request wrote, so there is no change of ours to announce
     if ((e as { code?: number }).code !== 11000) throw e;
+    return NextResponse.json({ ok: true });
   }
 
-  if (current?.relation !== relation) {
+  if (before?.relation !== relation) {
     void announceAccess({
       projectId,
       recipientId: userId,
       actorId: String(user._id),
       actorName: user.fullName || user.username,
       relation,
-      added: !current,
+      added: !before,
     });
   }
 
@@ -110,7 +118,7 @@ async function announceAccess(change: {
   added: boolean;
 }): Promise<void> {
   try {
-    const project = await Project.findById(change.projectId).select("name").lean();
+    const project = await Project.findById(change.projectId).select("name key").lean();
     const board = project?.name ?? "a board";
     const role = change.relation === "owner" ? "an owner" : "a member";
     await createNotifications({
@@ -121,6 +129,15 @@ async function announceAccess(change: {
       title: change.added
         ? `${change.actorName} added you to ${board} as ${role}`
         : `${change.actorName} made you ${role} of ${board}`,
+      email: project
+        ? {
+            kicker: change.added ? "Added to a board" : "Your role changed",
+            taskKey: project.key,
+            taskTitle: project.name,
+            taskMeta: `You are ${role} of this board`,
+            projectRef: project.key,
+          }
+        : undefined,
     });
   } catch (err) {
     console.error("Failed to announce a board access change:", err);

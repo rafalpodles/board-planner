@@ -4,7 +4,7 @@ import { safeFetch } from "./safe-fetch";
 import { OUTBOUND_CONCURRENCY, runBounded } from "./bounded";
 import { decryptSecret } from "./encryption";
 import { selfOrigin } from "./session";
-import { taskPath } from "./urls";
+import { notificationPath } from "./urls";
 import { DISCORD_NO_MENTIONS, escapeDiscord, escapeSlack } from "./chat-markup";
 import type { NotificationEmail } from "./in-app-notifications";
 
@@ -38,8 +38,8 @@ function line(type: NotificationType, title: string, url?: string): string {
 
 function urlFor(email?: NotificationEmail): string | undefined {
   const origin = selfOrigin();
-  if (!origin || !email?.projectRef || email.taskNumber === undefined) return undefined;
-  return `${origin}${taskPath(email.projectRef, email.taskNumber)}`;
+  const path = email && notificationPath(email);
+  return origin && path ? `${origin}${path}` : undefined;
 }
 
 function bodyFor(

@@ -8,7 +8,7 @@ import { sendEmail, isEmailConfigured } from "@/lib/email";
 import { APP_NAME } from "@/lib/brand";
 import { Pill, renderEmail } from "@/lib/email-template";
 import { selfOrigin } from "@/lib/session";
-import { taskPath } from "@/lib/urls";
+import { notificationPath } from "@/lib/urls";
 import { recipientsWithAccess } from "@/lib/grants";
 
 /**
@@ -23,7 +23,8 @@ export interface NotificationEmail {
   taskPills?: Pill[];
   taskMeta?: string;
   quote?: { who: string; text: string };
-  /** Project key (or id) and task number — together they make the link back into the board. */
+  /** Project key (or id) and task number make the link back into the board; without a task
+   *  number it is the board itself. */
   projectRef?: string;
   taskNumber?: number;
   /** Lets the footer tell an assignee why they got this without a second query per recipient. */
@@ -162,9 +163,12 @@ async function notify({
 function reasonFor(
   type: NotificationType,
   taskKey: string,
-  isAssignee: boolean
+  isAssignee: boolean,
+  boardName: string
 ): string {
   switch (type) {
+    case "board_access":
+      return `You're getting this because your access to ${boardName} changed.`;
     case "task_assigned":
       return `You're getting this because ${taskKey} was assigned to you.`;
     case "mentioned":
@@ -192,16 +196,19 @@ async function sendEmailNotifications(n: {
   // without the button — the alternative is a link to a build-machine literal (BP-316).
   const origin = selfOrigin();
   const e = n.email;
-  const taskUrl =
-    origin && e?.projectRef && e?.taskNumber !== undefined
-      ? `${origin}${taskPath(e.projectRef, e.taskNumber)}`
-      : undefined;
+  const path = e && notificationPath(e);
+  const taskUrl = origin && path ? `${origin}${path}` : undefined;
   const settingsUrl = origin ? `${origin}/settings/notifications` : undefined;
 
   for (const user of users) {
     const taskKey = e?.taskKey ?? "";
     const reason = e
-      ? reasonFor(n.type, taskKey, !!e.assigneeId && e.assigneeId === String(user._id))
+      ? reasonFor(
+          n.type,
+          taskKey,
+          !!e.assigneeId && e.assigneeId === String(user._id),
+          e.taskTitle
+        )
       : n.title;
 
     const { html, text } = renderEmail({
