@@ -1,5 +1,7 @@
-import { escapeRegex, ParsedPR, projectKeyPattern } from "./github";
+import { allowLoopbackIn, escapeRegex, ParsedPR, projectKeyPattern } from "./github";
 import { safeFetch, logUpstreamFailure, readBoundedJson, MAX_RESPONSE_BYTES } from "./safe-fetch";
+
+export const GITLAB_DESTINATION = { allowLoopback: allowLoopbackIn() };
 
 interface GitLabMR {
   iid: number;
@@ -18,10 +20,14 @@ export async function fetchMergeRequests(
 ): Promise<GitLabMR[]> {
   const base = host.replace(/\/+$/, "");
   const url = `${base}/api/v4/projects/${encodeURIComponent(projectPath)}/merge_requests?state=all&per_page=100&order_by=updated_at`;
-  const res = await safeFetch(url, {
-    headers: { "PRIVATE-TOKEN": token },
-    signal: AbortSignal.timeout(15000),
-  });
+  const res = await safeFetch(
+    url,
+    {
+      headers: { "PRIVATE-TOKEN": token },
+      signal: AbortSignal.timeout(15000),
+    },
+    GITLAB_DESTINATION
+  );
   if (!res.ok) {
     await logUpstreamFailure("GitLab", res);
     throw new Error(`GitLab API `);
@@ -94,10 +100,14 @@ function apiBase(host: string, projectPath: string): string {
 }
 
 async function gitlabGet<T>(url: string, token: string): Promise<T> {
-  const res = await safeFetch(url, {
-    headers: { "PRIVATE-TOKEN": token },
-    signal: AbortSignal.timeout(15000),
-  });
+  const res = await safeFetch(
+    url,
+    {
+      headers: { "PRIVATE-TOKEN": token },
+      signal: AbortSignal.timeout(15000),
+    },
+    GITLAB_DESTINATION
+  );
   if (!res.ok) {
     await logUpstreamFailure("GitLab", res);
     throw new Error(`GitLab API `);
