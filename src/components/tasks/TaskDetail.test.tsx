@@ -617,7 +617,6 @@ describe("TaskDetail, the Agent row's handover notice", () => {
   // readiness read, which is the one the focus re-read refreshes
   const readyBoard = project;
   const READY = {
-    owners: [] as string[],
     canAdmin: false,
     repositoryUrl: "https://github.com/acme/tp",
     workerEnabled: true,
@@ -733,18 +732,18 @@ describe("TaskDetail, the Agent row's handover notice", () => {
     ).toBe("Waiting for your machine to take it.");
   });
 
-  // BP-727. The board's own gaps reach both call sites, with the owners the endpoint named
+  // BP-727. The board's own gaps reach both call sites; BP-763: naming the owner's role, not the owner
   const selfAssigned = { assignedBy: { _id: "u1", username: "owner", fullName: "Owner Name" } };
-  const noRepository = { ...READY, repositoryUrl: "", owners: ["Ada"] };
+  const noRepository = { ...READY, repositoryUrl: "" };
 
-  it("names a board with no repository, and its owner, on the rail", async () => {
+  it("names a board with no repository, and the board's owner, on the rail", async () => {
     serve(selfAssigned, readyBoard, noRepository);
     renderDetail();
     await loaded();
 
     const notice = within(screen.getByRole("complementary")).getByTestId("handover-notice");
     expect(notice.dataset.reason).toBe("no-repository");
-    expect(notice.textContent).toContain("its owner, Ada,");
+    expect(notice.textContent).toContain("— the board's owner can add one");
   });
 
   it("names it in the mobile sheet too", async () => {

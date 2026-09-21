@@ -3,10 +3,6 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const getAuthUser = vi.fn();
 const check = vi.fn();
 const projectLean = vi.fn();
-const grantFind = vi.fn();
-const grantLean = vi.fn();
-const userFind = vi.fn();
-const userLean = vi.fn();
 const workerFind = vi.fn();
 const workerLean = vi.fn();
 
@@ -33,11 +29,18 @@ vi.mock("@/models/project", () => ({
     findOne: vi.fn(),
   },
 }));
+const grantFind = vi.fn();
+const userFind = vi.fn();
 vi.mock("@/models/grant", () => ({
-  Grant: { find: (...a: unknown[]) => (grantFind(...a), { select: () => ({ lean: grantLean }) }) },
+  Grant: { find: (...a: unknown[]) => (grantFind(...a), { select: () => ({ lean: async () => [{ subject: OWNER }] }) }) },
 }));
 vi.mock("@/models/user", () => ({
-  User: { find: (...a: unknown[]) => (userFind(...a), { sort: () => ({ lean: userLean }) }) },
+  User: {
+    find: (...a: unknown[]) => (
+      userFind(...a),
+      { sort: () => ({ lean: async () => [{ _id: OWNER, username: "ada", fullName: "Ada Lovelace" }] }) }
+    ),
+  },
 }));
 vi.mock("@/models/worker", () => ({
   Worker: { find: (...a: unknown[]) => (workerFind(...a), { lean: workerLean }) },
@@ -56,10 +59,6 @@ beforeEach(() => {
   getAuthUser.mockResolvedValue({ _id: READER, role: "member" });
   check.mockImplementation(async (_user: unknown, _project: string, need: string) => need === "access");
   projectLean.mockResolvedValue({ _id: PROJECT, repositoryUrl: "https://github.com/acme/orbit" });
-  grantLean.mockResolvedValue([{ subject: OWNER }]);
-  userLean.mockResolvedValue([
-    { _id: OWNER, username: "ada", fullName: "Ada", email: "ada@example.com", role: "member" },
-  ]);
   workerLean.mockResolvedValue([]);
 });
 
@@ -79,26 +78,15 @@ describe("GET handover readiness", () => {
     expect(workerFind.mock.calls[0][0]).toEqual({ owner: READER });
   });
 
-  it("names the board's owners, and only their names", async () => {
-    const { body } = await read();
+  // BP-763: who holds a role on the board is not a member's business, so nobody is named at all
+  it("names none of the board's owners, and does not look them up", async () => {
+    const { status, body } = await read();
 
-    expect(grantFind).toHaveBeenCalledWith({ objectType: "project", object: PROJECT, relation: "owner" });
-    expect(userFind.mock.calls[0][0]).toMatchObject({ kind: { $ne: "machine" } });
-    expect(userFind.mock.calls[0][1]).toBe("username fullName");
-    expect(body.owners).toEqual(["Ada"]);
-  });
-
-  // Who to ask, not a roster: a username is an account handle members have no need of here
-  it("names an owner with no display name by username, and sends no username otherwise", async () => {
-    userLean.mockResolvedValue([
-      { _id: OWNER, username: "ada", fullName: "Ada" },
-      { _id: "o2", username: "kasia", fullName: "" },
-    ]);
-
-    const { body } = await read();
-
-    expect(body.owners).toEqual(["Ada", "kasia"]);
-    expect(JSON.stringify(body)).not.toContain('"ada"');
+    expect(status).toBe(200);
+    expect(body).not.toHaveProperty("owners");
+    expect(JSON.stringify(body)).not.toMatch(/Ada|ada|Lovelace/);
+    expect(grantFind).not.toHaveBeenCalled();
+    expect(userFind).not.toHaveBeenCalled();
   });
 
   it("answers the board's own readiness, fresh, so a focus re-read sees a change made elsewhere", async () => {
