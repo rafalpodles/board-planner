@@ -79,6 +79,43 @@ private struct RecordingTransport: Transport {
     // The body above is a copy of what local-server.ts serves. It used to be written to match the
     // decoder instead, autoMerge and all, so it stayed green for years describing a payload no
     // worker sends — see ConfigDecodingTests for the fixture taken from a running one.
+    // Also the BP-377 case: a worker older than that field sends neither key nor name, and the
+    // fixture above still has to decode — which it does, since both are `String?`.
+    #expect(config.projects.first?.key == nil)
+    #expect(config.projects.first?.label == "p1")
+}
+
+// BP-377. What the Policy pane heads each project's block with, the same shape ProjectOffer's own
+// label already uses.
+@Test func namesABoundProjectTheWayAnOfferAlreadyDoes() async throws {
+    let body = #"""
+    {"apiUrl":"http://localhost:3991","workerName":"rig","projectCount":1,"pollIntervalMs":30000,
+     "projects":[{"project":"p1","key":"TP","name":"Test Project","baseBranch":"main","model":"opus",
+     "reviewModel":"sonnet","maxDiffLines":400,"taskTimeoutMs":900000}]}
+    """#
+    let client = SocketClient(socketPath: "/x",
+                              transport: FakeTransport(chunks: ["HTTP/1.1 200 OK\r\n\r\n", body]))
+
+    let config = try await client.config()
+
+    #expect(config.projects.first?.label == "Test Project · TP")
+}
+
+@Test func fallsBackToWhicheverOfKeyAndNameItHas() {
+    let named = ProjectConfig(
+        project: "p1", key: nil, name: "Test Project", baseBranch: "main", model: "opus",
+        reviewModel: "sonnet", maxDiffLines: 400, taskTimeoutMs: 900_000, blocked: nil)
+    #expect(named.label == "Test Project")
+
+    let keyed = ProjectConfig(
+        project: "p1", key: "TP", name: nil, baseBranch: "main", model: "opus",
+        reviewModel: "sonnet", maxDiffLines: 400, taskTimeoutMs: 900_000, blocked: nil)
+    #expect(keyed.label == "TP")
+
+    let neither = ProjectConfig(
+        project: "p1", key: nil, name: nil, baseBranch: "main", model: "opus",
+        reviewModel: "sonnet", maxDiffLines: 400, taskTimeoutMs: 900_000, blocked: nil)
+    #expect(neither.label == "p1")
 }
 
 @Test func surfacesEventsFromASplitStream() async throws {

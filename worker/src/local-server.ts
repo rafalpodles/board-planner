@@ -22,6 +22,10 @@ import { Telemetry } from "./telemetry.js";
 // bound project reports what it actually resolved to.
 export interface LocalProjectView {
   project: string;
+  // What the operator recognises the project by — empty when the server carries neither, which the
+  // pane itself falls back to the id for (BP-377).
+  key: string;
+  name: string;
   /** Why this project is not being claimed from, or empty when it is. */
   blocked: string;
   baseBranch: string;

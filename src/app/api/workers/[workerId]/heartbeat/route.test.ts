@@ -146,7 +146,9 @@ describe("POST /api/workers/:workerId/heartbeat", () => {
     const json = await (await POST(req, ctx)).json();
 
     expect(json.assignments).toEqual([
-      { project: PROJECT_ID, remote: REMOTE, policy: { model: "sonnet" } },
+      // This route's own projection carries no key/name — see the comment on it in route.ts:
+      // nothing reads its assignments field, only the direct GET does.
+      { project: PROJECT_ID, key: "", name: "", remote: REMOTE, policy: { model: "sonnet" } },
     ]);
   });
 

@@ -468,7 +468,7 @@ describe("assignmentsFor", () => {
 
   it("offers an enabled project whose repository this machine has", () => {
     expect(assignmentsFor(reported, [project()], [PROJECT_ID])).toEqual([
-      { project: PROJECT_ID, remote: REMOTE, policy: {} },
+      { project: PROJECT_ID, key: "", name: "", remote: REMOTE, policy: {} },
     ]);
   });
 
@@ -476,7 +476,31 @@ describe("assignmentsFor", () => {
     const [assignment] = assignmentsFor(reported, [project()], [PROJECT_ID]);
 
     expect(assignment.remote).toBe(REMOTE);
-    expect(Object.keys(assignment).sort()).toEqual(["policy", "project", "remote"]);
+    expect(Object.keys(assignment).sort()).toEqual(["key", "name", "policy", "project", "remote"]);
+  });
+
+  // BP-377. The Policy pane heads each block with this, the same way an offer already carries a
+  // name (BP-375) — without it the pane can only ever show the raw id.
+  it("carries the project's key and name, the way an offer already does", () => {
+    const [assignment] = assignmentsFor(
+      reported,
+      [project({ key: "TP", name: "Test Project" })],
+      [PROJECT_ID]
+    );
+
+    expect(assignment.key).toBe("TP");
+    expect(assignment.name).toBe("Test Project");
+  });
+
+  // A route that selects a narrower projection (the heartbeat's own assignments, which nothing
+  // reads — see the comment on that route) must not throw for want of fields it never asked for.
+  it("falls back to empty strings when the project carries no key or name", () => {
+    const [assignment] = assignmentsFor(reported, [project({ key: undefined, name: undefined })], [
+      PROJECT_ID,
+    ]);
+
+    expect(assignment.key).toBe("");
+    expect(assignment.name).toBe("");
   });
 
   it("skips a project nobody enabled for workers", () => {

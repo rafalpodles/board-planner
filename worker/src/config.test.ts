@@ -280,6 +280,23 @@ describe("parseAssignments", () => {
     expect(assignments[0].policy).toEqual({ autoMerge: true });
   });
 
+  // BP-377. Named the same way an offer already is, so the pane this worker serves over the local
+  // socket has something an operator recognises rather than the id alone.
+  it("carries the project's key and name alongside it", () => {
+    const assignments = parseAssignments([
+      { project: "p1", remote: "git@github.com:o/r.git", key: "TP", name: "Test Project" },
+    ]);
+    expect(assignments[0].key).toBe("TP");
+    expect(assignments[0].name).toBe("Test Project");
+  });
+
+  // A server older than BP-377 sends neither — dropping the entry for want of fields it never
+  // promised would blank the pane for every project rather than just this one's name.
+  it("keeps an assignment missing key and name, rather than dropping it", () => {
+    const assignments = parseAssignments([{ project: "p1", remote: "git@github.com:o/r.git" }]);
+    expect(assignments).toEqual([{ project: "p1", remote: "git@github.com:o/r.git" }]);
+  });
+
   it("drops an entry missing a remote, keeping the rest", () => {
     const assignments = parseAssignments([
       { project: "p1" },

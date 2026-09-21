@@ -107,6 +107,10 @@ export const DEFAULT_POLICY: EffectiveConfig = {
 
 export interface Assignment {
   project: string;
+  // What the project is called — optional, so a server that predates BP-377 still decodes; the
+  // pane falls back to the id when either is absent, exactly as it did before this carried them.
+  key?: string;
+  name?: string;
   // The remote this worker itself reported. It resolves back to a local checkout through the
   // worker's own inventory, so the server never names a directory on this machine.
   remote: string;

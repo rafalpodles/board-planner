@@ -776,6 +776,10 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       pollIntervalMs: policy.pollIntervalMs,
       projects: [...bound.entries()].map(([project, repo]) => ({
         project,
+        // What the operator recognises the project by, the way an offer already names one — falls
+        // back to the id in the pane itself when a server predating this carries neither (BP-377).
+        key: assignments.find((a) => a.project === project)?.key ?? "",
+        name: assignments.find((a) => a.project === project)?.name ?? "",
         // Empty when the project is claimable. Non-empty is the answer to "why is this machine
         // sitting on a project and doing nothing", which otherwise has no answer anywhere — a
         // poisoned checkout, the checkout failing the gates' own checks, or the board refusing the

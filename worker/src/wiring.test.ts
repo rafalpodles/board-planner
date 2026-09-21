@@ -1712,6 +1712,26 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       expect(run.localConfig?.().projects[0].blocked).toBe("");
     });
 
+    // BP-377. The Policy pane's only way to know what a bound project is called, rather than the
+    // id it always had.
+    it("says on the socket what a bound project is called", async () => {
+      const run = await runOneTask(undefined, undefined, {
+        extraAssignmentFields: { key: "TP", name: "Test Project" },
+      });
+
+      expect(run.localConfig?.().projects[0].key).toBe("TP");
+      expect(run.localConfig?.().projects[0].name).toBe("Test Project");
+    });
+
+    // A server older than BP-377 sends neither — the pane falls back to the id itself, but the
+    // socket has to hand it an empty string rather than `undefined` breaking the app's decode.
+    it("falls back to empty strings when the server names no key or name", async () => {
+      const run = await runOneTask();
+
+      expect(run.localConfig?.().projects[0].key).toBe("");
+      expect(run.localConfig?.().projects[0].name).toBe("");
+    });
+
     // The other answer to the same question (BP-512): a checkout that is fine, on a board that
     // refuses to claim at all. The cockpit has to show the board's reason in the same place.
     it("says on the socket why the board itself refused the claim", async () => {

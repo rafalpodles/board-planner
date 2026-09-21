@@ -4,6 +4,10 @@ import Foundation
 // show. Reporting one would put a number on screen that no run is using.
 public struct ProjectConfig: Decodable, Sendable {
     public let project: String
+    // What an operator recognises the project by. Optional so a worker older than BP-377 still
+    // decodes, the same reason blocked below is optional (BP-512).
+    public let key: String?
+    public let name: String?
     // autoMerge stood here and the worker has not sent it since the flag was retired — an agent
     // merges because its sequence carries a Merge step. A required field nothing sends made the
     // whole response undecodable, and `try?` at the call site turned that into a config of nil:
@@ -17,6 +21,17 @@ public struct ProjectConfig: Decodable, Sendable {
     // board refusing the claim outright — or empty when it is. Optional so a worker older than
     // this field still decodes, for the reason autoMerge's comment above gives (BP-512).
     public let blocked: String?
+
+    /// What an operator recognises it by, the same shape as `ProjectOffer.label` — but with no
+    /// repository URL to fall back to, since a bound project already has its checkout.
+    public var label: String {
+        let name = self.name ?? ""
+        let key = self.key ?? ""
+        if !name.isEmpty && !key.isEmpty { return "\(name) · \(key)" }
+        if !name.isEmpty { return name }
+        if !key.isEmpty { return key }
+        return project
+    }
 }
 
 public struct GithubAccountChoice: Decodable, Sendable, Identifiable, Equatable {
