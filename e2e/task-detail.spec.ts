@@ -413,7 +413,9 @@ test("uploads: an image attaches into the description, an oversized one is refus
   await page.getByRole("button", { name: "Edit", exact: true }).click();
   const descriptionField = page
     .locator("section")
-    .filter({ hasText: "Description" })
+    // By its heading exactly: hasText is a case-insensitive substring, and the History panel below
+    // now says "edited the description" in a section of its own that also holds a textarea
+    .filter({ has: page.getByText("Description", { exact: true }) })
     .locator("textarea");
   const fileInput = page.locator('input[type="file"]');
 

@@ -58,7 +58,10 @@ test("an edit appears in History without a reload, and so does a description cha
 
   await test.step("a description change is recorded at all, and listed the same way", async () => {
     await page.getByRole("button", { name: "Edit", exact: true }).click();
-    const field = page.locator("section").filter({ hasText: "Description" }).locator("textarea");
+    const field = page
+      .locator("section")
+      .filter({ has: page.getByText("Description", { exact: true }) })
+      .locator("textarea");
     await field.fill("What this task says now");
     const saved = write(page, "PUT", `/tasks/${SIBLING_TASK_ID}`);
     await field.blur();
