@@ -41,15 +41,24 @@ interface DigestLine {
   url?: string;
 }
 
-// A handful of titles lead with the row's own key ("TP-2 assigned to you"), most don't ("New
-// comment on TP-2", "admin mentioned you in TP-2", and task_linked's key mid-sentence) — so the
-// key is stripped wherever it sits, as a whole word, rather than only at the front. Any other
-// task's key in the same sentence (the blocker in a task_linked row) is left alone.
+// A handful of titles lead with the row's own key ("TP-2 assigned to you"), a couple trail with
+// it ("New comment on TP-2", "admin mentioned you in TP-2") — stripped at either end, both safe
+// since nothing else in the sentence sits where the key does.
+//
+// Deliberately NOT stripped in the middle. task_linked's sentences (link-phrasing.ts) use the
+// row's own key as a genuine grammatical object — "rafal marked TP-3 as blocked by TP-4",
+// "rafal removed TP-4 from TP-3's children" — and blanking it there breaks the sentence rather
+// than de-duplicating it ("marked as blocked by TP-4" reads as if the actor were the one marked;
+// "from 's children" is outright garbled). A title cannot tell which of its own words is "self"
+// without redoing what generated it, so the safe fix is narrower than the ticket's "wherever it
+// appears": the key stays duplicated on a row whose own reference sits mid-sentence, which is
+// still correct, just not deduplicated. BP-725 tracks closing that gap with a structured
+// self/other reference instead of text surgery.
 function stripKey(title: string, key: string): string {
   if (!key) return title;
-  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const stripped = title.replace(new RegExp(`\\b${escaped}\\b`), "");
-  return stripped === title ? title : stripped.replace(/\s{2,}/g, " ").trim();
+  if (title.startsWith(`${key} `)) return title.slice(key.length + 1);
+  if (title.endsWith(` ${key}`)) return title.slice(0, title.length - key.length - 1);
+  return title;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

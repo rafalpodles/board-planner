@@ -147,8 +147,11 @@ describe("when the digest is due", () => {
 });
 
 // BP-692. `lineFor` strips the row's own key from the title so it is not printed twice — once as
-// the row's key, once inside the sentence. Only two of the app's title shapes lead with it; the
-// rest carry it trailing or mid-sentence, so one case per shape here is what would have caught it.
+// the row's key, once inside the sentence — at either end of the title, where stripping it is
+// unambiguously safe. One case per shape here is what would have caught the original bug (only
+// the leading shape was stripped); the mid-sentence cases below are the control that keeps a
+// blanket "strip anywhere" from coming back — two independent reviews found it corrupts
+// task_linked's sentences (see the comment on stripKey and BP-725).
 describe("lineFor", () => {
   const PROJECT_REF = { _id: PROJECT, key: "TP" };
   const origin = "https://app.example.com";
@@ -189,7 +192,11 @@ describe("lineFor", () => {
     expect(line.title).toBe("admin mentioned you in");
   });
 
-  it("strips a mid-sentence key (task_linked), leaving the other task's key alone", () => {
+  // The control that matters most: task_linked's key is a grammatical object mid-sentence
+  // ("rafal marked TP-3 as blocked by TP-4"). Stripping it there reads as if rafal, not the
+  // task, were marked as blocked — worse than the duplication it would remove — so this row
+  // keeps its duplicate rather than being corrupted. BP-725 tracks closing this gap properly.
+  it("leaves a mid-sentence key alone (task_linked), rather than corrupting the sentence", () => {
     const line = lineFor(
       {
         title: "rafal marked TP-3 as blocked by TP-4",
@@ -198,15 +205,42 @@ describe("lineFor", () => {
       },
       origin
     );
-    expect(line.title).toBe("rafal marked as blocked by TP-4");
+    expect(line.title).toBe("rafal marked TP-3 as blocked by TP-4");
   });
 
-  it("strips a mid-sentence key (board feed)", () => {
+  // The other direction of the same event puts the row's own key last, where stripping is safe.
+  it("strips a task_linked key when its own direction happens to put it at the end", () => {
+    const line = lineFor(
+      {
+        title: "rafal marked TP-4 as blocked by TP-3",
+        task: { taskNumber: 3 },
+        project: PROJECT_REF,
+      },
+      origin
+    );
+    expect(line.title).toBe("rafal marked TP-4 as blocked by");
+  });
+
+  it("leaves a mid-sentence key alone (board feed)", () => {
     const line = lineFor(
       { title: "New task TP-5 in Board Planner", task: { taskNumber: 5 }, project: PROJECT_REF },
       origin
     );
-    expect(line.title).toBe("New task in Board Planner");
+    expect(line.title).toBe("New task TP-5 in Board Planner");
+  });
+
+  // The apostrophe case a blanket mid-sentence strip could not survive: "…TP-3's children" would
+  // lose the key and leave "…'s children" behind. Left alone here for the same reason as above.
+  it("leaves a possessive mid-sentence key alone", () => {
+    const line = lineFor(
+      {
+        title: "rafal removed TP-4 from TP-3's children",
+        task: { taskNumber: 3 },
+        project: PROJECT_REF,
+      },
+      origin
+    );
+    expect(line.title).toBe("rafal removed TP-4 from TP-3's children");
   });
 
   // TP-2 must not eat the leading digit of TP-20 — a plain substring replace would
