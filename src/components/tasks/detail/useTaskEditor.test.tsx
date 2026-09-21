@@ -31,7 +31,7 @@ const baseTask = {
 } as unknown as ApiTask;
 
 function Harness({ task }: { task: ApiTask }) {
-  const { draft, set, autoSaveState, autoSaveError, retry } = useTaskEditor("p1", task);
+  const { draft, set, autoSaveState, autoSaveError, retry, savedCount } = useTaskEditor("p1", task);
   return (
     <div>
       <input
@@ -40,6 +40,7 @@ function Harness({ task }: { task: ApiTask }) {
         onChange={(e) => set("title", e.target.value)}
       />
       <span data-testid="state">{autoSaveState}</span>
+      <span data-testid="saved-count">{savedCount}</span>
       <span data-testid="error">{autoSaveError ?? ""}</span>
       <span data-testid="priority">{draft.priority}</span>
       <button onClick={() => set("priority", "low")}>lower priority</button>
@@ -108,6 +109,33 @@ describe("useTaskEditor", () => {
     const { unmount } = render(<Harness task={baseTask} />);
     await act(async () => unmount());
     expect(api.put).not.toHaveBeenCalled();
+  });
+
+  // The history panel refetches on this. `autoSaveState` stays "saved" from one save to the next,
+  // so it cannot tell a listener that another write landed; this has to change on every one.
+  it("counts each accepted save, and only accepted ones", async () => {
+    render(<Harness task={baseTask} />);
+    expect(screen.getByTestId("saved-count").textContent).toBe("0");
+
+    await act(async () => type(titleField(), "First"));
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+    await waitFor(() => expect(screen.getByTestId("saved-count").textContent).toBe("1"));
+
+    await act(async () => type(titleField(), "Second"));
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+    await waitFor(() => expect(screen.getByTestId("saved-count").textContent).toBe("2"));
+
+    api.put.mockRejectedValueOnce(new Error("refused"));
+    await act(async () => type(titleField(), "Third"));
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+    await waitFor(() => expect(screen.getByTestId("state").textContent).toBe("error"));
+    expect(screen.getByTestId("saved-count").textContent).toBe("2");
   });
 
   it("offers a retry that goes out immediately when a save fails", async () => {

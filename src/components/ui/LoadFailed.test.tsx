@@ -16,6 +16,14 @@ describe("LoadFailed", () => {
     expect(alert.querySelector("button")?.textContent).toBe("Retry");
   });
 
+  // A refusal reads the same on every retry, so a button offering one says the page is broken
+  it("offers no Retry when there is nothing a retry could change", () => {
+    render(<LoadFailed message="You do not have access to this board." />);
+
+    expect(screen.getByRole("alert").textContent).toContain("You do not have access to this board.");
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
   it("calls onRetry when the button is pressed", () => {
     const onRetry = vi.fn();
     render(<LoadFailed message="Failed." onRetry={onRetry} />);

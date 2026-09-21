@@ -5074,3 +5074,47 @@ describe("heldRunRefusal", () => {
     expect(refusal?.error).toContain("w1");
   });
 });
+
+describe("updateTask writing a description change to the history", () => {
+  function stored(description: string) {
+    return { _id: "t1", taskNumber: 7, status: "doing", title: "x", description };
+  }
+
+  function setup(before: string, after: string) {
+    vi.clearAllMocks();
+    findById.mockReturnValue({ lean: () => Promise.resolve(customBoard) });
+    findOne.mockReturnValue({
+      lean: () => Promise.resolve(stored(before)),
+      populate: () => ({ lean: () => Promise.resolve(stored(before)) }),
+    });
+    findOneAndUpdate.mockReturnValue({ populate: () => Promise.resolve(stored(after)) });
+  }
+
+  const descriptionEntries = () =>
+    (logActivity as ReturnType<typeof vi.fn>).mock.calls.filter((call) => call[3] === "description");
+
+  // The history panel promises what a task said before, and the description is most of what a task
+  // says. Found by an evaluation in which every role edited one and saw nothing recorded.
+  it("records what the description said before and what it says now", async () => {
+    setup("the old words", "the new words");
+
+    await updateTask("p1", "t1", { description: "the new words" }, "actor");
+
+    expect(logActivity).toHaveBeenCalledWith(
+      "t1",
+      "actor",
+      "updated",
+      "description",
+      "the old words",
+      "the new words"
+    );
+  });
+
+  it("records nothing about a description the update left alone", async () => {
+    setup("unchanged", "unchanged");
+
+    await updateTask("p1", "t1", { title: "y" }, "actor");
+
+    expect(descriptionEntries()).toHaveLength(0);
+  });
+});
