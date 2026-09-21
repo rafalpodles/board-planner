@@ -42,8 +42,9 @@ interface DigestLine {
 }
 
 // A handful of titles lead with the row's own key ("TP-2 assigned to you"), a couple trail with
-// it ("New comment on TP-2", "admin mentioned you in TP-2") — stripped at either end, both safe
-// since nothing else in the sentence sits where the key does.
+// it ("New comment on TP-2", "admin mentioned you in TP-2") — stripped at either end, safe
+// because each of those titles names exactly one task, so nothing else in the sentence could be
+// the missing word.
 //
 // Deliberately NOT stripped in the middle. task_linked's sentences (link-phrasing.ts) use the
 // row's own key as a genuine grammatical object — "rafal marked TP-3 as blocked by TP-4",
@@ -67,7 +68,13 @@ export function lineFor(notification: any, origin: string | null): DigestLine {
   const project = notification.project;
   const hasRef = Boolean(project?.key && task?.taskNumber);
   const key = hasRef ? `${project.key}-${task.taskNumber}` : "";
-  const title = stripKey(notification.title, key);
+  // task_linked is the one type whose sentence names two tasks (link-phrasing.ts), so even the
+  // leading/trailing positions stripKey treats as safe elsewhere are ambiguous here: "rafal
+  // marked TP-4 as blocked by" (key stripped from the end) reads as missing a task, but the
+  // reader has no way to tell it was the row's own key rather than a third one — the sentence
+  // already named TP-4. Left fully alone; BP-725 covers this type entirely, not only its
+  // mid-sentence directions.
+  const title = notification.type === "task_linked" ? notification.title : stripKey(notification.title, key);
   return {
     key: key || "—",
     title,

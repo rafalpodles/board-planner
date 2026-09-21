@@ -192,13 +192,15 @@ describe("lineFor", () => {
     expect(line.title).toBe("admin mentioned you in");
   });
 
-  // The control that matters most: task_linked's key is a grammatical object mid-sentence
-  // ("rafal marked TP-3 as blocked by TP-4"). Stripping it there reads as if rafal, not the
-  // task, were marked as blocked — worse than the duplication it would remove — so this row
-  // keeps its duplicate rather than being corrupted. BP-725 tracks closing this gap properly.
+  // task_linked is left alone entirely, at every position — not just mid-sentence. Its sentences
+  // name two tasks (link-phrasing.ts), so even a key at the very end is ambiguous: "rafal marked
+  // TP-4 as blocked by" already named a different task earlier in the sentence, so a reader
+  // cannot tell whether the missing word is this row's own key or a third one. Every other
+  // stripped type names exactly one task, which is what makes stripping safe for them.
   it("leaves a mid-sentence key alone (task_linked), rather than corrupting the sentence", () => {
     const line = lineFor(
       {
+        type: "task_linked",
         title: "rafal marked TP-3 as blocked by TP-4",
         task: { taskNumber: 3 },
         project: PROJECT_REF,
@@ -208,17 +210,19 @@ describe("lineFor", () => {
     expect(line.title).toBe("rafal marked TP-3 as blocked by TP-4");
   });
 
-  // The other direction of the same event puts the row's own key last, where stripping is safe.
-  it("strips a task_linked key when its own direction happens to put it at the end", () => {
+  // The other direction puts the row's own key last — still not stripped, for the reason above:
+  // the sentence already names TP-4, so a reader cannot tell a trailing gap apart from one.
+  it("leaves a trailing task_linked key alone too, since the sentence already names another task", () => {
     const line = lineFor(
       {
+        type: "task_linked",
         title: "rafal marked TP-4 as blocked by TP-3",
         task: { taskNumber: 3 },
         project: PROJECT_REF,
       },
       origin
     );
-    expect(line.title).toBe("rafal marked TP-4 as blocked by");
+    expect(line.title).toBe("rafal marked TP-4 as blocked by TP-3");
   });
 
   it("leaves a mid-sentence key alone (board feed)", () => {
@@ -234,6 +238,7 @@ describe("lineFor", () => {
   it("leaves a possessive mid-sentence key alone", () => {
     const line = lineFor(
       {
+        type: "task_linked",
         title: "rafal removed TP-4 from TP-3's children",
         task: { taskNumber: 3 },
         project: PROJECT_REF,
