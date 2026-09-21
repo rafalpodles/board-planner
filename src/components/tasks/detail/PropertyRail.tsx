@@ -73,15 +73,9 @@ export type BoardReadiness = ApiHandoverReadiness;
 
 type Blocker = HandoverProblem | { reason: ReadinessGap };
 
-export function namesOf(names: string[]): string {
-  return names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
-}
-
 // Whoever may change the board's settings — an owner, or an instance admin — is told they can
-function whoFixes(owners: string[], canAdmin: boolean): string {
-  if (canAdmin) return "you";
-  if (owners.length === 0) return "an admin";
-  return `${owners.length === 1 ? "its owner" : "its owners"}, ${namesOf(owners)},`;
+function whoFixes(canAdmin: boolean): string {
+  return canAdmin ? "you" : "the board's owner";
 }
 
 function MachineLink({ children }: { children: string }) {
@@ -93,7 +87,6 @@ function MachineLink({ children }: { children: string }) {
 }
 
 interface BlockerContext {
-  owners: string[];
   canAdmin: boolean;
   viewerIsInstanceAdmin: boolean;
   projectKey: string | null;
@@ -103,7 +96,7 @@ interface BlockerContext {
 }
 
 function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }) {
-  const who = whoFixes(ctx.owners, ctx.canAdmin);
+  const who = whoFixes(ctx.canAdmin);
   switch (blocker.reason) {
     case "not-approved-yet":
       return <>A machine only looks at the column work is approved in — move it there when it is ready.</>;
@@ -272,7 +265,6 @@ function HandoverNotice({
     ...gaps.map((reason) => ({ reason })),
   ];
   const ctx: BlockerContext = {
-    owners: board?.owners ?? [],
     canAdmin: !!board?.canAdmin,
     viewerIsInstanceAdmin,
     projectKey,

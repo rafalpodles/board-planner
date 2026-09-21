@@ -187,8 +187,9 @@ test.describe("the Markdown toolbar", () => {
     await expect(page.locator("strong", { hasText: "Ship it" })).toBeVisible();
     await expect(page.locator("em", { hasText: "carefully" })).toBeVisible();
     await expect(page.getByRole("link", { name: "docs", exact: true })).toHaveAttribute("href", "https://");
-    await expect(page.locator("ol > li")).toHaveCount(2);
-    await expect(page.locator("ol > li").first()).toHaveText("one");
+    const description = page.getByRole("heading", { name: "Scope", level: 2 }).locator("xpath=..");
+    await expect(description.locator("ol > li")).toHaveCount(2);
+    await expect(description.locator("ol > li").first()).toHaveText("one");
   });
 
   test("the task's own description editor carries the same toolbar, and saves what it writes", async ({

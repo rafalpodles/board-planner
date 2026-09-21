@@ -1736,8 +1736,6 @@ export interface ApiAgentBlock {
 export type MachineState = "none" | "stale" | "paused" | "stopped" | "failing" | "live";
 
 export interface ApiHandoverReadiness {
-  /** Display names only: who a member can ask to fix the board */
-  owners: string[];
   /** Whether the reader may change this board's settings (an owner, or an instance admin) */
   canAdmin: boolean;
   repositoryUrl: string;

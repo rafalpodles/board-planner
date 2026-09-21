@@ -951,12 +951,11 @@ describe("re-assigning to record an assigner the board never had", () => {
 
 /**
  * BP-727, BP-728. Every requirement at once, the board's own among them, each naming who fixes it
- * — and, when nothing is missing, a line saying what it is waiting for instead of silence.
+ * — and, when nothing is missing, a line saying what it is waiting for instead of silence. BP-763:
+ * who fixes it is a role, never the people holding it.
  */
 describe("the hand-over notice, with the board judged too", () => {
   const OWNER = { _id: "u1", username: "owner", fullName: "Owner Name" } as ApiUser;
-  const ADA = "Ada";
-  const TOMEK = "Tomek";
   const AGENT = [{ _id: "a1", name: "Default" }] as React.ComponentProps<
     typeof PropertyRail
   >["agents"];
@@ -964,7 +963,6 @@ describe("the hand-over notice, with the board judged too", () => {
     repositoryUrl: "https://github.com/acme/orbit",
     workerEnabled: true,
     lockedByInstance: false,
-    owners: [ADA],
     canAdmin: false,
     columns: BOARD.map((c) => ({ role: c.role })),
     machine: "live",
@@ -1011,20 +1009,33 @@ describe("the hand-over notice, with the board judged too", () => {
     expect(notice().textContent).toMatch(/^Nothing will run this yet\. A machine only looks/);
   });
 
-  it("names a board with no repository and its owner", () => {
+  it("names a board with no repository, and the board's owner as who can fix it", () => {
     withBoard({ repositoryUrl: "" });
 
     expect(notice().dataset.reason).toBe("no-repository");
     expect(notice().textContent).toContain(
-      "This board names no repository, so no machine can match it — its owner, Ada, can add one in Project settings → Integrations."
+      "This board names no repository, so no machine can match it — the board's owner can add one in Project settings → Integrations."
     );
   });
 
-  it("names agent runs switched off, and every owner", () => {
-    withBoard({ workerEnabled: false, owners: [ADA, TOMEK] });
+  it("names agent runs switched off, and the board's owner as who can switch them on", () => {
+    withBoard({ workerEnabled: false });
 
     expect(notice().dataset.reason).toBe("runs-off");
-    expect(notice().textContent).toContain("its owners, Ada and Tomek, can switch them on");
+    expect(notice().textContent).toContain(
+      "Agent runs are off for this board — the board's owner can switch them on in Project settings → Workers."
+    );
+  });
+
+  // An answer from a server that still sends names must not put them on screen
+  it("names no owner even when the readiness answer carries names", () => {
+    withBoard({ repositoryUrl: "", workerEnabled: false, owners: ["Marta Kowalczyk"] } as never);
+
+    expect(notice().textContent).not.toContain("Marta");
+    expect(screen.getAllByTestId("handover-problem").map((li) => li.textContent)).toEqual([
+      expect.stringContaining("— the board's owner can add one"),
+      expect.stringContaining("— the board's owner can switch them on"),
+    ]);
   });
 
   // Only an instance admin lifts the lock: never the owners, and "you" only for an instance admin
@@ -1035,7 +1046,7 @@ describe("the hand-over notice, with the board judged too", () => {
     expect(notice().textContent).toBe(
       "Nothing will run this yet. An instance admin has locked agent runs off for this board — an instance admin can lift the lock in Project settings → Workers."
     );
-    expect(notice().textContent).not.toContain("Ada");
+    expect(notice().textContent).not.toContain("owner");
     expect(screen.queryByTestId("handover-waiting")).toBeNull();
   });
 
@@ -1051,7 +1062,7 @@ describe("the hand-over notice, with the board judged too", () => {
 
     expect(problems()).toEqual(["runs-locked", "runs-off"]);
     expect(screen.getAllByTestId("handover-problem")[1].textContent).toBe(
-      "Agent runs are also off — once the lock is lifted, its owner, Ada, can switch them on in Project settings → Workers."
+      "Agent runs are also off — once the lock is lifted, the board's owner can switch them on in Project settings → Workers."
     );
   });
 
@@ -1069,12 +1080,6 @@ describe("the hand-over notice, with the board judged too", () => {
       expect.stringContaining("— you can add one"),
       expect.stringContaining("— you can switch them on"),
     ]);
-  });
-
-  it("falls back to an admin for a board with no owner on record", () => {
-    withBoard({ workerEnabled: false, owners: [] });
-
-    expect(notice().textContent).toContain("— an admin can switch them on");
   });
 
   it("lists the task's problems and the board's together", () => {
@@ -1148,7 +1153,7 @@ describe("the hand-over notice, with the board judged too", () => {
 
     expect(notice().dataset.reason).toBe("missing-columns");
     expect(notice().textContent).toContain(
-      "This board has no Awaiting review or Done column, so no machine can run work on it — its owner, Ada, can give a column that role in Project settings → Board."
+      "This board has no Awaiting review or Done column, so no machine can run work on it — the board's owner can give a column that role in Project settings → Board."
     );
   });
 
@@ -1199,15 +1204,6 @@ describe("the hand-over notice, with the board judged too", () => {
       "It waits on an unfinished blocker, TP-3 — a machine takes it once that is done."
     );
     expect(screen.queryByTestId("handover-waiting")).toBeNull();
-  });
-
-  it("names three owners as a list, and an owner with no display name by username", () => {
-    withBoard({
-      repositoryUrl: "",
-      owners: [ADA, TOMEK, "kasia"],
-    });
-
-    expect(notice().textContent).toContain("its owners, Ada, Tomek and kasia, can add one");
   });
 
   it("says it is waiting for the assignee's own machine when everything is in place", () => {

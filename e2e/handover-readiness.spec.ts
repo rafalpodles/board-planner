@@ -43,22 +43,40 @@ async function openAs(page: Page, who: "admin" | "member", taskNumber = MEMBER_H
     (res) => res.url().endsWith(`/handover`) && res.request().method() === "GET"
   );
   await page.goto(`/projects/${PROJECT_KEY}/tasks/${taskNumber}`);
-  expect((await readiness).status()).toBe(200);
+  const response = await readiness;
+  expect(response.status()).toBe(200);
   await expect(page.getByText(`${PROJECT_KEY}-${taskNumber}`).first()).toBeVisible();
+  return response.json();
 }
 
 test.describe("a member's own task, as the board changes under it", () => {
   // No machine can serve a board with no repository, so connecting one is not yet the advice
-  test("a board with no repository says so and names its owner, and nothing about machines", async ({
+  // BP-763: who can fix it is the owner's role, never the owner's name — on screen or on the wire
+  test("a board with no repository says so and who can fix it, without naming anyone or machines", async ({
     page,
   }) => {
-    await openAs(page, "member");
+    const readiness = await openAs(page, "member");
 
     await expect(notice(page)).toHaveAttribute("data-reason", "no-repository");
     await expect(problems(page)).toHaveCount(0);
     await expect(notice(page)).toHaveText(
-      "Nothing will run this yet. This board names no repository, so no machine can match it — its owner, E2E Owner, can add one in Project settings → Integrations."
+      "Nothing will run this yet. This board names no repository, so no machine can match it — the board's owner can add one in Project settings → Integrations."
     );
+    await expect(notice(page)).not.toContainText("E2E Owner");
+    expect(readiness).not.toHaveProperty("owners");
+    expect(JSON.stringify(readiness)).not.toContain("E2E Owner");
+  });
+
+  test("a reader who may change the board is told they can fix it, and the answer names nobody", async ({
+    page,
+  }) => {
+    const readiness = await openAs(page, "admin");
+
+    await expect(notice(page)).toHaveAttribute("data-reason", "no-repository");
+    await expect(notice(page)).toContainText("— you can add one in Project settings → Integrations.");
+    expect(readiness).toMatchObject({ canAdmin: true });
+    expect(readiness).not.toHaveProperty("owners");
+    expect(JSON.stringify(readiness)).not.toContain("E2E Owner");
   });
 
   test("agent runs switched off say so as one sentence when that is all that is missing", async ({
@@ -71,12 +89,12 @@ test.describe("a member's own task, as the board changes under it", () => {
     await expect(notice(page)).toHaveAttribute("data-reason", "runs-off");
     await expect(problems(page)).toHaveCount(0);
     await expect(notice(page)).toHaveText(
-      "Nothing will run this yet. Agent runs are off for this board — its owner, E2E Owner, can switch them on in Project settings → Workers."
+      "Nothing will run this yet. Agent runs are off for this board — the board's owner can switch them on in Project settings → Workers."
     );
   });
 
   // BP-736: the owner switched runs on and an instance admin locked them off; the lock wins, and
-  // only an instance admin can lift it — the board's owners are not named for it
+  // only an instance admin can lift it — the board's owner is not pointed at for it
   test("a locked board whose owner switched runs on does not read as ready", async ({ page }) => {
     await setBoardReadiness({
       repositoryUrl: HANDOVER_REPOSITORY,
@@ -233,7 +251,7 @@ test.describe("a member's own task, as the board changes under it", () => {
 
     await expect(notice(page)).toHaveAttribute("data-reason", "runs-locked runs-off");
     await expect(problems(page).nth(1)).toHaveText(
-      "Agent runs are also off — once the lock is lifted, its owner, E2E Owner, can switch them on in Project settings → Workers."
+      "Agent runs are also off — once the lock is lifted, the board's owner can switch them on in Project settings → Workers."
     );
   });
 
