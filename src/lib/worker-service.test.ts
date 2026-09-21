@@ -959,6 +959,21 @@ describe("machineStateFor", () => {
     expect(machineStateFor([machine({ preflight })], board, NOW).machine).toBe("live");
   });
 
+  // Order must not decide it: the best machine wins wherever it sits in the list
+  it("keeps the best machine when worse ones come after it", () => {
+    expect(machineStateFor([machine({}), machine({ lastSeenAt: old })], board, NOW).machine).toBe("live");
+    expect(
+      machineStateFor(
+        [
+          machine({ command: "pause", commandIssuedAt: issued, commandAckedAt: acked }),
+          machine({ lastSeenAt: old }),
+        ],
+        board,
+        NOW
+      ).machine
+    ).toBe("paused");
+  });
+
   it("prefers a live machine over a paused one", () => {
     expect(
       machineStateFor(
