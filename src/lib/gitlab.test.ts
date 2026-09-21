@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fetchTaskBranches, matchMRsToTasks, parseGitlabRepo } from "./gitlab";
+import {
+  fetchMergeRequests,
+  fetchTaskBranches,
+  fetchTaskCommits,
+  matchMRsToTasks,
+  parseGitlabRepo,
+} from "./gitlab";
 
 // Hoisted, the way every other spec in this repo declares one: `vi.mock` is lifted above the module
 // body, so a plain `const` is not initialised when the factory runs.
@@ -226,5 +232,98 @@ describe("fetchTaskBranches — which branch belongs to a task", () => {
         lastCommitAt: new Date("2026-08-01T00:00:00Z"),
       },
     ]);
+  });
+});
+
+describe("the loopback carve-out that lets e2e/gitlab-stub.mjs be reached", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    safeFetch.mockImplementation(() => Promise.resolve(new Response("[]", { status: 200 })));
+  });
+
+  it("every GitLab call allows loopback outside production", async () => {
+    await fetchMergeRequests("http://127.0.0.1:9999", "g/p", "token");
+    await fetchTaskBranches("http://127.0.0.1:9999", "g/p", "token", "CP-5");
+    await fetchTaskCommits("http://127.0.0.1:9999", "g/p", "token", "CP-5");
+
+    expect(safeFetch).toHaveBeenCalledTimes(3);
+    for (const call of safeFetch.mock.calls) {
+      expect(call[2]).toEqual({ allowLoopback: true });
+    }
+  });
+
+  it("refuses loopback when the module is loaded in production", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.resetModules();
+    try {
+      const production = await import("./gitlab");
+      expect(production.GITLAB_DESTINATION).toEqual({ allowLoopback: false });
+
+      await production.fetchMergeRequests("http://127.0.0.1:9999", "g/p", "token");
+      expect(safeFetch.mock.calls[0][2]).toEqual({ allowLoopback: false });
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    }
+  });
+});
+
+describe("fetchTaskCommits — which commit belongs to a task", () => {
+  const hit = (title: string, message?: string) => ({
+    id: `${title}-sha`,
+    short_id: title.slice(0, 8),
+    title,
+    ...(message === undefined ? {} : { message }),
+    author_name: "Ada",
+    created_at: "2026-08-01T00:00:00Z",
+  });
+
+  const answering = (hits: ReturnType<typeof hit>[]) =>
+    safeFetch.mockResolvedValue(new Response(JSON.stringify(hits), { status: 200 }));
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("keeps the task's own commit and drops a longer number the search matched as a substring", async () => {
+    answering([hit("GL-3: fix"), hit("GL-30: other")]);
+
+    const commits = await fetchTaskCommits("https://gitlab.com", "g/p", "token", "GL-3");
+
+    expect(commits.map((c) => c.title)).toEqual(["GL-3: fix"]);
+  });
+
+  it("counts a key that appears only in the commit body", async () => {
+    answering([hit("fix the header", "fix the header\n\nRefs GL-3"), hit("GL-30 other", "GL-30 other")]);
+
+    const commits = await fetchTaskCommits("https://gitlab.com", "g/p", "token", "GL-3");
+
+    expect(commits.map((c) => c.title)).toEqual(["fix the header"]);
+  });
+});
+
+describe("a refused GitLab request", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    safeFetch.mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ message: "secret upstream detail" }), { status: 403 })
+      )
+    );
+  });
+
+  it("names the status and not the body, for merge requests", async () => {
+    await expect(fetchMergeRequests("https://gitlab.com", "g/p", "token")).rejects.toThrow(
+      /^GitLab answered 403$/
+    );
+  });
+
+  it("names the status and not the body, for branches and commits", async () => {
+    await expect(fetchTaskBranches("https://gitlab.com", "g/p", "token", "GL-3")).rejects.toThrow(
+      /^GitLab answered 403$/
+    );
+    await expect(fetchTaskCommits("https://gitlab.com", "g/p", "token", "GL-3")).rejects.toThrow(
+      /^GitLab answered 403$/
+    );
   });
 });

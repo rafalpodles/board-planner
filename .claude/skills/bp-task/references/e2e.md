@@ -21,7 +21,7 @@ docker run -d --name bp$N-mongo -p 27$N:27017 mongo:4.4
 E2E_MONGODB_URI=mongodb://localhost:27$N/bp${N}_e2e E2E_PORT=$((30000 + N * 10)) npx playwright test e2e/<name>.spec.ts
 ```
 
-The database name must end in `_e2e`. A run owns `E2E_PORT` through `E2E_PORT+9` — the mail server and its control port are +7 and +8 (BP-465), and GitHub's stub is +9 (BP-443). At the `30000 + N * 10` spacing above, that is the whole block with **nothing spare**, so keeping concurrent runs ten apart is now exact rather than comfortable. `docker rm -fv bp$N-mongo` once the task is done — the `-v` is not optional, see `git-github.md`'s Merge section for why plain `-f` leaks a volume per container.
+The database name must end in `_e2e`. A run owns `E2E_PORT` through `E2E_PORT+9` — the mail server and its control port are +7 and +8 (BP-465), and GitHub's stub is +9 (BP-443). At the `30000 + N * 10` spacing above, that is the whole block with **nothing spare**, so keeping concurrent runs ten apart is now exact rather than comfortable. Outside that block, `E2E_PORT+10000` (the proxied server), `+10001` (Coda stub) and `+10002` (GitLab stub, BP-695) are also taken. `docker rm -fv bp$N-mongo` once the task is done — the `-v` is not optional, see `git-github.md`'s Merge section for why plain `-f` leaks a volume per container.
 
 - Before believing a failure: `ps aux | grep -E "[p]laywright|[n]ext dev"` (a sibling suite), `docker ps` (the container), `df -h /System/Volumes/Data` (a full disk kills Mongo mid-suite and reads as two product bugs).
 - After any `next dev` in the worktree, `rm -rf .next` before `npm run build`, or the build fails on stale generated types.

@@ -1,5 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
-import { BOOTSTRAP_TOKEN, E2E_MONGODB_URI } from "./e2e/seed";
+import { BOOTSTRAP_TOKEN, E2E_ENCRYPTION_KEY, E2E_MONGODB_URI } from "./e2e/seed";
 import { GROUPS } from "./e2e/groups";
 
 // 3987, not the usual 3456: a developer's own dev server and other agents share this machine
@@ -89,6 +89,10 @@ export const RUN_PROXIED_SERVER = process.env.E2E_PROXIED_SERVER === "1";
 const CODA_STUB_PORT = Number(process.env.CODA_STUB_PORT ?? PORT + 10001);
 export const CODA_STUB_URL = `http://127.0.0.1:${CODA_STUB_PORT}`;
 
+// GitLab's API, the same way: `gitlabHost` is per-project, so only a project pointed here reaches it.
+const GITLAB_STUB_PORT = Number(process.env.GITLAB_STUB_PORT ?? PORT + 10002);
+export const GITLAB_STUB_URL = `http://127.0.0.1:${GITLAB_STUB_PORT}`;
+
 /** The seeded database's URI with its host swapped for the proxy's; credentials and options ride along. */
 function throughMongoProxy(uri: string): string {
   // One host, plain scheme: the proxy is a single TCP pipe, so a host list or an SRV record has
@@ -177,7 +181,7 @@ function devServerEnv(origin: string) {
     // Storing a project's chat webhook URL needs it (BP-372), and so does the personal one the
     // notification grid offers. Without it those routes answer 503 and the specs that drive
     // them assert a refusal instead of the encryption they exist to prove.
-    ENCRYPTION_KEY: "e2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee2ee",
+    ENCRYPTION_KEY: E2E_ENCRYPTION_KEY,
     // Two things now, and the second is not cosmetic. It turns off Next's dev indicator, which
     // paints over the bottom-left of every page and takes a real click meant for a bottom
     // sheet's action row (BP-589) — and it mounts `POST /api/e2e/digest`, which runs a digest
@@ -317,6 +321,15 @@ export default defineConfig({
       stdout: "pipe",
       stderr: "pipe",
       env: { CODA_STUB_PORT: String(CODA_STUB_PORT) },
+    },
+    {
+      command: `node e2e/gitlab-stub.mjs`,
+      url: `${GITLAB_STUB_URL}/health`,
+      reuseExistingServer: false,
+      timeout: 30_000,
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { GITLAB_STUB_PORT: String(GITLAB_STUB_PORT) },
     },
     {
       command: `npm run dev -- --port ${PORT}`,

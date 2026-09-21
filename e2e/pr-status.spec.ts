@@ -334,8 +334,8 @@ test("a refused refresh says which refusal it was", async ({ page, request }) =>
  *
  * Narrower than it first looks, and the comment that stood here overclaimed it: a sync writes
  * `ci: "none"`, so what this drives is the `!== "none"` half of `pullRequestLook`. The absent-`ci`
- * half — every link stored before BP-443, and every GitLab link — cannot be produced by a spec
- * that runs a real sync, and is pinned in `PullRequestBadge.test.tsx` instead.
+ * half — every link stored before BP-443, and every GitLab link (`gitlab-activity.spec.ts` syncs
+ * one, but GitLab links carry no `ci`) — is pinned in `PullRequestBadge.test.tsx`.
  */
 test("a pull request nothing has run against reads as open", async ({ page, request }) => {
   await github(request, { pulls: [pull()], checks: { [HEAD]: { check_runs: [] } } });
