@@ -4,6 +4,7 @@ import { connectDB } from "./db";
 import { User } from "@/models/user";
 import { ApiToken } from "@/models/apiToken";
 import { OAuthToken } from "@/models/oauthToken";
+import { OAuthClient } from "@/models/oauthClient";
 import { sha256 } from "./oauth";
 import {
   ProvenanceError,
@@ -105,6 +106,16 @@ async function verifyOAuthAccessToken(token: string): Promise<IUser | null> {
   // than "not shown to be expired" (BP-444).
   const expiresAt = record.accessExpiresAt?.getTime();
   if (!Number.isFinite(expiresAt) || (expiresAt as number) < Date.now()) return null;
+
+  // The client's own deletion cascade (clients/route.ts) deletes this row's client last-but-one —
+  // deliberately, so a concurrent grant's own existence check (token/route.ts) has something
+  // reliable to read. But that ordering only closes the race at *issuance*; a token issued earlier
+  // and still sitting in this collection stays readable here regardless of ordering if any one
+  // step of that four-part, non-transactional cascade fails partway through. Checked here too, so
+  // the cascade's ordering stops being the only thing standing between a deleted client and a
+  // token that still verifies (BP-747 review).
+  const clientStillExists = await OAuthClient.exists({ clientId: record.clientId });
+  if (!clientStillExists) return null;
 
   const user = await User.findById(record.user);
   if (!user) return null;

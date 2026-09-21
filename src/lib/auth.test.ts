@@ -4,6 +4,7 @@ const userFindById = vi.fn();
 const apiTokenFind = vi.fn();
 const apiTokenFindByIdAndUpdate = vi.fn();
 const oauthTokenFindOne = vi.fn();
+const oauthClientExists = vi.fn();
 const sessionFindOne = vi.fn();
 const sessionUpdateOne = vi.fn();
 const bcryptCompare = vi.fn();
@@ -24,6 +25,7 @@ vi.mock("@/models/apiToken", () => ({
   ApiToken: { find: apiTokenFind, findByIdAndUpdate: apiTokenFindByIdAndUpdate },
 }));
 vi.mock("@/models/oauthToken", () => ({ OAuthToken: { findOne: oauthTokenFindOne } }));
+vi.mock("@/models/oauthClient", () => ({ OAuthClient: { exists: oauthClientExists } }));
 vi.mock("@/models/session", () => ({
   Session: { findOne: sessionFindOne, updateOne: sessionUpdateOne },
 }));
@@ -72,6 +74,7 @@ beforeEach(() => {
   apiTokenFind.mockReturnValue({ lean: () => Promise.resolve([]) });
   apiTokenFindByIdAndUpdate.mockReturnValue(Promise.resolve(null));
   oauthTokenFindOne.mockResolvedValue(null);
+  oauthClientExists.mockResolvedValue({ _id: "c1" });
   userFindById.mockResolvedValue(user());
   bcryptCompare.mockResolvedValue(false);
 });
@@ -184,6 +187,29 @@ describe("getAuthUser — an OAuth row that cannot be shown to be live", () => {
     await expect(
       getAuthUser(request({ authorization: `Bearer ${MACHINE_TOKEN}` }))
     ).resolves.toMatchObject({ username: "owner" });
+  });
+
+  // BP-747 review: the client's own deletion cascade (clients/route.ts) is four separate,
+  // non-transactional writes. Ordering the client row first closes the race with a concurrent
+  // grant, but a token already sitting in this collection stays readable here regardless of
+  // ordering if any later step of that cascade never runs — this is the check that does not
+  // depend on the cascade completing at all.
+  it("refuses a token whose client no longer exists, live row or not", async () => {
+    oauthTokenFindOne.mockResolvedValue({
+      clientId: "deleted-client",
+      user: "u1",
+      accessExpiresAt: new Date(Date.now() + DAY_MS),
+      allowedProjects: [],
+    });
+    oauthClientExists.mockResolvedValue(null);
+
+    await expect(
+      getAuthUser(request({ authorization: `Bearer ${MACHINE_TOKEN}` }))
+    ).resolves.toBeNull();
+    expect(oauthClientExists).toHaveBeenCalledWith({ clientId: "deleted-client" });
+    // Refused before the user lookup — the same "the token's refusal, not the user's" shape as
+    // the expiry checks above
+    expect(userFindById).not.toHaveBeenCalled();
   });
 });
 
