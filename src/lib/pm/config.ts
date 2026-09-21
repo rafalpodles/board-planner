@@ -210,6 +210,14 @@ const EMPTY_OAUTH = {
   status: "unconfigured" as const,
 };
 
+const EMPTY_OAUTH_CLIENT = {
+  clientSecret: "",
+  accessToken: "",
+  refreshToken: "",
+  expiresAt: null,
+  status: "unconfigured" as const,
+};
+
 // Mongoose quirk: a spread subdocument keeps its `_doc`, which an update casts from instead of the new fields
 function plainOauth(oauth: IPmMcpOauth): IPmMcpOauth {
   const subdocument = oauth as IPmMcpOauth & { toObject?: () => IPmMcpOauth };
@@ -265,8 +273,8 @@ export function mergeMcpServerTokens(
       // client_id to the new server. An echo of what was stored is not an admin typing a new one.
       const echoesPriorClientId =
         !sameServer && transient.oauthClientId === prior?.oauth?.clientId;
-      if (transient.oauthClientId && !echoesPriorClientId) {
-        oauth.clientId = transient.oauthClientId;
+      if (transient.oauthClientId && !echoesPriorClientId && transient.oauthClientId !== oauth.clientId) {
+        oauth = { ...oauth, ...EMPTY_OAUTH_CLIENT, clientId: transient.oauthClientId };
       }
       if (transient.oauthClientSecret) {
         oauth.clientSecret = encryptSecret(transient.oauthClientSecret);

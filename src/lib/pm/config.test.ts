@@ -195,14 +195,26 @@ describe("mergeMcpServerTokens and moved OAuth credentials", () => {
 // BP-707. The PUT hands the merge the project as loaded, so `prior.oauth` is a Mongoose
 // subdocument, and what matters is what the update then writes — not what the merge returned.
 describe("mergeMcpServerTokens against a stored project", () => {
-  function writtenOauth(typed: Record<string, unknown>) {
+  const connected = {
+    clientId: "old-client",
+    clientSecret: "enc:old-secret",
+    accessToken: "enc:old-access",
+    refreshToken: "enc:old-refresh",
+    expiresAt: new Date("2030-01-01T00:00:00Z"),
+    status: "connected",
+  };
+
+  function writtenOauth(
+    typed: Record<string, unknown>,
+    stored: Record<string, unknown> = { clientId: "mistyped", clientSecret: "enc:mistyped", status: "unconfigured" }
+  ) {
     const project = Project.hydrate({
       _id: "e2e00000000000000000c001",
       name: "p",
       key: "P",
       pm: {
         mcpServers: [
-          server({ authType: "oauth", oauth: { clientId: "mistyped", clientSecret: "enc:mistyped", status: "unconfigured" } }),
+          server({ authType: "oauth", oauth: stored }),
         ],
       },
     });
@@ -223,6 +235,30 @@ describe("mergeMcpServerTokens against a stored project", () => {
 
   it("keeps the stored ones when nothing is typed", () => {
     expect(writtenOauth({})).toMatchObject({ clientId: "mistyped", clientSecret: "enc:mistyped" });
+  });
+
+  it("gives a different client id typed without a secret none of the old client's secret or tokens", () => {
+    expect(writtenOauth({ oauthClientId: "new-client" }, connected)).toMatchObject({
+      clientId: "new-client",
+      clientSecret: "",
+      accessToken: "",
+      refreshToken: "",
+      expiresAt: null,
+      status: "unconfigured",
+    });
+  });
+
+  it("keeps a secret typed in the same save as the new client id", () => {
+    expect(writtenOauth({ oauthClientId: "new-client", oauthClientSecret: "new-secret" }, connected)).toMatchObject({
+      clientId: "new-client",
+      clientSecret: "enc:new-secret",
+      accessToken: "",
+      status: "unconfigured",
+    });
+  });
+
+  it("keeps the connection when the page posts the stored client id back", () => {
+    expect(writtenOauth({ oauthClientId: "old-client" }, connected)).toMatchObject(connected);
   });
 });
 
