@@ -2,35 +2,17 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const create = vi.fn();
 const insertMany = vi.fn();
-const updateOne = vi.fn();
-const deleteOne = vi.fn();
-const latestRow = vi.fn();
-const findOne = vi.fn();
-const sort = vi.fn();
 
-vi.mock("@/models/activityLog", () => ({
-  ActivityLog: {
-    create,
-    insertMany,
-    updateOne,
-    deleteOne,
-    findOne,
-  },
-}));
+vi.mock("@/models/activityLog", () => ({ ActivityLog: { create, insertMany } }));
 
-const { logActivity, logActivities, logEditSession, EDIT_SESSION_MS } = await import("./activity");
+const { logActivity, logActivities, editSessions, presentSessions, EDIT_SESSION_MS } = await import(
+  "./activity"
+);
 
 beforeEach(() => {
   vi.clearAllMocks();
   create.mockReset();
   insertMany.mockReset();
-  updateOne.mockReset();
-  deleteOne.mockReset();
-  latestRow.mockReset();
-  findOne.mockReset();
-  sort.mockReset();
-  sort.mockReturnValue({ select: () => ({ lean: latestRow }) });
-  findOne.mockReturnValue({ sort });
 });
 
 /**
@@ -134,73 +116,90 @@ describe("logActivity", () => {
   });
 });
 
-describe("logEditSession", () => {
-  const row = (over: Record<string, unknown> = {}) => ({
-    _id: "row1",
+describe("editSessions", () => {
+  const t0 = new Date("2026-09-21T10:00:00Z").getTime();
+  let n = 0;
+  const row = (minutesAgo: number, over: Record<string, unknown> = {}) => ({
+    _id: `r${++n}`,
     user: "u1",
     action: "updated",
     field: "description",
-    oldValue: "before the session",
-    createdAt: new Date(Date.now() - 60_000),
+    customField: false,
+    createdAt: new Date(t0 - minutesAgo * 60_000),
     ...over,
   });
+  const ids = (sessions: ReturnType<typeof editSessions>) =>
+    sessions.map((s) => [String(s.newest._id), String(s.oldest._id)]);
 
-  // The query is the whole of what makes a session: any task's latest row, or the oldest, would fold
-  // one task's edit into another's history
-  it("looks at this task's newest row and no other", async () => {
-    latestRow.mockResolvedValue(null);
-
-    await logEditSession("t1", "u1", "description", "a", "b");
-
-    expect(findOne).toHaveBeenCalledWith({ task: "t1" });
-    expect(sort).toHaveBeenCalledWith({ createdAt: -1, _id: -1 });
+  it("folds one person's saves of one typed field into a session", () => {
+    const a = row(1);
+    const b = row(3);
+    const c = row(5);
+    expect(ids(editSessions([a, b, c] as never))).toEqual([[a._id, c._id]]);
   });
 
-  it("writes a new row when nothing is in progress", async () => {
-    latestRow.mockResolvedValue(null);
-
-    await logEditSession("t1", "u1", "description", "a", "b");
-
-    expect(create).toHaveBeenCalledWith({
-      task: "t1",
-      user: "u1",
-      action: "updated",
-      field: "description",
-      oldValue: "a",
-      newValue: "b",
-    });
-  });
-
-  // Typing a paragraph saved it dozens of times; each save was a row with the whole text in it
-  it("extends the same person's edit instead of adding a row, keeping what it said before", async () => {
-    latestRow.mockResolvedValue(row());
-
-    await logEditSession("t1", "u1", "description", "half typed", "fully typed");
-
-    expect(create).not.toHaveBeenCalled();
-    expect(updateOne).toHaveBeenCalledWith({ _id: "row1" }, { $set: { newValue: "fully typed" } });
-  });
-
-  it("leaves no row when the session ends where it began", async () => {
-    latestRow.mockResolvedValue(row());
-
-    await logEditSession("t1", "u1", "description", "something", "before the session");
-
-    expect(deleteOne).toHaveBeenCalledWith({ _id: "row1" });
-    expect(create).not.toHaveBeenCalled();
+  it("measures the gap between saves, not the length of the session", () => {
+    const rows = [row(0), row(8), row(16), row(24)];
+    expect(editSessions(rows as never)).toHaveLength(1);
   });
 
   it.each([
-    ["somebody else's edit", { user: "u2" }],
-    ["an edit of another field", { field: "title" }],
-    ["an older edit", { createdAt: new Date(Date.now() - EDIT_SESSION_MS - 1_000) }],
-    ["a row that is not an edit", { action: "status_changed" }],
-  ])("starts a new row after %s", async (_label, over) => {
-    latestRow.mockResolvedValue(row(over));
+    ["somebody else's save", { user: "u2" }],
+    ["another field", { field: "title" }],
+    ["a project field that happens to share the name", { customField: true }],
+    ["a change that is not a typed edit", { action: "status_changed", field: "status" }],
+    ["a pick from a list", { field: "priority" }],
+  ])("keeps %s apart", (_label, over) => {
+    const rows = [row(1), row(2, over), row(3)];
+    expect(editSessions(rows as never)).toHaveLength(3);
+  });
 
-    await logEditSession("t1", "u1", "description", "a", "b");
+  it("ends a session after a pause longer than the window", () => {
+    const rows = [row(0), row(EDIT_SESSION_MS / 60_000 + 1)];
+    expect(editSessions(rows as never)).toHaveLength(2);
+  });
 
-    expect(updateOne).not.toHaveBeenCalled();
-    expect(create).toHaveBeenCalledOnce();
+  it("folds a project's own text fields as well", () => {
+    const rows = [row(1, { field: "Notes", customField: true }), row(2, { field: "Notes", customField: true })];
+    expect(editSessions(rows as never)).toHaveLength(1);
+  });
+});
+
+describe("presentSessions", () => {
+  const full = (id: string, oldValue: string, newValue: string, over: Record<string, unknown> = {}) => ({
+    _id: id,
+    field: "title",
+    customField: false,
+    oldValue,
+    newValue,
+    ...over,
+  });
+  const session = (newest: string, oldest: string) => ({
+    newest: { _id: newest },
+    oldest: { _id: oldest },
+  });
+
+  it("shows a session as what the field said before it and what it says after", () => {
+    const shown = presentSessions([session("b", "a")] as never, [full("a", "one", "two"), full("b", "two", "three")]);
+    expect(shown).toEqual([expect.objectContaining({ _id: "b", oldValue: "one", newValue: "three" })]);
+  });
+
+  it("drops a session that ended where it began", () => {
+    const shown = presentSessions([session("b", "a")] as never, [full("a", "one", "two"), full("b", "two", "one")]);
+    expect(shown).toEqual([]);
+  });
+
+  // A single row is a real change whatever it says
+  it("keeps a single row as written", () => {
+    const shown = presentSessions([session("a", "a")] as never, [full("a", "one", "two")]);
+    expect(shown).toEqual([expect.objectContaining({ oldValue: "one", newValue: "two" })]);
+  });
+
+  it("omits the description's new text, which the history never shows", () => {
+    const shown = presentSessions(
+      [session("a", "a"), session("c", "c")] as never,
+      [full("a", "old", "new", { field: "description" }), full("c", "x", "y", { field: "description", customField: true })]
+    );
+    expect(shown.map((r) => r.newValue)).toEqual(["", "y"]);
   });
 });

@@ -50,7 +50,6 @@ describe("ActivityTimeline", () => {
     );
   });
 
-  // Sixty characters of a before and an after usually match, so the sentence said "from X… to X…"
   it("offers the whole of what a description said before, rather than a clipped sentence", async () => {
     const before = "A long first paragraph that is well over sixty characters in length.\nAnd a second line.";
     api.get.mockResolvedValue([
@@ -72,6 +71,33 @@ describe("ActivityTimeline", () => {
     await waitFor(() => expect(screen.getByText(/added a description/)).toBeTruthy());
 
     expect(screen.queryByText("What it said before")).toBeNull();
+  });
+
+  it("reads a project field called description as that field, not the task's description", async () => {
+    api.get.mockResolvedValue([
+      { ...log, action: "updated", field: "description", customField: true, oldValue: "a", newValue: "b" },
+    ]);
+    render(<ActivityTimeline projectId="TP" taskId="t1" />);
+    await waitFor(() => expect(screen.getByText(/changed description from a to b/)).toBeTruthy());
+
+    expect(screen.queryByText("What it said before")).toBeNull();
+  });
+
+  it("waits until it is shown to read again, and then reads once", async () => {
+    api.get.mockResolvedValue([log]);
+    const { rerender } = render(<ActivityTimeline projectId="TP" taskId="t1" refreshKey={0} visible={false} />);
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(1));
+
+    rerender(<ActivityTimeline projectId="TP" taskId="t1" refreshKey={1} visible={false} />);
+    rerender(<ActivityTimeline projectId="TP" taskId="t1" refreshKey={2} visible={false} />);
+    expect(api.get).toHaveBeenCalledTimes(1);
+
+    rerender(<ActivityTimeline projectId="TP" taskId="t1" refreshKey={2} visible />);
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2));
+
+    rerender(<ActivityTimeline projectId="TP" taskId="t1" refreshKey={2} visible={false} />);
+    rerender(<ActivityTimeline projectId="TP" taskId="t1" refreshKey={2} visible />);
+    expect(api.get).toHaveBeenCalledTimes(2);
   });
 
   it("marks a cleared value as empty rather than trailing off", async () => {

@@ -160,7 +160,7 @@ vi.mock("@/models/comment", () => ({
 }));
 const sprintExists = vi.fn();
 vi.mock("@/models/sprint", () => ({ Sprint: { exists: sprintExists } }));
-vi.mock("@/lib/activity", () => ({ logActivity: vi.fn(), logEditSession: vi.fn() }));
+vi.mock("@/lib/activity", () => ({ logActivity: vi.fn(), logActivities: vi.fn() }));
 vi.mock("@/lib/webhooks", () => ({ dispatchWebhooks: vi.fn() }));
 vi.mock("@/lib/notifications", () => ({ dispatchNotifications: vi.fn() }));
 vi.mock("@/lib/in-app-notifications", () => ({
@@ -216,7 +216,7 @@ const {
   heldRunRefusal,
 } = await import("./task-service");
 
-const { logActivity, logEditSession } = await import("@/lib/activity");
+const { logActivity, logActivities } = await import("@/lib/activity");
 const { dispatchWebhooks } = await import("@/lib/webhooks");
 const { dispatchNotifications } = await import("@/lib/notifications");
 
@@ -1710,9 +1710,9 @@ describe("updateTask writing project fields to the history", () => {
   }
 
   function fieldEntries() {
-    return (logActivity as ReturnType<typeof vi.fn>).mock.calls.filter(
-      (call) => call[3] === "Difficulty"
-    );
+    return (logActivities as ReturnType<typeof vi.fn>).mock.calls
+      .flatMap((call) => call[0] as { field: string }[])
+      .filter((row) => row.field === "Difficulty");
   }
 
   // The two sides genuinely differ in production: the read before the write is lean and gives a
@@ -1736,7 +1736,9 @@ describe("updateTask writing project fields to the history", () => {
     const result = await updateTask("p1", "t1", { customFieldValues: { "f-diff": "opt-l" } }, "actor");
 
     expect(result.ok).toBe(true);
-    expect(logActivity).toHaveBeenCalledWith("t1", "actor", "updated", "Difficulty", "M", "L");
+    expect(fieldEntries()).toEqual([
+      { taskId: "t1", userId: "actor", action: "updated", field: "Difficulty", oldValue: "M", newValue: "L", customField: true },
+    ]);
   });
 
   it("logs a cleared field rather than passing over it", async () => {
@@ -1744,7 +1746,7 @@ describe("updateTask writing project fields to the history", () => {
 
     await updateTask("p1", "t1", { customFieldValues: {} }, "actor");
 
-    expect(logActivity).toHaveBeenCalledWith("t1", "actor", "updated", "Difficulty", "M", "");
+    expect(fieldEntries()).toEqual([expect.objectContaining({ oldValue: "M", newValue: "" })]);
   });
 
   it("writes one entry per field, never two", async () => {
@@ -5090,22 +5092,15 @@ describe("updateTask writing a description change to the history", () => {
     findOneAndUpdate.mockReturnValue({ populate: () => Promise.resolve(stored(after)) });
   }
 
-  const descriptionEntries = () => [
-    ...(logActivity as ReturnType<typeof vi.fn>).mock.calls.filter((call) => call[3] === "description"),
-    ...(logEditSession as ReturnType<typeof vi.fn>).mock.calls,
-  ];
+  const descriptionRows = () =>
+    (logActivity as ReturnType<typeof vi.fn>).mock.calls.filter((call) => call[3] === "description");
 
-  // The history panel promises what a task said before, and the description is most of what a task
-  // says. Found by an evaluation in which every role edited one and saw nothing recorded.
   it("records what the description said before and what it says now", async () => {
     setup("the old words", "the new words");
 
     await updateTask("p1", "t1", { description: "the new words" }, "actor");
 
-    // As an edit session: the description saves on every pause in typing, and a row per save
-    // flooded the history and pushed its older entries out of the window the panel reads
-    expect(logEditSession).toHaveBeenCalledWith("t1", "actor", "description", "the old words", "the new words");
-    expect(logActivity).not.toHaveBeenCalledWith("t1", "actor", "updated", "description", expect.anything(), expect.anything());
+    expect(descriptionRows()).toEqual([["t1", "actor", "updated", "description", "the old words", "the new words"]]);
   });
 
   it("records nothing about a description the update left alone", async () => {
@@ -5113,6 +5108,27 @@ describe("updateTask writing a description change to the history", () => {
 
     await updateTask("p1", "t1", { title: "y" }, "actor");
 
-    expect(descriptionEntries()).toHaveLength(0);
+    expect(descriptionRows()).toHaveLength(0);
+  });
+});
+
+describe("updateTask writing a project field's change", () => {
+  it("marks it as the project's own field, so it is never read as the task's description", async () => {
+    vi.clearAllMocks();
+    const board = { ...customBoard, customFields: [{ _id: "f1", name: "description", fieldType: "text" }] };
+    findById.mockReturnValue({ lean: () => Promise.resolve(board) });
+    const task = (value: string) => ({ _id: "t1", taskNumber: 7, status: "doing", title: "x", customFieldValues: { f1: value } });
+    findOne.mockReturnValue({
+      lean: () => Promise.resolve(task("a")),
+      populate: () => ({ lean: () => Promise.resolve(task("a")) }),
+    });
+    findOneAndUpdate.mockReturnValue({ populate: () => Promise.resolve(task("b")) });
+
+    await updateTask("p1", "t1", { customFieldValues: { f1: "b" } }, "actor");
+
+    expect(logActivities).toHaveBeenCalledWith([
+      expect.objectContaining({ field: "description", oldValue: "a", newValue: "b", customField: true }),
+    ]);
+    expect(logActivity).not.toHaveBeenCalledWith("t1", "actor", "updated", "description", "a", "b");
   });
 });

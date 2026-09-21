@@ -45,6 +45,10 @@ const activityLogSchema = new Schema<IActivityLog>(
       type: String,
       default: "",
     },
+    customField: {
+      type: Boolean,
+      default: false,
+    },
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );

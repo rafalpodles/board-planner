@@ -3,6 +3,11 @@ import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { ActivityLog } from "@/models/activityLog";
 import { Task } from "@/models/task";
+import { editSessions, presentSessions, type ActivityHeader } from "@/lib/activity";
+import type { IActivityLog } from "@/types";
+
+const SHOWN = 100;
+const SCANNED = 1000;
 
 export const GET = withProjectAccess(async (_request, { params }) => {
   const { projectId, taskId } = await params;
@@ -14,21 +19,20 @@ export const GET = withProjectAccess(async (_request, { params }) => {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });
   }
 
-  const logs = await ActivityLog.find({ task: taskId })
-    // One act can write several rows in the same millisecond — a re-parented task loses and gains
-    // a parent in one request — and `createdAt` alone leaves that pair in an arbitrary order, so
-    // half the time the list claims the task lost its parent AFTER it gained one. `_id` rises with
-    // insertion, and this list is newest-first, so `-1` puts the row written last at the top,
-    // which is where it belongs (BP-658).
-    //
-    // The index is `{ task: 1, createdAt: -1 }`, so the tie-break makes this a blocking sort
-    // rather than a scan in index order. Not measured — reasoned: `{ task }` is a highly selective
-    // equality over one task's own history, and a top-100 over that is small enough that widening
-    // the index was judged not worth starting a second index build on a live collection.
+  // `_id` breaks a `createdAt` tie: one act can write several rows in the same millisecond, and
+  // `_id` rises with insertion, so newest-first puts the row written last on top (BP-658).
+  const headers = await ActivityLog.find({ task: taskId })
     .sort({ createdAt: -1, _id: -1 })
-    .limit(100)
+    .limit(SCANNED)
+    .select("user action field customField createdAt")
+    .lean<ActivityHeader[]>();
+
+  const sessions = editSessions(headers).slice(0, SHOWN);
+  const ids = new Set(sessions.flatMap((s) => [String(s.newest._id), String(s.oldest._id)]));
+  const rows = await ActivityLog.find({ _id: { $in: [...ids] } })
     .populate("user", "username fullName")
-    .lean();
+    .lean<IActivityLog[]>();
+  const logs = presentSessions(sessions, rows);
 
   return NextResponse.json(logs);
 });

@@ -159,8 +159,8 @@ function TaskDetailView({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [commentRefreshKey, setCommentRefreshKey] = useState(0);
-  const [linkRefreshKey, setLinkRefreshKey] = useState(0);
-  const [statusChanges, setStatusChanges] = useState(0);
+  const [historyWrites, setHistoryWrites] = useState(0);
+  const wroteHistory = () => setHistoryWrites((n) => n + 1);
 
   const { draft, set, autoSaveState, autoSaveError, retry, resend, savedCount } = useTaskEditor(
     projectId,
@@ -212,7 +212,7 @@ function TaskDetailView({
       });
     try {
       await patch();
-      setStatusChanges((n) => n + 1);
+      wroteHistory();
       // A status change ends any run the task was under, and the server clears the execution phase
       // in the same write — so patching status alone would leave the panel asserting a live run the
       // user just stopped, counting up from a snapshot that is no longer true
@@ -238,7 +238,7 @@ function TaskDetailView({
     setForcingStatus(true);
     try {
       await pending.retry();
-      setStatusChanges((n) => n + 1);
+      wroteHistory();
       toast(`${taskKey} taken from the worker`, "success");
     } catch {
       toast("Failed to update status", "error");
@@ -427,7 +427,7 @@ function TaskDetailView({
               task={task}
               columns={columns}
               onChanged={() => {
-                setLinkRefreshKey((k) => k + 1);
+                wroteHistory();
                 onReload();
               }}
               onAddChild={() => setAddingChild(true)}
@@ -441,8 +441,7 @@ function TaskDetailView({
                 taskId={task._id}
                 scope={scope}
                 commentRefreshKey={commentRefreshKey}
-                // Every source of a history row this view writes, summed: each only goes up
-                historyRefreshKey={linkRefreshKey + savedCount + statusChanges}
+                historyRefreshKey={historyWrites + savedCount}
               />
             </section>
           </div>
@@ -472,7 +471,10 @@ function TaskDetailView({
           projectId={projectId}
           projectKey={project.key}
           taskId={task._id}
-          onPosted={() => setCommentRefreshKey((k) => k + 1)}
+          onPosted={() => {
+            setCommentRefreshKey((k) => k + 1);
+            wroteHistory();
+          }}
         />
       </div>
 
@@ -519,6 +521,7 @@ function TaskDetailView({
           customFields={project.customFields || []}
           onSaved={() => {
             setAddingChild(false);
+            wroteHistory();
             onReload();
           }}
           onCancel={() => setAddingChild(false)}

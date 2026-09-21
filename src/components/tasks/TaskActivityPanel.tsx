@@ -11,7 +11,7 @@ interface TaskActivityPanelProps {
   taskId: string;
   /** Bumped when a comment is posted from the phone's bottom bar */
   commentRefreshKey?: number;
-  /** Bumped when something outside this panel wrote a history row — a link, today (BP-658) */
+  /** Bumped when something outside this panel wrote a history row */
   historyRefreshKey?: number;
 }
 
@@ -118,6 +118,7 @@ export function TaskActivityPanel({
           onCountChange={setHistoryCount}
           // Both only ever go up, so their sum changes whenever either does
           refreshKey={historyRefresh + historyRefreshKey}
+          visible={tab === "history"}
         />
       </div>
     </div>

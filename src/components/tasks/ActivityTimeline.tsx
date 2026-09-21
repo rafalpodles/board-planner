@@ -14,6 +14,7 @@ interface ActivityTimelineProps {
   onCountChange?: (count: number | null) => void;
   // Bumped by the parent when something outside this component wrote an activity entry
   refreshKey?: number;
+  visible?: boolean;
 }
 
 function actionIcon(action: string) {
@@ -119,9 +120,7 @@ function describeAction(log: ApiActivityLog): string {
       if (log.field === "recurrence" && !log.oldValue && log.newValue) {
         return `${userName} — ${log.newValue}`;
       }
-      // Too long for the sentence, and the first sixty characters of a before and an after usually
-      // match, so the row said "from X… to X…". The text it replaced is offered below the row.
-      if (log.field === "description") {
+      if (log.field === "description" && !log.customField) {
         return log.oldValue ? `${userName} edited the description` : `${userName} added a description`;
       }
       // A field entry that carries values says what changed; one that does not still reads.
@@ -171,6 +170,7 @@ export function ActivityTimeline({
   hideHeading,
   onCountChange,
   refreshKey = 0,
+  visible = true,
 }: ActivityTimelineProps) {
   const [logs, setLogs] = useState<ApiActivityLog[]>([]);
   const [expanded, setExpanded] = useState(false);
@@ -180,6 +180,7 @@ export function ActivityTimeline({
   const [reading, setReading] = useState(true);
   const api = useApi();
   const loadSeq = useRef(0);
+  const loadedKey = useRef(refreshKey);
 
   function load() {
     // A task switch reconciles this panel in place, so the previous task's read is still in
@@ -213,16 +214,18 @@ export function ActivityTimeline({
     setReading(true);
     setExpanded(false);
     onCountChange?.(null);
+    loadedKey.current = refreshKey;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId]);
 
   useEffect(() => {
     // A refresh keeps what is on screen: the rows are this task's either way
-    if (refreshKey === 0) return;
+    if (!visible || loadedKey.current === refreshKey) return;
+    loadedKey.current = refreshKey;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshKey]);
+  }, [refreshKey, visible]);
 
   const displayLogs = expanded ? logs : logs.slice(0, 5);
 
@@ -267,7 +270,7 @@ export function ActivityTimeline({
             </span>
             <div className="flex-1 min-w-0 text-text-muted">
               {describeAction(log)}
-              {log.action === "updated" && log.field === "description" && log.oldValue && (
+              {log.action === "updated" && log.field === "description" && !log.customField && log.oldValue && (
                 <details className="mt-1">
                   <summary className="cursor-pointer text-xs text-primary">What it said before</summary>
                   <p className="mt-1 max-h-60 overflow-y-auto whitespace-pre-wrap break-words rounded-lg bg-bg-input p-2 text-xs text-text">

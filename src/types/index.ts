@@ -1423,6 +1423,7 @@ export interface IActivityLog {
   field: string;
   oldValue: string;
   newValue: string;
+  customField?: boolean;
   createdAt: Date;
 }
 
@@ -1434,6 +1435,7 @@ export interface ApiActivityLog {
   field: string;
   oldValue: string;
   newValue: string;
+  customField?: boolean;
   createdAt: string;
 }
 
