@@ -26,8 +26,8 @@ describe("sameComposition", () => {
   });
 
   it("sees a changed parameter", () => {
-    const before = { ...empty, verification: [{ key: "diff-size", params: { maxLines: 400 } }] };
-    const after = { ...empty, verification: [{ key: "diff-size", params: { maxLines: 800 } }] };
+    const before = { ...empty, verification: [{ key: "diff-size", params: { maxLines: "400" } }] };
+    const after = { ...empty, verification: [{ key: "diff-size", params: { maxLines: "800" } }] };
     expect(sameComposition(after, before)).toBe(false);
   });
 

@@ -72,7 +72,8 @@ export default function KanbanPage() {
     return (
       <LoadFailed
         className="py-16"
-        message={failure.message}
+        // Only a refusal gets its own sentence; an outage keeps the one this page always gave
+        message={failure.retryable ? "Failed to load this board." : failure.message}
         onRetry={failure.retryable ? board.reload : undefined}
       />
     );
