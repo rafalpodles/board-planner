@@ -1522,9 +1522,8 @@ export async function seedAssignmentOutsider() {
 }
 
 /**
- * BP-407. Delivery itself needs a real receiver, which loopback-blocked `safeFetch` refuses under
- * BP-408 — so what this seeds is the OUTCOME of an attempt, the shape `dispatchWebhooks` writes
- * back onto a webhook row after one, not a delivery this fixture actually performs.
+ * BP-407. The OUTCOME of an attempt, the shape `dispatchWebhooks` writes back onto a webhook row
+ * after one — so the page's reading of both states is tested without waiting on a delivery.
  *
  * Both rows, not just the failed one: a page that always prints "Last delivery failed" regardless
  * of what is stored would pass a fixture carrying only the negative case.

@@ -10,6 +10,7 @@ import {
   PROJECT_KEY,
   seed,
   seedBoardFeedBystander,
+  seedWebhook,
 } from "./seed";
 import { signIn, signInThroughForm } from "./session";
 import { assignANewTask, db, dispatchHasRun, saved } from "./notification-grid";
@@ -192,6 +193,23 @@ test("an address this instance may not post to is refused when it is saved, not 
     expect((await channel).status()).toBe(400);
     await expect(lastToast(page)).toContainText("must be https and reachable on the public internet");
   });
+});
+
+test("a stored webhook the rule refuses is reported blocked on its row, not left silent", async ({
+  page,
+}) => {
+  // Written before saves were checked, so it never went through the form that now refuses it
+  await seedWebhook("http://10.0.0.5/hook", ["task_created"]);
+  await signIn(page);
+
+  await assignANewTask(page, "An event for a blocked webhook", MEMBER_USERNAME);
+
+  await expect(async () => {
+    await openConnection(page, /^Webhooks/);
+    await expect(page.getByText(/^Last delivery failed .* — Blocked destination$/)).toBeVisible({
+      timeout: 2_000,
+    });
+  }).toPass({ timeout: 30_000 });
 });
 
 test("a team channel announces the board to a room, with no recipient in it", async ({ page }) => {
