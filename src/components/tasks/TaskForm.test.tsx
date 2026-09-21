@@ -47,4 +47,13 @@ describe("the checklist box", () => {
     expect((input as HTMLInputElement).value).toBe("かくにん");
     expect(screen.getAllByDisplayValue("かくにん")).toEqual([input]);
   });
+
+  it("leaves Safari's composition-ending Enter to the IME too", () => {
+    const { input } = mount();
+    fireEvent.change(input, { target: { value: "かくにん" } });
+    fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
+
+    expect((input as HTMLInputElement).value).toBe("かくにん");
+    expect(screen.getAllByDisplayValue("かくにん")).toEqual([input]);
+  });
 });
