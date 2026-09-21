@@ -42,6 +42,7 @@ function named(gate: Gate, name: string): Gate {
 export function gateFromEntry(
   entry: SnapshotEntry,
   runner: Runner,
+  gitPath: string,
   timeoutMs: number,
   fallbacks: GateFallbacks
 ): Gate | null {
@@ -66,7 +67,7 @@ export function gateFromEntry(
       return named(testRunGate(runner, timeoutMs), entry.key);
     case "review":
       return named(
-        reviewGate(runner, timeoutMs, params.model || fallbacks.reviewModel, params.focus),
+        reviewGate(runner, gitPath, timeoutMs, params.model || fallbacks.reviewModel, params.focus),
         entry.key
       );
     default:

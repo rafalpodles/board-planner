@@ -70,6 +70,9 @@ public struct CloneStep: Sendable {
             case .linkedWorktree:
                 return .failed(
                     reason: "\(target) is a linked worktree of another checkout, not a repository of its own. Point this project at a folder of its own.")
+            case .submodule:
+                return .failed(
+                    reason: "\(target) is a submodule's working directory, not a repository of its own. Point this project at a folder of its own.")
             case nil:
                 return .failed(
                     reason: "\(target) already exists, and git could not say whether it is a repository or one of another repository's worktrees.")

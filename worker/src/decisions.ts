@@ -11,7 +11,7 @@ import { join, resolve, sep } from "node:path";
 import { ApiClient, DecisionSettlement } from "./api.js";
 import { Delivery } from "./delivery.js";
 import { Runner } from "./exec.js";
-import { gitArgs, localGitEnv } from "./git-safety.js";
+import { gitArgs, localGitEnv, requireGitPath } from "./git-safety.js";
 import { protectedPaths, workflowPaths } from "./gates/protected-paths.js";
 import { ClaimedTask, DiffStats } from "./types.js";
 import { scrub } from "./scrub.js";
@@ -343,6 +343,7 @@ export interface DecisionContext {
   destroyWorktree: (taskKey: string) => Promise<void>;
   delivery: Pick<Delivery, "push" | "openPr">;
   runner: Runner;
+  gitPath: string;
   collectDiff: (runner: Runner, worktreePath: string, baseSha: string) => Promise<DiffStats>;
 }
 
@@ -473,7 +474,7 @@ async function whyNotPushable(
 
   const branch = branchFor(decision.taskKey);
   const head = await context.runner.run(
-    "git",
+    requireGitPath(context.gitPath),
     gitArgs(["rev-parse", "--verify", `refs/heads/${branch}`]),
     {
       cwd: marker.worktreePath,

@@ -221,9 +221,12 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   write, a clean checkout of the commit. The shipped Default agent
   merges nothing; it stops at the pull request.
 - **Nothing executes before the static gates have read the diff.** `protected-paths` refuses
-  changes to `package.json`, lockfiles, `.npmrc`, hooks and workflows *before* the build gate runs
-  npm on the worktree, and installs run with `--ignore-scripts`. Cost ordering alone would have
-  executed agent-written lifecycle scripts first.
+  changes to `package.json`, lockfiles, `.npmrc`, `.husky/` and workflows *before* the build gate
+  runs npm on the worktree, and installs run with `--ignore-scripts`. Cost ordering alone would have
+  executed agent-written lifecycle scripts first. Not real git hooks — reaching one needs a path
+  with a `.git` component in the name, which the ordinary staging path (`commitAll`'s `git add`)
+  refuses; the low-level plumbing that could build one anyway needs Bash, which the agent does not
+  have (BP-310).
 - **Nothing is checked out of a poisoned clone, and a poisoned clone is not tried twice.** The
   first thing a run does is read the shared checkout's own git config and refuse it if it carries a
   key git would run — a `filter.<name>.smudge`, an `ext::` transport, an `include.path` this cannot
@@ -387,9 +390,13 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   own child, so the destination's `post-receive` would hold the credentials. Both are refused.
 
   What this does **not** claim: the allowlist includes `HOME`, because the CLI authenticates from
-  its logged-in session there. An agent that goes looking can **read** what is under it. Writing is
-  a different matter since BP-349 — see the next bullet — but the environment is the boundary for
-  reading, and the filesystem is not.
+  its logged-in session there. An agent that goes looking can **read** what is under it —
+  `~/.boardplanner/worker.json` (this worker's own board credential), `~/.config/gh/hosts.yml`,
+  `~/.claude/.credentials.json`, `~/.npmrc`, `~/.ssh`, `~/.aws`, all at this process's own uid.
+  Writing is a different matter since BP-349 — see the next bullet — but the environment is the
+  boundary for reading, and the filesystem is not: "a subprocess cannot inherit this worker's
+  secrets" is true of what travels in `env`, not of what the agent's own filesystem access can
+  reach (BP-310).
 
   **What it costs.** `~/.gitconfig` is not read on those calls, so anything an operator keeps there
   no longer applies to delivery: a deploy key set through `core.sshCommand`, a `url.*.insteadOf`
@@ -538,6 +545,12 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   would hand the directory to a reaper equally unable to run. After seven days the hold is released
   anyway and the path is logged: the worktree is then yours to remove, and a later rebind collects
   anything left.
+- **Unticking a project in the menubar honours the same "worktree of your own" boundary the
+  reaper above does**, independently: a worktree outside `cp-worktrees` blocks the checkout's
+  removal rather than being taken with it, and a submodule's working directory is left alone too
+  rather than deleted out from under its superproject. The decision marker above is the reaper's
+  own mechanism; this removal reads none — it refuses on nothing more than a lock, a dirty
+  worktree or one it does not recognise as the worker's own (BP-507).
 - **Accepting a refused change is the one report that does not go through the outbox.** Everything
   else this worker says is queued and retried until it lands; a decision settlement is not, because
   it can become *permanently* invalid — the decision superseded by a second claim, or given up on —

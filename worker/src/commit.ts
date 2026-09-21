@@ -1,5 +1,5 @@
 import { Runner } from "./exec.js";
-import { gitArgs, localGitEnv, operatorGitEnv } from "./git-safety.js";
+import { gitArgs, localGitEnv, operatorGitEnv, requireGitPath } from "./git-safety.js";
 import { plantedConfig, UNREADABLE_CONFIG } from "./repos.js";
 
 const TIMEOUT_MS = 60_000;
@@ -106,10 +106,11 @@ function parseIdent(line: string): CommitIdentity | null {
  */
 export async function resolveCommitIdentity(
   runner: Runner,
+  gitPath: string,
   cwd: string,
   extraEnv: NodeJS.ProcessEnv = {},
 ): Promise<ResolvedIdentity> {
-  const result = await runner.run("git", gitArgs(["var", "GIT_AUTHOR_IDENT"]), {
+  const result = await runner.run(requireGitPath(gitPath), gitArgs(["var", "GIT_AUTHOR_IDENT"]), {
     cwd,
     timeoutMs: TIMEOUT_MS,
     env: operatorGitEnv(extraEnv),
@@ -139,7 +140,7 @@ export async function resolveCommitIdentity(
   // The name is deliberately not held to this. git fills it from the account when only the address
   // is configured, and a name nobody can route mail to or link to an account is not the same claim
   // as an address.
-  const configured = await runner.run("git", gitArgs(["config", "--get", "user.email"]), {
+  const configured = await runner.run(requireGitPath(gitPath), gitArgs(["config", "--get", "user.email"]), {
     cwd,
     timeoutMs: TIMEOUT_MS,
     env: operatorGitEnv(extraEnv),
@@ -160,12 +161,13 @@ export async function resolveCommitIdentity(
 // The agent used to do this, which is the only reason Bash was in its tool list.
 export async function commitAll(
   runner: Runner,
+  gitPath: string,
   worktreePath: string,
   message: string,
   identity: CommitIdentity,
 ): Promise<string> {
   const git = (args: string[]) =>
-    runner.run("git", gitArgs(args), {
+    runner.run(requireGitPath(gitPath), gitArgs(args), {
       cwd: worktreePath,
       timeoutMs: TIMEOUT_MS,
       // The identity in the environment rather than as `-c user.email=…`: these variables are what
@@ -204,7 +206,7 @@ export async function commitAll(
   // the same environment, so `~/.gitconfig` is outside both (BP-516) and a filter reached through
   // `include.path` is refused as the indirection it is rather than followed. That leaves the
   // repository's own scopes, which is where a filter now has to be defined to run at all.
-  const planted = await plantedConfig(runner, worktreePath);
+  const planted = await plantedConfig(runner, gitPath, worktreePath);
   // Only a key somebody planted is a refusal a person has to look at. A config git would not read
   // at all is a checkout being re-cloned or a machine under load — it still stops the commit,
   // because a config this cannot read is one it cannot vouch for, but as an ordinary failure that

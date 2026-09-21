@@ -31,7 +31,7 @@ describe("plantedConfig against a real repository", () => {
   let home: string;
   let realHome: string | undefined;
 
-  const scan = (cwd = work) => plantedConfig(createRunner(), cwd);
+  const scan = (cwd = work) => plantedConfig(createRunner(), "git", cwd);
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "bp346-"));

@@ -2,6 +2,11 @@ import { describe, it, expect, vi } from "vitest";
 import { commitAll, resolveCommitIdentity, TamperedCheckoutError } from "./commit.js";
 import { scopedConfigListZ } from "./config-list.fixtures.js";
 
+// Not the literal "git": these tests mock the runner, and a mock that expected the bare name would
+// still pass if production regressed to hardcoding it too — a fake resolved path is what makes the
+// two distinguishable (BP-641 review).
+const gitPath = "/opt/homebrew/bin/git";
+
 type Result = { code: number; stdout?: string; stderr?: string };
 
 function runnerFor(...results: Result[]) {
@@ -46,14 +51,14 @@ const IDENTITY = { name: "Worker", email: "worker@example.com" };
 describe("commitAll", () => {
   it("does nothing when the agent left the tree clean", async () => {
     const { runner, run } = runnerReturning(clean);
-    await commitAll(runner, "/wt", "BP-1: something", IDENTITY);
+    await commitAll(runner, gitPath, "/wt", "BP-1: something", IDENTITY);
     // The two scan calls and `status`, and nothing after it
     expect(run).toHaveBeenCalledTimes(3);
   });
 
   it("stages everything and commits when there is something to commit", async () => {
     const { runner, run } = runnerReturning(dirty, clean, clean, clean);
-    await commitAll(runner, "/wt", "BP-1: something", IDENTITY);
+    await commitAll(runner, gitPath, "/wt", "BP-1: something", IDENTITY);
     expect(callWith(run, "add")).toContain("add");
     expect(callWith(run, "commit")).toContain("BP-1: something");
   });
@@ -61,7 +66,7 @@ describe("commitAll", () => {
   // The agent can write .git/hooks/pre-commit with the Write tool it needs for the task itself
   it("runs no hook of the agent's, on any call", async () => {
     const { runner, run } = runnerReturning(dirty, clean, clean, clean);
-    await commitAll(runner, "/wt", "m", IDENTITY);
+    await commitAll(runner, gitPath, "/wt", "m", IDENTITY);
     for (const call of run.mock.calls) {
       expect(call[1]).toContain("core.hooksPath=/dev/null");
     }
@@ -70,35 +75,35 @@ describe("commitAll", () => {
 
   it("throws when the commit fails, rather than reporting a run that committed nothing", async () => {
     const { runner } = runnerReturning(dirty, clean, { code: 1, stderr: "nope" });
-    await expect(commitAll(runner, "/wt", "m", IDENTITY)).rejects.toThrow(/nope/);
+    await expect(commitAll(runner, gitPath, "/wt", "m", IDENTITY)).rejects.toThrow(/nope/);
   });
 
   it("throws when git status itself fails, rather than reading silence as a clean tree", async () => {
     const { runner } = runnerReturning({ code: 128, stderr: "not a repository" });
-    await expect(commitAll(runner, "/wt", "m", IDENTITY)).rejects.toThrow(/not a repository/);
+    await expect(commitAll(runner, gitPath, "/wt", "m", IDENTITY)).rejects.toThrow(/not a repository/);
   });
 
   // -m takes the next argument, so a subject beginning with a dash would otherwise be read as one
   it("keeps the message out of git's option slot", async () => {
     const { runner, run } = runnerReturning(dirty, clean, clean, clean);
-    await commitAll(runner, "/wt", "--amend", IDENTITY);
+    await commitAll(runner, gitPath, "/wt", "--amend", IDENTITY);
     const args = callWith(run, "commit");
     expect(args[args.indexOf("-m") + 1]).toBe("--amend");
   });
 
   it("returns the sha it created", async () => {
     const { runner } = runnerReturning(dirty, clean, clean, { code: 0, stdout: "abc123\n" });
-    expect(await commitAll(runner, "/wt", "BP-1: edit", IDENTITY)).toBe("abc123");
+    expect(await commitAll(runner, gitPath, "/wt", "BP-1: edit", IDENTITY)).toBe("abc123");
   });
 
   it("returns an empty string when there was nothing to commit", async () => {
     const { runner } = runnerReturning(clean);
-    expect(await commitAll(runner, "/wt", "BP-1: edit", IDENTITY)).toBe("");
+    expect(await commitAll(runner, gitPath, "/wt", "BP-1: edit", IDENTITY)).toBe("");
   });
 
   it("throws when rev-parse fails, rather than reporting a run with no sha", async () => {
     const { runner } = runnerReturning(dirty, clean, clean, { code: 1, stderr: "no HEAD" });
-    await expect(commitAll(runner, "/wt", "m", IDENTITY)).rejects.toThrow(/no HEAD/);
+    await expect(commitAll(runner, gitPath, "/wt", "m", IDENTITY)).rejects.toThrow(/no HEAD/);
   });
 });
 
@@ -112,7 +117,7 @@ describe("commitAll against a planted config", () => {
   for (const leaf of ["clean", "smudge", "process"]) {
     it(`refuses before it reads the tree when filter.z.${leaf} is set`, async () => {
       const { runner, run } = runnerFor(readableConfig, { code: 0, stdout: local(`filter.z.${leaf}=/tmp/payload.sh`) });
-      await expect(commitAll(runner, "/wt", "m", IDENTITY)).rejects.toThrow(
+      await expect(commitAll(runner, gitPath, "/wt", "m", IDENTITY)).rejects.toThrow(
         new RegExp(`refusing to stage.*filter\\.z\\.${leaf}`)
       );
       // The scan and nothing else: no status, no add, so no call that reads a file's content
@@ -126,7 +131,7 @@ describe("commitAll against a planted config", () => {
   // keeps the worktree as evidence. Same refusal, two treatments (BP-516 review).
   it("refuses when the config cannot be read at all, rather than reading that as clean", async () => {
     const { runner, run } = runnerFor({ code: 128, stderr: "fatal: not a git repository" });
-    await expect(commitAll(runner, "/wt", "m", IDENTITY)).rejects.toThrow(
+    await expect(commitAll(runner, gitPath, "/wt", "m", IDENTITY)).rejects.toThrow(
       /refusing to stage.*could not be read/
     );
     expect(run).toHaveBeenCalledTimes(1);
@@ -135,7 +140,7 @@ describe("commitAll against a planted config", () => {
   it("does not call that a tampered checkout, which would park the task", async () => {
     const { runner } = runnerFor({ code: 128, stderr: "fatal: not a git repository" });
 
-    await expect(commitAll(runner, "/wt", "m", IDENTITY)).rejects.not.toBeInstanceOf(
+    await expect(commitAll(runner, gitPath, "/wt", "m", IDENTITY)).rejects.not.toBeInstanceOf(
       TamperedCheckoutError
     );
   });
@@ -147,13 +152,13 @@ describe("commitAll against a planted config", () => {
   // program, and refusing it would fail every repository that merely mentions a filter.
   it("lets an inert sibling leaf through", async () => {
     const { runner, run } = runnerReturning(dirty, clean, clean, { code: 0, stdout: "abc123\n" });
-    expect(await commitAll(runner, "/wt", "m", IDENTITY)).toBe("abc123");
+    expect(await commitAll(runner, gitPath, "/wt", "m", IDENTITY)).toBe("abc123");
     expect(callWith(run, "add")).toContain("add");
   });
 
   it("refuses filter.lfs.clean like any other, which is what bindRepository already did", async () => {
     const { runner } = runnerFor(readableConfig, { code: 0, stdout: local("filter.lfs.clean=git-lfs clean -- %f") });
-    await expect(commitAll(runner, "/wt", "m", IDENTITY)).rejects.toThrow(/refusing to stage.*filter\.lfs\.clean/);
+    await expect(commitAll(runner, gitPath, "/wt", "m", IDENTITY)).rejects.toThrow(/refusing to stage.*filter\.lfs\.clean/);
   });
 
   // Its own class, and this is what the pipeline branches on: a refusal keeps the worktree and
@@ -162,15 +167,15 @@ describe("commitAll against a planted config", () => {
   it("throws a refusal that can be told from a git failure", async () => {
     const { runner } = runnerFor(readableConfig, { code: 0, stdout: local("filter.z.clean=/tmp/payload.sh") });
 
-    await expect(commitAll(runner, "/wt", "m", IDENTITY)).rejects.toBeInstanceOf(TamperedCheckoutError);
-    await expect(commitAll(runnerFor(readableConfig, noPlantedConfig, { code: 1, stderr: "boom" }).runner, "/wt", "m", IDENTITY))
+    await expect(commitAll(runner, gitPath, "/wt", "m", IDENTITY)).rejects.toBeInstanceOf(TamperedCheckoutError);
+    await expect(commitAll(runnerFor(readableConfig, noPlantedConfig, { code: 1, stderr: "boom" }).runner, gitPath, "/wt", "m", IDENTITY))
       .rejects.not.toBeInstanceOf(TamperedCheckoutError);
   });
 
   it("carries the finding, so a caller can report the key without parsing a sentence", async () => {
     const { runner } = runnerFor(readableConfig, { code: 0, stdout: local("filter.z.clean=/tmp/payload.sh") });
 
-    await expect(commitAll(runner, "/wt", "m", IDENTITY)).rejects.toMatchObject({
+    await expect(commitAll(runner, gitPath, "/wt", "m", IDENTITY)).rejects.toMatchObject({
       finding: expect.stringContaining("filter.z.clean"),
     });
   });
@@ -191,7 +196,7 @@ describe("the commit identity", () => {
   it("neutralises the operator's global config on every call that stages or commits", async () => {
     const { runner, run } = runnerReturning(dirty, clean, clean, clean);
 
-    await commitAll(runner, "/wt", "m", IDENTITY);
+    await commitAll(runner, gitPath, "/wt", "m", IDENTITY);
 
     for (const call of run.mock.calls) {
       expect((call[2] as { env: NodeJS.ProcessEnv }).env.GIT_CONFIG_GLOBAL).toBe("/dev/null");
@@ -203,7 +208,7 @@ describe("the commit identity", () => {
   it("supplies the identity it was given, as both author and committer", async () => {
     const { runner, run } = runnerReturning(dirty, clean, clean, clean);
 
-    await commitAll(runner, "/wt", "m", IDENTITY);
+    await commitAll(runner, gitPath, "/wt", "m", IDENTITY);
 
     expect(envOf(run, "commit")).toMatchObject({
       GIT_AUTHOR_NAME: "Worker",
@@ -224,7 +229,7 @@ describe("the commit identity", () => {
       CONFIGURED,
     );
 
-    expect(await resolveCommitIdentity(runner, "/repo")).toEqual({ ok: true, identity: IDENTITY });
+    expect(await resolveCommitIdentity(runner, gitPath, "/repo")).toEqual({ ok: true, identity: IDENTITY });
   });
 
   // One question for who, one for whether anybody chose the address — git answers the first with a
@@ -232,7 +237,7 @@ describe("the commit identity", () => {
   it("asks git for the whole answer, then whether the address was configured at all", async () => {
     const { runner, run } = runnerFor({ code: 0, stdout: "Worker <worker@example.com> 1 +0000\n" }, CONFIGURED);
 
-    await resolveCommitIdentity(runner, "/repo");
+    await resolveCommitIdentity(runner, gitPath, "/repo");
 
     expect(run).toHaveBeenCalledTimes(2);
     expect(run.mock.calls[0][1]).toEqual(expect.arrayContaining(["var", "GIT_AUTHOR_IDENT"]));
@@ -251,7 +256,7 @@ describe("the commit identity", () => {
       { code: 1, stdout: "" },
     );
 
-    const resolved = await resolveCommitIdentity(runner, "/repo");
+    const resolved = await resolveCommitIdentity(runner, gitPath, "/repo");
 
     expect(resolved).toMatchObject({ ok: false });
     expect((resolved as { reason: string }).reason).toContain("fv-az1234");
@@ -263,7 +268,7 @@ describe("the commit identity", () => {
   it("reads it with the operator's own config in place", async () => {
     const { runner, run } = runnerFor({ code: 0, stdout: "Worker <w@e> 1 +0000\n" }, CONFIGURED);
 
-    await resolveCommitIdentity(runner, "/repo");
+    await resolveCommitIdentity(runner, gitPath, "/repo");
 
     for (const call of run.mock.calls) {
       expect((call[2] as { env: NodeJS.ProcessEnv }).env.GIT_CONFIG_GLOBAL).toBeUndefined();
@@ -284,7 +289,7 @@ describe("the commit identity", () => {
   ])("carries git's whole answer when %s", async (_case, stderr) => {
     const { runner } = runnerFor({ code: 128, stderr });
 
-    const resolved = await resolveCommitIdentity(runner, "/repo");
+    const resolved = await resolveCommitIdentity(runner, gitPath, "/repo");
 
     expect(resolved.ok).toBe(false);
     expect((resolved as { reason: string }).reason).toBe(stderr.trim());
@@ -296,12 +301,12 @@ describe("the commit identity", () => {
   it("refuses an identity git filled only half of", async () => {
     const { runner } = runnerFor({ code: 0, stdout: "The Operator <> 1789000000 +0200\n" }, CONFIGURED);
 
-    expect(await resolveCommitIdentity(runner, "/repo")).toMatchObject({ ok: false });
+    expect(await resolveCommitIdentity(runner, gitPath, "/repo")).toMatchObject({ ok: false });
   });
 
   it("refuses an answer that is not an identity, rather than committing as half of one", async () => {
     const { runner } = runnerFor({ code: 0, stdout: "no angle brackets here\n" }, CONFIGURED);
 
-    expect(await resolveCommitIdentity(runner, "/repo")).toMatchObject({ ok: false });
+    expect(await resolveCommitIdentity(runner, gitPath, "/repo")).toMatchObject({ ok: false });
   });
 });

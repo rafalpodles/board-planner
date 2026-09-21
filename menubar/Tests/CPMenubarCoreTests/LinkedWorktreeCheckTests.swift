@@ -45,4 +45,35 @@ final class LinkedWorktreeCheckTests: XCTestCase {
     func testAnEchoedOptionIsNotAPath() {
         XCTAssertNil(kind((0, ".git"), (0, "--git-common-dir"), at: "/repo"))
     }
+
+    // MARK: - BP-507: a submodule's working directory answers like a repository
+
+    /// The shape `CheckoutRemovalWorktreeTests`' submodule fixture measures against real git:
+    /// `--git-dir` and `--git-common-dir` agree, same as an ordinary repository, but the agreed
+    /// path is a `modules/<name>` child of the superproject's `.git`.
+    func testASubmoduleWorkingDirectoryIsNeitherARepositoryNorAWorktree() {
+        XCTAssertEqual(
+            kind((0, "/super/.git/modules/vendor"), (0, "/super/.git/modules/vendor"), at: "/super/vendor"),
+            .submodule)
+    }
+
+    /// A nested submodule (a submodule inside a submodule) nests the same `modules/` segment
+    /// rather than repeating `.git/` — containment has to look for the segment anywhere in the
+    /// path, not just as a suffix of the superproject's own `.git`.
+    func testANestedSubmoduleIsStillDetected() {
+        XCTAssertEqual(
+            kind(
+                (0, "/super/.git/modules/outer/modules/inner"),
+                (0, "/super/.git/modules/outer/modules/inner"),
+                at: "/super/outer/inner"),
+            .submodule)
+    }
+
+    /// The control: an ordinary repository's git-dir has no `modules/` segment at all, so the
+    /// existing case still answers `.repository` rather than being swallowed by the new one.
+    func testAnOrdinaryRepositoryIsStillARepository() {
+        XCTAssertEqual(
+            kind((0, "/repo/.git"), (0, "/repo/.git"), at: "/repo"),
+            .repository)
+    }
 }

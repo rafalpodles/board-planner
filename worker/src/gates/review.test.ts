@@ -11,6 +11,8 @@ import { claimedTask } from "../__fixtures__/task.js";
 import { scopedConfigListZ } from "../config-list.fixtures.js";
 
 const TIMEOUT_MS = 5000;
+// Not the literal "git" — see commit.test.ts's gitPath comment (BP-641 review).
+const gitPath = "/opt/homebrew/bin/git";
 
 const patch = [
   "diff --git a/a.ts b/a.ts",
@@ -42,7 +44,7 @@ function context(diff: Partial<DiffStats> = {}, task: Partial<ClaimedTask> = {})
 // no longer the first call, and these tests find it by name rather than by index.
 function claudeStdout(stdout: string, overrides: Partial<CommandResult> = {}) {
   const run = vi.fn<Runner["run"]>(async (command) =>
-    command === "git"
+    command === gitPath
       ? { code: 0, stdout: "", stderr: "", timedOut: false }
       : { code: 0, stdout, stderr: "", timedOut: false, ...overrides }
   );
@@ -68,7 +70,7 @@ function spawnCall(run: ReturnType<typeof claudeStdout>["run"]) {
 }
 
 function gitCall(run: ReturnType<typeof claudeStdout>["run"], subcommand: string) {
-  const call = run.mock.calls.find(([command, args]) => command === "git" && args.includes(subcommand));
+  const call = run.mock.calls.find(([command, args]) => command === gitPath && args.includes(subcommand));
   if (!call) throw new Error(`git ${subcommand} was never run`);
   return call;
 }
@@ -89,13 +91,13 @@ describe("reviewGate", () => {
   it("accepts an approving verdict", async () => {
     const { runner } = claudeReturning({ approved: true, reason: "looks right" });
 
-    expect((await reviewGate(runner, TIMEOUT_MS).run(context())).ok).toBe(true);
+    expect((await reviewGate(runner, gitPath, TIMEOUT_MS).run(context())).ok).toBe(true);
   });
 
   it("rejects and carries the reviewer's reason", async () => {
     const { runner } = claudeReturning({ approved: false, reason: "drops the error branch" });
 
-    const result = await reviewGate(runner, TIMEOUT_MS).run(context());
+    const result = await reviewGate(runner, gitPath, TIMEOUT_MS).run(context());
 
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/drops the error branch/);
@@ -104,7 +106,7 @@ describe("reviewGate", () => {
   it("passes the diff and the task in the prompt", async () => {
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 
-    await reviewGate(runner, TIMEOUT_MS).run(context({}, { acceptanceCriteria: ["handles zero"] }));
+    await reviewGate(runner, gitPath, TIMEOUT_MS).run(context({}, { acceptanceCriteria: ["handles zero"] }));
 
     const prompt = promptOf(run);
     expect(prompt).toContain("diff --git a/a.ts");
@@ -118,7 +120,7 @@ describe("reviewGate", () => {
   it("stays blind to a previous rejection the task is carrying for the retry's own prompt", async () => {
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 
-    await reviewGate(runner, TIMEOUT_MS).run(
+    await reviewGate(runner, gitPath, TIMEOUT_MS).run(
       context({}, { previousRejectionReason: "the diff touched auth.ts with no accompanying test" })
     );
 
@@ -128,7 +130,7 @@ describe("reviewGate", () => {
   it("labels the task and the diff as untrusted data rather than instructions", async () => {
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 
-    await reviewGate(runner, TIMEOUT_MS).run(context());
+    await reviewGate(runner, gitPath, TIMEOUT_MS).run(context());
 
     expect(promptOf(run)).toMatch(/untrusted/i);
     expect(promptOf(run)).toMatch(/not instructions/i);
@@ -143,7 +145,7 @@ describe("reviewGate", () => {
   it("tells the reviewer which files the patch does not show", async () => {
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 
-    await reviewGate(runner, TIMEOUT_MS).run(
+    await reviewGate(runner, gitPath, TIMEOUT_MS).run(
       context({ changedFiles: ["a.ts", "logo.png"], suppressedDiffs: ["logo.png"] })
     );
 
@@ -158,7 +160,7 @@ describe("reviewGate", () => {
   it("says nothing of the kind when the patch shows everything", async () => {
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 
-    await reviewGate(runner, TIMEOUT_MS).run(context());
+    await reviewGate(runner, gitPath, TIMEOUT_MS).run(context());
 
     expect(promptOf(run)).not.toContain("does NOT show");
   });
@@ -166,7 +168,7 @@ describe("reviewGate", () => {
   it("withholds the author's own summary so the reviewer is not primed by it", async () => {
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 
-    await reviewGate(runner, TIMEOUT_MS).run(context());
+    await reviewGate(runner, gitPath, TIMEOUT_MS).run(context());
 
     expect(promptOf(run)).not.toContain("I did exactly what the task asked");
   });
@@ -185,7 +187,7 @@ describe("reviewGate", () => {
   ])("rejects a diff touching %s without spawning a reviewer", async (file) => {
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 
-    const result = await reviewGate(runner, TIMEOUT_MS).run(
+    const result = await reviewGate(runner, gitPath, TIMEOUT_MS).run(
       context({ changedFiles: ["src/a.ts", file] })
     );
 
@@ -198,7 +200,7 @@ describe("reviewGate", () => {
   it("still reviews a diff whose paths merely resemble the instruction files", async () => {
     const { runner, run } = claudeReturning({ approved: true, reason: "fine" });
 
-    const result = await reviewGate(runner, TIMEOUT_MS).run(
+    const result = await reviewGate(runner, gitPath, TIMEOUT_MS).run(
       context({ changedFiles: ["src/claude.ts", "docs/CLAUDE.md.template", "src/mcp.json"] })
     );
 
@@ -209,7 +211,7 @@ describe("reviewGate", () => {
   it("gives the reviewer read-only tools and no permission bypass", async () => {
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 
-    await reviewGate(runner, TIMEOUT_MS).run(context());
+    await reviewGate(runner, gitPath, TIMEOUT_MS).run(context());
 
     const args = claudeCall(run)[1];
     // --tools, not --allowedTools: the latter only skips the permission prompt, so it left the
@@ -224,7 +226,7 @@ describe("reviewGate", () => {
   it("reviews with the model policy.reviewModel names", async () => {
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 
-    await reviewGate(runner, TIMEOUT_MS, "sonnet").run(context());
+    await reviewGate(runner, gitPath, TIMEOUT_MS, "sonnet").run(context());
 
     const args = claudeCall(run)[1];
     expect(args[args.indexOf("--model") + 1]).toBe("sonnet");
@@ -233,7 +235,7 @@ describe("reviewGate", () => {
   it("reviews with opus when reviewModel is blank rather than with no model at all", async () => {
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 
-    await reviewGate(runner, TIMEOUT_MS, "  ").run(context());
+    await reviewGate(runner, gitPath, TIMEOUT_MS, "  ").run(context());
 
     const args = claudeCall(run)[1];
     expect(args[args.indexOf("--model") + 1]).toBe("opus");
@@ -243,7 +245,7 @@ describe("reviewGate", () => {
   it("asks for a schema-enforced verdict", async () => {
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 
-    await reviewGate(runner, TIMEOUT_MS).run(context());
+    await reviewGate(runner, gitPath, TIMEOUT_MS).run(context());
 
     const args = claudeCall(run)[1];
     expect(args[args.indexOf("--output-format") + 1]).toBe("json");
@@ -253,7 +255,7 @@ describe("reviewGate", () => {
   it("rejects a truncated diff without spawning a reviewer", async () => {
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 
-    const result = await reviewGate(runner, TIMEOUT_MS).run(context({ truncated: true }));
+    const result = await reviewGate(runner, gitPath, TIMEOUT_MS).run(context({ truncated: true }));
 
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/too large/i);
@@ -263,7 +265,7 @@ describe("reviewGate", () => {
   it("rejects an empty patch without spawning a reviewer", async () => {
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 
-    const result = await reviewGate(runner, TIMEOUT_MS).run(context({ patch: "   \n" }));
+    const result = await reviewGate(runner, gitPath, TIMEOUT_MS).run(context({ patch: "   \n" }));
 
     expect(result.ok).toBe(false);
     expect(run).not.toHaveBeenCalled();
@@ -279,7 +281,7 @@ describe("reviewGate", () => {
   it("starts the reviewer with every discovered instruction channel disabled", async () => {
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 
-    await reviewGate(runner, TIMEOUT_MS).run(context());
+    await reviewGate(runner, gitPath, TIMEOUT_MS).run(context());
 
     expect(claudeCall(run)[1]).toContain("--safe-mode");
   });
@@ -295,7 +297,7 @@ describe("reviewGate", () => {
   it("still inherits HOME, because that is where the CLI finds its logged-in session", async () => {
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 
-    await reviewGate(runner, TIMEOUT_MS).run(context());
+    await reviewGate(runner, gitPath, TIMEOUT_MS).run(context());
 
     expect(claudeCall(run)[2].env?.HOME).toBe(process.env.HOME);
   });
@@ -306,7 +308,7 @@ describe("reviewGate", () => {
   it("spawns the reviewer through the sandbox", async () => {
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 
-    await reviewGate(runner, TIMEOUT_MS).run(context());
+    await reviewGate(runner, gitPath, TIMEOUT_MS).run(context());
 
     expect(spawnCall(run)[0]).toBe(SANDBOX_COMMAND);
   });
@@ -314,7 +316,7 @@ describe("reviewGate", () => {
   it("confines the reviewer to the checkout it made, and to nothing else", async () => {
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 
-    await reviewGate(runner, TIMEOUT_MS).run(context());
+    await reviewGate(runner, gitPath, TIMEOUT_MS).run(context());
 
     const args = spawnCall(run)[1];
     const writable = args.filter((_, index) => args[index - 1] === "-D");
@@ -336,7 +338,7 @@ describe("reviewGate", () => {
     Object.defineProperty(process, "platform", { value: "linux", configurable: true });
 
     try {
-      const result = await reviewGate(runner, TIMEOUT_MS).run(context());
+      const result = await reviewGate(runner, gitPath, TIMEOUT_MS).run(context());
 
       expect(result.ok).toBe(false);
       expect(result.reason).toBe(UNCONFINED_REASON);
@@ -356,12 +358,12 @@ describe("reviewGate", () => {
   // nothing was written to it, and the reviewer reads a tree with no change in it (BP-404 review)
   it("refuses when the checkout could not be made, rather than reviewing nothing", async () => {
     const run = vi.fn<Runner["run"]>(async (command, args) =>
-      command === "git" && args.includes("worktree") && args.includes("add")
+      command === gitPath && args.includes("worktree") && args.includes("add")
         ? { code: 128, stdout: "", stderr: "fatal: invalid reference", timedOut: false }
         : { code: 0, stdout: "", stderr: "", timedOut: false }
     );
 
-    const result = await reviewGate({ run }, TIMEOUT_MS).run(context());
+    const result = await reviewGate({ run }, gitPath, TIMEOUT_MS).run(context());
 
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/could not be checked out/i);
@@ -374,7 +376,7 @@ describe("reviewGate", () => {
   it("hardens the checkout call itself, not only the calls that read", async () => {
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 
-    await reviewGate(runner, TIMEOUT_MS).run(context());
+    await reviewGate(runner, gitPath, TIMEOUT_MS).run(context());
 
     const [, addArgs] = gitCall(run, "worktree");
     expect(addArgs).toEqual(expect.arrayContaining(["-c", "core.hooksPath=/dev/null"]));
@@ -390,7 +392,7 @@ describe("reviewGate", () => {
     const controller = new AbortController();
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 
-    await reviewGate(runner, TIMEOUT_MS).run({ ...context(), signal: controller.signal });
+    await reviewGate(runner, gitPath, TIMEOUT_MS).run({ ...context(), signal: controller.signal });
 
     expect(gitCall(run, "worktree")[2].signal).toBe(controller.signal);
   });
@@ -398,7 +400,7 @@ describe("reviewGate", () => {
   it("reviews under the given budget", async () => {
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 
-    await reviewGate(runner, TIMEOUT_MS).run(context());
+    await reviewGate(runner, gitPath, TIMEOUT_MS).run(context());
 
     expect(claudeCall(run)[2].timeoutMs).toBe(TIMEOUT_MS);
   });
@@ -412,7 +414,7 @@ describe("reviewGate", () => {
   it("does not review in the worktree the agent wrote in", async () => {
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 
-    await reviewGate(runner, TIMEOUT_MS).run(context());
+    await reviewGate(runner, gitPath, TIMEOUT_MS).run(context());
 
     expect(claudeCall(run)[2].cwd).not.toBe("/wt");
   });
@@ -420,7 +422,7 @@ describe("reviewGate", () => {
   it("reviews in the checkout it made, of the commit the diff was taken from", async () => {
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 
-    await reviewGate(runner, TIMEOUT_MS).run(context());
+    await reviewGate(runner, gitPath, TIMEOUT_MS).run(context());
 
     const [, addArgs] = gitCall(run, "worktree");
     expect(addArgs).toContain("--detach");
@@ -438,16 +440,16 @@ describe("reviewGate", () => {
    */
   it("refuses rather than checking out when the config carries something git would run", async () => {
     const run = vi.fn<Runner["run"]>(async (command, args) =>
-      command === "git" && args.includes("--list")
+      command === gitPath && args.includes("--list")
         ? { code: 0, stdout: scopedConfigListZ("filter.z.smudge=/tmp/theirs.sh"), stderr: "", timedOut: false }
         : { code: 0, stdout: "", stderr: "", timedOut: false }
     );
 
-    const result = await reviewGate({ run }, TIMEOUT_MS).run(context());
+    const result = await reviewGate({ run }, gitPath, TIMEOUT_MS).run(context());
 
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/filter\.z\.smudge/);
-    expect(run.mock.calls.find(([command, args]) => command === "git" && args.includes("worktree")))
+    expect(run.mock.calls.find(([command, args]) => command === gitPath && args.includes("worktree")))
       .toBeUndefined();
     expect(run.mock.calls.find(([command, args]) => isAgentSpawn(command, args))).toBeUndefined();
   });
@@ -456,7 +458,7 @@ describe("reviewGate", () => {
   it("removes the checkout afterwards, including when the reviewer rejected the change", async () => {
     const { runner, run } = claudeReturning({ approved: false, reason: "no" });
 
-    await reviewGate(runner, TIMEOUT_MS).run(context());
+    await reviewGate(runner, gitPath, TIMEOUT_MS).run(context());
 
     const [, removeArgs] = gitCall(run, "remove");
     const [, addArgs] = gitCall(run, "add");
@@ -468,7 +470,7 @@ describe("reviewGate", () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 
-    await reviewGate(runner, TIMEOUT_MS).run(context());
+    await reviewGate(runner, gitPath, TIMEOUT_MS).run(context());
 
     expect(claudeCall(run)[2].env?.ANTHROPIC_API_KEY).toBeUndefined();
     expect(claudeCall(run)[2].env?.PATH).toBe(process.env.PATH);
@@ -482,7 +484,7 @@ describe("reviewGate", () => {
     vi.stubEnv("HOME", "/Users/someone");
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 
-    await reviewGate(runner, TIMEOUT_MS).run(context());
+    await reviewGate(runner, gitPath, TIMEOUT_MS).run(context());
 
     const env = claudeCall(run)[2].env;
     expect(env?.CP_API_TOKEN).toBeUndefined();
@@ -494,7 +496,7 @@ describe("reviewGate", () => {
     const controller = new AbortController();
     const { runner, run } = claudeReturning({ approved: true, reason: "" });
 
-    await reviewGate(runner, TIMEOUT_MS).run({ ...context(), signal: controller.signal });
+    await reviewGate(runner, gitPath, TIMEOUT_MS).run({ ...context(), signal: controller.signal });
 
     expect(claudeCall(run)[2].signal).toBe(controller.signal);
   });
@@ -502,7 +504,7 @@ describe("reviewGate", () => {
   it("fails closed when the reviewer output cannot be parsed, keeping the raw output", async () => {
     const { runner } = claudeStdout("garbage");
 
-    const result = await reviewGate(runner, TIMEOUT_MS).run(context());
+    const result = await reviewGate(runner, gitPath, TIMEOUT_MS).run(context());
 
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/could not be completed/i);
@@ -512,7 +514,7 @@ describe("reviewGate", () => {
   it.each([true, false])("caps a runaway reviewer reason (approved: %s)", async (approved) => {
     const { runner } = claudeReturning({ approved, reason: "x".repeat(5000) });
 
-    const result = await reviewGate(runner, TIMEOUT_MS).run(context());
+    const result = await reviewGate(runner, gitPath, TIMEOUT_MS).run(context());
 
     expect(result.reason.length).toBeLessThan(2200);
     expect(result.reason).toMatch(/truncated/i);
@@ -521,7 +523,7 @@ describe("reviewGate", () => {
   it("fails closed on a timeout and says the review never ran", async () => {
     const { runner } = claudeStdout("", { code: -1, timedOut: true });
 
-    const result = await reviewGate(runner, TIMEOUT_MS).run(context());
+    const result = await reviewGate(runner, gitPath, TIMEOUT_MS).run(context());
 
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/could not be completed/i);
@@ -535,7 +537,7 @@ describe("reviewGate", () => {
       stderr: "Claude usage limit reached",
     });
 
-    const result = await reviewGate(runner, TIMEOUT_MS).run(context());
+    const result = await reviewGate(runner, gitPath, TIMEOUT_MS).run(context());
 
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/could not be completed/i);
@@ -554,7 +556,7 @@ describe("reviewGate", () => {
   ])("fails closed on a verdict with %s", async (_label, verdict) => {
     const { runner } = claudeReturning(verdict);
 
-    const result = await reviewGate(runner, TIMEOUT_MS).run(context());
+    const result = await reviewGate(runner, gitPath, TIMEOUT_MS).run(context());
 
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/could not be completed/i);
@@ -563,7 +565,7 @@ describe("reviewGate", () => {
   it("fails closed when the envelope carries no result", async () => {
     const { runner } = claudeStdout(JSON.stringify({ is_error: true, subtype: "error_max_turns" }));
 
-    const result = await reviewGate(runner, TIMEOUT_MS).run(context());
+    const result = await reviewGate(runner, gitPath, TIMEOUT_MS).run(context());
 
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/could not be completed/i);
@@ -574,7 +576,7 @@ describe("reviewGate", () => {
       JSON.stringify({ result: { approved: true, reason: "matches the task" } })
     );
 
-    expect((await reviewGate(runner, TIMEOUT_MS).run(context())).ok).toBe(true);
+    expect((await reviewGate(runner, gitPath, TIMEOUT_MS).run(context())).ok).toBe(true);
   });
 
   it("tolerates noise printed before the envelope", async () => {
@@ -582,7 +584,7 @@ describe("reviewGate", () => {
       `warning: config not found\n${JSON.stringify({ result: '{"approved":false,"reason":"missing a null check"}' })}`
     );
 
-    const result = await reviewGate(runner, TIMEOUT_MS).run(context());
+    const result = await reviewGate(runner, gitPath, TIMEOUT_MS).run(context());
 
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/missing a null check/);
@@ -591,7 +593,7 @@ describe("reviewGate", () => {
   it("distinguishes a substantive rejection from a review that never ran", async () => {
     const { runner } = claudeReturning({ approved: false, reason: "drops the error branch" });
 
-    const result = await reviewGate(runner, TIMEOUT_MS).run(context());
+    const result = await reviewGate(runner, gitPath, TIMEOUT_MS).run(context());
 
     expect(result.reason).not.toMatch(/could not be completed/i);
   });

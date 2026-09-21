@@ -71,10 +71,10 @@ final class CheckoutDeletionTests: XCTestCase {
         let r = Recorder()
 
         let step = deletion(r).perform(
-            project: "BP", path: "/co", root: "/co", worktrees: ["/wt/one", "/wt/two"])
+            project: "BP", path: "/co", root: "/co", worktrees: ["/cp-worktrees/one", "/cp-worktrees/two"])
 
         XCTAssertEqual(step, .removed(project: "BP", path: "/co"))
-        XCTAssertEqual(r.removed, ["/wt/one", "/wt/two", "/co"], "worktrees before the checkout")
+        XCTAssertEqual(r.removed, ["/cp-worktrees/one", "/cp-worktrees/two", "/co"], "worktrees before the checkout")
         XCTAssertEqual(r.forgotten, ["/co"], "the grant goes last, and only on success")
     }
 
@@ -82,21 +82,21 @@ final class CheckoutDeletionTests: XCTestCase {
     /// run report `.removed` for a checkout whose worktrees were still there.
     func testAWorktreeThatWillNotDeleteFailsTheWholeRemoval() {
         let r = Recorder()
-        r.failOn = "/wt/two"
+        r.failOn = "/cp-worktrees/two"
 
         let step = deletion(r).perform(
-            project: "BP", path: "/co", root: "/co", worktrees: ["/wt/one", "/wt/two", "/wt/three"])
+            project: "BP", path: "/co", root: "/co", worktrees: ["/cp-worktrees/one", "/cp-worktrees/two", "/cp-worktrees/three"])
 
-        // Partial, not failed: /wt/one is gone and saying only "/wt/two could not be removed"
+        // Partial, not failed: /cp-worktrees/one is gone and saying only "/cp-worktrees/two could not be removed"
         // reads as nothing having happened (BP-427).
         guard case .partiallyRemoved(let project, let removed, let reason) = step else {
             XCTFail("expected a partial removal, got \(step)")
             return
         }
         XCTAssertEqual(project, "BP")
-        XCTAssertEqual(removed, ["/wt/one"], "what already went is named")
-        XCTAssertTrue(reason.contains("/wt/two"), "the reason names the worktree: \(reason)")
-        XCTAssertEqual(r.removed, ["/wt/one"], "it stops at the throw rather than carrying on")
+        XCTAssertEqual(removed, ["/cp-worktrees/one"], "what already went is named")
+        XCTAssertTrue(reason.contains("/cp-worktrees/two"), "the reason names the worktree: \(reason)")
+        XCTAssertEqual(r.removed, ["/cp-worktrees/one"], "it stops at the throw rather than carrying on")
         XCTAssertFalse(r.removed.contains("/co"), "the checkout survives a failed worktree delete")
         XCTAssertEqual(r.forgotten, [], "and the grant is not dropped, so the worker may still clean up")
     }
@@ -249,6 +249,9 @@ final class CheckoutDeletionTests: XCTestCase {
         CheckoutRemoval(run: { _, _ in (128, "nope") }, exists: { _ in true })
     }
 
+    /// Callers pass worktree paths under `/cp-worktrees/`, same as `CheckoutRemoval` requires since
+    /// BP-507: a worktree outside that root reads as one the operator made by hand and refuses the
+    /// checkout's removal, which every test in this file is careful not to be about.
     private func allowing(_ worktrees: [String]) -> CheckoutRemoval {
         CheckoutRemoval(
             run: { args, _ in
@@ -372,11 +375,11 @@ final class CheckoutDeletionTests: XCTestCase {
 
         let step = await deletion(r).removeIfSafe(
             project: "BP", path: "/co", isBusy: idle(),
-            checking: allowing(["/wt/one", "/wt/two"]),
+            checking: allowing(["/cp-worktrees/one", "/cp-worktrees/two"]),
             asking: { asked.ask($0, $1) })
 
         XCTAssertEqual(step, .removed(project: "BP", path: "/co"))
-        XCTAssertEqual(r.removed, ["/wt/one", "/wt/two", "/co"])
+        XCTAssertEqual(r.removed, ["/cp-worktrees/one", "/cp-worktrees/two", "/co"])
     }
 
     // MARK: - BP-378: unticking is a proposal, and the machine is where it is put
@@ -389,13 +392,13 @@ final class CheckoutDeletionTests: XCTestCase {
 
         _ = await deletion(r).removeIfSafe(
             project: "BP", path: "/co", isBusy: idle(),
-            checking: allowing(["/wt/one", "/wt/two"]),
+            checking: allowing(["/cp-worktrees/one", "/cp-worktrees/two"]),
             asking: { asked.ask($0, $1) })
 
         XCTAssertEqual(asked.calls.count, 1, "asked once, immediately before the delete")
         XCTAssertEqual(asked.calls.first?.project, "BP")
         XCTAssertEqual(
-            asked.calls.first?.paths, ["/co", "/wt/one", "/wt/two"],
+            asked.calls.first?.paths, ["/co", "/cp-worktrees/one", "/cp-worktrees/two"],
             "the checkout first, then what goes with it — nothing deleted goes unnamed")
     }
 
@@ -442,10 +445,10 @@ final class CheckoutDeletionTests: XCTestCase {
 
         let step = await deletion(r).removeIfSafe(
             project: "BP", path: "/co", isBusy: idle(),
-            checking: allowing(["/wt/one"]),
+            checking: allowing(["/cp-worktrees/one"]),
             asking: { asked.ask($0, $1) })
 
-        XCTAssertEqual(step, .declined(project: "BP", paths: ["/co", "/wt/one"]))
+        XCTAssertEqual(step, .declined(project: "BP", paths: ["/co", "/cp-worktrees/one"]))
         XCTAssertEqual(r.removed, [], "no is a no about the disk")
         XCTAssertEqual(
             r.forgotten, [],
@@ -477,7 +480,7 @@ final class CheckoutDeletionTests: XCTestCase {
 
         let step = await deletion(r).removeIfSafe(
             project: "BP", path: "/co", isBusy: { busy.next() },
-            checking: allowing(["/wt/one"]),
+            checking: allowing(["/cp-worktrees/one"]),
             asking: { asked.ask($0, $1) })
 
         XCTAssertEqual(asked.calls.count, 1, "it did ask — the worker was idle when the guards ran")
@@ -494,7 +497,7 @@ final class CheckoutDeletionTests: XCTestCase {
     func testAWorktreeThatAppearsWhileTheQuestionIsOnScreenStopsTheDelete() async {
         let r = Recorder()
         let asked = Asked()
-        let worktrees = Growing(first: ["/wt/one"], then: ["/wt/one", "/wt/late"])
+        let worktrees = Growing(first: ["/cp-worktrees/one"], then: ["/cp-worktrees/one", "/cp-worktrees/late"])
 
         let step = await deletion(r).removeIfSafe(
             project: "BP", path: "/co", isBusy: idle(),
@@ -503,16 +506,16 @@ final class CheckoutDeletionTests: XCTestCase {
                 exists: { _ in true }),
             asking: { asked.ask($0, $1) })
 
-        XCTAssertEqual(asked.calls.first?.paths, ["/co", "/wt/one"], "asked about what was there then")
+        XCTAssertEqual(asked.calls.first?.paths, ["/co", "/cp-worktrees/one"], "asked about what was there then")
         guard case .refused(_, let reason) = step else {
             return XCTFail("expected a refusal, got \(step)")
         }
         // The line lands in the Repositories pane as something to act on, so it has to name what
         // changed. "Something changed" is not something anybody can act on.
-        XCTAssertTrue(reason.contains("/wt/late appeared"), reason)
+        XCTAssertTrue(reason.contains("/cp-worktrees/late appeared"), reason)
         XCTAssertTrue(reason.contains("while the question was on screen"), reason)
         XCTAssertTrue(reason.contains("it will ask again"), reason)
-        XCTAssertEqual(r.removed, [], "and /wt/late, which nobody was shown, is still there")
+        XCTAssertEqual(r.removed, [], "and /cp-worktrees/late, which nobody was shown, is still there")
     }
 
     /// The control for the two above: when nothing changes between the two looks, agreeing still
@@ -524,11 +527,11 @@ final class CheckoutDeletionTests: XCTestCase {
 
         let step = await deletion(r).removeIfSafe(
             project: "BP", path: "/co", isBusy: idle(),
-            checking: allowing(["/wt/one"]),
+            checking: allowing(["/cp-worktrees/one"]),
             asking: { asked.ask($0, $1) })
 
         XCTAssertEqual(step, .removed(project: "BP", path: "/co"))
-        XCTAssertEqual(r.removed, ["/wt/one", "/co"])
+        XCTAssertEqual(r.removed, ["/cp-worktrees/one", "/co"])
         XCTAssertEqual(r.forgotten, ["/co"])
     }
 
@@ -541,12 +544,12 @@ final class CheckoutDeletionTests: XCTestCase {
         r.failOn = "/co"
 
         let step = deletion(r).perform(
-            project: "BP", path: "/co", root: "/co", worktrees: ["/wt/one", "/wt/two"])
+            project: "BP", path: "/co", root: "/co", worktrees: ["/cp-worktrees/one", "/cp-worktrees/two"])
 
         XCTAssertEqual(
             step,
             .partiallyRemoved(
-                project: "BP", removed: ["/wt/one", "/wt/two"], reason: "could not remove /co"))
+                project: "BP", removed: ["/cp-worktrees/one", "/cp-worktrees/two"], reason: "could not remove /co"))
         XCTAssertEqual(r.forgotten, [], "the grant stays, so the worker may still clean up")
     }
 
@@ -556,23 +559,23 @@ final class CheckoutDeletionTests: XCTestCase {
         let r = Recorder()
         r.failForget = true
 
-        let step = deletion(r).perform(project: "BP", path: "/co", root: "/co", worktrees: ["/wt/one"])
+        let step = deletion(r).perform(project: "BP", path: "/co", root: "/co", worktrees: ["/cp-worktrees/one"])
 
         guard case .partiallyRemoved(_, let removed, _) = step else {
             return XCTFail("expected a partial removal, got \(step)")
         }
-        XCTAssertEqual(removed, ["/wt/one", "/co"], "the checkout is gone and has to be named")
+        XCTAssertEqual(removed, ["/cp-worktrees/one", "/co"], "the checkout is gone and has to be named")
     }
 
     /// The control that keeps the new case honest: when the very first act throws, nothing went,
     /// and "partly removed" would be its own kind of lie.
     func testAFirstActThatThrowsIsStillAPlainFailure() {
         let r = Recorder()
-        r.failOn = "/wt/one"
+        r.failOn = "/cp-worktrees/one"
 
-        let step = deletion(r).perform(project: "BP", path: "/co", root: "/co", worktrees: ["/wt/one", "/wt/two"])
+        let step = deletion(r).perform(project: "BP", path: "/co", root: "/co", worktrees: ["/cp-worktrees/one", "/cp-worktrees/two"])
 
-        XCTAssertEqual(step, .failed(project: "BP", reason: "could not remove /wt/one"))
+        XCTAssertEqual(step, .failed(project: "BP", reason: "could not remove /cp-worktrees/one"))
         XCTAssertEqual(r.removed, [], "and nothing reached the disk")
     }
 
@@ -580,10 +583,10 @@ final class CheckoutDeletionTests: XCTestCase {
     func testACompleteRemovalIsUnchanged() {
         let r = Recorder()
 
-        let step = deletion(r).perform(project: "BP", path: "/co", root: "/co", worktrees: ["/wt/one"])
+        let step = deletion(r).perform(project: "BP", path: "/co", root: "/co", worktrees: ["/cp-worktrees/one"])
 
         XCTAssertEqual(step, .removed(project: "BP", path: "/co"))
-        XCTAssertEqual(r.removed, ["/wt/one", "/co"])
+        XCTAssertEqual(r.removed, ["/cp-worktrees/one", "/co"])
         XCTAssertEqual(r.forgotten, ["/co"])
     }
 }

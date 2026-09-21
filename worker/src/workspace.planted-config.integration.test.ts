@@ -54,6 +54,7 @@ describe("workspace.create against a planted config", () => {
         baseBranch: "main",
       } as never,
       createRunner(),
+      "git",
       () => process.env,
       origin
     );

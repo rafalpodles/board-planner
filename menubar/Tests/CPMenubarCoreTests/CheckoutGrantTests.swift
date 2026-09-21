@@ -37,4 +37,19 @@ final class CheckoutGrantTests: XCTestCase {
             check(gitDir: (128, "fatal: not a git repository"), commonDir: (0, ".git"), at: "/repo"),
             .allowed)
     }
+
+    /// BP-507 review. This file used to compare `== .linkedWorktree` rather than switch, so adding
+    /// `.submodule` to the discriminator left a granted submodule silently `.allowed` — the same
+    /// problem BP-505 introduced this whole check to close for a linked worktree, since
+    /// `CheckoutRemoval` refuses to delete either one standalone once it is.
+    func testASubmoduleWorkingDirectoryIsRefused() {
+        let verdict = check(
+            gitDir: (0, "/super/.git/modules/vendor"), commonDir: (0, "/super/.git/modules/vendor"),
+            at: "/super/vendor")
+
+        guard case .refused(let reason) = verdict else {
+            return XCTFail("expected a refusal, got \(verdict)")
+        }
+        XCTAssertTrue(reason.contains("submodule"), reason)
+    }
 }

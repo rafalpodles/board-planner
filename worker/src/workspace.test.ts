@@ -19,6 +19,9 @@ const config = {
   baseBranch: "main",
 } as never;
 
+// Not the literal "git" — see commit.test.ts's gitPath comment (BP-641 review).
+const gitPath = "/opt/homebrew/bin/git";
+
 function runnerReturning(stdout = "") {
   const run = vi.fn().mockResolvedValue({ code: 0, stdout, stderr: "", timedOut: false });
   return { runner: { run }, run };
@@ -68,7 +71,7 @@ function baseFromRemote(sha: string, extra: Record<string, Partial<CommandResult
 }
 
 function withRemote(runner: Parameters<typeof createWorkspace>[1], env: () => NodeJS.ProcessEnv = () => ({})) {
-  return createWorkspace(config, runner, env, REMOTE_URL);
+  return createWorkspace(config, runner, gitPath, env, REMOTE_URL);
 }
 
 function ranAny(run: { mock: { calls: unknown[][] } }, fragment: string): boolean {
@@ -100,7 +103,7 @@ describe("createWorkspace", () => {
       // worktree reads is that same file, and asking first is what keeps a machine that cannot
       // answer from spending a fetch and a checkout to find out.
       expect(run).toHaveBeenCalledWith(
-        "git",
+        gitPath,
         [...HARDENING_PREFIX, "var", "GIT_AUTHOR_IDENT"],
         expect.objectContaining({ cwd: REPO_PATH }),
       );
@@ -160,12 +163,12 @@ describe("createWorkspace", () => {
     expect(result.path).toBe("/worktrees/CP-158");
     expect(result.baseSha).toBe("base1");
     expect(run).toHaveBeenCalledWith(
-      "git",
+      gitPath,
       [...HARDENING_PREFIX, "worktree", "add", "-B", "cp-158/worker", "--", "/worktrees/CP-158", "base1"],
       expect.objectContaining({ cwd: "/repo", env: expect.objectContaining({ GIT_CONFIG_NOSYSTEM: "1" }) }),
     );
     expect(run).not.toHaveBeenCalledWith(
-      "git",
+      gitPath,
       [...HARDENING_PREFIX, "worktree", "remove", "--force", "--", "/worktrees/CP-158"],
       expect.anything(),
     );
@@ -177,7 +180,7 @@ describe("createWorkspace", () => {
 
     expect(result.baseSha).toBe("base111");
     expect(run).toHaveBeenCalledWith(
-      "git",
+      gitPath,
       [...HARDENING_PREFIX, "worktree", "add", "-B", "bp-1/worker", "--", "/worktrees/BP-1", "base111"],
       expect.anything(),
     );
@@ -312,7 +315,7 @@ describe("createWorkspace", () => {
   it("refuses to run at all when no remote is configured, rather than reading the local ref", async () => {
     for (const env of [undefined, () => ({})]) {
       const { runner, run } = fakeGit(baseFromRemote("local1"));
-      const workspace = createWorkspace(config, runner, env, env ? undefined : REMOTE_URL);
+      const workspace = createWorkspace(config, runner, gitPath, env, env ? undefined : REMOTE_URL);
       await expect(workspace.create("BP-1", "worker")).rejects.toThrow(/no remote is configured/);
       expect(readsLocalRef(run)).toBe(false);
     }
@@ -390,7 +393,7 @@ describe("createWorkspace", () => {
     const { runner } = fakeGit(baseFromRemote("base1"));
 
     await expect(
-      createWorkspace(config, runner).create("BP-1", "worker")
+      createWorkspace(config, runner, gitPath).create("BP-1", "worker")
     ).rejects.toMatchObject({ kind: "configuration" });
   });
 
@@ -674,12 +677,12 @@ describe("createWorkspace", () => {
 
     expect(result.path).toBe("/worktrees/CP-158");
     expect(run).toHaveBeenCalledWith(
-      "git",
+      gitPath,
       [...HARDENING_PREFIX, "worktree", "remove", "--force", "--", "/worktrees/CP-158"],
       expect.anything(),
     );
     expect(run).toHaveBeenCalledWith(
-      "git",
+      gitPath,
       [...HARDENING_PREFIX, "worktree", "add", "-B", "cp-158/worker", "--", "/worktrees/CP-158", "base9"],
       expect.anything(),
     );
@@ -689,10 +692,10 @@ describe("createWorkspace", () => {
     const { runner, run } = fakeGit({
       "worktree list --porcelain": { stdout: "worktree /worktrees/CP-158\n" },
     });
-    await createWorkspace(config, runner).destroy("CP-158");
+    await createWorkspace(config, runner, gitPath).destroy("CP-158");
 
     expect(run).toHaveBeenCalledWith(
-      "git",
+      gitPath,
       [...HARDENING_PREFIX, "worktree", "remove", "--force", "--", "/worktrees/CP-158"],
       expect.anything(),
     );
@@ -700,10 +703,10 @@ describe("createWorkspace", () => {
 
   it("is a no-op when the worktree is already gone", async () => {
     const { runner, run } = runnerReturning();
-    await expect(createWorkspace(config, runner).destroy("CP-158")).resolves.toBeUndefined();
+    await expect(createWorkspace(config, runner, gitPath).destroy("CP-158")).resolves.toBeUndefined();
 
     expect(run).not.toHaveBeenCalledWith(
-      "git",
+      gitPath,
       [...HARDENING_PREFIX, "worktree", "remove", "--force", "--", "/worktrees/CP-158"],
       expect.anything(),
     );
@@ -714,7 +717,7 @@ describe("createWorkspace", () => {
       "worktree list --porcelain": { stdout: "worktree /worktrees/CP-158\n" },
       "worktree remove --force -- /worktrees/CP-158": { code: 1, stderr: "permission denied" },
     });
-    await expect(createWorkspace(config, runner).destroy("CP-158")).rejects.toThrow(
+    await expect(createWorkspace(config, runner, gitPath).destroy("CP-158")).rejects.toThrow(
       /permission denied/,
     );
   });
@@ -723,7 +726,7 @@ describe("createWorkspace", () => {
     const { runner } = runnerReturning(
       "worktree /repo\n\nworktree /worktrees/CP-1\n\nworktree /worktrees/CP-2\n",
     );
-    expect(await createWorkspace(config, runner).listWorktrees()).toEqual([
+    expect(await createWorkspace(config, runner, gitPath).listWorktrees()).toEqual([
       "/repo",
       "/worktrees/CP-1",
       "/worktrees/CP-2",
@@ -735,7 +738,7 @@ describe("createWorkspace", () => {
       "worktree /repo\nHEAD abc123\nbranch refs/heads/main\n\n" +
         "worktree /worktrees/CP 42\nHEAD def456\nbranch refs/heads/cp-42/worker\n",
     );
-    expect(await createWorkspace(config, runner).listWorktrees()).toEqual([
+    expect(await createWorkspace(config, runner, gitPath).listWorktrees()).toEqual([
       "/repo",
       "/worktrees/CP 42",
     ]);
@@ -743,7 +746,7 @@ describe("createWorkspace", () => {
 
   it("produces a clear error when a git call times out, instead of an empty one", async () => {
     const run = vi.fn().mockResolvedValue({ code: -1, stdout: "", stderr: "", timedOut: true });
-    await expect(createWorkspace(config, { run }).listWorktrees()).rejects.toThrow(/timed out/);
+    await expect(createWorkspace(config, { run }, gitPath).listWorktrees()).rejects.toThrow(/timed out/);
   });
 });
 
@@ -816,7 +819,7 @@ describe("a task key that is not a name this worker can use", () => {
   it("refuses to build a worktree path outside the worktree root", async () => {
     const { runner, run } = runnerReturning();
 
-    await expect(createWorkspace(config, runner).create("../escape-1", "worker")).rejects.toThrow(
+    await expect(createWorkspace(config, runner, gitPath).create("../escape-1", "worker")).rejects.toThrow(
       /worktree root/,
     );
     expect(run).not.toHaveBeenCalled();
@@ -825,7 +828,7 @@ describe("a task key that is not a name this worker can use", () => {
   it("refuses the same path on destroy", async () => {
     const { runner, run } = runnerReturning();
 
-    await expect(createWorkspace(config, runner).destroy("../escape-1")).rejects.toThrow(
+    await expect(createWorkspace(config, runner, gitPath).destroy("../escape-1")).rejects.toThrow(
       /worktree root/,
     );
     expect(run).not.toHaveBeenCalled();

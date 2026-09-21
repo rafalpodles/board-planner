@@ -15,11 +15,12 @@ public enum RemovalVerdict: Equatable, Sendable {
     /// worktrees with it.
     case go(root: String, worktrees: [String])
     case refused(reason: String)
-    /// The path is a linked worktree of another repository. Its own case rather than a `.refused`
-    /// carrying the same sentence: every other refusal here describes the checkout's *state* —
-    /// busy, dirty, unpushed — which can change on the next reconnect. This one is structural, so
-    /// waiting never helps, and `CheckoutDeletion` answers it differently for exactly that reason
-    /// (BP-505).
+    /// The path is a linked worktree of another repository, or the working directory of a
+    /// submodule (BP-507) — either way, not a repository of its own. Its own case rather than a
+    /// `.refused` carrying the same sentence: every other refusal here describes the checkout's
+    /// *state* — busy, dirty, unpushed — which can change on the next reconnect. This one is
+    /// structural, so waiting never helps, and `CheckoutDeletion` answers it differently for
+    /// exactly that reason (BP-505).
     case linkedWorktree(reason: String)
 }
 
@@ -88,6 +89,9 @@ public struct CheckoutRemoval: Sendable {
         case .linkedWorktree:
             return .linkedWorktree(
                 reason: "\(path) is a linked worktree, not a repository — this removes a repository together with its worktrees, and cannot remove a worktree from the repository it belongs to.")
+        case .submodule:
+            return .linkedWorktree(
+                reason: "\(path) is a submodule's working directory, not a repository of its own — its objects live in the superproject and are not lost, but the superproject's gitlink would be left pointing at a directory that is gone.")
         case nil:
             return .refused(
                 reason: "could not tell whether \(path) is a repository or one of its worktrees")
@@ -259,6 +263,21 @@ public struct CheckoutRemoval: Sendable {
                         ? "the worktree at \(entry.path) is locked"
                         : "the worktree at \(entry.path) is locked: \(reason)")
             }
+            // A worktree the operator made by hand, anywhere, used to be returned just the same as
+            // one the worker made under `cp-worktrees` — and deleted with it. worker/README.md
+            // promises a worktree of your own is left alone; honouring that here means refusing
+            // the checkout's removal rather than silently taking a directory nobody asked to lose.
+            // Gated on `exists`: an entry already gone has nothing left to protect, ours or not,
+            // and is handled by the `.filter(exists)` below the same as today (BP-507).
+            if exists(entry.path), !isOwnWorktree(entry.path, checkout: root) {
+                return .refused(
+                    // Not "git worktree move it under cp-worktrees" — measured, that command
+                    // refuses with "No such file or directory" when cp-worktrees does not exist
+                    // yet, which is the ordinary case for an operator who made this by hand and
+                    // never had the worker make one. Left as a plain instruction instead of a
+                    // command that would fail in the case this message is actually shown for.
+                    reason: "the worktree at \(entry.path) is not one the worker made — leaving worktrees of your own alone. Remove it yourself, or move it under cp-worktrees yourself and it goes with the checkout, before this checkout can be removed.")
+            }
         }
 
         let linked = linkedWorktrees(worktrees.output, root: root).filter(exists)
@@ -358,5 +377,27 @@ public struct CheckoutRemoval: Sendable {
         // differently-cased strings really do name two different directories.
         guard volumeFoldsCase(normalisedA) else { return false }
         return normalisedA.caseInsensitiveCompare(normalisedB) == .orderedSame
+    }
+
+    /// Whether `candidate` is a worktree the worker made: a descendant of the `cp-worktrees` root
+    /// beside `checkout`'s own parent directory — the sibling layout `worker/src/repos.ts` places
+    /// one under. Anything else is a worktree the operator added by hand, wherever they put it
+    /// (BP-507).
+    ///
+    /// Strictly under the root, never the root itself: the worker never registers a worktree AT
+    /// `cp-worktrees` — every one it makes nests under `<workerId>/<taskKey>` — so an entry
+    /// answering the root exactly is not one of ours, and treating it as foreign (rather than
+    /// matching it and risking `RemovalVerdict.go`'s own warning about taking the shared root
+    /// wholesale) costs nothing (BP-507 review).
+    private func isOwnWorktree(_ candidate: String, checkout: String) -> Bool {
+        let parent = (checkout as NSString).deletingLastPathComponent
+        let root = normalisedPath((parent as NSString).appendingPathComponent("cp-worktrees"))
+        let path = normalisedPath(candidate)
+        return path.hasPrefix(root + "/")
+    }
+
+    private func normalisedPath(_ path: String) -> String {
+        let standardised = (path as NSString).standardizingPath
+        return standardised.hasSuffix("/") ? String(standardised.dropLast()) : standardised
     }
 }

@@ -102,6 +102,9 @@ function shell(stdout = "", overrides: Partial<CommandResult> = {}): CommandResu
 
 const IMPLEMENT_COMMIT_SHA = "sha-implement001";
 
+// Not the literal "git" — see commit.test.ts's gitPath comment (BP-641 review).
+const GIT_PATH = "/opt/homebrew/bin/git";
+
 // Resolved by workspace.create before the agent runs, and required from there on: the commit has
 // nowhere else to get one, with `~/.gitconfig` out of the picture (BP-516).
 const IDENTITY = { name: "The Operator", email: "operator@example.com" };
@@ -199,6 +202,7 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
     recordRun,
     quarantineProject,
     runner,
+    gitPath: GIT_PATH,
     ...overrides,
   };
 
@@ -683,7 +687,7 @@ describe("runTask", () => {
     await runTask(h.deps, running("implement", "diff-size"));
 
     expect(runner.run).toHaveBeenCalledWith(
-      "git",
+      GIT_PATH,
       gitArgs(["status", "--porcelain"]),
       expect.objectContaining({
         cwd: "/wt",

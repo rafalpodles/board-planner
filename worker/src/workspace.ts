@@ -10,7 +10,7 @@ import {
 import { WorkerConfig } from "./config.js";
 import { plantedConfig, UNREADABLE_CONFIG } from "./repos.js";
 import { CommandResult, Runner } from "./exec.js";
-import { gitArgs, localGitEnv } from "./git-safety.js";
+import { gitArgs, localGitEnv, requireGitPath } from "./git-safety.js";
 
 const GIT_TIMEOUT_MS = 60_000;
 
@@ -130,6 +130,7 @@ export async function reapOrphans(
 export function createWorkspace(
   config: WorkerConfig,
   runner: Runner,
+  gitPath: string,
   remoteEnv?: () => NodeJS.ProcessEnv,
   remoteUrl?: string
 ): Workspace {
@@ -147,7 +148,7 @@ export function createWorkspace(
   }
 
   async function git(args: string[]): Promise<string> {
-    const result = await runner.run("git", gitArgs(args), {
+    const result = await runner.run(requireGitPath(gitPath), gitArgs(args), {
       cwd: config.repoPath,
       timeoutMs: GIT_TIMEOUT_MS,
       env: localGitEnv(),
@@ -196,7 +197,7 @@ export function createWorkspace(
     args: string[],
     extraEnv: NodeJS.ProcessEnv = {}
   ): Promise<CommandResult> {
-    const result = await runner.run("git", args, {
+    const result = await runner.run(requireGitPath(gitPath), args, {
       cwd,
       timeoutMs: GIT_TIMEOUT_MS,
       env: {
@@ -338,7 +339,7 @@ export function createWorkspace(
   async function whoseFault(inTheCheckout: ResolvedIdentity): Promise<"machine" | "checkout"> {
     if (inTheCheckout.ok) return "machine";
     const onTheMachine = await withNeutralGitHome(({ cwd, env }) =>
-      resolveCommitIdentity(runner, cwd, env),
+      resolveCommitIdentity(runner, gitPath, cwd, env),
     );
     return onTheMachine.ok ? "checkout" : "machine";
   }
@@ -356,7 +357,7 @@ export function createWorkspace(
     // directions: it would refuse over an operator's own credential helper, and — measured — one
     // malformed line in `~/.gitconfig` makes `--local --list` exit 128, which is read as unreadable
     // and refuses every project on the machine until somebody notices.
-    const planted = await plantedConfig(runner, config.repoPath);
+    const planted = await plantedConfig(runner, gitPath, config.repoPath);
     if (planted) throw new PoisonedCheckoutError(planted);
   }
 
@@ -380,7 +381,7 @@ export function createWorkspace(
       // saving is the work not done, not a leak avoided.) Read in the shared checkout, which is
       // the config a linked worktree has: the per-worktree scope is the only thing that could
       // differ, and a key in it is refused above.
-      const identity = await resolveCommitIdentity(runner, config.repoPath);
+      const identity = await resolveCommitIdentity(runner, gitPath, config.repoPath);
       if (!identity.ok) throw new MissingIdentityError(identity.reason, await whoseFault(identity));
 
       let baseSha: string;

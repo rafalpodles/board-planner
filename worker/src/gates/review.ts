@@ -6,7 +6,7 @@ import { DEFAULT_REVIEW_MODEL, modelOr } from "../config.js";
 import { childEnv } from "../env.js";
 import { CommandResult, Runner } from "../exec.js";
 import { confine } from "../sandbox.js";
-import { gitArgs, localGitEnv } from "../git-safety.js";
+import { gitArgs, localGitEnv, requireGitPath } from "../git-safety.js";
 import { plantedConfig } from "../repos.js";
 import { Gate, GateContext } from "../types.js";
 
@@ -170,6 +170,7 @@ const CHECKOUT_TIMEOUT_MS = 60_000;
  */
 async function reviewCheckout(
   runner: Runner,
+  gitPath: string,
   worktreePath: string,
   headSha: string,
   signal?: AbortSignal,
@@ -184,7 +185,7 @@ async function reviewCheckout(
   // following it; `localGitEnv` is what puts `~/.gitconfig` outside both (BP-516). This is the
   // third caller of it, after delivery.push and commitAll, and the one that runs before an action
   // the pipeline takes on its own behalf.
-  const planted = await plantedConfig(runner, worktreePath);
+  const planted = await plantedConfig(runner, gitPath, worktreePath);
   if (planted) {
     return {
       refusal: `the checkout's git config carries ${planted}, which git would run while checking the change out for review — a human has to look at this`,
@@ -193,7 +194,7 @@ async function reviewCheckout(
 
   const path = await mkdtemp(join(tmpdir(), "cp-review-"));
   const added = await runner.run(
-    "git",
+    requireGitPath(gitPath),
     gitArgs([
       "-C",
       worktreePath,
@@ -212,7 +213,7 @@ async function reviewCheckout(
     },
   );
   if (added.code !== 0 || added.timedOut) {
-    await discardCheckout(runner, worktreePath, path);
+    await discardCheckout(runner, gitPath, worktreePath, path);
     return {
       refusal: `the change could not be checked out for review: git exited ${added.code}\n${added.stderr || added.stdout}`,
     };
@@ -224,12 +225,13 @@ async function reviewCheckout(
 /// to — a review checkout left behind is a copy of the change sitting in a world-readable tmpdir.
 async function discardCheckout(
   runner: Runner,
+  gitPath: string,
   worktreePath: string,
   path: string,
 ): Promise<void> {
   await runner
     .run(
-      "git",
+      requireGitPath(gitPath),
       gitArgs(["-C", worktreePath, "worktree", "remove", "--force", path]),
       {
         cwd: worktreePath,
@@ -245,6 +247,7 @@ async function discardCheckout(
 // must not quietly hand the last gate before a merge to a weaker reviewer
 export function reviewGate(
   runner: Runner,
+  gitPath: string,
   timeoutMs: number,
   reviewModel?: string,
   focus?: string,
@@ -286,6 +289,7 @@ export function reviewGate(
 
       const checkout = await reviewCheckout(
         runner,
+        gitPath,
         context.worktreePath,
         context.diff.headSha,
         context.signal,
@@ -370,7 +374,7 @@ export function reviewGate(
               reason: `the reviewer rejected the change: ${capped(verdict.reason)}`,
             };
       } finally {
-        await discardCheckout(runner, context.worktreePath, checkout.path);
+        await discardCheckout(runner, gitPath, context.worktreePath, checkout.path);
       }
     },
   };

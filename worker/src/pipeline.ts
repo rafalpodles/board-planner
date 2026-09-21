@@ -11,7 +11,7 @@ import { branchFor, OpenDecisionInput, WORKER_BRANCH_SLUG } from "./decisions.js
 import { Delivery } from "./delivery.js";
 import { Runner } from "./exec.js";
 import { Executor } from "./executor.js";
-import { gitArgs, localGitEnv } from "./git-safety.js";
+import { gitArgs, localGitEnv, requireGitPath } from "./git-safety.js";
 import { Reporter } from "./reporter.js";
 import { SHUTDOWN_SIGNAL } from "./commands.js";
 import { scrub } from "./scrub.js";
@@ -53,6 +53,9 @@ export interface PipelineDeps {
     fallbacks: GateFallbacks,
   ) => Gate | null;
   runner: Runner;
+  // Resolved once by preflight and threaded down beside the runner it is paired with — the same
+  // absolute path every call site here uses instead of resolving "git" by name on PATH (BP-641).
+  gitPath: string;
   // Fire and forget, onto the outbox: a record that fails to post must not turn a delivered run
   // into a failed one, and must not be lost to the redeploy a merge triggers either.
   recordRun: (projectId: string, record: RunRecord) => void;
@@ -263,9 +266,10 @@ function keptWorktree(path: string): string {
 
 async function unfinishedWork(
   runner: Runner,
+  gitPath: string,
   worktreePath: string,
 ): Promise<string | null> {
-  const result = await runner.run("git", gitArgs(["status", "--porcelain"]), {
+  const result = await runner.run(requireGitPath(gitPath), gitArgs(["status", "--porcelain"]), {
     cwd: worktreePath,
     timeoutMs: GIT_TIMEOUT_MS,
     env: localGitEnv(),
@@ -282,6 +286,7 @@ async function unfinishedWork(
 // remote otherwise (BP-382).
 async function pushFailure(
   runner: Runner,
+  gitPath: string,
   baseSha: string,
   expected: string[],
   delivery: Delivery,
@@ -291,6 +296,7 @@ async function pushFailure(
 ): Promise<string | null> {
   const wrong = await unexpectedHistory(
     runner,
+    gitPath,
     worktreePath,
     baseSha,
     expected,
@@ -581,13 +587,14 @@ export async function runTask(
           executor,
           delivery,
           commit: (message) =>
-            commitAll(runner, worktree.path, message, worktree.commitIdentity),
+            commitAll(runner, deps.gitPath, worktree.path, message, worktree.commitIdentity),
           state,
           timeoutMs: budget.forEntry(config.taskTimeoutMs),
           signal: deps.signal,
           onEvent,
           baseSha: worktree.baseSha,
           runner,
+          gitPath: deps.gitPath,
         });
         // Before the abort check, not after it. An earlier step may already have committed, and
         // exiting without keeping the worktree destroys the only copy of that work: nothing is
@@ -797,6 +804,7 @@ export async function runTask(
             ? null
             : await pushFailure(
                 runner,
+                deps.gitPath,
                 worktree.baseSha,
                 state.commits,
                 delivery,
@@ -843,7 +851,7 @@ export async function runTask(
       // artifact the target repo does not gitignore would fail a run that did nothing wrong.
       if (entry.kind !== "step" || entry.capability !== "edit") continue;
 
-      const leftover = await unfinishedWork(runner, worktree.path);
+      const leftover = await unfinishedWork(runner, deps.gitPath, worktree.path);
       if (leftover) {
         keepWorktree = true;
         settle("failed", `${entry.name} left the worktree unclean`);

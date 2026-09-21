@@ -36,6 +36,8 @@ function plantRedirect(repoPath: string, from: string, to: string): void {
   appendFileSync(configPath, `[url "${to}"]\n\tinsteadOf = ${from}\n`);
 }
 
+const gitPath = "git";
+
 describe("a run's own diff cannot be narrowed from inside the worktree", () => {
   let dir: string;
   let parent: string;
@@ -48,6 +50,7 @@ describe("a run's own diff cannot be narrowed from inside the worktree", () => {
     return createWorkspace(
       { repoPath: parent, worktreeRoot: join(dir, "wt"), baseBranch: "main" } as WorkerConfig,
       createRunner(),
+      gitPath,
       () => ({}),
       remoteUrl
     );
@@ -101,7 +104,7 @@ describe("a run's own diff cannot be narrowed from inside the worktree", () => {
     git(worktree.path, "add", "-A");
     git(worktree.path, "commit", "--quiet", "-m", "notes");
 
-    const diff = await collectDiff(runner, worktree.path, worktree.baseSha);
+    const diff = await collectDiff(runner, gitPath, worktree.path, worktree.baseSha);
     const verdict = await protectedPathsGate().run({ diff } as never);
 
     expect(diff.changedFiles).toContain("package.json");
@@ -119,7 +122,7 @@ describe("a run's own diff cannot be narrowed from inside the worktree", () => {
     git(worktree.path, "add", "-A");
     git(worktree.path, "commit", "--quiet", "-m", "notes");
 
-    const diff = await collectDiff(runner, worktree.path, worktree.baseSha);
+    const diff = await collectDiff(runner, gitPath, worktree.path, worktree.baseSha);
     const verdict = await protectedPathsGate().run({ diff } as never);
 
     expect(worktree.baseSha).toBe(trueMain);
@@ -148,7 +151,7 @@ describe("a run's own diff cannot be narrowed from inside the worktree", () => {
     git(worktree.path, "add", "-A");
     git(worktree.path, "commit", "--quiet", "-m", "notes");
 
-    const diff = await collectDiff(runner, worktree.path, worktree.baseSha);
+    const diff = await collectDiff(runner, gitPath, worktree.path, worktree.baseSha);
 
     expect(worktree.baseSha).toBe(trueMain);
     expect(worktree.baseSha).not.toBe(payload);
@@ -370,6 +373,7 @@ describe("the base lookup runs with the environment production gives it", () => 
     const workspace = createWorkspace(
       { repoPath: parent, worktreeRoot: join(dir, "wt"), baseBranch: "main" } as WorkerConfig,
       createRunner(),
+      gitPath,
       productionRemoteEnv,
       remoteUrl
     );
@@ -405,6 +409,7 @@ describe("the base lookup runs with the environment production gives it", () => 
     const workspace = createWorkspace(
       { repoPath: clean, worktreeRoot: join(dir, "wt2"), baseBranch: "main" } as WorkerConfig,
       createRunner(),
+      gitPath,
       productionRemoteEnv,
       `ext::${program} %S`
     );

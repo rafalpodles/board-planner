@@ -49,6 +49,9 @@ function diff(over: Partial<DiffStats> = {}): DiffStats {
   };
 }
 
+// Not the literal "git" — see commit.test.ts's gitPath comment (BP-641 review).
+const gitPath = "/opt/homebrew/bin/git";
+
 describe("the marker that holds a worktree back from the reaper", () => {
   it("is written under the state directory, named for the task", () => {
     const fs = memoryFs();
@@ -300,6 +303,7 @@ describe("acting on a verdict", () => {
       destroyWorktree,
       delivery: { push, openPr },
       runner: { run } as never,
+      gitPath,
       collectDiff,
       ...over,
     };
@@ -857,6 +861,7 @@ describe("how the retries are spaced", () => {
               timedOut: false,
             }),
           } as never,
+          gitPath,
           collectDiff: vi.fn().mockResolvedValue(diff()),
         }),
         settle: async (settlement: DecisionSettlement) => {
@@ -974,6 +979,7 @@ describe("telling one verdict from a retry of it", () => {
             timedOut: false,
           }),
         } as never,
+        gitPath,
         collectDiff: vi.fn().mockResolvedValue(diff()),
       }),
       settle: async () => false,

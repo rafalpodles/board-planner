@@ -95,7 +95,7 @@ describe("collectDiff against a planted diff.external and diff.*.textconv", () =
   });
 
   it("collectDiff reports the real patch and never runs diff.external", async () => {
-    const diff = await collectDiff(createRunner(), work, baseSha);
+    const diff = await collectDiff(createRunner(), "git", work, baseSha);
 
     expect(diff.patch).toContain(REAL.trim());
     expect(diff.patch).not.toContain(DECOY.trim());
@@ -118,7 +118,7 @@ describe("collectDiff against a planted diff.external and diff.*.textconv", () =
   });
 
   it("collectDiff reports the real patch and never runs diff.*.textconv", async () => {
-    const diff = await collectDiff(createRunner(), work, baseSha);
+    const diff = await collectDiff(createRunner(), "git", work, baseSha);
 
     expect(diff.patch).toContain(REAL.trim());
     expect(diff.patch).not.toContain(DECOY.trim());

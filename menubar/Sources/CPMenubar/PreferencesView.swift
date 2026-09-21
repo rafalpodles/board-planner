@@ -189,7 +189,7 @@ private struct RepositoriesTab: View {
                     Text("Dropped \(project) — \(path) was already gone")
                         .font(.caption2).foregroundStyle(.secondary)
                 case .linkedWorktreeDropped(let project, let path):
-                    Text("Dropped \(project) — \(path) is a linked worktree, so nothing on disk was touched")
+                    Text("Dropped \(project) — \(path) is not a repository of its own, so nothing on disk was touched")
                         .font(.caption2).foregroundStyle(.secondary)
                 case .refused(let project, let reason):
                     Text("Left \(project) alone: \(reason)").font(.caption2).foregroundStyle(.orange)

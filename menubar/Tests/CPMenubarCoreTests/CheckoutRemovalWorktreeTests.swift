@@ -130,6 +130,118 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
         XCTAssertFalse(reason.contains(resolved(first)), "and not the clean one")
     }
 
+    // MARK: - BP-507: a worktree the operator made by hand, outside cp-worktrees
+
+    private func repoWithForeignWorktree() -> (checkout: String, worktree: String) {
+        let origin = dir + "/origin-foreign.git"
+        let checkout = dir + "/checkout-foreign"
+        // A sibling of `checkout`, same as `repoWithWorktree`'s — but not under `cp-worktrees`, so
+        // nothing marks it as a worktree this app made.
+        let worktree = dir + "/hand-made-worktree"
+        _ = git(dir, ["init", "-q", "--bare", origin])
+        _ = git(dir, ["init", "-q", checkout])
+        FileManager.default.createFile(atPath: checkout + "/a.txt", contents: Data("a\n".utf8))
+        _ = git(checkout, ["add", "-A"])
+        _ = git(checkout, ["commit", "-qm", "initial"])
+        _ = git(checkout, ["remote", "add", "origin", origin])
+        _ = git(checkout, ["push", "-q", "-u", "origin", "HEAD"])
+        _ = git(checkout, ["worktree", "add", "-q", "-b", "hand-made", worktree])
+        return (checkout, worktree)
+    }
+
+    /// The bug. worker/README.md promises a worktree of your own is left alone; before BP-507
+    /// `CheckoutRemoval` made no such distinction and would have taken this one with the checkout,
+    /// same as it does for one under `cp-worktrees` (the clean case is
+    /// `testItStillAllowsRemovingACheckoutWhoseWorktreesAreClean`, the control for this one).
+    func testItRefusesWhenALinkedWorktreeWasNotMadeUnderCpWorktrees() {
+        let (checkout, worktree) = repoWithForeignWorktree()
+
+        let verdict = removal().check(path: checkout, workerIsBusy: false)
+
+        guard case .refused(let reason) = verdict else {
+            XCTFail(
+                "expected a refusal, got \(verdict) — a worktree the operator made by hand would be swept up in the deletion")
+            return
+        }
+        XCTAssertTrue(
+            reason.contains(resolved(worktree)),
+            "the refusal has to name the worktree it would otherwise touch: \(reason)")
+        XCTAssertTrue(
+            reason.contains("not one the worker made"), "the reason has to say why: \(reason)")
+    }
+
+    // MARK: - BP-507: a submodule's working directory answers like a repository
+
+    /// `-c protocol.file.allow=always`: a local path is exactly what a real remote never is, and
+    /// git's own default since the 2022 CVE-2022-39253 fix is to refuse `file://` and bare local
+    /// paths in a recursive submodule operation. This is a direct, operator-initiated `submodule
+    /// add` in a test fixture, not the recursive case that default guards against.
+    private func repoWithSubmodule() throws -> (superproject: String, submodulePath: String) {
+        let subOrigin = dir + "/sub-origin.git"
+        let subSeed = dir + "/sub-seed"
+        _ = git(dir, ["init", "-q", "--bare", subOrigin])
+        _ = git(dir, ["init", "-q", "-b", "main", subSeed])
+        FileManager.default.createFile(atPath: subSeed + "/a.txt", contents: Data("a\n".utf8))
+        _ = git(subSeed, ["add", "-A"])
+        _ = git(subSeed, ["commit", "-qm", "initial"])
+        _ = git(subSeed, ["remote", "add", "origin", subOrigin])
+        _ = git(subSeed, ["push", "-q", "-u", "origin", "HEAD"])
+
+        let superOrigin = dir + "/super-origin.git"
+        let superproject = dir + "/super"
+        _ = git(dir, ["init", "-q", "--bare", superOrigin])
+        _ = git(dir, ["init", "-q", "-b", "main", superproject])
+        _ = git(
+            superproject,
+            ["-c", "protocol.file.allow=always", "submodule", "add", "-q", subOrigin, "vendor"])
+        _ = git(superproject, ["commit", "-qm", "add submodule"])
+        _ = git(superproject, ["remote", "add", "origin", superOrigin])
+        _ = git(superproject, ["push", "-q", "-u", "origin", "HEAD"])
+
+        let submodulePath = superproject + "/vendor"
+        // Same guard CheckoutRemovalReachTests' submodule fixtures use, and for the same reason:
+        // without it, a git that refused this file-protocol submodule add leaves `vendor` absent,
+        // and pointing realGit's cwd at a directory that does not exist doesn't fail — the spawn
+        // itself throws, `try? task.run()` swallows it, and `readDataToEndOfFile()` blocks forever
+        // on a pipe nothing will ever close. Measured: a hung `swift test`, not a red one.
+        try XCTSkipIf(
+            !FileManager.default.fileExists(atPath: submodulePath + "/a.txt"),
+            "this git refused a file-protocol submodule")
+
+        return (superproject, submodulePath)
+    }
+
+    /// The premise, measured separately so a failure here reads as "git changed" rather than "the
+    /// guard changed" — same discipline as the worktree premise above.
+    func testGitDirAndCommonDirAgreeInsideASubmodulesWorkingDirectory() throws {
+        let (_, submodulePath) = try repoWithSubmodule()
+
+        func kind(_ path: String) -> GitCheckoutKind? {
+            LinkedWorktreeCheck.kind(
+                gitDir: git(path, ["rev-parse", "--git-dir"]),
+                commonDir: git(path, ["rev-parse", "--git-common-dir"]),
+                relativeTo: path)
+        }
+
+        XCTAssertEqual(kind(submodulePath), .submodule)
+    }
+
+    /// The bug. Without the discriminator, `--git-dir` and `--git-common-dir` agreeing reads as an
+    /// ordinary repository and `check` proceeds to a `.go` — deleting the submodule's working
+    /// directory and leaving the superproject's gitlink pointing at a directory that is gone.
+    func testASubmoduleWorkingDirectoryIsNotOfferedForRemoval() throws {
+        let (_, submodulePath) = try repoWithSubmodule()
+
+        let verdict = removal().check(path: submodulePath, workerIsBusy: false)
+
+        guard case .linkedWorktree(let reason) = verdict else {
+            XCTFail(
+                "expected a linked-worktree verdict, got \(verdict) — the submodule's working directory would be deleted out from under the superproject")
+            return
+        }
+        XCTAssertTrue(reason.contains("submodule"), "the reason has to say what the path is: \(reason)")
+    }
+
     // MARK: - BP-422: the granted path is itself a linked worktree
 
     /// Premise one. This is why the subdirectory guard cannot see the case: a linked worktree is a
@@ -248,7 +360,9 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
     /// deleted the checkout while that worktree is still there. A success that left something
     /// behind, rather than the partial removal covered elsewhere in the ticket.
     ///
-    /// Only real git can answer this: a stub would emit whatever shape it was handed.
+    /// Only real git can answer this: a stub would emit whatever shape it was handed. Placed under
+    /// `cp-worktrees`, same as `repoWithWorktree()` — this test isolates the newline truncation,
+    /// not the BP-507 ownership boundary, and a bare sibling would trip that guard instead.
     func testAWorktreeWhosePathContainsANewlineComesBackWhole() {
         let dir = NSTemporaryDirectory() + "bp427-" + UUID().uuidString
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
@@ -256,7 +370,7 @@ final class CheckoutRemovalWorktreeTests: XCTestCase {
 
         let origin = dir + "/origin.git"
         let checkout = dir + "/checkout"
-        let odd = dir + "/we\nird"
+        let odd = dir + "/cp-worktrees/we\nird"
         _ = git(dir, ["init", "-q", "--bare", origin])
         try? FileManager.default.createDirectory(atPath: checkout, withIntermediateDirectories: true)
         _ = git(checkout, ["init", "-q", "-b", "main"])
