@@ -223,9 +223,10 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
 - **Nothing executes before the static gates have read the diff.** `protected-paths` refuses
   changes to `package.json`, lockfiles, `.npmrc`, `.husky/` and workflows *before* the build gate
   runs npm on the worktree, and installs run with `--ignore-scripts`. Cost ordering alone would have
-  executed agent-written lifecycle scripts first. Not real git hooks — the agent has no Bash in its
-  tool list, so the only way it ever changes a file is the ordinary staging path, and that path
-  refuses a `.git` component in the name (BP-310).
+  executed agent-written lifecycle scripts first. Not real git hooks — reaching one needs a path
+  with a `.git` component in the name, which the ordinary staging path (`commitAll`'s `git add`)
+  refuses; the low-level plumbing that could build one anyway needs Bash, which the agent does not
+  have (BP-310).
 - **Nothing is checked out of a poisoned clone, and a poisoned clone is not tried twice.** The
   first thing a run does is read the shared checkout's own git config and refuse it if it carries a
   key git would run — a `filter.<name>.smudge`, an `ext::` transport, an `include.path` this cannot
