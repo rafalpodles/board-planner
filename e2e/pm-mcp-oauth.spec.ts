@@ -172,6 +172,49 @@ test("Connect registers a client, signs in through the provider, and the token r
   expect(last?.offeredTools).toContain(`mcp_${ROW}_list_oauth_record`);
 });
 
+// BP-749. The authorization URL a flow produces carries no proof of who is allowed to finish it —
+// only the callback's own check of `initiatedBy` against the signed-in session does that. This
+// simulates the URL reaching a second signed-in user rather than the admin who started the flow
+// (consent phishing), and a genuine retry by the same admin as the positive control.
+test("a second signed-in user cannot finish someone else's connection; that admin's own flow is the positive control", async ({
+  page,
+  browser,
+  baseURL,
+}) => {
+  const tenant = newTenant();
+  await signIn(page, "admin");
+  await openSettings(page);
+  await addOauthServer(page, tenant);
+
+  await clickConnect(page, tenant);
+  const authorizationUrl = page.url();
+
+  const memberContext = await browser.newContext({ baseURL });
+  const memberPage = await memberContext.newPage();
+  try {
+    await signIn(memberPage, "member");
+    await memberPage.goto(authorizationUrl);
+    await expect(
+      memberPage.getByRole("heading", { name: "Authorize BoardPlanner PM Agent" })
+    ).toBeVisible();
+    const callback = memberPage.waitForResponse((r) => r.url().startsWith(CALLBACK));
+    await memberPage.getByRole("button", { name: "Approve" }).click();
+    const res = await callback;
+    expect(res.status()).toBe(302);
+    expect(res.headers()["location"]).toContain("mcp_oauth=error%3Awrong_user");
+  } finally {
+    await memberContext.close();
+  }
+
+  // The admin's own browser shows no completed connection from the attempt above.
+  await openSettings(page);
+  await expect(page.getByText("Not connected", { exact: true })).toBeVisible();
+  expect((await storedOauth()).status).not.toBe("connected");
+
+  // Positive control: the admin who actually started a flow can still finish one.
+  await connect(page, tenant);
+});
+
 test("a client typed by hand is the one the token request carries; an unknown one is refused", async ({ page, request }) => {
   const tenant = newTenant();
   const typed = { id: `typed-${tenant}`, secret: `typed-secret-${tenant}` };
@@ -283,6 +326,42 @@ test("a token that expires is refreshed; once the refresh is refused the panel s
   expect((await storedOauth()).status).toBe("connected");
   await testConnection(page);
   await expect(page.getByText("✓ Connected — 1 tools offered. Tick the ones the agent should get.")).toBeVisible();
+});
+
+// BP-750. A stored expiry that still looks fresh is a local guess, not the provider's word — this
+// revokes only the access token (the refresh token stays valid), so the ordinary "is it still
+// fresh" check would otherwise hand a dead token straight to the call, exactly like a real early
+// revocation between one PM turn and the next.
+test("an access token revoked early, but not locally expired, is refreshed on the next PM turn", async ({ page, request }) => {
+  const tenant = newTenant();
+  await signIn(page, "admin");
+  await openSettings(page);
+  await addOauthServer(page, tenant);
+  await connect(page, tenant);
+
+  const before = await storedOauth();
+  await request.post(`${MCP_SERVER_STUB_URL}/_control/oauth/${tenant}/revoke-access`);
+
+  await request.post(`${PM_STUB_URL}/reset`);
+  await page.goto(PM_URL);
+  await page.getByPlaceholder(/Message the PM/).fill(`Say hello. <<${JSON.stringify({ say: "Hi." })}>>`);
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(page.getByText("Hi.", { exact: true })).toHaveCount(1, { timeout: 30_000 });
+  const last = await (await request.get(`${PM_STUB_URL}/last`)).json();
+  expect(last?.offeredTools, "the turn must still get the tool despite the mid-flight 401").toContain(
+    `mcp_${ROW}_list_oauth_record`
+  );
+
+  const after = await storedOauth();
+  expect(after.status).toBe("connected");
+  expect(after.accessToken).not.toBe(before.accessToken);
+  expect(tokenRequests(await stubLog(request, tenant)).map((e) => [e.grantType, e.outcome])).toEqual([
+    ["authorization_code", "issued"],
+    ["refresh_token", "issued"],
+  ]);
+
+  await openSettings(page);
+  await expect(page.getByText("Connected", { exact: true })).toBeVisible();
 });
 
 test("Disconnect deletes the stored tokens, not only the badge", async ({ page }) => {
