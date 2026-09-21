@@ -1,6 +1,6 @@
 import { test, expect, type Locator, type Page, type Response } from "@playwright/test";
 import mongoose from "mongoose";
-import { E2E_MONGODB_URI, FIELDS, PROJECT_ID, PROJECT_KEY, seed, seedCustomFields } from "./seed";
+import { E2E_MONGODB_URI, FIELDS, PROJECT_ID, PROJECT_KEY, PROJECT_NAME, seed, seedCustomFields } from "./seed";
 import { signIn } from "./session";
 import { expectToast, recordToasts } from "./toasts";
 
@@ -112,11 +112,13 @@ test.describe("General · Identity", () => {
     await expect(page.getByText(seeded)).toHaveCount(0);
 
     await page.goto(`${SETTINGS}?section=general`);
+    await expect(page.getByLabel("Project description")).toHaveValue("Where the run-conflict fixtures live");
     await page.getByLabel("Project description").fill("");
     await saveBar(page, projectWrite(page));
     expect((await storedProject())?.description).toBe("");
     await page.goto(BOARD);
-    await expect(page.getByRole("button", { name: "New task" })).toBeVisible();
+    // The header's own title first: a board that has not loaded shows no description either
+    await expect(boardHeader(page).getByRole("heading", { name: PROJECT_NAME })).toBeVisible();
     await expect(page.getByText("Where the run-conflict fixtures live")).toHaveCount(0);
   });
 });
@@ -241,6 +243,7 @@ test.describe("Workers · Default agent", () => {
     expect((await written).status()).toBe(200);
     expect((await storedProject())?.worker?.agent ?? null).toBeNull();
     await page.reload();
+    await expect(page.getByLabel("Default agent")).toBeEnabled();
     await expect(page.getByLabel("Default agent")).toHaveValue("");
   });
 });

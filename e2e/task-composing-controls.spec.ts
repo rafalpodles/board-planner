@@ -227,6 +227,8 @@ test.describe("the Markdown toolbar", () => {
 });
 
 test.describe("the new-task form", () => {
+  test.use({ timezoneId: "UTC" });
+
   test("a template, a checklist, a due date and every kind of custom field reach the task", async ({
     page,
   }) => {
@@ -345,12 +347,16 @@ test.describe("the new-task form", () => {
     for (const item of ["changelog written", "tag pushed", "announcement sent"]) {
       await expect(page.getByRole("checkbox", { name: item, exact: true })).toBeVisible();
     }
-    await expect(page.getByText(/Oct 1[45], 2026/).first()).toBeVisible();
+    // Pinned to UTC above: in a zone behind UTC the rail shows the day before (BP-754)
+    await expect(page.getByText("Oct 15, 2026", { exact: true })).toBeVisible();
     await expect(page.getByRole("switch", { name: FIELDS.spike.name, exact: true })).toBeChecked();
     await expect(page.locator(`input[aria-label="${FIELDS.points.name}"]`)).toHaveValue("5");
     await expect(page.locator(`input[aria-label="${FIELDS.target.name}"]`)).toHaveValue("2026-11-01");
     await expect(page.locator(`input[aria-label="${FIELDS.notes.name}"]`)).toHaveValue("Needs a freeze window");
-    await expect(page.getByRole("combobox", { name: FIELDS.difficulty.name, exact: true })).toContainText("L");
+    // The row's text is its label followed by the chosen value, and nothing after it
+    await expect(page.getByRole("combobox", { name: FIELDS.difficulty.name, exact: true })).toHaveText(
+      `${FIELDS.difficulty.name}L`
+    );
     await expect(page.getByRole("combobox", { name: FIELDS.platforms.name, exact: true })).toContainText("Web");
     await expect(page.getByRole("combobox", { name: FIELDS.platforms.name, exact: true })).not.toContainText("iOS");
   });

@@ -9,6 +9,7 @@ import {
   PLANNING_SPRINT_ID,
   PLANNING_SPRINT_NAME,
   PLANNING_SPRINT_TASK_NUMBER,
+  PLANNING_SECOND_SPRINT_ID,
   PLANNING_SECOND_SPRINT_NAME,
   PROJECT_ID,
   PROJECT_KEY,
@@ -108,9 +109,13 @@ test.describe("the sprint scope in the board's header", () => {
     });
 
     await test.step("a planned sprint with nothing in it yet", async () => {
+      const fetched = scopeFetch(page, String(PLANNING_SECOND_SPRINT_ID));
       await pick(page, PLANNING_SECOND_SPRINT_NAME);
+      expect((await fetched).status()).toBe(200);
       await expect(scope).toHaveText(PLANNING_SECOND_SPRINT_NAME);
-      await expect(page.locator(CARDS)).toHaveCount(0);
+      // The loading spinner also has no cards in it; only the empty state says the answer arrived
+      await expect(page.getByRole("heading", { name: "No tasks yet" })).toBeVisible();
+      await expect(page.locator(CARDS)).toHaveCount(0, { timeout: 1_000 });
     });
 
     await test.step("and back to everything", async () => {
@@ -130,6 +135,7 @@ test.describe("the sprint scope in the board's header", () => {
     await expect(
       page.getByRole("menu", { name: "Sprint scope" }).getByRole("button", { name: "Backlog (no sprint)" })
     ).toHaveAttribute("aria-current", "true");
+    await expect(card(page, PLANNING_BACKLOG_TASK_NUMBER)).toBeVisible();
     await expect(card(page, PLANNING_SPRINT_TASK_NUMBER)).toHaveCount(0);
   });
 });
