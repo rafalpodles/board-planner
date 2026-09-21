@@ -120,8 +120,7 @@ const userSchema = new Schema<IUser>({
 userSchema.index({ email: 1 }, { unique: true, partialFilterExpression: { email: { $gt: "" } } });
 
 // Remove the credentials from JSON output. The webhook is encrypted at rest, but it rides on the
-// user document, and three routes serialise a whole user — the admin list, the admin single fetch
-// and the caller's own PUT — so without this an admin's user list would carry every colleague's
+// user document, and routes serialise a whole user — the admin list and the caller's own PUT — so without this an admin's user list would carry every colleague's
 // stored chat destination. Projects strip theirs the same way, in sanitizeProjectSecrets.
 userSchema.set("toJSON", {
   transform: (_doc, ret) => {

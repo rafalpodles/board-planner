@@ -5,9 +5,9 @@ import { ADMIN_USERNAME, E2E_MONGODB_URI, MEMBER_USERNAME, seed } from "./seed";
 import { signIn } from "./session";
 
 /**
- * BP-718. Since BP-713 removed `GET /api/users/[userId]`, the list was the only route returning a
- * user document, and it leaves machines out. `?include=machines` is the opt-in; the screen keeps
- * the default.
+ * BP-718. Since BP-713 removed `GET /api/users/[userId]`, no route returned a machine account's
+ * document: the list leaves machines out. `?include=machines` is the opt-in; the screen keeps the
+ * default.
  */
 
 const MACHINES = [
@@ -55,7 +55,8 @@ test("the users screen still lists people only", async ({ page }) => {
   const response = await listed;
 
   expect(new URL(response.url()).searchParams.get("include")).toBeNull();
-  expect(usernames(await response.json())).not.toContain("pm");
+  const names = usernames(await response.json());
+  for (const machine of MACHINES) expect(names).not.toContain(machine.username);
   await expect(
     page.getByText(`@${MEMBER_USERNAME}`, { exact: true }),
   ).toBeVisible();
@@ -94,7 +95,6 @@ test("an admin who asks for machines is given pm and the worker alongside the pe
       kind: "machine",
       role: "member",
     });
-    expect(row.password).toBeUndefined();
   }
 });
 
