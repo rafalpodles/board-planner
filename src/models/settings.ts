@@ -1,4 +1,5 @@
 import mongoose, { Schema, Model } from "mongoose";
+import { upsertSingleton } from "@/lib/singleton";
 
 export interface ISettings {
   _id: mongoose.Types.ObjectId;
@@ -26,9 +27,5 @@ export const Settings: Model<ISettings> =
   mongoose.models.Settings || mongoose.model<ISettings>("Settings", settingsSchema);
 
 export async function getSettings(): Promise<ISettings> {
-  return Settings.findOneAndUpdate(
-    {},
-    { $setOnInsert: { aiModel: "gpt-4o-mini" } },
-    { upsert: true, returnDocument: "after" }
-  ) as Promise<ISettings>;
+  return upsertSingleton(Settings, { $setOnInsert: { aiModel: "gpt-4o-mini" } });
 }

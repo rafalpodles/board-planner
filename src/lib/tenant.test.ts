@@ -9,6 +9,7 @@ vi.mock("./db", () => ({ connectDB }));
 vi.mock("@/models/tenant", () => ({ Tenant: { findOneAndUpdate } }));
 
 const { getTenant } = await import("./tenant");
+const { SINGLETON_ID } = await import("./singleton");
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -26,7 +27,12 @@ describe("getTenant", () => {
     expect(connectDB).toHaveBeenCalled();
     expect(findOneAndUpdate).toHaveBeenCalledWith(
       {},
-      { $setOnInsert: { entitlements: { plan: "free", features: [], source: "none" } } },
+      {
+        $setOnInsert: {
+          entitlements: { plan: "free", features: [], source: "none" },
+          _id: SINGLETON_ID,
+        },
+      },
       { upsert: true, returnDocument: "after" }
     );
     expect(tenant.entitlements).toEqual({ plan: "free", features: [], source: "none" });
