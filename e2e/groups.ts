@@ -98,6 +98,7 @@ export const GROUPS = {
   people: [
     "day-zero.spec.ts",
     "bounded-bodies.spec.ts",
+    "entitlements.spec.ts",
     "sessions-and-auth.spec.ts",
     "proxied-login-throttle.spec.ts",
     "admin-sets-password.spec.ts",
