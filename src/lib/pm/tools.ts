@@ -17,7 +17,7 @@ import { buildBoardDigest } from "./board-review";
 import { handoverOf } from "@/lib/handover";
 import { getProjectColumns } from "@/lib/columns";
 import { echo } from "@/lib/echo";
-import { projectRunsWorkers } from "@/lib/worker-gate";
+import { isWorkerLockedByInstance, projectRunsWorkers } from "@/lib/worker-gate";
 
 export interface PmToolContext {
   projectId: string;
@@ -154,6 +154,9 @@ async function whyItWillNotRun(
   task: { agent?: unknown; assignee?: unknown; assignedBy?: unknown; status?: unknown }
 ): Promise<string> {
   const project = await Project.findById(projectId, "columns worker").lean();
+  if (project && isWorkerLockedByInstance(project.worker)) {
+    return "an instance admin has locked workers off for this project, so nothing will run it";
+  }
   if (!project || !projectRunsWorkers(project.worker)) {
     return "this project is not enabled for workers, so nothing will run it";
   }

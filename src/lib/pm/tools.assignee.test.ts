@@ -122,3 +122,39 @@ describe("the PM's assign_task and a username the writer refuses", () => {
     expect(result).toMatchObject({ task: "BP-9", assignee: null });
   });
 });
+
+// BP-736: the owner switches workers on, an instance admin's lock wins — and the PM says which
+describe("the PM's assign_task on a project an instance admin locked off", () => {
+  beforeEach(() => {
+    taskFindOne.mockResolvedValue({ _id: "t1", taskNumber: 9 });
+    assignTaskMock.mockResolvedValue({
+      ok: true,
+      data: { taskNumber: 9, assignee: { username: "kuba" }, agent: "a1" },
+    });
+  });
+
+  it("says the lock is why nothing will run it, though the owner switched workers on", async () => {
+    projectFindById.mockReturnValue({
+      lean: async () => ({ columns: COLUMNS, worker: { enabled: true, lockedByInstance: true } }),
+    });
+
+    const { result } = await PM_TOOLS.assign_task.execute({ taskKey: "BP-9", username: "kuba" }, ctx);
+
+    expect(result).toMatchObject({
+      willRun: false,
+      note: "Assigned, but an instance admin has locked workers off for this project, so nothing will run it.",
+    });
+  });
+
+  it("does not blame a lock on a project that is merely switched off", async () => {
+    projectFindById.mockReturnValue({
+      lean: async () => ({ columns: COLUMNS, worker: { enabled: false } }),
+    });
+
+    const { result } = await PM_TOOLS.assign_task.execute({ taskKey: "BP-9", username: "kuba" }, ctx);
+
+    expect(result).toMatchObject({
+      note: "Assigned, but this project is not enabled for workers, so nothing will run it.",
+    });
+  });
+});

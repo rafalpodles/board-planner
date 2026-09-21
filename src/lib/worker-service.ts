@@ -10,7 +10,7 @@ import { projectRepositoryUrl } from "@/lib/repository";
 import { ensureWorkerUser } from "@/lib/worker-user";
 import { accessibleProjectIds } from "@/lib/grants";
 import { User } from "@/models/user";
-import { projectRunsWorkers } from "@/lib/worker-gate";
+import { isWorkerLockedByInstance, projectRunsWorkers } from "@/lib/worker-gate";
 
 export const PROTOCOL_VERSION = 1;
 export const WORKER_STALE_MS = 5 * 60 * 1000;
@@ -81,7 +81,12 @@ export function verdictFor(
   // the three checks below, in that order. Deciding it here keeps them in one place rather than
   // trusting a list the server would have had to write.
   if (!projectRunsWorkers(project?.worker)) {
-    return { ok: false, reason: "this project is not enabled for workers" };
+    return {
+      ok: false,
+      reason: isWorkerLockedByInstance(project?.worker)
+        ? "an instance admin has locked workers off for this project"
+        : "this project is not enabled for workers",
+    };
   }
   // Ownership first, because it is the answer to both questions: an ownerless machine reaches
   // nothing, and saying so beats saying it cannot reach this particular project.

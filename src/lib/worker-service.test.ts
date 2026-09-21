@@ -825,7 +825,9 @@ describe("an instance admin's lock on the project", () => {
     const verdict = verdictFor(worker(), locked(), PROTOCOL_VERSION, now);
 
     expect(verdict.ok).toBe(false);
-    expect((verdict as { reason: string }).reason).toMatch(/not enabled for workers/);
+    expect((verdict as { reason: string }).reason).toBe(
+      "an instance admin has locked workers off for this project"
+    );
   });
 
   it("offers no assignment", () => {
