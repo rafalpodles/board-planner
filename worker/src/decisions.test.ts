@@ -49,7 +49,8 @@ function diff(over: Partial<DiffStats> = {}): DiffStats {
   };
 }
 
-const gitPath = "git";
+// Not the literal "git" — see commit.test.ts's gitPath comment (BP-641 review).
+const gitPath = "/opt/homebrew/bin/git";
 
 describe("the marker that holds a worktree back from the reaper", () => {
   it("is written under the state directory, named for the task", () => {

@@ -54,7 +54,8 @@ function ctx(over: Partial<StepContext> = {}) {
     onEvent: vi.fn(),
     baseSha,
     runner,
-    gitPath: "git",
+    // Not the literal "git" — see commit.test.ts's gitPath comment (BP-641 review).
+    gitPath: "/opt/homebrew/bin/git",
     ...over,
   } as unknown as StepContext;
   return context as StepContext & {

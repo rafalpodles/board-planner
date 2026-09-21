@@ -11,7 +11,8 @@ import { claimedTask } from "../__fixtures__/task.js";
 import { scopedConfigListZ } from "../config-list.fixtures.js";
 
 const TIMEOUT_MS = 5000;
-const gitPath = "git";
+// Not the literal "git" — see commit.test.ts's gitPath comment (BP-641 review).
+const gitPath = "/opt/homebrew/bin/git";
 
 const patch = [
   "diff --git a/a.ts b/a.ts",
@@ -43,7 +44,7 @@ function context(diff: Partial<DiffStats> = {}, task: Partial<ClaimedTask> = {})
 // no longer the first call, and these tests find it by name rather than by index.
 function claudeStdout(stdout: string, overrides: Partial<CommandResult> = {}) {
   const run = vi.fn<Runner["run"]>(async (command) =>
-    command === "git"
+    command === gitPath
       ? { code: 0, stdout: "", stderr: "", timedOut: false }
       : { code: 0, stdout, stderr: "", timedOut: false, ...overrides }
   );
@@ -69,7 +70,7 @@ function spawnCall(run: ReturnType<typeof claudeStdout>["run"]) {
 }
 
 function gitCall(run: ReturnType<typeof claudeStdout>["run"], subcommand: string) {
-  const call = run.mock.calls.find(([command, args]) => command === "git" && args.includes(subcommand));
+  const call = run.mock.calls.find(([command, args]) => command === gitPath && args.includes(subcommand));
   if (!call) throw new Error(`git ${subcommand} was never run`);
   return call;
 }
@@ -357,7 +358,7 @@ describe("reviewGate", () => {
   // nothing was written to it, and the reviewer reads a tree with no change in it (BP-404 review)
   it("refuses when the checkout could not be made, rather than reviewing nothing", async () => {
     const run = vi.fn<Runner["run"]>(async (command, args) =>
-      command === "git" && args.includes("worktree") && args.includes("add")
+      command === gitPath && args.includes("worktree") && args.includes("add")
         ? { code: 128, stdout: "", stderr: "fatal: invalid reference", timedOut: false }
         : { code: 0, stdout: "", stderr: "", timedOut: false }
     );
@@ -439,7 +440,7 @@ describe("reviewGate", () => {
    */
   it("refuses rather than checking out when the config carries something git would run", async () => {
     const run = vi.fn<Runner["run"]>(async (command, args) =>
-      command === "git" && args.includes("--list")
+      command === gitPath && args.includes("--list")
         ? { code: 0, stdout: scopedConfigListZ("filter.z.smudge=/tmp/theirs.sh"), stderr: "", timedOut: false }
         : { code: 0, stdout: "", stderr: "", timedOut: false }
     );
@@ -448,7 +449,7 @@ describe("reviewGate", () => {
 
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/filter\.z\.smudge/);
-    expect(run.mock.calls.find(([command, args]) => command === "git" && args.includes("worktree")))
+    expect(run.mock.calls.find(([command, args]) => command === gitPath && args.includes("worktree")))
       .toBeUndefined();
     expect(run.mock.calls.find(([command, args]) => isAgentSpawn(command, args))).toBeUndefined();
   });

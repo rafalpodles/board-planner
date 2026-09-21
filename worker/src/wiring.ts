@@ -353,9 +353,10 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   }
 
   // The one composition point every git-spawning call site reads its absolute path from, the same
-  // way `githubIdentityToken` reads `preflight?.paths.gh` — resolved once by `establishPreflight`,
-  // read back out fresh rather than cached separately, so a machine that could not find git on its
-  // first pass picks it up the moment a later preflight does (BP-641). Empty before the first
+  // way `githubIdentityToken` reads `preflight?.paths.gh`. `establishPreflight` runs exactly once,
+  // at the top of `run()`, and sets the outer `preflight` this reads — a live read of that variable
+  // rather than a value snapshotted into a second one, so every caller shares the one place the
+  // resolution lives instead of each being handed its own copy (BP-641). Empty before that first
   // preflight completes, or if git was never found; every reader downstream refuses on empty rather
   // than falling back to the bare name "git" on PATH.
   function resolvedGitPath(): string {

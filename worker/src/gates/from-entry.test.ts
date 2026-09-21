@@ -29,7 +29,8 @@ function ctx(changedLines: number): GateContext {
 }
 
 const idleRunner = { run: vi.fn() } as never;
-const gitPath = "git";
+// Not the literal "git" — see commit.test.ts's gitPath comment (BP-641 review).
+const gitPath = "/opt/homebrew/bin/git";
 
 // What a block that names no parameter of its own falls back to: the project's worker policy,
 // deliberately not the built-in constants — a project that pinned a limit before the catalog

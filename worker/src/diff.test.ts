@@ -3,7 +3,8 @@ import { CommandResult } from "./exec.js";
 import { gitArgs } from "./git-safety.js";
 import { collectDiff } from "./diff.js";
 
-const gitPath = "git";
+// Not the literal "git" — see commit.test.ts's gitPath comment (BP-641 review).
+const gitPath = "/opt/homebrew/bin/git";
 
 // Every call carries the hardening flags gitArgs prepends — stripped here so recorded calls and
 // response keys stay about the git subcommand, the same convention workspace.test.ts uses.

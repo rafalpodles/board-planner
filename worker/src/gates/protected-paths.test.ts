@@ -117,11 +117,12 @@ describe("protectedPathsGate", () => {
   });
 
   // BP-310. `.git/hooks/pre-push` used to be on the list above, and the assertion never meant
-  // anything: `diff.changedFiles` comes from `git diff --numstat`, and git refuses to track any
-  // path with a `.git` component, so this gate is never actually asked about one. Kept as its own
-  // test — rather than deleted outright — so the dead clause's removal reads as a decision, not an
-  // accident a future pass quietly re-adds.
-  it("does not refuse .git/hooks/pre-push, which real git can never report as a changed file", async () => {
+  // anything: `commitAll`'s `git add` — the only thing that stages a change here — refuses a path
+  // with a `.git` component, so `diff.changedFiles` never carries one from the ordinary path an
+  // agent has (it holds no Bash, so the low-level plumbing that COULD build such a tree is out of
+  // its reach). Kept as its own test — rather than deleted outright — so the dead clause's removal
+  // reads as a decision, not an accident a future pass quietly re-adds.
+  it("does not refuse .git/hooks/pre-push, unreachable via the staging path an agent actually has", async () => {
     expect((await gate.run(context([".git/hooks/pre-push"]))).ok).toBe(true);
   });
 

@@ -50,10 +50,15 @@ export const AGENT_INSTRUCTION_FILE =
 // cannot be accepted.
 //
 // `.gitmodules` is its neighbour: it names other repositories a checkout pulls in.
-// `.git/hooks` used to be one of the directories below, and never could match: `diff.changedFiles`
-// comes from `git diff --numstat`, and git refuses to track any path with a `.git` path component,
-// so nothing under `.git/hooks/` is ever a changed file this gate is asked about. `.husky/` is a
-// real hook install path git does track, which is what made the dead clause easy to miss (BP-310).
+// `.git/hooks` used to be one of the directories below, and could not match in practice: the only
+// thing that stages a change here is `commitAll`'s `git add`, which refuses a path with a `.git`
+// component — measured on git 2.50.1 — so `diff.changedFiles` (from `git diff --numstat` against
+// what actually got committed) never carries one either. Low-level plumbing (`mktree`, `hash-object`
+// plus `update-ref`) CAN build a tree that names such a path — measured, `--numstat` will print it —
+// but the agent has no Bash in its tool list to reach those, and even a hook that got there some
+// other way would run under `core.hooksPath=/dev/null` and delivery's `--no-verify`. `.husky/` is a
+// real hook install path `git add` does track, which is what made the dead clause easy to miss
+// (BP-310).
 export const EXECUTABLE_CONFIG_FILE =
   /(^|\/)(package(-lock)?\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.ya?ml|\.npmrc|\.yarnrc(\.yml)?|binding\.gyp)$|(^|\/)(next|vite|vitest|webpack|rollup|jest|babel|astro|svelte|nuxt|tailwind|postcss|playwright|esbuild|metro|remix|gatsby)\.config\.[cm]?[jt]sx?$|(^|\/)(\.babelrc(\.[cm]?js(on)?)?|Makefile|CMakeLists\.txt|\.gitattributes|\.gitmodules)$|(^|\/)(\.husky|\.github\/workflows|\.github\/actions|scripts)\//i;
 

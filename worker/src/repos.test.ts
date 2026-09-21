@@ -39,7 +39,8 @@ function depsWith(over: Partial<{
         timedOut: false,
       })),
     },
-    gitPath: "git",
+    // Not the literal "git" — see commit.test.ts's gitPath comment (BP-641 review).
+    gitPath: "/opt/homebrew/bin/git",
     readAllowlist: () => JSON.stringify({ repos: over.allowlist ?? ["/repo"] }),
     realpath: over.realpath ?? ((p: string) => p),
     stat: () => ({ uid: over.fileUid ?? 501, mode: over.mode ?? 0o755 }),
@@ -314,7 +315,8 @@ describe("repoInventory", () => {
   it("reports each allowed checkout with the origin it resolves to", async () => {
     const result = await repoInventory({
       runner: runner("git@github.com:owner/repo.git") as never,
-      gitPath: "git",
+      // Not the literal "git" — see commit.test.ts's gitPath comment (BP-641 review).
+    gitPath: "/opt/homebrew/bin/git",
       readAllowlist: () => JSON.stringify({ repos: ["/a"] }),
     });
 
@@ -327,14 +329,16 @@ describe("repoInventory", () => {
   it("distinguishes a file it could not read from a machine with nothing listed", async () => {
     const unreadable = await repoInventory({
       runner: runner("x") as never,
-      gitPath: "git",
+      // Not the literal "git" — see commit.test.ts's gitPath comment (BP-641 review).
+    gitPath: "/opt/homebrew/bin/git",
       readAllowlist: () => {
         throw new Error("is readable by group or others (mode 644); run chmod 600 on it");
       },
     });
     const empty = await repoInventory({
       runner: runner("x") as never,
-      gitPath: "git",
+      // Not the literal "git" — see commit.test.ts's gitPath comment (BP-641 review).
+    gitPath: "/opt/homebrew/bin/git",
       readAllowlist: () => JSON.stringify({ repos: [] }),
     });
 
@@ -347,7 +351,8 @@ describe("repoInventory", () => {
   it("refuses a repos.json whose repos is not an array, instead of throwing", async () => {
     const result = await repoInventory({
       runner: runner("x") as never,
-      gitPath: "git",
+      // Not the literal "git" — see commit.test.ts's gitPath comment (BP-641 review).
+    gitPath: "/opt/homebrew/bin/git",
       readAllowlist: () => JSON.stringify({ repos: { a: 1 } }),
     });
 
@@ -367,7 +372,8 @@ describe("repoInventory", () => {
 
     const result = await repoInventory({
       runner: mixed as never,
-      gitPath: "git",
+      // Not the literal "git" — see commit.test.ts's gitPath comment (BP-641 review).
+    gitPath: "/opt/homebrew/bin/git",
       readAllowlist: () => JSON.stringify({ repos: ["/first", "/second"] }),
     });
 

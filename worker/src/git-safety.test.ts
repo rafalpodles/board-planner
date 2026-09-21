@@ -103,7 +103,13 @@ const FILES_THAT_RUN_GIT = [
   "workspace.ts",
 ];
 
-const RUNS_GIT = /run\(\s*requireGitPath\(/g;
+// Both shapes a git call can be written in, correct and vulnerable alike — this test's job below is
+// "still finds every file that spawns git", and a call written the old way, `run("git", ...)`,
+// still spawns git. Matching only the new shape would make this scan blind to exactly the regression
+// BP-641 fixed: a file that went back to resolving git by name would silently stop being found
+// rather than being flagged (measured — see the sibling test below, added for that reason).
+const RUNS_GIT = /run\(\s*(requireGitPath\(|["']git["'])/g;
+const RUNS_GIT_BY_BARE_NAME = /run\(\s*["']git["']/g;
 
 // The helper has to be what the call's `env` is built FROM, not a name that happens to appear in
 // the window. Reading the source as it is means a comment inside a call's window would otherwise
@@ -127,6 +133,16 @@ describe("every git invocation is hardened", () => {
       .map(({ file }) => file);
 
     expect(found).toEqual(FILES_THAT_RUN_GIT);
+  });
+
+  // BP-641. The property "still finds every file" and the property "git is resolved by absolute
+  // path, not by name" are different claims — RUNS_GIT proves the first, this proves the second.
+  it("never resolves git by the bare name \"git\" on PATH", () => {
+    const offenders = sources()
+      .filter(({ source }) => [...source.matchAll(RUNS_GIT_BY_BARE_NAME)].length > 0)
+      .map(({ file }) => file);
+
+    expect(offenders).toEqual([]);
   });
 
   it("builds the environment of every git call from the shared helpers", () => {

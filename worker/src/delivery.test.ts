@@ -7,7 +7,8 @@ import { scopedConfigListZ } from "./config-list.fixtures.js";
 
 const task = claimedTask();
 
-const gitPath = "git";
+// Not the literal "git" — see commit.test.ts's gitPath comment (BP-641 review).
+const gitPath = "/opt/homebrew/bin/git";
 
 const ok: CommandResult = { code: 0, stdout: "", stderr: "", timedOut: false };
 
@@ -26,7 +27,12 @@ function fakeCli(responses: Record<string, Partial<CommandResult>>) {
     args: string[],
     _opts?: RunOpts
   ): Promise<CommandResult> => {
-    const line = `${command} ${withoutConfigFlags(args).join(" ")}`;
+    // Response keys are written "git ..."/"gh ..." — the shorthand every test in this file uses,
+    // regardless of gitPath's actual value. Normalised back to that shorthand for matching only;
+    // what's recorded on `run.mock.calls`, which the command-argument assertions elsewhere in this
+    // file read, is the real, unmodified argument.
+    const normalisedCommand = command === gitPath ? "git" : command;
+    const line = `${normalisedCommand} ${withoutConfigFlags(args).join(" ")}`;
     const key = Object.keys(responses).find((prefix) => line.startsWith(prefix));
     return { ...ok, ...(key ? responses[key] : {}) };
   });
@@ -72,7 +78,7 @@ describe("push", () => {
     await createDelivery({ run }, gitPath).push("/wt", "cp-158/worker", COMMIT);
 
     expect(run).toHaveBeenCalledWith(
-      "git",
+      gitPath,
       [
         "push",
         "--no-verify",

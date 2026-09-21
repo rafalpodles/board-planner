@@ -2,7 +2,10 @@ import { describe, it, expect, vi } from "vitest";
 import { commitAll, resolveCommitIdentity, TamperedCheckoutError } from "./commit.js";
 import { scopedConfigListZ } from "./config-list.fixtures.js";
 
-const gitPath = "git";
+// Not the literal "git": these tests mock the runner, and a mock that expected the bare name would
+// still pass if production regressed to hardcoding it too — a fake resolved path is what makes the
+// two distinguishable (BP-641 review).
+const gitPath = "/opt/homebrew/bin/git";
 
 type Result = { code: number; stdout?: string; stderr?: string };
 

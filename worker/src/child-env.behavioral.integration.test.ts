@@ -13,6 +13,11 @@ import { collectDiff } from "./diff.js";
 import { commitAll } from "./commit.js";
 import { createDelivery, hardenedGitConfig } from "./delivery.js";
 import { runPreflight } from "./preflight.js";
+import { createExecutor } from "./executor.js";
+import { reviewGate } from "./gates/review.js";
+import { unexpectedHistory } from "./provenance.js";
+import { claimedTask } from "./__fixtures__/task.js";
+import { isAgentSpawn } from "./__fixtures__/agent-spawn.js";
 import { WorkerConfig } from "./config.js";
 
 /**
@@ -20,9 +25,20 @@ import { WorkerConfig } from "./config.js";
  * object — `...deps.env` reads nothing like `...process.env` — or a call site that widens
  * `childEnv`'s `alsoAllow` with a name that should never leave this process. Both are the bypasses
  * BP-310's audit ranked most plausible. This is the runtime half: one shared, recording `Runner`
- * driven through the real functions a task's pipeline actually calls — workspace creation, diffing,
- * a commit, a push, and preflight — against a real git daemon, asserting every env any of them
- * actually built stays inside what the real building blocks are known to add.
+ * driven through the real functions a task's pipeline actually calls, against a real git daemon,
+ * asserting every env any of them actually built stays inside what the real building blocks are
+ * known to add. Only the CLI process itself is stubbed — `isAgentSpawn` from the shared fixture is
+ * what every other stub runner in this package keys on, since BP-349 wraps both `claude` calls in
+ * `sandbox-exec` and the command a plain `command === "claude"` check would have matched is gone.
+ *
+ * Covers: workspace creation, diffing, a commit, a push, preflight, the provenance check, the
+ * implement step's own spawn (`executor.ts`) and the review gate's (`gates/review.ts`, plus its own
+ * checkout/discard git calls) — the two BP-310 names as the historical leak (the source scan's own
+ * docstring: "That is how the review gate leaked for as long as it did"). Not covered: `pipeline.ts`'s
+ * `unfinishedWork`/`pushFailure` (module-private, reachable only through a full `runTask`, which
+ * would mean re-mocking the rest of the pipeline rather than running it for real — the same
+ * `localGitEnv`/`requireGitPath` composition is exercised by the sites above), `decisions.ts`,
+ * `github-account.ts`, and `gates/confined-npm.ts` (a real `npm ci`/`npm test`, not attempted here).
  *
  * The permitted set is derived from those building blocks (`ALLOWED`, `GIT_SAFE_ENV`,
  * `hardenedGitConfig()`) rather than hand-copied, so it tracks them if they change; the handful of
@@ -61,11 +77,41 @@ interface RecordedCall {
   env: NodeJS.ProcessEnv;
 }
 
+// The CLI itself is the one thing this file cannot run for real — everything else (git, the review
+// checkout it makes on the way) goes to the real runner underneath.
+function agentEnvelope(args: readonly string[]): string {
+  const verdict = { approved: true, reason: "looks fine" };
+  if (!args.includes("stream-json")) {
+    // gates/review.ts: --output-format json, a single object, parsed whole.
+    return JSON.stringify({ result: JSON.stringify(verdict) });
+  }
+  // executor.ts: --output-format stream-json, one JSON object per line, the last one carrying the
+  // result. Only the line this file's parser actually reads is real; the rest can be minimal.
+  const result = {
+    status: "completed",
+    summary: "did it",
+    filesChanged: ["change.txt"],
+    testsAdded: [],
+    blockedReason: "",
+  };
+  return `${JSON.stringify({
+    type: "result",
+    subtype: "success",
+    is_error: false,
+    num_turns: 1,
+    total_cost_usd: 0,
+    result: JSON.stringify(result),
+  })}\n`;
+}
+
 function recordingRunner(calls: RecordedCall[]): Runner {
   const real = createRunner();
   return {
     run(command: string, args: string[], opts: RunOpts): Promise<CommandResult> {
       calls.push({ command, args, env: opts.env ?? childEnv() });
+      if (isAgentSpawn(command, args)) {
+        return Promise.resolve({ code: 0, stdout: agentEnvelope(args), stderr: "", timedOut: false });
+      }
       return real.run(command, args, opts);
     },
   };
@@ -134,7 +180,7 @@ describe("every real env-building call site stays inside the allowlist, across a
   });
 
   it(
-    "workspace creation, diffing, a commit and a push never build an env outside the allowlist",
+    "workspace, diff, commit, push, provenance, the implement step and the review gate never build an env outside the allowlist",
     async () => {
       const calls: RecordedCall[] = [];
       const runner = recordingRunner(calls);
@@ -151,8 +197,33 @@ describe("every real env-building call site stays inside the allowlist, across a
       const sha = await commitAll(runner, gitPath, worktree.path, "a change", worktree.commitIdentity);
       expect(sha).not.toBe("");
 
+      const wrong = await unexpectedHistory(runner, gitPath, worktree.path, worktree.baseSha, [sha]);
+      expect(wrong).toBe("");
+
       const diff = await collectDiff(runner, gitPath, worktree.path, worktree.baseSha);
       expect(diff.changedFiles).toContain("change.txt");
+
+      const task = claimedTask();
+      const outcome = await createExecutor(config, runner).execute({
+        task,
+        worktreePath: worktree.path,
+        brief: { prompt: "say hi", capability: "edit", model: "", fallbackModel: "", timeoutMs: 30_000 },
+      });
+      expect(outcome.kind).toBe("result");
+
+      const verdict = await reviewGate(runner, gitPath, 30_000).run({
+        worktreePath: worktree.path,
+        task,
+        result: {
+          status: "completed",
+          summary: "did it",
+          filesChanged: diff.changedFiles,
+          testsAdded: [],
+          blockedReason: "",
+        },
+        diff,
+      });
+      expect(verdict.ok).toBe(true);
 
       await createDelivery(runner, gitPath, config.baseBranch).push(worktree.path, "bp-310/child-env-test", sha);
       const pushed = execFileSync("git", ["ls-remote", remoteUrl, "refs/heads/bp-310/child-env-test"], {

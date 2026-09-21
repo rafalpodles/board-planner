@@ -19,7 +19,8 @@ const config = {
   baseBranch: "main",
 } as never;
 
-const gitPath = "git";
+// Not the literal "git" — see commit.test.ts's gitPath comment (BP-641 review).
+const gitPath = "/opt/homebrew/bin/git";
 
 function runnerReturning(stdout = "") {
   const run = vi.fn().mockResolvedValue({ code: 0, stdout, stderr: "", timedOut: false });
@@ -102,7 +103,7 @@ describe("createWorkspace", () => {
       // worktree reads is that same file, and asking first is what keeps a machine that cannot
       // answer from spending a fetch and a checkout to find out.
       expect(run).toHaveBeenCalledWith(
-        "git",
+        gitPath,
         [...HARDENING_PREFIX, "var", "GIT_AUTHOR_IDENT"],
         expect.objectContaining({ cwd: REPO_PATH }),
       );
@@ -162,12 +163,12 @@ describe("createWorkspace", () => {
     expect(result.path).toBe("/worktrees/CP-158");
     expect(result.baseSha).toBe("base1");
     expect(run).toHaveBeenCalledWith(
-      "git",
+      gitPath,
       [...HARDENING_PREFIX, "worktree", "add", "-B", "cp-158/worker", "--", "/worktrees/CP-158", "base1"],
       expect.objectContaining({ cwd: "/repo", env: expect.objectContaining({ GIT_CONFIG_NOSYSTEM: "1" }) }),
     );
     expect(run).not.toHaveBeenCalledWith(
-      "git",
+      gitPath,
       [...HARDENING_PREFIX, "worktree", "remove", "--force", "--", "/worktrees/CP-158"],
       expect.anything(),
     );
@@ -179,7 +180,7 @@ describe("createWorkspace", () => {
 
     expect(result.baseSha).toBe("base111");
     expect(run).toHaveBeenCalledWith(
-      "git",
+      gitPath,
       [...HARDENING_PREFIX, "worktree", "add", "-B", "bp-1/worker", "--", "/worktrees/BP-1", "base111"],
       expect.anything(),
     );
@@ -676,12 +677,12 @@ describe("createWorkspace", () => {
 
     expect(result.path).toBe("/worktrees/CP-158");
     expect(run).toHaveBeenCalledWith(
-      "git",
+      gitPath,
       [...HARDENING_PREFIX, "worktree", "remove", "--force", "--", "/worktrees/CP-158"],
       expect.anything(),
     );
     expect(run).toHaveBeenCalledWith(
-      "git",
+      gitPath,
       [...HARDENING_PREFIX, "worktree", "add", "-B", "cp-158/worker", "--", "/worktrees/CP-158", "base9"],
       expect.anything(),
     );
@@ -694,7 +695,7 @@ describe("createWorkspace", () => {
     await createWorkspace(config, runner, gitPath).destroy("CP-158");
 
     expect(run).toHaveBeenCalledWith(
-      "git",
+      gitPath,
       [...HARDENING_PREFIX, "worktree", "remove", "--force", "--", "/worktrees/CP-158"],
       expect.anything(),
     );
@@ -705,7 +706,7 @@ describe("createWorkspace", () => {
     await expect(createWorkspace(config, runner, gitPath).destroy("CP-158")).resolves.toBeUndefined();
 
     expect(run).not.toHaveBeenCalledWith(
-      "git",
+      gitPath,
       [...HARDENING_PREFIX, "worktree", "remove", "--force", "--", "/worktrees/CP-158"],
       expect.anything(),
     );

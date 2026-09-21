@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { unexpectedHistory } from "./provenance.js";
 
-const gitPath = "git";
+// Not the literal "git" — see commit.test.ts's gitPath comment (BP-641 review).
+const gitPath = "/opt/homebrew/bin/git";
 
 const runnerFor = (revList: string, head: string, code = 0) => ({
   run: async (_c: string, args: string[]) =>

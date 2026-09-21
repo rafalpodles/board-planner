@@ -223,8 +223,9 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
 - **Nothing executes before the static gates have read the diff.** `protected-paths` refuses
   changes to `package.json`, lockfiles, `.npmrc`, `.husky/` and workflows *before* the build gate
   runs npm on the worktree, and installs run with `--ignore-scripts`. Cost ordering alone would have
-  executed agent-written lifecycle scripts first. Not real git hooks — `.git/hooks/` is untracked,
-  so a changed-files diff can never name a path under it in the first place (BP-310).
+  executed agent-written lifecycle scripts first. Not real git hooks — the agent has no Bash in its
+  tool list, so the only way it ever changes a file is the ordinary staging path, and that path
+  refuses a `.git` component in the name (BP-310).
 - **Nothing is checked out of a poisoned clone, and a poisoned clone is not tried twice.** The
   first thing a run does is read the shared checkout's own git config and refuse it if it carries a
   key git would run — a `filter.<name>.smudge`, an `ext::` transport, an `include.path` this cannot
@@ -534,18 +535,18 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
 - **Worktrees left by a killed worker are reaped**, the first time this process binds each
   project's repository, but only under that project's own derived worktree root (`<repo
   parent>/cp-worktrees/<workerId>`) — the repository checkout and any worktree of your own are
-  left alone. **One exception:** a worktree holding a change somebody is being asked to accept is
-  kept, named by a marker under `<CP_STATE_DIR>/decisions/`. That marker has no expiry, unlike a
-  run's two-hour lease, so an unanswered decision pins a worktree until somebody answers it.
-  Accepting, declining and giving up all release it — provided this machine still serves that
-  project, because both removing a worktree and reaping one resolve through the binding. Lose the
-  assignment while a decision is open and the marker is kept rather than dropped, since dropping it
-  would hand the directory to a reaper equally unable to run. After seven days the hold is released
-  anyway and the path is logged: the worktree is then yours to remove, and a later rebind collects
-  anything left. The menubar's own removal — untick a project in Repositories — honours the same
+  left alone. The menubar's own removal — untick a project in Repositories — honours the same
   "worktree of your own" boundary: a worktree outside `cp-worktrees` blocks the checkout's removal
   rather than being taken with it, and a submodule's working directory is left alone too rather
-  than deleted out from under its superproject (BP-507).
+  than deleted out from under its superproject (BP-507). **One exception:** a worktree holding a
+  change somebody is being asked to accept is kept, named by a marker under
+  `<CP_STATE_DIR>/decisions/`. That marker has no expiry, unlike a run's two-hour lease, so an
+  unanswered decision pins a worktree until somebody answers it. Accepting, declining and giving up
+  all release it — provided this machine still serves that project, because both removing a
+  worktree and reaping one resolve through the binding. Lose the assignment while a decision is
+  open and the marker is kept rather than dropped, since dropping it would hand the directory to a
+  reaper equally unable to run. After seven days the hold is released anyway and the path is
+  logged: the worktree is then yours to remove, and a later rebind collects anything left.
 - **Accepting a refused change is the one report that does not go through the outbox.** Everything
   else this worker says is queued and retried until it lands; a decision settlement is not, because
   it can become *permanently* invalid — the decision superseded by a second claim, or given up on —

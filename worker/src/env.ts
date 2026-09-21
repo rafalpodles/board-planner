@@ -16,7 +16,7 @@ export const ALLOWED = [
   "TERM",
   "TMPDIR",
   "TZ",
-];
+] as const;
 
 /**
  * Whether the operator has accepted running the agent with nothing confining its writes (BP-349).
