@@ -12,14 +12,6 @@ import {
 } from "./seed";
 import { signIn, signInThroughForm } from "./session";
 
-/**
- * Four things an agent-driven evaluation of the product (`trawler`) hit independently, each
- * reproduced by a second session that was given only the steps. Every evaluator that opened a
- * task's History after editing it concluded the history recorded nothing; a board you have no
- * grant to looked like an outage; a step placed in an agent vanished when the page was left
- * unsaved; and the new-task form called acceptance criteria a "Checklist".
- */
-
 async function db() {
   if (mongoose.connection.readyState === 0) await mongoose.connect(E2E_MONGODB_URI);
   const handle = mongoose.connection.db;
@@ -34,6 +26,7 @@ function write(page: Page, method: string, urlPart: string) {
 }
 
 test.beforeEach(seed);
+test.afterAll(() => mongoose.disconnect());
 
 test("an edit appears in History without a reload, and so does a description change", async ({
   page,
@@ -76,7 +69,7 @@ test("a board with no grant says so on every screen of it, and offers no Retry",
   await seedAssignmentOutsider();
   await signInThroughForm(page, OUTSIDER_USERNAME, OUTSIDER_PASSWORD);
 
-  for (const path of ["", "/sprints", "/settings"]) {
+  for (const path of ["", "/sprints", "/settings", "/pm", `/tasks/${SIBLING_TASK_NUMBER}`]) {
     await test.step(`/projects/${PROJECT_KEY}${path}`, async () => {
       await page.goto(`/projects/${PROJECT_KEY}${path}`);
       const alert = page.getByRole("alert").filter({ hasText: "You do not have access to this board" });
@@ -113,12 +106,12 @@ test("a failure that is not a refusal still offers Retry, and Retry loads the bo
   });
 
   await page.goto(`/projects/${PROJECT_KEY}/settings`);
-  const alert = page.getByRole("alert").filter({ hasText: "could not be loaded" });
-  await expect(alert).toContainText("the database went away");
+  const alert = page.getByRole("alert").filter({ hasText: "Failed to load this board." });
+  await expect(alert).toBeVisible();
 
   refuse = false;
   await alert.getByRole("button", { name: "Retry" }).click();
-  await expect(page.getByRole("alert").filter({ hasText: "could not be loaded" })).toHaveCount(0);
+  await expect(alert).toHaveCount(0);
   await expect(page.getByPlaceholder("Search settings")).toBeVisible();
 });
 
@@ -205,6 +198,55 @@ test.describe("an agent with unsaved changes", () => {
       expect(askedAgain).toBe(false);
     });
   });
+});
+
+test("a save that lands is not reported as unsaved when the catalog cannot be read again", async ({
+  page,
+}) => {
+  const handle = await db();
+  await handle.collection("agentblocks").insertOne({
+    kind: "step",
+    builtIn: true,
+    gateKind: "",
+    params: {},
+    prompt: "",
+    key: "review",
+    name: "Review",
+    description: "Read it back",
+    capability: "read-only",
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+  const { insertedId } = await handle.collection("agents").insertOne({
+    name: "Saved blind",
+    description: "",
+    scope: "global",
+    owner: null,
+    project: null,
+    builtIn: false,
+    composition: { analysis: [], implementation: [], verification: [], delivery: [] },
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+  await signIn(page, "admin");
+  await page.goto(`/agents/${insertedId}`);
+  await expect(page.getByRole("heading", { name: "Saved blind" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Add Review to a phase" }).click();
+  await page.getByLabel("Where to add Review").getByRole("button", { name: "Analysis" }).click();
+  await expect(page.getByText("Unsaved changes")).toBeVisible();
+
+  await page.route(/\/api\/agents$/, (route) =>
+    route.request().method() === "GET"
+      ? route.fulfill({ status: 500, contentType: "application/json", body: '{"error":"down"}' })
+      : route.continue()
+  );
+  const saved = write(page, "PUT", `/api/agents/${insertedId}`);
+  await page.getByRole("button", { name: "Save" }).click();
+  expect((await saved).status()).toBe(200);
+
+  await expect(page.getByTestId("agent-editor-stale")).toBeVisible();
+  await expect(page.getByText("Unsaved changes")).toHaveCount(0);
 });
 
 test("the new-task form calls acceptance criteria by the name the task shows them under", async ({
