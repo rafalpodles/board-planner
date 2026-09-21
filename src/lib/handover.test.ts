@@ -272,3 +272,17 @@ describe("handoverOf and blockers", () => {
     });
   });
 });
+
+/** BP-727 review: nothing resets a task's attempts, and the claim skips one that has spent them. */
+describe("handoverOf and spent attempts", () => {
+  it("names a task machines have spent every attempt on", () => {
+    expect(handoverOf(task({ attemptsExhausted: true } as never), BOARD)).toEqual({
+      runs: false,
+      problems: [{ reason: "attempts-exhausted", by: null }],
+    });
+  });
+
+  it("runs a task with attempts left", () => {
+    expect(handoverOf(task({ attemptsExhausted: false } as never), BOARD)).toEqual({ runs: true });
+  });
+});

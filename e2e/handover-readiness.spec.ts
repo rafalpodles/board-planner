@@ -7,6 +7,7 @@ import {
   setBoardReadiness,
   blockTask,
   setTaskStatus,
+  spendAttempts,
   MEMBER_HANDOVER_TASK_ID,
   MEMBER_BACKLOG_TASK_ID,
   PROJECT_KEY,
@@ -155,12 +156,86 @@ test.describe("a member's own task, as the board changes under it", () => {
 
   test("a paused machine is named as connected but not taking work", async ({ page }) => {
     await setBoardReadiness({ repositoryUrl: HANDOVER_REPOSITORY, workerEnabled: true });
-    await seedMachine("git@github.com:e2e/handover-board.git", { paused: true });
+    await seedMachine("git@github.com:e2e/handover-board.git", { command: "pause" });
     await openAs(page, "member");
 
     await expect(notice(page)).toHaveAttribute("data-reason", "machine-paused");
-    await expect(notice(page)).toContainText("connected but not taking work: it is paused");
+    await expect(notice(page)).toHaveText(
+      "Nothing will run this yet. Your machine is connected but not taking work: it is paused. Resume it in Settings → Workers."
+    );
     await expect(waiting(page)).toHaveCount(0);
+  });
+
+  test("a stopped machine is named as connected but not taking work", async ({ page }) => {
+    await setBoardReadiness({ repositoryUrl: HANDOVER_REPOSITORY, workerEnabled: true });
+    await seedMachine("git@github.com:e2e/handover-board.git", { command: "stop" });
+    await openAs(page, "member");
+
+    await expect(notice(page)).toHaveAttribute("data-reason", "machine-stopped");
+    await expect(waiting(page)).toHaveCount(0);
+  });
+
+  // Only the sandbox check stops a claim; another failed check may be another project's checkout
+  test("a failed sandbox check is a reason, and any other failed check is not", async ({ page }) => {
+    await setBoardReadiness({ repositoryUrl: HANDOVER_REPOSITORY, workerEnabled: true });
+    await seedMachine("git@github.com:e2e/handover-board.git", {
+      failingChecks: ["checkout quarantined"],
+    });
+    await openAs(page, "member");
+    await expect(waiting(page)).toHaveText("Waiting for your machine to take it.");
+  });
+
+  test("a failed sandbox check says the machine is not taking work", async ({ page }) => {
+    await setBoardReadiness({ repositoryUrl: HANDOVER_REPOSITORY, workerEnabled: true });
+    await seedMachine("git@github.com:e2e/handover-board.git", { failingChecks: ["sandbox"] });
+    await openAs(page, "member");
+
+    await expect(notice(page)).toHaveAttribute("data-reason", "machine-failing");
+    await expect(notice(page)).toContainText("its sandbox check failed");
+  });
+
+  test("a task machines have given up on says so, not that it is waiting", async ({ page }) => {
+    await setBoardReadiness({ repositoryUrl: HANDOVER_REPOSITORY, workerEnabled: true });
+    await seedMachine("git@github.com:e2e/handover-board.git");
+    await spendAttempts(MEMBER_HANDOVER_TASK_ID, 3);
+    await openAs(page, "member");
+
+    await expect(notice(page)).toHaveAttribute("data-reason", "attempts-exhausted");
+    await expect(waiting(page)).toHaveCount(0);
+  });
+
+  // Switched on in Settings in another tab; coming back shows it without reopening the task
+  test("runs switched on elsewhere show up when the window regains focus", async ({ page }) => {
+    await setBoardReadiness({ repositoryUrl: HANDOVER_REPOSITORY, workerEnabled: false });
+    await seedMachine("git@github.com:e2e/handover-board.git");
+    await openAs(page, "member");
+    await expect(notice(page)).toHaveAttribute("data-reason", "runs-off");
+
+    await setBoardReadiness({ workerEnabled: true });
+    const reread = page.waitForResponse(
+      (res) => res.url().endsWith("/handover") && res.request().method() === "GET"
+    );
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await reread;
+
+    await expect(waiting(page)).toHaveText("Waiting for your machine to take it.", { timeout: 1_000 });
+  });
+
+  test("a locked board switched off names the lock first, and the owners' switch after it", async ({
+    page,
+  }) => {
+    await setBoardReadiness({
+      repositoryUrl: HANDOVER_REPOSITORY,
+      workerEnabled: false,
+      lockedByInstance: true,
+    });
+    await seedMachine("git@github.com:e2e/handover-board.git");
+    await openAs(page, "member");
+
+    await expect(notice(page)).toHaveAttribute("data-reason", "runs-locked runs-off");
+    await expect(problems(page).nth(1)).toHaveText(
+      "Agent runs are also off — once the lock is lifted, its owner, E2E Owner, can switch them on in Settings → Workers."
+    );
   });
 
   test("a task waiting on an unfinished blocker is not said to be waiting for a machine", async ({
@@ -223,15 +298,15 @@ test.describe("the agent picker", () => {
     await openAs(page, "member");
     await page.getByRole("combobox", { name: "Agent" }).click();
 
-    const merging = page.getByRole("option", { name: MERGING_AGENT_NAME, exact: true });
+    const merging = page.getByRole("option", { name: MERGING_AGENT_NAME });
     const pushing = page.getByRole("option", { name: PROJECT_AGENT_NAME, exact: true });
     await expect(merging).toContainText(MERGING_AGENT_DESCRIPTION);
     await expect(merging.getByTestId("option-marker")).toHaveText("Merges without a person");
     await expect(pushing).toContainText(PROJECT_AGENT_DESCRIPTION);
     await expect(pushing.getByTestId("option-marker")).toHaveCount(0);
-    await expect(merging).toHaveAccessibleDescription(
-      `${MERGING_AGENT_DESCRIPTION} Merges without a person`
-    );
+    await expect(merging).toHaveAccessibleName(`${MERGING_AGENT_NAME} Merges without a person`);
+    await expect(merging).toHaveAccessibleDescription(MERGING_AGENT_DESCRIPTION);
+    await expect(pushing).toHaveAccessibleName(PROJECT_AGENT_NAME);
   });
 
   test("still chooses an agent by keyboard, and saves it", async ({ page }) => {
@@ -245,7 +320,7 @@ test.describe("the agent picker", () => {
       .getByRole("option")
       .evaluateAll((els) =>
         els.map((el) => {
-          const label = el.getAttribute("aria-labelledby");
+          const label = el.getAttribute("aria-labelledby")?.split(" ")[0];
           return (label ? document.getElementById(label)?.textContent : el.textContent) ?? "";
         })
       );
@@ -260,6 +335,8 @@ test.describe("the agent picker", () => {
     await page.keyboard.press("Enter");
     expect((await saved).ok()).toBe(true);
     await expect(trigger).toContainText(MERGING_AGENT_NAME);
+    // Chosen, the marker stays in view on the closed field
+    await expect(trigger.getByTestId("agent-marker")).toHaveText("Merges without a person");
   });
 
   test("the hand-over rules open beside the field and link to the docs", async ({ page }) => {

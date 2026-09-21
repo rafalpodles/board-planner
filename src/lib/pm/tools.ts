@@ -10,12 +10,13 @@ import {
   changeStatus,
   assignTask,
   addComment,
+  MAX_EXECUTION_ATTEMPTS,
 } from "@/lib/task-service";
 import { OrToolDefinition } from "./openrouter";
 import { unknownParameterMessage, NOTHING_TO_CHANGE } from "@/lib/mcp/strict-input";
 import { buildBoardDigest } from "./board-review";
 import { handoverOf, type HandoverProblem } from "@/lib/handover";
-import { missingRunRoles, readinessGaps, type ReadinessGap } from "@/lib/project-readiness";
+import { missingRolesText, readinessGaps, type ReadinessGap } from "@/lib/project-readiness";
 import { projectRepositoryUrl } from "@/lib/repository";
 import type { AnyColumn } from "@/lib/columns";
 import { getProjectColumns } from "@/lib/columns";
@@ -160,6 +161,7 @@ async function whyItWillNotRun(
     assignedBy?: unknown;
     status?: unknown;
     blockedBy?: unknown;
+    execution?: { attempts?: number } | null;
   }
 ): Promise<string> {
   const project = await Project.findById(
@@ -168,8 +170,9 @@ async function whyItWillNotRun(
   ).lean();
   if (!project) return "this project is not enabled for workers, so nothing will run it";
   const columns = getProjectColumns(project);
+  const attemptsExhausted = (task.execution?.attempts ?? 0) >= MAX_EXECUTION_ATTEMPTS;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const handover = handoverOf(task as any, columns);
+  const handover = handoverOf({ ...(task as any), attemptsExhausted }, columns);
   // No agent means a person is doing it, and nothing about the board matters to that
   if (!handover.runs && handover.problems[0].reason === "no-agent") {
     return whyThisProblem(handover.problems[0], project.key);
@@ -195,7 +198,7 @@ function whyThisGap(gap: ReadinessGap, columns: AnyColumn[]): string {
     case "runs-locked":
       return "an instance admin has locked workers off for this project, so nothing will run it";
     case "missing-columns":
-      return `the board has no ${missingRunRoles(columns).join(", ")} column, so no machine can claim from it`;
+      return `the board has no ${missingRolesText(columns)} column, so no machine can claim from it`;
     default:
       return "";
   }
@@ -210,6 +213,8 @@ function whyThisGap(gap: ReadinessGap, columns: AnyColumn[]): string {
 // end, reproduced inside the feature written to end it.
 function whyThisProblem({ reason, blockers }: HandoverProblem, key: string): string {
   switch (reason) {
+    case "attempts-exhausted":
+      return "machines have already tried it as many times as they may, so none will take it again — a person has to finish it";
     case "blocked":
       return `it waits on unfinished blockers (${(blockers ?? []).map((n) => `${key}-${n}`).join(", ")})`;
     case "no-agent":

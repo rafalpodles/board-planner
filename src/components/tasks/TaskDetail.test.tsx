@@ -613,16 +613,23 @@ describe("TaskDetail, the Agent row's handover notice", () => {
     assignedBy: { _id: "u2", username: "kmk", fullName: "Krzysiek" },
   };
 
-  const readyBoard = {
-    ...project,
+  // The page's own project read is deliberately NOT ready: the board is judged from the
+  // readiness read, which is the one the focus re-read refreshes
+  const readyBoard = project;
+  const READY = {
+    owners: [] as string[],
+    canAdmin: false,
     repositoryUrl: "https://github.com/acme/tp",
-    worker: { enabled: true },
+    workerEnabled: true,
+    lockedByInstance: false,
+    columns: [{ role: "approved" }, { role: "active" }, { role: "review" }, { role: "done" }],
+    machine: "live",
   };
 
   function serve(
     over: Record<string, unknown> = {},
     board: Record<string, unknown> = readyBoard,
-    readiness: unknown = { owners: [], machine: "live" }
+    readiness: Record<string, unknown> = READY
   ) {
     api.get.mockImplementation((url: string) => {
       if (url === "/api/projects/TP/assignable-users") return Promise.resolve([]);
@@ -728,11 +735,10 @@ describe("TaskDetail, the Agent row's handover notice", () => {
 
   // BP-727. The board's own gaps reach both call sites, with the owners the endpoint named
   const selfAssigned = { assignedBy: { _id: "u1", username: "owner", fullName: "Owner Name" } };
-  const noRepository = { ...readyBoard, repositoryUrl: "" };
-  const ownedByAda = { owners: [{ _id: "u9", username: "ada", fullName: "Ada" }], machine: "live" };
+  const noRepository = { ...READY, repositoryUrl: "", owners: ["Ada"] };
 
   it("names a board with no repository, and its owner, on the rail", async () => {
-    serve(selfAssigned, noRepository, ownedByAda);
+    serve(selfAssigned, readyBoard, noRepository);
     renderDetail();
     await loaded();
 
@@ -742,7 +748,7 @@ describe("TaskDetail, the Agent row's handover notice", () => {
   });
 
   it("names it in the mobile sheet too", async () => {
-    serve(selfAssigned, noRepository, ownedByAda);
+    serve(selfAssigned, readyBoard, noRepository);
     renderDetail();
     await loaded();
     await act(async () => screen.getByRole("button", { name: "All details" }).click());
@@ -753,7 +759,7 @@ describe("TaskDetail, the Agent row's handover notice", () => {
   });
 
   it("names agent runs switched off from the board's own worker setting", async () => {
-    serve(selfAssigned, { ...readyBoard, worker: { enabled: false } }, ownedByAda);
+    serve(selfAssigned, readyBoard, { ...READY, workerEnabled: false });
     renderDetail();
     await loaded();
 
@@ -764,7 +770,7 @@ describe("TaskDetail, the Agent row's handover notice", () => {
 
   // A locked board whose owner switched runs on must not read as ready
   it("names a lock on a board whose owner switched runs on", async () => {
-    serve(selfAssigned, { ...readyBoard, worker: { enabled: true, lockedByInstance: true } }, ownedByAda);
+    serve(selfAssigned, readyBoard, { ...READY, lockedByInstance: true });
     renderDetail();
     await loaded();
 
@@ -774,7 +780,7 @@ describe("TaskDetail, the Agent row's handover notice", () => {
   });
 
   it("tells the assignee they have no machine, from the readiness read", async () => {
-    serve(selfAssigned, readyBoard, { owners: [], machine: "none" });
+    serve(selfAssigned, readyBoard, { ...READY, machine: "none" });
     renderDetail();
     await loaded();
 
@@ -783,17 +789,23 @@ describe("TaskDetail, the Agent row's handover notice", () => {
     ).toBe("no-machine");
   });
 
-  // Connecting a machine happens in another window; coming back must show it without a reopen
-  it("reads the machine again when the window regains focus", async () => {
-    let machine = "none";
+  function serveChanging(readiness: () => Record<string, unknown>) {
     api.get.mockImplementation((url: string) => {
       if (url === "/api/projects/TP/assignable-users") return Promise.resolve([]);
       if (url.startsWith("/api/agent")) return Promise.resolve([]);
       if (url.includes("/tasks/")) return Promise.resolve({ ...handedOver, ...selfAssigned });
       if (url.includes("/sprints")) return Promise.resolve([]);
-      if (url === "/api/projects/TP/handover") return Promise.resolve({ owners: [], machine });
+      if (url === "/api/projects/TP/handover") return Promise.resolve(readiness());
       return Promise.resolve(readyBoard);
     });
+  }
+  const handoverReads = () =>
+    api.get.mock.calls.filter((c: unknown[]) => c[0] === "/api/projects/TP/handover").length;
+
+  // Connecting a machine happens in another window; coming back must show it without a reopen
+  it("reads the machine again when the window regains focus", async () => {
+    let machine = "none";
+    serveChanging(() => ({ ...READY, machine }));
     renderDetail();
     await loaded();
     const rail = within(screen.getByRole("complementary"));
@@ -806,6 +818,64 @@ describe("TaskDetail, the Agent row's handover notice", () => {
     expect(rail.getByTestId("handover-waiting").textContent).toBe("Waiting for your machine to take it.");
   });
 
+  // Switching runs on is done in Settings, in another tab; the board's own fields come back too
+  it("reads the board's own readiness again on focus, not only the machine", async () => {
+    let workerEnabled = false;
+    serveChanging(() => ({ ...READY, workerEnabled }));
+    renderDetail();
+    await loaded();
+    const rail = within(screen.getByRole("complementary"));
+    expect(rail.getByTestId("handover-notice").dataset.reason).toBe("runs-off");
+
+    workerEnabled = true;
+    await act(async () => window.dispatchEvent(new Event("focus")));
+
+    await waitFor(() => expect(rail.queryByTestId("handover-notice")).toBeNull());
+  });
+
+  // Coming back to a tab fires focus and visibilitychange together; one read answers both
+  it("reads once for a focus and a visibility change that arrive together", async () => {
+    serveChanging(() => READY);
+    renderDetail();
+    await loaded();
+    const before = handoverReads();
+
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    await waitFor(() => expect(handoverReads()).toBe(before + 1));
+    await act(async () => new Promise((r) => setTimeout(r, 50)));
+    expect(handoverReads()).toBe(before + 1);
+  });
+
+  // A tab going to the background is not a return to it
+  it("does not read while the page is hidden", async () => {
+    serveChanging(() => READY);
+    renderDetail();
+    await loaded();
+    const before = handoverReads();
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+
+    await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+    await act(async () => new Promise((r) => setTimeout(r, 50)));
+
+    expect(handoverReads()).toBe(before);
+    visibility.mockRestore();
+  });
+
+  it("names a task machines have spent every attempt on, instead of waiting", async () => {
+    serve({ ...selfAssigned, attemptsExhausted: true });
+    renderDetail();
+    await loaded();
+
+    expect(
+      within(screen.getByRole("complementary")).getByTestId("handover-notice").dataset.reason
+    ).toBe("attempts-exhausted");
+    expect(screen.queryByTestId("handover-waiting")).toBeNull();
+  });
+
   // The endpoint failing must not take the task with it, and then the board is simply not judged
   it("still opens the task when the readiness read fails, and judges only the task", async () => {
     api.get.mockImplementation((url: string) => {
@@ -814,7 +884,7 @@ describe("TaskDetail, the Agent row's handover notice", () => {
       if (url.includes("/tasks/")) return Promise.resolve({ ...handedOver, ...selfAssigned });
       if (url.includes("/sprints")) return Promise.resolve([]);
       if (url === "/api/projects/TP/handover") return Promise.reject(new Error("boom"));
-      return Promise.resolve(noRepository);
+      return Promise.resolve({ ...project, repositoryUrl: "", worker: { enabled: false } });
     });
     renderDetail();
     await loaded();

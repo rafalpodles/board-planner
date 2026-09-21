@@ -54,7 +54,7 @@ const OWNER = "507f1f77bcf86cd799439012";
 beforeEach(() => {
   vi.clearAllMocks();
   getAuthUser.mockResolvedValue({ _id: READER, role: "member" });
-  check.mockResolvedValue(true);
+  check.mockImplementation(async (_user: unknown, _project: string, need: string) => need === "access");
   projectLean.mockResolvedValue({ _id: PROJECT, repositoryUrl: "https://github.com/acme/orbit" });
   grantLean.mockResolvedValue([{ subject: OWNER }]);
   userLean.mockResolvedValue([
@@ -85,7 +85,51 @@ describe("GET handover readiness", () => {
     expect(grantFind).toHaveBeenCalledWith({ objectType: "project", object: PROJECT, relation: "owner" });
     expect(userFind.mock.calls[0][0]).toMatchObject({ kind: { $ne: "machine" } });
     expect(userFind.mock.calls[0][1]).toBe("username fullName");
-    expect(body.owners).toEqual([{ username: "ada", fullName: "Ada" }]);
+    expect(body.owners).toEqual(["Ada"]);
+  });
+
+  // Who to ask, not a roster: a username is an account handle members have no need of here
+  it("names an owner with no display name by username, and sends no username otherwise", async () => {
+    userLean.mockResolvedValue([
+      { _id: OWNER, username: "ada", fullName: "Ada" },
+      { _id: "o2", username: "kasia", fullName: "" },
+    ]);
+
+    const { body } = await read();
+
+    expect(body.owners).toEqual(["Ada", "kasia"]);
+    expect(JSON.stringify(body)).not.toContain('"ada"');
+  });
+
+  it("answers the board's own readiness, fresh, so a focus re-read sees a change made elsewhere", async () => {
+    projectLean.mockResolvedValue({
+      _id: PROJECT,
+      repositoryUrl: "https://github.com/acme/orbit",
+      worker: { enabled: true, lockedByInstance: true, policy: { secret: "x" } },
+      columns: [
+        { id: "todo", label: "To do", color: "#000", role: "approved", order: 0 },
+        { id: "done", label: "Done", color: "#000", role: "done", order: 1 },
+      ],
+    });
+
+    const { body } = await read();
+
+    expect(body).toMatchObject({
+      repositoryUrl: "https://github.com/acme/orbit",
+      workerEnabled: true,
+      lockedByInstance: true,
+      columns: [{ role: "approved" }, { role: "done" }],
+    });
+    expect(JSON.stringify(body)).not.toContain("secret");
+  });
+
+  it.each([
+    [true, true],
+    [false, false],
+  ])("says whether the reader may change the board (admin need: %s)", async (admin, expected) => {
+    check.mockImplementation(async (_u: unknown, _p: string, need: string) => need === "access" || admin);
+
+    expect((await read()).body.canAdmin).toBe(expected);
   });
 
   it("answers a coarse machine state and nothing about the machine itself", async () => {
@@ -99,7 +143,8 @@ describe("GET handover readiness", () => {
 
     const { body } = await read();
 
-    expect(body).toEqual({ owners: [{ username: "ada", fullName: "Ada" }], machine: "live" });
+    expect(body.machine).toBe("live");
+    expect(JSON.stringify(body)).not.toContain("/Users/ada");
   });
 
   // A board migrated from before repositoryUrl names its repository only in githubRepo
@@ -134,7 +179,7 @@ describe("GET handover readiness", () => {
     expect((await read()).body.machine).toBe("none");
   });
 
-  it("names the failed checks of the reader's own paused-or-failing machine, and no detail", async () => {
+  it("answers failing for a failed sandbox check, and nothing of its detail", async () => {
     workerLean.mockResolvedValue([
       {
         enabled: true,
@@ -146,11 +191,8 @@ describe("GET handover readiness", () => {
 
     const { body } = await read();
 
-    expect(body).toEqual({
-      owners: [{ username: "ada", fullName: "Ada" }],
-      machine: "failing",
-      failingChecks: ["sandbox"],
-    });
+    expect(body.machine).toBe("failing");
+    expect(JSON.stringify(body)).not.toContain("/private/path");
   });
 
   it("selects what pause and preflight are read from", async () => {

@@ -955,15 +955,18 @@ describe("re-assigning to record an assigner the board never had", () => {
  */
 describe("the hand-over notice, with the board judged too", () => {
   const OWNER = { _id: "u1", username: "owner", fullName: "Owner Name" } as ApiUser;
-  const ADA = { _id: "u9", username: "ada", fullName: "Ada" };
-  const TOMEK = { _id: "u8", username: "tomek", fullName: "Tomek" };
+  const ADA = "Ada";
+  const TOMEK = "Tomek";
   const AGENT = [{ _id: "a1", name: "Default" }] as React.ComponentProps<
     typeof PropertyRail
   >["agents"];
   const READY: NonNullable<React.ComponentProps<typeof PropertyRail>["board"]> = {
     repositoryUrl: "https://github.com/acme/orbit",
     workerEnabled: true,
+    lockedByInstance: false,
     owners: [ADA],
+    canAdmin: false,
+    columns: BOARD.map((c) => ({ role: c.role })),
     machine: "live",
   };
 
@@ -1037,9 +1040,19 @@ describe("the hand-over notice, with the board judged too", () => {
   });
 
   it("tells an owner the lock is not theirs to lift", () => {
-    withBoard({ lockedByInstance: true, owners: [OWNER, ADA] });
+    withBoard({ lockedByInstance: true, canAdmin: true });
 
     expect(notice().textContent).toContain("— an instance admin can lift the lock");
+  });
+
+  // Off and locked: both said, the lock first, and the owners' switch only after the lock
+  it("names both a lock and runs switched off, in that order", () => {
+    withBoard({ lockedByInstance: true, workerEnabled: false });
+
+    expect(problems()).toEqual(["runs-locked", "runs-off"]);
+    expect(screen.getAllByTestId("handover-problem")[1].textContent).toBe(
+      "Agent runs are also off — once the lock is lifted, its owner, Ada, can switch them on in Settings → Workers."
+    );
   });
 
   it("tells an instance admin they can lift the lock", () => {
@@ -1048,10 +1061,14 @@ describe("the hand-over notice, with the board judged too", () => {
     expect(notice().textContent).toContain("— you can lift the lock");
   });
 
-  it("tells an owner reading it that they can fix it themselves", () => {
-    withBoard({ repositoryUrl: "", owners: [OWNER, ADA] });
+  // Owners and instance admins alike may change the board's settings
+  it("tells a reader who may change the board that they can fix it themselves", () => {
+    withBoard({ repositoryUrl: "", workerEnabled: false, canAdmin: true });
 
-    expect(notice().textContent).toContain("— you can add one");
+    expect(screen.getAllByTestId("handover-problem").map((li) => li.textContent)).toEqual([
+      expect.stringContaining("— you can add one"),
+      expect.stringContaining("— you can switch them on"),
+    ]);
   });
 
   it("falls back to an admin for a board with no owner on record", () => {
@@ -1085,19 +1102,31 @@ describe("the hand-over notice, with the board judged too", () => {
     );
   });
 
-  it("tells the assignee their machine is paused", () => {
+  // A pause set on the machine itself never reaches the server, so the server-side resume is
+  // the only one this screen can see take effect
+  it("tells the assignee their machine is paused, and where to resume it", () => {
     withBoard({ machine: "paused" });
 
     expect(notice().dataset.reason).toBe("machine-paused");
-    expect(notice().textContent).toContain(
-      "Your machine is connected but not taking work: it is paused."
+    expect(notice().textContent).toBe(
+      "Nothing will run this yet. Your machine is connected but not taking work: it is paused. Resume it in Settings → Workers."
     );
+    expect(notice().textContent).not.toContain("menubar");
     expect(screen.queryByTestId("handover-waiting")).toBeNull();
+  });
+
+  it("tells the assignee their machine was stopped", () => {
+    withBoard({ machine: "stopped" });
+
+    expect(notice().dataset.reason).toBe("machine-stopped");
+    expect(notice().textContent).toBe(
+      "Nothing will run this yet. Your machine is connected but not taking work: it was stopped. Resume it in Settings → Workers."
+    );
   });
 
   // The sandbox check is the one that stops the claim itself
   it("says a machine whose sandbox check failed is not taking work", () => {
-    withBoard({ machine: "failing", failingChecks: ["sandbox"] });
+    withBoard({ machine: "failing" });
 
     expect(notice().dataset.reason).toBe("machine-failing");
     expect(notice().textContent).toContain(
@@ -1105,21 +1134,36 @@ describe("the hand-over notice, with the board judged too", () => {
     );
   });
 
-  // Any other failed check: the machine still claims, and the run would fail — said as that
-  it("names other failed checks without claiming the machine takes no work", () => {
-    withBoard({ machine: "failing", failingChecks: ["gh", "git"] });
-
-    expect(notice().textContent).toContain("its preflight checks failed (gh, git)");
-    expect(notice().textContent).not.toContain("not taking work");
-  });
-
-  it("names a board missing a column a run needs, and who can add it", () => {
-    withBoard(READY, {}, { columns: BOARD.filter((c) => c.role !== "review") });
+  // The board's own columns, as the readiness read answered them rather than as the page loaded
+  it("names a board missing columns a run needs, as a list of their labels", () => {
+    withBoard({ columns: [{ role: "approved" }, { role: "active" }] });
 
     expect(notice().dataset.reason).toBe("missing-columns");
     expect(notice().textContent).toContain(
-      "This board has no Awaiting review column, so no machine can run work on it — its owner, Ada, can give a column that role in Settings → Board."
+      "This board has no Awaiting review or Done column, so no machine can run work on it — its owner, Ada, can give a column that role in Settings → Board."
     );
+  });
+
+  it("names three missing roles as a list", () => {
+    withBoard({ columns: [{ role: "active" }] });
+
+    expect(notice().textContent).toContain("no Ready to pick up, Awaiting review or Done column");
+  });
+
+  it("names a task machines have given up on, instead of waiting for one", () => {
+    withBoard(READY, { attemptsExhausted: true });
+
+    expect(notice().dataset.reason).toBe("attempts-exhausted");
+    expect(notice().textContent).toContain("so none will take it again — a person has to finish it");
+    expect(screen.queryByTestId("handover-waiting")).toBeNull();
+  });
+
+  it("reads the reasons out as they change", () => {
+    withBoard({ repositoryUrl: "" });
+
+    const live = screen.getByTestId("handover-live");
+    expect(live.getAttribute("aria-live")).toBe("polite");
+    expect(live.contains(notice())).toBe(true);
   });
 
   it("names unfinished blockers by key", () => {
@@ -1144,7 +1188,7 @@ describe("the hand-over notice, with the board judged too", () => {
   it("names three owners as a list, and an owner with no display name by username", () => {
     withBoard({
       repositoryUrl: "",
-      owners: [ADA, TOMEK, { _id: "u7", username: "kasia", fullName: "" }],
+      owners: [ADA, TOMEK, "kasia"],
     });
 
     expect(notice().textContent).toContain("its owners, Ada, Tomek and kasia, can add one");
@@ -1282,39 +1326,74 @@ describe("the Agent row explains itself", () => {
   });
 
   // The name stays the name; the description and marker are read as its description
-  it("keeps the option's accessible name to the agent's name", async () => {
+  const textOf = (ids: string | null) =>
+    (ids ?? "")
+      .split(" ")
+      .filter(Boolean)
+      .map((id) => document.getElementById(id)!.textContent)
+      .join(" ");
+
+  // Merging without a person changes what choosing this option does, so it is part of its name
+  it("names a merging agent with its marker, and describes it with its description", async () => {
     renderRail({ agents });
     await openRow("Agent");
 
     const ships = option("Ships it");
-    const name = document.getElementById(ships.getAttribute("aria-labelledby")!)!;
-    const described = document.getElementById(ships.getAttribute("aria-describedby")!)!;
-    expect(name.textContent).toBe("Ships it");
-    expect(described.textContent).toContain("Merges without a person");
-    expect(screen.getByRole("option", { name: "Ships it" })).toBe(ships);
+    expect(textOf(ships.getAttribute("aria-labelledby"))).toBe("Ships it Merges without a person");
+    expect(textOf(ships.getAttribute("aria-describedby"))).toBe(MERGER.description);
   });
 
-  // The marker alone is still a description, and must be read out as one
-  it("describes an option with a marker and no description", async () => {
+  it("names an agent that does not merge by its name alone", async () => {
+    renderRail({ agents });
+    await openRow("Agent");
+
+    const proposes = option("Proposes");
+    expect(textOf(proposes.getAttribute("aria-labelledby"))).toBe("Proposes");
+    expect(textOf(proposes.getAttribute("aria-describedby"))).toBe(PROPOSER.description);
+  });
+
+  it("names an option with a marker and no description, and describes nothing", async () => {
     renderRail({ agents });
     await openRow("Agent");
 
     const quiet = option("Quiet merger");
-    expect(document.getElementById(quiet.getAttribute("aria-describedby")!)!.textContent).toBe(
-      "Merges without a person"
-    );
-    expect(document.getElementById(quiet.getAttribute("aria-labelledby")!)!.textContent).toBe(
-      "Quiet merger"
-    );
+    expect(textOf(quiet.getAttribute("aria-labelledby"))).toBe("Quiet merger Merges without a person");
+    expect(quiet.hasAttribute("aria-describedby")).toBe(false);
   });
 
-  it("shows a long description whole, not cut after two lines", async () => {
+  // Clamped so one talkative agent cannot push the others out of the list; the whole text is kept
+  it("clamps a long description, keeping the whole text in the DOM and its title", async () => {
     renderRail({ agents });
     await openRow("Agent");
 
     const description = option("Talkative").querySelector('[data-testid="option-description"]')!;
     expect(description.textContent).toBe(LONG.description);
-    expect(description.className).not.toMatch(/line-clamp/);
+    expect(description.getAttribute("title")).toBe(LONG.description);
+    expect(description.className).toMatch(/line-clamp-3/);
+  });
+
+  it("shows the marker on the closed field when the chosen agent merges", () => {
+    renderRail({
+      agents,
+      draft: { ...draft, agent: "a1" },
+      stored: { agent: "a1", assignee: null, assignedBy: null, status: "todo" },
+    });
+
+    const trigger = screen.getByRole("combobox", { name: "Agent" });
+    expect(trigger.querySelector('[data-testid="agent-marker"]')?.textContent).toBe(
+      "Merges without a person"
+    );
+  });
+
+  it("shows no marker on the closed field for an agent that does not merge", () => {
+    renderRail({
+      agents,
+      draft: { ...draft, agent: "a2" },
+      stored: { agent: "a2", assignee: null, assignedBy: null, status: "todo" },
+    });
+
+    expect(screen.getByRole("combobox", { name: "Agent" }).textContent).toContain("Proposes");
+    expect(screen.queryByTestId("agent-marker")).toBeNull();
   });
 
   it("leaves an option with nothing to describe exactly as it was", async () => {

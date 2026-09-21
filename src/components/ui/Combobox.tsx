@@ -486,8 +486,17 @@ export function Combobox(props: ComboboxProps) {
                     type="button"
                     role="option"
                     aria-selected={on}
-                    aria-labelledby={described ? `${optionId}-label` : undefined}
-                    aria-describedby={described ? `${optionId}-description` : undefined}
+                    // The marker is part of the name: it changes what choosing this option does
+                    aria-labelledby={
+                      described
+                        ? [`${optionId}-label`, option.marker && `${optionId}-marker`]
+                            .filter(Boolean)
+                            .join(" ")
+                        : undefined
+                    }
+                    aria-describedby={
+                      option.description ? `${optionId}-description` : undefined
+                    }
                     onMouseEnter={() => setActive(index)}
                     onClick={(e) => {
                       e.stopPropagation();
@@ -509,17 +518,20 @@ export function Combobox(props: ComboboxProps) {
                         <span id={`${optionId}-label`} className="truncate">
                           {option.label}
                         </span>
-                        <span
-                          id={`${optionId}-description`}
-                          className="flex flex-col items-start gap-1 text-[11px] leading-snug text-text-muted"
-                        >
+                        <span className="flex flex-col items-start gap-1 text-[11px] leading-snug text-text-muted">
                           {option.description && (
-                            <span data-testid="option-description" className="whitespace-pre-line break-words">
+                            <span
+                              id={`${optionId}-description`}
+                              data-testid="option-description"
+                              title={option.description}
+                              className="line-clamp-3 break-words"
+                            >
                               {option.description}
                             </span>
                           )}
                           {option.marker && (
                             <span
+                              id={`${optionId}-marker`}
                               data-testid="option-marker"
                               className="rounded bg-warning/15 px-1.5 py-0.5 font-medium text-warning"
                             >

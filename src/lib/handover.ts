@@ -21,7 +21,8 @@ export type HandoverReason =
   | "assigner-unrecorded"
   | "assigned-by-someone-else"
   | "pm-assigned-for-someone-else"
-  | "blocked";
+  | "blocked"
+  | "attempts-exhausted";
 
 export interface HandoverProblem {
   reason: HandoverReason;
@@ -33,7 +34,7 @@ export interface HandoverProblem {
 export type Handover = { runs: true } | { runs: false; problems: HandoverProblem[] };
 
 type Judged = Pick<ApiTask, "agent" | "assignee" | "assignedBy" | "pmAssignedFor" | "status"> &
-  Partial<Pick<ApiTask, "blockedBy">>;
+  Partial<Pick<ApiTask, "blockedBy" | "attemptsExhausted">>;
 
 // Only blockers whose status arrived with them can be judged; a bare id says nothing either way
 function openBlockers(task: Judged, columns: AnyColumn[]): number[] {
@@ -138,6 +139,8 @@ export function handoverOf(task: Judged, columns?: AnyColumn[]): Handover {
   // The claim leaves a task with an unfinished blocker alone until that blocker reaches a done column
   const blockers = columns ? openBlockers(task, columns) : [];
   if (blockers.length > 0) problems.push({ reason: "blocked", by: null, blockers });
+  // Nothing resets a task's attempts, and the claim skips a task that has spent them
+  if (task.attemptsExhausted) problems.push({ reason: "attempts-exhausted", by: null });
 
   return problems.length === 0 ? { runs: true } : { runs: false, problems };
 }

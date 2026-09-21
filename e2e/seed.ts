@@ -2460,8 +2460,15 @@ export async function seedMachine(
   {
     owner = MEMBER_ID,
     seenAgoMs = 0,
-    paused = false,
-  }: { owner?: mongoose.Types.ObjectId; seenAgoMs?: number; paused?: boolean } = {}
+    command = "",
+    failingChecks = [],
+  }: {
+    owner?: mongoose.Types.ObjectId;
+    seenAgoMs?: number;
+    /** Issued and acknowledged, the way a board-issued pause or stop settles */
+    command?: "" | "pause" | "stop";
+    failingChecks?: string[];
+  } = {}
 ) {
   const db = (await connect()).db!;
   const now = new Date();
@@ -2481,13 +2488,26 @@ export async function seedMachine(
     lastSeenAt: new Date(now.getTime() - seenAgoMs),
     identity: null,
     bindingError: "",
-    preflight: null,
-    command: paused ? "pause" : "",
-    commandIssuedAt: paused ? new Date(now.getTime() - 60_000) : null,
-    commandAckedAt: paused ? new Date(now.getTime() - 30_000) : null,
+    preflight: failingChecks.length
+      ? {
+          ok: false,
+          account: "",
+          checks: failingChecks.map((name) => ({ name, ok: false, warn: false, detail: "failed" })),
+          reportedAt: now,
+        }
+      : null,
+    command,
+    commandIssuedAt: command ? new Date(now.getTime() - 60_000) : null,
+    commandAckedAt: command ? new Date(now.getTime() - 30_000) : null,
     createdAt: now,
     updatedAt: now,
   });
+  await mongoose.disconnect();
+}
+
+export async function spendAttempts(taskId: mongoose.Types.ObjectId, attempts: number) {
+  const db = (await connect()).db!;
+  await db.collection("tasks").updateOne({ _id: taskId }, { $set: { "execution.attempts": attempts } });
   await mongoose.disconnect();
 }
 

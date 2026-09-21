@@ -100,7 +100,34 @@ describe("the PM says every reason its hand-over will not run", () => {
     board({ columns: COLUMNS.filter((c) => c.role !== "review") });
 
     expect((await assign()).result).toMatchObject({
-      note: expect.stringContaining("the board has no review column"),
+      note: expect.stringContaining("the board has no Awaiting review column"),
+    });
+  });
+
+  it("names every missing role as a list of their labels", async () => {
+    board({ columns: COLUMNS.filter((c) => c.role === "active") });
+
+    expect((await assign()).result).toMatchObject({
+      note: expect.stringContaining("no Ready to pick up, Awaiting review or Done column"),
+    });
+  });
+
+  it("names a task machines have spent every attempt on", async () => {
+    expect((await assign({ execution: { attempts: 3 } })).result).toMatchObject({
+      note: expect.stringContaining("none will take it again"),
+    });
+  });
+
+  it("does not name attempts a task still has", async () => {
+    expect((await assign({ execution: { attempts: 2 } })).result).toEqual({ task: "BP-9", assignee: "owner" });
+  });
+
+  // A board deleted between the assignment and this read answers, rather than throwing
+  it("does not throw when the project is gone", async () => {
+    projectFindById.mockReturnValue({ lean: async () => null });
+
+    expect((await assign()).result).toMatchObject({
+      note: "Assigned, but this project is not enabled for workers, so nothing will run it.",
     });
   });
 

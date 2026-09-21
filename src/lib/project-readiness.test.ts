@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { missingRunRoles, readinessGaps } from "./project-readiness";
+import { missingRolesText, missingRunRoles, orList, readinessGaps } from "./project-readiness";
 
 const READY = { repositoryUrl: "https://github.com/acme/orbit", workerEnabled: true, machine: "live" as const };
 
@@ -25,8 +25,8 @@ describe("readinessGaps", () => {
   // Switching runs on alone would not be enough, so both are said
   it("names both when the board is switched off and locked", () => {
     expect(readinessGaps({ ...READY, workerEnabled: false, lockedByInstance: true })).toEqual([
-      "runs-off",
       "runs-locked",
+      "runs-off",
     ]);
   });
 
@@ -39,6 +39,7 @@ describe("readinessGaps", () => {
   });
 
   it.each([
+    ["stopped", "machine-stopped"],
     ["paused", "machine-paused"],
     ["failing", "machine-failing"],
   ] as const)("names a %s machine", (machine, gap) => {
@@ -79,5 +80,22 @@ describe("missingRunRoles", () => {
   it("lists the roles a run needs that no column carries, in the order a run needs them", () => {
     const columns = [{ id: "a", label: "a", color: "#888", role: "active" as const, order: 0 }];
     expect(missingRunRoles(columns)).toEqual(["approved", "review", "done"]);
+  });
+});
+
+describe("orList", () => {
+  it.each([
+    [[], ""],
+    [["A"], "A"],
+    [["A", "B"], "A or B"],
+    [["A", "B", "C"], "A, B or C"],
+  ])("lists %o as %o", (items, expected) => {
+    expect(orList(items)).toBe(expected);
+  });
+});
+
+describe("missingRolesText", () => {
+  it("names the missing roles by their labels", () => {
+    expect(missingRolesText([{ role: "active" }])).toBe("Ready to pick up, Awaiting review or Done");
   });
 });

@@ -18,7 +18,6 @@ import {
 } from "@/types";
 import { useStore } from "@/app/(app)/agents/store";
 import { effectiveColumns } from "@/lib/columns";
-import { isWorkerLockedByInstance } from "@/lib/worker-gate";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Modal } from "@/components/ui/Modal";
 import { TaskForm } from "@/components/tasks/TaskForm";
@@ -127,12 +126,18 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
 
   // Connecting or resuming a machine happens in another window; coming back should show it
   useEffect(() => {
+    // Coming back to the tab fires both events; one read answers both
+    let inFlight = false;
     function reread() {
-      if (document.visibilityState === "hidden") return;
+      if (document.visibilityState === "hidden" || inFlight) return;
+      inFlight = true;
       api
         .get(`/api/projects/${projectId}/handover`)
         .then(setReadiness)
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => {
+          inFlight = false;
+        });
     }
     window.addEventListener("focus", reread);
     document.addEventListener("visibilitychange", reread);
@@ -266,16 +271,6 @@ function TaskDetailView({
     task.createdBy && typeof task.createdBy === "object" ? task.createdBy.fullName : null;
   const watching = !!currentUser && (task.watchers || []).includes(currentUser._id);
   const projectDefaultAgent = project.worker?.agent ? String(project.worker.agent) : undefined;
-  const board = readiness
-    ? {
-        repositoryUrl: project.repositoryUrl ?? "",
-        workerEnabled: !!project.worker?.enabled,
-        lockedByInstance: isWorkerLockedByInstance(project.worker),
-        owners: readiness.owners,
-        machine: readiness.machine,
-        failingChecks: readiness.failingChecks,
-      }
-    : null;
 
   // Forces the write the diff-based auto-save would drop, which is how "assign it again" repairs a
   // task whose assigner was never recorded. Reloaded straight after: that write is what clears the
@@ -553,7 +548,7 @@ function TaskDetailView({
               projectDefaultAgent={projectDefaultAgent}
               stored={task}
               columns={columns}
-              board={board}
+              board={readiness}
               projectKey={project.key}
               viewerIsInstanceAdmin={isAdmin}
               onRepairAssigner={repairAssigner}
@@ -593,7 +588,7 @@ function TaskDetailView({
           projectDefaultAgent={projectDefaultAgent}
           stored={task}
           columns={columns}
-          board={board}
+          board={readiness}
           projectKey={project.key}
           viewerIsInstanceAdmin={isAdmin}
           onRepairAssigner={repairAssigner}

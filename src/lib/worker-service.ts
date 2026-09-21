@@ -146,53 +146,50 @@ function isLive(worker: IWorker, now: Date): boolean {
 type ServingMachine = Pick<IWorker, "enabled" | "lastSeenAt" | "repos"> &
   Partial<Pick<IWorker, "preflight" | "command" | "commandIssuedAt" | "commandAckedAt">>;
 
-// Proven only by the machine's acknowledgement, the way the fleet console reads it: a pause issued
-// and not yet acked may still be finishing a run, so it is not reported as paused.
-function pauseAcknowledged(worker: ServingMachine): boolean {
-  if (worker.command !== "pause" || !worker.commandAckedAt) return false;
+// The name the worker gives the check that stops it claiming (worker/src/preflight.ts)
+const SANDBOX_CHECK = "sandbox";
+
+// Proven only by the machine's acknowledgement, the way the fleet console reads it: a command
+// issued and not yet acked may still be finishing a run. `stop` aborts the run and pauses the loop.
+function haltAcknowledged(worker: ServingMachine): "paused" | "stopped" | null {
+  if ((worker.command !== "pause" && worker.command !== "stop") || !worker.commandAckedAt) return null;
   const ackedAt = new Date(worker.commandAckedAt).getTime();
   const issuedAt = worker.commandIssuedAt ? new Date(worker.commandIssuedAt).getTime() : null;
-  return issuedAt === null || ackedAt > issuedAt;
+  if (issuedAt !== null && ackedAt <= issuedAt) return null;
+  return worker.command === "pause" ? "paused" : "stopped";
 }
 
-function failingChecksOf(worker: ServingMachine): string[] {
-  if (!worker.preflight || worker.preflight.ok !== false) return [];
-  const names = (worker.preflight.checks ?? []).filter((c) => !c.ok).map((c) => c.name);
-  return names.length > 0 ? names : ["preflight"];
+// Only the sandbox check stops the claim outright. Other failed checks may belong to another
+// project's checkout, which the report does not attribute, so they say nothing about this board.
+function sandboxFailed(worker: ServingMachine): boolean {
+  return (worker.preflight?.checks ?? []).some((c) => c.name === SANDBOX_CHECK && !c.ok);
 }
 
 const MACHINE_RANK: Record<MachineState, number> = {
   none: 0,
   stale: 1,
   failing: 2,
-  paused: 3,
-  live: 4,
+  stopped: 3,
+  paused: 4,
+  live: 5,
 };
 
 /**
  * The best of these machines, for this project's repository. A machine that reports in but will
- * not take work — paused, or with a failed preflight — is not `live`, and says why.
+ * not take work — paused, stopped, or failing its sandbox check — is not `live`, and says why.
  */
 export function machineStateFor(
   workers: ServingMachine[],
   project: MatchableProject,
   now = new Date()
-): { machine: MachineState; failingChecks?: string[] } {
-  let best: { machine: MachineState; failingChecks?: string[] } = { machine: "none" };
+): MachineState {
+  let best: MachineState = "none";
   for (const worker of workers) {
     if (!matchRepo(project, worker.repos ?? [])) continue;
-    const failing = failingChecksOf(worker);
-    const candidate: { machine: MachineState; failingChecks?: string[] } = !isLive(
-      worker as IWorker,
-      now
-    )
-      ? { machine: "stale" }
-      : pauseAcknowledged(worker)
-        ? { machine: "paused" }
-        : failing.length > 0
-          ? { machine: "failing", failingChecks: failing }
-          : { machine: "live" };
-    if (MACHINE_RANK[candidate.machine] > MACHINE_RANK[best.machine]) best = candidate;
+    const candidate: MachineState = !isLive(worker as IWorker, now)
+      ? "stale"
+      : (haltAcknowledged(worker) ?? (sandboxFailed(worker) ? "failing" : "live"));
+    if (MACHINE_RANK[candidate] > MACHINE_RANK[best]) best = candidate;
   }
   return best;
 }

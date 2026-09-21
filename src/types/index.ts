@@ -1296,6 +1296,8 @@ export interface ApiTask {
   updatedAt: string;
   execution?: ApiTaskExecution;
   decision?: ApiTaskDecision;
+  /** Machines have spent every attempt on it; no claim takes it again (GET task only) */
+  attemptsExhausted?: boolean;
 }
 
 // Only what a reader needs. lastError is deliberately absent — task-service writes it as "" and
@@ -1731,14 +1733,19 @@ export interface ApiAgentBlock {
   deterministic: boolean;
 }
 
-export type MachineState = "none" | "stale" | "paused" | "failing" | "live";
+export type MachineState = "none" | "stale" | "paused" | "stopped" | "failing" | "live";
 
 export interface ApiHandoverReadiness {
-  owners: ApiUserSummary[];
+  /** Display names only: who a member can ask to fix the board */
+  owners: string[];
+  /** Whether the reader may change this board's settings (an owner, or an instance admin) */
+  canAdmin: boolean;
+  repositoryUrl: string;
+  workerEnabled: boolean;
+  lockedByInstance: boolean;
+  columns: { role: ColumnRole }[];
   /** The reader's own machines only, against this board's repository */
   machine: MachineState;
-  /** Names of the preflight checks the reader's own machine reports failing, when `failing` */
-  failingChecks?: string[];
 }
 
 export interface ApiAgent {

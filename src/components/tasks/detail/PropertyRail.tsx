@@ -10,7 +10,8 @@ import {
   PRIORITIES,
   PRIORITY_LABELS,
   Priority,
-  ROLE_LABELS,
+  type ApiHandoverReadiness,
+  type ColumnRole,
   RecurrenceFrequency,
 } from "@/types";
 import { activeFields, orderedOptions, sortedFields } from "@/lib/custom-fields";
@@ -35,12 +36,7 @@ import {
   type Handover,
   type HandoverProblem,
 } from "@/lib/handover";
-import {
-  missingRunRoles,
-  readinessGaps,
-  type MachineState,
-  type ReadinessGap,
-} from "@/lib/project-readiness";
+import { missingRolesText, readinessGaps, type ReadinessGap } from "@/lib/project-readiness";
 import { mergesWithoutAPerson } from "@/lib/agent-rules";
 import { assigneeToShow } from "./assignee-display";
 import type { AnyColumn } from "@/lib/columns";
@@ -71,26 +67,18 @@ function formatDate(value: string): string {
 export const EXECUTION_DOCS_URL = "https://board-planner.com/docs/ai/execution-workers/";
 const CONNECT_MACHINE_URL = `${EXECUTION_DOCS_URL}#setting-one-up`;
 
-export interface BoardReadiness {
-  repositoryUrl: string;
-  /** The owner's switch; whether runs happen is that AND no instance lock (projectRunsWorkers) */
-  workerEnabled: boolean;
-  lockedByInstance?: boolean;
-  owners: ApiUserSummary[];
-  /** The reader's own machines, against this board's repository */
-  machine: MachineState;
-  failingChecks?: string[];
-}
+/** What GET /handover answers: the board's own readiness, read fresh rather than off the page */
+export type BoardReadiness = ApiHandoverReadiness;
 
 type Blocker = HandoverProblem | { reason: ReadinessGap };
 
-export function namesOf(people: ApiUserSummary[]): string {
-  const names = people.map((p) => p.fullName || p.username);
+export function namesOf(names: string[]): string {
   return names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 }
 
-function whoFixes(owners: ApiUserSummary[], viewer: string | null): string {
-  if (viewer && owners.some((o) => o.username === viewer)) return "you";
+// Whoever may change the board's settings — an owner, or an instance admin — is told they can
+function whoFixes(owners: string[], canAdmin: boolean): string {
+  if (canAdmin) return "you";
   if (owners.length === 0) return "an admin";
   return `${owners.length === 1 ? "its owner" : "its owners"}, ${namesOf(owners)},`;
 }
@@ -104,16 +92,17 @@ function MachineLink({ children }: { children: string }) {
 }
 
 interface BlockerContext {
-  owners: ApiUserSummary[];
-  viewer: string | null;
+  owners: string[];
+  canAdmin: boolean;
   viewerIsInstanceAdmin: boolean;
   projectKey: string | null;
-  columns: AnyColumn[];
-  failingChecks: string[];
+  columns: { role: ColumnRole }[];
+  /** Runs-off beside a lock: the owners' switch only matters once the lock is lifted */
+  locked: boolean;
 }
 
 function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }) {
-  const who = whoFixes(ctx.owners, ctx.viewer);
+  const who = whoFixes(ctx.owners, ctx.canAdmin);
   switch (blocker.reason) {
     case "not-approved-yet":
       return <>A machine only looks at the column work is approved in — move it there when it is ready.</>;
@@ -162,7 +151,12 @@ function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }
         </>
       );
     case "runs-off":
-      return (
+      return ctx.locked ? (
+        <>
+          Agent runs are also off — once the lock is lifted, {who} can switch them on in Settings →
+          Workers.
+        </>
+      ) : (
         <>
           Agent runs are off for this board — {who} can switch them on in Settings → Workers.
         </>
@@ -175,15 +169,13 @@ function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }
           Workers.
         </>
       );
-    case "missing-columns": {
-      const roles = missingRunRoles(ctx.columns).map((r) => ROLE_LABELS[r].label);
+    case "missing-columns":
       return (
         <>
-          This board has no {roles.join(", ")} column, so no machine can run work on it — {who}{" "}
-          can give a column that role in Settings → Board.
+          This board has no {missingRolesText(ctx.columns)} column, so no machine can run work on
+          it — {who} can give a column that role in Settings → Board.
         </>
       );
-    }
     case "no-machine":
       return (
         <>
@@ -201,20 +193,29 @@ function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }
     case "machine-paused":
       return (
         <>
-          Your machine is connected but not taking work: it is paused. Resume it from the menubar
-          app or Settings → Workers.
+          Your machine is connected but not taking work: it is paused. Resume it in Settings →
+          Workers.
+        </>
+      );
+    case "machine-stopped":
+      return (
+        <>
+          Your machine is connected but not taking work: it was stopped. Resume it in Settings →
+          Workers.
         </>
       );
     case "machine-failing":
-      return ctx.failingChecks.includes("sandbox") ? (
+      return (
         <>
           Your machine is connected but not taking work: its sandbox check failed. The menubar app
           says what to fix.
         </>
-      ) : (
+      );
+    case "attempts-exhausted":
+      return (
         <>
-          Your machine is connected, but its preflight checks failed ({ctx.failingChecks.join(", ")}
-          ), so a run on it would not succeed. The menubar app says what to fix.
+          Machines have already tried it as many times as they may, so none will take it again — a
+          person has to finish it.
         </>
       );
     default:
@@ -228,7 +229,6 @@ function HandoverNotice({
   handover,
   awaiting,
   board,
-  columns,
   assignee,
   viewer,
   viewerIsInstanceAdmin,
@@ -237,7 +237,6 @@ function HandoverNotice({
   handover: Handover | null;
   awaiting: boolean;
   board: BoardReadiness | null;
-  columns: AnyColumn[] | undefined;
   assignee: ApiUserSummary | null;
   viewer: string | null;
   viewerIsInstanceAdmin: boolean;
@@ -255,7 +254,7 @@ function HandoverNotice({
         repositoryUrl: board.repositoryUrl,
         workerEnabled: board.workerEnabled,
         lockedByInstance: board.lockedByInstance,
-        columns,
+        columns: board.columns,
         machine: viewerIsAssignee ? board.machine : null,
       })
     : [];
@@ -265,11 +264,11 @@ function HandoverNotice({
   ];
   const ctx: BlockerContext = {
     owners: board?.owners ?? [],
-    viewer,
+    canAdmin: !!board?.canAdmin,
     viewerIsInstanceAdmin,
     projectKey,
-    columns: columns ?? [],
-    failingChecks: board?.failingChecks ?? [],
+    columns: board?.columns ?? [],
+    locked: gaps.includes("runs-locked"),
   };
 
   if (blockers.length === 0) {
@@ -532,7 +531,17 @@ export function PropertyRail({
           >
             {(selected) =>
               selected ? (
-                <span className="truncate">{selected.label}</span>
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="truncate">{selected.label}</span>
+                  {selected.marker && (
+                    <span
+                      data-testid="agent-marker"
+                      className="shrink-0 rounded bg-warning/15 px-1.5 py-0.5 text-[11px] font-medium text-warning"
+                    >
+                      {selected.marker}
+                    </span>
+                  )}
+                </span>
               ) : (
                 <EmptyValue>No agent</EmptyValue>
               )
@@ -554,16 +563,18 @@ export function PropertyRail({
           </p>
         )}
 
-        <HandoverNotice
-          handover={handover}
-          awaiting={awaiting}
-          board={board}
-          columns={columns}
-          assignee={stored.assignee ?? null}
-          viewer={currentUsername}
-          viewerIsInstanceAdmin={viewerIsInstanceAdmin}
-          projectKey={projectKey}
-        />
+        {/* Always rendered, so a screen reader hears the reasons change as the task is fixed */}
+        <div aria-live="polite" data-testid="handover-live">
+          <HandoverNotice
+            handover={handover}
+            awaiting={awaiting}
+            board={board}
+            assignee={stored.assignee ?? null}
+            viewer={currentUsername}
+            viewerIsInstanceAdmin={viewerIsInstanceAdmin}
+            projectKey={projectKey}
+          />
+        </div>
         {!notOffered && <HandoverRules />}
 
         <ComboboxRow
