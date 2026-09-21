@@ -14,6 +14,7 @@ import { isPmLockedByInstance, isPmRunnable, pmDisabledReason } from "@/lib/pm/g
 import { taskPath } from "@/lib/urls";
 import { useOpenTask } from "@/hooks/use-open-task";
 import { Modal } from "@/components/ui/Modal";
+import { BoardLoadFailed } from "@/components/ui/LoadFailed";
 
 const MAX_ATTACHMENTS = 4;
 const MAX_INPUT_HEIGHT = 200;
@@ -82,6 +83,8 @@ export function PmChat({
   // which ends recovery instantly while the real turn is still running.
   const answerBefore = useRef("");
   const [loading, setLoading] = useState(true);
+  const [projectFailure, setProjectFailure] = useState<unknown>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   // Height is measured, not declared: `auto` first so shrinking is possible, then
@@ -117,12 +120,10 @@ export function PmChat({
   useEffect(() => {
     const projectPromise = preloadedProject
       ? Promise.resolve(preloadedProject).then(setProject)
-      : api.get(`/api/projects/${projectId}`).then(setProject);
-    Promise.all([projectPromise, loadMessages().catch(() => {})])
-      .catch(() => {})
-      .finally(() => setLoading(false));
+      : api.get(`/api/projects/${projectId}`).then(setProject, setProjectFailure);
+    Promise.all([projectPromise, loadMessages().catch(() => {})]).finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
+  }, [projectId, loadAttempt]);
 
   useEffect(() => {
     refreshTaskMap();
@@ -461,6 +462,19 @@ export function PmChat({
       <div className="flex justify-center py-12">
         <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent" />
       </div>
+    );
+  }
+
+  if (!project && projectFailure) {
+    return (
+      <BoardLoadFailed
+        reason={projectFailure}
+        onRetry={() => {
+          setProjectFailure(null);
+          setLoading(true);
+          setLoadAttempt((n) => n + 1);
+        }}
+      />
     );
   }
 
