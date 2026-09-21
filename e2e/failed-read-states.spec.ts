@@ -451,8 +451,9 @@ test("a task whose history answers shows it", async ({ page, request }) => {
 
 /**
  * The count, as BP-582 pinned it for comments: the first read answers and puts a number on the
- * tab, then a comment makes the history re-read and that read fails. The row stays (it is this
- * task's either way); the number beside the tab does not.
+ * tab, then a saved edit makes the open history re-read and that read fails. With the tab hidden
+ * a refresh only drops the count without reading, so the tab is opened first: only the read's
+ * own failure path can take the number away here.
  */
 test("the History tab drops its count when a reload of the history fails", async ({
   page,
@@ -463,21 +464,21 @@ test("the History tab drops its count when a reload of the history fails", async
   await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
 
   const historyTab = page.getByRole("tab", { name: /^History/ });
+  await historyTab.click();
+  const panel = page.locator("#task-panel-history");
+  await expect(panel.getByText(HISTORY_ROW)).toBeVisible();
   await expect(historyTab).toHaveText(/^History\s*[1-9]\d*$/);
 
   await failUntilTold(page, HISTORY_READ);
-  const box = page.getByRole("textbox", { name: "Write a comment, @mention someone…" });
-  await expect(box).toBeVisible();
-  await box.fill("A remark the history cannot be re-read after");
   const failedReread = page.waitForResponse(
     (r) => HISTORY_READ(new URL(r.url())) && r.status() === 500
   );
-  await page.getByRole("button", { name: "Comment", exact: true }).click();
+  await page.getByLabel("Task title").fill("Renamed while the history cannot be re-read");
   await failedReread;
 
-  await historyTab.click();
-  const panel = page.locator("#task-panel-history");
   await expect(panel.getByTestId("history-error")).toBeVisible();
   await expect(panel.getByText(HISTORY_ROW)).toBeVisible();
-  await expect(historyTab, "no number beside a panel that cannot count").toHaveText("History");
+  await expect(historyTab, "no number beside a panel that cannot count").toHaveText("History", {
+    timeout: 1_000,
+  });
 });
