@@ -267,6 +267,10 @@ describe("suggestProjectKey", () => {
     ["My Project", "MP"],
     ["board planner", "BP"],
     ["Zażółć gęślą jaźń", "ZGJ"],
+    ["Øresund", "ORE"],
+    ["Ærø Ferry", "AF"],
+    ["Æther", "AET"],
+    ["Œuvre", "OEU"],
     ["Customer Support Help Desk Team", "CSHD"],
     ["2026 roadmap", "ROA"],
     ["Q3 launch", "QL"],
@@ -275,6 +279,12 @@ describe("suggestProjectKey", () => {
     ["123", ""],
   ])("suggests %j → %j", (name, key) => {
     expect(suggestProjectKey(name)).toBe(key);
+  });
+
+  it("steps past keys other boards already hold", () => {
+    expect(suggestProjectKey("Orbital", ["ORB"])).toBe("ORB2");
+    expect(suggestProjectKey("Orbital", ["orb", "ORB2"])).toBe("ORB3");
+    expect(suggestProjectKey("Orbital", ["TP"])).toBe("ORB");
   });
 
   it("only ever suggests a key the server accepts", () => {

@@ -28,22 +28,37 @@ export function isValidProjectKey(key: string): boolean {
   return PROJECT_KEY_PATTERN.test(key);
 }
 
-export function suggestProjectKey(name: string): string {
+const LETTERS_WITHOUT_A_DECOMPOSITION: Record<string, string> = {
+  Ł: "L",
+  Ø: "O",
+  Æ: "AE",
+  Œ: "OE",
+};
+
+export function suggestProjectKey(name: string, taken: Iterable<string> = []): string {
   const words = name
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toUpperCase()
-    .replace(/Ł/g, "L")
-    .replace(/Ø/g, "O")
+    .replace(/[ŁØÆŒ]/g, (letter) => LETTERS_WITHOUT_A_DECOMPOSITION[letter])
     .split(/[^A-Z0-9]+/)
     .filter(Boolean);
   while (words.length > 0 && !/^[A-Z]/.test(words[0])) words.shift();
   if (words.length === 0) return "";
-  if (words.length === 1) return words[0].slice(0, 3);
-  return words
-    .slice(0, 4)
-    .map((word) => word[0])
-    .join("");
+  const base =
+    words.length === 1
+      ? words[0].slice(0, 3)
+      : words
+          .slice(0, 4)
+          .map((word) => word[0])
+          .join("");
+
+  const used = new Set([...taken].map((key) => key.toUpperCase()));
+  if (!used.has(base)) return base;
+  for (let n = 2; ; n++) {
+    const candidate = `${base}${n}`;
+    if (!used.has(candidate)) return candidate;
+  }
 }
 
 // The identities this instance mints for itself; a person holding one would be taken for it

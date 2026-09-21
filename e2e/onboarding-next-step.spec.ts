@@ -46,6 +46,13 @@ test("a new account is offered a board from the toast, and its owner hears about
   await form.getByLabel("Username").fill("grace");
   await form.getByLabel("Full Name").fill("Grace Hopper");
   await form.getByLabel("Password").fill("hopper-1906");
+  // A name whose suggestion another board already holds is stepped past rather than offered
+  await key.fill("");
+  await name.fill(PROJECT_KEY.toLowerCase());
+  await expect(key).toHaveValue(`${PROJECT_KEY}2`);
+  await expect(page.locator("#project-key-hint")).toContainText(`(${PROJECT_KEY}2-1, ${PROJECT_KEY}2-2…)`);
+  await key.fill("sat");
+
   const created = page.waitForResponse(
     (r) => new URL(r.url()).pathname === "/api/users" && r.request().method() === "POST"
   );

@@ -4,8 +4,9 @@ import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import type { AuthState } from "@/hooks/use-auth";
 import type { ApiUser } from "@/types";
 
-const { api, nav, auth } = vi.hoisted(() => ({
+const { api, nav, auth, projectsState } = vi.hoisted(() => ({
   api: { post: vi.fn() },
+  projectsState: { projects: [] as { key: string }[] },
   nav: { replace: vi.fn(), back: vi.fn(), push: vi.fn() },
   // Annotated, so a field added to AuthState fails here instead of reaching the component as
   // undefined with the suite green
@@ -25,6 +26,7 @@ const { api, nav, auth } = vi.hoisted(() => ({
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/hooks/use-auth", () => ({ useAuth: () => auth }));
 vi.mock("next/navigation", () => ({ useRouter: () => nav }));
+vi.mock("@/hooks/use-projects", () => ({ useProjects: () => projectsState }));
 
 const { default: NewProjectPage } = await import("./page");
 
@@ -32,6 +34,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   auth.isAdmin = true;
   auth.isLoading = false;
+  projectsState.projects = [];
 });
 
 afterEach(cleanup);
@@ -109,5 +112,31 @@ describe("the key", () => {
     expect(document.getElementById("project-key-hint")?.textContent).toBe(
       "Task keys are built from it (ORB-1, ORB-2…) and it cannot change later."
     );
+  });
+});
+
+describe("a key another board holds", () => {
+  const nameField = () => screen.getByLabelText("Project Name") as HTMLInputElement;
+  const keyField = () => screen.getByLabelText("Project Key") as HTMLInputElement;
+
+  it("is not suggested", () => {
+    projectsState.projects = [{ key: "ORB" }];
+    render(<NewProjectPage />);
+
+    fireEvent.change(nameField(), { target: { value: "Orbital" } });
+
+    expect(keyField().value).toBe("ORB2");
+  });
+
+  it("is refused on the form in the server's words when it is typed anyway", async () => {
+    api.post.mockRejectedValue(new Error("That key is already used by another board"));
+    render(<NewProjectPage />);
+
+    fireEvent.change(nameField(), { target: { value: "Orbital" } });
+    fireEvent.change(keyField(), { target: { value: "ORB" } });
+    fireEvent.submit(keyField().closest("form")!);
+
+    expect(await screen.findByText("That key is already used by another board")).toBeTruthy();
+    expect(nav.push).not.toHaveBeenCalled();
   });
 });

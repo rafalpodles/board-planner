@@ -4,6 +4,7 @@ import { useEffect, useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { useAuth } from "@/hooks/use-auth";
+import { useProjects } from "@/hooks/use-projects";
 import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Button } from "@/components/ui/Button";
@@ -21,6 +22,7 @@ export default function NewProjectPage() {
   const api = useApi();
   const router = useRouter();
   const { isAdmin, isLoading: authLoading } = useAuth();
+  const { projects } = useProjects();
 
   useEffect(() => {
     if (authLoading) return;
@@ -65,7 +67,9 @@ export default function NewProjectPage() {
           value={name}
           onChange={(e) => {
             setName(e.target.value);
-            if (!keyTyped) setKey(suggestProjectKey(e.target.value));
+            if (!keyTyped) {
+              setKey(suggestProjectKey(e.target.value, projects.map((p) => p.key)));
+            }
           }}
           placeholder="My Project"
           required
