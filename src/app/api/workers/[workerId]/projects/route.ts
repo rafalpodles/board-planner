@@ -71,6 +71,7 @@ export const GET = withAuth(async (_request, { params, user }) => {
     catalogue: catalogue.map((entry) => ({
       ...entry,
       canEnable: administered.has(entry.project) && !locked.has(entry.project),
+      locked: locked.has(entry.project),
     })),
   });
 });

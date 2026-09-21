@@ -162,7 +162,7 @@ describe("GET /api/workers/enrolment/device/:userCode", () => {
 
     const json = await (await GET(request(), ctx())).json();
 
-    expect(json.projects[0]).toMatchObject({ workersEnabled: false, canEnable: false });
+    expect(json.projects[0]).toMatchObject({ workersEnabled: false, canEnable: false, locked: true });
   });
 
   /**

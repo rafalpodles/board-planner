@@ -266,6 +266,38 @@ describe("saving the machine's projects", () => {
     expect(screen.queryByText(/ticking it turns that on/)).toBeNull();
   });
 
+  it("says a project is locked by an instance admin rather than that the reader cannot switch it", async () => {
+    api.get.mockResolvedValue({
+      ...VIEW,
+      catalogue: [
+        {
+          ...VIEW.catalogue[0],
+          wanted: false,
+          servedHere: false,
+          workersEnabled: false,
+          canEnable: false,
+          locked: true,
+        },
+      ],
+    });
+    api.put.mockResolvedValueOnce({ leftDisabled: ["BP"] });
+    render(<MachineProjectsPage />);
+
+    expect(await screen.findByText("an instance admin has locked machines off for this project")).toBeTruthy();
+    await act(async () => {
+      (screen.getByRole("checkbox") as HTMLInputElement).click();
+    });
+    await act(async () => {
+      screen.getByRole("button", { name: "Save" }).click();
+    });
+
+    expect(
+      await screen.findByText(
+        "Saved. BP is locked off by an instance admin — the machine will leave it alone until somebody does."
+      )
+    ).toBeTruthy();
+  });
+
   it("clears what it said as soon as the reader changes the picks again", async () => {
     api.get.mockResolvedValueOnce(VIEW).mockRejectedValueOnce(new Error("read timed out"));
     await saveOnce();

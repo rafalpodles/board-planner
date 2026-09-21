@@ -72,6 +72,8 @@ export const GET = withAuth(async (_request, { params, user }) => {
       // discovered afterwards: a project left switched off takes the machine and then runs
       // nothing, which is the one outcome nobody can diagnose from the machine's own logs.
       canEnable: administered.has(String(p._id)) && !isWorkerLockedByInstance(p.worker),
+      // Said apart from canEnable, because who can fix it differs: the owner, or only an admin
+      locked: isWorkerLockedByInstance(p.worker),
     })),
     existingWorker,
   });

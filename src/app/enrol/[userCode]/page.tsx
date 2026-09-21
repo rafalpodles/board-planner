@@ -16,6 +16,7 @@ interface EnrolProject {
   repositoryUrl: string;
   workersEnabled: boolean;
   canEnable: boolean;
+  locked?: boolean;
 }
 
 interface EnrolmentView {
@@ -217,9 +218,18 @@ function Enrol({ params }: { params: Promise<{ userCode: string }> }) {
             data-testid="workers-off-warning"
             className="mt-6 rounded-lg border border-warning/40 bg-warning/10 p-4 text-sm text-text"
           >
-            That project does not run machines yet, and you cannot turn that on. The machine will
-            connect and sit idle until the project&apos;s owner enables it under the project&apos;s Workers
-            settings.
+            {chosen?.locked ? (
+              <>
+                An instance admin has locked machines off for that project. The machine will connect
+                and sit idle until an instance admin lifts the lock.
+              </>
+            ) : (
+              <>
+                That project does not run machines yet, and you cannot turn that on. The machine
+                will connect and sit idle until the project&apos;s owner enables it under the
+                project&apos;s Workers settings.
+              </>
+            )}
           </div>
         )}
 

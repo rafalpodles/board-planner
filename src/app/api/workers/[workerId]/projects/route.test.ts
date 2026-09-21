@@ -135,7 +135,7 @@ describe("GET the picker's own view", () => {
 
     const [row] = (await (await GET(getRequest(), ctx())).json()).catalogue;
 
-    expect(row).toMatchObject({ key: "SB", canEnable: false, workersEnabled: false });
+    expect(row).toMatchObject({ key: "SB", canEnable: false, workersEnabled: false, locked: true });
   });
 
   it("answers 404 for somebody else's machine, the same as for one that does not exist", async () => {
