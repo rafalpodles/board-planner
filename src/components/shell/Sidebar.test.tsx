@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, waitFor, act } from "@testing-library/react";
 import { Sidebar } from "./Sidebar";
+import { useLeaveGuard } from "@/hooks/use-leave-guard";
 
 const { api, auth, nav, theme, projectsState } = vi.hoisted(() => ({
   api: { get: vi.fn() },
@@ -356,5 +357,26 @@ describe("Sidebar instance settings", () => {
     await act(async () => screen.getByText("Admin User").closest("button")!.click());
     const link = screen.getByRole("link", { name: "Settings" });
     expect(link.getAttribute("href")).toBe("/settings");
+  });
+});
+
+describe("signing out with unsaved work on screen", () => {
+  function Unsaved() {
+    useLeaveGuard(true, "Leave without saving?");
+    return null;
+  }
+
+  it("asks first, and stays signed in when told no", async () => {
+    auth.user = { fullName: "Owner Name", role: "admin" };
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<Unsaved />);
+    renderSidebar();
+
+    await act(async () => screen.getByRole("button", { name: /Owner Name/ }).click());
+    await act(async () => screen.getByRole("button", { name: "Logout" }).click());
+
+    expect(confirm).toHaveBeenCalledWith("Leave without saving?");
+    expect(auth.logout).not.toHaveBeenCalled();
+    confirm.mockRestore();
   });
 });

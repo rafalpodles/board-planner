@@ -121,7 +121,7 @@ export function SearchLayer({ open, onOpen, onClose }: SearchLayerProps) {
   const { hits, loading, failed, active, trimmed, selectedIndex } = search;
 
   function close(hit?: SearchHit) {
-    if (hit) search.open(hit);
+    if (hit && !search.open(hit)) return;
     onClose();
   }
 

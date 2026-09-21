@@ -168,8 +168,9 @@ export function useSearch(
 
   const open = useCallback(
     (hit: SearchHit) => {
-      openTask(hit.href);
+      if (!openTask(hit.href)) return false;
       reset();
+      return true;
     },
     [openTask, reset]
   );

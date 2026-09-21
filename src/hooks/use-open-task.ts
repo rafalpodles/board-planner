@@ -70,7 +70,7 @@ export function useOpenTask() {
   const pathname = usePathname();
 
   return useCallback(
-    (href: string) => {
+    (href: string): boolean => {
       const here = projectRefFromPathname(pathname);
       const there = projectRefFromPathname(href);
       // An id against a key cannot be told from two different boards, so a disagreement takes the
@@ -80,8 +80,13 @@ export function useOpenTask() {
       // genuinely cross-board task into the modal of the board being left, which is the bug.
       const anotherBoard = !!here && !!there && here.toLowerCase() !== there.toLowerCase();
 
-      if (isTaskPath(href) && (fromTaskPage || anotherBoard)) window.location.assign(href);
-      else if (mayLeave()) router.push(href);
+      if (isTaskPath(href) && (fromTaskPage || anotherBoard)) {
+        window.location.assign(href);
+        return true;
+      }
+      if (!mayLeave()) return false;
+      router.push(href);
+      return true;
     },
     [fromTaskPage, pathname, router]
   );

@@ -23,7 +23,9 @@ vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast: vi.fn() }) }
 
 // The self-fetching panels are stubbed; this spec is about the assembly
 vi.mock("./TaskActivityPanel", () => ({
-  TaskActivityPanel: () => <div data-testid="activity-panel" />,
+  TaskActivityPanel: ({ historyRefreshKey }: { historyRefreshKey?: number }) => (
+    <div data-testid="activity-panel" data-history-key={historyRefreshKey} />
+  ),
 }));
 vi.mock("./TaskLinks", () => ({ TaskLinks: () => <div data-testid="task-links" /> }));
 vi.mock("./GitlabActivity", () => ({ GitlabActivity: () => <div data-testid="gitlab" /> }));
@@ -148,6 +150,19 @@ describe("TaskDetail", () => {
     expect(pill.textContent).toMatch(/To Do/i);
     await act(async () => pill.click());
     expect(screen.getByRole("listbox", { name: "Status" })).toBeTruthy();
+  });
+
+  it("tells the history panel a status change wrote to it", async () => {
+    api.patch.mockResolvedValue({});
+    renderDetail();
+    await loaded();
+    const key = () => Number(screen.getByTestId("activity-panel").dataset.historyKey);
+    const before = key();
+
+    await act(async () => screen.getByRole("combobox", { name: "Status" }).click());
+    await act(async () => screen.getByRole("option", { name: /In Progress/i }).click());
+
+    expect(key()).toBeGreaterThan(before);
   });
 
   it("moves status changes through the endpoint that runs the transition", async () => {
