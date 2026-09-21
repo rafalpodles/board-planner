@@ -214,6 +214,21 @@ final class CheckoutDeletionTests: XCTestCase {
             "only the resolved root is deleted — path is not a symlink, so there is no separate link entry to clean up")
     }
 
+    // BP-428 review, round 4. An earlier version of this fix let a failed link cleanup turn a
+    // completed deletion into `.failed` — the checkout genuinely gone, the operator told nothing
+    // happened. The one place a false negative is worse than the truth: nothing else records
+    // that the irreversible act already succeeded.
+    func testAFailedLinkCleanupDoesNotTurnACompletedDeletionIntoAFailure() {
+        let r = Recorder()
+        r.failOn = "/link"
+
+        let step = deletion(r, isSymlink: { $0 == "/link" }).perform(
+            project: "BP", path: "/link", root: "/real", worktrees: [])
+
+        XCTAssertEqual(step, .removed(project: "BP", path: "/link"))
+        XCTAssertEqual(r.removed, ["/real"], "the checkout itself is gone regardless of what happened to the link")
+    }
+
     // MARK: - removeIfSafe: the seam that used to live in an untested app target
 
     private func alwaysRefusing() -> CheckoutRemoval {

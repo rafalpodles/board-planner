@@ -219,18 +219,27 @@ public struct CheckoutDeletion: Sendable {
                 // under two spellings and a second `remove` would just fail against whichever one
                 // the first call already deleted.
                 //
-                // `gone` is only appended once both acts on this path succeed: recording it after
-                // `remove(root)` alone would have a failed link cleanup produce a `reason` naming
-                // `path` as uncleanable in the same step that lists `path` as already gone.
+                // `try?`, not `try`: `remove(root)` above already succeeded by the time this
+                // runs, so this is best-effort bookkeeping on top of a deletion that already
+                // happened, not the removal itself. Review of an earlier version of this commit
+                // measured what `try` does here: a failed link cleanup reported `.failed` for a
+                // checkout `r.removed` shows was actually gone — the one place a false "nothing
+                // happened" is worse than the truth, since nothing else records that the deletion
+                // did happen. An unremoved link surfaces on its own later — failing, loudly and
+                // recoverably, the next clone attempted under the same name.
                 if isSymlink(path) {
-                    try remove(path)
+                    try? remove(path)
                 }
                 gone.append(path)
             } else if isSymlink(path) {
                 // A grant whose target is already gone but whose link survives as a dangling
                 // entry: `exists` above reads it as absent (it follows the link), so the branch
-                // above never runs and nothing would otherwise clean this up either.
-                try remove(path)
+                // above never runs and nothing would otherwise clean this up either. Also
+                // best-effort: `forget` below drops the grant regardless, and a `try` here would
+                // leave the stale grant stuck forever the moment this cleanup itself fails —
+                // every later pass hitting the same branch and failing the same way, which is
+                // worse than the leftover link this exists to clean up in the first place.
+                try? remove(path)
             }
 
             // The grant goes last. Dropped first, a failed delete would leave a directory the
