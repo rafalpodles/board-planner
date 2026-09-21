@@ -13,6 +13,7 @@ import {
   isValidTaskTitle,
   isValidUsername,
   normaliseFullName,
+  suggestProjectKey,
 } from "@/lib/identifiers";
 
 /**
@@ -257,5 +258,29 @@ describe("the per-project ceilings the docs publish", () => {
     expect(MAX_CATEGORIES).toBe(50);
     expect(MAX_TASK_TEMPLATES).toBe(50);
     expect(TEMPLATE_NAME_MAX_LENGTH).toBe(100);
+  });
+});
+
+describe("suggestProjectKey", () => {
+  it.each([
+    ["Orbit", "ORB"],
+    ["My Project", "MP"],
+    ["board planner", "BP"],
+    ["Zażółć gęślą jaźń", "ZGJ"],
+    ["Customer Support Help Desk Team", "CSHD"],
+    ["2026 roadmap", "ROA"],
+    ["Q3 launch", "QL"],
+    ["", ""],
+    ["  --  ", ""],
+    ["123", ""],
+  ])("suggests %j → %j", (name, key) => {
+    expect(suggestProjectKey(name)).toBe(key);
+  });
+
+  it("only ever suggests a key the server accepts", () => {
+    for (const name of ["Orbit", "My Project", "Q3 launch", "a", "Ω mega"]) {
+      const key = suggestProjectKey(name);
+      if (key) expect(isValidProjectKey(key)).toBe(true);
+    }
   });
 });

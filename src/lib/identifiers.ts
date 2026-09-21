@@ -28,6 +28,24 @@ export function isValidProjectKey(key: string): boolean {
   return PROJECT_KEY_PATTERN.test(key);
 }
 
+export function suggestProjectKey(name: string): string {
+  const words = name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/Ł/g, "L")
+    .replace(/Ø/g, "O")
+    .split(/[^A-Z0-9]+/)
+    .filter(Boolean);
+  while (words.length > 0 && !/^[A-Z]/.test(words[0])) words.shift();
+  if (words.length === 0) return "";
+  if (words.length === 1) return words[0].slice(0, 3);
+  return words
+    .slice(0, 4)
+    .map((word) => word[0])
+    .join("");
+}
+
 // The identities this instance mints for itself; a person holding one would be taken for it
 export function isReservedUsername(username: string): boolean {
   return username === PM_USERNAME || /^worker-[0-9a-f]{24}$/.test(username);
