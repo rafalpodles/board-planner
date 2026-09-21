@@ -54,12 +54,16 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
     { $push: { categories: { name: name.trim(), color: color || "#3b82f6" } } },
     { returnDocument: "after" }
   );
-  // The project was read a moment ago, so a miss here is the ceiling and not a vanished project.
   if (!added) {
-    return NextResponse.json(
-      { error: `A project may have at most ${MAX_CATEGORIES} categories` },
-      { status: 400 }
-    );
+    // The project was read a moment ago, so ordinarily a miss here is the ceiling — but it can
+    // also mean the project was deleted in between, and the two answer differently (BP-719).
+    if (await Project.exists({ _id: projectId })) {
+      return NextResponse.json(
+        { error: `A project may have at most ${MAX_CATEGORIES} categories` },
+        { status: 400 }
+      );
+    }
+    return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
   logProjectAudit(projectId, user._id, "settings_updated", `Category added: ${name.trim()}`);

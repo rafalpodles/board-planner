@@ -11,13 +11,14 @@ const getAuthUser = vi.fn();
 const check = vi.fn();
 const projectFindById = vi.fn();
 const projectFindOneAndUpdate = vi.fn();
+const projectExists = vi.fn();
 const logProjectAudit = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ getAuthUser, RateLimitError: class extends Error {} }));
 vi.mock("@/lib/grants", () => ({ check }));
 vi.mock("@/models/project", () => ({
-  Project: { findById: projectFindById, findOneAndUpdate: projectFindOneAndUpdate },
+  Project: { findById: projectFindById, findOneAndUpdate: projectFindOneAndUpdate, exists: projectExists },
 }));
 vi.mock("@/lib/projectAudit", () => ({ logProjectAudit }));
 
@@ -84,6 +85,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   getAuthUser.mockResolvedValue({ _id: "u1", role: "member" });
   check.mockResolvedValue(true);
+  // The ceiling-miss path re-checks this to tell "full" from "deleted out from under the
+  // request" apart (BP-721) — true by default, since every existing scenario's project is there.
+  projectExists.mockResolvedValue(true);
   project(template("t1", "Crash report"));
 });
 
@@ -161,6 +165,18 @@ describe("POST /api/projects/:projectId/templates", () => {
 
     project(...many(MAX_TASK_TEMPLATES - 1));
     expect((await call(POST, { name: "the last one" })).status).toBe(201);
+  });
+
+  // A ceiling-filter miss also fires when the project was deleted between the earlier findById
+  // and this write — the two must not both read as "full" (BP-721).
+  it("404s, not 400, when the project vanished between the read and the write", async () => {
+    project(...many(MAX_TASK_TEMPLATES));
+    projectExists.mockResolvedValue(false);
+
+    const res = await call(POST, { name: "one too many" });
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "Project not found" });
   });
 
   it("carries the ceiling in the write filter rather than checking it beforehand", async () => {
