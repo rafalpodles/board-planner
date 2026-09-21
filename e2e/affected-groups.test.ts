@@ -89,6 +89,11 @@ describe("computeAffectedGroups", () => {
     }
   });
 
+  it("adds project for the two board components a settings spec reads back from", () => {
+    expect(computeAffectedGroups(["src/components/kanban/BoardFilters.tsx"])).toEqual(["board", "project"]);
+    expect(computeAffectedGroups(["src/components/kanban/BoardHeader.tsx"])).toEqual(["board", "project"]);
+  });
+
   it("falls back to every group for a non-spec e2e helper file", () => {
     expect(computeAffectedGroups(["e2e/api.ts"])).toEqual([...GROUP_NAMES]);
     expect(computeAffectedGroups(["e2e/groups.ts"])).toEqual([...GROUP_NAMES]);
