@@ -295,11 +295,40 @@ describe("WorkersSection for a project owner who is not an instance admin", () =
     expect(screen.queryByRole("switch", { name: /lock workers off/i })).toBeNull();
   });
 
-  it("says the instance lock is on and holds the owner's switch", () => {
-    renderWith(false, { worker: { ...project().worker, enabled: true, lockedByInstance: true } });
+  it("says the instance lock is on and holds the owner's switch off", () => {
+    renderWith(false, { worker: { ...project().worker, enabled: false, lockedByInstance: true } });
 
     expect(screen.getByTestId("workers-locked").textContent).toMatch(/instance admin has locked workers off/i);
     expect(enableSwitch().disabled).toBe(true);
+  });
+
+  it("still lets the owner switch runs off under the lock, and saves it", async () => {
+    api.put.mockResolvedValue(project({ worker: { ...project().worker, enabled: false, lockedByInstance: true } }));
+    renderWith(false, { worker: { ...project().worker, enabled: true, lockedByInstance: true } });
+
+    expect(enableSwitch().disabled).toBe(false);
+    fireEvent.click(enableSwitch());
+    await latestGroup().save();
+
+    expect(api.put).toHaveBeenCalledWith("/api/projects/TP", { worker: { enabled: false } });
+  });
+
+  it("leaves an instance admin's own switch usable under the lock", () => {
+    renderWith(true, { worker: { ...project().worker, enabled: false, lockedByInstance: true } });
+
+    expect(enableSwitch().disabled).toBe(false);
+  });
+
+  it("lets an instance admin lift the lock from the screen", async () => {
+    api.put.mockResolvedValue(project({ worker: { ...project().worker, lockedByInstance: false } }));
+    renderWith(true, { worker: { ...project().worker, enabled: true, lockedByInstance: true } });
+    const lock = screen.getByRole("switch", { name: /lock workers off for this project/i }) as HTMLInputElement;
+
+    expect(lock.checked).toBe(true);
+    fireEvent.click(lock);
+    await latestGroup().save();
+
+    expect(api.put).toHaveBeenCalledWith("/api/projects/TP", { worker: { lockedByInstance: false } });
   });
 
   it("gives an instance admin the lock, and saves it", async () => {

@@ -217,7 +217,7 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
           <>
             <Switch
               checked={!!draft.value.enabled}
-              disabled={!canEdit || (locked && !isAdmin)}
+              disabled={!canEdit || (locked && !isAdmin && !draft.value.enabled)}
               onChange={(v) => draft.set("enabled", v)}
               label="Let workers run tasks for this project"
               hint="A task goes to the machine of the person it is assigned to, once it names an agent."
