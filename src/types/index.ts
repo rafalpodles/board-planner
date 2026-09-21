@@ -548,6 +548,7 @@ export interface ProjectWorkerConfig {
   // An ObjectId in the document, a string once it has been through JSON. Both readers stringify.
   agent?: string | Types.ObjectId | null;
   enabled: boolean;
+  lockedByInstance?: boolean;
   policy: ProjectWorkerPolicy;
   policyOverrides: string[];
 }
@@ -1476,6 +1477,8 @@ export const INSTANCE_AUDIT_ACTIONS = [
   "enrolment_token_spent",
   "project_workers_enabled",
   "project_workers_disabled",
+  "project_workers_locked",
+  "project_workers_unlocked",
   "worker_command_sent",
   "user_password_reset",
   "user_email_changed",

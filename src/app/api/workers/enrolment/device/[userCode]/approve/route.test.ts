@@ -74,10 +74,12 @@ function ctx(userCode = "ABCD-1234") {
   return { params: Promise.resolve({ userCode }) };
 }
 
-// Reach is a grant; committing the project to machines is not — that is instance-admin, decided by
-// the account's role, exactly as PUT /api/projects/:id has it.
-function grants(access: boolean) {
-  check.mockResolvedValue(access);
+// Reach is the member grant; committing the project to machines is the project-admin one — its
+// owner, or an instance admin — exactly as PUT /api/projects/:id has it (BP-736).
+function grants(access: boolean, owns = false) {
+  check.mockImplementation(async (user: { role?: string }, _id: string, need: string) =>
+    user.role === "admin" ? true : need === "admin" ? owns : access
+  );
 }
 
 beforeEach(() => {
@@ -142,11 +144,9 @@ describe("POST /api/workers/enrolment/device/:userCode/approve", () => {
   });
 
   describe("committing the project to machines", () => {
-    // Still a project-admin decision with its own audit row: a member connecting their laptop does
-    // not make it on the project's behalf.
-    // A project OWNER, not just any member: owning a project is what would make this look like a
-    // project-admin decision, and PUT /api/projects/:id refuses them too
-    it("leaves the switch alone for a member, even one who owns the project", async () => {
+    // A project-admin decision with its own audit row: a member connecting their laptop does not
+    // make it on the project's behalf.
+    it("leaves the switch alone for a member who does not own the project", async () => {
       const response = await POST(request({ projectId: PROJECT_ID }), ctx());
 
       expect(projectUpdateOne).not.toHaveBeenCalled();
@@ -154,6 +154,36 @@ describe("POST /api/workers/enrolment/device/:userCode/approve", () => {
       expect(logInstanceAudit).not.toHaveBeenCalledWith(
         expect.objectContaining({ action: "project_workers_enabled" })
       );
+    });
+
+    it("turns it on, and records that, for the project's owner", async () => {
+      grants(true, true);
+
+      const response = await POST(request({ projectId: PROJECT_ID }), ctx());
+
+      expect(projectUpdateOne).toHaveBeenCalledWith(
+        { _id: PROJECT_ID },
+        { $set: { "worker.enabled": true } }
+      );
+      expect((await response.json()).workersEnabled).toBe(true);
+      expect(logInstanceAudit).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "project_workers_enabled", target: "BP" })
+      );
+    });
+
+    it("leaves a locked project off, for its owner and for an instance admin alike", async () => {
+      projectSelect.mockResolvedValue(
+        project({ worker: { enabled: true, lockedByInstance: true } })
+      );
+      for (const who of [MEMBER, ADMIN]) {
+        grants(true, true);
+        getAuthUser.mockResolvedValue(who);
+
+        const response = await POST(request({ projectId: PROJECT_ID }), ctx());
+
+        expect((await response.json()).workersEnabled).toBe(false);
+      }
+      expect(projectUpdateOne).not.toHaveBeenCalled();
     });
 
     it("turns it on, and records that, for an instance admin", async () => {

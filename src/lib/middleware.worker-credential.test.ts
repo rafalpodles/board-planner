@@ -170,6 +170,21 @@ describe("the grant is re-derived on every call", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
+  it("refuses a project an instance admin locked, though its owner switched workers on", async () => {
+    projectFindById.mockReturnValue({
+      select: () => ({
+        lean: () =>
+          Promise.resolve(projectDoc({ worker: { enabled: true, lockedByInstance: true } })),
+      }),
+    });
+    const handler = vi.fn();
+
+    const res = await withProjectAccessOrWorker(handler)(workerRequest(), context());
+
+    expect(res.status).toBe(403);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
   // This is what a static project-scoped token could not do: the scope has to follow the
   // assignments, not a list fixed when the token was minted
   it("refuses a project whose repository this machine does not report", async () => {

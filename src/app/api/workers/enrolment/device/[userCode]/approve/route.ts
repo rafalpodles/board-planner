@@ -3,6 +3,7 @@ import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
 import { check } from "@/lib/grants";
+import { isWorkerLockedByInstance, projectRunsWorkers } from "@/lib/worker-gate";
 import { Project } from "@/models/project";
 import { DeviceEnrolment } from "@/models/deviceEnrolment";
 import { registerWorker, WorkerAlreadyOwned } from "@/lib/worker-service";
@@ -68,13 +69,14 @@ export const POST = withAuth(async (request, { params, user }) => {
     );
   }
 
-  // Committing a project to machines stays instance-admin, exactly as PUT /api/projects/:id has it:
-  // it commits somebody's machine to running agent-written code, which is not a project admin's
-  // call to make and certainly not a member's. Enrolling a laptop does not make that decision for
-  // the project. Done here as well as from the settings screen because this is the path people
-  // actually take, and a log that misses the primary route implies a completeness it does not have.
+  // The same rule PUT /api/projects/:id applies to `worker`: committing a project to machines is
+  // its owner's call (or an instance admin's), never a member's, and nobody makes it while an
+  // instance admin's lock is on. Done here as well as from the settings screen because this is the
+  // path people actually take, and a log that misses the primary route implies a completeness it
+  // does not have.
   const key = project.key || String(project._id);
-  const mayEnable = user.role === "admin";
+  const mayEnable =
+    !isWorkerLockedByInstance(project.worker) && (await check(user, projectId, "admin"));
   if (mayEnable && !project.worker?.enabled) {
     await Project.updateOne({ _id: project._id }, { $set: { "worker.enabled": true } });
     void logInstanceAudit({
@@ -137,6 +139,6 @@ export const POST = withAuth(async (request, { params, user }) => {
   return NextResponse.json({
     state: "approved",
     workerId: String(worker._id),
-    workersEnabled: mayEnable || !!project.worker?.enabled,
+    workersEnabled: mayEnable || projectRunsWorkers(project.worker),
   });
 });

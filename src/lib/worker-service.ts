@@ -10,6 +10,7 @@ import { projectRepositoryUrl } from "@/lib/repository";
 import { ensureWorkerUser } from "@/lib/worker-user";
 import { accessibleProjectIds } from "@/lib/grants";
 import { User } from "@/models/user";
+import { projectRunsWorkers } from "@/lib/worker-gate";
 
 export const PROTOCOL_VERSION = 1;
 export const WORKER_STALE_MS = 5 * 60 * 1000;
@@ -79,7 +80,7 @@ export function verdictFor(
   // being able to reach it AND this machine reporting a checkout of that project's repository —
   // the three checks below, in that order. Deciding it here keeps them in one place rather than
   // trusting a list the server would have had to write.
-  if (!project?.worker?.enabled) {
+  if (!projectRunsWorkers(project?.worker)) {
     return { ok: false, reason: "this project is not enabled for workers" };
   }
   // Ownership first, because it is the answer to both questions: an ownerless machine reaches
@@ -124,6 +125,7 @@ export interface AssignableProject extends MatchableProject {
   name?: string;
   worker?: {
     enabled?: boolean;
+    lockedByInstance?: boolean;
     policy?: Record<string, unknown>;
     policyOverrides?: string[];
   };
@@ -165,7 +167,7 @@ export function assignmentsFor(
 ): ResolvedAssignment[] {
   const out: ResolvedAssignment[] = [];
   for (const project of projects) {
-    if (!project.worker?.enabled) continue;
+    if (!projectRunsWorkers(project.worker)) continue;
     if (!canServe(reachable, String(project._id))) continue;
     const remote = matchRepo(project, reported);
     if (!remote) continue;
@@ -197,7 +199,7 @@ export function offersFor(
 ): ProjectOffer[] {
   const out: ProjectOffer[] = [];
   for (const project of projects) {
-    if (!project.worker?.enabled) continue;
+    if (!projectRunsWorkers(project.worker)) continue;
     if (!canServe(reachable, String(project._id))) continue;
     // Already served: offering it again invites a second clone of a repository this machine has
     if (matchRepo(project, reported)) continue;
@@ -243,7 +245,7 @@ export function catalogueFor(
       // A project naming no repository cannot be given to a machine, but it is shown rather than
       // hidden: the operator can fix it, and an absence with no reason is the worse screen.
       available: !!repositoryUrl,
-      workersEnabled: !!project.worker?.enabled,
+      workersEnabled: projectRunsWorkers(project.worker),
       servedHere,
       // No stored selection means nobody has opened the screen yet, and the honest answer for
       // "what does this machine want" is then "what it already has". Reading an absent selection

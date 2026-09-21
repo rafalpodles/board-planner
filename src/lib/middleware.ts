@@ -14,6 +14,7 @@ import { PROJECT_KEY_PATTERN } from "./urls";
 import { matchRepo } from "./repo-match";
 import { getTenant } from "./tenant";
 import { can, FeatureKey } from "./entitlements";
+import { projectRunsWorkers } from "@/lib/worker-gate";
 
 type AuthenticatedHandler = (
   request: Request,
@@ -279,7 +280,7 @@ export function withProjectAccessOrWorker(handler: AuthenticatedHandler) {
       ownerReachableProjectIds(worker),
     ]);
     const assigned =
-      !!project?.worker?.enabled &&
+      projectRunsWorkers(project?.worker) &&
       canServe(reachable, String(project._id)) &&
       matchRepo(project as never, worker.repos ?? []);
     // A run this machine is holding right now goes through even when the answer above is no. That

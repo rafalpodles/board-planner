@@ -186,6 +186,9 @@ const projectSchema = new Schema<IProject>(
     // never names a directory on someone else's machine.
     worker: {
       enabled: { type: Boolean, default: false },
+      // Instance-admin lock: overrides `enabled`, which the project owner sets, and cannot be
+      // cleared from project settings by anybody but an instance admin
+      lockedByInstance: { type: Boolean, default: false },
       policy: {
         // Retained data (BP-458/BP-579): both retired and read by nothing. Stored projects still
         // carry the values and the schema still declares them so the documents read true; nothing

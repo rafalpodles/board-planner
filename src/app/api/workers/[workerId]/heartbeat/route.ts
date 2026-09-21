@@ -7,6 +7,7 @@ import { Worker } from "@/models/worker";
 import { RepoReport } from "@/lib/repo-match";
 import { WorkerPreflight, WorkerPreflightCheck } from "@/types";
 import { assignmentsFor, ownerReachableProjectIds, overriddenWorkerPolicy, touchWorker, usableRepos } from "@/lib/worker-service";
+import { PROJECT_RUNS_WORKERS_QUERY } from "@/lib/worker-gate";
 
 /**
  * Every other worker's claim and heartbeat read this inventory back, so one machine inflating its
@@ -153,7 +154,7 @@ export const POST = withWorker(async (request, { worker }) => {
   );
 
   const [projects, reachable] = await Promise.all([
-    Project.find({ "worker.enabled": true })
+    Project.find(PROJECT_RUNS_WORKERS_QUERY)
       .select("_id key name repositoryUrl githubRepo gitlabRepo gitlabHost worker")
       .lean(),
     ownerReachableProjectIds(worker),

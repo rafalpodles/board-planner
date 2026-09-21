@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import sift from "sift";
 
 const verifyWorkerCredential = vi.fn();
 const touchWorker = vi.fn();
 
 const projectFind = vi.fn();
+const projectFindQuery = vi.fn();
 const workerUpdateOne = vi.fn();
 const workerFind = vi.fn();
 const accessibleProjectIds = vi.fn();
@@ -13,7 +15,12 @@ vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/grants", () => ({ accessibleProjectIds, check: vi.fn() }));
 vi.mock("@/models/user", () => ({ User: { findById: userFindById } }));
 vi.mock("@/models/project", () => ({
-  Project: { find: () => ({ select: () => ({ lean: projectFind }) }) },
+  Project: {
+    find: (query: unknown) => {
+      projectFindQuery(query);
+      return { select: () => ({ lean: projectFind }) };
+    },
+  },
 }));
 vi.mock("@/models/worker", () => ({
   Worker: { updateOne: workerUpdateOne, find: () => ({ select: workerFind }) },
@@ -139,6 +146,18 @@ describe("POST /api/workers/:workerId/heartbeat", () => {
     const { req, ctx } = request();
 
     expect((await (await POST(req, ctx)).json()).policy).toEqual({});
+  });
+
+  // BP-736: the owner switches a project on, an instance admin's lock wins over it — so the rows
+  // the assignments are computed from must already leave a locked project out
+  it("selects only projects that run workers, leaving out a locked one", async () => {
+    const { req, ctx } = request({ repos: [{ remote: "git@github.com:owner/repo.git", path: "/r" }] });
+    await POST(req, ctx);
+
+    const matches = sift(projectFindQuery.mock.calls[0][0]);
+    expect(matches({ worker: { enabled: true } })).toBe(true);
+    expect(matches({ worker: { enabled: true, lockedByInstance: true } })).toBe(false);
+    expect(matches({ worker: { enabled: false } })).toBe(false);
   });
 
   // The whole inversion in one assertion: a remote comes back, never a path.

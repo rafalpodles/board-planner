@@ -7,13 +7,17 @@ const findPendingByUserCode = vi.fn();
 const projectFind = vi.fn();
 const projectLean = vi.fn();
 const workerFindOne = vi.fn();
+let ownedByCaller: string[] = [];
+const administeredProjectIds = vi.fn(async (user: { role: string }, ids: string[]) =>
+  new Set(user.role === "admin" ? ids : ids.filter((id) => ownedByCaller.includes(id)))
+);
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({
   getAuthUser,
   RateLimitError: class RateLimitError extends Error {},
 }));
-vi.mock("@/lib/grants", () => ({ check, accessibleProjectIds }));
+vi.mock("@/lib/grants", () => ({ check, accessibleProjectIds, administeredProjectIds }));
 vi.mock("@/lib/device-enrolment", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/device-enrolment")>();
   return { ...actual, findPendingByUserCode };
@@ -49,6 +53,7 @@ const request = () =>
 
 beforeEach(() => {
   vi.clearAllMocks();
+  ownedByCaller = [];
   getAuthUser.mockResolvedValue(MEMBER);
   check.mockResolvedValue(false);
   accessibleProjectIds.mockResolvedValue([MINE]);
@@ -127,14 +132,37 @@ describe("GET /api/workers/enrolment/device/:userCode", () => {
     expect((await (await GET(request(), ctx())).json()).projects[0].workersEnabled).toBe(false);
   });
 
-  // Committing a project to machines is instance-admin, exactly as PUT /api/projects/:id has it —
-  // a grant on the project does not make it a project admin's call
-  it("reports canEnable false for a member, whatever grants they hold", async () => {
-    check.mockResolvedValue(true);
-
+  // Committing a project to machines is its owner's call, exactly as PUT /api/projects/:id has it
+  // (BP-736) — a member's access to the project does not make it theirs
+  it("reports canEnable false for a member who does not own the project", async () => {
     const json = await (await GET(request(), ctx())).json();
 
     expect(json.projects[0].canEnable).toBe(false);
+  });
+
+  it("reports canEnable true for the project's owner", async () => {
+    ownedByCaller = [MINE];
+
+    const json = await (await GET(request(), ctx())).json();
+
+    expect(json.projects[0].canEnable).toBe(true);
+  });
+
+  it("offers nobody the switch while an instance admin's lock is on, and reports it off", async () => {
+    getAuthUser.mockResolvedValue({ ...MEMBER, role: "admin" });
+    projectLean.mockResolvedValue([
+      {
+        _id: MINE,
+        name: "Mine",
+        key: "BP",
+        repositoryUrl: "git@github.com:owner/repo.git",
+        worker: { enabled: true, lockedByInstance: true },
+      },
+    ]);
+
+    const json = await (await GET(request(), ctx())).json();
+
+    expect(json.projects[0]).toMatchObject({ workersEnabled: false, canEnable: false });
   });
 
   /**

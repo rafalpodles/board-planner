@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
-import { accessibleProjectIds } from "@/lib/grants";
+import { accessibleProjectIds, administeredProjectIds } from "@/lib/grants";
+import { isWorkerLockedByInstance } from "@/lib/worker-gate";
 import { Project } from "@/models/project";
 import { Worker } from "@/models/worker";
 import { catalogueFor, ownerReachableProjectIds, usableRepos } from "@/lib/worker-service";
@@ -10,8 +11,8 @@ import { logInstanceAudit } from "@/lib/instanceAudit";
 
 // The screen where somebody says which projects a machine should work on, and the one place that
 // choice is written down. It is a browser screen and not a pane in the app for a reason that is
-// not cosmetic: ticking a project may have to switch workers on for it, and that is an instance
-// admin acting in an interactive session — something the app, which holds no board credential and
+// not cosmetic: ticking a project may have to switch workers on for it, and that is the project's
+// owner acting in an interactive session — something the app, which holds no board credential and
 // carries only the machine's, can never be.
 //
 // The selection is stored rather than derived. What a machine HAS is its reported checkouts; what
@@ -49,17 +50,28 @@ export const GET = withAuth(async (_request, { params, user }) => {
     ownerReachableProjectIds(worker),
   ]);
 
+  const catalogue = catalogueFor(
+    usableRepos(worker as never, others as never),
+    projects as never,
+    reachable,
+    worker.desiredProjects?.map(String)
+  );
+  const administered = await administeredProjectIds(
+    user,
+    catalogue.map((entry) => entry.project)
+  );
+  const locked = new Set(
+    projects.filter((p) => isWorkerLockedByInstance(p.worker)).map((p) => String(p._id))
+  );
+
   return NextResponse.json({
     worker: { _id: String(worker._id), name: worker.name, host: worker.host },
-    // Whether this person can switch a project on while they are here, which is what the screen
-    // needs to know before it offers a switched-off project as tickable
-    canEnableWorkers: user.role === "admin",
-    catalogue: catalogueFor(
-      usableRepos(worker as never, others as never),
-      projects as never,
-      reachable,
-      worker.desiredProjects?.map(String)
-    ),
+    // Per project, because it is the project's owner who can switch a project on while they are
+    // here, which is what the screen needs to know before it offers a switched-off one as tickable
+    catalogue: catalogue.map((entry) => ({
+      ...entry,
+      canEnable: administered.has(entry.project) && !locked.has(entry.project),
+    })),
   });
 });
 
@@ -99,13 +111,17 @@ export const PUT = withAuth(async (request, { params, user }) => {
   const chosen = await Project.find({ _id: { $in: wanted } }).select("_id key worker").lean();
 
   // Ticking a project that nobody has committed to machines is the point of this screen — but the
-  // commitment itself is still instance-admin, and still audited, exactly as it is on the project's
+  // commitment itself is the project owner's, and still audited, exactly as it is on the project's
   // own settings page. A member who ticks one records the wish; the switch stays off and the reply
   // says which ones, so the screen can say it rather than leaving a machine idle with no reason.
+  const administered = await administeredProjectIds(
+    user,
+    chosen.map((project) => String(project._id))
+  );
   const leftDisabled: string[] = [];
   for (const project of chosen) {
-    if (project.worker?.enabled) continue;
-    if (user.role !== "admin") {
+    if (project.worker?.enabled && !isWorkerLockedByInstance(project.worker)) continue;
+    if (!administered.has(String(project._id)) || isWorkerLockedByInstance(project.worker)) {
       leftDisabled.push(project.key || String(project._id));
       continue;
     }

@@ -9,6 +9,20 @@ describe("parseProjectWorkerConfig", () => {
     });
   });
 
+  it("carries the instance lock as its own dotted field", () => {
+    expect(parseProjectWorkerConfig({ lockedByInstance: true })).toEqual({
+      ok: true,
+      update: { "worker.lockedByInstance": true },
+    });
+  });
+
+  it("refuses a lock that is not a boolean", () => {
+    expect(parseProjectWorkerConfig({ lockedByInstance: "yes" })).toEqual({
+      ok: false,
+      error: "worker.lockedByInstance must be a boolean",
+    });
+  });
+
   // A partial patch that replaced `worker` wholesale would reset every field it did not mention
   it("writes dotted paths so an untouched field survives", () => {
     const result = parseProjectWorkerConfig({ policy: { baseBranch: "develop" } });
