@@ -112,6 +112,8 @@ describe("POST /api/projects/[projectId]/pm/mcp-oauth/start — a client whose c
         clientId: "old-registered-id",
         clientSecret: "enc:old-secret",
         clientSource: "registered",
+        authorizationEndpoint: "https://provider.example/authorize",
+        tokenEndpoint: "https://provider.example/token",
         registrationEndpoint: "https://provider.example/register",
         redirectUri: "https://old.example.com/api/pm/oauth/callback",
         accessToken: "enc:stale-access",
@@ -141,6 +143,8 @@ describe("POST /api/projects/[projectId]/pm/mcp-oauth/start — a client whose c
         clientId: "admin-typed-id",
         clientSecret: "enc:admin-secret",
         clientSource: "typed",
+        authorizationEndpoint: "https://provider.example/authorize",
+        tokenEndpoint: "https://provider.example/token",
         redirectUri: "https://old.example.com/api/pm/oauth/callback",
         status: "connected",
       })
@@ -162,7 +166,13 @@ describe("POST /api/projects/[projectId]/pm/mcp-oauth/start — a client whose c
       projectWithServer({
         clientId: "legacy-id",
         clientSecret: "enc:legacy-secret",
-        // No clientSource, no redirectUri: every record from before this field existed.
+        // A connection that genuinely worked before `redirectUri` was tracked: discovery has
+        // completed (authorizationEndpoint is set) but no clientSource, no stored redirectUri —
+        // every record from before both fields existed. Distinct from a server that has simply
+        // never connected, which has no authorizationEndpoint either.
+        authorizationEndpoint: "https://provider.example/authorize",
+        tokenEndpoint: "https://provider.example/token",
+        status: "connected",
       })
     );
 
@@ -193,6 +203,23 @@ describe("POST /api/projects/[projectId]/pm/mcp-oauth/start — a client whose c
     expect(registerClient).not.toHaveBeenCalled();
     const oauth = (await projectFindById.mock.results[0].value).pm.mcpServers[0].oauth;
     expect(oauth.clientId).toBe("admin-typed-id");
+  });
+
+  // The control this whole describe block needs: a server whose Connect has never once
+  // succeeded also has an empty `redirectUri` and no `authorizationEndpoint` — for the ordinary
+  // reason that this route has never finished a run for it, not because a callback changed. That
+  // must not be mistaken for the "changed since a real connection" case above.
+  it("connects normally on the very first attempt, although redirectUri has never been set", async () => {
+    projectFindById.mockResolvedValue(
+      projectWithServer({ clientId: "typed-before-ever-connecting", clientSecret: "enc:s", clientSource: "typed" })
+    );
+
+    const res = await POST(request(), ctx());
+
+    expect(res.status).toBe(200);
+    expect(registerClient).not.toHaveBeenCalled();
+    const oauth = (await projectFindById.mock.results[0].value).pm.mcpServers[0].oauth;
+    expect(oauth).toMatchObject({ clientId: "typed-before-ever-connecting", redirectUri: REDIRECT_URI });
   });
 
   it("marks a freshly registered client as this app's own", async () => {

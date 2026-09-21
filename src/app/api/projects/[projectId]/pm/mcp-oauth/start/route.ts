@@ -45,14 +45,21 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
   const oauth: any = server.oauth ?? {};
 
   // The app's public URL changed since registration (e.g. localhost → production): a dynamically
-  // registered client is bound to the old callback, so re-register. Only for a client this app
-  // registered itself — `clientSource` is unset for every record predating it (including a legacy
-  // one whose `redirectUri` was never stored, so it always differs here) and treated the same as
-  // "typed": a client the admin typed by hand is registered with the provider under the OLD
-  // callback by the admin, not by us, and silently discarding it (registering a fresh one nobody
-  // asked for, without a word) replaced a credential the admin owns with one the provider has
-  // never heard of (BP-751).
-  if (oauth.clientId && oauth.redirectUri !== redirectUri) {
+  // registered client is bound to the old callback, so re-register. Gated on
+  // `authorizationEndpoint` rather than `clientId` alone: a server whose Connect has never once
+  // succeeded has an empty `redirectUri` too, for the ordinary reason that this route has never
+  // finished writing one — not because the callback changed since a real connection, which is the
+  // only thing this block is about. `authorizationEndpoint` is set only once discovery has
+  // actually completed, which "never connected" and "connected, but before redirectUri was even
+  // stored" (the legacy case) tell apart the same way every other legacy record does.
+  //
+  // Only a client this app registered itself is re-registered silently — `clientSource` is unset
+  // for every record predating it, including that legacy one, and treated the same as "typed": a
+  // client the admin typed by hand is registered with the provider under the OLD callback by the
+  // admin, not by us, and silently discarding it (registering a fresh one nobody asked for,
+  // without a word) replaced a credential the admin owns with one the provider has never heard of
+  // (BP-751).
+  if (oauth.clientId && oauth.authorizationEndpoint && oauth.redirectUri !== redirectUri) {
     if (oauth.clientSource === "registered" && oauth.registrationEndpoint) {
       oauth.clientId = "";
       oauth.clientSecret = "";
