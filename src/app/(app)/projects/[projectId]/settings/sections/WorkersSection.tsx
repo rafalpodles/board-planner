@@ -15,6 +15,7 @@ import { SectionProps } from "./types";
 import { endedBadly, endState } from "@/lib/run-outcome";
 import Link from "next/link";
 import { useStore } from "@/app/(app)/agents/store";
+import { isWorkerLockedByInstance } from "@/lib/worker-gate";
 
 const NUMBER_FIELDS = new Set(["taskTimeoutMs", "runCeilingMs", "maxDiffLines", "maxDiffFiles"]);
 const LABELS: Record<string, string> = {
@@ -55,6 +56,7 @@ function draftFrom(project: ApiProject): Draft {
   const pinned = new Set(project.worker?.policyOverrides ?? []);
   const draft: Draft = {
     enabled: !!project.worker?.enabled,
+    lockedByInstance: isWorkerLockedByInstance(project.worker),
   };
   for (const field of FIELDS) draft[field] = pinned.has(field) ? stored[field] : DEFAULTS[field];
   return draft;
@@ -115,12 +117,13 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
     const policy: Record<string, PolicyValue> = {};
     for (const field of draft.dirtyKeys) {
       const name = String(field);
-      if (name === "enabled" || unpinned.has(name)) continue;
+      if (name === "enabled" || name === "lockedByInstance" || unpinned.has(name)) continue;
       policy[name] = draft.value[name];
     }
 
     const patch: Record<string, unknown> = {};
     if (draft.isDirty("enabled")) patch.enabled = draft.value.enabled;
+    if (draft.isDirty("lockedByInstance")) patch.lockedByInstance = draft.value.lockedByInstance;
     if (Object.keys(policy).length > 0) patch.policy = policy;
     if (unpinned.size > 0) patch.reset = [...unpinned];
     if (Object.keys(patch).length === 0) return;
@@ -174,14 +177,36 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
     (w.repos ?? []).some((r) => wanted.some((candidate) => sameRepo(candidate, r.remote)))
   );
 
-  const contract = isAdmin ? "draft" : "readonly";
+  const canEdit = !!project.canAdmin;
+  const locked = isWorkerLockedByInstance(project.worker);
 
   return (
     <div className="space-y-6">
+      {locked && (
+        <div
+          data-testid="workers-locked"
+          className="flex gap-3 rounded-xl border border-danger/40 bg-danger/10 px-4 py-3 text-sm"
+        >
+          <span aria-hidden="true">⛔</span>
+          <p>
+            <strong className="font-semibold">An instance admin has locked workers off.</strong> No
+            machine runs this project, and the switch below cannot override it.
+          </p>
+        </div>
+      )}
+      {isAdmin && (
+        <SettingsCard title="Instance lock" instanceScoped>
+          <Switch
+            checked={!!draft.value.lockedByInstance}
+            onChange={(v) => draft.set("lockedByInstance", v)}
+            label="Lock workers off for this project"
+            hint="Wins over the project owner's switch below."
+          />
+        </SettingsCard>
+      )}
       <SettingsCard
         title="Autonomous workers"
         description="A worker claims approved tasks, runs the coding agent in its own checkout, and opens a pull request. Nothing runs until you enable it here."
-        instanceScoped
       >
         {!project.repositoryUrl ? (
           <p className="text-sm text-danger">
@@ -192,37 +217,39 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
           <>
             <Switch
               checked={!!draft.value.enabled}
-              disabled={!isAdmin}
+              disabled={!canEdit || (locked && !isAdmin)}
               onChange={(v) => draft.set("enabled", v)}
               label="Let workers run tasks for this project"
               hint="A task goes to the machine of the person it is assigned to, once it names an agent."
             />
 
-            <div className="mt-4">
-              <p className="text-sm font-medium mb-2">Machines offering this repository</p>
-              {workers === null ? (
-                <p className="text-sm text-text-muted">Loading…</p>
-              ) : offering.length === 0 ? (
-                <p className="text-sm text-text-muted">
-                  None yet. A machine appears here once its worker reports a checkout of{" "}
-                  <code className="text-text">{project.repositoryUrl}</code> —
-                  granted locally in <code className="text-text">repos.json</code> on that machine,
-                  never set from here.
-                </p>
-              ) : (
-                <ul className="border border-border rounded-lg divide-y divide-border">
-                  {offering.map((w) => (
-                    <li key={w._id} className="flex items-center gap-3 px-3 py-2 text-sm">
-                      <span className="font-medium">{w.name}</span>
-                      <span className="text-text-muted">{w.host}</span>
-                      <span className={`ml-auto text-xs ${w.stale ? "text-danger" : "text-success"}`}>
-                        {w.stale ? "not reporting" : "live"}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+            {isAdmin && (
+              <div className="mt-4">
+                <p className="text-sm font-medium mb-2">Machines offering this repository</p>
+                {workers === null ? (
+                  <p className="text-sm text-text-muted">Loading…</p>
+                ) : offering.length === 0 ? (
+                  <p className="text-sm text-text-muted">
+                    None yet. A machine appears here once its worker reports a checkout of{" "}
+                    <code className="text-text">{project.repositoryUrl}</code> —
+                    granted locally in <code className="text-text">repos.json</code> on that machine,
+                    never set from here.
+                  </p>
+                ) : (
+                  <ul className="border border-border rounded-lg divide-y divide-border">
+                    {offering.map((w) => (
+                      <li key={w._id} className="flex items-center gap-3 px-3 py-2 text-sm">
+                        <span className="font-medium">{w.name}</span>
+                        <span className="text-text-muted">{w.host}</span>
+                        <span className={`ml-auto text-xs ${w.stale ? "text-danger" : "text-success"}`}>
+                          {w.stale ? "not reporting" : "live"}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
           </>
         )}
       </SettingsCard>
@@ -230,7 +257,6 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
       <SettingsCard
         title="How work is done here"
         description="These describe this repository, so every machine serving it runs under the same values. A field you have not set follows the default."
-        instanceScoped
       >
         <p className="mb-3 text-xs text-text-muted">
           Diff limits, review, merging and the models moved to the{" "}
@@ -257,7 +283,7 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
                 {typeof value === "boolean" ? (
                   <Switch
                     checked={value}
-                    disabled={!isAdmin}
+                    disabled={!canEdit}
                     onChange={(v) => editField(field, v)}
                     label={label}
                   />
@@ -268,7 +294,7 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
                     id={fieldId}
                     value={String(value)}
                     className="flex-1"
-                    disabled={!isAdmin}
+                    disabled={!canEdit}
                     onChange={(e) =>
                       editField(
                         field,
@@ -282,7 +308,7 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
                 ) : (
                   <button
                     type="button"
-                    disabled={!isAdmin}
+                    disabled={!canEdit}
                     onClick={() => resetField(field)}
                     className="text-xs text-primary hover:underline w-24 text-left disabled:text-text-muted disabled:no-underline"
                     // One per pinned field, and "set · reset" is the same on every one of them.
@@ -313,7 +339,7 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
           <select
             id={defaultAgentId}
             value={defaultAgent}
-            disabled={!isAdmin || store.loading}
+            disabled={!canEdit || store.loading}
             onChange={(e) => saveDefaultAgent(e.target.value)}
             className="w-full rounded-lg border border-border bg-bg-input min-h-11 px-2 py-1.5 text-sm sm:min-h-0"
           >

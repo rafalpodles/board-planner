@@ -28,7 +28,7 @@ import { SettingsStats } from "./sections/types";
 import { BoardLoadFailed } from "@/components/ui/LoadFailed";
 import { useLeaveGuard } from "@/hooks/use-leave-guard";
 
-type Access = "member" | "projectAdmin" | "instanceAdmin";
+type Access = "member" | "projectAdmin";
 
 interface SectionMeta {
   id: string;
@@ -127,8 +127,8 @@ const SECTIONS: SectionMeta[] = [
     title: "Workers",
     blurb:
       "Whether autonomous workers may run this project's approved tasks, and how they should behave.",
-    keywords: "worker agent autonomous merge branch diff model gates checkout repository",
-    access: "instanceAdmin",
+    keywords: "worker agent autonomous merge branch diff model gates checkout repository lock",
+    access: "projectAdmin",
     icon: <Icon d="M4 7h16M4 12h16M4 17h7" />,
   },
   {
@@ -218,7 +218,6 @@ export default function ProjectSettingsPage() {
   const visible = useMemo(() => {
     if (!project) return [];
     return SECTIONS.filter((s) => {
-      if (s.access === "instanceAdmin") return isAdmin;
       if (s.access === "projectAdmin") return project.canAdmin;
       return true;
     });
