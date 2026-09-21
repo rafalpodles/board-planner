@@ -34,16 +34,23 @@ function sanitizeName(raw: string): string {
 const EXPIRY_MARGIN_MS = 60_000;
 const refreshInFlight = new Map<string, Promise<string | undefined>>();
 
+// Scoped to the client whose tokens these are: a client id changed meanwhile has reset them
 async function persistOauthFields(
   projectId: string,
-  serverName: string,
+  server: IPmMcpServer,
   fields: Record<string, unknown>
 ): Promise<void> {
   const $set: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(fields)) {
     $set[`pm.mcpServers.$.oauth.${key}`] = value;
   }
-  await Project.updateOne({ _id: projectId, "pm.mcpServers.name": serverName }, { $set });
+  await Project.updateOne(
+    {
+      _id: projectId,
+      "pm.mcpServers": { $elemMatch: { name: server.name, "oauth.clientId": server.oauth?.clientId ?? "" } },
+    },
+    { $set }
+  );
 }
 
 async function resolveOauthAccessToken(
@@ -58,7 +65,7 @@ async function resolveOauthAccessToken(
   if (fresh) return decryptSecret(oauth.accessToken);
 
   if (!oauth.refreshToken) {
-    await persistOauthFields(projectId, server.name, { status: "needs_reauth" });
+    await persistOauthFields(projectId, server, { status: "needs_reauth" });
     return undefined;
   }
 
@@ -76,7 +83,7 @@ async function resolveOauthAccessToken(
         refreshToken: decryptSecret(oauth.refreshToken),
         resource: server.url,
       });
-      await persistOauthFields(projectId, server.name, {
+      await persistOauthFields(projectId, server, {
         accessToken: encryptSecret(tokens.accessToken),
         refreshToken: tokens.refreshToken ? encryptSecret(tokens.refreshToken) : oauth.refreshToken,
         expiresAt: tokens.expiresAt,
@@ -85,7 +92,7 @@ async function resolveOauthAccessToken(
       return tokens.accessToken;
     } catch (err) {
       console.warn(`[pm/mcp] token refresh failed for "${server.name}": ${err instanceof Error ? err.message : err}`);
-      await persistOauthFields(projectId, server.name, { status: "needs_reauth" }).catch(() => {});
+      await persistOauthFields(projectId, server, { status: "needs_reauth" }).catch(() => {});
       return undefined;
     } finally {
       refreshInFlight.delete(key);
