@@ -12,6 +12,8 @@ import { Task } from "@/models/task";
 import { IUser, IWorker } from "@/types";
 import { PROJECT_KEY_PATTERN } from "./urls";
 import { matchRepo } from "./repo-match";
+import { getTenant } from "./tenant";
+import { can, FeatureKey } from "./entitlements";
 
 type AuthenticatedHandler = (
   request: Request,
@@ -85,6 +87,22 @@ export function withAdmin(handler: AuthenticatedHandler) {
     }
     return handler(request, context);
   });
+}
+
+// 402, not 404 or 403, so the UI can upsell rather than treat this as missing or off-limits.
+export function withEntitlement(feature: FeatureKey) {
+  return (handler: AuthenticatedHandler) =>
+    withAuth(async (request, context) => {
+      await connectDB();
+      const tenant = await getTenant();
+      if (!can(tenant, feature)) {
+        return NextResponse.json(
+          { error: "This feature requires a plan upgrade", feature, plan: tenant.entitlements.plan },
+          { status: 402 }
+        );
+      }
+      return handler(request, context);
+    });
 }
 
 export function protocolOf(request: Request): number {

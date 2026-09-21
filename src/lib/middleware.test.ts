@@ -1,10 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const verifyWorkerCredential = vi.fn();
+const { verifyWorkerCredential, getAuthUser, getTenant } = vi.hoisted(() => ({
+  verifyWorkerCredential: vi.fn(),
+  getAuthUser: vi.fn(),
+  getTenant: vi.fn(),
+}));
 
 vi.mock("./worker-service", () => ({ verifyWorkerCredential }));
+vi.mock("./auth", () => ({ getAuthUser }));
+vi.mock("./db", () => ({ connectDB: vi.fn() }));
+vi.mock("./tenant", () => ({ getTenant }));
 
-const { withWorker, protocolOf } = await import("./middleware");
+const { withWorker, protocolOf, withEntitlement } = await import("./middleware");
 
 function request(headers: Record<string, string> = {}): Request {
   return new Request("https://example.com/api/workers/w1/heartbeat", {
@@ -129,5 +136,59 @@ describe("withWorker", () => {
     });
 
     expect(handler.mock.calls[0][1].worker.credentialHash).toBeFalsy();
+  });
+});
+
+function entitlementsRequest(): Request {
+  return new Request("https://example.com/api/test-route", { method: "POST" });
+}
+
+describe("withEntitlement", () => {
+  const USER = { _id: "u1", username: "member", role: "member" };
+
+  beforeEach(() => {
+    getAuthUser.mockReset();
+    getTenant.mockReset();
+    getAuthUser.mockResolvedValue(USER);
+  });
+
+  it("answers 402 with the feature and plan for a tenant that lacks it", async () => {
+    getTenant.mockResolvedValue({ entitlements: { plan: "free", features: [] } });
+    const handler = vi.fn();
+
+    const res = await withEntitlement("integrations.coda")(handler)(entitlementsRequest(), {
+      params: paramsOf(),
+    });
+
+    expect(res.status).toBe(402);
+    expect(await res.json()).toEqual(
+      expect.objectContaining({ feature: "integrations.coda", plan: "free" })
+    );
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("passes through to the handler for a tenant that has the feature", async () => {
+    getTenant.mockResolvedValue({ entitlements: { plan: "pro", features: [] } });
+    const handler = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+
+    const res = await withEntitlement("integrations.coda")(handler)(entitlementsRequest(), {
+      params: paramsOf(),
+    });
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(200);
+  });
+
+  it("still requires authentication first", async () => {
+    getAuthUser.mockResolvedValue(null);
+    const handler = vi.fn();
+
+    const res = await withEntitlement("integrations.coda")(handler)(entitlementsRequest(), {
+      params: paramsOf(),
+    });
+
+    expect(res.status).toBe(401);
+    expect(getTenant).not.toHaveBeenCalled();
+    expect(handler).not.toHaveBeenCalled();
   });
 });
