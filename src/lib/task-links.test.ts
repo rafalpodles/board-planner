@@ -961,6 +961,39 @@ describe("severLinksToDeletedTask", () => {
     expect(dispatchWebhooks).not.toHaveBeenCalled();
   });
 
+  // Review finding: an earlier version read the survivors, then cleaned up with a bare
+  // `updateMany` — proof came from the READ, not from the write. A concurrent `removeTaskLink`
+  // pulling the same reference in between would then be announced twice: once by the request that
+  // actually removed it, once by this one reading a list that had already gone stale. Each
+  // candidate's own atomic pull is what closes that window, the same way every other writer in
+  // this module proves what it removed.
+  it("does not announce a link another request already removed between the read and its own pull", async () => {
+    store = [task("s", 1, { blockedBy: ["d"] })];
+    // Simulates a concurrent removeTaskLink landing in the gap between severLinksToDeletedTask's
+    // read of survivors and its own per-candidate write.
+    findOneAndUpdate.mockImplementation((filter: Record<string, unknown>) => {
+      if ("blockedBy" in filter) store.find((d) => d._id === "s")!.blockedBy = [];
+    });
+
+    await severLinksToDeletedTask(P, "d", DELETED, ACTOR);
+
+    expect(rows()).toEqual([]);
+    expect(dispatchWebhooks).not.toHaveBeenCalled();
+    expect(createNotifications).not.toHaveBeenCalled();
+  });
+
+  it("does not announce a relation another request already replaced between the read and its own pull", async () => {
+    store = [task("s", 1, { relations: [{ task: "d", type: "relates" }] })];
+    findOneAndUpdate.mockImplementation((filter: Record<string, unknown>) => {
+      if ("relations" in filter) store.find((d) => d._id === "s")!.relations = [];
+    });
+
+    await severLinksToDeletedTask(P, "d", DELETED, ACTOR);
+
+    expect(rows()).toEqual([]);
+    expect(dispatchWebhooks).not.toHaveBeenCalled();
+  });
+
   // The fan-out cap board-feed.ts set the precedent for: the cleanup pull is unconditional (a
   // dangling reference left behind is worse than a missed notification), only the announcement is
   // bounded.

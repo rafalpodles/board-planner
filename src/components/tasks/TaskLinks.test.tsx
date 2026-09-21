@@ -104,7 +104,10 @@ describe("a pair related from both directions", () => {
     expect(screen.getAllByText("TP-3")).toHaveLength(1);
   });
 
-  it("removes it from the end this task's own document stores it on", () => {
+  // Review finding: removing only the displayed (outgoing) copy left the incoming one in place,
+  // and the row reappeared from that surviving direction after the refetch — reporting a removal
+  // that only half happened, the same symptom this ticket was filed for in the first place.
+  it("removes both directions, not just the one displayed", () => {
     const other = linked("other", 3, "The other task");
     const task = baseTask({
       relations: [{ task: other, type: "relates" }],
@@ -120,6 +123,11 @@ describe("a pair related from both directions", () => {
       taskId: "other",
       type: "relates",
     });
+    expect(api.del).toHaveBeenCalledWith("/api/projects/p1/tasks/other/links", {
+      taskId: "self",
+      type: "relates",
+    });
+    expect(api.del).toHaveBeenCalledTimes(2);
   });
 });
 

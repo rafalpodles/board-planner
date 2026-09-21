@@ -519,8 +519,7 @@ const DELETE_LINK_FANOUT_LIMIT = 200;
 /**
  * Detaches every reference to a deleted task from the rest of the board — the two writers the
  * DELETE route already ran as bare `updateMany` pulls, with nothing to say why a task's blocker or
- * an epic's child had vanished (BP-690). The reads run before the pulls, since a pull cannot be
- * asked afterwards what it matched.
+ * an epic's child had vanished (BP-690).
  *
  * Only the surviving side gets a row: `announce`'s `skipTargetRow` is what makes that true here,
  * since `deleted`'s document is gone before this function is ever asked to write to it.
@@ -533,7 +532,7 @@ export async function severLinksToDeletedTask(
 ): Promise<void> {
   const deletedTaskId = canonicalId(rawDeletedTaskId);
 
-  const [blockedSurvivors, relatedSurvivors] = await Promise.all([
+  const [blockedCandidates, relatedCandidates] = await Promise.all([
     Task.find({ project: projectId, blockedBy: deletedTaskId }, SUBJECT_FIELDS)
       // Ordered, so the cap takes the same tasks every time rather than whichever the storage
       // engine happened to reach first.
@@ -547,8 +546,8 @@ export async function severLinksToDeletedTask(
   ]);
 
   if (
-    blockedSurvivors.length === DELETE_LINK_FANOUT_LIMIT ||
-    relatedSurvivors.length === DELETE_LINK_FANOUT_LIMIT
+    blockedCandidates.length === DELETE_LINK_FANOUT_LIMIT ||
+    relatedCandidates.length === DELETE_LINK_FANOUT_LIMIT
   ) {
     console.error(
       `Deleting task ${deletedTaskId} in project ${projectId} hit the ${DELETE_LINK_FANOUT_LIMIT}-task ` +
@@ -562,21 +561,45 @@ export async function severLinksToDeletedTask(
     title: deleted.title,
     status: deleted.status,
   };
-  const facts: LinkFact[] = [
-    ...blockedSurvivors.map((holder) => ({
-      action: "removed" as const,
-      type: "blocked_by" as const,
-      holder,
-      target,
-    })),
-    ...relatedSurvivors
-      .map((holder) => ({ holder, type: relationBetween(holder, deletedTaskId) }))
-      // The query matched on this, so absent would mean the array changed between the read above
-      // and here — never observed, but the filter is what proves the fact, not the query alone.
-      .filter((h): h is { holder: (typeof relatedSurvivors)[number]; type: RelationType } => !!h.type)
-      .map(({ holder, type }) => ({ action: "removed" as const, type, holder, target })),
-  ];
 
+  // Each candidate's OWN pull proves what it removed, the same way every other writer in this
+  // module does — the read above can be stale by the time this runs, and a concurrent unlink of
+  // the same reference (an ordinary `removeTaskLink` racing this deletion) would otherwise be
+  // announced twice: once by the request that actually removed it, once by this one reading a
+  // list that no longer matches by the time it acts on it.
+  const blockedFacts = await Promise.all(
+    blockedCandidates.map(async (candidate): Promise<LinkFact | null> => {
+      const before = await Task.findOneAndUpdate(
+        { _id: idOf(candidate), project: projectId, blockedBy: deletedTaskId },
+        { $pull: { blockedBy: deletedTaskId } },
+        { returnDocument: "before", projection: SUBJECT_FIELDS }
+      ).lean<LinkSubject | null>();
+      if (!before) return null;
+      return { action: "removed", type: "blocked_by", holder: before, target };
+    })
+  );
+
+  const relatedFacts = await Promise.all(
+    relatedCandidates.map(async (candidate): Promise<LinkFact | null> => {
+      const type = relationBetween(candidate, deletedTaskId);
+      // The query matched on this, so absent means the array changed between the read above and
+      // here — the same narrow window the atomic pull below closes for the write itself.
+      if (!type) return null;
+      const before = await Task.findOneAndUpdate(
+        { _id: idOf(candidate), project: projectId, relations: { $elemMatch: { task: deletedTaskId, type } } },
+        { $pull: { relations: { task: deletedTaskId, type } } },
+        { returnDocument: "before", projection: SUBJECT_FIELDS }
+      ).lean<LinkSubject | null>();
+      if (!before) return null;
+      return { action: "removed", type, holder: before, target };
+    })
+  );
+
+  const facts = [...blockedFacts, ...relatedFacts].filter((fact): fact is LinkFact => fact !== null);
+
+  // Unconditional and unbounded, unlike the reads above: a dangling reference left behind past the
+  // fan-out cap is worse than a missed notification (BP-690). The two pulls just performed above
+  // make this a no-op for every candidate that already got one.
   await Promise.all([
     Task.updateMany({ project: projectId, blockedBy: deletedTaskId }, { $pull: { blockedBy: deletedTaskId } }),
     Task.updateMany(
