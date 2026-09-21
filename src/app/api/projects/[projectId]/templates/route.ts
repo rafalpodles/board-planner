@@ -105,10 +105,15 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
     { returnDocument: "after" }
   );
   if (!added) {
-    return NextResponse.json(
-      { error: `A project may have at most ${MAX_TASK_TEMPLATES} templates` },
-      { status: 400 }
-    );
+    // The project was read a moment ago, so ordinarily a miss here is the ceiling — but it can
+    // also mean the project was deleted in between, and the two answer differently (BP-719).
+    if (await Project.exists({ _id: projectId })) {
+      return NextResponse.json(
+        { error: `A project may have at most ${MAX_TASK_TEMPLATES} templates` },
+        { status: 400 }
+      );
+    }
+    return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
   logProjectAudit(projectId, user._id, "template_added", name.trim());
