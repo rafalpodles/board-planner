@@ -209,6 +209,27 @@ final class CheckoutDeletionTests: XCTestCase {
         XCTAssertEqual(r.removed, [])
     }
 
+    /// The exotic half: `removeIfSafe` re-checks right before deleting, in case the operator's
+    /// confirmation dialog sat on screen long enough for something to change (BP-378/BP-424). This
+    /// answers a linked worktree only on the *second* look — a transition nothing in this app's own
+    /// flow produces, since the shape is structural rather than a state that changes underneath a
+    /// modal, but the switch has to answer for it, and only this test drives that arm.
+    func testABecomingLinkedWorktreeBetweenTheTwoLooksStillDropsTheGrantRatherThanDeleting() async {
+        let r = Recorder()
+        let asked = Asked()
+        let git = BecomesALinkedWorktreeOnItsSecondLook()
+
+        let step = await deletion(r).removeIfSafe(
+            project: "BP", path: "/co", isBusy: idle(),
+            checking: CheckoutRemoval(run: { args, cwd in git.run(args, cwd) }, exists: { _ in true }),
+            asking: { asked.ask($0, $1) })
+
+        XCTAssertEqual(step, .linkedWorktreeDropped(project: "BP", path: "/co"))
+        XCTAssertEqual(asked.calls.count, 1, "asked on the first look, before anything changed")
+        XCTAssertEqual(r.removed, [], "the second look says linked worktree, so nothing is deleted")
+        XCTAssertEqual(r.forgotten, ["/co"])
+    }
+
     /// What the guard found is what gets deleted. The two used to be wired together by hand in the
     /// app target, where passing an empty list would have deleted no worktrees and told nobody.
     func testItDeletesExactlyTheWorktreesTheGuardFound() async {
@@ -436,4 +457,26 @@ private final class Growing: @unchecked Sendable {
         return (0, porcelainZ((["/co"] + listed).map { "worktree \($0)" }.joined(separator: "\n\n")))
     }
     return (0, "")
+}
+
+/// An ordinary, clean repository on the first `check`, a linked worktree on the second —
+/// `--show-toplevel` is the first git call inside every `check` invocation, so counting it (not
+/// deferred: every later call in *this same* invocation must still see the bumped count) tells the
+/// rest of the stub which invocation it is answering for.
+private final class BecomesALinkedWorktreeOnItsSecondLook: @unchecked Sendable {
+    private var invocation = 0
+
+    func run(_ args: [String], _ cwd: String) -> (code: Int32, output: String) {
+        if args.contains("--show-toplevel") {
+            invocation += 1
+            return (0, "/co\n")
+        }
+        guard invocation >= 2 else {
+            if args.contains("--git-dir") || args.contains("--git-common-dir") { return (0, ".git") }
+            return (0, "")
+        }
+        if args.contains("--git-dir") { return (0, "/repo/.git/worktrees/co\n") }
+        if args.contains("--git-common-dir") { return (0, "/repo/.git\n") }
+        return (0, "")
+    }
 }
