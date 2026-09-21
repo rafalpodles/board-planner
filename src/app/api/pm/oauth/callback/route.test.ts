@@ -127,7 +127,7 @@ describe("GET /api/pm/oauth/callback — binding the flow to whoever started it"
   it("refuses rather than throwing when the session fails its provenance check", async () => {
     findOne.mockResolvedValue(PENDING);
     const { ProvenanceError } = await import("@/lib/session");
-    getAuthUser.mockRejectedValue(new ProvenanceError("origin mismatch"));
+    getAuthUser.mockRejectedValue(new ProvenanceError("origin-mismatch"));
 
     const res = await GET(approveRequest());
 
