@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
+import { useApi } from "@/hooks/use-api";
 import { DEFAULT_PROJECT_ICON } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { useAuth } from "@/hooks/use-auth";
@@ -36,7 +38,9 @@ export default function ProjectsPage() {
         }
       />
 
-      {projects.length === 0 ? (
+      {projects.length === 0 && !isAdmin ? (
+        <NotOnAnyBoard />
+      ) : projects.length === 0 ? (
         <div className="text-center py-12 text-text-muted">
           <p className="mb-4">No projects yet</p>
           {isAdmin && (
@@ -76,6 +80,33 @@ export default function ProjectsPage() {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function NotOnAnyBoard() {
+  const api = useApi();
+  const [admins, setAdmins] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    api
+      .get("/api/users/admins")
+      .then((list: { fullName: string }[]) => setAdmins(list.map((admin) => admin.fullName)))
+      .catch(() => setAdmins([]));
+  }, [api]);
+
+  return (
+    <div className="mx-auto max-w-md py-12 text-center text-text-muted" data-testid="not-on-any-board">
+      <p className="mb-2 font-medium text-text">You are not on any board yet.</p>
+      <p>
+        Boards are opened to you by their owners.
+        {admins && admins.length > 0 && (
+          <>
+            {" "}
+            Ask one of the admins: <span className="text-text">{admins.join(", ")}</span>.
+          </>
+        )}
+      </p>
     </div>
   );
 }

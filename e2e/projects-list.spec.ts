@@ -145,8 +145,16 @@ test("with nothing to show, the list says so — and only an admin is offered a 
   await seedAssignmentOutsider();
 
   await test.step("an account with no grant anywhere", async () => {
+    const admins = page.waitForResponse(
+      (r) => r.url().endsWith("/api/users/admins") && r.request().method() === "GET"
+    );
     await signInThroughForm(page, OUTSIDER_USERNAME, OUTSIDER_PASSWORD);
-    await expect(page.getByText("No projects yet")).toBeVisible();
+    expect((await admins).status()).toBe(200);
+    // BP-753: a member is told who can open a board for them, by name, instead of "No projects yet"
+    await expect(page.getByTestId("not-on-any-board")).toHaveText(
+      "You are not on any board yet.Boards are opened to you by their owners. Ask one of the admins: E2E Admin."
+    );
+    await expect(page.getByText("No projects yet")).toHaveCount(0);
     await expect(page.getByText("0 projects", { exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: /Create your first project/ })).toHaveCount(0);
 
@@ -161,6 +169,7 @@ test("with nothing to show, the list says so — and only an admin is offered a 
 
     await expect(page.getByText("No projects yet")).toBeVisible();
     await expect(page.getByRole("link", { name: /Create your first project/ })).toBeVisible();
+    await expect(page.getByTestId("not-on-any-board")).toHaveCount(0);
   });
 });
 
