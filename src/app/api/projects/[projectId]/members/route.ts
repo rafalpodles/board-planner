@@ -84,7 +84,7 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     before = await Grant.findOneAndUpdate(
       { subject: userId, objectType: "project", object: projectId },
       { $set: { relation }, $setOnInsert: { createdBy: user._id } },
-      { upsert: true, new: false }
+      { upsert: true, returnDocument: "before" }
     )
       .select("relation")
       .lean();

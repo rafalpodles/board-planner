@@ -140,7 +140,7 @@ describe("PUT members", () => {
     expect(grantUpsert).toHaveBeenCalledWith(
       { subject: U1, objectType: "project", object: PROJECT },
       { $set: { relation: "owner" }, $setOnInsert: { createdBy: "o1" } },
-      { upsert: true, new: false }
+      { upsert: true, returnDocument: "before" }
     );
   });
 
@@ -179,7 +179,7 @@ describe("PUT members", () => {
     expect(grantUpsert).toHaveBeenCalledWith(
       { subject: U2, objectType: "project", object: PROJECT },
       { $set: { relation: "member" }, $setOnInsert: { createdBy: "o1" } },
-      { upsert: true, new: false }
+      { upsert: true, returnDocument: "before" }
     );
   });
 
@@ -200,7 +200,7 @@ describe("PUT members", () => {
     expect(grantUpsert).toHaveBeenCalledWith(
       { subject: U2, objectType: "project", object: PROJECT },
       { $set: { relation: "member" }, $setOnInsert: { createdBy: "o1" } },
-      { upsert: true, new: false }
+      { upsert: true, returnDocument: "before" }
     );
   });
 

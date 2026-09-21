@@ -8,6 +8,7 @@ import { useToast } from "@/components/ui/Toast";
 import { Modal } from "@/components/ui/Modal";
 import { Select } from "@/components/ui/Select";
 import { Button } from "@/components/ui/Button";
+import { LoadFailed } from "@/components/ui/LoadFailed";
 import { GrantRelation } from "@/types";
 
 export function AddToBoardModal({
@@ -19,7 +20,7 @@ export function AddToBoardModal({
 }) {
   const api = useApi();
   const { toast } = useToast();
-  const { projects } = useProjects();
+  const { projects, loadFailed, retrying, reload } = useProjects();
   const [projectId, setProjectId] = useState("");
   const [relation, setRelation] = useState<GrantRelation>("member");
   const [error, setError] = useState("");
@@ -32,6 +33,10 @@ export function AddToBoardModal({
     setError("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [person]);
+
+  useEffect(() => {
+    if (person && !projectId && projects.length > 0) setProjectId(projects[0]._id);
+  }, [person, projectId, projects]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -61,7 +66,9 @@ export function AddToBoardModal({
       closeDisabled={saving}
       title={person ? `Add ${person.fullName} to a board` : ""}
     >
-      {projects.length === 0 ? (
+      {loadFailed ? (
+        <LoadFailed message="The boards could not be loaded." onRetry={reload} busy={retrying} />
+      ) : projects.length === 0 ? (
         <p className="text-sm text-text-muted">
           There is no board yet.{" "}
           <Link href="/projects/new" className="text-primary underline" onClick={onClose}>

@@ -55,7 +55,7 @@ export default function UsersPage() {
   // The action opens a dialog on this page, so it must not outlive the page it would open it on
   useEffect(() => {
     const ids = actionToasts.current;
-    return () => ids.forEach((id) => dismiss?.(id));
+    return () => ids.forEach((id) => dismiss(id));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

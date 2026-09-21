@@ -15,9 +15,10 @@ vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
 vi.mock("@/hooks/use-auth", () => ({ useAuth: () => auth }));
 
 function Probe({ newOrder }: { newOrder?: string[] } = {}) {
-  const { projects, isLoading, loadFailed, reload, reorder } = useProjects();
+  const { projects, isLoading, loadFailed, retrying, reload, reorder } = useProjects();
   return (
     <div>
+      <span data-testid="retrying">{String(retrying)}</span>
       <span data-testid="failed">{String(loadFailed)}</span>
       <span data-testid="loading">{String(isLoading)}</span>
       <span data-testid="count">{projects.length}</span>
@@ -47,6 +48,37 @@ afterEach(cleanup);
 
 describe("useProjects", () => {
   // BP-753: /projects tells a member with no boards whom to ask, which is only true if the read worked
+  it("forgets a failed read when the user signs out", async () => {
+    api.get.mockRejectedValueOnce(new Error("offline"));
+    const { rerender } = renderProvider();
+    await waitFor(() => expect(screen.getByTestId("failed").textContent).toBe("true"));
+
+    auth.user = null;
+    rerender(
+      <ProjectsProvider>
+        <Probe />
+      </ProjectsProvider>
+    );
+
+    await waitFor(() => expect(screen.getByTestId("failed").textContent).toBe("false"));
+  });
+
+  it("says it is retrying while a read is out, and stops when it answers", async () => {
+    api.get.mockRejectedValueOnce(new Error("offline"));
+    renderProvider();
+    await waitFor(() => expect(screen.getByTestId("failed").textContent).toBe("true"));
+    expect(screen.getByTestId("retrying").textContent).toBe("false");
+
+    let answer: (value: unknown) => void = () => {};
+    api.get.mockImplementation(() => new Promise((resolve) => (answer = resolve)));
+    act(() => screen.getByText("reload").click());
+    expect(screen.getByTestId("retrying").textContent).toBe("true");
+
+    await act(async () => answer([{ _id: "1" }]));
+    expect(screen.getByTestId("retrying").textContent).toBe("false");
+    expect(screen.getByTestId("failed").textContent).toBe("false");
+  });
+
   it("says the read failed, and clears that once a retry answers", async () => {
     api.get.mockRejectedValueOnce(new Error("offline"));
 

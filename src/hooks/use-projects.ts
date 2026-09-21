@@ -17,6 +17,7 @@ interface ProjectsState {
   projects: ApiProject[];
   isLoading: boolean;
   loadFailed: boolean;
+  retrying: boolean;
   reload: () => Promise<void>;
   reorder: (orderedIds: string[]) => Promise<void>;
 }
@@ -31,12 +32,16 @@ export function useProjectsProvider(): ProjectsState {
   const [projects, setProjects] = useState<ApiProject[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const readsInFlight = useRef(0);
   const appliedSeq = useRef(0);
 
   // A read carries the order of the moment it was answered, so one overtaken by a later read or by
   // a reorder applies nothing rather than undoing it (BP-551)
   const reload = useCallback(async () => {
     const seq = ++appliedSeq.current;
+    readsInFlight.current++;
+    setRetrying(true);
     try {
       const list = await api.get("/api/projects");
       if (seq !== appliedSeq.current) return;
@@ -49,12 +54,14 @@ export function useProjectsProvider(): ProjectsState {
       setLoadFailed(true);
     } finally {
       if (seq === appliedSeq.current) setIsLoading(false);
+      if (--readsInFlight.current === 0) setRetrying(false);
     }
   }, [api]);
 
   useEffect(() => {
     if (!user) {
       setProjects([]);
+      setLoadFailed(false);
       setIsLoading(false);
       return;
     }
@@ -87,8 +94,8 @@ export function useProjectsProvider(): ProjectsState {
   );
 
   return useMemo(
-    () => ({ projects, isLoading, loadFailed, reload, reorder }),
-    [projects, isLoading, loadFailed, reload, reorder]
+    () => ({ projects, isLoading, loadFailed, retrying, reload, reorder }),
+    [projects, isLoading, loadFailed, retrying, reload, reorder]
   );
 }
 

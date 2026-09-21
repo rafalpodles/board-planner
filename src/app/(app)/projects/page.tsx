@@ -12,7 +12,7 @@ import { PageHeader } from "@/components/shell/PageHeader";
 import { LoadFailed } from "@/components/ui/LoadFailed";
 
 export default function ProjectsPage() {
-  const { projects, isLoading: loading, loadFailed, reload } = useProjects();
+  const { projects, isLoading: loading, loadFailed, retrying, reload } = useProjects();
   const { isAdmin } = useAuth();
 
   if (loading) {
@@ -47,6 +47,7 @@ export default function ProjectsPage() {
         <LoadFailed
           message="Your boards could not be loaded."
           onRetry={reload}
+          busy={retrying}
           testId="projects-load-failed"
         />
       ) : projects.length === 0 && !isAdmin ? (

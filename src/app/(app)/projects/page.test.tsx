@@ -10,6 +10,7 @@ const { api, auth, projectsState } = vi.hoisted(() => ({
     projects: [] as ApiProject[],
     isLoading: false,
     loadFailed: false,
+    retrying: false,
     reload: vi.fn(),
   },
 }));
@@ -29,6 +30,7 @@ beforeEach(() => {
   auth.isAdmin = false;
   projectsState.projects = [];
   projectsState.loadFailed = false;
+  projectsState.retrying = false;
   api.get.mockResolvedValue([{ fullName: "Agnieszka Nowak" }, { fullName: "Tomasz Wójcik" }]);
 });
 
@@ -89,5 +91,14 @@ describe("when the boards could not be read", () => {
 
     screen.getByRole("button", { name: "Retry" }).click();
     expect(projectsState.reload).toHaveBeenCalled();
+  });
+
+  it("shows the retry as busy while it runs", () => {
+    projectsState.loadFailed = true;
+    projectsState.retrying = true;
+
+    render(<ProjectsPage />);
+
+    expect(screen.getByRole("button", { name: "Retrying…" })).toBeTruthy();
   });
 });
