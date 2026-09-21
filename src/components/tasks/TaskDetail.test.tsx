@@ -1023,6 +1023,23 @@ describe("TaskDetail when a save is refused", () => {
   });
 });
 
+describe("TaskDetail when a save's value is refused", () => {
+  it("keeps the task on screen and says what was wrong with the value", async () => {
+    api.put.mockRejectedValue(Object.assign(new Error("Title is required"), { status: 400 }));
+    renderDetail();
+    await loaded();
+
+    const title = screen.getByLabelText("Task title") as HTMLTextAreaElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(title, " ");
+      title.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    expect(await screen.findByText(/Title is required/, {}, { timeout: 3000 })).toBeTruthy();
+    expect(screen.getByLabelText("Task title")).toBeTruthy();
+  });
+});
+
 describe("TaskDetail telling the history panel it wrote there", () => {
   const key = () => Number(screen.getByTestId("activity-panel").dataset.historyKey);
 

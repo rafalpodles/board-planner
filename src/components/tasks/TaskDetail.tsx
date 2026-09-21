@@ -44,9 +44,10 @@ interface TaskDetailProps {
   onLoaded?: (task: ApiTask, project: ApiProject) => void;
 }
 
-function taskRefusal(err: unknown): string | null {
+// A 400 on reading the task is a malformed address; on a save it is a refused value, not a refusal
+function taskRefusal(err: unknown, reading: boolean): string | null {
   const status = (err as { status?: number } | null)?.status;
-  if (status === 404 || status === 400) return "There is no task here — the link may be stale.";
+  if (status === 404 || (reading && status === 400)) return "There is no task here — the link may be stale.";
   return boardRefusal(err);
 }
 
@@ -64,8 +65,8 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
   const [retrying, setRetrying] = useState(false);
   const shown = useRef(false);
 
-  const refuse = useCallback((err: unknown) => {
-    const refused = taskRefusal(err);
+  const refuse = useCallback((err: unknown, reading = false) => {
+    const refused = taskRefusal(err, reading);
     if (!refused) return false;
     setRefusal(refused);
     setTask(null);
@@ -87,7 +88,7 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
       onLoaded?.(t, p);
     } catch (err) {
       // With nothing on screen the page itself says so; a toast would say it twice
-      if (!refuse(err) && shown.current) toast("Failed to load task", "error");
+      if (!refuse(err, true) && shown.current) toast("Failed to load task", "error");
     } finally {
       setLoading(false);
     }
@@ -154,7 +155,7 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
       onClose={onClose}
       onReload={loadData}
       onTaskChange={setTask}
-      onRefused={refuse}
+      onRefused={(err) => refuse(err)}
     />
   );
 }
