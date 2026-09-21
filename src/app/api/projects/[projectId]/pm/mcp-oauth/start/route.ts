@@ -69,9 +69,21 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
       oauth.expiresAt = null;
       oauth.status = "unconfigured";
     } else {
+      // Recorded now, not left for the success path at the bottom of this function to write —
+      // that line never runs on this return. Without this, nothing in the app ever clears the
+      // stale value this same condition reads next time: retyping the identical client id is a
+      // no-op (config.ts's merge only resets on a *changed* id), and Disconnect deliberately
+      // keeps it. Left unrecorded, this 400 would repeat forever and "update it here" would name
+      // an action that does not exist (BP-751 review). Recording it makes the retry this message
+      // asks for actually work: Connect again once the provider knows the new address, and this
+      // guard no longer has anything to compare against.
+      oauth.redirectUri = redirectUri;
+      server.oauth = oauth;
+      project.markModified("pm.mcpServers");
+      await project.save();
       return NextResponse.json(
         {
-          error: `This connection's callback address changed to ${redirectUri}. Register that address with the provider for this client, then update it here — a client id not obtained through dynamic registration here is never replaced automatically.`,
+          error: `This connection's callback address changed to ${redirectUri}. Make sure this client is registered with that address on the provider, then Connect again — a client id this app did not register itself is never replaced automatically.`,
         },
         { status: 400 }
       );
