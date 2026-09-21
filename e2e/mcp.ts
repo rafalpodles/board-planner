@@ -170,12 +170,12 @@ export class McpSession {
 export async function authorize(
   page: Page,
   request: APIRequestContext,
-  options: { projects: "all" | string[] } = { projects: "all" }
+  options: { projects?: "all" | string[]; clientName?: string } = {}
 ): Promise<{ accessToken: string; refreshToken: string; code: string; redirectUri: string; clientId: string; verifier: string }> {
   const receiver = await redirectReceiver();
   try {
     const registration = await request.post("/oauth/register", {
-      data: { client_name: "E2E MCP Client", redirect_uris: [receiver.url] },
+      data: { client_name: options.clientName ?? "E2E MCP Client", redirect_uris: [receiver.url] },
     });
     expect(registration.status(), await registration.text()).toBe(201);
     const { client_id: clientId } = await registration.json();
@@ -198,7 +198,8 @@ export async function authorize(
     await page.getByRole("button", { name: "Continue" }).click();
 
     await expect(page.getByRole("heading", { name: "Grant access" })).toBeVisible();
-    if (options.projects === "all") {
+    const projects = options.projects ?? "all";
+    if (projects === "all") {
       await page.check('input[name="access"][value="all"]');
     } else {
       await page.check('input[name="access"][value="limited"]');
@@ -206,7 +207,7 @@ export async function authorize(
       // ticking one is that another was there to leave unticked. The count is seed() plus
       // seedSecondProject() — a project added to seed() itself belongs in this number.
       await expect(page.locator('input[name="projects"]')).toHaveCount(2);
-      for (const projectId of options.projects) {
+      for (const projectId of projects) {
         await page.check(`input[name="projects"][value="${projectId}"]`);
       }
     }
