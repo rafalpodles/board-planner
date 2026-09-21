@@ -190,7 +190,7 @@ test("a list that could not be read says so, rather than that there is nothing",
   // The control: the same reader, once the read answers, is on no board
   failing = false;
   await page.getByRole("button", { name: "Retry" }).click();
-  await expect(page.getByTestId("not-on-any-board")).toBeVisible();
+  await expect(page.getByTestId("not-on-any-board")).toHaveText("You are not on any board yet.");
 });
 
 // BP-534: /projects/new used to read no auth state at all, so a member typing the URL got the

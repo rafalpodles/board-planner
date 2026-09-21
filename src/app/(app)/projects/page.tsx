@@ -97,7 +97,7 @@ export default function ProjectsPage() {
 function NotOnAnyBoard() {
   return (
     <div className="mx-auto max-w-md py-12 text-center text-text-muted" data-testid="not-on-any-board">
-      <p>You are not on any board yet.</p>
+      <p className="font-medium text-text">You are not on any board yet.</p>
     </div>
   );
 }
