@@ -406,6 +406,11 @@ export interface WorkerDecision {
  * `pending` records travel too, deliberately: the worker keeps a marker per task to hold the
  * worktree back from the reaper, and the only way to know a marker should be dropped is to see
  * that its decision is no longer among the live ones.
+ *
+ * An acceptance on a project an instance admin has locked workers off is held back as `pending`
+ * rather than left out: out of the list, the machine would drop its marker and reap the worktree
+ * holding the very commit that was accepted. Held, it keeps the work and pushes nothing until the
+ * lock is lifted. A decline spends nothing, so it travels as it is.
  */
 export async function decisionsForWorker(workerId: string): Promise<WorkerDecision[]> {
   await connectDB();
@@ -433,6 +438,8 @@ export async function decisionsForWorker(workerId: string): Promise<WorkerDecisi
       }[]
     >();
 
+  const locked = await lockedProjectIds(tasks.map((task) => String(task.project)));
+
   return tasks.flatMap((task) =>
     task.decision?.state
       ? [
@@ -443,7 +450,10 @@ export async function decisionsForWorker(workerId: string): Promise<WorkerDecisi
             title: task.decision.title ?? "",
             commit: task.decision.commit ?? "",
             patchSha256: task.decision.patchSha256 ?? "",
-            state: task.decision.state,
+            state:
+              task.decision.state === "accepted" && locked.has(String(task.project))
+                ? ("pending" as const)
+                : task.decision.state,
             attempts: task.decision.attempts ?? 0,
             decidedAt: task.decision.decidedAt
               ? new Date(task.decision.decidedAt).toISOString()
@@ -452,4 +462,14 @@ export async function decisionsForWorker(workerId: string): Promise<WorkerDecisi
         ]
       : []
   );
+}
+
+async function lockedProjectIds(projectIds: string[]): Promise<Set<string>> {
+  const unique = [...new Set(projectIds)];
+  if (unique.length === 0) return new Set();
+  const { Project } = await import("@/models/project");
+  const locked = await Project.find({ _id: { $in: unique }, "worker.lockedByInstance": true })
+    .select("_id")
+    .lean<{ _id: unknown }[]>();
+  return new Set(locked.map((project) => String(project._id)));
 }
