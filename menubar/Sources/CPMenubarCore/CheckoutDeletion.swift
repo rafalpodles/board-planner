@@ -208,7 +208,6 @@ public struct CheckoutDeletion: Sendable {
                 // pointing at it any more. `root` is what the verdict this run started from
                 // resolved that to; deleting it rather than `path` is what actually removes it.
                 try remove(root)
-                gone.append(path)
 
                 // The link itself, left dangling once its target is gone: `exists` follows
                 // symlinks, so a dangling one already reads as absent and nothing would ever
@@ -219,9 +218,19 @@ public struct CheckoutDeletion: Sendable {
                 // maintains (`/tmp`, `/var`), where `path` and `root` name the same directory
                 // under two spellings and a second `remove` would just fail against whichever one
                 // the first call already deleted.
+                //
+                // `gone` is only appended once both acts on this path succeed: recording it after
+                // `remove(root)` alone would have a failed link cleanup produce a `reason` naming
+                // `path` as uncleanable in the same step that lists `path` as already gone.
                 if isSymlink(path) {
                     try remove(path)
                 }
+                gone.append(path)
+            } else if isSymlink(path) {
+                // A grant whose target is already gone but whose link survives as a dangling
+                // entry: `exists` above reads it as absent (it follows the link), so the branch
+                // above never runs and nothing would otherwise clean this up either.
+                try remove(path)
             }
 
             // The grant goes last. Dropped first, a failed delete would leave a directory the
