@@ -88,7 +88,8 @@ test("the sprint header reads the points done out of the points planned, and a m
   await menu.getByRole("button", { name: "Done", exact: true }).click();
   expect((await moved).status()).toBe(200);
 
-  // Inside a second of the answer, so the board's ten-second poll cannot be what satisfied it
+  // What the screen shows once the move is made; the client-side sum itself is pinned by the
+  // planning test below, which holds the board's re-reads
   await expect(page.getByTestId("sprint-progress")).toHaveText("3/4", { timeout: 1_000 });
   await expect(estimateProgress(page)).toHaveText("8/8 Points", { timeout: 1_000 });
 });
@@ -144,6 +145,7 @@ test("the planning pane heads the sprint with its points, and moving tasks in an
   await expect(heading).toHaveText(`${ESTIMATE_SPRINT_NAME} (4) · 5 Points`, { timeout: 1_000 });
   // What is left done is the "TBD" task, worth nothing — not 5 carried over from the one removed
   await expect(estimateProgress(page)).toHaveText("0/5 Points", { timeout: 1_000 });
+  await page.unrouteAll({ behavior: "ignoreErrors" });
 });
 
 test("on a board with no Done column the header gives no points-done figure", async ({ page }) => {

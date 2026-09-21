@@ -187,7 +187,17 @@ test("a search that answers with nothing still reports no tasks", async ({ page 
   await expect(page.getByTestId("search-error")).toHaveCount(0);
 });
 
-test("a task whose comments cannot be read does not claim it has none", async ({ page }) => {
+test("a task whose comments cannot be read does not claim it has none", async ({
+  page,
+  request,
+}) => {
+  const remark = "A remark that was there all along";
+  const posted = await request.post(
+    `/api/projects/${PROJECT_ID}/tasks/${SIBLING_TASK_ID}/comments`,
+    { headers: ADMIN_AUTH, data: { body: remark } }
+  );
+  expect(posted.status(), await posted.text()).toBe(201);
+
   await signIn(page);
   const stopFailing = await failUntilTold(page, "**/comments");
   await page.goto(`/projects/${PROJECT_KEY}/tasks/${SIBLING_TASK_NUMBER}`);
@@ -197,9 +207,17 @@ test("a task whose comments cannot be read does not claim it has none", async ({
   await page.waitForTimeout(AFTER_THE_TOAST);
   await expect(page.getByTestId("comments-error")).toBeVisible();
 
+  // A section, not the page: the task and its other tab are still there
+  await expect(page.getByRole("textbox", { name: "Task title" })).toHaveValue(SIBLING_TASK_TITLE);
+  await page.getByRole("tab", { name: /^History/ }).click();
+  const history = page.locator("#task-panel-history");
+  await expect(history.getByText("E2E Admin added a comment")).toBeVisible();
+  await expect(history.getByTestId("history-error")).toHaveCount(0);
+  await page.getByRole("tab", { name: /^Comments/ }).click();
+
   stopFailing();
   await page.getByRole("button", { name: "Retry" }).click();
-  await expect(page.getByText("No comments yet")).toBeVisible();
+  await expect(page.locator("#task-panel-comments").getByText(remark)).toBeVisible();
   await expect(page.getByTestId("comments-error")).toHaveCount(0);
 });
 
