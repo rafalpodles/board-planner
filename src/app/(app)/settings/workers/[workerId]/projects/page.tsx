@@ -10,7 +10,7 @@ import { PageHeader } from "@/components/shell/PageHeader";
 
 // Where somebody says which projects a machine works on. A browser screen and not a pane in the
 // menubar app, for a reason that is not a preference: ticking a project may mean switching workers
-// on for it, and that is an instance admin in an interactive session — which the app, holding only
+// on for it, and that is the project's owner in an interactive session — which the app, holding only
 // the machine's own credential, can never be.
 
 interface CatalogueRow {
@@ -22,12 +22,33 @@ interface CatalogueRow {
   workersEnabled: boolean;
   servedHere: boolean;
   wanted: boolean;
+  canEnable: boolean;
+  locked?: boolean;
 }
 
 interface View {
   worker: { _id: string; name: string; host: string };
-  canEnableWorkers: boolean;
   catalogue: CatalogueRow[];
+}
+
+function leftDisabledMessage(left: string[], rows: CatalogueRow[]): string {
+  if (left.length === 0) return "Saved. The app picks this up the next time it connects to the worker.";
+  const lockedKeys = new Set(rows.filter((row) => row.locked).map((row) => row.key));
+  const locked = left.filter((key) => lockedKeys.has(key));
+  const off = left.filter((key) => !lockedKeys.has(key));
+  const them = left.length === 1 ? "it" : "them";
+  const parts: string[] = [];
+  if (off.length) {
+    parts.push(
+      `${off.join(", ")} ${off.length === 1 ? "does not run machines" : "do not run machines"} yet, and you cannot turn that on`
+    );
+  }
+  if (locked.length) {
+    parts.push(
+      `${locked.join(", ")} ${locked.length === 1 ? "is" : "are"} locked off by an instance admin`
+    );
+  }
+  return `Saved. ${parts.join("; ")} — the machine will leave ${them} alone until somebody does.`;
 }
 
 export default function MachineProjectsPage() {
@@ -89,11 +110,7 @@ export default function MachineProjectsPage() {
         projects: [...picked],
       });
       left = (result?.leftDisabled ?? []) as string[];
-      setSaved(
-        left.length
-          ? `Saved. ${left.join(", ")} ${left.length === 1 ? "does not run machines" : "do not run machines"} yet, and only an instance admin can turn that on — the machine will leave ${left.length === 1 ? "it" : "them"} alone until somebody does.`
-          : "Saved. The app picks this up the next time it connects to the worker."
-      );
+      setSaved(leftDisabledMessage(left, view?.catalogue ?? []));
     } catch (e) {
       setSaved("");
       setError((e as Error).message || "Could not save");
@@ -187,9 +204,11 @@ export default function MachineProjectsPage() {
               </span>
               {row.available && !row.workersEnabled && (
                 <span className="block text-xs text-warning">
-                  {view.canEnableWorkers
-                    ? "does not run machines yet — ticking it turns that on"
-                    : "does not run machines yet, and only an instance admin can turn that on"}
+                  {row.locked
+                    ? "an instance admin has locked machines off for this project"
+                    : row.canEnable
+                      ? "does not run machines yet — ticking it turns that on"
+                      : "does not run machines yet, and you cannot turn that on"}
                 </span>
               )}
             </span>

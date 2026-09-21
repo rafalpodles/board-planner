@@ -6,8 +6,8 @@ import { Agent } from "@/models/agent";
 import { Project } from "@/models/project";
 import { isRunnable, normaliseComposition } from "@/lib/agent-rules";
 
-// Its own route rather than a field on the worker policy: policy is instance-admin only and travels
-// in the assignment payload, and this is neither — a project admin picks it. Since BP-358 it does
+// Its own route rather than a field on the worker policy: policy travels in the assignment payload
+// and this does not. Since BP-358 it does
 // not ride the claim either: the task's own agent is the only thing a claim resolves, and this is
 // the agent the task picker offers first.
 export const PUT = withProjectAccess(async (request, { params, user }) => {

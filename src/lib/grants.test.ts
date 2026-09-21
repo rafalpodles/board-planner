@@ -128,7 +128,8 @@ vi.mock("@/models/user", () => ({
   User: { find: (...args: unknown[]) => userFind(...args) },
 }));
 
-const { check, accessibleProjectIds, recipientsWithAccess, canBeAssigned } = await import("./grants");
+const { check, accessibleProjectIds, administeredProjectIds, recipientsWithAccess, canBeAssigned } =
+  await import("./grants");
 
 function lean(value: unknown) {
   return { select: () => ({ lean: () => Promise.resolve(value) }) };
@@ -199,6 +200,61 @@ describe("accessibleProjectIds", () => {
     find.mockReturnValue(lean([{ object: P }, { object: OTHER }]));
     const user = { _id: "u1", role: "member", tokenScoped: true, tokenScope: [OTHER] } as never;
     expect(await accessibleProjectIds(user)).toEqual([OTHER]);
+  });
+});
+
+// BP-736: the batch form of check(user, id, "admin"), for the screens that decide per project
+// whether this person may switch its workers on
+describe("administeredProjectIds", () => {
+  const THIRD = "69a52e3b399b27d3cbb2c5a7";
+  // Grant rows as the store holds them: `object` is an ObjectId, not a string
+  const rows = [
+    { subject: "u1", objectType: "project", object: new Types.ObjectId(P), relation: "owner" },
+    { subject: "u1", objectType: "project", object: new Types.ObjectId(OTHER), relation: "member" },
+  ];
+
+  beforeEach(() => {
+    find.mockReset();
+    find.mockImplementation((query: { subject: string; object: { $in: string[] } }) =>
+      lean(
+        rows.filter(
+          (row) => row.subject === query.subject && query.object.$in.includes(String(row.object))
+        )
+      )
+    );
+  });
+
+  it("includes a project the person owns and leaves out one they are only a member of", async () => {
+    const user = { _id: "u1", role: "member" } as never;
+
+    expect([...(await administeredProjectIds(user, [P, OTHER, THIRD]))]).toEqual([P]);
+  });
+
+  it("matches a grant whose object is stored as an ObjectId", async () => {
+    const user = { _id: "u1", role: "member" } as never;
+
+    expect((await administeredProjectIds(user, [P])).has(P)).toBe(true);
+  });
+
+  it("gives an instance admin every project without querying", async () => {
+    const user = { _id: "a1", role: "admin" } as never;
+
+    expect([...(await administeredProjectIds(user, [P, OTHER]))]).toEqual([P, OTHER]);
+    expect(find).not.toHaveBeenCalled();
+  });
+
+  it("gives a scoped token nothing, since admin needs an unscoped session", async () => {
+    const user = { _id: "u1", role: "member", tokenScoped: true, tokenScope: [P] } as never;
+
+    expect(await administeredProjectIds(user, [P, OTHER])).toEqual(new Set());
+  });
+
+  it("leaves out a project outside the token's scope even where the person owns it", async () => {
+    rows.push({ subject: "u1", objectType: "project", object: new Types.ObjectId(THIRD), relation: "owner" });
+    const user = { _id: "u1", role: "member", tokenScope: [THIRD] } as never;
+
+    expect([...(await administeredProjectIds(user, [P, THIRD]))]).toEqual([THIRD]);
+    rows.pop();
   });
 });
 

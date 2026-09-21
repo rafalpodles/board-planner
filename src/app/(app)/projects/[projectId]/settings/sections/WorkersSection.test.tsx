@@ -224,3 +224,132 @@ describe("the project's default agent", () => {
     await waitFor(() => expect(picker().value).toBe(""));
   });
 });
+
+// BP-736: the project's owner manages this section; an instance admin keeps a lock over it.
+describe("WorkersSection for a project owner who is not an instance admin", () => {
+  const register = vi.fn();
+
+  function renderWith(isAdmin: boolean, over: Partial<ApiProject> = {}) {
+    return render(
+      <SettingsProvider register={register} unregister={vi.fn()}>
+        <WorkersSection
+          projectId="TP"
+          project={project(over)}
+          patchProject={vi.fn()}
+          replaceProject={vi.fn()}
+          isAdmin={isAdmin}
+          stats={null}
+        />
+      </SettingsProvider>
+    );
+  }
+
+  const enableSwitch = () =>
+    screen.getByRole("switch", { name: /let workers run tasks for this project/i }) as HTMLInputElement;
+  const latestGroup = () => register.mock.calls.at(-1)![0];
+
+  beforeEach(() => register.mockReset());
+
+  it("lets the owner switch workers on and saves it", async () => {
+    api.put.mockResolvedValue(project({ worker: { ...project().worker, enabled: true } }));
+    renderWith(false);
+
+    expect(enableSwitch().disabled).toBe(false);
+    fireEvent.click(enableSwitch());
+    await latestGroup().save();
+
+    expect(api.put).toHaveBeenCalledWith("/api/projects/TP", { worker: { enabled: true } });
+  });
+
+  it("lets the owner edit the timeouts and the base branch", () => {
+    renderWith(false);
+
+    expect((screen.getByLabelText("Base branch") as HTMLInputElement).disabled).toBe(false);
+    expect((screen.getByLabelText("Timeout for one step (ms)") as HTMLInputElement).disabled).toBe(false);
+  });
+
+  it("lets the owner pick the default agent", () => {
+    renderWith(false);
+
+    expect((screen.getByLabelText("Default agent") as HTMLSelectElement).disabled).toBe(false);
+  });
+
+  it("keeps every control read-only for somebody who cannot administer the project", () => {
+    renderWith(false, { canAdmin: false });
+
+    expect(enableSwitch().disabled).toBe(true);
+    expect((screen.getByLabelText("Base branch") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText("Default agent") as HTMLSelectElement).disabled).toBe(true);
+  });
+
+  it("does not ask the instance-admin fleet endpoint, which would refuse the owner", () => {
+    renderWith(false);
+
+    expect(api.get).not.toHaveBeenCalledWith("/api/admin/workers");
+    expect(screen.queryByText("Machines offering this repository")).toBeNull();
+  });
+
+  it("offers the owner no lock switch", () => {
+    renderWith(false);
+
+    expect(screen.queryByRole("switch", { name: /lock workers off/i })).toBeNull();
+  });
+
+  it("says the instance lock is on and holds the owner's switch off", () => {
+    renderWith(false, { worker: { ...project().worker, enabled: false, lockedByInstance: true } });
+
+    expect(screen.getByTestId("workers-locked").textContent).toMatch(/instance admin has locked workers off/i);
+    expect(enableSwitch().disabled).toBe(true);
+  });
+
+  it("still lets the owner switch runs off under the lock, and saves it", async () => {
+    api.put.mockResolvedValue(project({ worker: { ...project().worker, enabled: false, lockedByInstance: true } }));
+    renderWith(false, { worker: { ...project().worker, enabled: true, lockedByInstance: true } });
+
+    expect(enableSwitch().disabled).toBe(false);
+    fireEvent.click(enableSwitch());
+    await latestGroup().save();
+
+    expect(api.put).toHaveBeenCalledWith("/api/projects/TP", { worker: { enabled: false } });
+  });
+
+  // Judged on what is stored, not the draft: flipping it off must not lock the owner out of undoing it
+  it("lets the owner flip the switch back on before saving, having flipped it off under the lock", () => {
+    renderWith(false, { worker: { ...project().worker, enabled: true, lockedByInstance: true } });
+
+    fireEvent.click(enableSwitch());
+    expect(enableSwitch().checked).toBe(false);
+    expect(enableSwitch().disabled).toBe(false);
+    fireEvent.click(enableSwitch());
+
+    expect(enableSwitch().checked).toBe(true);
+  });
+
+  it("leaves an instance admin's own switch usable under the lock", () => {
+    renderWith(true, { worker: { ...project().worker, enabled: false, lockedByInstance: true } });
+
+    expect(enableSwitch().disabled).toBe(false);
+  });
+
+  it("lets an instance admin lift the lock from the screen", async () => {
+    api.put.mockResolvedValue(project({ worker: { ...project().worker, lockedByInstance: false } }));
+    renderWith(true, { worker: { ...project().worker, enabled: true, lockedByInstance: true } });
+    const lock = screen.getByRole("switch", { name: /lock workers off for this project/i }) as HTMLInputElement;
+
+    expect(lock.checked).toBe(true);
+    fireEvent.click(lock);
+    await latestGroup().save();
+
+    expect(api.put).toHaveBeenCalledWith("/api/projects/TP", { worker: { lockedByInstance: false } });
+  });
+
+  it("gives an instance admin the lock, and saves it", async () => {
+    api.put.mockResolvedValue(project({ worker: { ...project().worker, lockedByInstance: true } }));
+    renderWith(true);
+
+    fireEvent.click(screen.getByRole("switch", { name: /lock workers off for this project/i }));
+    await latestGroup().save();
+
+    expect(api.put).toHaveBeenCalledWith("/api/projects/TP", { worker: { lockedByInstance: true } });
+  });
+});

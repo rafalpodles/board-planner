@@ -4,6 +4,8 @@ import { withProjectAccess, withProjectOwner, withProjectAccessOrWorker } from "
 import { check } from "@/lib/grants";
 import { Project } from "@/models/project";
 import { parseProjectWorkerConfig } from "@/lib/project-worker-config";
+import { isWorkerLockedByInstance, WORKERS_LOCKED_MESSAGE } from "@/lib/worker-gate";
+import { PROJECT_POLICY_FIELDS_MOVED_TO_BLOCKS } from "@/lib/worker-policy";
 import { logInstanceAudit } from "@/lib/instanceAudit";
 import { InstanceAuditAction } from "@/types";
 import { Task } from "@/models/task";
@@ -100,20 +102,12 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
   }
 
   if (body.worker !== undefined) {
-    // Instance-admin only: enabling a project for workers commits somebody's machine to running
-    // agent-written code, which is not a project admin's call to make.
-    if (user.role !== "admin") {
-      return NextResponse.json(
-        { error: "Only an instance admin can change worker settings" },
-        { status: 403 }
-      );
-    }
-    // Enabling a project for workers commits somebody's machine to running agent-written code.
-    // The device-enrolment route performing the same enable is already gated this way; an unscoped
-    // admin API token used to walk past this one (BP-306).
+    // withProjectOwner has already required the project-admin grant: the owner, or an instance
+    // admin. A machine credential is refused because enabling commits somebody's machine to
+    // running agent-written code, and an API token read off that machine must not decide it (BP-306).
     if (user.viaMachineCredential) {
       return NextResponse.json(
-        { error: "Interactive admin session required to change worker settings" },
+        { error: "Interactive session required to change worker settings" },
         { status: 403 }
       );
     }
@@ -127,6 +121,31 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     );
     if (!parsed.ok) {
       return NextResponse.json({ error: parsed.error }, { status: 400 });
+    }
+    const isInstanceAdmin = user.role === "admin";
+    if ("worker.lockedByInstance" in parsed.update && !isInstanceAdmin) {
+      return NextResponse.json(
+        { error: "Only an instance admin can lock or unlock workers for a project" },
+        { status: 403 }
+      );
+    }
+    const blockFields = Object.keys(
+      (body.worker as { policy?: Record<string, unknown> }).policy ?? {}
+    ).filter((field) => PROJECT_POLICY_FIELDS_MOVED_TO_BLOCKS.has(field));
+    if (blockFields.length > 0 && !isInstanceAdmin) {
+      return NextResponse.json(
+        {
+          error: `Only an instance admin can set ${blockFields.join(", ")} — they belong to the agent's steps and gates now`,
+        },
+        { status: 403 }
+      );
+    }
+    if (
+      parsed.update["worker.enabled"] === true &&
+      !isInstanceAdmin &&
+      isWorkerLockedByInstance(existing.worker)
+    ) {
+      return NextResponse.json({ error: WORKERS_LOCKED_MESSAGE }, { status: 403 });
     }
     Object.assign(updates, parsed.update);
 
@@ -331,7 +350,7 @@ type PendingWorkerAudit = { action: InstanceAuditAction; target: string; detail?
 // Decided from the values already stored, because the update is a dotted patch: a field the request
 // never mentioned is not a change, and one carrying the value it already had is not either.
 function pendingWorkerAudit(
-  existing: { worker?: { enabled?: boolean } },
+  existing: { worker?: { enabled?: boolean; lockedByInstance?: boolean } },
   updates: Record<string, unknown>,
   target: string
 ): PendingWorkerAudit[] {
@@ -339,10 +358,18 @@ function pendingWorkerAudit(
 
   const nowEnabled = updates["worker.enabled"];
   if (typeof nowEnabled === "boolean" && nowEnabled !== !!existing.worker?.enabled) {
-    // Instance-level, not project-level: this commits somebody's machine to running agent-written
-    // code, and the project audit log is read by project admins who cannot make that decision.
+    // Instance-level as well as project-level: this commits somebody's machine to running
+    // agent-written code, and the instance admin who can lock it off reads this log, not the board's.
     entries.push({
       action: nowEnabled ? "project_workers_enabled" : "project_workers_disabled",
+      target,
+    });
+  }
+
+  const nowLocked = updates["worker.lockedByInstance"];
+  if (typeof nowLocked === "boolean" && nowLocked !== !!existing.worker?.lockedByInstance) {
+    entries.push({
+      action: nowLocked ? "project_workers_locked" : "project_workers_unlocked",
       target,
     });
   }

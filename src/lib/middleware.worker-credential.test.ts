@@ -170,6 +170,21 @@ describe("the grant is re-derived on every call", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
+  it("refuses a project an instance admin locked, though its owner switched workers on", async () => {
+    projectFindById.mockReturnValue({
+      select: () => ({
+        lean: () =>
+          Promise.resolve(projectDoc({ worker: { enabled: true, lockedByInstance: true } })),
+      }),
+    });
+    const handler = vi.fn();
+
+    const res = await withProjectAccessOrWorker(handler)(workerRequest(), context());
+
+    expect(res.status).toBe(403);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
   // This is what a static project-scoped token could not do: the scope has to follow the
   // assignments, not a list fixed when the token was minted
   it("refuses a project whose repository this machine does not report", async () => {
@@ -263,6 +278,51 @@ describe("the grant is re-derived on every call", () => {
         project: PROJECT_ID,
         "execution.workerId": "w1",
         "execution.runId": { $nin: ["", null] },
+      });
+    });
+
+    // BP-736: a lock landing mid-run lets that run finish and report, and nothing else
+    describe("when an instance admin has locked the project", () => {
+      const HELD = "69a52e3b399b27d3cbb2c5d1";
+      const OTHER = "69a52e3b399b27d3cbb2c5d2";
+      const lockedContext = (taskId?: string) => ({
+        params: Promise.resolve({ projectId: PROJECT_ID, ...(taskId ? { taskId } : {}) }),
+      });
+
+      beforeEach(() => {
+        projectFindById.mockReturnValue({
+          select: () => ({
+            lean: () =>
+              Promise.resolve(projectDoc({ worker: { enabled: true, lockedByInstance: true } })),
+          }),
+        });
+        taskExists.mockImplementation(async (query: { _id?: string }) =>
+          query._id === undefined || query._id === HELD ? { _id: HELD } : null
+        );
+      });
+
+      it("lets the held task's own routes through", async () => {
+        const handler = vi.fn().mockResolvedValue(new Response("ok"));
+
+        const res = await withProjectAccessOrWorker(handler)(workerRequest(), lockedContext(HELD));
+
+        expect(res.status).toBe(200);
+        expect(taskExists).toHaveBeenCalledWith(expect.objectContaining({ _id: HELD }));
+      });
+
+      it("refuses a route about any other task on the project", async () => {
+        const handler = vi.fn();
+
+        const res = await withProjectAccessOrWorker(handler)(workerRequest(), lockedContext(OTHER));
+
+        expect(res.status).toBe(403);
+        expect(handler).not.toHaveBeenCalled();
+      });
+
+      it("keeps the project-level routes the run reports its outcome on", async () => {
+        const handler = vi.fn().mockResolvedValue(new Response("ok"));
+
+        expect((await withProjectAccessOrWorker(handler)(workerRequest(), lockedContext())).status).toBe(200);
       });
     });
 

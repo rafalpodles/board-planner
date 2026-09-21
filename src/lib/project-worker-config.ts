@@ -46,6 +46,13 @@ export function parseProjectWorkerConfig(
     update["worker.enabled"] = body.enabled;
   }
 
+  if ("lockedByInstance" in body) {
+    if (typeof body.lockedByInstance !== "boolean") {
+      return { ok: false, error: "worker.lockedByInstance must be a boolean" };
+    }
+    update["worker.lockedByInstance"] = body.lockedByInstance;
+  }
+
   // Un-pinning, the other half of policyOverrides. Without it a field touched once could never
   // follow the default again, and the UI would show "set" with no route back.
   const reset = body.reset;

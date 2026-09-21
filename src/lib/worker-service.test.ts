@@ -813,3 +813,43 @@ describe("catalogueFor", () => {
     });
   });
 });
+
+// BP-736: the owner sets `enabled`, an instance admin sets the lock, and the lock wins everywhere a
+// machine is told what it may run.
+describe("an instance admin's lock on the project", () => {
+  const reported = [{ remote: REMOTE, path: "/repo" }];
+  const locked = () =>
+    project({ worker: { enabled: true, lockedByInstance: true, policy: {}, policyOverrides: [] } });
+
+  it("refuses the claim even though the owner switched workers on", () => {
+    const verdict = verdictFor(worker(), locked(), PROTOCOL_VERSION, now);
+
+    expect(verdict.ok).toBe(false);
+    expect((verdict as { reason: string }).reason).toBe(
+      "an instance admin has locked workers off for this project"
+    );
+  });
+
+  it("offers no assignment", () => {
+    expect(assignmentsFor(reported, [locked()], [PROJECT_ID])).toEqual([]);
+  });
+
+  it("offers nothing to clone", () => {
+    expect(offersFor([], [locked()], [PROJECT_ID])).toEqual([]);
+  });
+
+  it("reports the project as not running workers in the picker", () => {
+    const [row] = catalogueFor(reported, [locked()], [PROJECT_ID], undefined);
+
+    expect(row.workersEnabled).toBe(false);
+  });
+
+  it("leaves an unlocked, enabled project running, as the control", () => {
+    const unlocked = project({
+      worker: { enabled: true, lockedByInstance: false, policy: {}, policyOverrides: [] },
+    });
+
+    expect(verdictFor(worker(), unlocked, PROTOCOL_VERSION, now)).toEqual({ ok: true });
+    expect(assignmentsFor(reported, [unlocked], [PROJECT_ID])).toHaveLength(1);
+  });
+});

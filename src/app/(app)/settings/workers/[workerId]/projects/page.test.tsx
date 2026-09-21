@@ -20,7 +20,6 @@ vi.mock("next/navigation", () => ({ useParams: () => ({ workerId: "w1" }) }));
 
 const VIEW = {
   worker: { _id: "w1", name: "Studio", host: "studio.local" },
-  canEnableWorkers: true,
   catalogue: [
     {
       project: "p1",
@@ -31,6 +30,7 @@ const VIEW = {
       workersEnabled: true,
       servedHere: true,
       wanted: true,
+      canEnable: true,
     },
   ],
 };
@@ -213,7 +213,6 @@ describe("saving the machine's projects", () => {
   it("stops offering to switch on what the save switched on", async () => {
     const off = {
       ...VIEW,
-      canEnableWorkers: true,
       catalogue: [{ ...VIEW.catalogue[0], wanted: false, servedHere: false, workersEnabled: false }],
     };
     api.get.mockResolvedValueOnce(off).mockRejectedValueOnce(new Error("read timed out"));
@@ -235,7 +234,6 @@ describe("saving the machine's projects", () => {
   it("keeps the warning for a project the server left switched off", async () => {
     const off = {
       ...VIEW,
-      canEnableWorkers: true,
       catalogue: [{ ...VIEW.catalogue[0], wanted: false, servedHere: false, workersEnabled: false }],
     };
     api.get.mockResolvedValueOnce(off).mockRejectedValueOnce(new Error("read timed out"));
@@ -252,6 +250,52 @@ describe("saving the machine's projects", () => {
 
     await waitFor(() => expect(screen.getByText(LIST_REFRESH_FAILED)).toBeTruthy());
     expect(screen.getByText(/ticking it turns that on/)).toBeTruthy();
+  });
+
+  // BP-736: whether a row is tickable-into-running is the project owner's, so it is per row
+  it("says a switched-off project cannot be turned on here when this person does not own it", async () => {
+    api.get.mockResolvedValue({
+      ...VIEW,
+      catalogue: [
+        { ...VIEW.catalogue[0], wanted: false, servedHere: false, workersEnabled: false, canEnable: false },
+      ],
+    });
+    render(<MachineProjectsPage />);
+
+    expect(await screen.findByText("does not run machines yet, and you cannot turn that on")).toBeTruthy();
+    expect(screen.queryByText(/ticking it turns that on/)).toBeNull();
+  });
+
+  it("says a project is locked by an instance admin rather than that the reader cannot switch it", async () => {
+    api.get.mockResolvedValue({
+      ...VIEW,
+      catalogue: [
+        {
+          ...VIEW.catalogue[0],
+          wanted: false,
+          servedHere: false,
+          workersEnabled: false,
+          canEnable: false,
+          locked: true,
+        },
+      ],
+    });
+    api.put.mockResolvedValueOnce({ leftDisabled: ["BP"] });
+    render(<MachineProjectsPage />);
+
+    expect(await screen.findByText("an instance admin has locked machines off for this project")).toBeTruthy();
+    await act(async () => {
+      (screen.getByRole("checkbox") as HTMLInputElement).click();
+    });
+    await act(async () => {
+      screen.getByRole("button", { name: "Save" }).click();
+    });
+
+    expect(
+      await screen.findByText(
+        "Saved. BP is locked off by an instance admin — the machine will leave it alone until somebody does."
+      )
+    ).toBeTruthy();
   });
 
   it("clears what it said as soon as the reader changes the picks again", async () => {

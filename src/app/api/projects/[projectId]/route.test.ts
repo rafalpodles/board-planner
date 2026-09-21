@@ -351,3 +351,186 @@ describe("the key a project may be renamed to", () => {
     expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
   });
 });
+
+// BP-736: the project's owner manages its worker settings; an instance admin keeps a lock that
+// wins over them.
+describe("PUT /api/projects/[projectId] worker settings", () => {
+  const ADMIN = { _id: "a1", role: "admin" };
+
+  function stored(worker: Record<string, unknown>) {
+    projectFindById.mockReturnValue({
+      select: () => Promise.resolve({ key: "TP", worker: { policyOverrides: [], ...worker } }),
+    });
+  }
+
+  function lastUpdate() {
+    return projectFindByIdAndUpdate.mock.calls.at(-1)?.[1] as Record<string, unknown> | undefined;
+  }
+
+  // Honours `need` and the caller, the way grants.check does: OWNER holds the owner grant, MEMBER
+  // only the member one, and an instance admin passes everything
+  beforeEach(() => {
+    check.mockImplementation(async (user: { _id: string; role: string }, _id: string, need: string) => {
+      if (user.role === "admin") return true;
+      if (user._id === OWNER._id) return true;
+      return user._id === MEMBER._id && need === "access";
+    });
+    stored({ enabled: false });
+  });
+
+  it("lets the project's owner switch workers on, and records it for the instance", async () => {
+    const response = await PUT(putRequest({ worker: { enabled: true } }), ctx());
+
+    expect(response.status).toBe(200);
+    expect(lastUpdate()).toMatchObject({ "worker.enabled": true });
+    expect(logInstanceAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "project_workers_enabled", target: "TP", user: "u1" })
+    );
+  });
+
+  it("lets the owner set the base branch and a timeout", async () => {
+    const response = await PUT(
+      putRequest({ worker: { policy: { baseBranch: "develop", taskTimeoutMs: 600000 } } }),
+      ctx()
+    );
+
+    expect(response.status).toBe(200);
+    expect(lastUpdate()).toMatchObject({
+      "worker.policy.baseBranch": "develop",
+      "worker.policy.taskTimeoutMs": 600000,
+    });
+  });
+
+  it("refuses a member who does not own the project", async () => {
+    getAuthUser.mockResolvedValue(MEMBER);
+
+    const response = await PUT(putRequest({ worker: { enabled: true } }), ctx());
+
+    expect(response.status).toBe(403);
+    expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("refuses the owner's machine credential", async () => {
+    getAuthUser.mockResolvedValue({ ...OWNER, viaMachineCredential: true });
+
+    const response = await PUT(putRequest({ worker: { enabled: true } }), ctx());
+
+    expect(response.status).toBe(403);
+    expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("refuses the owner an enable while an instance admin's lock is on", async () => {
+    stored({ enabled: false, lockedByInstance: true });
+
+    const response = await PUT(putRequest({ worker: { enabled: true } }), ctx());
+
+    expect(response.status).toBe(403);
+    expect((await response.json()).error).toMatch(/locked workers off/);
+    expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("still lets the owner switch workers off under the lock", async () => {
+    stored({ enabled: true, lockedByInstance: true });
+
+    const response = await PUT(putRequest({ worker: { enabled: false } }), ctx());
+
+    expect(response.status).toBe(200);
+    expect(lastUpdate()).toMatchObject({ "worker.enabled": false });
+  });
+
+  it("refuses the owner the lock itself, in either direction", async () => {
+    for (const lockedByInstance of [true, false]) {
+      stored({ enabled: true, lockedByInstance: !lockedByInstance });
+
+      const response = await PUT(putRequest({ worker: { lockedByInstance } }), ctx());
+
+      expect(response.status).toBe(403);
+    }
+    expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("lets an instance admin lock a project, and records it for the instance", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    stored({ enabled: true });
+
+    const response = await PUT(putRequest({ worker: { lockedByInstance: true } }), ctx());
+
+    expect(response.status).toBe(200);
+    expect(lastUpdate()).toMatchObject({ "worker.lockedByInstance": true });
+    expect(logInstanceAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "project_workers_locked", target: "TP" })
+    );
+  });
+
+  it("lets an instance admin switch a locked project on, since the lock is theirs", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    stored({ enabled: false, lockedByInstance: true });
+
+    const response = await PUT(putRequest({ worker: { enabled: true } }), ctx());
+
+    expect(response.status).toBe(200);
+    expect(lastUpdate()).toMatchObject({ "worker.enabled": true });
+  });
+
+  it("records an unlock for the instance", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    stored({ enabled: true, lockedByInstance: true });
+
+    await PUT(putRequest({ worker: { lockedByInstance: false } }), ctx());
+
+    expect(logInstanceAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "project_workers_unlocked", target: "TP" })
+    );
+  });
+
+  it("records nothing when the lock is re-sent with the value it already has", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    stored({ enabled: true, lockedByInstance: true });
+
+    const response = await PUT(putRequest({ worker: { lockedByInstance: true } }), ctx());
+
+    expect(response.status).toBe(200);
+    expect(logInstanceAudit).not.toHaveBeenCalled();
+  });
+
+  // The screen no longer offers these — they moved to the agent's blocks — but each still reaches
+  // every machine serving the project as a fallback, so the owner must not set one through the API
+  it.each(["model", "fallbackModel", "reviewModel", "maxDiffLines", "maxDiffFiles"])(
+    "refuses the owner %s, a field that moved to the agent's blocks",
+    async (field) => {
+      const value = field.startsWith("maxDiff") ? 5 : "sonnet";
+
+      const response = await PUT(putRequest({ worker: { policy: { [field]: value } } }), ctx());
+
+      expect(response.status).toBe(403);
+      expect((await response.json()).error).toContain(field);
+      expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+    }
+  );
+
+  it("lets the owner clear one of those fields back to the default", async () => {
+    stored({ enabled: true, policyOverrides: ["model"] });
+
+    const response = await PUT(putRequest({ worker: { reset: ["model"] } }), ctx());
+
+    expect(response.status).toBe(200);
+    expect(lastUpdate()).toMatchObject({ "worker.policy.model": "opus", "worker.policyOverrides": [] });
+  });
+
+  it("still lets an instance admin set one", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+
+    const response = await PUT(putRequest({ worker: { policy: { model: "sonnet" } } }), ctx());
+
+    expect(response.status).toBe(200);
+    expect(lastUpdate()).toMatchObject({ "worker.policy.model": "sonnet" });
+  });
+
+  it("refuses an instance admin's API token the lock", async () => {
+    getAuthUser.mockResolvedValue({ ...ADMIN, viaMachineCredential: true });
+
+    const response = await PUT(putRequest({ worker: { lockedByInstance: true } }), ctx());
+
+    expect(response.status).toBe(403);
+  });
+});

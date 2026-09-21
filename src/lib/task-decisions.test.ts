@@ -5,10 +5,23 @@ import { ITaskDecision, TASK_DECISION_STATES, TaskDecisionState } from "@/types"
 const findOneAndUpdate = vi.fn();
 const find = vi.fn();
 const workerFindById = vi.fn();
+const projectFind = vi.fn();
 
 vi.mock("./db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/task", () => ({ Task: { findOneAndUpdate, find } }));
 vi.mock("@/models/worker", () => ({ Worker: { findById: workerFindById } }));
+// Honours the filter, so a query that stopped asking for the lock would match every project
+let storedProjects: { _id: string; worker?: { lockedByInstance?: boolean } }[] = [];
+vi.mock("@/models/project", () => ({
+  Project: {
+    find: (query: Record<string, unknown>) => {
+      projectFind(query);
+      return {
+        select: () => ({ lean: async () => storedProjects.filter((p) => sift(query)(p)) }),
+      };
+    },
+  },
+}));
 
 const {
   DECISION_FIELDS_A_READER_NEEDS,
@@ -541,6 +554,36 @@ describe("what the machine is told is waiting on it", () => {
     waiting([{ _id: "t1", project: "p1" }]);
 
     expect(await decisionsForWorker(WORKER)).toEqual([]);
+  });
+
+  // BP-736: the lock stops a machine acting on an acceptance, without making it drop the worktree
+  describe("on a project an instance admin has locked workers off", () => {
+    beforeEach(() => {
+      storedProjects = [
+        { _id: "p1", worker: { lockedByInstance: true } },
+        { _id: "p2", worker: { lockedByInstance: false } },
+      ];
+    });
+
+    it("holds an acceptance back as pending, so nothing is pushed and the worktree is kept", async () => {
+      waiting([{ _id: "t1", project: "p1", decision: decision({ state: "accepted" }) }]);
+
+      const [row] = await decisionsForWorker(WORKER);
+
+      expect(row).toMatchObject({ taskId: "t1", state: "pending" });
+    });
+
+    it("still passes a decline through, which spends nothing", async () => {
+      waiting([{ _id: "t1", project: "p1", decision: decision({ state: "declined" }) }]);
+
+      expect((await decisionsForWorker(WORKER))[0].state).toBe("declined");
+    });
+
+    it("leaves an acceptance on an unlocked project alone, as the control", async () => {
+      waiting([{ _id: "t2", project: "p2", decision: decision({ state: "accepted" }) }]);
+
+      expect((await decisionsForWorker(WORKER))[0].state).toBe("accepted");
+    });
   });
 });
 

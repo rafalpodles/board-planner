@@ -14,6 +14,8 @@ const LABELS: Partial<Record<InstanceAuditAction, string>> = {
   enrolment_token_spent: "Enrolment token spent",
   project_workers_enabled: "Workers enabled for project",
   project_workers_disabled: "Workers disabled for project",
+  project_workers_locked: "Workers locked off for project",
+  project_workers_unlocked: "Workers lock lifted for project",
   // The retired pair's `project_worker_policy_changed` action went with the fields (BP-579). A
   // row still carrying it renders through the fallback below, as a sentence without the verb.
   user_password_reset: "Password set by an admin",

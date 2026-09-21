@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withAuth } from "@/lib/middleware";
-import { accessibleProjectIds } from "@/lib/grants";
+import { accessibleProjectIds, administeredProjectIds } from "@/lib/grants";
+import { isWorkerLockedByInstance, projectRunsWorkers } from "@/lib/worker-gate";
 import { Project } from "@/models/project";
 import { Worker } from "@/models/worker";
 import { findPendingByUserCode, formatUserCode } from "@/lib/device-enrolment";
@@ -28,13 +29,15 @@ export const GET = withAuth(async (_request, { params, user }) => {
   }
 
   const reachable = await accessibleProjectIds(user);
-  // The same rule PUT /api/projects/:id applies to `worker`: committing a project to machines is
-  // instance-admin, not project-admin. Answered once rather than per project, because it is not a
-  // per-project question.
-  const canEnable = user.role === "admin";
   const projects = await Project.find(reachable === null ? {} : { _id: { $in: reachable } })
     .select("_id name key repositoryUrl githubRepo gitlabRepo gitlabHost worker")
     .lean();
+  // The same rule PUT /api/projects/:id applies to `worker`: the project's owner (or an instance
+  // admin) commits it to machines, and nobody is offered it while an instance admin's lock is on.
+  const administered = await administeredProjectIds(
+    user,
+    projects.map((p) => String(p._id))
+  );
   // A boolean pair, not the record. The name and host it is looked up by come from the
   // UNAUTHENTICATED start route, so returning `_id`, `name`, `host` and `lastSeenAt` turned this
   // into a probe for whose machines exist and when they last ran — reconnaissance that was behind
@@ -64,11 +67,13 @@ export const GET = withAuth(async (_request, { params, user }) => {
       // gitlabRepo pair — reading repositoryUrl alone told an instance that had not run
       // scripts/migrate-repository-url.ts that no project names a repository at all.
       repositoryUrl: projectRepositoryUrl(p),
-      workersEnabled: !!p.worker?.enabled,
+      workersEnabled: projectRunsWorkers(p.worker),
       // Whether confirming here can also turn machines on for that project. Rendered rather than
       // discovered afterwards: a project left switched off takes the machine and then runs
       // nothing, which is the one outcome nobody can diagnose from the machine's own logs.
-      canEnable,
+      canEnable: administered.has(String(p._id)) && !isWorkerLockedByInstance(p.worker),
+      // Said apart from canEnable, because who can fix it differs: the owner, or only an admin
+      locked: isWorkerLockedByInstance(p.worker),
     })),
     existingWorker,
   });

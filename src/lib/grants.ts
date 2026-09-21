@@ -73,6 +73,34 @@ export async function check(user: IdentifiedSubject, projectId: string, need: Ne
   return decide(principal, grant?.relation ?? null, need, projectId);
 }
 
+/**
+ * Which of these projects this person may administer — check(user, id, "admin") for a list, in
+ * one query rather than one per project.
+ */
+export async function administeredProjectIds(
+  user: IdentifiedSubject,
+  projectIds: string[]
+): Promise<Set<string>> {
+  const ids = projectIds.map(String);
+  const principal = principalOf(user);
+  const withoutGrant = principal.instanceAdmin || principal.instanceAdminBeforeScope;
+  let relationOf = new Map<string, GrantRelation>();
+  if (!withoutGrant && ids.length > 0) {
+    await connectDB();
+    const grants = await Grant.find({
+      subject: user._id,
+      objectType: "project",
+      object: { $in: ids },
+    })
+      .select("object relation")
+      .lean();
+    relationOf = new Map(grants.map((g) => [String(g.object), g.relation]));
+  }
+  return new Set(
+    ids.filter((id) => decide(principal, relationOf.get(id) ?? null, "admin", id))
+  );
+}
+
 export async function accessibleProjectIds(user: IdentifiedSubject): Promise<string[] | null> {
   const principal = principalOf(user);
   if (principal.instanceAdmin || principal.instanceAdminBeforeScope) {

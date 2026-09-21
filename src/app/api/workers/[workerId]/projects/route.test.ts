@@ -9,6 +9,10 @@ const workerUpdateOne = vi.fn();
 const projectFind = vi.fn();
 const projectUpdateOne = vi.fn();
 const logInstanceAudit = vi.fn();
+let ownedByCaller: string[] = [];
+const administeredProjectIds = vi.fn(async (user: { role: string }, ids: string[]) =>
+  new Set(user.role === "admin" ? ids : ids.filter((id) => ownedByCaller.includes(id)))
+);
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/instanceAudit", () => ({ logInstanceAudit }));
@@ -16,7 +20,7 @@ vi.mock("@/lib/auth", () => ({
   getAuthUser,
   RateLimitError: class RateLimitError extends Error {},
 }));
-vi.mock("@/lib/grants", () => ({ accessibleProjectIds, check: vi.fn() }));
+vi.mock("@/lib/grants", () => ({ accessibleProjectIds, administeredProjectIds, check: vi.fn() }));
 vi.mock("@/models/user", () => ({ User: {} }));
 vi.mock("@/models/task", () => ({ Task: {} }));
 // The filter is honoured rather than discarded. A stub that answers every query with the same rows
@@ -75,6 +79,7 @@ const getRequest = () => new Request(`http://localhost/api/workers/${WORKER_ID}/
 
 beforeEach(() => {
   vi.clearAllMocks();
+  ownedByCaller = [];
   getAuthUser.mockResolvedValue(OWNER);
   accessibleProjectIds.mockResolvedValue(null);
   ownerReachableProjectIds.mockResolvedValue(null);
@@ -105,11 +110,32 @@ describe("GET the picker's own view", () => {
 
   // The screen has to know before it renders whether a switched-off project is tickable here or
   // only somewhere else, or it promises something the PUT will not do.
-  it("says whether this person can switch workers on while they are here", async () => {
-    expect((await (await GET(getRequest(), ctx())).json()).canEnableWorkers).toBe(false);
+  it("says per project whether this person can switch workers on while they are here", async () => {
+    const canEnable = async () =>
+      Object.fromEntries(
+        ((await (await GET(getRequest(), ctx())).json()).catalogue as { key: string; canEnable: boolean }[]).map(
+          (row) => [row.key, row.canEnable]
+        )
+      );
+
+    expect(await canEnable()).toEqual({ BP: false, SB: false });
+
+    ownedByCaller = [OFF];
+    expect(await canEnable()).toEqual({ BP: false, SB: true });
 
     getAuthUser.mockResolvedValue(ADMIN);
-    expect((await (await GET(getRequest(), ctx())).json()).canEnableWorkers).toBe(true);
+    expect(await canEnable()).toEqual({ BP: true, SB: true });
+  });
+
+  it("offers nobody the switch on a project an instance admin has locked, not even an admin", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    projectFind.mockResolvedValue([
+      { _id: OFF, key: "SB", name: "Sandbox", githubRepo: "owner/sandbox", worker: { enabled: true, lockedByInstance: true } },
+    ]);
+
+    const [row] = (await (await GET(getRequest(), ctx())).json()).catalogue;
+
+    expect(row).toMatchObject({ key: "SB", canEnable: false, workersEnabled: false, locked: true });
   });
 
   it("answers 404 for somebody else's machine, the same as for one that does not exist", async () => {
@@ -131,6 +157,46 @@ describe("PUT the selection", () => {
   });
 
   // This is the whole reason the screen lives in a browser rather than in the app
+  it("switches workers on for a picked project when its owner is confirming", async () => {
+    ownedByCaller = [OFF];
+
+    const json = await (await PUT(putRequest({ projects: [SERVED, OFF] }), ctx())).json();
+
+    expect(projectUpdateOne).toHaveBeenCalledWith(
+      { _id: OFF },
+      { $set: { "worker.enabled": true } }
+    );
+    expect(logInstanceAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "project_workers_enabled", target: "SB" })
+    );
+    expect(json.leftDisabled).toEqual([]);
+  });
+
+  it("leaves a locked project switched off and says so, even for an instance admin", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    projectFind.mockResolvedValue([
+      { _id: OFF, key: "SB", name: "Sandbox", githubRepo: "owner/sandbox", worker: { enabled: false, lockedByInstance: true } },
+    ]);
+
+    const json = await (await PUT(putRequest({ projects: [OFF] }), ctx())).json();
+
+    expect(projectUpdateOne).not.toHaveBeenCalled();
+    expect(json.leftDisabled).toEqual(["SB"]);
+  });
+
+  // Its switch is on, but the lock wins — so it is reported as left off, not quietly counted as running
+  it("reports a project whose switch is on but is locked as left switched off", async () => {
+    ownedByCaller = [OFF];
+    projectFind.mockResolvedValue([
+      { _id: OFF, key: "SB", name: "Sandbox", githubRepo: "owner/sandbox", worker: { enabled: true, lockedByInstance: true } },
+    ]);
+
+    const json = await (await PUT(putRequest({ projects: [OFF] }), ctx())).json();
+
+    expect(json.leftDisabled).toEqual(["SB"]);
+    expect(projectUpdateOne).not.toHaveBeenCalled();
+  });
+
   it("switches workers on for a picked project when an instance admin is confirming", async () => {
     getAuthUser.mockResolvedValue(ADMIN);
 
@@ -148,7 +214,7 @@ describe("PUT the selection", () => {
 
   // A machine picked for a project nobody committed to machines would sit idle with nothing on it
   // to say why. Naming them is what lets the screen say it instead.
-  it("names the projects it left switched off when the person cannot switch them", async () => {
+  it("names the projects it left switched off when the person is a member but not the owner", async () => {
     const json = await (await PUT(putRequest({ projects: [SERVED, OFF] }), ctx())).json();
 
     expect(projectUpdateOne).not.toHaveBeenCalled();
