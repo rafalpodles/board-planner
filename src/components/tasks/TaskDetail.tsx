@@ -32,6 +32,8 @@ import { useTaskEditor } from "@/components/tasks/detail/useTaskEditor";
 import type { Trigger } from "@/hooks/use-trigger-autocomplete";
 import { useEditorTriggers } from "@/hooks/use-editor-triggers";
 import { useOpenTask } from "@/hooks/use-open-task";
+import { LoadFailed } from "@/components/ui/LoadFailed";
+import { boardRefusal } from "@/lib/board-load-failure";
 
 interface TaskDetailProps {
   projectId: string;
@@ -51,6 +53,7 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
   const { allAgents: agents } = useStore();
   const [users, setUsers] = useState<ApiUserSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refusal, setRefusal] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -62,9 +65,18 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
       setTask(t);
       setProject(p);
       setSprints(s);
+      setRefusal(null);
       onLoaded?.(t, p);
-    } catch {
-      toast("Failed to load task", "error");
+    } catch (err) {
+      const status = (err as { status?: number } | null)?.status;
+      const refused =
+        status === 404 ? "There is no task here — the link may be stale." : boardRefusal(err);
+      if (refused) {
+        setRefusal(refused);
+        setTask(null);
+      } else {
+        toast("Failed to load task", "error");
+      }
     } finally {
       setLoading(false);
     }
@@ -89,6 +101,12 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
   // The board was not the only view going stale on a PM write — this view never reloaded
   // at all, so it kept editing a task that had moved underneath it
   useEffect(() => subscribeBoardRefresh(projectId, loadData), [projectId, loadData]);
+
+  if (refusal) return <LoadFailed className="py-16" message={refusal} />;
+
+  if (!loading && (!task || !project)) {
+    return <LoadFailed className="py-16" message="Failed to load this task." onRetry={loadData} />;
+  }
 
   if (loading || !task || !project) {
     return (

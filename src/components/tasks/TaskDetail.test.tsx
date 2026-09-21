@@ -933,3 +933,43 @@ describe("TaskDetail, the subtask dialog while its create is in flight", () => {
     expect(screen.queryByRole("dialog", { name: /New child of/ })).toBeNull();
   });
 });
+
+describe("TaskDetail that cannot be read", () => {
+  function failTaskWith(status: number) {
+    api.get.mockImplementation((url: string) => {
+      if (url === "/api/projects/TP/assignable-users") return Promise.resolve([]);
+      if (url.startsWith("/api/agent")) return Promise.resolve([]);
+      if (url.includes("/tasks/")) return Promise.reject(Object.assign(new Error("no"), { status }));
+      if (url.includes("/sprints")) return Promise.resolve([]);
+      return Promise.resolve(project);
+    });
+  }
+
+  it.each([
+    [403, "You do not have access to this board."],
+    [404, "There is no task here — the link may be stale."],
+  ])("names a %i instead of spinning, and offers no retry", async (status, text) => {
+    failTaskWith(status);
+    renderDetail();
+
+    expect(await screen.findByText(text)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
+  it("offers a retry after an outage, and it works", async () => {
+    failTaskWith(500);
+    renderDetail();
+    const retry = await screen.findByRole("button", { name: "Retry" });
+
+    api.get.mockImplementation((url: string) => {
+      if (url === "/api/projects/TP/assignable-users") return Promise.resolve([]);
+      if (url.startsWith("/api/agent")) return Promise.resolve([]);
+      if (url.includes("/tasks/")) return Promise.resolve(task);
+      if (url.includes("/sprints")) return Promise.resolve([]);
+      return Promise.resolve(project);
+    });
+    await act(async () => retry.click());
+
+    await loaded();
+  });
+});
