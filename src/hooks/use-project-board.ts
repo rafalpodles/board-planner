@@ -244,7 +244,8 @@ export function useProjectBoard(projectId: string, scope: string | null): Projec
     scopeRef.current = scope;
   }, [loadData, scope]);
 
-  usePollWhileVisible(loadData, 10_000, !refused);
+  // A refused board is asked again, only less often, so a grant given back is picked up
+  usePollWhileVisible(loadData, refused ? 60_000 : 10_000);
 
   // Instant refresh when the PM chat reports a write action (poll stays as fallback).
   // Bursts are coalesced inside subscribeBoardRefresh.

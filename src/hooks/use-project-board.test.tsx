@@ -21,7 +21,7 @@ const { api, toast } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/hooks/use-api", () => ({ useApi: () => api }));
-const poll = vi.hoisted(() => ({ enabled: true }));
+const poll = vi.hoisted(() => ({ ms: 0 }));
 vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast }) }));
 // The real one reads on mount and then on an interval. Kept honest about the first read — it is
 // what puts the board on screen — and silent afterwards, so the tests fire each further read
@@ -29,8 +29,8 @@ vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast }) }));
 vi.mock("@/hooks/use-poll-while-visible", async () => {
   const { useEffect } = await import("react");
   return {
-    usePollWhileVisible: (callback: () => void, _ms: number, enabled = true) => {
-      poll.enabled = enabled;
+    usePollWhileVisible: (callback: () => void, ms: number) => {
+      poll.ms = ms;
       useEffect(() => {
         callback();
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -82,13 +82,15 @@ beforeEach(() => {
   // Module-level, so a test that renders <Probe /> without mounted()/mountedScoped() would
   // otherwise inherit the previous test's scope
   probeScope = "all";
-  api.get.mockImplementation((path: string) => {
-    if (path.endsWith("/tasks")) return Promise.resolve([task("t1", 0), task("t2", 1)]);
-    if (path.endsWith("/sprints")) return Promise.resolve([]);
-    return Promise.resolve(PROJECT);
-  });
+  api.get.mockImplementation(defaultGet);
   api.put.mockResolvedValue({});
 });
+
+function defaultGet(path: string) {
+  if (path.endsWith("/tasks")) return Promise.resolve([task("t1", 0), task("t2", 1)]);
+  if (path.endsWith("/sprints")) return Promise.resolve([]);
+  return Promise.resolve(PROJECT);
+}
 afterEach(cleanup);
 
 /** The board filtered to one sprint, which is where an optimistic move is visible */
@@ -521,17 +523,20 @@ describe("a board that refuses the reader", () => {
     expect(toast).not.toHaveBeenCalled();
   });
 
-  it("stops polling a board that refuses, and keeps polling through an outage", async () => {
+  it("asks a refusing board again less often, and puts it back when access returns", async () => {
     api.get.mockRejectedValue(refused());
     render(<Probe />);
     await waitFor(() => expect(board.loadError).toBe(true));
-    expect(poll.enabled).toBe(false);
+    expect(poll.ms).toBe(60_000);
 
-    api.get.mockRejectedValue(Object.assign(new Error("boom"), { status: 500 }));
+    api.get.mockImplementation(defaultGet);
     await act(async () => {
       await board.reload();
     });
-    expect(poll.enabled).toBe(true);
+
+    expect(board.loadError).toBe(false);
+    expect(board.project).not.toBeNull();
+    expect(poll.ms).toBe(10_000);
   });
 
   it("still reports an outage the way it always has, and keeps the board", async () => {

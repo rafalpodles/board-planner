@@ -69,7 +69,9 @@ export function draftFromTask(task: ApiTask): TaskDraft {
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
-export function useTaskEditor(projectId: string, task: ApiTask) {
+export function useTaskEditor(projectId: string, task: ApiTask, onRefused?: (err: unknown) => boolean) {
+  const refused = useRef(onRefused);
+  refused.current = onRefused;
   const api = useApi();
   const [draft, setDraft] = useState<TaskDraft>(() => draftFromTask(task));
   const [autoSaveState, setAutoSaveState] = useState<AutoSaveState>("idle");
@@ -124,6 +126,7 @@ export function useTaskEditor(projectId: string, task: ApiTask) {
         setSavedCount((n) => n + 1);
         emitBoardRefresh(projectId);
       } catch (err) {
+        if (refused.current?.(err)) return;
         setAutoSaveError(err instanceof Error && err.message ? err.message : null);
         setAutoSaveState("error");
       }

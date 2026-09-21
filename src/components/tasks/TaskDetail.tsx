@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useApi } from "@/hooks/use-api";
 import { subscribeBoardRefresh } from "@/lib/board-refresh";
 import { taskPath } from "@/lib/urls";
@@ -33,6 +33,7 @@ import type { Trigger } from "@/hooks/use-trigger-autocomplete";
 import { useEditorTriggers } from "@/hooks/use-editor-triggers";
 import { useOpenTask } from "@/hooks/use-open-task";
 import { LoadFailed } from "@/components/ui/LoadFailed";
+import { Button } from "@/components/ui/Button";
 import { boardRefusal } from "@/lib/board-load-failure";
 
 interface TaskDetailProps {
@@ -41,6 +42,12 @@ interface TaskDetailProps {
   /** Back to the board: the page navigates, the modal just closes */
   onClose: () => void;
   onLoaded?: (task: ApiTask, project: ApiProject) => void;
+}
+
+function taskRefusal(err: unknown): string | null {
+  const status = (err as { status?: number } | null)?.status;
+  if (status === 404 || status === 400) return "There is no task here — the link may be stale.";
+  return boardRefusal(err);
 }
 
 export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailProps) {
@@ -54,6 +61,16 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
   const [users, setUsers] = useState<ApiUserSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [refusal, setRefusal] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
+  const shown = useRef(false);
+
+  const refuse = useCallback((err: unknown) => {
+    const refused = taskRefusal(err);
+    if (!refused) return false;
+    setRefusal(refused);
+    setTask(null);
+    return true;
+  }, []);
 
   const loadData = useCallback(async () => {
     try {
@@ -66,17 +83,11 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
       setProject(p);
       setSprints(s);
       setRefusal(null);
+      shown.current = true;
       onLoaded?.(t, p);
     } catch (err) {
-      const status = (err as { status?: number } | null)?.status;
-      const refused =
-        status === 404 ? "There is no task here — the link may be stale." : boardRefusal(err);
-      if (refused) {
-        setRefusal(refused);
-        setTask(null);
-      } else {
-        toast("Failed to load task", "error");
-      }
+      // With nothing on screen the page itself says so; a toast would say it twice
+      if (!refuse(err) && shown.current) toast("Failed to load task", "error");
     } finally {
       setLoading(false);
     }
@@ -102,10 +113,25 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
   // at all, so it kept editing a task that had moved underneath it
   useEffect(() => subscribeBoardRefresh(projectId, loadData), [projectId, loadData]);
 
-  if (refusal) return <LoadFailed className="py-16" message={refusal} />;
+  const failed = (message: string, onRetry?: () => void) => (
+    <div>
+      <div className="flex justify-end px-4 pt-3">
+        <Button size="sm" variant="secondary" onClick={onClose}>
+          Close
+        </Button>
+      </div>
+      <LoadFailed className="py-12" message={message} onRetry={onRetry} busy={retrying} />
+    </div>
+  );
+
+  if (refusal) return failed(refusal);
 
   if (!loading && (!task || !project)) {
-    return <LoadFailed className="py-16" message="Failed to load this task." onRetry={loadData} />;
+    return failed("Failed to load this task.", async () => {
+      setRetrying(true);
+      await loadData();
+      setRetrying(false);
+    });
   }
 
   if (loading || !task || !project) {
@@ -128,6 +154,7 @@ export function TaskDetail({ projectId, taskId, onClose, onLoaded }: TaskDetailP
       onClose={onClose}
       onReload={loadData}
       onTaskChange={setTask}
+      onRefused={refuse}
     />
   );
 }
@@ -142,6 +169,7 @@ interface TaskDetailViewProps {
   onClose: () => void;
   onReload: () => void;
   onTaskChange: (updater: (prev: ApiTask | null) => ApiTask | null) => void;
+  onRefused: (err: unknown) => boolean;
 }
 
 function TaskDetailView({
@@ -154,6 +182,7 @@ function TaskDetailView({
   onClose,
   onReload,
   onTaskChange,
+  onRefused,
 }: TaskDetailViewProps) {
   const api = useApi();
   const openTask = useOpenTask();
@@ -182,7 +211,8 @@ function TaskDetailView({
 
   const { draft, set, autoSaveState, autoSaveError, retry, resend, savedCount } = useTaskEditor(
     projectId,
-    task
+    task,
+    onRefused
   );
 
   const columns = effectiveColumns(project.columns);

@@ -3,7 +3,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, waitFor, act, within } from "@testing-library/react";
 import { TaskDetail } from "./TaskDetail";
 
-const { api, auth } = vi.hoisted(() => ({
+const { api, auth, toast } = vi.hoisted(() => ({
+  toast: vi.fn(),
   api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), del: vi.fn() },
   auth: { user: { _id: "u1", username: "owner", fullName: "Owner Name" }, isAdmin: false },
 }));
@@ -19,7 +20,10 @@ vi.mock("@/lib/board-refresh", () => ({
   subscribeBoardRefresh: () => () => {},
   emitBoardRefresh: vi.fn(),
 }));
-vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
+vi.mock("@/components/ui/Toast", () => ({ useToast: () => ({ toast }) }));
+vi.mock("@/components/tasks/detail/MobileCommentBar", () => ({
+  MobileCommentBar: ({ onPosted }: { onPosted: () => void }) => <button onClick={onPosted}>stub: post from the phone bar</button>,
+}));
 
 // The self-fetching panels are stubbed; this spec is about the assembly
 vi.mock("./TaskActivityPanel", () => ({
@@ -32,8 +36,9 @@ vi.mock("./GitlabActivity", () => ({ GitlabActivity: () => <div data-testid="git
 // The form is stubbed, but it keeps the one part the dialog around it depends on: the write it
 // reports upwards, which is what tells that dialog to stay put (BP-565).
 vi.mock("./TaskForm", () => ({
-  TaskForm: ({ onBusyChange }: { onBusyChange?: (busy: boolean) => void }) => (
+  TaskForm: ({ onBusyChange, onSaved }: { onBusyChange?: (busy: boolean) => void; onSaved?: () => void }) => (
     <div data-testid="task-form">
+      <button onClick={() => onSaved?.()}>stub: saved</button>
       <button onClick={() => onBusyChange?.(true)}>stub: start the write</button>
       <button onClick={() => onBusyChange?.(false)}>stub: finish the write</button>
     </div>
@@ -956,6 +961,33 @@ describe("TaskDetail that cannot be read", () => {
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
   });
 
+  it("offers a way to close a refusal, since in the board's dialog nothing else closes it", async () => {
+    failTaskWith(403);
+    const onClose = vi.fn();
+    renderDetail({ onClose });
+    await screen.findByText("You do not have access to this board.");
+
+    await act(async () => screen.getByRole("button", { name: "Close" }).click());
+
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("reads a malformed task address as a missing task", async () => {
+    failTaskWith(400);
+    renderDetail();
+
+    expect(await screen.findByText("There is no task here — the link may be stale.")).toBeTruthy();
+  });
+
+  it("says an outage once, on the page, rather than again in a toast", async () => {
+    toast.mockClear();
+    failTaskWith(500);
+    renderDetail();
+
+    await screen.findByRole("button", { name: "Retry" });
+    expect(toast).not.toHaveBeenCalled();
+  });
+
   it("offers a retry after an outage, and it works", async () => {
     failTaskWith(500);
     renderDetail();
@@ -971,5 +1003,48 @@ describe("TaskDetail that cannot be read", () => {
     await act(async () => retry.click());
 
     await loaded();
+  });
+});
+
+describe("TaskDetail when a save is refused", () => {
+  it("replaces the task with the refusal instead of leaving it editable", async () => {
+    api.put.mockRejectedValue(Object.assign(new Error("Forbidden"), { status: 403 }));
+    renderDetail();
+    await loaded();
+
+    const title = screen.getByLabelText("Task title") as HTMLTextAreaElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(title, "Renamed");
+      title.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    expect(await screen.findByText("You do not have access to this board.", {}, { timeout: 3000 })).toBeTruthy();
+    expect(screen.queryByLabelText("Task title")).toBeNull();
+  });
+});
+
+describe("TaskDetail telling the history panel it wrote there", () => {
+  const key = () => Number(screen.getByTestId("activity-panel").dataset.historyKey);
+
+  it("after a comment posted from the phone bar", async () => {
+    renderDetail();
+    await loaded();
+    const before = key();
+
+    await act(async () => screen.getByRole("button", { name: "stub: post from the phone bar" }).click());
+
+    expect(key()).toBeGreaterThan(before);
+  });
+
+  it("after a child task is added", async () => {
+    renderDetail();
+    await loaded();
+    const before = key();
+
+    await act(async () => screen.getByRole("button", { name: "More actions" }).click());
+    await act(async () => within(screen.getByRole("listbox", { name: "More actions" })).getByRole("option", { name: "Add subtask" }).click());
+    await act(async () => screen.getByRole("button", { name: "stub: saved" }).click());
+
+    expect(key()).toBeGreaterThan(before);
   });
 });
