@@ -29,6 +29,7 @@ export const GROUPS = {
     "task-detail-remainder.spec.ts",
     "link-leaves-a-trace.spec.ts",
     "first-use-gaps.spec.ts",
+    "task-composing-controls.spec.ts",
   ],
   "task-fields": [
     "field-history.spec.ts",

@@ -573,8 +573,10 @@ export function TaskForm({
             aria-label="Add criterion"
             className="focus-ring flex-1 bg-bg-input border border-border rounded px-3 py-1.5 text-sm"
             onKeyDown={(e) => {
-              if (e.key === "Enter" && newChecklistItem.trim()) {
-                e.preventDefault();
+              if (e.key !== "Enter") return;
+              // Enter here adds an item, so an empty one must not fall through to submitting the task
+              e.preventDefault();
+              if (newChecklistItem.trim()) {
                 setChecklist((prev) => [
                   ...prev,
                   { text: newChecklistItem.trim(), done: false },
