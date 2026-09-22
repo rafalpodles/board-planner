@@ -189,7 +189,6 @@ ENCRYPTION_KEY=           # 32 bytes (hex or base64) — without it integration 
                           # URLs (project team channels, personal) cannot be saved; a wrong-length
                           # key stops the app from starting
 ENCRYPTION_KEYS_OLD=      # Optional — comma-separated retired keys, so a rotation can still decrypt
-NEXT_PUBLIC_APP_URL=      # Frontend URL for links — read at BUILD time, not runtime
 BOOTSTRAP_TOKEN=          # Optional — setup code for the first account; unset, one is generated and
                           # printed to the server log while the instance has no users (BP-325)
 APP_ORIGIN=               # Comma-separated origins allowed to write — the CSRF allowlist, together
@@ -200,8 +199,10 @@ TRUSTED_PROXY_HOPS=       # Proxies appending to X-Forwarded-For in front of the
 PUBLIC_ORIGIN=            # This instance's own address, at runtime. Required for /api/mcp, both
                           # /.well-known documents and the PM OAuth redirect_uri, which answer 500
                           # without it rather than falling back to a request header (BP-316).
-                          # Falls back to APP_ORIGIN only when that names exactly one origin —
-                          # never to NEXT_PUBLIC_APP_URL, which is a build-machine literal
+                          # Falls back to APP_ORIGIN only when that names exactly one origin.
+                          # Every link the app sends (mail, chat, Coda, worker enrolment) is built
+                          # from it; nothing reads NEXT_PUBLIC_APP_URL, which would be a
+                          # build-machine literal in the published image (BP-766)
 ```
 
 ## Build
@@ -212,8 +213,9 @@ docker compose up -d --build     # app + MongoDB 4.4, no local Node or Mongo nee
 ```
 `next.config.ts` emits `output: "standalone"` only when `BUILD_STANDALONE` is set, which the Dockerfile
 does — `next start` refuses standalone output, and Railway deploys with `next start`.
-`NEXT_PUBLIC_APP_URL` is baked in at build time — the compose file passes it as a build arg. See
-[README.md](README.md).
+Every `vX.Y.Z` tag also publishes `ghcr.io/rafalpodles/board-planner:<x.y.z>` and `:latest`
+(amd64 + arm64, `.github/workflows/release.yml`), which `docker-compose.yml` runs by default; `--build`
+builds the checkout instead. The image bakes in no address — see [README.md](README.md).
 
 ## Deploy
 Railway auto-deploys from `main` branch.

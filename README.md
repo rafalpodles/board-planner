@@ -169,11 +169,19 @@ audit trail. Webhooks, signed. GitHub and GitLab PR linking. Works on a phone.
 
 ## Quick start
 
-You need Docker. Nothing else — no Node, no MongoDB.
+You need Docker. Nothing else — no Node, no MongoDB, not even a clone.
 
 ```bash
-docker compose up -d --build
+curl -fsSLO https://raw.githubusercontent.com/rafalpodles/board-planner/main/docker-compose.yml
+docker compose up -d
 ```
+
+That runs the published image, `ghcr.io/rafalpodles/board-planner`, built for `linux/amd64` and
+`linux/arm64` on every release. `:latest` is the newest release; pin one with
+`BOARD_PLANNER_VERSION=1.2.3` in a `.env` next to the compose file. To upgrade,
+`docker compose pull && docker compose up -d`.
+
+From a clone, `docker compose up -d --build` builds the checkout instead of pulling.
 
 Open <http://localhost:3000>. The first account created on the sign-in page becomes the instance
 administrator; every account after that is made from **Settings → Users**.
@@ -240,8 +248,8 @@ Everything is optional except the database. Put overrides in a `.env` file next 
 | `MONGODB_URI` | `mongodb://mongo:27017/boardplanner` | Point the app at your own MongoDB instead of the bundled one |
 | `APP_PORT` | `3000` | Host port the app is published on |
 | `APP_ORIGIN` | `http://localhost:${APP_PORT}` | Comma-separated origins the app is served from. Together with `PUBLIC_ORIGIN`, what a write's `Origin` is checked against when the browser sends no `Sec-Fetch-Site` |
-| `PUBLIC_ORIGIN` | compose default; otherwise `APP_ORIGIN` when it names exactly one origin | The one address this instance calls its own. Required for MCP and PM OAuth |
-| `NEXT_PUBLIC_APP_URL` | `http://localhost:${APP_PORT}` | Public URL used in notification and webhook links. **Build-time** |
+| `PUBLIC_ORIGIN` | `http://localhost:${APP_PORT}` (compose); otherwise `APP_ORIGIN` when it names exactly one origin | The one address this instance calls its own, and the base of every link it sends. Required for MCP, PM OAuth and enrolling a worker |
+| `BOARD_PLANNER_VERSION` | `latest` | Which published image compose runs |
 | `BOOTSTRAP_TOKEN` | generated, printed to the log | The setup code the first account is created with, 16 characters or more. Set it when the log is not where you can read it |
 | `COOKIE_ALLOW_INSECURE` | `1` (compose only) | Issue the session cookie without `Secure` and without the `__Host-` prefix, for an instance served over plain HTTP |
 | `TRUSTED_PROXY_HOPS` | `0` | How many proxies append to `X-Forwarded-For` in front of this app |
@@ -325,23 +333,23 @@ id when it meets one it cannot read.
 </details>
 
 <details>
-<summary><strong><code>NEXT_PUBLIC_APP_URL</code> and <code>PUBLIC_ORIGIN</code></strong> — why there are two</summary>
+<summary><strong><code>PUBLIC_ORIGIN</code></strong> — set it to the address people use</summary>
 
-`NEXT_PUBLIC_APP_URL` is a **build-time** value: Next.js inlines `NEXT_PUBLIC_*` into the bundle, so
-it is passed as a build argument and baked into the image. Changing it means rebuilding —
-`docker compose up -d --build`. There is no runtime override.
+Every link the app builds to itself — in mail, in a Slack or Discord message, in a Coda row, the
+page a worker's machine opens to be approved — starts with `PUBLIC_ORIGIN`. It is read when the app
+runs, so one published image serves every instance; nothing about the address is baked in when it is
+built.
 
-`PUBLIC_ORIGIN` exists because the other two cannot answer "what is this instance's own address".
-`APP_ORIGIN` is a list, and nothing says which entry is the public one. `NEXT_PUBLIC_APP_URL` is
-baked into the image, so in the running container it is whatever the *build machine* had — which is
-why it is not consulted at all: as a fallback it was always set and always wrong, and it silently
-replaced the intended failure with a discovery document naming `localhost`.
+`PUBLIC_ORIGIN` exists because `APP_ORIGIN` cannot answer "what is this instance's own address": it
+is a list, and nothing says which entry is the public one. When it names exactly one origin it is
+used; otherwise nothing is guessed.
 
 So **an instance reachable at anything other than the compose default must set `PUBLIC_ORIGIN`.**
-The MCP endpoint, both `/.well-known` documents and the PM agent's OAuth `redirect_uri` are built
-from it and answer **500** when it resolves to nothing — deliberately, because the value they used
-to fall back to was a request header. It must be an `http`/`https` URL; `board.example.com:8443` is
-not one, however much it looks like it.
+The MCP endpoint, both `/.well-known` documents, the PM agent's OAuth `redirect_uri` and a worker's
+enrolment answer **500** when it resolves to nothing, and mail and chat messages go out without their
+links — deliberately, because the values they used to fall back to were a request header or an
+address from the build machine. It must be an `http`/`https` URL; `board.example.com:8443` is not
+one, however much it looks like it.
 
 </details>
 
