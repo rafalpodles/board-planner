@@ -319,8 +319,8 @@ throttle can key on, and the header is a header: with nothing in front of the ap
 varies it gets a fresh counter every request and the throttle never bites. So the default is `0` —
 the header is not read at all, and anonymous callers share one bucket at a raised threshold.
 
-**Behind a reverse proxy, set it to the number of proxies that append to that header** (`1` for a
-single nginx or Caddy in front, `2` if there is a CDN in front of that).
+**Behind a reverse proxy, set it to the number of proxies that append to that header** — measured,
+not guessed; see below. `1` is a single nginx or Caddy in front and nothing else.
 
 Getting the number wrong has consequences in both directions. Set it **too high** and the header is
 refused as not matching what you described — every caller then shares the anonymous bucket, which is
@@ -338,17 +338,29 @@ A request arrived with X-Forwarded-For carrying 2 entries while TRUSTED_PROXY_HO
 header is ignored and the login throttle has no per-address key. …
 ```
 
-That count is the value to set. Leave the variable unset, open the sign-in page yourself over the
-address your users use, read the count out of the log, set `TRUSTED_PROXY_HOPS` to it and restart —
-the warning stops. Guessing is unreliable because chains are longer than they look: a CDN in front
-of a hosting platform that also proxies is **two**, not one, because each appends an entry. Counting
-the boxes you pay for is not the same as counting the hops.
+To produce that line, leave the variable unset and **attempt a sign-in** at the address your users
+use. A wrong password is enough. *Loading* the page logs nothing: the header is read when a request
+is throttled by address, which on the login route is after the username and password have been
+accepted as present. Then read the count from the log, set `TRUSTED_PROXY_HOPS` to it and restart —
+the warning stops.
 
-Read the count off a request you made yourself through the whole chain. A caller can send the header
-too, so the count on a request you did not make is a number somebody else chose — and a health check
-or uptime probe that reaches the app by a shorter path carries fewer entries than a browser does.
-That is why the app reports each *new* count it sees rather than only the first, up to four distinct
-counts per process; if they disagree, the one from your own browser request is the one to set.
+Expect **more than one** entry when a CDN sits in front of a hosting platform that itself proxies,
+because each appends one. How many is what the log answers; counting the boxes you pay for is not
+counting the hops, which is the whole reason to measure.
+
+**The count is the value only where every proxy appends.** One that *replaces* the header hides
+everything before it — Caddy does exactly that unless its
+[`trusted_proxies`](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy#trusted_proxies)
+names the proxy in front of it. Behind a CDN such a proxy makes the log say `1`, and setting `1`
+would then key the throttle on the CDN's edge address rather than the visitor's — the "too low"
+failure above. Make each proxy append first, then measure.
+
+Read the count off a request **you** made through the whole chain. A caller can send the header too,
+and a health check or uptime probe that reaches the app by a shorter path carries fewer entries than
+a browser does. That is why the app reports each *new* count rather than only the first: after four
+distinct counts it reports a further new one at most once every ten minutes, so forged headers can
+delay your line but not suppress it, and a restart clears what it has reported. A header carrying no
+address at all is not reported and costs none of the four.
 
 </details>
 
