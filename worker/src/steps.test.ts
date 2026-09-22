@@ -276,6 +276,42 @@ describe("runStep — a worker action", () => {
     expect(c.delivery.push).toHaveBeenCalledWith("/wt", "cp-1/x", "sha2");
   });
 
+  // Review of BP-780: Implement → test-run → Implement listed test-run as passed on code it never saw
+  it("forgets the checks a later commit made stale", async () => {
+    const c = ctx();
+    c.state.checks.push({ name: "test-run", commands: ["npm test"], durationMs: 5 });
+
+    await runStep(entry({ capability: "edit" }), c);
+
+    expect(c.state.checks).toEqual([]);
+  });
+
+  it("keeps the checks when a step commits nothing", async () => {
+    const c = ctx({ commit: vi.fn(async () => "") });
+    c.state.checks.push({ name: "test-run", commands: ["npm test"], durationMs: 5 });
+
+    await runStep(entry({ capability: "edit" }), c);
+
+    expect(c.state.checks).toHaveLength(1);
+  });
+
+  it("tells a model step which gates follow it in the sequence", async () => {
+    const implement = entry({ key: "implement", capability: "edit" });
+    const sequence = [
+      entry({ key: "plan", capability: "read-only" }),
+      implement,
+      entry({ key: "build", kind: "gate", gateKind: "build" }),
+      entry({ key: "review", kind: "gate", gateKind: "review" }),
+    ];
+    const c = ctx({
+      task: { taskKey: "CP-1", title: "t", description: "", acceptanceCriteria: [], agent: { sequence } },
+    } as never);
+
+    await runStep(implement, c);
+
+    expect(c.executor.execute.mock.calls[0][0].brief.laterChecks).toEqual(["build", "review"]);
+  });
+
   it("gives the pull request the checks the run passed", async () => {
     const c = ctx();
     c.state.checks.push({ name: "build", commands: ["npm run build"], durationMs: 5 });

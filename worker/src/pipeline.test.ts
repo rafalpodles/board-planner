@@ -2451,6 +2451,46 @@ describe("the checks a pull request lists", () => {
     });
   });
 
+  // Review of BP-780: a gate that ran before a later edit step never saw the code delivered
+  it("lists only the gates that ran after the last commit", async () => {
+    let dirty = true;
+    const shas: string[] = [];
+    const runner = {
+      run: vi.fn<Runner["run"]>(async (_command, args) => {
+        if (args.includes("status")) return shell(dirty ? " M a.ts\n" : "");
+        if (args.includes("commit")) {
+          dirty = false;
+          shas.push(`sha-edit-${shas.length + 1}`);
+          return shell();
+        }
+        if (args.includes("rev-list")) return shell(shas.length ? `${[...shas].reverse().join("\n")}\n` : "");
+        if (args.includes("rev-parse")) return shell(shas.at(-1) ?? "base1");
+        return shell();
+      }),
+    };
+    const execute = vi.fn<Executor["execute"]>(async () => {
+      dirty = true;
+      return { kind: "result", result: completed };
+    });
+    const implement = DEFAULT_SEQUENCE[0];
+    const h = harness({ runner, executor: { execute } });
+    const sequence = [
+      implement,
+      { key: "test-run", kind: "gate", name: "Tests pass", gateKind: "test-run" },
+      { ...implement, key: "polish", name: "Polish" },
+      { key: "diff-size", kind: "gate", name: "Size", gateKind: "diff-size" },
+      { key: "push", kind: "step", name: "Push", deterministic: true },
+      { key: "pull-request", kind: "step", name: "Pull request", deterministic: true },
+    ] as SnapshotEntry[];
+
+    await runTask(h.deps, { ...task, agent: agentOf(sequence) });
+
+    expect(shas).toHaveLength(2);
+    expect(vi.mocked(h.delivery.openPr).mock.calls[0][3]?.map((check) => check.name)).toEqual([
+      "diff-size",
+    ]);
+  });
+
   it("lists no gate that refused", async () => {
     const h = harness({ gateFor: gateForOnly("review", rejectingGate("review", "no")) });
 

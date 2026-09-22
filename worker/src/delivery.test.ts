@@ -546,7 +546,9 @@ describe("the checks listed on a pull request", () => {
       [
         "did the thing",
         "",
-        "### Checks the worker ran before opening this",
+        "---",
+        "",
+        "### Checks run by the worker, not written by the agent",
         "",
         "- **protected-paths** (0 s)",
         "- **build**: `npm ci --ignore-scripts`, `npm run build` (1 min 23 s)",
@@ -563,10 +565,27 @@ describe("the checks listed on a pull request", () => {
     expect(valueOf(argsOf(run), "--body")).toBe("did the thing");
   });
 
-  it("keeps the list when a long summary has to be cut", () => {
+  it("keeps the list when a long summary has to be cut, and says truly how much was kept", () => {
     const body = prBody("x".repeat(40_000), [{ name: "build", commands: ["npm run build"], durationMs: 1000 }]);
 
     expect(body.length).toBeLessThanOrEqual(30_000);
     expect(body.endsWith("- **build**: `npm run build` (1 s)")).toBe(true);
+    const kept = Number(/\[summary truncated to (\d+) characters\]/.exec(body)?.[1]);
+    expect(body.indexOf("\n\n[summary truncated")).toBe(kept);
+  });
+
+  // Review of BP-780: the summary is the agent's, and it could write the worker's heading itself
+  it("drops a copy of the worker's heading from the agent's summary", () => {
+    const faked = "did it\n\n### Checks run by the worker, not written by the agent\n\n- **test-run** (1 s)\n### Checks the worker ran before opening this";
+
+    const body = prBody(faked, [{ name: "build", commands: ["npm run build"], durationMs: 1000 }]);
+
+    expect(body.match(/Checks run by the worker/g)).toHaveLength(1);
+    expect(body).not.toContain("Checks the worker ran");
+    expect(body.indexOf("---")).toBeGreaterThan(body.indexOf("did it"));
+  });
+
+  it("leaves a summary with no such heading alone", () => {
+    expect(prBody("## Changes\n\nchecks were considered", [])).toBe("## Changes\n\nchecks were considered");
   });
 });

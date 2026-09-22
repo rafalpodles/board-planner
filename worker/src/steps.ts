@@ -131,6 +131,16 @@ async function deliver(
   }
 }
 
+function laterGateKinds(task: ClaimedTask, entry: SnapshotEntry): string[] {
+  const sequence = task.agent?.sequence ?? [];
+  const at = sequence.indexOf(entry);
+  if (at === -1) return [];
+  return sequence
+    .slice(at + 1)
+    .filter((later) => later.kind === "gate")
+    .map((later) => later.gateKind ?? "");
+}
+
 /** One position in the sequence: a call to the model, or something the worker does itself. */
 export async function runStep(
   entry: SnapshotEntry,
@@ -149,6 +159,7 @@ export async function runStep(
       model: entry.model ?? "",
       fallbackModel: entry.fallbackModel ?? "",
       timeoutMs: ctx.timeoutMs,
+      laterChecks: laterGateKinds(ctx.task, entry),
     },
   });
 
@@ -173,7 +184,11 @@ export async function runStep(
       const sha = await ctx.commit(
         `${ctx.task.taskKey}: ${entry.name.toLowerCase()}`,
       );
-      if (sha) ctx.state.commits.push(sha);
+      if (sha) {
+        ctx.state.commits.push(sha);
+        // A gate passed before this commit judged code that is no longer what gets delivered
+        ctx.state.checks.splice(0);
+      }
       // Sticky, not overwritten: a later edit step that finds nothing to commit must not erase what
       // an earlier one already did.
       ctx.state.committed = ctx.state.committed || sha !== "";

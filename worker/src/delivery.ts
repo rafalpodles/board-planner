@@ -71,13 +71,23 @@ function prTitle(task: PrSubject): string {
 export function prBody(summary: string, checks: PassedCheck[] = []): string {
   const passed = checksSection(checks);
   const room = MAX_BODY_CHARS - (passed ? passed.length + 2 : 0);
-  let body = scrub(summary).trim();
+  // The agent writes the summary, so a heading of the worker's own in it is removed: only the
+  // section below the rule is the worker's word
+  let body = scrub(summary)
+    .split("\n")
+    .filter((line) => !WORKER_HEADING.test(line))
+    .join("\n")
+    .trim();
   if (body.length > room) {
-    const note = `\n\n[summary truncated to ${room} characters]`;
-    body = `${body.slice(0, room - note.length)}${note}`;
+    const noteFor = (kept: number) => `\n\n[summary truncated to ${kept} characters]`;
+    const kept = room - noteFor(room).length;
+    body = `${body.slice(0, kept)}${noteFor(kept)}`;
   }
   return passed ? `${body}\n\n${passed}`.trim() : body;
 }
+
+const CHECKS_HEADING = "### Checks run by the worker, not written by the agent";
+const WORKER_HEADING = /^\s*#{1,6}\s*checks (the worker ran|run by the worker)/i;
 
 export function formatDuration(ms: number): string {
   const seconds = Math.round(ms / 1000);
@@ -95,7 +105,7 @@ function checksSection(checks: PassedCheck[]): string {
       : "";
     return `- **${check.name}**${ran} (${formatDuration(check.durationMs)})`;
   });
-  return ["### Checks the worker ran before opening this", "", ...lines].join("\n");
+  return ["---", "", CHECKS_HEADING, "", ...lines].join("\n");
 }
 
 function repoArgs(prUrl: string): string[] {

@@ -183,15 +183,31 @@ describe("createExecutor", () => {
   });
 
   // BP-780. With no shell, an agent not told this closed every summary "tests were not run".
-  it("tells the agent the worker runs the checks after it, so it does not disclaim them", async () => {
+  it("tells the agent which checks the worker runs after it, so it does not disclaim them", async () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 
-    await createExecutor(config, runner).execute(options);
+    await createExecutor(config, runner).execute({
+      ...options,
+      brief: { ...options.brief, laterChecks: ["protected-paths", "build", "test-run", "review"] },
+    });
 
     const args = run.mock.calls[0][1] as string[];
     const prompt = args[args.indexOf("--append-system-prompt") + 1];
-    expect(prompt).toMatch(/The worker runs the checks/);
-    expect(prompt).toMatch(/do not say in your summary that a build or tests were not run/);
+    expect(prompt).toContain("After this step the worker itself runs the build and the test suite");
+    expect(prompt).toContain("do not say in your summary that it was not run");
+  });
+
+  // Review of BP-780: an agent composed with no build or test gate must not be promised one
+  it("promises no checks to an agent that has none after the step", async () => {
+    const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
+
+    await createExecutor(config, runner).execute({
+      ...options,
+      brief: { ...options.brief, laterChecks: ["protected-paths", "review"] },
+    });
+
+    const args = run.mock.calls[0][1] as string[];
+    expect(args[args.indexOf("--append-system-prompt") + 1]).not.toContain("the worker itself runs");
   });
 
   it("asks the CLI for a stream, with the --verbose it refuses to stream without", async () => {
