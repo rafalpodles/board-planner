@@ -174,7 +174,7 @@ jobs:
         run: |
           codesign --verify --strict --deep --verbose=2 .build/CPMenubar.app
           xcrun stapler validate .build/CPMenubar.app
-          ASSESSMENT="$(spctl --assess --type execute --verbose=4 .build/CPMenubar.app 2>&1)"
+          ASSESSMENT="$(spctl --assess --type execute --verbose=4 .build/CPMenubar.app 2>&1 || true)"
           echo "$ASSESSMENT"
           grep -q "source=Notarized Developer ID" <<<"$ASSESSMENT" \
             || { echo "::error::Gatekeeper did not report 'source=Notarized Developer ID'"; exit 1; }
@@ -194,6 +194,7 @@ jobs:
           path: release-assets/
           if-no-files-found: error
           retention-days: 3
+          overwrite: true
 
       - name: Delete the temporary keychain and key
         if: always()
@@ -221,6 +222,7 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           ls -l release-assets
+          (cd release-assets && sha256sum -c SHA256SUMS)
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" release-assets/* --repo "$GITHUB_REPOSITORY" --clobber
           else
