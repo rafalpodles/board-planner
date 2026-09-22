@@ -202,7 +202,9 @@ PUBLIC_ORIGIN=            # This instance's own address, at runtime. Required fo
                           # Falls back to APP_ORIGIN only when that names exactly one origin.
                           # Every link the app sends (mail, chat, Coda, worker enrolment) is built
                           # from it; nothing reads NEXT_PUBLIC_APP_URL, which would be a
-                          # build-machine literal in the published image (BP-766)
+                          # build-machine literal in the published image (BP-766).
+                          # WARNING: a second origin in APP_ORIGIN with PUBLIC_ORIGIN unset turns
+                          # every link off (and MCP, enrolment, password reset refuse)
 ```
 
 ## Build

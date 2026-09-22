@@ -181,7 +181,15 @@ That runs the published image, `ghcr.io/rafalpodles/board-planner`, built for `l
 `BOARD_PLANNER_VERSION=1.2.3` in a `.env` next to the compose file. To upgrade,
 `docker compose pull && docker compose up -d`.
 
-From a clone, `docker compose up -d --build` builds the checkout instead of pulling.
+**From a clone, run `docker compose up -d --build`.** Plain `docker compose up -d` pulls and runs
+the last *release*, not the code you have checked out; `--build` builds the checkout and runs that.
+
+### Upgrading from a build before the published image
+
+Rename `NEXT_PUBLIC_APP_URL` in your `.env` to `PUBLIC_ORIGIN`. The app no longer reads the old name
+at all; `docker-compose.yml` still passes it on as `PUBLIC_ORIGIN` when `PUBLIC_ORIGIN` is unset, so
+an untouched `.env` keeps its links, but that fallback lives in the compose file only — any other
+way of running the image needs `PUBLIC_ORIGIN` itself.
 
 Open <http://localhost:3000>. The first account created on the sign-in page becomes the instance
 administrator; every account after that is made from **Settings → Users**.
@@ -248,7 +256,7 @@ Everything is optional except the database. Put overrides in a `.env` file next 
 | `MONGODB_URI` | `mongodb://mongo:27017/boardplanner` | Point the app at your own MongoDB instead of the bundled one |
 | `APP_PORT` | `3000` | Host port the app is published on |
 | `APP_ORIGIN` | `http://localhost:${APP_PORT}` | Comma-separated origins the app is served from. Together with `PUBLIC_ORIGIN`, what a write's `Origin` is checked against when the browser sends no `Sec-Fetch-Site` |
-| `PUBLIC_ORIGIN` | `http://localhost:${APP_PORT}` (compose); otherwise `APP_ORIGIN` when it names exactly one origin | The one address this instance calls its own, and the base of every link it sends. Required for MCP, PM OAuth and enrolling a worker |
+| `PUBLIC_ORIGIN` | `NEXT_PUBLIC_APP_URL`, else `http://localhost:${APP_PORT}` (compose); otherwise `APP_ORIGIN` when it names exactly one origin | The one address this instance calls its own, and the base of every link it sends. Required for MCP, PM OAuth and enrolling a worker |
 | `BOARD_PLANNER_VERSION` | `latest` | Which published image compose runs |
 | `BOOTSTRAP_TOKEN` | generated, printed to the log | The setup code the first account is created with, 16 characters or more. Set it when the log is not where you can read it |
 | `COOKIE_ALLOW_INSECURE` | `1` (compose only) | Issue the session cookie without `Secure` and without the `__Host-` prefix, for an instance served over plain HTTP |
@@ -345,10 +353,17 @@ is a list, and nothing says which entry is the public one. When it names exactly
 used; otherwise nothing is guessed.
 
 So **an instance reachable at anything other than the compose default must set `PUBLIC_ORIGIN`.**
-The MCP endpoint, both `/.well-known` documents, the PM agent's OAuth `redirect_uri` and a worker's
-enrolment answer **500** when it resolves to nothing, and mail and chat messages go out without their
-links — deliberately, because the values they used to fall back to were a request header or an
-address from the build machine. It must be an `http`/`https` URL; `board.example.com:8443` is not
+When it resolves to nothing:
+
+- the MCP endpoint, both `/.well-known` documents, the PM agent's OAuth `redirect_uri`, enrolling a
+  worker and a password reset by email answer **500**;
+- changing your email address answers **503**, because the confirmation link cannot be built;
+- notification mail, Slack and Discord messages still go out, without their links, and Coda rows
+  get an empty Link.
+
+Deliberately: the values these used to fall back to were a request header or an address from the
+build machine. Adding a second origin to `APP_ORIGIN` without setting `PUBLIC_ORIGIN` lands here
+too, because a list cannot say which entry is the instance's own. It must be an `http`/`https` URL; `board.example.com:8443` is not
 one, however much it looks like it.
 
 </details>
