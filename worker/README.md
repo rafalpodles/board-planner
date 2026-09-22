@@ -164,7 +164,7 @@ The plist points `CP_ENROLMENT_TOKEN_FILE` at that file. The worker will not use
 by group or others: a worker with no identity yet stays unregistered and logs that reason, including
 `run chmod 600 on it`, until you fix the file and
 run the `unload` and `load` below again. A worker that has already registered
-never reads the token, so a leftover file there does not stop it. The inline variable still works
+never uses the token, so a leftover file there does not stop it. The inline variable still works
 for a container, where there is no file to protect.
 
 Then install the plist and load it. It ships with `REPO_DIR` and `HOME_DIR` placeholders rather than
