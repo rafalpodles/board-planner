@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { getClientIp, trustedProxyHops, isIpAddress } from "./client-ip";
 
 const ORIGINAL = { ...process.env };
@@ -116,4 +116,40 @@ describe("isIpAddress", () => {
     "refuses %o",
     (value) => expect(isIpAddress(value)).toBe(false)
   );
+});
+
+// BP-774. Production ran behind Railway's proxy with the variable unset, and nothing said so.
+describe("a forwarded request with no proxy configured", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  async function fresh() {
+    vi.resetModules();
+    delete process.env.TRUSTED_PROXY_HOPS;
+    return (await import("./client-ip")).getClientIp;
+  }
+
+  it("says once that the header is ignored, and still ignores it", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const getIp = await fresh();
+    const forwarded = () =>
+      new Request("https://app.example.com/api/auth/login", { headers: { "x-forwarded-for": "203.0.113.9" } });
+
+    expect(getIp(forwarded())).toBeNull();
+    expect(getIp(forwarded())).toBeNull();
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain("TRUSTED_PROXY_HOPS=0");
+  });
+
+  it("says nothing about a request that carries no such header", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const getIp = await fresh();
+
+    getIp(new Request("https://app.example.com/api/auth/login"));
+
+    expect(warn).not.toHaveBeenCalled();
+  });
 });
