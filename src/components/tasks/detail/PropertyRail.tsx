@@ -40,6 +40,7 @@ import {
 } from "@/lib/handover";
 import { missingRolesText, readinessGaps, type ReadinessGap } from "@/lib/project-readiness";
 import { mergesWithoutAPerson } from "@/lib/agent-rules";
+import { describeBindingError } from "@/lib/binding-error";
 import { assigneeToShow } from "./assignee-display";
 import type { AnyColumn } from "@/lib/columns";
 import { MAX_RECURRENCE_INTERVAL, clampInterval } from "@/lib/recurrence";
@@ -93,6 +94,8 @@ interface BlockerContext {
   columns: { role: ColumnRole }[];
   /** Runs-off beside a lock: the owners' switch only matters once the lock is lifted */
   locked: boolean;
+  /** Why the reader's own machine refuses its checkout of this board, as the worker said it */
+  bindingError: string;
 }
 
 function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }) {
@@ -204,6 +207,13 @@ function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }
         </>
       );
     }
+    case "machine-unbound":
+      return (
+        <>
+          Your machine is connected but not taking work for this board:{" "}
+          {describeBindingError(ctx.bindingError)}
+        </>
+      );
     case "machine-failing":
       return (
         <>
@@ -270,6 +280,7 @@ function HandoverNotice({
     projectKey,
     columns: board?.columns ?? [],
     locked: gaps.includes("runs-locked"),
+    bindingError: board?.bindingError ?? "",
   };
 
   if (blockers.length === 0) {

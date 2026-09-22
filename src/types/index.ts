@@ -1733,7 +1733,14 @@ export interface ApiAgentBlock {
   deterministic: boolean;
 }
 
-export type MachineState = "none" | "stale" | "paused" | "stopped" | "failing" | "live";
+export type MachineState =
+  | "none"
+  | "stale"
+  | "unbound"
+  | "paused"
+  | "stopped"
+  | "failing"
+  | "live";
 
 export interface ApiHandoverReadiness {
   /** Whether the reader may change this board's settings (an owner, or an instance admin) */
@@ -1744,6 +1751,8 @@ export interface ApiHandoverReadiness {
   columns: { role: ColumnRole }[];
   /** The reader's own machines only, against this board's repository */
   machine: MachineState;
+  /** Why the reader's machine cannot use its checkout of this board, when `machine` is "unbound" */
+  bindingError: string;
 }
 
 export interface ApiAgent {

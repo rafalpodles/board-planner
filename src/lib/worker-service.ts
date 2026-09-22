@@ -12,6 +12,7 @@ import { accessibleProjectIds } from "@/lib/grants";
 import { User } from "@/models/user";
 import { isWorkerLockedByInstance, projectRunsWorkers } from "@/lib/worker-gate";
 import type { MachineState } from "@/types";
+import { bindingErrorFor } from "@/lib/binding-error";
 
 export const PROTOCOL_VERSION = 1;
 export const WORKER_STALE_MS = 5 * 60 * 1000;
@@ -144,7 +145,9 @@ function isLive(worker: IWorker, now: Date): boolean {
 }
 
 type ServingMachine = Pick<IWorker, "enabled" | "lastSeenAt" | "repos"> &
-  Partial<Pick<IWorker, "preflight" | "command" | "commandIssuedAt" | "commandAckedAt">>;
+  Partial<
+    Pick<IWorker, "preflight" | "command" | "commandIssuedAt" | "commandAckedAt" | "bindingError">
+  >;
 
 // The name the worker gives the check that stops it claiming (worker/src/preflight.ts)
 const SANDBOX_CHECK = "sandbox";
@@ -168,30 +171,47 @@ function sandboxFailed(worker: ServingMachine): boolean {
 const MACHINE_RANK: Record<MachineState, number> = {
   none: 0,
   stale: 1,
-  failing: 2,
-  stopped: 3,
-  paused: 4,
-  live: 5,
+  unbound: 2,
+  failing: 3,
+  stopped: 4,
+  paused: 5,
+  live: 6,
 };
+
+type ServedProject = MatchableProject & { _id?: unknown };
 
 /**
  * The best of these machines, for this project's repository. A machine that reports in but will
- * not take work — paused, stopped, or failing its sandbox check — is not `live`, and says why.
+ * not take work — paused, stopped, failing its sandbox check, or refusing its checkout of this very
+ * project — is not `live`, and says why.
  */
-export function machineStateFor(
+export function machineReadinessFor(
   workers: ServingMachine[],
-  project: MatchableProject,
+  project: ServedProject,
   now = new Date()
-): MachineState {
-  let best: MachineState = "none";
+): { state: MachineState; bindingError: string } {
+  let best: { state: MachineState; bindingError: string } = { state: "none", bindingError: "" };
+  const projectId = project._id ? String(project._id) : "";
   for (const worker of workers) {
     if (!matchRepo(project, worker.repos ?? [])) continue;
-    const candidate: MachineState = !isLive(worker as IWorker, now)
+    const refused = bindingErrorFor(worker.bindingError, projectId);
+    const state: MachineState = !isLive(worker as IWorker, now)
       ? "stale"
-      : (haltAcknowledged(worker) ?? (sandboxFailed(worker) ? "failing" : "live"));
-    if (MACHINE_RANK[candidate] > MACHINE_RANK[best]) best = candidate;
+      : (haltAcknowledged(worker) ??
+        (sandboxFailed(worker) ? "failing" : refused ? "unbound" : "live"));
+    if (MACHINE_RANK[state] > MACHINE_RANK[best.state]) {
+      best = { state, bindingError: state === "unbound" ? refused : "" };
+    }
   }
   return best;
+}
+
+export function machineStateFor(
+  workers: ServingMachine[],
+  project: ServedProject,
+  now = new Date()
+): MachineState {
+  return machineReadinessFor(workers, project, now).state;
 }
 
 // Only what an operator actually set. Sending the stored policy would pin every field forever,

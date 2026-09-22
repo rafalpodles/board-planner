@@ -42,6 +42,7 @@ describe("readinessGaps", () => {
     ["stopped", "machine-stopped"],
     ["paused", "machine-paused"],
     ["failing", "machine-failing"],
+    ["unbound", "machine-unbound"],
   ] as const)("names a %s machine", (machine, gap) => {
     expect(readinessGaps({ ...READY, machine })).toEqual([gap]);
   });

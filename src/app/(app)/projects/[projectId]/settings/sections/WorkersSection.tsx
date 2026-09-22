@@ -16,6 +16,7 @@ import { endedBadly, endState } from "@/lib/run-outcome";
 import Link from "next/link";
 import { useStore } from "@/app/(app)/agents/store";
 import { isWorkerLockedByInstance } from "@/lib/worker-gate";
+import { bindingErrorFor, describeBindingError } from "@/lib/binding-error";
 
 const NUMBER_FIELDS = new Set(["taskTimeoutMs", "runCeilingMs", "maxDiffLines", "maxDiffFiles"]);
 const LABELS: Record<string, string> = {
@@ -233,15 +234,34 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
                   </p>
                 ) : (
                   <ul className="border border-border rounded-lg divide-y divide-border">
-                    {offering.map((w) => (
-                      <li key={w._id} className="flex items-center gap-3 px-3 py-2 text-sm">
-                        <span className="font-medium">{w.name}</span>
-                        <span className="text-text-muted">{w.host}</span>
-                        <span className={`ml-auto text-xs ${w.stale ? "text-danger" : "text-success"}`}>
-                          {w.stale ? "not reporting" : "live"}
-                        </span>
-                      </li>
-                    ))}
+                    {offering.map((w) => {
+                      const refused = w.stale ? "" : bindingErrorFor(w.bindingError, String(project._id));
+                      return (
+                        <li
+                          key={w._id}
+                          data-testid="offering-machine"
+                          className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-sm"
+                        >
+                          <span className="font-medium">{w.name}</span>
+                          <span className="text-text-muted">{w.host}</span>
+                          <span
+                            data-testid="offering-machine-state"
+                            className={`ml-auto text-xs ${w.stale || refused ? "text-danger" : "text-success"}`}
+                          >
+                            {w.stale ? "not reporting" : refused ? "cannot use its checkout" : "live"}
+                          </span>
+                          {refused && (
+                            <p
+                              data-testid="offering-machine-error"
+                              className="basis-full text-xs text-danger break-words"
+                              title={refused}
+                            >
+                              {describeBindingError(refused)}
+                            </p>
+                          )}
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </div>
