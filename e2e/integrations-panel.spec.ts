@@ -229,6 +229,16 @@ test.describe("Coda", () => {
 
     const upsert = await (await request.get(`${CODA_STUB_URL}/last-upsert`)).json();
     expect(upsert.requestCount).toBeGreaterThan(0);
+    // Each row links back to this instance at its runtime origin, not a build-time literal (BP-766)
+    const links: string[] = upsert.upsert.rows.map(
+      (row: { cells: { column: string; value: string }[] }) =>
+        row.cells.find((cell) => cell.column === "Link")?.value,
+    );
+    expect(links.length).toBeGreaterThan(0);
+    const appOrigin = new URL(page.url()).origin;
+    for (const link of links) {
+      expect(link).toMatch(new RegExp(`^${appOrigin}/projects/${PROJECT_KEY}/tasks/\\d+$`));
+    }
 
     await page.getByRole("button", { name: "Disconnect" }).click();
     await expect(page.getByLabel("Doc ID")).toHaveValue("");

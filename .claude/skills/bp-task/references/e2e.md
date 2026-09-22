@@ -67,7 +67,7 @@ Next to the case the fix must refuse, assert the case that is supposed to work. 
 
 Green tests are not a look. Run the stack, drive the flow, read a screenshot.
 
-- Local stack from the task worktree: `.env.local` (gitignored) with `MONGODB_URI=mongodb://localhost:27$N/bp$N` and `NEXT_PUBLIC_APP_URL=http://localhost:<port>`, then `PORT=<port> npm run dev`. Seed an admin into `users` (bcryptjs, cost 10, `role: "admin"`) and log in at `/login`.
+- Local stack from the task worktree: `.env.local` (gitignored) with `MONGODB_URI=mongodb://localhost:27$N/bp$N` and `PUBLIC_ORIGIN=http://localhost:<port>`, then `PORT=<port> npm run dev`. Seed an admin into `users` (bcryptjs, cost 10, `role: "admin"`) and log in at `/login`.
 - Confirm the browser runs your build first: pick an unconditional marker from the diff and assert it in the DOM.
 - Check the phone viewport when the component has a `sm:`, `md:` or `lg:` variant. Measure against a known-good sibling, never against a label.
 - Browser pane limits: `form_input` does not fire React's onChange (native value setter plus a dispatched `input` event does); `computer{key}` may deliver nothing (dispatch a `KeyboardEvent`); coordinate clicks miss after `resize_window`. Say in the task comment which paths were driven for real and which were synthesised.

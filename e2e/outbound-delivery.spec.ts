@@ -270,6 +270,9 @@ test("a team channel announces the board to a room, with no recipient in it", as
   const text = JSON.stringify(body.blocks);
   expect(text).toContain("New task created in");
   expect(body.text).toBeUndefined();
+  // The room's link is this instance's runtime origin, not a literal baked in at build time (BP-766)
+  const appOrigin = new URL(page.url()).origin;
+  expect(body.blocks[0].text.text).toContain(`\n<${appOrigin}/projects/${PROJECT_KEY}/tasks/`);
 });
 
 test("a ticked chat cell posts to the reader's own Slack or Discord, and unticking stops it", async ({

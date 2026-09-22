@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 /**
  * BP-322. This route had no test at any level, and the ticket's own claim — that the throttle runs
@@ -39,6 +39,7 @@ const oversized = (headers?: Record<string, string>) =>
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  process.env.PUBLIC_ORIGIN = "https://board.example.org";
   await resetRateLimits();
   startDeviceEnrolment.mockResolvedValue({
     deviceCode: "cpd_abc",
@@ -46,6 +47,13 @@ beforeEach(async () => {
     expiresAt: new Date("2026-01-01T00:00:00Z"),
     intervalMs: 2000,
   });
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  delete process.env.PUBLIC_ORIGIN;
+  delete process.env.APP_ORIGIN;
+  delete process.env.NEXT_PUBLIC_APP_URL;
 });
 
 describe("POST /api/workers/enrolment/device", () => {
@@ -81,5 +89,41 @@ describe("POST /api/workers/enrolment/device", () => {
     for (let i = 0; i < 11; i++) await POST(oversized());
 
     expect((await POST(post({ name: "MacBook" }))).status).toBe(429);
+  });
+});
+
+// BP-766. The app opens this address on the operator's Mac, and a published image is built once
+// for every self-hoster: a build-time NEXT_PUBLIC_APP_URL would send them all to localhost:3000
+describe("POST /api/workers/enrolment/device — where the operator is sent", () => {
+  it("sends the operator to PUBLIC_ORIGIN, read at runtime", async () => {
+    process.env.NEXT_PUBLIC_APP_URL = "http://localhost:3000";
+
+    const response = await POST(post({ name: "MacBook" }));
+
+    expect(response.status).toBe(201);
+    expect((await response.json()).verificationUrl).toBe("https://board.example.org/enrol/ABCD1234");
+  });
+
+  it("takes APP_ORIGIN when it names exactly one origin", async () => {
+    delete process.env.PUBLIC_ORIGIN;
+    process.env.APP_ORIGIN = "https://lan.example.org";
+
+    const response = await POST(post({ name: "MacBook" }));
+
+    expect((await response.json()).verificationUrl).toBe("https://lan.example.org/enrol/ABCD1234");
+  });
+
+  it("refuses to start an enrolment it could not send anyone to approve", async () => {
+    delete process.env.PUBLIC_ORIGIN;
+    process.env.NEXT_PUBLIC_APP_URL = "http://localhost:3000";
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const response = await POST(post({ name: "MacBook" }));
+
+    expect(response.status).toBe(500);
+    expect((await response.json()).error).toMatch(/PUBLIC_ORIGIN/);
+    expect(startDeviceEnrolment).not.toHaveBeenCalled();
+    // The operator reads the server log, not the Mac's error sheet
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining("PUBLIC_ORIGIN"));
   });
 });

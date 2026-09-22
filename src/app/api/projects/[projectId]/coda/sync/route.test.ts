@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 /**
  * BP-472. This route had no test at any level — the word "coda" appeared only in `e2e/seed.ts`.
@@ -154,6 +154,45 @@ describe("POST .../coda/sync — the pushed rows", () => {
         due: "2026-09-01",
       }),
     ]);
+  });
+
+  describe("the link each row carries", () => {
+    const oneTask = () =>
+      taskFind.mockReturnValue({
+        sort: () => ({
+          populate: () => ({
+            lean: () => Promise.resolve([{ taskNumber: 5, title: "Ship it", status: "todo", customFieldValues: {} }]),
+          }),
+        }),
+      });
+    const pushedLink = () => upsertTaskRows.mock.calls[0][4][0].link;
+
+    afterEach(() => {
+      delete process.env.PUBLIC_ORIGIN;
+      delete process.env.APP_ORIGIN;
+      delete process.env.NEXT_PUBLIC_APP_URL;
+    });
+
+    // BP-766: a published image is built once for every self-hoster, so the address comes from
+    // the runtime environment and a build-time NEXT_PUBLIC_APP_URL is not consulted
+    it("points at PUBLIC_ORIGIN, read when the sync runs", async () => {
+      oneTask();
+      process.env.PUBLIC_ORIGIN = "https://board.example.org";
+      process.env.NEXT_PUBLIC_APP_URL = "http://localhost:3000";
+
+      await POST(request(), ctx());
+
+      expect(pushedLink()).toBe("https://board.example.org/projects/BP/tasks/5");
+    });
+
+    it("is left empty when this instance's origin is not configured", async () => {
+      oneTask();
+      process.env.NEXT_PUBLIC_APP_URL = "http://localhost:3000";
+
+      await POST(request(), ctx());
+
+      expect(pushedLink()).toBe("");
+    });
   });
 
   it("reports partial application rather than claiming success", async () => {

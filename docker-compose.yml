@@ -13,10 +13,12 @@ services:
       start_period: 20s
 
   app:
+    # The published image, pulled when it is not already here. `docker compose up -d --build`
+    # builds this checkout instead and tags the result with the same name
+    image: ghcr.io/rafalpodles/board-planner:${BOARD_PLANNER_VERSION:-latest}
+    pull_policy: missing
     build:
       context: .
-      args:
-        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:${APP_PORT:-3000}}
     restart: unless-stopped
     depends_on:
       mongo:
@@ -31,9 +33,10 @@ services:
       # 0 unless something in front of the app appends to X-Forwarded-For — the login throttle
       # keys on it, and an unset value means the header is ignored rather than trusted
       TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-0}
-      # This instance's own address. Behind a proxy, set it to the public one — APP_ORIGIN is a
-      # list and cannot say which entry that is, and NEXT_PUBLIC_APP_URL is baked into the image
-      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:${APP_PORT:-3000}}
+      # This instance's own address, and the base of every link it sends out. Behind a proxy, set
+      # it to the public one — APP_ORIGIN is a list and cannot say which entry that is.
+      # NEXT_PUBLIC_APP_URL is the name it had before BP-766, still honoured here and nowhere else
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-${NEXT_PUBLIC_APP_URL:-http://localhost:${APP_PORT:-3000}}}
       # The setup code for the first account; empty means one is generated and printed to the log
       BOOTSTRAP_TOKEN: ${BOOTSTRAP_TOKEN:-}
       # Everything below is optional — leave it empty and the feature stays off
