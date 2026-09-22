@@ -136,12 +136,6 @@ export function EnrolWorkerModal({ open, onClose }: EnrolWorkerModalProps) {
                 <code className="text-text">CP_ENROLMENT_TOKEN_FILE</code> at it. The worker deletes
                 that file once it has registered, and never needs it again.
               </li>
-              <li>
-                Scope the worker&apos;s own <code className="text-text">CP_API_TOKEN</code> to the
-                projects it serves. That token is a separate credential and it sits on a disk the
-                coding agent can read — an unscoped admin token there would let the agent lift its
-                own kill switch, which is the whole reason enrolment tokens exist.
-              </li>
             </ol>
           </div>
 

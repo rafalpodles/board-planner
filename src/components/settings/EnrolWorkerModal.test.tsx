@@ -41,4 +41,21 @@ describe("EnrolWorkerModal", () => {
       within(firstStep).getByRole("link", { name: "Getting the software" }).getAttribute("href")
     ).toBe(DOWNLOAD);
   });
+
+  it("asks the machine for the enrolment token and no second credential", async () => {
+    api.post.mockResolvedValue({
+      token: "cpe_abc",
+      expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+    });
+    render(<EnrolWorkerModal open onClose={() => {}} />);
+
+    await act(async () => {
+      screen.getByRole("button", { name: "Mint token" }).click();
+    });
+
+    const steps = screen.getAllByRole("listitem");
+    expect(steps).toHaveLength(2);
+    expect(steps[1].textContent).toContain("CP_ENROLMENT_TOKEN_FILE");
+    expect(screen.getByRole("dialog").textContent).not.toContain("CP_API_TOKEN");
+  });
 });
