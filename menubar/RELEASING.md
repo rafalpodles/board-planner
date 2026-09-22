@@ -1,8 +1,77 @@
 # Releasing the menubar app
 
-## From CI — the normal way
+## Cutting a release — merge the release PR
 
-`.github/workflows/release.yml` runs on a pushed tag `vX.Y.Z`, in three jobs:
+`.github/workflows/release-please.yml` runs
+[release-please](https://github.com/googleapis/release-please-action) on every push to `main`. It
+keeps one pull request open, *chore(main): release X.Y.Z* on the branch
+`release-please--branches--main--components--board-planner`, that bumps `package.json`,
+`package-lock.json` and `.release-please-manifest.json` and prepends the new section to
+`CHANGELOG.md`, all read from the conventional commits since the last release: `feat` is a minor
+bump, `fix` a patch, `!` or `BREAKING CHANGE` a major; `ci`, `docs`, `test`, `build`, `chore` and
+`refactor` bump nothing and stay out of the changelog. A merged pull request contributes its title
+and each of its commits.
+
+**Merging that pull request is the release.** The push it makes to `main` runs the workflow again,
+which tags `vX.Y.Z` on the merge commit, creates the GitHub release with the changelog section as
+its notes, and — in the same run — calls `release.yml` with that tag. It has to call it: a tag
+created with `GITHUB_TOKEN` starts no workflow of its own. The called jobs check out the tag, not
+`main`, so a commit landing in the meantime is not built into the release.
+
+| Where it is set | What |
+| --- | --- |
+| `release-please-config.json` | `release-type: node`, tags without the package name (`v1.2.3`), and `bootstrap-sha` at `v1.0.1`'s commit |
+| `.release-please-manifest.json` | The last released version. It started at `1.0.1`, so the first release PR holds only what came after `v1.0.1` |
+
+The `release-please` job holds `contents`, `issues` and `pull-requests: write`; the job that calls
+`release.yml` grants `contents: write` and `packages: write`, the ceiling for the called jobs, each of
+which still narrows to its own permissions below. A called workflow's jobs cannot hold more than the
+calling job grants.
+
+**Two things GitHub does not do for this pull request:**
+
+- **Create it, until it is allowed to.** *Settings → Actions → General → Workflow permissions →
+  Allow GitHub Actions to create and approve pull requests* must be ticked, or the job fails with
+  *GitHub Actions is not permitted to create or approve pull requests*.
+- **Run CI on it.** A branch pushed with `GITHUB_TOKEN` triggers no workflow, so `ci.yml` never runs
+  on the release branch. `main` has no branch protection and no ruleset, so nothing blocks the
+  merge; the pull request only changes versions and the changelog, and CI runs on `main` after the
+  merge because that push is yours. To see it green first, **Actions → CI → Run workflow** on the
+  release branch.
+
+  Making CI run on its own takes a token that is not `GITHUB_TOKEN`. The least privilege is a GitHub
+  App installed on this repository alone with *Contents* and *Pull requests* read-and-write, its
+  token minted per run by `actions/create-github-app-token` and passed as the action's `token`. That
+  token's tag push then starts `release.yml` by itself, so the `release` job in
+  `release-please.yml` has to go in the same change, or every release builds twice.
+
+A tag pushed by hand still releases (below), but release-please does not know about it: bump
+`.release-please-manifest.json` and `package.json` to that version in a commit, or the next release
+PR proposes a version that already exists. To force a version, put `Release-As: 2.0.0` in a commit
+body.
+
+A called run that fails — say notarisation times out — is re-run from its Release Please run with
+**Re-run failed jobs**. The tag and the release already exist, the build checks the tag out again,
+and publish uploads over the assets. **Re-run all jobs** builds nothing: release-please finds the
+release already made and reports `release_created=false`.
+
+`fix`, `perf`, `revert` and `deps` commits bump the patch, `feat` the minor, and `!` or a
+`BREAKING CHANGE` footer the major.
+
+Two releases whose image jobs overlap can leave `latest` on the older one, because each job decides
+it when it starts. If that happens, sign in with `docker login ghcr.io` (a token with
+`write:packages`) and point it at the newest version with
+`docker buildx imagetools create -t ghcr.io/rafalpodles/board-planner:latest ghcr.io/rafalpodles/board-planner:X.Y.Z`.
+
+The action is pinned to the commit of its v5.0.0 release, because its outputs start the signing
+build. Bump the SHA deliberately, from the action's release page.
+
+## From CI — what the release runs
+
+`.github/workflows/release.yml` runs on a pushed tag `vX.Y.Z` or when `release-please.yml` calls it
+with one. A `resolve` job reads the tag — from the call's `tag` input, or the pushed ref — and every
+other job takes the version from it, never from `github.ref`, which is `main` when called. Then three
+jobs:
 
 - **build** (`macos-latest`, `contents: read`, environment `release`). Installs the worker with
   `npm ci --ignore-scripts`, builds it, runs the Swift tests and packs the worker tarball, all
@@ -11,10 +80,11 @@
   Connect API key (90-minute limit, submission id printed first), staples (three tries), and
   requires `spctl` to report `source=Notarized Developer ID`. The keychain and key files are
   deleted in an `always()` step. The assets go up as a workflow artifact kept for 3 days.
-- **publish** (`ubuntu-latest`, `contents: write`, tag pushes only). Downloads that artifact and
-  attaches it to the release, creating it with generated notes if it does not exist, or replacing
-  the assets if it does.
-- **image** (`ubuntu-latest`, `contents: read` + `packages: write`, tag pushes only). Builds the
+- **publish** (`ubuntu-latest`, `contents: write`, releases only). Downloads that artifact and
+  attaches it to the release. A release from release-please exists already, with its changelog as
+  the notes, and only gets the assets (replacing any from an earlier attempt); a tag pushed by hand
+  has no release yet and gets one with generated notes.
+- **image** (`ubuntu-latest`, `contents: read` + `packages: write`, releases only). Builds the
   repository's `Dockerfile` for `linux/amd64` and `linux/arm64` (QEMU + Buildx) and pushes
   `ghcr.io/rafalpodles/board-planner:X.Y.Z` — and `:latest` only when `vX.Y.Z` is the highest
   `vX.Y.Z` tag in the repository (`git tag --sort=-v:refname`, pre-release names ignored), so a
@@ -31,6 +101,13 @@
 | `board-planner-menubar-X.Y.Z.zip` | The app, worker inside, signed, notarised and stapled |
 | `board-planner-worker-X.Y.Z.tar.gz` | The worker alone, for a machine run by hand: `worker/` with `dist/`, `package.json`, `launchd/`; runs with `node`, no install |
 | `SHA256SUMS` | Checksums of both |
+
+The app's `CFBundleShortVersionString` and the worker tarball's `package.json` both carry the tag's
+version. The build number, `CFBundleVersion`, is `github.run_number` of whichever workflow started the
+run — Release Please's or Release's — so it is not comparable between the two paths; the app reads
+neither. The running worker still reports a hard-coded `1.0.0` to the server (BP-768).
+
+By hand, bypassing the release PR:
 
 ```bash
 git tag v1.0.1 && git push origin v1.0.1
@@ -55,7 +132,8 @@ repository with the *Write* role; a package first pushed by this workflow gets t
 The secrets are **environment** secrets, not repository secrets: **Settings → Environments → New
 environment → `release`**. Under *Deployment branches and tags* choose **Selected branches and
 tags** and add the branch `main` and the tag pattern `v*`, so no other ref can reach the signing
-certificate. A required reviewer is optional and makes every signed run wait for approval.
+certificate. Both are needed: a hand-pushed tag runs on `refs/tags/vX.Y.Z`, while a release from
+release-please runs on the calling workflow's ref, `refs/heads/main`. A required reviewer is optional and makes every signed run wait for approval.
 
 The build job stops before signing unless all six are set, and names each missing one:
 

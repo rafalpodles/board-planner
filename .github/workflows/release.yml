@@ -2,11 +2,19 @@ name: Release
 
 # A tag vX.Y.Z builds the menubar app (worker inside), signs it with the Developer ID, notarises
 # and staples it, packs the worker on its own, and attaches both to the GitHub release.
+# The tag arrives either pushed by hand or from release-please.yml, which calls this workflow because
+# a tag created with GITHUB_TOKEN triggers no workflow of its own.
 # Run by hand it is a dry run: the same build, kept as a short-lived workflow artifact (downloadable
 # by anyone, the repository is public) and attached to no release.
 on:
   push:
     tags: ["v*.*.*"]
+  workflow_call:
+    inputs:
+      tag:
+        description: "The release tag to build and publish (vX.Y.Z); it must already exist"
+        type: string
+        required: true
   workflow_dispatch:
     inputs:
       version:
@@ -19,7 +27,7 @@ on:
         default: true
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag || github.ref }}
   cancel-in-progress: false
 
 permissions:
@@ -30,30 +38,60 @@ defaults:
     shell: bash
 
 jobs:
+  # When called, github.event_name and github.ref are the caller's (push, main): only the tag input
+  # tells a release from a dry run
+  resolve:
+    name: Resolve the release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      release: ${{ steps.resolve.outputs.release }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - name: Resolve the tag and the version
+        id: resolve
+        env:
+          CALLED_TAG: ${{ inputs.tag }}
+          DISPATCH_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '' }}
+        run: |
+          if [ -n "$CALLED_TAG" ]; then
+            TAG="$CALLED_TAG"
+          elif [ "$GITHUB_EVENT_NAME" = "push" ] && [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            TAG="$GITHUB_REF_NAME"
+          else
+            TAG=""
+          fi
+          if [ -n "$TAG" ]; then RELEASE=true; VERSION="${TAG#v}"; else RELEASE=false; VERSION="$DISPATCH_VERSION"; fi
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { [ -n "$TAG" ] && [ "$TAG" != "v$VERSION" ]; }; then
+            echo "::error::The version must be x.y.z (a tag vX.Y.Z), got tag '$TAG', version '$VERSION'"
+            exit 1
+          fi
+          echo "release=$RELEASE tag=${TAG:-none} version=$VERSION"
+          {
+            echo "release=$RELEASE"
+            echo "tag=$TAG"
+            echo "version=$VERSION"
+          } >> "$GITHUB_OUTPUT"
+
   build:
     name: Build, sign, notarise
+    needs: resolve
     runs-on: macos-latest
     timeout-minutes: 120
     # The signing secrets live in this environment, not in the repository
-    environment: ${{ (github.event_name == 'push' || inputs.signed) && 'release' || '' }}
+    environment: ${{ (needs.resolve.outputs.release == 'true' || inputs.signed) && 'release' || '' }}
     env:
-      SIGNED: ${{ github.event_name == 'push' || inputs.signed }}
+      SIGNED: ${{ needs.resolve.outputs.release == 'true' || inputs.signed }}
       OUT: ${{ github.workspace }}/release-assets
+      VERSION: ${{ needs.resolve.outputs.version }}
     outputs:
-      artifact: ${{ steps.version.outputs.artifact }}
+      artifact: ${{ steps.artifact.outputs.artifact }}
     steps:
-      - name: Resolve the version
-        id: version
-        env:
-          DISPATCH_VERSION: ${{ inputs.version }}
+      - name: Name the artifact
+        id: artifact
         run: |
-          if [ "$GITHUB_EVENT_NAME" = "push" ]; then VERSION="${GITHUB_REF_NAME#v}"; else VERSION="$DISPATCH_VERSION"; fi
-          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::The version must be x.y.z (a tag vX.Y.Z), got '$VERSION'"
-            exit 1
-          fi
           if [ "$SIGNED" = "true" ]; then SUFFIX=signed; else SUFFIX=unsigned; fi
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "artifact=release-$VERSION-$SUFFIX" >> "$GITHUB_OUTPUT"
 
       - name: Every signing secret is set
@@ -79,8 +117,10 @@ jobs:
             exit 1
           fi
 
+      # The tag's commit, not wherever main has moved on to by the time a called run gets here
       - uses: actions/checkout@v7
         with:
+          ref: ${{ needs.resolve.outputs.tag && format('refs/tags/{0}', needs.resolve.outputs.tag) || '' }}
           persist-credentials: false
 
       - uses: actions/setup-node@v7
@@ -190,7 +230,7 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ steps.version.outputs.artifact }}
+          name: ${{ steps.artifact.outputs.artifact }}
           path: release-assets/
           if-no-files-found: error
           retention-days: 3
@@ -204,8 +244,8 @@ jobs:
 
   publish:
     name: Attach to the GitHub release
-    needs: build
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [resolve, build]
+    if: needs.resolve.outputs.release == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -216,10 +256,11 @@ jobs:
           name: ${{ needs.build.outputs.artifact }}
           path: release-assets
 
+      # release-please has already created the release with its changelog; a hand-pushed tag has none yet
       - name: Attach
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.resolve.outputs.tag }}
         run: |
           ls -l release-assets
           (cd release-assets && sha256sum -c SHA256SUMS)
@@ -233,7 +274,8 @@ jobs:
   # The dry run below repeats these steps through anchors, so it builds exactly what a tag pushes.
   image:
     name: Publish the Docker image
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: resolve
+    if: needs.resolve.outputs.release == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
@@ -243,19 +285,19 @@ jobs:
       - &image-version
         name: Resolve the version
         env:
-          DISPATCH_VERSION: ${{ inputs.version }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+          RELEASE: ${{ needs.resolve.outputs.release }}
         run: |
-          if [ "$GITHUB_EVENT_NAME" = "push" ]; then VERSION="${GITHUB_REF_NAME#v}"; else VERSION="$DISPATCH_VERSION"; fi
-          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::The version must be x.y.z (a tag vX.Y.Z), got '$VERSION'"
-            exit 1
-          fi
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+          {
+            echo "VERSION=$VERSION"
+            echo "RELEASE=$RELEASE"
+            echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}"
+          } >> "$GITHUB_ENV"
 
       - &image-checkout
         uses: actions/checkout@v7
         with:
+          ref: ${{ needs.resolve.outputs.tag && format('refs/tags/{0}', needs.resolve.outputs.tag) || '' }}
           persist-credentials: false
           # Every tag, to decide whether this one is the newest
           fetch-depth: 0
@@ -265,9 +307,12 @@ jobs:
         name: Is this the newest release
         run: |
           NEWEST="$(git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)"
-          if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$NEWEST" = "v$VERSION" ]; then LATEST=true; else LATEST=false; fi
+          if [ "$RELEASE" = "true" ] && [ "$NEWEST" = "v$VERSION" ]; then LATEST=true; else LATEST=false; fi
           echo "Newest release tag: ${NEWEST:-none}; this is v$VERSION; latest=$LATEST"
-          echo "LATEST=$LATEST" >> "$GITHUB_ENV"
+          {
+            echo "LATEST=$LATEST"
+            echo "REVISION=$(git rev-parse HEAD)"
+          } >> "$GITHUB_ENV"
 
       - &image-qemu
         uses: docker/setup-qemu-action@v4
@@ -282,6 +327,7 @@ jobs:
         env:
           DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
         with:
+          context: git
           images: ${{ env.IMAGE }}
           flavor: latest=false
           tags: |
@@ -290,11 +336,11 @@ jobs:
           labels: |
             org.opencontainers.image.title=Board Planner
             org.opencontainers.image.version=${{ env.VERSION }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ env.REVISION }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           annotations: |
             org.opencontainers.image.version=${{ env.VERSION }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ env.REVISION }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
 
       - name: Log in to GitHub Container Registry
@@ -310,14 +356,15 @@ jobs:
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name == 'push' }}
+          push: ${{ env.RELEASE == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
 
   image-dry-run:
     name: Build the Docker image (dry run, not pushed)
-    if: github.event_name == 'workflow_dispatch'
+    needs: resolve
+    if: needs.resolve.outputs.release != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
