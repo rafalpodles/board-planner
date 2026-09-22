@@ -142,7 +142,35 @@ public struct POSIXTransport: Transport {
             close(descriptor)
             throw SocketError.io(failure)
         }
+
+        // On the connected descriptor, not on the path: the directory check happens before this
+        // call and a local attacker looping create/delete on /tmp can win that gap. getpeereid
+        // answers for the process on the other end of THIS connection, so a socket somebody else
+        // put there is refused however the race went (BP-778 review).
+        do {
+            try refusePeer(descriptor)
+        } catch {
+            close(descriptor)
+            throw error
+        }
         return descriptor
+    }
+
+    static func peerRefusal(peer: uid_t, ours: uid_t) -> String? {
+        peer == ours
+            ? nil
+            : "the process answering on this socket runs as uid \(peer), not as you (uid \(ours)); it is not your worker"
+    }
+
+    private static func refusePeer(_ descriptor: Int32, ours: uid_t = getuid()) throws {
+        var peer: uid_t = 0
+        var group: gid_t = 0
+        guard getpeereid(descriptor, &peer, &group) == 0 else {
+            throw SocketError.unsafeDirectory("the socket would not say which user answers on it (errno \(errno))")
+        }
+        if let refusal = peerRefusal(peer: peer, ours: ours) {
+            throw SocketError.unsafeDirectory(refusal)
+        }
     }
 
     private static func writeAll(_ descriptor: Int32, _ data: Data) throws {
