@@ -115,11 +115,15 @@ describe("POST /api/workers/enrolment/device — where the operator is sent", ()
   it("refuses to start an enrolment it could not send anyone to approve", async () => {
     delete process.env.PUBLIC_ORIGIN;
     process.env.NEXT_PUBLIC_APP_URL = "http://localhost:3000";
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const response = await POST(post({ name: "MacBook" }));
 
     expect(response.status).toBe(500);
     expect((await response.json()).error).toMatch(/PUBLIC_ORIGIN/);
     expect(startDeviceEnrolment).not.toHaveBeenCalled();
+    // The operator reads the server log, not the Mac's error sheet
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining("PUBLIC_ORIGIN"));
+    logged.mockRestore();
   });
 });

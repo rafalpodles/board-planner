@@ -35,6 +35,7 @@ export async function POST(request: Request) {
 
   const origin = selfOrigin();
   if (!origin) {
+    console.error("Worker enrolment requested with no PUBLIC_ORIGIN configured");
     return NextResponse.json(
       { error: "This instance's own origin is not configured. Set PUBLIC_ORIGIN (or give APP_ORIGIN exactly one origin): the machine sends its operator there to approve it." },
       { status: 500 }
