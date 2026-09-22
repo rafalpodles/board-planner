@@ -59,7 +59,8 @@ release already made and reports `release_created=false`.
 `BREAKING CHANGE` footer the major.
 
 Two releases whose image jobs overlap can leave `latest` on the older one, because each job decides
-it when it starts. If that happens, point it at the newest version with
+it when it starts. If that happens, sign in with `docker login ghcr.io` (a token with
+`write:packages`) and point it at the newest version with
 `docker buildx imagetools create -t ghcr.io/rafalpodles/board-planner:latest ghcr.io/rafalpodles/board-planner:X.Y.Z`.
 
 The action is pinned to the commit of its v5.0.0 release, because its outputs start the signing
