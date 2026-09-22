@@ -329,10 +329,26 @@ than the client's, so every request on earth may land in the same bucket — and
 looks to the app like a genuine address, it is metered at the *tight* per-address ceilings rather
 than the raised anonymous ones. Too low throttles the whole world as though it were one caller.
 
-At `0`, the first request carrying `X-Forwarded-For` to a route that throttles by address — sign-in,
-password reset, the OAuth endpoints, machine enrolment, account changes — makes the app log one
-warning that the header is being ignored. A caller can send that header too, so the warning cannot prove a proxy
-is there — but behind one, it is the sign this is still unset.
+**Measure it rather than guess.** At `0`, a request carrying `X-Forwarded-For` to a route that
+throttles by address — sign-in, password reset, the OAuth endpoints, machine enrolment, account
+changes — makes the app log a warning that names how many entries the header held:
+
+```
+A request arrived with X-Forwarded-For carrying 2 entries while TRUSTED_PROXY_HOPS=0, so the
+header is ignored and the login throttle has no per-address key. …
+```
+
+That count is the value to set. Leave the variable unset, open the sign-in page yourself over the
+address your users use, read the count out of the log, set `TRUSTED_PROXY_HOPS` to it and restart —
+the warning stops. Guessing is unreliable because chains are longer than they look: a CDN in front
+of a hosting platform that also proxies is **two**, not one, because each appends an entry. Counting
+the boxes you pay for is not the same as counting the hops.
+
+Read the count off a request you made yourself through the whole chain. A caller can send the header
+too, so the count on a request you did not make is a number somebody else chose — and a health check
+or uptime probe that reaches the app by a shorter path carries fewer entries than a browser does.
+That is why the app reports each *new* count it sees rather than only the first, up to four distinct
+counts per process; if they disagree, the one from your own browser request is the one to set.
 
 </details>
 

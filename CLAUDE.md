@@ -200,6 +200,9 @@ APP_ORIGIN=               # Comma-separated origins allowed to write — the CSR
 TRUSTED_PROXY_HOPS=       # Proxies appending to X-Forwarded-For in front of the app; default 0,
                           # which ignores the header. The login throttle keys on it, so on a
                           # proxy-less deployment a forged header used to reset every counter (BP-318).
+                          # While it is 0 the app warns how many entries an arriving header carried —
+                          # that count is the value to set, and it reports each new count it sees
+                          # rather than only the first, up to four (BP-774).
                           # At 0 the first throttled request carrying the header logs one warning
                           # (BP-774)
 COOKIE_ALLOW_INSECURE=    # 1: plain session cookie (no Secure, no __Host-) for plain HTTP. auto:
