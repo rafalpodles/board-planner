@@ -321,6 +321,19 @@ describe("a forwarded request with no proxy configured", () => {
     expect(warn.mock.calls.every((call) => !String(call[0]).includes("carrying 0"))).toBe(true);
   });
 
+  // Splitting the line in two once dropped the definition, leaving "set it to that count" with no
+  // statement of what the variable actually means
+  it("says what the variable is, not only what to set it to", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const getIp = await fresh();
+
+    getIp(forwarded(chain(2)));
+
+    expect(warn.mock.calls[0][0]).toContain(
+      "TRUSTED_PROXY_HOPS is the number of proxies in front that append to that header"
+    );
+  });
+
   // The measurement is only the right number if each proxy adds an entry rather than overwriting
   it("tells the operator the count counts only where every proxy appends", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});

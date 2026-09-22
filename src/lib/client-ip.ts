@@ -63,7 +63,7 @@ function warnHeaderIgnored(count: number): void {
   lastReportedAt = now;
   console.warn(
     `A request arrived with X-Forwarded-For carrying ${count} ${count === 1 ? "entry" : "entries"} while ${TRUSTED_PROXY_HOPS_VAR}=0, so the header is ignored and the login throttle has no per-address key. ` +
-      `If a proxy sits in front of this app, set ${TRUSTED_PROXY_HOPS_VAR} to that count — provided this was a sign-in you attempted yourself, and every proxy in front appends rather than replaces the header.`
+      `${TRUSTED_PROXY_HOPS_VAR} is the number of proxies in front that append to that header: set it to the count above, provided this was a sign-in you attempted yourself and every proxy in front appends rather than replaces the header.`
   );
 }
 
