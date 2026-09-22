@@ -20,7 +20,8 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 IDENTITY="${CP_SIGN_IDENTITY:--}"
 NOTARY_PROFILE="${CP_NOTARY_PROFILE:-}"
 NOTARY_KEY_PATH="${CP_NOTARY_KEY_PATH:-}"
-VERSION="${CP_VERSION:-1.0.0}"
+# Unset, the version is the worker's own, which release-please keeps at the last release
+VERSION="${CP_VERSION:-$(sed -n 's/^  "version": "\(.*\)",$/\1/p' "$ROOT/../worker/package.json")}"
 BUILD_NUMBER="${CP_BUILD_NUMBER:-1}"
 
 if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then

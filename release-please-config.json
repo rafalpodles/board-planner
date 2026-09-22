@@ -13,6 +13,16 @@
           "type": "json",
           "path": "worker/package.json",
           "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "worker/package-lock.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "worker/package-lock.json",
+          "jsonpath": "$.packages[''].version"
         }
       ]
     }

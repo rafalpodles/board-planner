@@ -9,7 +9,7 @@ const child = spawn(
   { stdio: "inherit" }
 );
 
-for (const signal of ["SIGINT", "SIGTERM"]) {
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
   process.on(signal, () => child.kill(signal));
 }
 child.on("exit", (code) => process.exit(code ?? 1));

@@ -70,13 +70,13 @@ function newestRelease(tags: string[], version: string): string {
   return readEnvFile(envFile).LATEST;
 }
 
-function publish(releaseExists: boolean, latest: string): string[] {
+function publish(releaseExists: boolean, latest: string, published = "false 2"): string[] {
   const dir = scratch();
   const calls = join(dir, "calls");
   const gh = join(dir, "gh");
   writeFileSync(
     gh,
-    `#!/bin/bash\necho "$*" >> "${calls}"\nif [ "$1 $2" = "release view" ] && [[ "$*" != *--json* ]] && [ "${releaseExists ? 1 : 0}" = 0 ]; then exit 1; fi\nexit 0\n`
+    `#!/bin/bash\necho "$*" >> "${calls}"\nif [ "$1 $2" = "release view" ] && [[ "$*" == *--json* ]]; then echo "${published}"; exit 0; fi\nif [ "$1 $2" = "release view" ] && [ "${releaseExists ? 1 : 0}" = 0 ]; then exit 1; fi\nexit 0\n`
   );
   chmodSync(gh, 0o755);
   const assets = join(dir, "release-assets");
@@ -130,6 +130,36 @@ describe("the release workflow", () => {
 
     expect(create).toContain("release-assets/board-planner-menubar-1.2.0.zip");
     expect(create).toContain("--latest=false");
+  });
+
+  it("fails the job when the release is still a draft afterwards, or is missing an asset", () => {
+    expect(() => publish(true, "true", "true 2")).toThrow();
+    expect(() => publish(true, "true", "false 1")).toThrow();
+  });
+
+  it("has release-please keep the worker's manifest and lockfile at the release", () => {
+    expect(CONFIG.packages["."]["extra-files"]).toEqual([
+      { type: "json", path: "worker/package.json", jsonpath: "$.version" },
+      { type: "json", path: "worker/package-lock.json", jsonpath: "$.version" },
+      { type: "json", path: "worker/package-lock.json", jsonpath: "$.packages[''].version" },
+    ]);
+  });
+
+  // BP-768 review: a local `make` stamped 1.0.0 into the app, which is the bug again
+  it("stamps an unconfigured local app build with the worker's own version", () => {
+    const line = readFileSync(join(__dirname, "..", "menubar", "bundle.sh"), "utf8")
+      .split("\n")
+      .find((l) => l.startsWith("VERSION="));
+    const worker = JSON.parse(readFileSync(join(__dirname, "..", "worker", "package.json"), "utf8"));
+
+    const stamped = execFileSync(
+      "bash",
+      ["-c", `ROOT="${join(__dirname, "..", "menubar")}"; unset CP_VERSION; ${line}; printf %s "$VERSION"`],
+      { encoding: "utf8" }
+    );
+
+    expect(stamped).toBe(worker.version);
+    expect(stamped).not.toBe("1.0.0");
   });
 
   it("decides latest in the publish job, after the build it depends on", () => {

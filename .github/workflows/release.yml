@@ -307,8 +307,12 @@ jobs:
             gh release create "$TAG" release-assets/* --repo "$GITHUB_REPOSITORY" --verify-tag \
               --title "$TAG" --generate-notes --latest="$LATEST"
           fi
-          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,assets \
-            --jq '"draft=\(.isDraft) assets=\(.assets | length)"'
+          EXPECTED="$(find release-assets -type f | wc -l | tr -d ' ')"
+          STATE="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,assets \
+            --jq '"\(.isDraft) \(.assets | length)"')"
+          echo "draft, assets: $STATE (expected false $EXPECTED)"
+          [ "$STATE" = "false $EXPECTED" ] \
+            || { echo "::error::$TAG is still a draft, or does not carry the $EXPECTED assets"; exit 1; }
 
   # Independent of the macOS jobs: a failed notarisation does not hold the image back, nor the reverse.
   # The dry run below repeats these steps through anchors, so it builds exactly what a tag pushes.
