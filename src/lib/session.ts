@@ -57,10 +57,9 @@ export function appOrigins(): string[] {
  * `PUBLIC_ORIGIN`, which is a single value and settable at runtime.
  *
  * `NEXT_PUBLIC_APP_URL` is deliberately NOT a source. Next.js inlines it at build time, so in the
- * shipped bundle it is a literal from the build machine — the Dockerfile defaults it to
- * `http://localhost:3000`, which made it always truthy and turned the intended fail-closed 500
- * into a discovery document advertising localhost, cached for an hour. A value that cannot be
- * corrected at runtime cannot be this one (BP-316 review).
+ * shipped bundle it is a literal from the build machine — as a fallback it was always truthy and
+ * turned the intended fail-closed 500 into a discovery document advertising localhost, cached for
+ * an hour (BP-316 review). The published image serves every instance, so nothing reads it (BP-766).
  *
  * Every candidate is parsed, and the scheme is checked. `new URL()` accepts `board.example.com:8443`
  * as an opaque URL whose `.origin` is the string "null" — truthy, so every "not configured" guard

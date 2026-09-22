@@ -82,8 +82,11 @@ async function machineAsksToEnrol(request: APIRequestContext, machine = MACHINE)
   });
   expect(response.status(), await response.text()).toBe(201);
   const started = await response.json();
-  // Port-agnostic: the server builds this from NEXT_PUBLIC_APP_URL and the suite moves ports
-  return { ...started, path: new URL(started.verificationUrl).pathname };
+  const verification = new URL(started.verificationUrl);
+  // The app opens this on the operator's Mac, so it must be this instance's runtime origin, not a
+  // literal baked into the image when it was built (BP-766)
+  expect(verification.origin).toBe(new URL(response.url()).origin);
+  return { ...started, path: verification.pathname };
 }
 
 /** The machine polling for its answer, exactly as the app on it does. */

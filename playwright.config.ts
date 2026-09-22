@@ -114,10 +114,8 @@ function devServerEnv(origin: string) {
     // before it writes anything — see the guard at the top of run-conflict.spec.ts. Through the
     // proxy above, which is what lets mcp-tools.spec.ts take the database away mid-run.
     MONGODB_URI: throughMongoProxy(E2E_MONGODB_URI),
-    NEXT_PUBLIC_APP_URL: origin,
-    // /api/mcp answers 500 without it and will not take NEXT_PUBLIC_APP_URL, which is a
-    // build-time literal. Setting it here is not a test convenience: this run is what proved
-    // a real deployment needs it too, by 500ing three MCP specs when it was missing (BP-316).
+    // Every link the app builds to itself comes from here; NEXT_PUBLIC_APP_URL is a build-time
+    // literal and is left unset so nothing can quietly depend on it again (BP-316, BP-766).
     PUBLIC_ORIGIN: origin,
     // The premise the session and throttle specs are written against, pinned rather than
     // assumed: at 0 the app ignores X-Forwarded-For, so callers have no address and share the
