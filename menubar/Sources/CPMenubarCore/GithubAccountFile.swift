@@ -31,9 +31,19 @@ public struct GithubAccountFile: Sendable {
         return document.account
     }
 
+    // A name and address the operator set by hand (BP-779) belong to the account they were set for,
+    // so they survive re-picking that account and go when another one is picked.
     public func write(_ account: String) throws {
-        let data = try JSONEncoder().encode(
-            Document(account: account.trimmingCharacters(in: .whitespaces)))
+        let login = account.trimmingCharacters(in: .whitespaces)
+        var document: [String: String] = ["account": login]
+        if let existing = try? Data(contentsOf: URL(fileURLWithPath: path)),
+           let previous = try? JSONSerialization.jsonObject(with: existing) as? [String: Any],
+           previous["account"] as? String == login {
+            for key in ["name", "email"] {
+                if let value = previous[key] as? String { document[key] = value }
+            }
+        }
+        let data = try JSONSerialization.data(withJSONObject: document, options: [.sortedKeys])
         let url = URL(fileURLWithPath: path)
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(),
