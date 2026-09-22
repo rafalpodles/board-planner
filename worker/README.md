@@ -152,8 +152,20 @@ Unpack it and run `npm start` (or `node dist/main.js`) inside the `worker/` it c
 
 As a macOS service:
 
-The plist ships with `REPO_DIR` and `HOME_DIR` placeholders rather than one developer's
-absolute paths, so substitute them as you install it:
+Write the enrolment token first, to a file only you can read — never into the plist, which sits
+at `0644` and rides along into Time Machine. With the token copied from the Enrol dialog:
+
+```bash
+mkdir -p -m 700 ~/.boardplanner
+install -m 600 /dev/null ~/.boardplanner/token && pbpaste > ~/.boardplanner/token
+```
+
+The plist points `CP_ENROLMENT_TOKEN_FILE` at that file. The worker refuses one that is readable by
+group or others, and stops with that reason rather than starting without a token. The inline
+variable still works for a container, where there is no file to protect.
+
+Then install the plist and load it. It ships with `REPO_DIR` and `HOME_DIR` placeholders rather than
+one developer's absolute paths, so substitute them as you install it:
 
 ```bash
 sed -e "s|REPO_DIR|$(cd .. && pwd)|g" -e "s|HOME_DIR|$HOME|g" \
@@ -161,15 +173,8 @@ sed -e "s|REPO_DIR|$(cd .. && pwd)|g" -e "s|HOME_DIR|$HOME|g" \
 launchctl load ~/Library/LaunchAgents/com.boardplanner.worker.plist
 ```
 
-Put the enrolment token in a file only you can read, and point `CP_ENROLMENT_TOKEN_FILE` at it —
-never in the plist, which sits at `0644` and rides along into Time Machine:
-
-```bash
-install -m 600 /dev/null ~/.boardplanner/token && pbpaste > ~/.boardplanner/token
-```
-
-The worker refuses to read a secret file that is readable by group or others. The inline variable
-still works for a container, where there is no file to protect.
+Loading it before the token is in place starts a worker with nothing to register with, which
+launchd then restarts over and over.
 
 The plist carries the paths for this machine — check `ProgramArguments` and `PATH` before loading
 it anywhere else. Logs go to `/tmp/boardplanner-worker.log` and
@@ -631,24 +636,27 @@ replaced. Nothing leaves the machine.
 
 ## Credentials
 
-Two, and neither of them can lift this worker's kill switch. That is the point: the worker runs the
-coding agent at the same uid with `Read` and `bypassPermissions`, so anything on this disk is
-readable by the agent, and an unscoped instance-admin token there would let it switch its own
-`enabled` flag back on.
+One, and it cannot lift this worker's kill switch. That is the point: the worker runs the coding
+agent at the same uid with `Read` and `bypassPermissions`, so anything on this disk is readable by
+the agent, and an unscoped instance-admin token there would let it switch its own `enabled` flag
+back on.
+
+**The `cpw_` credential in `worker.json`** — minted at registration, and the only one the worker
+uses: claiming, reporting status, commenting, releasing, and all of `/api/workers/**`. No route
+outside the worker API accepts it.
 
 **`CP_ENROLMENT_TOKEN` / `CP_ENROLMENT_TOKEN_FILE`** — single-use, one hour to live. Mint one from
 Settings → Workers → "Enrol a worker" and put it on the machine. The first registration spends it
 server-side, the worker deletes the file, and it is never needed again — a worker with an identity
 in `worker.json` does not re-register. Optional by design: an enrolled worker must keep booting
-after you remove it.
+after you remove it, so a token file that is gone is not an error; one that is there but readable
+by group or others is, and stops the worker with `chmod 600` in the message.
 
-**`CP_API_TOKEN` / `CP_API_TOKEN_FILE`** — **no longer used.** The worker's own `cpw_` credential
+**`CP_API_TOKEN` / `CP_API_TOKEN_FILE`** — **no longer used**, and not a credential this worker
+holds. The worker's own `cpw_` credential
 does the claiming and the reporting, and its scope is re-derived on every call from the projects
 this machine is actually assigned to, so it cannot drift the way a minted list does. The kill switch
 still holds: `PATCH /api/workers/:id` refuses every machine credential, worker credentials included.
-
-Claiming itself uses neither: `worker.json` holds a `cpw_` credential minted at registration, which
-no route outside the worker API accepts.
 
 ## Which repositories this machine will run
 
