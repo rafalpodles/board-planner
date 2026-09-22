@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { BASE_URL, PROXIED_BASE_URL, RUN_PROXIED_SERVER } from "../playwright.config";
 import { ADMIN_PASSWORD, ADMIN_USERNAME, seedWithoutSessions } from "./seed";
+import { SAME_ORIGIN } from "./api";
 
 /**
  * BP-773. docker-compose.yml used to default COOKIE_ALLOW_INSECURE to 1, so a compose instance
@@ -50,4 +51,24 @@ test("an instance with nothing set still issues the secure, prefixed cookie", as
 
   const session = (await page.context().cookies(BASE_URL)).filter((c) => c.name.endsWith("bp_session"));
   expect(session).toEqual([expect.objectContaining({ name: "__Host-bp_session", secure: true })]);
+});
+
+// The review's residual case: the same compose instance, origins still at their localhost
+// defaults, reached through a TLS proxy. This suite has no TLS to sign in over, so the sign-in is
+// the request a browser on https sends — its Origin — and the answer is read off the wire.
+test("the same instance, signed into over https, issues the secure, prefixed cookie", async ({
+  request,
+}) => {
+  const response = await request.post(`${PROXIED_BASE_URL}/api/auth/login`, {
+    headers: { ...SAME_ORIGIN, Origin: "https://board.example.com" },
+    data: { username: ADMIN_USERNAME, password: ADMIN_PASSWORD },
+  });
+
+  expect(response.status()).toBe(200);
+  const cookies = response
+    .headersArray()
+    .filter((h) => h.name.toLowerCase() === "set-cookie")
+    .map((h) => h.value);
+  expect(cookies[0]).toMatch(/^__Host-bp_session=cps_[^;]+; .*; Secure$/);
+  expect(cookies[1]).toMatch(/^bp_session=; .*Max-Age=0/);
 });
