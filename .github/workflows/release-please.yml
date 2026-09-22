@@ -1,0 +1,40 @@
+name: Release Please
+
+# Keeps one release PR open against main. Merging it tags vX.Y.Z and creates the GitHub release, and
+# the same run builds and attaches the assets: a tag created with GITHUB_TOKEN starts no workflow.
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  release-please:
+    name: Update the release PR, or release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: release-please
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v5
+        id: release
+
+  release:
+    name: Release
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    # The ceiling for every job in release.yml: publish writes the release, image pushes to GHCR
+    permissions:
+      contents: write
+      packages: write
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.release-please.outputs.tag }}
