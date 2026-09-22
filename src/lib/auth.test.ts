@@ -82,6 +82,7 @@ beforeEach(() => {
 afterEach(() => {
   delete process.env.COOKIE_ALLOW_INSECURE;
   delete process.env.APP_ORIGIN;
+  delete process.env.PUBLIC_ORIGIN;
 });
 
 describe("getAuthUser — session cookie", () => {
@@ -353,6 +354,39 @@ describe("getAuthUser — forwarded headers do not decide anything", () => {
         withCookie(SESSION_TOKEN, { "x-forwarded-host": "app.example.com" }, "POST")
       )
     ).rejects.toBeInstanceOf(ProvenanceError);
+  });
+});
+
+// BP-773 review: under auto both names can be in the jar, and the prefixed one is read first —
+// but a revoked row under that name must not log a reader out while their other session is live.
+describe("getAuthUser — two cookie names under auto", () => {
+  beforeEach(() => {
+    process.env.COOKIE_ALLOW_INSECURE = "auto";
+    process.env.APP_ORIGIN = "http://localhost:3000";
+    process.env.PUBLIC_ORIGIN = "http://localhost:3000";
+  });
+
+  const both = (headers: Record<string, string> = {}) =>
+    request({ cookie: `__Host-bp_session=${SESSION_TOKEN}; bp_session=cps_plain`, ...headers });
+
+  it("falls through to the other name when the first names no live session", async () => {
+    sessionFindOne.mockImplementation((query: { tokenHash?: unknown }) => ({
+      lean: async () => (JSON.stringify(query).includes(sha256("cps_plain")) ? sessionRow() : null),
+    }));
+    userFindById.mockResolvedValue({ _id: "u1", username: "ada" });
+
+    const result = await getAuthUser(both());
+
+    expect(result).toMatchObject({ username: "ada" });
+  });
+
+  it("reads the prefixed name first when both are live", async () => {
+    sessionFound(sessionRow());
+    userFindById.mockResolvedValue({ _id: "u1", username: "ada" });
+
+    await getAuthUser(both());
+
+    expect(JSON.stringify(sessionFindOne.mock.calls[0])).toContain(sha256(SESSION_TOKEN));
   });
 });
 

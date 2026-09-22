@@ -191,18 +191,33 @@ export function legacySessionCookies(request?: Request): string[] {
   );
 }
 
-export function readSessionCookie(header: string | null): string | null {
-  if (!header) return null;
-  // Under auto a sign-in over https was issued the prefixed cookie and one over http the plain
-  // one, so both names are read — the prefixed first, since only a secure context can have set it
-  // and nothing on a sibling subdomain can shadow it. Signing in under either name expires the
-  // other, and logout clears both.
-  if (autoMode()) {
-    const prefixed = cookieValues(header, HOST_COOKIE_NAME);
-    if (prefixed.length > 0) return soleValue(prefixed);
-    return soleValue(cookieValues(header, UNPREFIXED_COOKIE_NAME));
+/**
+ * Every session token this request carries, the prefixed name first.
+ *
+ * Under auto a sign-in over https was issued the prefixed cookie and one over http the plain one,
+ * and each is a row of its own. Both are read — the prefixed first, since only a secure context
+ * can have set it and nothing on a sibling subdomain can shadow it — so a reader whose prefixed
+ * session was revoked elsewhere is not logged out while a live plain one is still in the jar, and
+ * logout can revoke both rather than leaving the exposed one alive for its full 90 days.
+ */
+export function sessionCookieTokens(header: string | null): string[] {
+  if (!header) return [];
+  const names = autoMode() ? KNOWN_COOKIE_NAMES : [sessionCookieName()];
+  const tokens: string[] = [];
+  for (const name of names) {
+    const values = cookieValues(header, name);
+    // Two cookies of one name mean one was set for a parent domain — the shadowing the __Host-
+    // prefix exists to prevent. Taking either is a coin flip on whose session wins, and so is
+    // reading past it to the other name, so the request carries nothing.
+    if (values.length > 1) return [];
+    const value = soleValue(values);
+    if (value && !tokens.includes(value)) tokens.push(value);
   }
-  return soleValue(cookieValues(header, sessionCookieName()));
+  return tokens;
+}
+
+export function readSessionCookie(header: string | null): string | null {
+  return sessionCookieTokens(header)[0] ?? null;
 }
 
 function cookieValues(header: string, name: string): string[] {
@@ -216,9 +231,6 @@ function cookieValues(header: string, name: string): string[] {
   return values;
 }
 
-// Two cookies of one name mean one was set for a parent domain — the shadowing the __Host- prefix
-// exists to prevent, and which the unprefixed name cannot. Taking either is a coin flip on whose
-// session wins, so take neither.
 function soleValue(values: string[]): string | null {
   if (values.length !== 1) return null;
   return values[0].length > 0 ? values[0] : null;

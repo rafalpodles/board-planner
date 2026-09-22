@@ -9,7 +9,7 @@ import { sha256 } from "./oauth";
 import {
   ProvenanceError,
   checkProvenance,
-  readSessionCookie,
+  sessionCookieTokens,
   resolveSession,
 } from "./session";
 import { IUser } from "@/types";
@@ -127,13 +127,19 @@ async function verifyOAuthAccessToken(token: string): Promise<IUser | null> {
 }
 
 async function verifySessionCookie(request: Request): Promise<IUser | null> {
-  const token = readSessionCookie(request.headers.get("cookie"));
-  if (!token) return null;
+  const tokens = sessionCookieTokens(request.headers.get("cookie"));
+  if (tokens.length === 0) return null;
 
   const provenance = checkProvenance(request);
   if (!provenance.ok) throw new ProvenanceError(provenance.reason);
 
-  const session = await resolveSession(token);
+  // The second name only matters under auto, where the jar can hold both: a revoked prefixed
+  // session must not log a reader out while their plain one is still live.
+  let session: Awaited<ReturnType<typeof resolveSession>> = null;
+  for (const token of tokens) {
+    session = await resolveSession(token);
+    if (session) break;
+  }
   if (!session) return null;
 
   await connectDB();
