@@ -161,7 +161,7 @@ install -m 600 /dev/null ~/.boardplanner/token && pbpaste > ~/.boardplanner/toke
 ```
 
 The plist points `CP_ENROLMENT_TOKEN_FILE` at that file. The worker will not use one that is readable
-by group or others: a worker with no identity yet stays unregistered and logs that reason, ending in
+by group or others: a worker with no identity yet stays unregistered and logs that reason, including
 `run chmod 600 on it`, until you fix the file and
 run the `unload` and `load` below again. A worker that has already registered
 never reads the token, so a leftover file there does not stop it. The inline variable still works
