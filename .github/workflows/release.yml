@@ -331,18 +331,34 @@ jobs:
     timeout-minutes: 10
     permissions: {}
     steps:
-      - name: Redeploy board-planner-site
+      # A `secrets` expression is not allowed in a step's `if`, so whether the redeploy is configured
+      # becomes an output here. Nothing but this shell sees the token.
+      - name: Is the redeploy configured
+        id: token
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-          SERVICE: ${{ vars.RAILWAY_SITE_SERVICE || 'board-planner-site' }}
           TAG: ${{ needs.resolve.outputs.tag }}
         run: |
           if [ -z "$RAILWAY_TOKEN" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
             echo "::warning::RAILWAY_TOKEN is unset: board-planner.com will not list $TAG until its site is deployed for some other reason"
-            exit 0
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
-          npm install -g @railway/cli@5.43.4
-          railway redeploy --service "$SERVICE" --from-source --yes
+
+      # Third-party code runs in its own step with no secret in the environment, which is the rule
+      # the worker's install follows above. `--ignore-scripts` is not an option here: the CLI fetches
+      # its binary from a postinstall script, so it would install nothing that runs.
+      - name: Install the Railway CLI
+        if: steps.token.outputs.configured == 'true'
+        run: npm install -g @railway/cli@5.43.4
+
+      - name: Redeploy board-planner-site
+        if: steps.token.outputs.configured == 'true'
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          SERVICE: ${{ vars.RAILWAY_SITE_SERVICE || 'board-planner-site' }}
+        run: railway redeploy --service "$SERVICE" --from-source --yes
 
   # Independent of the macOS jobs: a failed notarisation does not hold the image back, nor the reverse.
   # The dry run below repeats these steps through anchors, so it builds exactly what a tag pushes.
