@@ -166,6 +166,22 @@ private struct RecordingTransport: Transport {
     #expect(recorder.requests.first?.contains("Connection: close") == true)
 }
 
+// BP-778. The same input and the same answer as the worker's own test (worker/src/config.test.ts):
+// the two sides derive the path independently and have to agree byte for byte.
+@Test func movesTheSocketWhereTheWorkerDoesForADeepStateDirectory() {
+    let deep = "/Users/operator/" + String(repeating: "nested/", count: 12) + "state"
+
+    #expect(SocketClient.socketPath(in: deep, uid: 501)
+            == "/tmp/cp-worker-501-7038366db39fb12e/worker.sock")
+}
+
+@Test func keepsTheSocketBesideAStateDirectoryShortEnoughForOne() {
+    let dir = "/" + String(repeating: "a", count: 103 - "/worker.sock".count - 1)
+
+    #expect(SocketClient.socketPath(in: dir, uid: 501) == dir + "/worker.sock")
+    #expect(SocketClient.socketPath(in: dir + "b", uid: 501).hasPrefix("/tmp/cp-worker-501-"))
+}
+
 @Test func defaultsToTheWorkersOwnStateDirectory() {
     #expect(SocketClient.defaultSocketPath().hasSuffix("/worker.sock"))
 }

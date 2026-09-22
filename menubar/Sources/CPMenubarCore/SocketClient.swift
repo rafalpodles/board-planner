@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 // Work settings describe a project, not this machine, so there is no single model or diff limit to
@@ -108,8 +109,20 @@ public struct SocketClient: Sendable {
         self.transport = transport
     }
 
-    public static func socketPath(in stateDirectory: String) -> String {
-        (stateDirectory as NSString).appendingPathComponent("worker.sock")
+    // sun_path is 104 bytes, the terminating NUL included
+    static let maxSocketPathBytes = 103
+
+    // The worker's own rule (localSocketPath in worker/src/config.ts): beside the state, unless that
+    // is too long for a socket, when it moves to /tmp under this user's uid and a digest of the
+    // state directory (BP-778).
+    public static func socketPath(in stateDirectory: String, uid: uid_t = getuid()) -> String {
+        let beside = (stateDirectory as NSString).appendingPathComponent("worker.sock")
+        if beside.utf8.count <= maxSocketPathBytes { return beside }
+        let digest = SHA256.hash(data: Data(stateDirectory.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+            .prefix(16)
+        return "/tmp/cp-worker-\(uid)-\(digest)/worker.sock"
     }
 
     public static func defaultSocketPath() -> String {
