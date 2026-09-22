@@ -2462,12 +2462,15 @@ export async function seedMachine(
     seenAgoMs = 0,
     command = "",
     failingChecks = [],
+    bindingError = "",
   }: {
     owner?: mongoose.Types.ObjectId;
     seenAgoMs?: number;
     /** Issued and acknowledged, the way a board-issued pause or stop settles */
     command?: "" | "pause" | "stop";
     failingChecks?: string[];
+    /** As the worker reports it: "<projectId>: <reason>", "; "-joined */
+    bindingError?: string;
   } = {}
 ) {
   const db = (await connect()).db!;
@@ -2487,7 +2490,7 @@ export async function seedMachine(
     enabled: true,
     lastSeenAt: new Date(now.getTime() - seenAgoMs),
     identity: null,
-    bindingError: "",
+    bindingError,
     preflight: failingChecks.length
       ? {
           ok: false,

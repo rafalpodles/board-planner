@@ -11,6 +11,7 @@ import {
   MEMBER_HANDOVER_TASK_ID,
   MEMBER_BACKLOG_TASK_ID,
   PROJECT_KEY,
+  PROJECT_ID,
   PROJECT_AGENT_NAME,
   PROJECT_AGENT_DESCRIPTION,
   MERGING_AGENT_NAME,
@@ -191,6 +192,57 @@ test.describe("a member's own task, as the board changes under it", () => {
 
     await expect(notice(page)).toHaveAttribute("data-reason", "machine-stopped");
     await expect(waiting(page)).toHaveCount(0);
+  });
+
+  // BP-777. A worker refusing its checkout of this board reports in every minute like a working
+  // one, and the task used to say it was simply waiting for it.
+  test("a machine that refuses its checkout of this board says why, in what to do", async ({ page }) => {
+    await setBoardReadiness({ repositoryUrl: HANDOVER_REPOSITORY, workerEnabled: true });
+    await seedMachine("git@github.com:e2e/handover-board.git", {
+      bindingError: `${PROJECT_ID}: /private/tmp/handover-board is under the sensitive directory /private/tmp`,
+    });
+    const readiness = await openAs(page, "member");
+
+    expect(readiness).toMatchObject({
+      machine: "unbound",
+      bindingError: "/private/tmp/handover-board is under the sensitive directory /private/tmp",
+    });
+    await expect(notice(page)).toHaveAttribute("data-reason", "machine-unbound");
+    await expect(notice(page)).toHaveText(
+      "Nothing will run this yet. Your machine is connected but not taking work for this board: its checkout is in /private/tmp, a directory the worker refuses to work in. Move the checkout somewhere else, such as your home folder, and update repos.json on that machine."
+    );
+    await expect(waiting(page)).toHaveCount(0);
+  });
+
+  test("the board's Workers settings list the refusing machine as unable to use its checkout", async ({
+    page,
+  }) => {
+    await setBoardReadiness({ repositoryUrl: HANDOVER_REPOSITORY, workerEnabled: true });
+    await seedMachine("git@github.com:e2e/handover-board.git", {
+      bindingError: `${PROJECT_ID}: /private/tmp/handover-board is under the sensitive directory /private/tmp`,
+    });
+    await signIn(page, "admin");
+    const fleet = page.waitForResponse((res) => res.url().endsWith("/api/admin/workers"));
+    await page.goto(`/projects/${PROJECT_KEY}/settings?section=workers`);
+    expect((await fleet).status()).toBe(200);
+
+    const machine = page.getByTestId("offering-machine");
+    await expect(machine).toHaveCount(1);
+    await expect(machine.getByTestId("offering-machine-state")).toHaveText("cannot use its checkout");
+    await expect(machine.getByTestId("offering-machine-error")).toHaveText(
+      "its checkout is in /private/tmp, a directory the worker refuses to work in. Move the checkout somewhere else, such as your home folder, and update repos.json on that machine."
+    );
+  });
+
+  test("a machine refusing another board's checkout is still waited for here", async ({ page }) => {
+    await setBoardReadiness({ repositoryUrl: HANDOVER_REPOSITORY, workerEnabled: true });
+    await seedMachine("git@github.com:e2e/handover-board.git", {
+      bindingError: "e2e0000000000000000000ff: /private/tmp/other is under the sensitive directory /private/tmp",
+    });
+    await openAs(page, "member");
+
+    await expect(waiting(page)).toHaveText("Waiting for your machine to take it.");
+    await expect(notice(page)).toHaveCount(0);
   });
 
   // Only the sandbox check stops a claim; another failed check may be another project's checkout
