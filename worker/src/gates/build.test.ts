@@ -63,6 +63,7 @@ describe("buildGate", () => {
     const result = await buildGate(r, TIMEOUT_MS).run(context);
 
     expect(result.ok).toBe(true);
+    expect(result.commands).toEqual(["npm ci --ignore-scripts --no-audit --no-fund", "npm run build"]);
     expect(run).toHaveBeenCalledTimes(2);
     expect(run.mock.calls[0][0]).toBe(SANDBOX_COMMAND);
     // The install's own arguments, after everything the sandbox wrapper put in front of them

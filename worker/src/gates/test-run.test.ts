@@ -45,6 +45,12 @@ describe("testRunGate", () => {
     expect((await testRunGate(runner, TIMEOUT_MS).run(context)).ok).toBe(true);
   });
 
+  it("names the command it ran, for the pull request (BP-780)", async () => {
+    const { runner } = runnerReturning(ok);
+
+    expect((await testRunGate(runner, TIMEOUT_MS).run(context)).commands).toEqual(["npm test"]);
+  });
+
   it("rejects a failing suite and carries the output", async () => {
     const { runner } = runnerReturning({
       ...ok,

@@ -551,6 +551,7 @@ export async function runTask(
     prUrl: "",
     merged: false,
     summary: "",
+    checks: [],
     lastResult: EMPTY_RESULT,
   };
 
@@ -721,6 +722,7 @@ export async function runTask(
           worktree.path,
           worktree.baseSha,
         );
+        const gateStartedAt = now();
         const verdict = await gate.run({
           worktreePath: worktree.path,
           task,
@@ -729,6 +731,13 @@ export async function runTask(
           signal: deps.signal,
         });
         if (await releaseIfAborted(deps, reporter, task)) return;
+        if (verdict.ok) {
+          state.checks.push({
+            name: gate.name,
+            commands: verdict.commands ?? [],
+            durationMs: Math.max(0, now() - gateStartedAt),
+          });
+        }
 
         if (!verdict.ok) {
           // The gate did not judge the change; this machine could not run it. Reported as a

@@ -309,7 +309,7 @@ describe("runTask", () => {
     await runTask(h.deps, merging);
 
     expect(h.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker", IMPLEMENT_COMMIT_SHA);
-    expect(h.delivery.openPr).toHaveBeenCalledWith("/wt", merging, "did it");
+    expect(h.delivery.openPr).toHaveBeenCalledWith("/wt", merging, "did it", expect.any(Array));
     expect(h.delivery.merge).toHaveBeenCalledWith("/wt", "https://x/pull/7");
     expect(h.reporter.merged).toHaveBeenCalledWith(merging, "https://x/pull/7", "did it");
     expect(h.workspace.destroy).toHaveBeenCalledWith("CP-158");
@@ -2410,5 +2410,52 @@ describe("what a machine fault is recorded as", () => {
     await runTask(h.deps, task);
 
     expect(h.recordRun.mock.calls.at(-1)![1]).toMatchObject({ outcome: "requeued" });
+  });
+});
+
+// BP-780. The pull request used to carry only the agent's summary, which — the agent having no
+// shell — ended "the tests were not run" while the worker had just run them.
+describe("the checks a pull request lists", () => {
+  it("hands delivery every gate the run passed, in order, with what each ran and how long it took", async () => {
+    let clock = 1_000;
+    const h = harness({
+      now: () => (clock += 1_500),
+      gateFor: (entry) =>
+        entry.key === "build"
+          ? {
+              name: "build",
+              run: vi.fn<Gate["run"]>().mockResolvedValue({
+                ok: true,
+                reason: "",
+                commands: ["npm ci --ignore-scripts", "npm run build"],
+              }),
+            }
+          : passingGate(entry.key),
+    });
+
+    await runTask(h.deps, task);
+
+    const checks = vi.mocked(h.delivery.openPr).mock.calls[0][3];
+    expect(checks?.map((check) => check.name)).toEqual([
+      "protected-paths",
+      "diff-size",
+      "test-presence",
+      "build",
+      "test-run",
+      "review",
+    ]);
+    expect(checks?.[3]).toEqual({
+      name: "build",
+      commands: ["npm ci --ignore-scripts", "npm run build"],
+      durationMs: 1_500,
+    });
+  });
+
+  it("lists no gate that refused", async () => {
+    const h = harness({ gateFor: gateForOnly("review", rejectingGate("review", "no")) });
+
+    await runTask(h.deps, task);
+
+    expect(h.delivery.openPr).not.toHaveBeenCalled();
   });
 });

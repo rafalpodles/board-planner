@@ -4,7 +4,7 @@ import { Executor } from "./executor.js";
 import { Runner } from "./exec.js";
 import { unexpectedHistory } from "./provenance.js";
 import { StreamEvent } from "./stream.js";
-import { ClaimedTask, ExecutionResult, SnapshotEntry } from "./types.js";
+import { ClaimedTask, ExecutionResult, PassedCheck, SnapshotEntry } from "./types.js";
 
 export type StepOutcome =
   | { kind: "ok" }
@@ -42,6 +42,8 @@ export interface RunState {
   prUrl: string;
   merged: boolean;
   summary: string;
+  /** Every gate this run has passed so far, in order, for the pull request to list (BP-780). */
+  checks: PassedCheck[];
   /** A gate's context takes one result and a composed agent produces several; the last is the honest one. */
   lastResult: ExecutionResult;
 }
@@ -104,6 +106,7 @@ async function deliver(
         ctx.worktreePath,
         ctx.task,
         ctx.state.summary,
+        ctx.state.checks,
       );
       return { kind: "ok" };
 

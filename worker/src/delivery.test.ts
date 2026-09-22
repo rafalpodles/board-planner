@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { createDelivery } from "./delivery.js";
+import { createDelivery, prBody } from "./delivery.js";
 import { CommandResult, RunOpts } from "./exec.js";
 import { ClaimedTask } from "./types.js";
 import { claimedTask } from "./__fixtures__/task.js";
@@ -528,5 +528,45 @@ describe("the github identity delivery acts as", () => {
     const env = envOf(run);
     expect("GH_TOKEN" in env).toBe(false);
     expect("GITHUB_TOKEN" in env).toBe(false);
+  });
+});
+
+// BP-780
+describe("the checks listed on a pull request", () => {
+  it("puts the gates the run passed under the summary, with their commands and durations", async () => {
+    const run = vi.fn().mockResolvedValue({ ...ok, stdout: "https://github.com/x/y/pull/7" });
+
+    await createDelivery({ run }, gitPath).openPr("/wt", task, "did the thing", [
+      { name: "protected-paths", commands: [], durationMs: 40 },
+      { name: "build", commands: ["npm ci --ignore-scripts", "npm run build"], durationMs: 83_400 },
+      { name: "test-run", commands: ["npm test"], durationMs: 12_200 },
+    ]);
+
+    expect(valueOf(argsOf(run), "--body")).toBe(
+      [
+        "did the thing",
+        "",
+        "### Checks the worker ran before opening this",
+        "",
+        "- **protected-paths** (0 s)",
+        "- **build**: `npm ci --ignore-scripts`, `npm run build` (1 min 23 s)",
+        "- **test-run**: `npm test` (12 s)",
+      ].join("\n")
+    );
+  });
+
+  it("leaves the body as the summary alone when no gate ran", async () => {
+    const run = vi.fn().mockResolvedValue({ ...ok, stdout: "https://github.com/x/y/pull/7" });
+
+    await createDelivery({ run }, gitPath).openPr("/wt", task, "did the thing");
+
+    expect(valueOf(argsOf(run), "--body")).toBe("did the thing");
+  });
+
+  it("keeps the list when a long summary has to be cut", () => {
+    const body = prBody("x".repeat(40_000), [{ name: "build", commands: ["npm run build"], durationMs: 1000 }]);
+
+    expect(body.length).toBeLessThanOrEqual(30_000);
+    expect(body.endsWith("- **build**: `npm run build` (1 s)")).toBe(true);
   });
 });

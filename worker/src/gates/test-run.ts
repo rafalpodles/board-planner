@@ -34,7 +34,7 @@ export function testRunGate(runner: Runner, timeoutMs: number): Gate {
           reason: `the test suite failed (exit ${result.code}):\n${outputTail(result)}`,
         };
       }
-      return { ok: true, reason: "" };
+      return { ok: true, reason: "", commands: ["npm test"] };
     },
   };
 }

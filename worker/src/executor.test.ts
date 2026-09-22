@@ -182,6 +182,18 @@ describe("createExecutor", () => {
     expect(args[args.indexOf("--append-system-prompt") + 1]).toMatch(/Do not commit/);
   });
 
+  // BP-780. With no shell, an agent not told this closed every summary "tests were not run".
+  it("tells the agent the worker runs the checks after it, so it does not disclaim them", async () => {
+    const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
+
+    await createExecutor(config, runner).execute(options);
+
+    const args = run.mock.calls[0][1] as string[];
+    const prompt = args[args.indexOf("--append-system-prompt") + 1];
+    expect(prompt).toMatch(/The worker runs the checks/);
+    expect(prompt).toMatch(/do not say in your summary that a build or tests were not run/);
+  });
+
   it("asks the CLI for a stream, with the --verbose it refuses to stream without", async () => {
     const { runner, run } = runnerReturning({ code: 0, stdout: FIXTURE, stderr: "", timedOut: false });
 

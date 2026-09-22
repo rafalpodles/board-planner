@@ -22,6 +22,7 @@ function ctx(over: Partial<StepContext> = {}) {
     prUrl: "",
     merged: false,
     summary: "",
+    checks: [],
     lastResult: completed,
   };
   const baseSha = over.baseSha ?? "base";
@@ -247,7 +248,7 @@ describe("runStep — a model step", () => {
 
 describe("runStep — a worker action", () => {
   it("pushes on the push step and calls no model", async () => {
-    const c = ctx({ state: { committed: true, uncommittedWork: false, commits: ["sha1"], pushed: false, prUrl: "", merged: false, summary: "", lastResult: completed } });
+    const c = ctx({ state: { committed: true, uncommittedWork: false, commits: ["sha1"], pushed: false, prUrl: "", merged: false, summary: "", checks: [], lastResult: completed } });
     await runStep(entry({ key: "push", deterministic: true }), c);
 
     expect(c.delivery.push).toHaveBeenCalledWith("/wt", "cp-1/x", "sha1");
@@ -273,6 +274,17 @@ describe("runStep — a worker action", () => {
     await runStep(entry({ key: "push", deterministic: true }), c);
 
     expect(c.delivery.push).toHaveBeenCalledWith("/wt", "cp-1/x", "sha2");
+  });
+
+  it("gives the pull request the checks the run passed", async () => {
+    const c = ctx();
+    c.state.checks.push({ name: "build", commands: ["npm run build"], durationMs: 5 });
+
+    await runStep(entry({ key: "pull-request", deterministic: true }), c);
+
+    expect(c.delivery.openPr).toHaveBeenCalledWith("/wt", c.task, "", [
+      { name: "build", commands: ["npm run build"], durationMs: 5 },
+    ]);
   });
 
   it("remembers the pull request url, and that a merge happened", async () => {
@@ -301,7 +313,7 @@ describe("runStep — a worker action", () => {
 
   it("refuses to push a history it did not write", async () => {
     const c = ctx({
-      state: { committed: true, uncommittedWork: false, commits: ["sha1"], pushed: false, prUrl: "", merged: false, summary: "", lastResult: completed },
+      state: { committed: true, uncommittedWork: false, commits: ["sha1"], pushed: false, prUrl: "", merged: false, summary: "", checks: [], lastResult: completed },
       runner: {
         run: vi.fn(async (_command: string, args: string[]) =>
           args.includes("rev-list")
