@@ -228,3 +228,93 @@ jobs:
           else
             gh release create "$TAG" release-assets/* --repo "$GITHUB_REPOSITORY" --verify-tag --title "$TAG" --generate-notes
           fi
+
+  # Independent of the macOS jobs: a failed notarisation does not hold the image back, nor the reverse.
+  # The dry run below repeats these steps through anchors, so it builds exactly what a tag pushes.
+  image:
+    name: Publish the Docker image
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - &image-version
+        name: Resolve the version
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then VERSION="${GITHUB_REF_NAME#v}"; else VERSION="$DISPATCH_VERSION"; fi
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::The version must be x.y.z (a tag vX.Y.Z), got '$VERSION'"
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+      - &image-checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - &image-qemu
+        uses: docker/setup-qemu-action@v4
+
+      - &image-buildx
+        uses: docker/setup-buildx-action@v4
+
+      - &image-metadata
+        name: Tags and labels
+        id: meta
+        uses: docker/metadata-action@v6
+        env:
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
+        with:
+          images: ${{ env.IMAGE }}
+          flavor: latest=false
+          tags: |
+            type=raw,value=${{ env.VERSION }}
+            type=raw,value=latest,enable=${{ github.event_name == 'push' }}
+          labels: |
+            org.opencontainers.image.title=Board Planner
+            org.opencontainers.image.version=${{ env.VERSION }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          annotations: |
+            org.opencontainers.image.version=${{ env.VERSION }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - &image-build
+        name: Build for amd64 and arm64
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+
+  image-dry-run:
+    name: Build the Docker image (dry run, not pushed)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - *image-version
+      - *image-checkout
+      - *image-qemu
+      - *image-buildx
+      - *image-metadata
+      - *image-build

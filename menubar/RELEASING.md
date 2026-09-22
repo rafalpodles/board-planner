@@ -2,7 +2,7 @@
 
 ## From CI — the normal way
 
-`.github/workflows/release.yml` runs on a pushed tag `vX.Y.Z`, in two jobs:
+`.github/workflows/release.yml` runs on a pushed tag `vX.Y.Z`, in three jobs:
 
 - **build** (`macos-latest`, `contents: read`, environment `release`). Installs the worker with
   `npm ci --ignore-scripts`, builds it, runs the Swift tests and packs the worker tarball, all
@@ -14,6 +14,13 @@
 - **publish** (`ubuntu-latest`, `contents: write`, tag pushes only). Downloads that artifact and
   attaches it to the release, creating it with generated notes if it does not exist, or replacing
   the assets if it does.
+- **image** (`ubuntu-latest`, `contents: read` + `packages: write`, tag pushes only). Builds the
+  repository's `Dockerfile` for `linux/amd64` and `linux/arm64` (QEMU + Buildx) and pushes
+  `ghcr.io/rafalpodles/board-planner:X.Y.Z` and `:latest` with the workflow's own `GITHUB_TOKEN`,
+  labelled with the OCI `source`, `version` and `revision` so GHCR links the package to the
+  repository. It needs no environment and no secret, and depends on neither job above: a failed
+  notarisation does not hold the image back, nor the reverse. The image bakes in no address — every
+  link the app builds comes from `PUBLIC_ORIGIN` at runtime.
 
 | Asset | What it is |
 | --- | --- |
@@ -25,9 +32,18 @@
 git tag v1.0.1 && git push origin v1.0.1
 ```
 
-**Actions → Release → Run workflow** is a dry run: the build job alone, attached to no release. Its
-artifact is still downloadable by anyone for 3 days, because the repository is public. Turn
+**Actions → Release → Run workflow** is a dry run: the build job, attached to no release, and the
+same image build for both architectures, pushed nowhere (`image-dry-run`, `contents: read` only).
+The macOS artifact is still downloadable by anyone for 3 days, because the repository is public. Turn
 *signed* off to exercise it before the secrets exist; that run uses no environment.
+
+### The image's package is private until you say otherwise
+
+GHCR creates a new package as **private**, whatever the repository's visibility, so after the first
+tag push `docker pull` fails for everyone else until it is made public, once: **GitHub → your profile
+→ Packages → `board-planner` → Package settings → Danger Zone → Change visibility → Public**. Later
+pushes keep that visibility. The same page, under *Manage Actions access*, should list this
+repository with the *Write* role; a package first pushed by this workflow gets that on its own.
 
 ### The `release` environment
 
