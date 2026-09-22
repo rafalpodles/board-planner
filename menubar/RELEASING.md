@@ -41,7 +41,8 @@ The macOS artifact is still downloadable by anyone for 3 days, because the repos
 
 GHCR creates a new package as **private**, whatever the repository's visibility, so after the first
 tag push `docker pull` fails for everyone else until it is made public, once: **GitHub → your profile
-→ Packages → `board-planner` → Package settings → Danger Zone → Change visibility → Public**. Later
+→ Packages → `board-planner` → Package settings → Danger Zone → Change visibility → Public**
+(<https://github.com/users/rafalpodles/packages/container/board-planner/settings>). Later
 pushes keep that visibility. The same page, under *Manage Actions access*, should list this
 repository with the *Write* role; a package first pushed by this workflow gets that on its own.
 
