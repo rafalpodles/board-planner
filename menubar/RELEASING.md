@@ -135,6 +135,12 @@ tags** and add the branch `main` and the tag pattern `v*`, so no other ref can r
 certificate. Both are needed: a hand-pushed tag runs on `refs/tags/vX.Y.Z`, while a release from
 release-please runs on the calling workflow's ref, `refs/heads/main`. A required reviewer is optional and makes every signed run wait for approval.
 
+A called workflow gets an environment's secrets only for secrets its caller passes on, which is why
+`release-please.yml` calls `release.yml` with `secrets: inherit`. Without it the build job of a
+release-please release finds all six unset, as v1.1.0's did; a hand-pushed tag never goes through
+the call and was never affected. The repository has no secrets of its own, so `inherit` hands the
+called workflow nothing beyond the environment's.
+
 The build job stops before signing unless all six are set, and names each missing one:
 
 | Secret | Holds |
