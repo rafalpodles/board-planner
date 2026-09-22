@@ -2,9 +2,18 @@
 
 ## From CI — the normal way
 
-`.github/workflows/release.yml` runs on a pushed tag `vX.Y.Z`. On a macOS runner it runs `make app`
-with a universal build (arm64 and x86_64), signs with the Developer ID from a temporary keychain,
-notarises with an App Store Connect API key, staples, and attaches three files to the release:
+`.github/workflows/release.yml` runs on a pushed tag `vX.Y.Z`, in two jobs:
+
+- **build** (`macos-latest`, `contents: read`, environment `release`). Installs the worker with
+  `npm ci --ignore-scripts`, builds it, runs the Swift tests and packs the worker tarball, all
+  before any secret touches the disk. Then it imports the Developer ID into a temporary keychain,
+  runs `bundle.sh release` as a universal build (arm64 and x86_64), notarises with an App Store
+  Connect API key (90-minute limit, submission id printed first), staples (three tries), and
+  requires `spctl` to report `source=Notarized Developer ID`. The keychain and key files are
+  deleted in an `always()` step. The assets go up as a workflow artifact kept for 3 days.
+- **publish** (`ubuntu-latest`, `contents: write`, tag pushes only). Downloads that artifact and
+  attaches it to the release, creating it with generated notes if it does not exist, or replacing
+  the assets if it does.
 
 | Asset | What it is |
 | --- | --- |
@@ -16,12 +25,18 @@ notarises with an App Store Connect API key, staples, and attaches three files t
 git tag v1.0.1 && git push origin v1.0.1
 ```
 
-A tag whose release already exists gets its assets replaced; otherwise the release is created with
-generated notes. **Actions → Release → Run workflow** is a dry run: the same build, kept as a
-workflow artifact and published nowhere. Turn *signed* off to exercise it before the secrets exist.
+**Actions → Release → Run workflow** is a dry run: the build job alone, attached to no release. Its
+artifact is still downloadable by anyone for 3 days, because the repository is public. Turn
+*signed* off to exercise it before the secrets exist; that run uses no environment.
 
-The job refuses to start signing unless all six repository secrets are set, and names each missing
-one:
+### The `release` environment
+
+The secrets are **environment** secrets, not repository secrets: **Settings → Environments → New
+environment → `release`**. Under *Deployment branches and tags* choose **Selected branches and
+tags** and add the branch `main` and the tag pattern `v*`, so no other ref can reach the signing
+certificate. A required reviewer is optional and makes every signed run wait for approval.
+
+The build job stops before signing unless all six are set, and names each missing one:
 
 | Secret | Holds |
 | --- | --- |
@@ -32,10 +47,13 @@ one:
 | `ASC_ISSUER_ID` | App Store Connect issuer id |
 | `ASC_KEY_P8_BASE64` | The downloaded `AuthKey_<id>.p8`, base64 |
 
+A notarisation that has no verdict within the limit fails the job with its submission id. Finish
+it by hand with `xcrun notarytool wait <id>` and staple, or re-run the job.
+
 ## By hand
 
 `bundle.sh` signs with the hardened runtime, notarises, staples and produces a zip — it just needs
-an identity to sign with. `CP_VERSION`, `CP_BUILD_NUMBER` and `CP_ARCHS` are what CI sets; unset,
+an identity to sign with. `CP_VERSION`, `CP_BUILD_NUMBER`, `CP_ARCHS` and `CP_NOTARY_TIMEOUT` (default `90m`) are what CI sets; unset,
 the build is `1.0.0`, build 1, for this Mac's architecture.
 
 ## The signing path is already proven with a real certificate

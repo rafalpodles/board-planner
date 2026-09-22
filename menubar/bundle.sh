@@ -111,17 +111,35 @@ else
   exit 0
 fi
 
-# The verdict is read from the output, so a rejection arrives with Apple's reasons attached
-SUBMISSION="$(xcrun notarytool submit "$ZIP" "${NOTARY_AUTH[@]}" --wait --output-format json || true)"
-echo "$SUBMISSION"
-SUBMISSION_ID="$(/usr/bin/plutil -extract id raw -o - - <<<"$SUBMISSION" 2>/dev/null || true)"
-SUBMISSION_STATUS="$(/usr/bin/plutil -extract status raw -o - - <<<"$SUBMISSION" 2>/dev/null || true)"
-if [ "$SUBMISSION_STATUS" != "Accepted" ]; then
-  echo "error: notarisation ended '${SUBMISSION_STATUS:-with no verdict}'." >&2
-  [ -z "$SUBMISSION_ID" ] || xcrun notarytool log "$SUBMISSION_ID" "${NOTARY_AUTH[@]}" >&2 || true
-  exit 1
-fi
-xcrun stapler staple "$APP"
+NOTARY_TIMEOUT="${CP_NOTARY_TIMEOUT:-90m}"
+SUBMISSION="$(xcrun notarytool submit "$ZIP" "${NOTARY_AUTH[@]}" --output-format json)"
+SUBMISSION_ID="$(/usr/bin/plutil -extract id raw -o - - <<<"$SUBMISSION")"
+echo "notarisation submission id: $SUBMISSION_ID"
+xcrun notarytool wait "$SUBMISSION_ID" "${NOTARY_AUTH[@]}" --timeout "$NOTARY_TIMEOUT" || true
+SUBMISSION_STATUS="$(xcrun notarytool info "$SUBMISSION_ID" "${NOTARY_AUTH[@]}" --output-format json \
+  | /usr/bin/plutil -extract status raw -o - - 2>/dev/null || true)"
+case "$SUBMISSION_STATUS" in
+  Accepted) ;;
+  "In Progress"|"")
+    echo "error: notarisation of $SUBMISSION_ID had no verdict within $NOTARY_TIMEOUT. Finish it by hand:" >&2
+    echo "       xcrun notarytool wait $SUBMISSION_ID <auth>, then xcrun stapler staple CPMenubar.app" >&2
+    exit 1
+    ;;
+  *)
+    echo "error: notarisation of $SUBMISSION_ID ended '$SUBMISSION_STATUS'. Apple's log follows." >&2
+    xcrun notarytool log "$SUBMISSION_ID" "${NOTARY_AUTH[@]}" >&2 || true
+    exit 1
+    ;;
+esac
+
+for attempt in 1 2 3; do
+  if xcrun stapler staple "$APP"; then break; fi
+  if [ "$attempt" = 3 ]; then
+    echo "error: stapling failed three times; notarisation $SUBMISSION_ID was accepted, so retry 'xcrun stapler staple'." >&2
+    exit 1
+  fi
+  sleep 30
+done
 # The stapled ticket lives in the .app, so the zip has to be rebuilt from it
 rm -f "$ZIP"
 ditto -c -k --keepParent "$APP" "$ZIP"

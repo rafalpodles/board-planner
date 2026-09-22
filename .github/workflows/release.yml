@@ -2,7 +2,8 @@ name: Release
 
 # A tag vX.Y.Z builds the menubar app (worker inside), signs it with the Developer ID, notarises
 # and staples it, packs the worker on its own, and attaches both to the GitHub release.
-# Run it by hand for a dry run: the same build, kept as a workflow artifact, with no release.
+# Run by hand it is a dry run: the same build, kept as a short-lived workflow artifact (downloadable
+# by anyone, the repository is public) and attached to no release.
 on:
   push:
     tags: ["v*.*.*"]
@@ -13,7 +14,7 @@ on:
         default: "0.0.0"
         required: true
       signed:
-        description: "Sign and notarise (needs the signing secrets)"
+        description: "Sign and notarise (needs the release environment's secrets)"
         type: boolean
         default: true
 
@@ -22,28 +23,38 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
-  release:
-    name: Build, sign, notarise, publish
+  build:
+    name: Build, sign, notarise
     runs-on: macos-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
+    # The signing secrets live in this environment, not in the repository
+    environment: ${{ (github.event_name == 'push' || inputs.signed) && 'release' || '' }}
     env:
-      PUBLISH: ${{ github.event_name == 'push' }}
       SIGNED: ${{ github.event_name == 'push' || inputs.signed }}
       OUT: ${{ github.workspace }}/release-assets
+    outputs:
+      artifact: ${{ steps.version.outputs.artifact }}
     steps:
       - name: Resolve the version
+        id: version
         env:
           DISPATCH_VERSION: ${{ inputs.version }}
         run: |
-          if [ "$PUBLISH" = "true" ]; then VERSION="${GITHUB_REF_NAME#v}"; else VERSION="$DISPATCH_VERSION"; fi
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then VERSION="${GITHUB_REF_NAME#v}"; else VERSION="$DISPATCH_VERSION"; fi
           if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::The version must be x.y.z (a tag vX.Y.Z), got '$VERSION'"
             exit 1
           fi
+          if [ "$SIGNED" = "true" ]; then SUFFIX=signed; else SUFFIX=unsigned; fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "artifact=release-$VERSION-$SUFFIX" >> "$GITHUB_OUTPUT"
 
       - name: Every signing secret is set
         if: env.SIGNED == 'true'
@@ -62,19 +73,33 @@ jobs:
           done
           if [ "${#missing[@]}" -gt 0 ]; then
             for name in "${missing[@]}"; do
-              echo "::error::Repository secret $name is not set (Settings → Secrets and variables → Actions)"
+              echo "::error::Secret $name is not set in the 'release' environment (Settings → Environments → release)"
             done
             echo "Missing: ${missing[*]}. Set them, or run by hand with 'signed' off for an unsigned dry run."
             exit 1
           fi
 
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v7
         with:
           node-version: 26
-          cache: npm
-          cache-dependency-path: worker/package-lock.json
+
+      # Everything that runs third-party code happens here, before any secret is written to disk
+      - name: Install and build the worker
+        working-directory: worker
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+
+      - name: Swift tests
+        working-directory: menubar
+        run: make test
+
+      - name: Pack the worker
+        run: worker/pack.sh "$VERSION" "$OUT"
 
       - name: Import the Developer ID certificate into a temporary keychain
         if: env.SIGNED == 'true'
@@ -83,6 +108,7 @@ jobs:
           MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          umask 077
           KEYCHAIN="$RUNNER_TEMP/release-signing.keychain-db"
           KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
           echo "::add-mask::$KEYCHAIN_PASSWORD"
@@ -99,14 +125,15 @@ jobs:
           rm -f "$CERT"
 
           # The chain codesign needs, whether or not the runner image carries it
-          curl -fsSL https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer -o "$RUNNER_TEMP/DeveloperIDG2CA.cer"
+          curl --fail --silent --show-error --location --retry 3 \
+            https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer -o "$RUNNER_TEMP/DeveloperIDG2CA.cer"
           security import "$RUNNER_TEMP/DeveloperIDG2CA.cer" -k "$KEYCHAIN" || true
 
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
           security list-keychains -d user -s "$KEYCHAIN" "$HOME/Library/Keychains/login.keychain-db"
 
           IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" \
-            | grep "Developer ID Application" | grep "($APPLE_TEAM_ID)" | head -1 | awk '{print $2}')"
+            | grep "Developer ID Application" | grep "($APPLE_TEAM_ID)" | head -1 | awk '{print $2}' || true)"
           if [ -z "$IDENTITY" ]; then
             echo "::error::MACOS_CERTIFICATE_P12_BASE64 holds no 'Developer ID Application' identity for team APPLE_TEAM_ID. Identities found:"
             security find-identity -v -p codesigning "$KEYCHAIN" | sed 's/^/  /'
@@ -121,8 +148,9 @@ jobs:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
         run: |
+          umask 077
           KEY="$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8"
-          (umask 077 && printf '%s' "$ASC_KEY_P8_BASE64" | base64 --decode > "$KEY")
+          printf '%s' "$ASC_KEY_P8_BASE64" | base64 --decode > "$KEY"
           grep -q "BEGIN PRIVATE KEY" "$KEY" || { echo "::error::ASC_KEY_P8_BASE64 does not decode to a .p8 private key"; exit 1; }
           {
             echo "CP_NOTARY_KEY_PATH=$KEY"
@@ -130,51 +158,71 @@ jobs:
             echo "CP_NOTARY_ISSUER=$ASC_ISSUER_ID"
           } >> "$GITHUB_ENV"
 
-      - name: Build the app (tests, worker, bundle, sign, notarise, staple)
+      # `make app` is `make test worker`, done above, followed by this
+      - name: Bundle, sign, notarise, staple
         working-directory: menubar
         env:
           CP_ARCHS: arm64 x86_64
           CP_VERSION: ${{ env.VERSION }}
           CP_BUILD_NUMBER: ${{ github.run_number }}
-        run: make app
+          CP_NOTARY_TIMEOUT: 90m
+        run: ./bundle.sh release
 
-      - name: Gatekeeper accepts it
+      - name: Gatekeeper accepts it as notarised
         if: env.SIGNED == 'true'
         working-directory: menubar
         run: |
           codesign --verify --strict --deep --verbose=2 .build/CPMenubar.app
           xcrun stapler validate .build/CPMenubar.app
-          spctl --assess --type execute --verbose=4 .build/CPMenubar.app
+          ASSESSMENT="$(spctl --assess --type execute --verbose=4 .build/CPMenubar.app 2>&1)"
+          echo "$ASSESSMENT"
+          grep -q "source=Notarized Developer ID" <<<"$ASSESSMENT" \
+            || { echo "::error::Gatekeeper did not report 'source=Notarized Developer ID'"; exit 1; }
 
       - name: Package
         run: |
-          mkdir -p "$OUT"
           test -f menubar/.build/CPMenubar.app/Contents/Resources/worker/main.js
           ditto -c -k --keepParent menubar/.build/CPMenubar.app "$OUT/board-planner-menubar-$VERSION.zip"
-          worker/pack.sh "$VERSION" "$OUT"
-          (cd "$OUT" && shasum -a 256 ./*.zip ./*.tar.gz | sed 's| \./| |' > SHA256SUMS)
-          cat "$OUT/SHA256SUMS"
+          cd "$OUT"
+          shasum -a 256 "board-planner-menubar-$VERSION.zip" "board-planner-worker-$VERSION.tar.gz" > SHA256SUMS
+          shasum -a 256 -c SHA256SUMS
+          [ "$(wc -l < SHA256SUMS)" -eq 2 ] || { echo "::error::SHA256SUMS does not list both assets"; exit 1; }
 
       - uses: actions/upload-artifact@v7
         with:
-          name: release-${{ env.VERSION }}${{ env.SIGNED == 'true' && '-signed' || '-unsigned' }}
+          name: ${{ steps.version.outputs.artifact }}
           path: release-assets/
           if-no-files-found: error
-
-      - name: Attach to the GitHub release
-        if: env.PUBLISH == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG="$GITHUB_REF_NAME"
-          if gh release view "$TAG" > /dev/null 2>&1; then
-            gh release upload "$TAG" "$OUT"/* --clobber
-          else
-            gh release create "$TAG" "$OUT"/* --verify-tag --title "$TAG" --generate-notes
-          fi
+          retention-days: 3
 
       - name: Delete the temporary keychain and key
         if: always()
         run: |
           if [ -n "${RELEASE_KEYCHAIN:-}" ]; then security delete-keychain "$RELEASE_KEYCHAIN" || true; fi
           rm -f "$RUNNER_TEMP"/AuthKey_*.p8 "$RUNNER_TEMP"/developer-id.p12
+
+  publish:
+    name: Attach to the GitHub release
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: ${{ needs.build.outputs.artifact }}
+          path: release-assets
+
+      - name: Attach
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          ls -l release-assets
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$TAG" release-assets/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" release-assets/* --repo "$GITHUB_REPOSITORY" --verify-tag --title "$TAG" --generate-notes
+          fi

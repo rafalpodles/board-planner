@@ -43,5 +43,5 @@ node -e '
 
 mkdir -p "$OUT"
 TARBALL="$(cd "$OUT" && pwd)/board-planner-worker-$VERSION.tar.gz"
-COPYFILE_DISABLE=1 tar -czf "$TARBALL" -C "$STAGE" worker
+COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata --uid 0 --gid 0 --uname root --gname wheel -czf "$TARBALL" -C "$STAGE" worker
 echo "$TARBALL"
