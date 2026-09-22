@@ -50,6 +50,12 @@ there and **accept** it: the machine then pushes that exact commit and opens a p
 task's failure. A crash or timeout also returns it to the queue, but spends the attempt, so a
 repeating failure runs out of retries and lands in front of a human instead of cycling forever.
 
+The pull request carries the agent's summary and, under it, the gates the run passed before it was
+opened — each with the commands it ran (`npm ci --ignore-scripts --no-audit --no-fund` and
+`npm run build` for `build`, `npm test` for `test-run`) and how long it took (BP-780). The agent
+itself has no shell, and is told that the worker runs these checks after it, so its summary does
+not claim the tests were never run.
+
 ## Configuration
 
 Bootstrap is everything the worker needs before it can even register — where the server is, how
@@ -102,6 +108,22 @@ was — whatever gh has active — and preflight then says so, rather than repor
 `authenticated`. That silence was BP-373: the check was green for an account with no write access,
 and the truth arrived from GitHub as a 403 half an hour into the run.
 
+The pin also decides who the commits are **by** (BP-779). With an account pinned, each run asks
+GitHub for that account (`gh api user`, with its own token) and authors its commits as its display
+name and its noreply address, `<id>+<login>@users.noreply.github.com` — so a machine whose global
+git config names a work identity does not put it into a personal repository. To commit as something
+else, put both a name and an address beside the pin:
+
+```json
+{ "account": "owner", "name": "Owner Name", "email": "owner@example.com" }
+```
+
+The menubar keeps those two when the same account is picked again, and drops them when another one
+is. Nothing is written to the checkout's git config: the identity travels in the environment of the
+commit alone. With nothing pinned, commits carry what git config names on this machine, as before.
+Preflight names the identity either way, as its `commit identity` row, and warns when GitHub would
+not say who the pinned account is and the machine's own config is used instead.
+
 Everything that used to be an environment variable beyond the four above — base branch, poll
 interval, task timeout, diff caps, model — is now worker policy, set by an instance or project
 admin in `/settings/workers`, not by whoever starts the process:
@@ -149,6 +171,18 @@ npm install && npm run build && npm start
 Without a clone: every release carries `board-planner-worker-X.Y.Z.tar.gz`, built by
 `pack.sh` — this directory's `dist/`, `launchd/` and a `package.json` with nothing to install.
 Unpack it and run `npm start` (or `node dist/main.js`) inside the `worker/` it contains.
+
+The worker reports its version to the server on every heartbeat, read from the `package.json` it
+ships with: beside `main.js` in the menubar app, beside `dist/` in the tarball and in a clone. The
+release build stamps the tag's version into both, and release-please keeps this directory's own
+`package.json` at the last release, so the fleet screen shows what each machine actually runs
+(BP-768).
+
+The menubar app reaches the worker over a unix socket, `<CP_STATE_DIR>/worker.sock`. macOS caps a
+socket path at 104 bytes, so when that path would be longer the socket moves to
+`/tmp/cp-worker-<uid>-<digest of CP_STATE_DIR>/worker.sock`, in a directory the worker creates at
+mode 0700 and refuses to use if anybody else owns it or can write to it. The menubar derives the
+same path from the same state directory, so nothing needs configuring (BP-778).
 
 As a macOS service:
 
@@ -480,7 +514,9 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   (`CP_ALLOW_UNCONFINED_AGENT=1`) can write `user.email` into that file or into the shared
   `.git/config`, since a confined one writes nowhere but its worktree. Neither is a key git *runs*,
   so no scan refuses it. A commit's author is as trustworthy as the machine's own configuration. The account a
-  push acts as is pinned separately (BP-373), and that one is not writable from the checkout.
+  push acts as is pinned separately (BP-373), and that one is not writable from the checkout. A
+  pinned account (above, BP-779) takes this question away from git config altogether: git is not
+  asked, and the commit carries the account's own name and noreply address.
 - **Nothing the server sends becomes a path or an option.** Everything below arrives over HTTP from
   whichever server this worker is enrolled with, and everything past that boundary runs on somebody's
   laptop at their uid. Two of these were live: a `workerId` of `../../../../Users/owner/Library/LaunchAgents`
@@ -676,13 +712,20 @@ still holds: `PATCH /api/workers/:id` refuses every machine credential, worker c
 ```
 
 Mode 0600, absolute paths only. On every refresh the worker resolves each entry's `origin` and
-reports `{remote, path}` upward. The server matches those remotes against each project's configured
+reports `{remote, path}` upward — whether or not the server answered its own request on that
+refresh, so a checkout added while the worker runs is reported without a restart (BP-776). The server matches those remotes against each project's configured
 repository and answers with the projects this machine may serve — **as remotes, never as paths.**
 
 That direction matters. The server cannot name a directory on this machine: it says "this project is
 enabled and its repository is X", and the worker looks X up in its own inventory. A project whose
 repository is not in `repos.json` here is simply reported unbound, and no amount of server-side
 configuration changes that.
+
+A checkout the worker refuses — under a system or temporary directory such as `/private/tmp`,
+writable by others, not its own git toplevel — is reported as the machine's binding error for that
+project. The board then counts the machine as not live for that project: the assignee's own task
+says why and what to do, and Project settings → Workers lists the machine as unable to use its
+checkout (BP-777).
 
 An entry that has gone missing, or has no `origin`, is skipped rather than failing the whole list —
 one stale line must not cost this machine every other checkout it could serve.

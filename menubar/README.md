@@ -6,7 +6,9 @@ run is stuck or working, raises a notification when one ends, and manages the re
 ## What it talks to, and what it does not
 
 Its only I/O is the worker's unix socket at `${CP_STATE_DIR}/worker.sock` (default
-`~/.boardplanner/worker.sock`) and the allowlist at `${CP_STATE_DIR}/repos.json`.
+`~/.boardplanner/worker.sock`; under `/tmp/cp-worker-<uid>-<digest>/` when that path is longer than
+the 104 bytes macOS allows a socket, derived the same way the worker derives it) and the allowlist
+at `${CP_STATE_DIR}/repos.json`.
 
 **It holds no Board Planner credential and never opens a network connection.** Registration and
 policy live on the worker and in the web console; the Connection and Policy tabs are read-only

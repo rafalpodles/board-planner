@@ -126,7 +126,11 @@ mcp-server/           # Standalone MCP server (stdio transport)
   project's default, which only pre-selects the picker. Since BP-349 execution is effectively
   **macOS-only**: both calls to the CLI run under `sandbox-exec`, confined to one directory, and a
   machine with no seatbelt claims nothing until its operator sets `CP_ALLOW_UNCONFINED_AGENT=1`.
-  The worker's own test suite therefore runs on macOS in CI. See `worker/README.md` and
+  The worker's own test suite therefore runs on macOS in CI. A machine whose worker refuses its
+  checkout of a board (its `bindingError` names that project) is `unbound`, not live, for that board:
+  the assignee's task and Project settings → Workers say why (BP-777). Commits are authored as the
+  pinned GitHub account's noreply address, or a `name`/`email` in `github.json`, never by writing
+  the checkout's git config (BP-779). See `worker/README.md` and
   https://board-planner.com/docs/ai/agents/.
 - **A held task refuses to move**: while a run holds a task (`execution.runId` set), a status change
   that would leave the column is refused with **409**, naming the worker and its phase — through
@@ -195,7 +199,14 @@ APP_ORIGIN=               # Comma-separated origins allowed to write — the CSR
                           # with PUBLIC_ORIGIN, whenever a request carries no Sec-Fetch-Site (BP-361)
 TRUSTED_PROXY_HOPS=       # Proxies appending to X-Forwarded-For in front of the app; default 0,
                           # which ignores the header. The login throttle keys on it, so on a
-                          # proxy-less deployment a forged header used to reset every counter (BP-318)
+                          # proxy-less deployment a forged header used to reset every counter (BP-318).
+                          # At 0 the first request carrying the header logs one warning (BP-774)
+COOKIE_ALLOW_INSECURE=    # 1: plain session cookie (no Secure, no __Host-) for plain HTTP. auto:
+                          # the same only while PUBLIC_ORIGIN and every APP_ORIGIN are http:// —
+                          # what docker-compose.yml passes, so an https PUBLIC_ORIGIN is secure with
+                          # nothing else set. Empty or unset: secure (BP-773)
+PORT=                     # `npm start` (scripts/start.mjs) reads it from the environment, then from
+                          # .env and the other files Next reads; default 3000 (BP-775)
 PUBLIC_ORIGIN=            # This instance's own address, at runtime. Required for /api/mcp, both
                           # /.well-known documents and the PM OAuth redirect_uri, which answer 500
                           # without it rather than falling back to a request header (BP-316).
