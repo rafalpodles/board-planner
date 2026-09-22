@@ -53,7 +53,9 @@ make app       # test, build the worker, assemble the app through bundle.sh, ad-
 make clean
 ```
 
-`make app` produces `.build/CPMenubar.app`. `LSUIElement` keeps it out of the Dock and ⌘-Tab, so
+`make app` produces `.build/CPMenubar.app`, signed ad hoc, which opens on this Mac only. The
+signed and notarised build people download is made by CI on a version tag — see
+[RELEASING.md](RELEASING.md). `LSUIElement` keeps it out of the Dock and ⌘-Tab, so
 the menu bar icon and ⌘, from the panel are the only ways in.
 
 **The worker ships inside the app**, at `Contents/Resources/worker` — about 200 KB of JavaScript

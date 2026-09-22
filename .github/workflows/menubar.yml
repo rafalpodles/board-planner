@@ -6,7 +6,9 @@ on:
   push:
     paths:
       - "menubar/**"
+      - "worker/pack.sh"
       - ".github/workflows/menubar.yml"
+      - ".github/workflows/release.yml"
   workflow_dispatch:
 
 concurrency:
@@ -36,3 +38,12 @@ jobs:
         run: |
           make app
           test -f .build/CPMenubar.app/Contents/Resources/worker/main.js
+      - name: The worker packs into a tarball that runs without an install
+        run: |
+          ../worker/pack.sh 0.0.0 "$RUNNER_TEMP/pack"
+          mkdir "$RUNNER_TEMP/unpacked"
+          tar -xzf "$RUNNER_TEMP/pack/board-planner-worker-0.0.0.tar.gz" -C "$RUNNER_TEMP/unpacked"
+          cd "$RUNNER_TEMP/unpacked/worker"
+          test -f dist/main.js
+          test "$(node -p 'require("./package.json").type')" = module
+          node --input-type=module -e 'await import(process.cwd() + "/dist/config.js")'
