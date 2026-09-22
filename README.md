@@ -267,7 +267,7 @@ Everything is optional except the database. Put overrides in a `.env` file next 
 | `PUBLIC_ORIGIN` | `NEXT_PUBLIC_APP_URL`, else `http://localhost:${APP_PORT}` (compose); otherwise `APP_ORIGIN` when it names exactly one origin | The one address this instance calls its own, and the base of every link it sends. Required for MCP, PM OAuth and enrolling a worker |
 | `BOARD_PLANNER_VERSION` | `latest` | Which published image compose runs |
 | `BOOTSTRAP_TOKEN` | generated, printed to the log | The setup code the first account is created with, 16 characters or more. Set it when the log is not where you can read it |
-| `COOKIE_ALLOW_INSECURE` | `auto` (compose); off otherwise | `1` issues the session cookie without `Secure` and without the `__Host-` prefix, for an instance served over plain HTTP. `auto` does that only while `PUBLIC_ORIGIN` and every `APP_ORIGIN` are `http://`. `0`, empty or unset: the secure cookie |
+| `COOKIE_ALLOW_INSECURE` | `auto` (compose); off otherwise | `1` issues the session cookie without `Secure` and without the `__Host-` prefix, for an instance served over plain HTTP. `auto` does that only while `PUBLIC_ORIGIN` and every `APP_ORIGIN` are `http://` and the sign-in did not arrive over `https://`. `0`, empty or unset: the secure cookie |
 | `TRUSTED_PROXY_HOPS` | `0` | How many proxies append to `X-Forwarded-For` in front of this app |
 | `ENCRYPTION_KEY` | — | 32 bytes, hex or standard base64 (not base64url), encrypting stored integration tokens and chat webhook URLs at rest |
 | `ENCRYPTION_KEYS_OLD` | — | Comma-separated retired keys, so a rotation can still read what they wrote |
