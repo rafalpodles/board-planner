@@ -118,6 +118,20 @@ function harness(overrides: Partial<WorkerDeps> = {}) {
   return { worker, seen, heartbeat, control, local, logError };
 }
 
+describe("the enrolment token file in the wiring", () => {
+  it("tells the heartbeat which file to name when it has no token to register with", () => {
+    const { seen } = harness({ env: { ...ENV, CP_ENROLMENT_TOKEN_FILE: "/nonexistent/cp-enrol/token" } });
+
+    expect(seen.heartbeat?.enrolmentTokenFile).toBe("/nonexistent/cp-enrol/token");
+  });
+
+  it("names no file when none is configured", () => {
+    const { seen } = harness();
+
+    expect(seen.heartbeat?.enrolmentTokenFile).toBeUndefined();
+  });
+});
+
 describe("the local socket's place in the wiring", () => {
   // The two server channels deliver the same standing command, so they must share the guard that
   // tells a redelivery from a fresh instruction.
