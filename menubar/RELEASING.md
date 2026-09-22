@@ -23,8 +23,8 @@
   labelled with the OCI `source`, `version` and `revision` so GHCR links the package to the
   repository. It needs no environment and no secret, and depends on neither job above: a failed
   notarisation does not hold the image back, nor the reverse. The image bakes in no address — every
-  link the app builds comes from `PUBLIC_ORIGIN` at runtime. Layers are cached in the GitHub
-  Actions cache (`type=gha`, `mode=max`), shared with the dry run.
+  link the app builds comes from `PUBLIC_ORIGIN` at runtime. A mistaken high tag (say `v9.0.0`)
+  keeps `latest` from moving until that tag is deleted.
 
 | Asset | What it is |
 | --- | --- |
