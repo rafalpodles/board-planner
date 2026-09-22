@@ -20,6 +20,7 @@ function depsWith(
     registerStatus?: number;
     forgetEnrolmentToken?: () => void;
     enrolmentTokenFile?: string;
+    enrolmentTokenError?: string;
   } = {}
 ): HeartbeatDeps {
   const initialStored = opts.stored === undefined ? { workerId: "6a7c686f70ed274cf658b1b3", credential: "cpw_existing", heartbeatMs: 60_000 } : opts.stored;
@@ -51,6 +52,7 @@ function depsWith(
     enrolmentToken: opts.enrolmentToken === undefined ? "cpe_one_time" : opts.enrolmentToken,
     forgetEnrolmentToken: opts.forgetEnrolmentToken,
     enrolmentTokenFile: opts.enrolmentTokenFile,
+    enrolmentTokenError: opts.enrolmentTokenError,
     registration: { name: "worker-1", host: "host-1", platform: "darwin", version: "1.0.0" },
     store,
     handlers: opts.handlers ?? handlerStub(),
@@ -221,6 +223,36 @@ describe("startHeartbeat", () => {
     const message = String(vi.mocked(deps.log!).mock.calls[0][0]);
     expect(message).toContain("CP_ENROLMENT_TOKEN_FILE (/Users/op/.boardplanner/token) is missing");
     expect(message).not.toContain("and set CP_ENROLMENT_TOKEN_FILE");
+  });
+
+  it("with no identity, reports why the token file could not be used and does not register", async () => {
+    const deps = depsWith({
+      stored: null,
+      enrolmentToken: "",
+      enrolmentTokenFile: "/Users/op/.boardplanner/token",
+      enrolmentTokenError:
+        "CP_ENROLMENT_TOKEN_FILE: /Users/op/.boardplanner/token is readable by group or others (mode 644); run chmod 600 on it",
+    });
+
+    await startHeartbeat(deps).tick();
+
+    expect(calls(deps).some(([url]) => String(url).endsWith("/api/workers/register"))).toBe(false);
+    const message = String(vi.mocked(deps.log!).mock.calls[0][0]);
+    expect(message).toContain("readable by group or others");
+    expect(message).toContain("chmod 600");
+  });
+
+  it("with an identity, never mentions an unusable token file and heartbeats as usual", async () => {
+    const deps = depsWith({
+      enrolmentToken: "",
+      enrolmentTokenFile: "/Users/op/.boardplanner/token",
+      enrolmentTokenError: "CP_ENROLMENT_TOKEN_FILE: readable by group or others; run chmod 600 on it",
+    });
+
+    await startHeartbeat(deps).tick();
+
+    expect(calls(deps)[0][1].headers.Authorization).toBe("Bearer cpw_existing");
+    expect(deps.log).not.toHaveBeenCalledWith(expect.stringContaining("chmod 600"));
   });
 
   // An enrolled worker must keep booting after the operator deletes the token, which is the whole

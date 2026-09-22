@@ -73,6 +73,8 @@ export interface Bootstrap {
   // Single-use, spent by the first registration. Empty once the operator has removed it, which is
   // the intended end state — an enrolled worker never needs it again.
   enrolmentToken: string;
+  // Why the token file could not be read. Only matters to a worker with no identity yet
+  enrolmentTokenError: string;
   enrolmentTokenFile: string;
   workerName: string;
   stateDir: string;
@@ -180,20 +182,24 @@ function requiredSecret(env: Env, key: string, readSecret: SecretReader): string
 
 const isMissingFile = (e: unknown) => (e as NodeJS.ErrnoException)?.code === "ENOENT";
 
-// Optional by design: once a worker has an identity it never registers again, and it deletes the
-// file itself after registering — so a missing file is the normal end state and an enrolled worker
-// must keep booting. A file that is there but cannot be used is the operator's mistake, and says so.
-function enrolmentSecret(env: Env, key: string, readSecret: SecretReader): string {
+// Never fatal at boot: an enrolled worker never reads the token again, and a file left at that path
+// (an old plist's cp_ token, say) must not stop it. A missing file is the normal end state — the
+// worker deletes it after registering. Any other failure is kept, and registration reports it.
+function enrolmentSecret(
+  env: Env,
+  key: string,
+  readSecret: SecretReader
+): { token: string; error: string } {
   const inline = env[key];
-  if (inline?.trim()) return inline.trim();
+  if (inline?.trim()) return { token: inline.trim(), error: "" };
 
   const path = env[`${key}_FILE`];
-  if (!path?.trim()) return "";
+  if (!path?.trim()) return { token: "", error: "" };
   try {
-    return readSecret(path.trim()).trim();
+    return { token: readSecret(path.trim()).trim(), error: "" };
   } catch (e) {
-    if (isMissingFile(e)) return "";
-    throw new Error(`${key}_FILE: ${e instanceof Error ? e.message : String(e)}`);
+    if (isMissingFile(e)) return { token: "", error: "" };
+    return { token: "", error: `${key}_FILE: ${e instanceof Error ? e.message : String(e)}` };
   }
 }
 
@@ -227,12 +233,14 @@ export function stateDirFrom(env: Env): string {
 }
 
 export function loadBootstrap(env: Env, readSecret: SecretReader = readSecretFile): Bootstrap {
+  const enrolment = enrolmentSecret(env, "CP_ENROLMENT_TOKEN", readSecret);
   return {
     apiBaseUrl: required(env, "CP_API_URL").replace(/\/$/, ""),
     // Optional since CP-237: the worker holds one credential, minted by registration, whose scope
     // tracks its assignments. Still read when present so an existing plist keeps booting.
     apiToken: ignoredSecret(env, "CP_API_TOKEN", readSecret),
-    enrolmentToken: enrolmentSecret(env, "CP_ENROLMENT_TOKEN", readSecret),
+    enrolmentToken: enrolment.token,
+    enrolmentTokenError: enrolment.error,
     enrolmentTokenFile: env.CP_ENROLMENT_TOKEN_FILE?.trim() || "",
     workerName: required(env, "CP_WORKER_NAME"),
     stateDir: stateDirFrom(env),

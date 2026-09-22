@@ -135,32 +135,39 @@ describe("the enrolment token file", () => {
   });
 
   // Under the default umask the file is 0644. Swallowing the refusal left the operator reading
-  // "set CP_ENROLMENT_TOKEN_FILE" about a variable that was set
-  it("refuses a file others can read, naming the variable and the fix", () => {
+  // "set CP_ENROLMENT_TOKEN_FILE" about a variable that was set. Not thrown here: an enrolled worker
+  // must boot past a leftover file, so registration decides whether the reason matters
+  it("keeps the refusal of a file others can read, naming the variable and the fix", () => {
     const path = tokenAt(0o644);
 
-    expect(() => loadBootstrap({ ...base, CP_ENROLMENT_TOKEN_FILE: path })).toThrow(
-      /CP_ENROLMENT_TOKEN_FILE: .*readable by group or others.*chmod 600/
+    const bootstrap = loadBootstrap({ ...base, CP_ENROLMENT_TOKEN_FILE: path });
+
+    expect(bootstrap.enrolmentToken).toBe("");
+    expect(bootstrap.enrolmentTokenError).toMatch(
+      /^CP_ENROLMENT_TOKEN_FILE: .*readable by group or others.*chmod 600/
     );
   });
 
-  it("surfaces any other read failure rather than booting without a token", () => {
+  it("keeps any other read failure rather than booting as if nothing was set", () => {
     const read = vi.fn(() => {
       throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
     });
 
-    expect(() =>
-      loadBootstrap({ ...base, CP_ENROLMENT_TOKEN_FILE: "/secrets/token" }, read)
-    ).toThrow(/CP_ENROLMENT_TOKEN_FILE: EACCES/);
+    expect(
+      loadBootstrap({ ...base, CP_ENROLMENT_TOKEN_FILE: "/secrets/token" }, read).enrolmentTokenError
+    ).toBe("CP_ENROLMENT_TOKEN_FILE: EACCES: permission denied");
   });
 
   // The worker deletes the file itself once registered, and the plist still names it: an enrolled
   // worker has to keep booting
-  it("is empty rather than fatal once the file is gone", () => {
-    expect(
-      loadBootstrap({ ...base, CP_ENROLMENT_TOKEN_FILE: join(tmpdir(), "cp-enrol-absent", "token") })
-        .enrolmentToken
-    ).toBe("");
+  it("is empty, with nothing to report, once the file is gone", () => {
+    const bootstrap = loadBootstrap({
+      ...base,
+      CP_ENROLMENT_TOKEN_FILE: join(tmpdir(), "cp-enrol-absent", "token"),
+    });
+
+    expect(bootstrap.enrolmentToken).toBe("");
+    expect(bootstrap.enrolmentTokenError).toBe("");
   });
 
   it("is empty when the variable is not set", () => {

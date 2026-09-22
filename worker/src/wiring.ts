@@ -781,6 +781,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       ? () => rmSync(bootstrap.enrolmentTokenFile, { force: true })
       : undefined,
     enrolmentTokenFile: bootstrap.enrolmentTokenFile || undefined,
+    enrolmentTokenError: bootstrap.enrolmentTokenError || undefined,
     registration: {
       name: bootstrap.workerName,
       host: deps.hostname(),

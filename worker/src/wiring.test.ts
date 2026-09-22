@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { agentArgs, answerSandboxProbe, isAgentSpawn, isSandboxProbe } from "./__fixtures__/agent-spawn.js";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -123,6 +123,40 @@ describe("the enrolment token file in the wiring", () => {
     const { seen } = harness({ env: { ...ENV, CP_ENROLMENT_TOKEN_FILE: "/nonexistent/cp-enrol/token" } });
 
     expect(seen.heartbeat?.enrolmentTokenFile).toBe("/nonexistent/cp-enrol/token");
+  });
+
+  // The upgrade path: an old plist's CP_API_TOKEN_FILE held a cp_ token at mode 0644, and the new
+  // plist points CP_ENROLMENT_TOKEN_FILE at that same file
+  it("starts an enrolled worker past a token file others can read", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cp-wiring-enrol-"));
+    const path = join(dir, "token");
+    writeFileSync(path, "cp_legacy\n");
+    chmodSync(path, 0o644);
+    try {
+      const { seen } = harness({ env: { ...ENV, CP_ENROLMENT_TOKEN_FILE: path } });
+
+      expect(seen.heartbeat).toBeDefined();
+      expect(seen.heartbeat?.enrolmentToken).toBe("");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("hands registration the refusal when there is no identity to fall back on", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cp-wiring-enrol-"));
+    const path = join(dir, "token");
+    writeFileSync(path, "cpe_x\n");
+    chmodSync(path, 0o644);
+    try {
+      const { seen } = harness({
+        env: { ...ENV, CP_ENROLMENT_TOKEN_FILE: path },
+        createStore: () => memoryStore(""),
+      });
+
+      expect(seen.heartbeat?.enrolmentTokenError).toMatch(/readable by group or others.*chmod 600/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("names no file when none is configured", () => {
