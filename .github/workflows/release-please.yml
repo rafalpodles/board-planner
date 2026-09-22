@@ -1,7 +1,8 @@
 name: Release Please
 
-# Keeps one release PR open against main. Merging it tags vX.Y.Z and creates the GitHub release, and
-# the same run builds and attaches the assets: a tag created with GITHUB_TOKEN starts no workflow.
+# Keeps one release PR open against main. Merging it tags vX.Y.Z and creates the GitHub release as a
+# draft, and the same run builds and attaches the assets and only then publishes it (BP-772): a tag
+# created with GITHUB_TOKEN starts no workflow.
 on:
   push:
     branches: [main]

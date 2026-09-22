@@ -251,37 +251,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v7
-        with:
-          name: ${{ needs.build.outputs.artifact }}
-          path: release-assets
-
-      # release-please has already created the release with its changelog; a hand-pushed tag has none yet
-      - name: Attach
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.resolve.outputs.tag }}
-        run: |
-          ls -l release-assets
-          (cd release-assets && sha256sum -c SHA256SUMS)
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            gh release upload "$TAG" release-assets/* --repo "$GITHUB_REPOSITORY" --clobber
-          else
-            gh release create "$TAG" release-assets/* --repo "$GITHUB_REPOSITORY" --verify-tag --title "$TAG" --generate-notes
-          fi
-
-  # Independent of the macOS jobs: a failed notarisation does not hold the image back, nor the reverse.
-  # The dry run below repeats these steps through anchors, so it builds exactly what a tag pushes.
-  image:
-    name: Publish the Docker image
-    needs: resolve
-    if: needs.resolve.outputs.release == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    permissions:
-      contents: read
-      packages: write
-    steps:
+      # Defined here, reused by the image jobs below: one rule for what `latest` means
       - &image-version
         name: Resolve the version
         env:
@@ -313,6 +283,48 @@ jobs:
             echo "LATEST=$LATEST"
             echo "REVISION=$(git rev-parse HEAD)"
           } >> "$GITHUB_ENV"
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: ${{ needs.build.outputs.artifact }}
+          path: release-assets
+
+      # release-please has already created the release, as a draft with its changelog; a hand-pushed
+      # tag has none yet. Either way it is published, and made `latest` when it is the newest
+      # vX.Y.Z, only here: after its assets are attached, so the docs' "latest release" link never
+      # lands on a release with no app to download (BP-772)
+      - name: Attach and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          ls -l release-assets
+          (cd release-assets && sha256sum -c SHA256SUMS)
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$TAG" release-assets/* --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest="$LATEST"
+          else
+            gh release create "$TAG" release-assets/* --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --title "$TAG" --generate-notes --latest="$LATEST"
+          fi
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,assets \
+            --jq '"draft=\(.isDraft) assets=\(.assets | length)"'
+
+  # Independent of the macOS jobs: a failed notarisation does not hold the image back, nor the reverse.
+  # The dry run below repeats these steps through anchors, so it builds exactly what a tag pushes.
+  image:
+    name: Publish the Docker image
+    needs: resolve
+    if: needs.resolve.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - *image-version
+      - *image-checkout
+      - *image-latest
 
       - &image-qemu
         uses: docker/setup-qemu-action@v4

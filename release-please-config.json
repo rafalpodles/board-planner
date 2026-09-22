@@ -6,6 +6,8 @@
     ".": {
       "release-type": "node",
       "package-name": "board-planner",
+      "draft": true,
+      "force-tag-creation": true,
       "extra-files": [
         {
           "type": "json",
