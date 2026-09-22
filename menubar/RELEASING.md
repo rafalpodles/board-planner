@@ -109,6 +109,16 @@ jobs:
   notarisation does not hold the image back, nor the reverse. The image bakes in no address — every
   link the app builds comes from `PUBLIC_ORIGIN` at runtime. A mistaken high tag (say `v9.0.0`)
   keeps `latest` from moving until that tag is deleted.
+- **docs** (`ubuntu-latest`, no permissions, releases only). Redeploys the `board-planner-site`
+  Railway service so <https://board-planner.com/docs/changelog/>, which is generated when that site
+  is built, lists the new version. It waits for **publish** — the changelog reads the releases API
+  unauthenticated, and until publish the release is still a draft and invisible to it — and for
+  **image**, so the page never prints a `docker pull` for a tag that was not pushed. **A failed
+  image job therefore skips this**, and the page then waits for the next site deploy, whenever that
+  happens to be; re-running the image job afterwards runs it. Needs the repository secret
+  `RAILWAY_TOKEN` (a Railway project token for that service) and, if the service is not named
+  `board-planner-site`, the repository variable `RAILWAY_SITE_SERVICE`. With neither the job prints
+  a warning and succeeds: the docs lagging must not fail a release.
 
 | Asset | What it is |
 | --- | --- |
