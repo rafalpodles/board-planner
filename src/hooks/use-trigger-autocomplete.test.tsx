@@ -4,15 +4,11 @@ import { act, renderHook } from "@testing-library/react";
 import type { KeyboardEvent } from "react";
 import { useTriggerAutocomplete, type Trigger } from "./use-trigger-autocomplete";
 
-function taskTrigger(): Trigger {
+function taskTrigger(ids = ["1", "2", "3"]): Trigger {
   return {
     name: "task",
     pattern: /BP-(\d*)$/,
-    suggest: () => [
-      { id: "1", insert: "BP-1", label: "BP-1" },
-      { id: "2", insert: "BP-2", label: "BP-2" },
-      { id: "3", insert: "BP-3", label: "BP-3" },
-    ],
+    suggest: () => ids.map((id) => ({ id, insert: `BP-${id}`, label: `BP-${id}` })),
   };
 }
 
@@ -21,7 +17,7 @@ function press(key: string): KeyboardEvent<HTMLTextAreaElement> {
 }
 
 async function openedList() {
-  const textarea = { current: null };
+  const textarea = { current: document.createElement("textarea") };
   const hook = renderHook(({ triggers }) => useTriggerAutocomplete(triggers, textarea, () => {}), {
     initialProps: { triggers: [taskTrigger()] },
   });
@@ -57,5 +53,59 @@ describe("the selection in an open suggestion list", () => {
     await act(async () => result.current.detect("see BP-1", 8));
 
     expect(result.current.index).toBe(0);
+  });
+
+  it("stays on the same task when the rebuilt list puts it elsewhere", async () => {
+    const { result, rerender } = await openedList();
+    act(() => result.current.onKeyDown(press("ArrowDown")));
+
+    await act(async () => rerender({ triggers: [taskTrigger(["4", "1", "2", "3"])] }));
+
+    expect(result.current.items[result.current.index].id).toBe("2");
+  });
+
+  it("goes back to the top when the selected task is gone from the rebuilt list", async () => {
+    const { result, rerender } = await openedList();
+    act(() => result.current.onKeyDown(press("ArrowDown")));
+    act(() => result.current.onKeyDown(press("ArrowDown")));
+
+    await act(async () => rerender({ triggers: [taskTrigger(["1", "2"])] }));
+
+    expect(result.current.index).toBe(0);
+  });
+});
+
+describe("a list somebody is done with", () => {
+  it("stays shut after Escape when the triggers are rebuilt", async () => {
+    const { result, rerender } = await openedList();
+    act(() => result.current.onKeyDown(press("Escape")));
+
+    await act(async () => rerender({ triggers: [taskTrigger()] }));
+
+    expect(result.current.items).toHaveLength(0);
+    expect(result.current.trigger).toBeNull();
+  });
+
+  it("stays shut after a pick when the triggers are rebuilt", async () => {
+    const { result, rerender } = await openedList();
+    act(() => result.current.onKeyDown(press("Enter")));
+
+    await act(async () => rerender({ triggers: [taskTrigger()] }));
+
+    expect(result.current.items).toHaveLength(0);
+  });
+
+  // The reason the rebuilt triggers are asked again at all: a key typed before its data arrived
+  it("is still offered once its data arrives, when nothing matched before", async () => {
+    const textarea = { current: document.createElement("textarea") };
+    const { result, rerender } = renderHook(
+      ({ triggers }) => useTriggerAutocomplete(triggers, textarea, () => {}),
+      { initialProps: { triggers: [] as Trigger[] } }
+    );
+    await act(async () => result.current.detect("see BP-", 7));
+
+    await act(async () => rerender({ triggers: [taskTrigger()] }));
+
+    expect(result.current.items).toHaveLength(3);
   });
 });
