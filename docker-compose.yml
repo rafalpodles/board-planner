@@ -25,7 +25,15 @@ services:
         condition: service_healthy
     ports:
       - "${APP_PORT:-3000}:3000"
+    # Every variable in .env reaches the app; the entries under `environment:` win over it
+    env_file:
+      - path: .env
+        required: false
     environment:
+      # Pinned so a .env written for `npm run dev` cannot move the port, the bind address or the mode
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
       MONGODB_URI: ${MONGODB_URI:-mongodb://mongo:27017/boardplanner}
       # Compose binds localhost over plain HTTP, where a Secure cookie is discarded — drop this once the instance is behind TLS
       COOKIE_ALLOW_INSECURE: ${COOKIE_ALLOW_INSECURE:-1}

@@ -177,8 +177,8 @@ docker compose up -d
 ```
 
 That runs the published image, `ghcr.io/rafalpodles/board-planner`, built for `linux/amd64` and
-`linux/arm64` on every release. `:latest` is the newest release; pin one with
-`BOARD_PLANNER_VERSION=1.2.3` in a `.env` next to the compose file. To upgrade,
+`linux/arm64` on every release from 1.1.0 on — 1.0.x predates it and has no image. `:latest` is the
+newest release; pin one with `BOARD_PLANNER_VERSION=1.2.3` in a `.env` next to the compose file. To upgrade,
 `docker compose pull && docker compose up -d`.
 
 **From a clone, run `docker compose up -d --build`.** Plain `docker compose up -d` pulls and runs
@@ -249,7 +249,9 @@ cd mcp-server && npm install && npm run build
 ## Configuration
 
 Everything is optional except the database. Put overrides in a `.env` file next to
-`docker-compose.yml`.
+`docker-compose.yml`; the compose file hands every variable in it to the app (Docker Compose 2.24 or
+newer). `NODE_ENV`, `PORT` and `HOSTNAME` are the exception — compose pins them, so a `.env` written
+for `npm run dev` cannot change how the container serves.
 
 | Variable | Default | What it does |
 | --- | --- | --- |
@@ -269,6 +271,8 @@ Everything is optional except the database. Put overrides in a `.env` file next 
 | `OPENROUTER_API_KEY`, `PM_MODEL`, `PM_MAX_TOKENS`, `PM_DAILY_TURN_CAP`, `PM_DAILY_TOKEN_CAP`, `PM_SCHEDULER_TICK_MS` | — | PM agent |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | — | Email notifications |
 | `DIGEST_HOUR`, `DIGEST_TIMEZONE`, `DIGEST_TICK_MS` | `7`, `Europe/Warsaw`, `300000` | When the opt-in daily digest goes out |
+| `GITHUB_SYNC_TICK_MS` | `300000` | How often projects with a GitHub token are re-synced; `0` turns the background sync off |
+| `GITHUB_API_BASE_URL` | `https://api.github.com` | Where GitHub's API is, for GitHub Enterprise Server |
 
 A few of these have sharp edges worth reading once.
 
