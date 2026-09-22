@@ -312,6 +312,28 @@ describe("runStep — a worker action", () => {
     expect(c.executor.execute.mock.calls[0][0].brief.laterChecks).toEqual(["build", "review"]);
   });
 
+  // Review of BP-780: two identical steps in one sequence, and indexOf answered for the first
+  it("answers for the step at this position, not the first one that looks like it", async () => {
+    const step = entry({ key: "implement", capability: "edit" });
+    const sequence = [
+      step,
+      { ...step },
+      entry({ key: "build", kind: "gate", gateKind: "build" }),
+    ];
+    const task = { taskKey: "CP-1", title: "t", description: "", acceptanceCriteria: [], agent: { sequence } };
+
+    const first = ctx({ task, position: 0 } as never);
+    await runStep(sequence[0], first);
+    const second = ctx({ task, position: 1 } as never);
+    await runStep(sequence[1], second);
+
+    expect(first.executor.execute.mock.calls[0][0].brief.laterChecks).toEqual(["build"]);
+    expect(second.executor.execute.mock.calls[0][0].brief.laterChecks).toEqual(["build"]);
+    expect(
+      (await runStep(sequence[2], ctx({ task, position: 2 } as never))).kind
+    ).toBeDefined();
+  });
+
   it("gives the pull request the checks the run passed", async () => {
     const c = ctx();
     c.state.checks.push({ name: "build", commands: ["npm run build"], durationMs: 5 });

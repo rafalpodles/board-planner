@@ -87,7 +87,9 @@ export function prBody(summary: string, checks: PassedCheck[] = []): string {
 }
 
 const CHECKS_HEADING = "### Checks run by the worker, not written by the agent";
-const WORKER_HEADING = /^\s*#{1,6}\s*checks (the worker ran|run by the worker)/i;
+// Any heading-shaped line about checks and the worker: the summary below the rule is the agent's,
+// and it must not be able to write a line that reads as the worker's own section (BP-780 review)
+const WORKER_HEADING = /^\s*(#{1,6}|\*\*|__)?\s*checks?\b.*\b(worker|ran|run|runs)\b/i;
 
 export function formatDuration(ms: number): string {
   const seconds = Math.round(ms / 1000);

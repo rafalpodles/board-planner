@@ -558,7 +558,7 @@ export async function runTask(
   try {
     const budget = createBudget(config.runCeilingMs, now);
 
-    for (const entry of task.agent.sequence) {
+    for (const [position, entry] of task.agent.sequence.entries()) {
       if (
         await releaseIfAborted(deps, reporter, task, whatLanded(state, branch))
       )
@@ -596,6 +596,7 @@ export async function runTask(
           baseSha: worktree.baseSha,
           runner,
           gitPath: deps.gitPath,
+          position,
         });
         // Before the abort check, not after it. An earlier step may already have committed, and
         // exiting without keeping the worktree destroys the only copy of that work: nothing is

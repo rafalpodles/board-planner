@@ -62,6 +62,8 @@ export interface StepContext {
   baseSha: string;
   runner: Runner;
   gitPath: string;
+  /** Where this entry sits in the agent's sequence — two identical steps are not the same step */
+  position?: number;
 }
 
 // A push or a merge that throws must not reach the pipeline's outer catch: that requeues and
@@ -131,10 +133,12 @@ async function deliver(
   }
 }
 
-function laterGateKinds(task: ClaimedTask, entry: SnapshotEntry): string[] {
-  const sequence = task.agent?.sequence ?? [];
-  const at = sequence.indexOf(entry);
-  if (at === -1) return [];
+function laterGateKinds(ctx: StepContext, entry: SnapshotEntry): string[] {
+  const sequence = ctx.task.agent?.sequence ?? [];
+  // indexOf finds the first entry that looks like this one, and a sequence may hold the same step
+  // twice — the caller knows which position this is
+  const at = ctx.position ?? sequence.indexOf(entry);
+  if (at === -1 || sequence[at] !== entry) return [];
   return sequence
     .slice(at + 1)
     .filter((later) => later.kind === "gate")
@@ -159,7 +163,7 @@ export async function runStep(
       model: entry.model ?? "",
       fallbackModel: entry.fallbackModel ?? "",
       timeoutMs: ctx.timeoutMs,
-      laterChecks: laterGateKinds(ctx.task, entry),
+      laterChecks: laterGateKinds(ctx, entry),
     },
   });
 
