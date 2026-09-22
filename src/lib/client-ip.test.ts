@@ -120,25 +120,35 @@ describe("isIpAddress", () => {
 
 // BP-774. Production ran behind Railway's proxy with the variable unset, and nothing said so.
 describe("a forwarded request with no proxy configured", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     vi.resetModules();
   });
 
-  async function fresh() {
+  async function fresh(hops?: string) {
     vi.resetModules();
     delete process.env.TRUSTED_PROXY_HOPS;
+    if (hops !== undefined) process.env.TRUSTED_PROXY_HOPS = hops;
     return (await import("./client-ip")).getClientIp;
   }
+
+  const forwarded = (value: string) =>
+    new Request("https://app.example.com/api/auth/login", { headers: { "x-forwarded-for": value } });
+
+  const chain = (entries: number) =>
+    Array.from({ length: entries }, (_, i) => `203.0.113.${i + 1}`).join(", ");
 
   it("says once that the header is ignored, and still ignores it", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const getIp = await fresh();
-    const forwarded = () =>
-      new Request("https://app.example.com/api/auth/login", { headers: { "x-forwarded-for": "203.0.113.9" } });
 
-    expect(getIp(forwarded())).toBeNull();
-    expect(getIp(forwarded())).toBeNull();
+    expect(getIp(forwarded("203.0.113.9"))).toBeNull();
+    expect(getIp(forwarded("203.0.113.9"))).toBeNull();
 
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0][0]).toContain("TRUSTED_PROXY_HOPS=0");
@@ -149,6 +159,207 @@ describe("a forwarded request with no proxy configured", () => {
     const getIp = await fresh();
 
     getIp(new Request("https://app.example.com/api/auth/login"));
+
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  // The count is the number TRUSTED_PROXY_HOPS wants, so an operator reads the value off the log
+  // rather than guessing at their chain
+  it("names how many entries the header carried", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const getIp = await fresh();
+
+    getIp(forwarded("203.0.113.9, 172.16.0.1"));
+
+    expect(warn.mock.calls[0][0]).toContain("carrying 2 entries");
+  });
+
+  it("says entry, not entries, for a header with one", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const getIp = await fresh();
+
+    getIp(forwarded("203.0.113.9"));
+
+    expect(warn.mock.calls[0][0]).toContain("carrying 1 entry");
+  });
+
+  // Blank and padded entries are what a chain of proxies produces; the count has to be the count of
+  // addresses, which is the number the operator would set
+  it("counts the addresses, not the commas", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const getIp = await fresh();
+
+    getIp(forwarded(" 203.0.113.9 ,  , 172.16.0.1 , "));
+
+    expect(warn.mock.calls[0][0]).toContain("carrying 2 entries");
+  });
+
+  // A health check or an uptime probe reaches the app by a shorter path than a browser does, and
+  // whichever arrives first is a sample of one. A second path through the chain is the case the
+  // operator needs to see before choosing a number.
+  it("reports again when a later request carries a different count", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const getIp = await fresh();
+
+    getIp(forwarded("203.0.113.9"));
+    getIp(forwarded("203.0.113.9, 172.16.0.1"));
+    getIp(forwarded("198.51.100.4"));
+
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(warn.mock.calls[0][0]).toContain("carrying 1 entry");
+    expect(warn.mock.calls[1][0]).toContain("carrying 2 entries");
+  });
+
+  it("never repeats a count it has already reported", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const getIp = await fresh();
+
+    for (let i = 0; i < 20; i++) getIp(forwarded("203.0.113.9, 172.16.0.1"));
+
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  // Without a bound, a caller who varies the header's length has a per-request log
+  it("holds a fifth count back once four have been reported", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const getIp = await fresh();
+
+    for (let entries = 1; entries <= 9; entries++) getIp(forwarded(chain(entries)));
+
+    expect(warn).toHaveBeenCalledTimes(4);
+  });
+
+  // Nine and eleven minutes rather than ten: on the boundary itself, a quiet period of one
+  // millisecond would satisfy both halves and the ten minutes would be pinned by nothing
+  it("still holds a new count back nine minutes into the quiet period", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const getIp = await fresh();
+
+    for (let entries = 1; entries <= 5; entries++) getIp(forwarded(chain(entries)));
+    expect(warn).toHaveBeenCalledTimes(4);
+
+    vi.setSystemTime(Date.now() + 9 * 60 * 1000);
+    getIp(forwarded(chain(6)));
+
+    expect(warn).toHaveBeenCalledTimes(4);
+  });
+
+  // The bound must not swallow a count for good: one still unseen is reported once the period is up
+  it("reports a still-unseen count eleven minutes on", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const getIp = await fresh();
+
+    for (let entries = 1; entries <= 9; entries++) getIp(forwarded(chain(entries)));
+    expect(warn).toHaveBeenCalledTimes(4);
+
+    vi.setSystemTime(Date.now() + 11 * 60 * 1000);
+    getIp(forwarded(chain(7)));
+
+    expect(warn).toHaveBeenCalledTimes(5);
+    expect(warn.mock.calls[4][0]).toContain("carrying 7 entries");
+  });
+
+  // A count held back is not remembered, or the quiet period would swallow it for good
+  it("does not count a held-back request as reported", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const getIp = await fresh();
+
+    for (let entries = 1; entries <= 5; entries++) getIp(forwarded(chain(entries)));
+    vi.setSystemTime(Date.now() + 11 * 60 * 1000);
+    getIp(forwarded(chain(5)));
+
+    expect(warn.mock.calls[4][0]).toContain("carrying 5 entries");
+  });
+
+  // What the bound does NOT do, pinned so the documentation cannot drift back to claiming it does.
+  // A caller sending one fresh length a minute keeps the slot taken, and the operator signing in
+  // over and over gets nothing — the app cannot tell the two apart. The docs say to restart.
+  it("is held open indefinitely by a caller sending a fresh length every minute", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const getIp = await fresh();
+
+    for (let entries = 1; entries <= 4; entries++) getIp(forwarded(chain(entries)));
+    expect(warn).toHaveBeenCalledTimes(4);
+    warn.mockClear();
+
+    // 777 is a length the forged sequence below never reaches, so only the operator produces it
+    const operator = chain(777);
+    let forged = 100;
+    for (let minute = 0; minute < 360; minute++) {
+      vi.setSystemTime(Date.now() + 60 * 1000);
+      getIp(forwarded(chain(forged++)));
+      getIp(forwarded(operator));
+    }
+
+    const reported = (needle: string) =>
+      warn.mock.calls.some((call) => String(call[0]).includes(needle));
+
+    expect(reported("carrying 777 entries")).toBe(false);
+    expect(warn.mock.calls.length).toBeGreaterThan(0);
+
+    // A restart is the operator's way out, and the only one: the set starts empty again
+    warn.mockClear();
+    const afterRestart = await fresh();
+    afterRestart(forwarded(operator));
+
+    expect(reported("carrying 777 entries")).toBe(true);
+  });
+
+  // Nothing to measure, and "set it to 0" is advice to change nothing — so it says nothing and
+  // spends none of the four
+  it.each(["", " ", " , , "])("says nothing about a header carrying no address (%o)", async (value) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const getIp = await fresh();
+
+    expect(getIp(forwarded(value))).toBeNull();
+    getIp(forwarded(chain(1)));
+    getIp(forwarded(chain(2)));
+    getIp(forwarded(chain(3)));
+    getIp(forwarded(chain(4)));
+
+    expect(warn).toHaveBeenCalledTimes(4);
+    expect(warn.mock.calls.every((call) => !String(call[0]).includes("carrying 0"))).toBe(true);
+  });
+
+  // Splitting the line in two once dropped the definition, leaving "set it to that count" with no
+  // statement of what the variable actually means
+  it("says what the variable is, not only what to set it to", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const getIp = await fresh();
+
+    getIp(forwarded(chain(2)));
+
+    expect(warn.mock.calls[0][0]).toContain(
+      "TRUSTED_PROXY_HOPS is the number of proxies in front that append to that header"
+    );
+  });
+
+  // The measurement is only the right number if each proxy adds an entry rather than overwriting
+  it("tells the operator the count counts only where every proxy appends", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const getIp = await fresh();
+
+    getIp(forwarded(chain(2)));
+
+    expect(warn.mock.calls[0][0]).toContain("appends rather than replaces");
+  });
+
+  // getClientIp runs on the login POST, after the body validates — opening the page logs nothing
+  it("names the sign-in attempt that produces the count", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const getIp = await fresh();
+
+    getIp(forwarded(chain(2)));
+
+    expect(warn.mock.calls[0][0]).toContain("sign-in you attempted yourself");
+  });
+
+  it("stays silent once the hops are set, whatever the header carries", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const getIp = await fresh("1");
+
+    expect(getIp(forwarded("10.0.0.1, 203.0.113.9"))).toBe("203.0.113.9");
+    getIp(forwarded("203.0.113.9"));
 
     expect(warn).not.toHaveBeenCalled();
   });

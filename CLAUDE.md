@@ -200,8 +200,10 @@ APP_ORIGIN=               # Comma-separated origins allowed to write — the CSR
 TRUSTED_PROXY_HOPS=       # Proxies appending to X-Forwarded-For in front of the app; default 0,
                           # which ignores the header. The login throttle keys on it, so on a
                           # proxy-less deployment a forged header used to reset every counter (BP-318).
-                          # At 0 the first throttled request carrying the header logs one warning
-                          # (BP-774)
+                          # While it is 0, a throttled request carrying the header makes the app warn
+                          # how many entries it held; that count is the value to set, measured from a
+                          # sign-in attempt of your own. Each new count is reported, then at most one
+                          # per ten minutes past four of them; an empty header is not (BP-774)
 COOKIE_ALLOW_INSECURE=    # 1: plain session cookie (no Secure, no __Host-) for plain HTTP. auto:
                           # the same only while PUBLIC_ORIGIN and every APP_ORIGIN are http:// and
                           # the sign-in's Origin is not https — what docker-compose.yml passes.

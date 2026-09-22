@@ -36,30 +36,53 @@ export function trustedProxyHops(): number {
 // whichever request happens to reach a throttle first
 trustedProxyHops();
 
-let warnedHeaderIgnored = false;
+// The count the header carried is the number this variable wants, so the warning names it and an
+// operator reads the value off their own log (BP-774). The count only, never the entries.
+//
+// Each count not reported before: the first forwarded request is a sample of one, and often a probe
+// on a shorter path rather than a browser. The first IMMEDIATE_COUNTS go out at once; past that a
+// further new count waits out QUIET_MS, which is what bounds the log.
+//
+// The bound does not make the operator's line certain, and nothing here can make it certain: this
+// code cannot tell their sign-in from a forged header, so a caller sending a fresh length often
+// enough holds the slot for as long as they keep it up. A restart empties the set and frees the
+// first four again, which is what the docs tell an operator to do.
+const IMMEDIATE_COUNTS = 4;
+const QUIET_MS = 10 * 60 * 1000;
+const reportedCounts = new Set<number>();
+let lastReportedAt = 0;
 
-// Once per process. A caller can send the header too, so this cannot conclude a proxy is there —
-// but on a deployment behind one (Railway, BP-774) it is the only sign that the throttle has no
-// per-address key.
-function warnHeaderIgnored(): void {
-  if (warnedHeaderIgnored) return;
-  warnedHeaderIgnored = true;
+function warnHeaderIgnored(count: number): void {
+  // A header with no addresses in it measures nothing, and telling the operator to set 0 would be
+  // advice to change nothing
+  if (count === 0 || reportedCounts.has(count)) return;
+  const now = Date.now();
+  if (reportedCounts.size >= IMMEDIATE_COUNTS && now - lastReportedAt < QUIET_MS) return;
+  // Only a reported count is remembered, so one held back by the quiet period is still new later
+  reportedCounts.add(count);
+  lastReportedAt = now;
   console.warn(
-    `A request arrived with X-Forwarded-For while ${TRUSTED_PROXY_HOPS_VAR}=0, so the header is ignored and the login throttle has no per-address key. If a proxy sits in front of this app, set ${TRUSTED_PROXY_HOPS_VAR} to the number of proxies that append to that header.`
+    `A request arrived with X-Forwarded-For carrying ${count} ${count === 1 ? "entry" : "entries"} while ${TRUSTED_PROXY_HOPS_VAR}=0, so the header is ignored and the login throttle has no per-address key. ` +
+      `${TRUSTED_PROXY_HOPS_VAR} is the number of proxies in front that append to that header: set it to the count above, provided this was a sign-in you attempted yourself and every proxy in front appends rather than replaces the header.`
   );
 }
 
-export function getClientIp(request: Request): string | null {
-  const hops = trustedProxyHops();
-  if (hops === 0) {
-    if (request.headers.has("x-forwarded-for")) warnHeaderIgnored();
-    return null;
-  }
-
-  const entries = (request.headers.get("x-forwarded-for") ?? "")
+const forwardedEntries = (header: string): string[] =>
+  header
     .split(",")
     .map((entry) => entry.trim())
     .filter(Boolean);
+
+export function getClientIp(request: Request): string | null {
+  const hops = trustedProxyHops();
+  const header = request.headers.get("x-forwarded-for");
+
+  if (hops === 0) {
+    if (header !== null) warnHeaderIgnored(forwardedEntries(header).length);
+    return null;
+  }
+
+  const entries = forwardedEntries(header ?? "");
 
   // Fewer entries than the operator described means the request did not come through the proxies
   // they configured, so nothing in it is the address they promised. Counting the leftmost entry
