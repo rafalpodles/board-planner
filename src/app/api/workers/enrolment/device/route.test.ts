@@ -50,6 +50,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   delete process.env.PUBLIC_ORIGIN;
   delete process.env.APP_ORIGIN;
   delete process.env.NEXT_PUBLIC_APP_URL;
@@ -124,6 +125,5 @@ describe("POST /api/workers/enrolment/device — where the operator is sent", ()
     expect(startDeviceEnrolment).not.toHaveBeenCalled();
     // The operator reads the server log, not the Mac's error sheet
     expect(logged).toHaveBeenCalledWith(expect.stringContaining("PUBLIC_ORIGIN"));
-    logged.mockRestore();
   });
 });
