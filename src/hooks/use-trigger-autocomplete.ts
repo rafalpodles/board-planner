@@ -67,7 +67,7 @@ export function useTriggerAutocomplete(
   }, []);
 
   const detect = useCallback(
-    (value: string, caret: number) => {
+    (value: string, caret: number, keepSelection = false) => {
       last.current = { value, caret };
       const before = value.slice(0, caret);
 
@@ -77,13 +77,15 @@ export function useTriggerAutocomplete(
 
         const ticket = ++request.current;
         setOpen({ trigger: trigger.name, start: caret - match[0].length, caret });
-        setIndex(0);
+        if (!keepSelection) setIndex(0);
         if (textareaRef.current) setAt(caretCoordinates(textareaRef.current));
 
         Promise.resolve(trigger.suggest(match[1] ?? ""))
           .then((found) => {
             if (request.current !== ticket) return;
-            setItems(found.slice(0, MAX_SUGGESTIONS));
+            const shown = found.slice(0, MAX_SUGGESTIONS);
+            setItems(shown);
+            if (keepSelection) setIndex((i) => Math.min(i, Math.max(shown.length - 1, 0)));
           })
           .catch(() => {
             if (request.current === ticket) setItems([]);
@@ -99,7 +101,7 @@ export function useTriggerAutocomplete(
   // Triggers change identity when their data does — the people list arriving, the board key
   // resolving. Anything already typed is re-offered against it.
   useEffect(() => {
-    if (last.current) detect(last.current.value, last.current.caret);
+    if (last.current) detect(last.current.value, last.current.caret, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [triggers]);
 
