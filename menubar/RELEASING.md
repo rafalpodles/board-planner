@@ -16,11 +16,15 @@
   the assets if it does.
 - **image** (`ubuntu-latest`, `contents: read` + `packages: write`, tag pushes only). Builds the
   repository's `Dockerfile` for `linux/amd64` and `linux/arm64` (QEMU + Buildx) and pushes
-  `ghcr.io/rafalpodles/board-planner:X.Y.Z` and `:latest` with the workflow's own `GITHUB_TOKEN`,
+  `ghcr.io/rafalpodles/board-planner:X.Y.Z` — and `:latest` only when `vX.Y.Z` is the highest
+  `vX.Y.Z` tag in the repository (`git tag --sort=-v:refname`, pre-release names ignored), so a
+  backport such as `v1.1.1` pushed after `v1.2.0` does not take `latest` backwards — with the
+  workflow's own `GITHUB_TOKEN`,
   labelled with the OCI `source`, `version` and `revision` so GHCR links the package to the
   repository. It needs no environment and no secret, and depends on neither job above: a failed
   notarisation does not hold the image back, nor the reverse. The image bakes in no address — every
-  link the app builds comes from `PUBLIC_ORIGIN` at runtime.
+  link the app builds comes from `PUBLIC_ORIGIN` at runtime. Layers are cached in the GitHub
+  Actions cache (`type=gha`, `mode=max`), shared with the dry run.
 
 | Asset | What it is |
 | --- | --- |
