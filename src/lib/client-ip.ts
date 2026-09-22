@@ -40,25 +40,30 @@ trustedProxyHops();
 // operator reads the value off their own log (BP-774). The count only, never the entries.
 //
 // Each count not reported before: the first forwarded request is a sample of one, and often a probe
-// on a shorter path rather than a browser. A caller can forge the header, so after
-// MAX_COUNTS_WARNED distinct counts a further new one waits for QUIET_MS — which bounds the log
-// without letting forged lengths suppress the operator's own line for more than that.
-const MAX_COUNTS_WARNED = 4;
+// on a shorter path rather than a browser. The first IMMEDIATE_COUNTS go out at once; past that a
+// further new count waits out QUIET_MS, which is what bounds the log.
+//
+// The bound does not make the operator's line certain, and nothing here can make it certain: this
+// code cannot tell their sign-in from a forged header, so a caller sending a fresh length often
+// enough holds the slot for as long as they keep it up. A restart empties the set and frees the
+// first four again, which is what the docs tell an operator to do.
+const IMMEDIATE_COUNTS = 4;
 const QUIET_MS = 10 * 60 * 1000;
-const warnedCounts = new Set<number>();
-let lastWarnedAt = 0;
+const reportedCounts = new Set<number>();
+let lastReportedAt = 0;
 
 function warnHeaderIgnored(count: number): void {
   // A header with no addresses in it measures nothing, and telling the operator to set 0 would be
   // advice to change nothing
-  if (count === 0 || warnedCounts.has(count)) return;
+  if (count === 0 || reportedCounts.has(count)) return;
   const now = Date.now();
-  if (warnedCounts.size >= MAX_COUNTS_WARNED && now - lastWarnedAt < QUIET_MS) return;
+  if (reportedCounts.size >= IMMEDIATE_COUNTS && now - lastReportedAt < QUIET_MS) return;
   // Only a reported count is remembered, so one held back by the quiet period is still new later
-  warnedCounts.add(count);
-  lastWarnedAt = now;
+  reportedCounts.add(count);
+  lastReportedAt = now;
   console.warn(
-    `A request arrived with X-Forwarded-For carrying ${count} ${count === 1 ? "entry" : "entries"} while ${TRUSTED_PROXY_HOPS_VAR}=0, so the header is ignored and the login throttle has no per-address key. If a proxy sits in front of this app, set ${TRUSTED_PROXY_HOPS_VAR} to the number of proxies that append to that header — the count above, when the request was a sign-in you attempted yourself through the whole chain, and every proxy in front appends rather than replaces the header.`
+    `A request arrived with X-Forwarded-For carrying ${count} ${count === 1 ? "entry" : "entries"} while ${TRUSTED_PROXY_HOPS_VAR}=0, so the header is ignored and the login throttle has no per-address key. ` +
+      `If a proxy sits in front of this app, set ${TRUSTED_PROXY_HOPS_VAR} to that count — provided this was a sign-in you attempted yourself, and every proxy in front appends rather than replaces the header.`
   );
 }
 

@@ -229,16 +229,30 @@ describe("a forwarded request with no proxy configured", () => {
     expect(warn).toHaveBeenCalledTimes(4);
   });
 
-  // The bound must not let an outsider who burns the four slots with forged lengths suppress the
-  // operator's own sign-in: a count still unseen is reported once the quiet period is up
-  it("reports a still-unseen count again after the quiet period", async () => {
+  // Nine and eleven minutes rather than ten: on the boundary itself, a quiet period of one
+  // millisecond would satisfy both halves and the ten minutes would be pinned by nothing
+  it("still holds a new count back nine minutes into the quiet period", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const getIp = await fresh();
+
+    for (let entries = 1; entries <= 5; entries++) getIp(forwarded(chain(entries)));
+    expect(warn).toHaveBeenCalledTimes(4);
+
+    vi.setSystemTime(Date.now() + 9 * 60 * 1000);
+    getIp(forwarded(chain(6)));
+
+    expect(warn).toHaveBeenCalledTimes(4);
+  });
+
+  // The bound must not swallow a count for good: one still unseen is reported once the period is up
+  it("reports a still-unseen count eleven minutes on", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const getIp = await fresh();
 
     for (let entries = 1; entries <= 9; entries++) getIp(forwarded(chain(entries)));
     expect(warn).toHaveBeenCalledTimes(4);
 
-    vi.setSystemTime(Date.now() + 10 * 60 * 1000);
+    vi.setSystemTime(Date.now() + 11 * 60 * 1000);
     getIp(forwarded(chain(7)));
 
     expect(warn).toHaveBeenCalledTimes(5);
@@ -251,10 +265,44 @@ describe("a forwarded request with no proxy configured", () => {
     const getIp = await fresh();
 
     for (let entries = 1; entries <= 5; entries++) getIp(forwarded(chain(entries)));
-    vi.setSystemTime(Date.now() + 10 * 60 * 1000);
+    vi.setSystemTime(Date.now() + 11 * 60 * 1000);
     getIp(forwarded(chain(5)));
 
     expect(warn.mock.calls[4][0]).toContain("carrying 5 entries");
+  });
+
+  // What the bound does NOT do, pinned so the documentation cannot drift back to claiming it does.
+  // A caller sending one fresh length a minute keeps the slot taken, and the operator signing in
+  // over and over gets nothing — the app cannot tell the two apart. The docs say to restart.
+  it("is held open indefinitely by a caller sending a fresh length every minute", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const getIp = await fresh();
+
+    for (let entries = 1; entries <= 4; entries++) getIp(forwarded(chain(entries)));
+    expect(warn).toHaveBeenCalledTimes(4);
+    warn.mockClear();
+
+    // 777 is a length the forged sequence below never reaches, so only the operator produces it
+    const operator = chain(777);
+    let forged = 100;
+    for (let minute = 0; minute < 360; minute++) {
+      vi.setSystemTime(Date.now() + 60 * 1000);
+      getIp(forwarded(chain(forged++)));
+      getIp(forwarded(operator));
+    }
+
+    const reported = (needle: string) =>
+      warn.mock.calls.some((call) => String(call[0]).includes(needle));
+
+    expect(reported("carrying 777 entries")).toBe(false);
+    expect(warn.mock.calls.length).toBeGreaterThan(0);
+
+    // A restart is the operator's way out, and the only one: the set starts empty again
+    warn.mockClear();
+    const afterRestart = await fresh();
+    afterRestart(forwarded(operator));
+
+    expect(reported("carrying 777 entries")).toBe(true);
   });
 
   // Nothing to measure, and "set it to 0" is advice to change nothing — so it says nothing and
