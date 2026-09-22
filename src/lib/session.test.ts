@@ -143,6 +143,72 @@ describe("COOKIE_ALLOW_INSECURE=auto", () => {
     expect(allowsInsecureCookie()).toBe(false);
     expect(() => assertSessionConfig()).not.toThrow();
   });
+
+  // Review of BP-773: compose behind TLS with PUBLIC_ORIGIN left at its localhost default still
+  // served the site over https, and auto issued the plain cookie there.
+  describe("with the origins left at plain http", () => {
+    const signIn = (origin?: string) =>
+      new Request("http://app:3000/api/auth/login", {
+        method: "POST",
+        headers: origin ? { origin } : {},
+      });
+
+    beforeEach(() => {
+      process.env.PUBLIC_ORIGIN = "http://localhost:3000";
+      process.env.APP_ORIGIN = "http://localhost:3000";
+    });
+
+    it("issues the secure, prefixed cookie to a sign-in that arrived over https", () => {
+      const request = signIn("https://board.example.com");
+      const cookie = buildSessionCookie("cps_abc", new Date(Date.now() + DAY_MS), request);
+
+      expect(cookie.startsWith("__Host-bp_session=cps_abc; ")).toBe(true);
+      expect(cookie).toContain("; Secure");
+      expect(legacySessionCookies(request)).toEqual([expect.stringMatching(/^bp_session=; /)]);
+    });
+
+    it("keeps the plain cookie for a sign-in over http, or with no Origin to go on", () => {
+      for (const request of [signIn("http://localhost:3000"), signIn()]) {
+        const cookie = buildSessionCookie("cps_abc", new Date(Date.now() + DAY_MS), request);
+        expect(cookie.startsWith("bp_session=cps_abc; ")).toBe(true);
+        expect(cookie).not.toContain("Secure");
+      }
+    });
+
+    it("reads the prefixed cookie first, and the plain one when it is the only one", () => {
+      expect(readSessionCookie("bp_session=cps_old; __Host-bp_session=cps_new")).toBe("cps_new");
+      expect(readSessionCookie("bp_session=cps_plain")).toBe("cps_plain");
+      expect(readSessionCookie("bp_session=a; bp_session=b")).toBeNull();
+      expect(readSessionCookie("__Host-bp_session=a; __Host-bp_session=b; bp_session=c")).toBeNull();
+    });
+
+    it("clears both names on logout", () => {
+      expect(clearSessionCookies().map((c) => c.split("=")[0])).toEqual([
+        "__Host-bp_session",
+        "bp_session",
+      ]);
+    });
+  });
+});
+
+describe("COOKIE_ALLOW_INSECURE=1 beside an https PUBLIC_ORIGIN", () => {
+  it("refuses to start, naming PUBLIC_ORIGIN", () => {
+    process.env.COOKIE_ALLOW_INSECURE = "1";
+    process.env.APP_ORIGIN = "http://localhost:3000";
+    process.env.PUBLIC_ORIGIN = "https://board.example.com";
+
+    expect(() => assertSessionConfig()).toThrow(/requires PUBLIC_ORIGIN to be an http:\/\/ origin/);
+  });
+
+  it("starts with an http PUBLIC_ORIGIN", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    process.env.COOKIE_ALLOW_INSECURE = "1";
+    process.env.APP_ORIGIN = "http://localhost:3000";
+    process.env.PUBLIC_ORIGIN = "http://localhost:3000";
+
+    expect(() => assertSessionConfig()).not.toThrow();
+    warn.mockRestore();
+  });
 });
 
 describe("cookie name and attributes", () => {

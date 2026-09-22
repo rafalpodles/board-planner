@@ -502,8 +502,8 @@ export async function POST(req: Request) {
     location: authorizeHref(p),
     "cache-control": "private, no-store",
   });
-  headers.append("set-cookie", buildSessionCookie(session.token, session.absoluteExpiresAt));
-  for (const stale of legacySessionCookies()) headers.append("set-cookie", stale);
+  headers.append("set-cookie", buildSessionCookie(session.token, session.absoluteExpiresAt, req));
+  for (const stale of legacySessionCookies(req)) headers.append("set-cookie", stale);
   return new Response(null, { status: 303, headers });
 }
 

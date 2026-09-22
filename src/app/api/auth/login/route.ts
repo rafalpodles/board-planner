@@ -72,8 +72,8 @@ export async function POST(request: Request) {
     createdAt: user.createdAt,
   });
 
-  response.headers.append("Set-Cookie", buildSessionCookie(token, absoluteExpiresAt));
-  for (const cookie of legacySessionCookies()) {
+  response.headers.append("Set-Cookie", buildSessionCookie(token, absoluteExpiresAt, request));
+  for (const cookie of legacySessionCookies(request)) {
     response.headers.append("Set-Cookie", cookie);
   }
 

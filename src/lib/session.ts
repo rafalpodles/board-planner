@@ -25,14 +25,27 @@ const KNOWN_COOKIE_NAMES = [HOST_COOKIE_NAME, UNPREFIXED_COOKIE_NAME];
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 // "1" is the operator's explicit opt-in. "auto" is what docker-compose.yml passes: plain HTTP only
-// while PUBLIC_ORIGIN and every APP_ORIGIN are http://, so the same compose file serves localhost
-// out of the box and turns the cookie secure the moment the instance is given an https address
-// (BP-773). Anything else, empty included, is the secure default.
-export function allowsInsecureCookie(): boolean {
+// while PUBLIC_ORIGIN and every APP_ORIGIN are http:// and the sign-in itself did not arrive over
+// https, so the same compose file serves localhost out of the box and a TLS deployment that never
+// set PUBLIC_ORIGIN still gets the secure cookie (BP-773). Anything else, empty included, is the
+// secure default.
+export function allowsInsecureCookie(request?: Request): boolean {
   const flag = process.env.COOKIE_ALLOW_INSECURE;
   if (flag === "1") return true;
-  if (flag === "auto") return servedOverPlainHttp();
+  if (flag === "auto") return servedOverPlainHttp() && !(request && signedInOverHttps(request));
   return false;
+}
+
+function autoMode(): boolean {
+  return process.env.COOKIE_ALLOW_INSECURE === "auto" && servedOverPlainHttp();
+}
+
+// The Origin header, because the browser writes it and no page script can: a sign-in is a POST,
+// which always carries it. The request URL is the last hop's, plain http behind a TLS proxy, and
+// X-Forwarded-Proto is whatever the caller typed on a deployment with nothing in front. A
+// non-browser caller can forge Origin, but only to choose the attributes of its own cookie.
+function signedInOverHttps(request: Request): boolean {
+  return request.headers.get("origin")?.trim().toLowerCase().startsWith("https://") === true;
 }
 
 function servedOverPlainHttp(): boolean {
@@ -44,8 +57,8 @@ function servedOverPlainHttp(): boolean {
   );
 }
 
-export function sessionCookieName(): string {
-  return allowsInsecureCookie() ? UNPREFIXED_COOKIE_NAME : HOST_COOKIE_NAME;
+export function sessionCookieName(request?: Request): string {
+  return allowsInsecureCookie(request) ? UNPREFIXED_COOKIE_NAME : HOST_COOKIE_NAME;
 }
 
 function normaliseOrigin(value: string): string {
@@ -108,6 +121,12 @@ export function assertSessionConfig(): void {
   if (!allowsInsecureCookie()) return;
 
   const origins = appOrigins();
+  const own = selfOrigin();
+  if (process.env.COOKIE_ALLOW_INSECURE === "1" && own && !own.startsWith("http://")) {
+    throw new Error(
+      `COOKIE_ALLOW_INSECURE=1 requires PUBLIC_ORIGIN to be an http:// origin; got ${own}. The session cookie is issued without Secure and without the __Host- prefix in this mode. Set COOKIE_ALLOW_INSECURE to 0 (or auto), or fix PUBLIC_ORIGIN.`
+    );
+  }
   if (origins.length === 0) {
     throw new Error(
       "APP_ORIGIN is required when COOKIE_ALLOW_INSECURE=1: without it every mutating request, including login, is refused"
@@ -127,7 +146,7 @@ export function assertSessionConfig(): void {
 
   console.warn(
     process.env.COOKIE_ALLOW_INSECURE === "auto"
-      ? "COOKIE_ALLOW_INSECURE=auto and this instance's origins are plain http:// — session cookies are issued without Secure and without the __Host- prefix. Set PUBLIC_ORIGIN and APP_ORIGIN to the https:// address once the instance is behind TLS."
+      ? "COOKIE_ALLOW_INSECURE=auto and this instance's origins are plain http:// — a sign-in that does not arrive over https gets a session cookie without Secure and without the __Host- prefix. Set PUBLIC_ORIGIN and APP_ORIGIN to the https:// address once the instance is behind TLS."
       : "COOKIE_ALLOW_INSECURE=1 — session cookies are issued without Secure and without the __Host- prefix. Set it to 0 once this instance is behind TLS."
   );
 }
@@ -142,7 +161,7 @@ function cookieHeader(name: string, value: string, maxAgeSeconds: number): strin
     "HttpOnly",
     "SameSite=Lax",
   ];
-  if (!allowsInsecureCookie() || name.startsWith("__Host-")) {
+  if (name.startsWith("__Host-") || !allowsInsecureCookie()) {
     attributes.push("Secure");
   }
   return attributes.join("; ");
@@ -152,17 +171,21 @@ function cookieHeader(name: string, value: string, maxAgeSeconds: number): strin
 // use, but nothing re-sends Set-Cookie, so pinning the cookie to it would have the browser discard a
 // live session 30 days after login however often it was used — the very logout this work removes.
 // A cookie outliving its row is harmless: the server is the authority and answers 401.
-export function buildSessionCookie(token: string, absoluteExpiresAt: Date): string {
+export function buildSessionCookie(
+  token: string,
+  absoluteExpiresAt: Date,
+  request?: Request
+): string {
   const maxAge = Math.max(0, Math.floor((absoluteExpiresAt.getTime() - Date.now()) / 1000));
-  return cookieHeader(sessionCookieName(), token, maxAge);
+  return cookieHeader(sessionCookieName(request), token, maxAge);
 }
 
 export function clearSessionCookies(): string[] {
   return KNOWN_COOKIE_NAMES.map((name) => cookieHeader(name, "", 0));
 }
 
-export function legacySessionCookies(): string[] {
-  const active = sessionCookieName();
+export function legacySessionCookies(request?: Request): string[] {
+  const active = sessionCookieName(request);
   return KNOWN_COOKIE_NAMES.filter((name) => name !== active).map((name) =>
     cookieHeader(name, "", 0)
   );
@@ -170,19 +193,33 @@ export function legacySessionCookies(): string[] {
 
 export function readSessionCookie(header: string | null): string | null {
   if (!header) return null;
-  const name = sessionCookieName();
-  const values: string[] = [];
+  // Under auto a sign-in over https was issued the prefixed cookie and one over http the plain
+  // one, so both names are read — the prefixed first, since only a secure context can have set it
+  // and nothing on a sibling subdomain can shadow it. Signing in under either name expires the
+  // other, and logout clears both.
+  if (autoMode()) {
+    const prefixed = cookieValues(header, HOST_COOKIE_NAME);
+    if (prefixed.length > 0) return soleValue(prefixed);
+    return soleValue(cookieValues(header, UNPREFIXED_COOKIE_NAME));
+  }
+  return soleValue(cookieValues(header, sessionCookieName()));
+}
 
+function cookieValues(header: string, name: string): string[] {
+  const values: string[] = [];
   for (const part of header.split(";")) {
     const separator = part.indexOf("=");
     if (separator === -1) continue;
     if (part.slice(0, separator).trim() !== name) continue;
     values.push(part.slice(separator + 1).trim());
   }
+  return values;
+}
 
-  // Two cookies of one name mean one was set for a parent domain — the shadowing the __Host- prefix
-  // exists to prevent, and which the unprefixed name cannot. Taking either is a coin flip on whose
-  // session wins, so take neither.
+// Two cookies of one name mean one was set for a parent domain — the shadowing the __Host- prefix
+// exists to prevent, and which the unprefixed name cannot. Taking either is a coin flip on whose
+// session wins, so take neither.
+function soleValue(values: string[]): string | null {
   if (values.length !== 1) return null;
   return values[0].length > 0 ? values[0] : null;
 }
