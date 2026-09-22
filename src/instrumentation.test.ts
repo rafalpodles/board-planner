@@ -115,6 +115,24 @@ describe("register", () => {
     );
   });
 
+  // BP-773. The check ran only when the login route first loaded the module, so a misconfigured
+  // compose deployment was up and healthy and answered every sign-in with a 500.
+  it("exits on an insecure cookie over an https origin rather than failing each sign-in", async () => {
+    process.env.NEXT_RUNTIME = "nodejs";
+    delete process.env.ENCRYPTION_KEY;
+    process.env.COOKIE_ALLOW_INSECURE = "1";
+    process.env.APP_ORIGIN = "https://board.example.com";
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`exit:${code}`);
+    }) as never);
+    const { register } = await import("./instrumentation");
+
+    await expect(register()).rejects.toThrow("exit:1");
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining("COOKIE_ALLOW_INSECURE=1 requires"));
+  });
+
   it("starts normally when no key is configured at all", async () => {
     process.env.NEXT_RUNTIME = "nodejs";
     delete process.env.ENCRYPTION_KEY;

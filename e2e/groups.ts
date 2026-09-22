@@ -113,6 +113,7 @@ export const GROUPS = {
     "entitlements.spec.ts",
     "sessions-and-auth.spec.ts",
     "proxied-login-throttle.spec.ts",
+    "compose-cookie.spec.ts",
     "admin-sets-password.spec.ts",
     "reset-by-email.spec.ts",
     "email-on-account.spec.ts",

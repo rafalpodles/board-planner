@@ -106,6 +106,45 @@ describe("COOKIE_ALLOW_INSECURE parsing", () => {
   });
 });
 
+// BP-773. docker-compose.yml passes "auto": the scheme of the instance's own origins decides, so a
+// compose deployment given an https address is secure without anybody remembering a second setting.
+describe("COOKIE_ALLOW_INSECURE=auto", () => {
+  beforeEach(() => {
+    process.env.COOKIE_ALLOW_INSECURE = "auto";
+  });
+
+  it("is insecure for a plain-HTTP localhost, the compose default", () => {
+    process.env.PUBLIC_ORIGIN = "http://localhost:3000";
+    process.env.APP_ORIGIN = "http://localhost:3000";
+
+    expect(allowsInsecureCookie()).toBe(true);
+    expect(sessionCookieName()).toBe("bp_session");
+    expect(() => assertSessionConfig()).not.toThrow();
+  });
+
+  it("is secure as soon as PUBLIC_ORIGIN is https, even with APP_ORIGIN left at localhost", () => {
+    process.env.PUBLIC_ORIGIN = "https://board.example.com";
+    process.env.APP_ORIGIN = "http://localhost:3000";
+
+    expect(allowsInsecureCookie()).toBe(false);
+    expect(sessionCookieName()).toBe("__Host-bp_session");
+    expect(buildSessionCookie("cps_abc", new Date(Date.now() + DAY_MS))).toContain("; Secure");
+  });
+
+  it("is secure when any allowed origin is https, and never refuses to start", () => {
+    process.env.PUBLIC_ORIGIN = "http://localhost:3000";
+    process.env.APP_ORIGIN = "http://localhost:3000,https://board.example.com";
+
+    expect(allowsInsecureCookie()).toBe(false);
+    expect(() => assertSessionConfig()).not.toThrow();
+  });
+
+  it("is secure when nothing names an origin at all", () => {
+    expect(allowsInsecureCookie()).toBe(false);
+    expect(() => assertSessionConfig()).not.toThrow();
+  });
+});
+
 describe("cookie name and attributes", () => {
   const expiresAt = new Date(Date.now() + 30 * DAY_MS);
 

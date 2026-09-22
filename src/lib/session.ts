@@ -24,8 +24,24 @@ const KNOWN_COOKIE_NAMES = [HOST_COOKIE_NAME, UNPREFIXED_COOKIE_NAME];
 
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
+// "1" is the operator's explicit opt-in. "auto" is what docker-compose.yml passes: plain HTTP only
+// while PUBLIC_ORIGIN and every APP_ORIGIN are http://, so the same compose file serves localhost
+// out of the box and turns the cookie secure the moment the instance is given an https address
+// (BP-773). Anything else, empty included, is the secure default.
 export function allowsInsecureCookie(): boolean {
-  return process.env.COOKIE_ALLOW_INSECURE === "1";
+  const flag = process.env.COOKIE_ALLOW_INSECURE;
+  if (flag === "1") return true;
+  if (flag === "auto") return servedOverPlainHttp();
+  return false;
+}
+
+function servedOverPlainHttp(): boolean {
+  const origins = appOrigins();
+  return (
+    selfOrigin()?.startsWith("http://") === true &&
+    origins.length > 0 &&
+    origins.every((origin) => origin.startsWith("http://"))
+  );
 }
 
 export function sessionCookieName(): string {
@@ -105,12 +121,14 @@ export function assertSessionConfig(): void {
   const notPlainHttp = origins.filter((origin) => !origin.startsWith("http://"));
   if (notPlainHttp.length > 0) {
     throw new Error(
-      `COOKIE_ALLOW_INSECURE=1 requires every APP_ORIGIN to be an http:// origin; got ${notPlainHttp.join(", ")}. The session cookie is issued without Secure and without the __Host- prefix in this mode, so on anything else it is injectable from a sibling subdomain. Unset COOKIE_ALLOW_INSECURE, or fix APP_ORIGIN.`
+      `COOKIE_ALLOW_INSECURE=1 requires every APP_ORIGIN to be an http:// origin; got ${notPlainHttp.join(", ")}. The session cookie is issued without Secure and without the __Host- prefix in this mode, so on anything else it is injectable from a sibling subdomain. Set COOKIE_ALLOW_INSECURE to 0 (or auto), or fix APP_ORIGIN.`
     );
   }
 
   console.warn(
-    "COOKIE_ALLOW_INSECURE=1 — session cookies are issued without Secure and without the __Host- prefix. Unset it once this instance is behind TLS."
+    process.env.COOKIE_ALLOW_INSECURE === "auto"
+      ? "COOKIE_ALLOW_INSECURE=auto and this instance's origins are plain http:// — session cookies are issued without Secure and without the __Host- prefix. Set PUBLIC_ORIGIN and APP_ORIGIN to the https:// address once the instance is behind TLS."
+      : "COOKIE_ALLOW_INSECURE=1 — session cookies are issued without Secure and without the __Host- prefix. Set it to 0 once this instance is behind TLS."
   );
 }
 

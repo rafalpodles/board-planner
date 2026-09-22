@@ -35,8 +35,10 @@ services:
       PORT: "3000"
       HOSTNAME: 0.0.0.0
       MONGODB_URI: ${MONGODB_URI:-mongodb://mongo:27017/boardplanner}
-      # Compose binds localhost over plain HTTP, where a Secure cookie is discarded — drop this once the instance is behind TLS
-      COOKIE_ALLOW_INSECURE: ${COOKIE_ALLOW_INSECURE:-1}
+      # auto: a plain cookie only while PUBLIC_ORIGIN and every APP_ORIGIN are http://, as on this
+      # file's localhost defaults; an https PUBLIC_ORIGIN makes it Secure with nothing else to change.
+      # 0 forces the secure cookie, 1 forces the plain one
+      COOKIE_ALLOW_INSECURE: ${COOKIE_ALLOW_INSECURE:-auto}
       APP_ORIGIN: ${APP_ORIGIN:-http://localhost:${APP_PORT:-3000}}
       # 0 unless something in front of the app appends to X-Forwarded-For — the login throttle
       # keys on it, and an unset value means the header is ignored rather than trusted
