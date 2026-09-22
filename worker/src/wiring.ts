@@ -42,7 +42,13 @@ import {
   settleDecisions,
 } from "./decisions.js";
 import { collectDiff } from "./diff.js";
-import { pinnedAccount, resolveGhToken } from "./github-account.js";
+import {
+  accountCommitIdentity,
+  configuredCommitIdentity,
+  pinnedAccount,
+  resolveGhToken,
+} from "./github-account.js";
+import type { CommitIdentity } from "./commit.js";
 import { gateFromEntry } from "./gates/from-entry.js";
 import { createRunner, Runner } from "./exec.js";
 import { childEnv } from "./env.js";
@@ -343,6 +349,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
         execPath: deps.execPath,
         isExecutable: deps.isExecutable,
         pinnedGithubAccount: pinnedAccount(deps.readFile, bootstrap.stateDir),
+        configuredCommitIdentity: configuredCommitIdentity(deps.readFile, bootstrap.stateDir),
       });
     } catch (error) {
       deps.logError(`preflight could not run: ${String(error)}`);
@@ -641,6 +648,27 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     return token;
   }
 
+  // Read per run like the token: github.json's own name and address first, then the pinned
+  // account's noreply address. Neither touches the checkout's config (BP-779).
+  async function pinnedCommitIdentity(githubToken: string): Promise<CommitIdentity | undefined> {
+    const configured = configuredCommitIdentity(deps.readFile, bootstrap.stateDir);
+    if (configured) return configured;
+    const account = pinnedAccount(deps.readFile, bootstrap.stateDir);
+    if (!account || !githubToken) return undefined;
+    const identity = await accountCommitIdentity(
+      deps.runner,
+      preflight?.paths.gh ?? "",
+      githubToken,
+      childEnv([], deps.env)
+    );
+    if (!identity) {
+      deps.logError(
+        `could not read the pinned GitHub account ${account}'s name from GitHub — commits fall back to this machine's git config`
+      );
+    }
+    return identity ?? undefined;
+  }
+
   async function execute(task: ClaimedTask): Promise<RunDisposition> {
     const taskConfig = configFor(task.projectId);
     if (!taskConfig) {
@@ -652,6 +680,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     }
 
     const githubToken = await githubIdentityToken();
+    const commitIdentity = await pinnedCommitIdentity(githubToken);
     const gitPath = resolvedGitPath();
     // The same value rebind() matched this project's checkout against — the server's own record
     // of the project's repository, never re-read from repoPath/.git at execution time.
@@ -667,7 +696,14 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
           createReporter: (client, statusIds) =>
             createReporter(client, statusIds, (message) => deps.logError(message), outbox, releaseComments),
           createDelivery: (runner, baseBranch) => createDelivery(runner, gitPath, baseBranch, githubToken),
-          workspace: createWorkspace(taskConfig, deps.runner, gitPath, remoteFetchEnv(githubToken), remoteUrl),
+          workspace: createWorkspace(
+            taskConfig,
+            deps.runner,
+            gitPath,
+            remoteFetchEnv(githubToken),
+            remoteUrl,
+            commitIdentity
+          ),
           executor: createExecutor(taskConfig, deps.runner),
           collectDiff: (runner, worktreePath, baseSha) => collectDiff(runner, gitPath, worktreePath, baseSha),
           gateFor: (entry, runner, timeoutMs, fallbacks) =>

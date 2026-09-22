@@ -1056,6 +1056,18 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     ]);
   });
 
+  // BP-779. The pin decides who the commits are by, not the machine's global git config.
+  it("commits as the name and address pinned beside the account", async () => {
+    const { everyCall } = await runOneTask(undefined, undefined, {
+      stateFiles: {
+        "github.json": JSON.stringify({ account: "owner", name: "Owner", email: "owner@example.org" }),
+      },
+    });
+
+    expect(everyCall.some((call) => call.includes("worktree") && call.includes("add"))).toBe(true);
+    expect(everyCall.some((call) => call.includes("GIT_AUTHOR_IDENT"))).toBe(false);
+  });
+
   // The seam gate-integrity.integration.test.ts cannot reach: that test mirrors what this call site
   // composes rather than calling it, so a createWorkspace(...) that stopped passing
   // remoteFetchEnv(...) would leave it green. The lookup's `git fetch` runs inside the checkout,

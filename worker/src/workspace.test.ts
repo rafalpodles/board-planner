@@ -109,6 +109,22 @@ describe("createWorkspace", () => {
       );
     });
 
+    // BP-779. A pinned GitHub account is who the run commits as, whatever the machine's own
+    // config names — and git is not asked, so nothing is written to the checkout either.
+    it("carries the pinned account's identity instead of asking git", async () => {
+      const { runner, run } = fakeGit(baseFromRemote("base1"));
+      const pinned = { name: "Octo Cat", email: "1+octocat@users.noreply.github.com" };
+
+      const result = await createWorkspace(config, runner, gitPath, () => ({}), REMOTE_URL, pinned).create(
+        "CP-158",
+        "worker",
+      );
+
+      expect(result.commitIdentity).toEqual(pinned);
+      expect(ranAny(run, "GIT_AUTHOR_IDENT")).toBe(false);
+      expect(ranAny(run, "config user")).toBe(false);
+    });
+
     // Before the agent, not at the commit: every task this machine takes meets the same wall, and
     // finding out at the commit costs a whole run of somebody's subscription.
     it("refuses to make a worktree at all when git names nobody", async () => {
