@@ -24,8 +24,28 @@ public enum StateDirectory {
         defaults.set(path, forKey: defaultsKey)
     }
 
+    // The worker's normaliseStateDir (worker/src/config.ts): the socket path is derived from this
+    // spelling on both sides, so "." and ".." and a trailing slash must not change it.
+    public static func normalise(_ path: String) -> String {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        let absolute = trimmed.hasPrefix("/")
+        var parts: [Substring] = []
+        for part in trimmed.split(separator: "/", omittingEmptySubsequences: true) {
+            if part == "." { continue }
+            if part == ".." {
+                if let last = parts.last, last != ".." { parts.removeLast() }
+                else if !absolute { parts.append(part) }
+                continue
+            }
+            parts.append(part)
+        }
+        let joined = parts.joined(separator: "/")
+        if absolute { return "/" + joined }
+        return joined.isEmpty ? "." : joined
+    }
+
     private static func nonEmpty(_ value: String?) -> String? {
-        guard let trimmed = value?.trimmingCharacters(in: .whitespaces), !trimmed.isEmpty else {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
             return nil
         }
         return trimmed

@@ -84,6 +84,9 @@ public enum SocketError: Error, Equatable {
     case malformedResponse
     case pathTooLong
     case io(Int32)
+    // The relocated socket's directory is not this user's own private one, so whatever answers in
+    // it may not be this user's worker (BP-778)
+    case unsafeDirectory(String)
 }
 
 public func sseEvents(from buffer: inout Data) -> [Data] {
@@ -116,9 +119,10 @@ public struct SocketClient: Sendable {
     // is too long for a socket, when it moves to /tmp under this user's uid and a digest of the
     // state directory (BP-778).
     public static func socketPath(in stateDirectory: String, uid: uid_t = getuid()) -> String {
-        let beside = (stateDirectory as NSString).appendingPathComponent("worker.sock")
+        let directory = StateDirectory.normalise(stateDirectory)
+        let beside = directory == "/" ? "/worker.sock" : directory + "/worker.sock"
         if beside.utf8.count <= maxSocketPathBytes { return beside }
-        let digest = SHA256.hash(data: Data(stateDirectory.utf8))
+        let digest = SHA256.hash(data: Data(directory.utf8))
             .map { String(format: "%02x", $0) }
             .joined()
             .prefix(16)
@@ -129,11 +133,47 @@ public struct SocketClient: Sendable {
         socketPath(in: StateDirectory.resolve())
     }
 
+    static let relocatedPrefix = "/tmp/cp-worker-"
+
+    // Only the relocated socket is checked: /tmp is shared, so its directory could have been made by
+    // anyone before the worker ran. The state directory is the operator's own choice.
+    public static func unsafeDirectoryReason(forSocketAt path: String, uid: uid_t = getuid()) -> String? {
+        guard path.hasPrefix(relocatedPrefix) else { return nil }
+        return directoryRefusal((path as NSString).deletingLastPathComponent, uid: uid)
+    }
+
+    public static func directoryRefusal(_ directory: String, uid: uid_t = getuid()) -> String? {
+        var info = stat()
+        guard lstat(directory, &info) == 0 else {
+            return errno == ENOENT ? nil : "\(directory) cannot be inspected (errno \(errno))"
+        }
+        if (info.st_mode & S_IFMT) == S_IFLNK {
+            return "\(directory) is a symbolic link, so the worker's socket may not be there"
+        }
+        if (info.st_mode & S_IFMT) != S_IFDIR {
+            return "\(directory) is not a directory"
+        }
+        if info.st_uid != uid {
+            return "\(directory) belongs to another user (uid \(info.st_uid)); remove it and restart the worker"
+        }
+        if info.st_mode & 0o077 != 0 {
+            return "\(directory) can be opened by other users (mode \(String(info.st_mode & 0o777, radix: 8))); remove it and restart the worker"
+        }
+        return nil
+    }
+
+    private func refuseUnsafeDirectory() throws {
+        if let reason = SocketClient.unsafeDirectoryReason(forSocketAt: socketPath) {
+            throw SocketError.unsafeDirectory(reason)
+        }
+    }
+
     private func request(_ method: String, _ path: String) -> String {
         "\(method) \(path) HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
     }
 
     private func collect(_ method: String, _ path: String) async throws -> HTTPResponse {
+        try refuseUnsafeDirectory()
         var bytes = Data()
         for try await chunk in try await transport.send(request(method, path), to: socketPath) {
             bytes.append(chunk)
@@ -172,6 +212,7 @@ public struct SocketClient: Sendable {
                     var headerSeen = false
                     var chunked = false
                     let decoder = JSONDecoder()
+                    try refuseUnsafeDirectory()
                     for try await chunk in try await transport.send(request("GET", "/stream"), to: socketPath) {
                         buffer.append(chunk)
                         if !headerSeen {

@@ -64,6 +64,13 @@ describe("loadBootstrap", () => {
     expect(Buffer.byteLength(socket)).toBeLessThanOrEqual(103);
   });
 
+  it("derives one socket path from every spelling of the same state dir", () => {
+    const deep = `/Users/operator/${"nested/".repeat(12)}state`;
+    const spelled = `  /Users/operator/./x/../${"nested/".repeat(12)}state/\n`;
+
+    expect(localSocketPath(spelled, 501)).toBe(localSocketPath(deep, 501));
+  });
+
   it("keeps the socket beside the state at exactly the longest path a socket may have", () => {
     const dir = `/${"a".repeat(103 - "/worker.sock".length - 1)}`;
 

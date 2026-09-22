@@ -175,6 +175,14 @@ private struct RecordingTransport: Transport {
             == "/tmp/cp-worker-501-7038366db39fb12e/worker.sock")
 }
 
+@Test func derivesOneSocketPathFromEverySpellingOfTheStateDirectory() {
+    let spelled = "  /Users/operator/./x/../" + String(repeating: "nested/", count: 12) + "state/\n"
+
+    #expect(SocketClient.socketPath(in: spelled, uid: 501)
+            == "/tmp/cp-worker-501-7038366db39fb12e/worker.sock")
+    #expect(SocketClient.socketPath(in: "/rig/./state/", uid: 501) == "/rig/state/worker.sock")
+}
+
 @Test func keepsTheSocketBesideAStateDirectoryShortEnoughForOne() {
     let dir = "/" + String(repeating: "a", count: 103 - "/worker.sock".count - 1)
 
@@ -221,4 +229,63 @@ private struct RecordingTransport: Transport {
 
     #expect(status.paused == false)
     #expect(status.recent.isEmpty)
+}
+
+// BP-778 review. The relocated socket lives under /tmp, where anyone could have made its directory
+// before the worker ran; the app must not hand a pause, a resume or its trust to whatever answers.
+private func scratchDirectory(mode: mode_t) throws -> String {
+    let path = NSTemporaryDirectory() + "cp-socket-dir-" + UUID().uuidString
+    try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: false)
+    chmod(path, mode)
+    return path
+}
+
+@Test func acceptsAPrivateDirectoryOfThisUsers() throws {
+    let dir = try scratchDirectory(mode: 0o700)
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+
+    #expect(SocketClient.directoryRefusal(dir) == nil)
+}
+
+@Test func refusesADirectoryOtherUsersCanOpen() throws {
+    let dir = try scratchDirectory(mode: 0o755)
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+
+    #expect(SocketClient.directoryRefusal(dir)?.contains("can be opened by other users") == true)
+}
+
+@Test func refusesADirectoryAnotherUserOwns() throws {
+    let dir = try scratchDirectory(mode: 0o700)
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+
+    #expect(SocketClient.directoryRefusal(dir, uid: getuid() + 1)?.contains("belongs to another user") == true)
+}
+
+@Test func refusesASymlinkInPlaceOfTheDirectory() throws {
+    let dir = try scratchDirectory(mode: 0o700)
+    let link = dir + "-link"
+    defer {
+        try? FileManager.default.removeItem(atPath: link)
+        try? FileManager.default.removeItem(atPath: dir)
+    }
+    try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: dir)
+
+    #expect(SocketClient.directoryRefusal(link)?.contains("symbolic link") == true)
+}
+
+@Test func sendsNothingToARelocatedSocketInADirectoryOthersCanOpen() async throws {
+    let dir = "/tmp/cp-worker-\(getuid())-test\(UUID().uuidString.prefix(8))"
+    try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: false)
+    chmod(dir, 0o777)
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let recorder = RecordingTransport.Recorder()
+    let client = SocketClient(socketPath: dir + "/worker.sock",
+                              transport: RecordingTransport(body: #"{"paused":false}"#, seen: recorder))
+
+    await #expect(throws: SocketError.self) { _ = try await client.command("pause") }
+    #expect(recorder.requests.isEmpty)
+}
+
+@Test func leavesAStateDirectorySocketToTheOperator() {
+    #expect(SocketClient.unsafeDirectoryReason(forSocketAt: "/Users/someone/.boardplanner/worker.sock") == nil)
 }

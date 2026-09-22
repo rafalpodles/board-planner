@@ -1,7 +1,7 @@
 import { createHash } from "crypto";
 import { readFileSync, statSync } from "fs";
 import { homedir } from "os";
-import { join } from "path";
+import { join, posix } from "path";
 import { clampCeiling, DEFAULT_RUN_CEILING_MS } from "./budget.js";
 
 // The shape workspace.ts, executor.ts, gates/index.ts, loop.ts and pipeline.ts run against for one
@@ -258,14 +258,22 @@ export const MAX_SOCKET_PATH_BYTES = 103;
 // directory too deep for that moves it to /tmp, under a name the menubar app derives the same way
 // (SocketClient.socketPath): the uid, and a digest of the state directory (BP-778).
 export function localSocketPath(stateDir: string, uid = currentUid()): string {
-  const beside = join(stateDir, LOCAL_SOCKET_NAME);
+  const dir = normaliseStateDir(stateDir);
+  const beside = join(dir, LOCAL_SOCKET_NAME);
   if (Buffer.byteLength(beside) <= MAX_SOCKET_PATH_BYTES) return beside;
-  const digest = createHash("sha256").update(stateDir).digest("hex").slice(0, 16);
+  const digest = createHash("sha256").update(dir).digest("hex").slice(0, 16);
   return join("/tmp", `cp-worker-${uid}-${digest}`, LOCAL_SOCKET_NAME);
 }
 
 export function socketMovedOutOfStateDir(stateDir: string, socketPath: string): boolean {
-  return socketPath !== join(stateDir, LOCAL_SOCKET_NAME);
+  return socketPath !== join(normaliseStateDir(stateDir), LOCAL_SOCKET_NAME);
+}
+
+// The menubar derives the same path in Swift (StateDirectory.normalise), so the digest has to be
+// taken over one spelling of the directory, not whichever the operator typed
+export function normaliseStateDir(stateDir: string): string {
+  const normal = posix.normalize(stateDir.trim());
+  return normal.length > 1 ? normal.replace(/\/+$/, "") : normal;
 }
 
 function currentUid(): number {

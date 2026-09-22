@@ -46,6 +46,7 @@ final class AppModel {
     // A worker restart drops the socket; reconnecting on our own is what makes "retrying" true
     // rather than decorative.
     private func pumpForever() async {
+        var refusal: String?
         while !Task.isCancelled {
             do {
                 let status = try await client.status()
@@ -77,9 +78,12 @@ final class AppModel {
                     state.apply(event, at: Date())
                     Notifier.shared.handle(event)
                 }
+            } catch SocketError.unsafeDirectory(let reason) {
+                refusal = reason
             } catch {}
             if Task.isCancelled { return }
-            state.markDisconnected()
+            state.markDisconnected(reason: refusal)
+            refusal = nil
             Notifier.shared.workerDisconnected()
             try? await Task.sleep(for: .seconds(5))
         }
