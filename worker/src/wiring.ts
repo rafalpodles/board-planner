@@ -780,6 +780,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     forgetEnrolmentToken: bootstrap.enrolmentTokenFile
       ? () => rmSync(bootstrap.enrolmentTokenFile, { force: true })
       : undefined,
+    enrolmentTokenFile: bootstrap.enrolmentTokenFile || undefined,
     registration: {
       name: bootstrap.workerName,
       host: deps.hostname(),

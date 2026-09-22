@@ -178,9 +178,27 @@ function requiredSecret(env: Env, key: string, readSecret: SecretReader): string
   throw new Error(`${key} or ${key}_FILE is required`);
 }
 
-// Optional by design: once a worker has an identity it never registers again, so the operator is
-// meant to delete this. Requiring it would stop an enrolled worker from booting.
-function optionalSecret(env: Env, key: string, readSecret: SecretReader): string {
+const isMissingFile = (e: unknown) => (e as NodeJS.ErrnoException)?.code === "ENOENT";
+
+// Optional by design: once a worker has an identity it never registers again, and it deletes the
+// file itself after registering — so a missing file is the normal end state and an enrolled worker
+// must keep booting. A file that is there but cannot be used is the operator's mistake, and says so.
+function enrolmentSecret(env: Env, key: string, readSecret: SecretReader): string {
+  const inline = env[key];
+  if (inline?.trim()) return inline.trim();
+
+  const path = env[`${key}_FILE`];
+  if (!path?.trim()) return "";
+  try {
+    return readSecret(path.trim()).trim();
+  } catch (e) {
+    if (isMissingFile(e)) return "";
+    throw new Error(`${key}_FILE: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+// Nothing reads this any more, so a leftover file in any state must not stop a working worker
+function ignoredSecret(env: Env, key: string, readSecret: SecretReader): string {
   const inline = env[key];
   if (inline?.trim()) return inline.trim();
 
@@ -213,8 +231,8 @@ export function loadBootstrap(env: Env, readSecret: SecretReader = readSecretFil
     apiBaseUrl: required(env, "CP_API_URL").replace(/\/$/, ""),
     // Optional since CP-237: the worker holds one credential, minted by registration, whose scope
     // tracks its assignments. Still read when present so an existing plist keeps booting.
-    apiToken: optionalSecret(env, "CP_API_TOKEN", readSecret),
-    enrolmentToken: optionalSecret(env, "CP_ENROLMENT_TOKEN", readSecret),
+    apiToken: ignoredSecret(env, "CP_API_TOKEN", readSecret),
+    enrolmentToken: enrolmentSecret(env, "CP_ENROLMENT_TOKEN", readSecret),
     enrolmentTokenFile: env.CP_ENROLMENT_TOKEN_FILE?.trim() || "",
     workerName: required(env, "CP_WORKER_NAME"),
     stateDir: stateDirFrom(env),

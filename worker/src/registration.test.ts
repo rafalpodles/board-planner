@@ -19,6 +19,7 @@ function depsWith(
     enrolmentToken?: string;
     registerStatus?: number;
     forgetEnrolmentToken?: () => void;
+    enrolmentTokenFile?: string;
   } = {}
 ): HeartbeatDeps {
   const initialStored = opts.stored === undefined ? { workerId: "6a7c686f70ed274cf658b1b3", credential: "cpw_existing", heartbeatMs: 60_000 } : opts.stored;
@@ -49,6 +50,7 @@ function depsWith(
     apiBaseUrl: "https://app.example.com",
     enrolmentToken: opts.enrolmentToken === undefined ? "cpe_one_time" : opts.enrolmentToken,
     forgetEnrolmentToken: opts.forgetEnrolmentToken,
+    enrolmentTokenFile: opts.enrolmentTokenFile,
     registration: { name: "worker-1", host: "host-1", platform: "darwin", version: "1.0.0" },
     store,
     handlers: opts.handlers ?? handlerStub(),
@@ -205,6 +207,20 @@ describe("startHeartbeat", () => {
 
     expect(calls(deps).some(([url]) => String(url).endsWith("/api/workers/register"))).toBe(false);
     expect(deps.log).toHaveBeenCalledWith(expect.stringContaining("CP_ENROLMENT_TOKEN"));
+  });
+
+  it("names the configured token file when it is missing, rather than asking for it to be set", async () => {
+    const deps = depsWith({
+      stored: null,
+      enrolmentToken: "",
+      enrolmentTokenFile: "/Users/op/.boardplanner/token",
+    });
+
+    await startHeartbeat(deps).tick();
+
+    const message = String(vi.mocked(deps.log!).mock.calls[0][0]);
+    expect(message).toContain("CP_ENROLMENT_TOKEN_FILE (/Users/op/.boardplanner/token) is missing");
+    expect(message).not.toContain("and set CP_ENROLMENT_TOKEN_FILE");
   });
 
   // An enrolled worker must keep booting after the operator deletes the token, which is the whole
