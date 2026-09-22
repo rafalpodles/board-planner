@@ -117,3 +117,41 @@ describe("breakpoints on the wire", () => {
     expect(JSON.stringify(bodies[0].tools)).not.toContain("cache_control");
   });
 });
+
+// BP-766. A published image is built once for every self-hoster; the referer names the instance
+// the request came from, which only the runtime environment knows
+describe("the referer the provider is told", () => {
+  const referers: (string | null)[] = [];
+
+  beforeEach(() => {
+    referers.length = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        referers.push(new Headers(init.headers).get("HTTP-Referer"));
+        return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), { status: 200 });
+      })
+    );
+  });
+  afterEach(() => {
+    delete process.env.PUBLIC_ORIGIN;
+    delete process.env.NEXT_PUBLIC_APP_URL;
+  });
+
+  it("is this instance's PUBLIC_ORIGIN, not NEXT_PUBLIC_APP_URL", async () => {
+    process.env.PUBLIC_ORIGIN = "https://board.example.org";
+    process.env.NEXT_PUBLIC_APP_URL = "http://localhost:3000";
+
+    await send();
+
+    expect(referers).toEqual(["https://board.example.org"]);
+  });
+
+  it("falls back to the product's own domain when the origin is not configured", async () => {
+    process.env.NEXT_PUBLIC_APP_URL = "http://localhost:3000";
+
+    await send();
+
+    expect(referers).toEqual(["https://board-planner.com"]);
+  });
+});

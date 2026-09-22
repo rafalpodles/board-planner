@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
+import { selfOrigin } from "@/lib/session";
 import { withProjectOwner } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { Task } from "@/models/task";
@@ -72,7 +73,7 @@ export const POST = withProjectOwner(async (_request, { params }) => {
     const record = values as Record<string, unknown> | undefined;
     return String(record?.[id] ?? "");
   };
-  const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/+$/, "");
+  const appUrl = selfOrigin();
 
   const rows: CodaTaskRow[] = tasks.map((task) => ({
     key: `${project.key}-${task.taskNumber}`,

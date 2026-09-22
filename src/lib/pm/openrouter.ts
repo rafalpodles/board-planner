@@ -1,4 +1,5 @@
 import { APP_NAME, APP_DOMAIN } from "@/lib/brand";
+import { selfOrigin } from "@/lib/session";
 import { withCacheBreakpoints } from "./prompt-cache";
 
 const BASE_URL = () => process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1";
@@ -120,7 +121,7 @@ export async function chatCompletion(opts: {
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
-        "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || `https://${APP_DOMAIN}`,
+        "HTTP-Referer": selfOrigin() ?? `https://${APP_DOMAIN}`,
         "X-Title": `${APP_NAME} PM Agent`,
       },
       body: JSON.stringify({

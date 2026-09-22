@@ -10,6 +10,7 @@ import {
   startDeviceEnrolment,
 } from "@/lib/device-enrolment";
 import { getClientIp } from "@/lib/auth";
+import { selfOrigin } from "@/lib/session";
 import {
   anonymousMultiplier,
   isRateLimited,
@@ -29,6 +30,14 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { error: `server speaks protocol ${PROTOCOL_VERSION}` },
       { status: 409 }
+    );
+  }
+
+  const origin = selfOrigin();
+  if (!origin) {
+    return NextResponse.json(
+      { error: "This instance's own origin is not configured. Set PUBLIC_ORIGIN (or give APP_ORIGIN exactly one origin): the machine sends its operator there to approve it." },
+      { status: 500 }
     );
   }
 
@@ -63,14 +72,13 @@ export async function POST(request: Request) {
   }
 
   const started = await startDeviceEnrolment({ machineName, machineHost });
-  const base = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? "";
 
   return NextResponse.json(
     {
       deviceCode: started.deviceCode,
       userCode: formatUserCode(started.userCode),
       // Where to send the operator. Carries the code so the common path is a click, not typing.
-      verificationUrl: `${base}/enrol/${started.userCode}`,
+      verificationUrl: `${origin}/enrol/${started.userCode}`,
       expiresAt: started.expiresAt.toISOString(),
       expiresInMs: DEVICE_ENROLMENT_TTL_MS,
       intervalMs: started.intervalMs,

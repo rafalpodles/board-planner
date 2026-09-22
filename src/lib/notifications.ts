@@ -5,6 +5,7 @@ import { safeFetch } from "./safe-fetch";
 import { OUTBOUND_CONCURRENCY, runBounded } from "./bounded";
 import { decryptSecret } from "./encryption";
 import { DISCORD_NO_MENTIONS, escapeDiscord, escapeSlack, excerpt } from "./chat-markup";
+import { selfOrigin } from "./session";
 
 interface NotificationPayload {
   project: { key: string; name: string };
@@ -13,8 +14,8 @@ interface NotificationPayload {
 }
 
 // Encoded, because a key is not constrained to a format: a `|` in it would end Slack's link target
-function taskUrlFor(appUrl: string, projectKey: string, taskKey?: string): string {
-  if (!taskKey) return "";
+function taskUrlFor(appUrl: string | null, projectKey: string, taskKey?: string): string {
+  if (!appUrl || !taskKey) return "";
   return `${appUrl}/projects/${encodeURIComponent(projectKey)}/tasks/${encodeURIComponent(taskKey)}`;
 }
 
@@ -26,7 +27,7 @@ function labelOf(status: unknown): string {
 function formatSlackPayload(
   event: WebhookEvent,
   payload: NotificationPayload,
-  appUrl: string
+  appUrl: string | null
 ): Record<string, unknown> {
   const { project, task, data } = payload;
   const e = escapeSlack;
@@ -37,6 +38,7 @@ function formatSlackPayload(
   const key = e(project.key);
   const taskKey = e(task?.taskKey ?? "");
   const title = e(task?.title ?? "");
+  const taskRef = taskUrl ? `<${taskUrl}|${taskKey}>` : taskKey;
 
   switch (event) {
     case "task_created":
@@ -46,7 +48,7 @@ function formatSlackPayload(
             type: "section",
             text: {
               type: "mrkdwn",
-              text: `*New task created in ${name}*\n<${taskUrl}|${taskKey}> ${title}`,
+              text: `*New task created in ${name}*\n${taskRef} ${title}`,
             },
           },
           {
@@ -65,7 +67,7 @@ function formatSlackPayload(
             type: "section",
             text: {
               type: "mrkdwn",
-              text: `*Task status changed in ${name}*\n<${taskUrl}|${taskKey}> ${title}`,
+              text: `*Task status changed in ${name}*\n${taskRef} ${title}`,
             },
           },
           {
@@ -87,7 +89,7 @@ function formatSlackPayload(
             type: "section",
             text: {
               type: "mrkdwn",
-              text: `*New comment in ${name}*\n<${taskUrl}|${taskKey}> ${title}`,
+              text: `*New comment in ${name}*\n${taskRef} ${title}`,
             },
           },
           ...(data?.commentBody
@@ -121,7 +123,7 @@ function formatSlackPayload(
             type: "section",
             text: {
               type: "mrkdwn",
-              text: `*${event === "task_linked" ? "Tasks linked" : "Link removed"} in ${name}*\n<${taskUrl}|${taskKey}> ${title}`,
+              text: `*${event === "task_linked" ? "Tasks linked" : "Link removed"} in ${name}*\n${taskRef} ${title}`,
             },
           },
           {
@@ -139,7 +141,7 @@ function formatSlackPayload(
 function formatDiscordPayload(
   event: WebhookEvent,
   payload: NotificationPayload,
-  appUrl: string
+  appUrl: string | null
 ): Record<string, unknown> {
   const { project, task, data } = payload;
   const d = escapeDiscord;
@@ -165,7 +167,7 @@ function formatDiscordPayload(
           {
             title: `New task: ${taskKey}`,
             description: title,
-            url: taskUrl,
+            url: taskUrl || undefined,
             color: colors.task_created,
             fields: [
               { name: "Status", value: statusLabel, inline: true },
@@ -182,7 +184,7 @@ function formatDiscordPayload(
           {
             title: `Status changed: ${taskKey}`,
             description: title,
-            url: taskUrl,
+            url: taskUrl || undefined,
             color: colors.status_changed,
             fields: [
               {
@@ -204,7 +206,7 @@ function formatDiscordPayload(
           {
             title: `New comment on ${taskKey}`,
             description: body,
-            url: taskUrl,
+            url: taskUrl || undefined,
             color: colors.comment_added,
             fields: [
               { name: "Author", value: d(String(data?.author || "unknown")), inline: true },
@@ -223,7 +225,7 @@ function formatDiscordPayload(
           {
             title: `${event === "task_linked" ? "Tasks linked" : "Link removed"}: ${taskKey}`,
             description: d(String(data?.summary ?? title)),
-            url: taskUrl,
+            url: taskUrl || undefined,
             color: colors[event],
             fields: [
               { name: "Related", value: d(String(data?.relatedTaskKey ?? "")), inline: true },
@@ -243,7 +245,7 @@ function formatPayload(
   channelType: NotificationChannelType,
   event: WebhookEvent,
   payload: NotificationPayload,
-  appUrl: string
+  appUrl: string | null
 ): Record<string, unknown> {
   switch (channelType) {
     case "slack":
@@ -269,8 +271,7 @@ export async function dispatchNotifications(
     );
     if (active.length === 0) return;
 
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL
-      || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : "http://localhost:3000");
+    const appUrl = selfOrigin();
 
     void runBounded(active, OUTBOUND_CONCURRENCY, async (channel) => {
       let webhookUrl: string;

@@ -42,11 +42,15 @@ function channelsOf(type: "slack" | "discord", events: string[], ...urls: string
 
 beforeEach(() => {
   vi.clearAllMocks();
+  process.env.PUBLIC_ORIGIN = "https://board.example.org";
   process.env.ENCRYPTION_KEY = KEY;
   delete process.env.ENCRYPTION_KEYS_OLD;
 });
 
 afterEach(() => {
+  delete process.env.PUBLIC_ORIGIN;
+  delete process.env.NEXT_PUBLIC_APP_URL;
+  delete process.env.RAILWAY_PUBLIC_DOMAIN;
   process.env.ENCRYPTION_KEY = KEY;
   delete process.env.ENCRYPTION_KEYS_OLD;
   // Restored here rather than at the end of a test body: an assertion above that line throws and
@@ -134,7 +138,7 @@ describe("dispatchNotifications — markup in what members write", () => {
     expect(text).not.toContain("<https://phish.example");
     expect(text).toContain("&lt;https://phish.example|Reset your password&gt;");
     // The task link the message exists to carry still works
-    expect(text).toContain("<http://localhost:3000/projects/BP/tasks/BP-1|BP-1>");
+    expect(text).toContain("<https://board.example.org/projects/BP/tasks/BP-1|BP-1>");
   });
 
   it("sends a Slack link in a comment body as text", async () => {
@@ -353,5 +357,51 @@ describe("where a project channel message may go", () => {
 
     await vi.waitFor(() => expect(safeFetch).toHaveBeenCalledTimes(1));
     expect(safeFetch.mock.calls[0][2]).toBe(WEBHOOK_DESTINATION);
+  });
+});
+
+// BP-766. A published image is built once for every self-hoster, so the link a room receives is
+// this instance's runtime origin; a build-time NEXT_PUBLIC_APP_URL would be the same for all of them
+describe("where a project channel message links to", () => {
+  const sentBody = () => JSON.parse(String(safeFetch.mock.calls[0][1]?.body));
+
+  it("links Slack to PUBLIC_ORIGIN, not to NEXT_PUBLIC_APP_URL", async () => {
+    process.env.NEXT_PUBLIC_APP_URL = "http://localhost:3000";
+    channelsOf("slack", ["task_created"], "https://hooks.slack.com/services/T/B/x");
+
+    await dispatchNotifications("p1", "task_created", PAYLOAD);
+
+    expect(sentBody().blocks[0].text.text).toBe(
+      "*New task created in Board*\n<https://board.example.org/projects/BP/tasks/BP-1|BP-1> T"
+    );
+  });
+
+  it("links Discord to PUBLIC_ORIGIN", async () => {
+    channelsOf("discord", ["task_created"], "https://discord.com/api/webhooks/1/x");
+
+    await dispatchNotifications("p1", "task_created", PAYLOAD);
+
+    expect(sentBody().embeds[0].url).toBe("https://board.example.org/projects/BP/tasks/BP-1");
+  });
+
+  it("names the task without a link when this instance's origin is not configured", async () => {
+    delete process.env.PUBLIC_ORIGIN;
+    process.env.NEXT_PUBLIC_APP_URL = "http://localhost:3000";
+    process.env.RAILWAY_PUBLIC_DOMAIN = "stale.up.railway.app";
+    channelsOf("slack", ["task_created"], "https://hooks.slack.com/services/T/B/x");
+
+    await dispatchNotifications("p1", "task_created", PAYLOAD);
+
+    expect(sentBody().blocks[0].text.text).toBe("*New task created in Board*\nBP-1 T");
+  });
+
+  it("sends a Discord embed with no url rather than an empty one", async () => {
+    delete process.env.PUBLIC_ORIGIN;
+    channelsOf("discord", ["task_created"], "https://discord.com/api/webhooks/1/x");
+
+    await dispatchNotifications("p1", "task_created", PAYLOAD);
+
+    expect(sentBody().embeds[0]).not.toHaveProperty("url");
+    expect(sentBody().embeds[0].title).toBe("New task: BP-1");
   });
 });
