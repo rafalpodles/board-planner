@@ -36,30 +36,41 @@ export function trustedProxyHops(): number {
 // whichever request happens to reach a throttle first
 trustedProxyHops();
 
-let warnedHeaderIgnored = false;
+// The warning carries how many entries the header held, because that count is the number this
+// variable wants: an operator reads the value off their own log instead of guessing at their chain
+// (BP-774). The count only — an entry is an address, and addresses do not belong in a log nobody
+// asked to collect them in.
+//
+// Once per distinct count, not once per process. The first forwarded request is a sample of one and
+// often not a browser's: a platform health check or an uptime probe reaches the app by a shorter
+// path and carries fewer entries, and a caller can forge the header outright. A second path through
+// the chain is exactly what an operator needs to see before choosing a number. The cap keeps a
+// caller who varies the header's length from turning this into a per-request log.
+const DISTINCT_COUNTS_WARNED = 4;
+const warnedCounts = new Set<number>();
 
-// Once per process. A caller can send the header too, so this cannot conclude a proxy is there —
-// but on a deployment behind one (Railway, BP-774) it is the only sign that the throttle has no
-// per-address key.
-function warnHeaderIgnored(): void {
-  if (warnedHeaderIgnored) return;
-  warnedHeaderIgnored = true;
+function warnHeaderIgnored(count: number): void {
+  if (warnedCounts.has(count) || warnedCounts.size >= DISTINCT_COUNTS_WARNED) return;
+  warnedCounts.add(count);
+  const last = warnedCounts.size === DISTINCT_COUNTS_WARNED;
   console.warn(
-    `A request arrived with X-Forwarded-For while ${TRUSTED_PROXY_HOPS_VAR}=0, so the header is ignored and the login throttle has no per-address key. If a proxy sits in front of this app, set ${TRUSTED_PROXY_HOPS_VAR} to the number of proxies that append to that header.`
+    `A request arrived with X-Forwarded-For carrying ${count} ${count === 1 ? "entry" : "entries"} while ${TRUSTED_PROXY_HOPS_VAR}=0, so the header is ignored and the login throttle has no per-address key. If a proxy sits in front of this app, set ${TRUSTED_PROXY_HOPS_VAR} to the number of proxies that append to that header — the count above, read from a request you made yourself through the whole chain.${last ? " Further counts will not be reported." : ""}`
   );
 }
 
 export function getClientIp(request: Request): string | null {
   const hops = trustedProxyHops();
-  if (hops === 0) {
-    if (request.headers.has("x-forwarded-for")) warnHeaderIgnored();
-    return null;
-  }
+  const header = request.headers.get("x-forwarded-for");
 
-  const entries = (request.headers.get("x-forwarded-for") ?? "")
+  const entries = (header ?? "")
     .split(",")
     .map((entry) => entry.trim())
     .filter(Boolean);
+
+  if (hops === 0) {
+    if (header !== null) warnHeaderIgnored(entries.length);
+    return null;
+  }
 
   // Fewer entries than the operator described means the request did not come through the proxies
   // they configured, so nothing in it is the address they promised. Counting the leftmost entry
