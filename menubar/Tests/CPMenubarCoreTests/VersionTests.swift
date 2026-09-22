@@ -1,6 +1,11 @@
 import Testing
 @testable import CPMenubarCore
 
-@Test func exposesItsVersion() {
-    #expect(CPMenubarCore.version == "0.1.0")
+@Test func readsTheVersionTheBundleWasStampedWith() {
+    #expect(CPMenubarCore.version(from: ["CFBundleShortVersionString": "1.2.3"]) == "1.2.3")
+}
+
+@Test func saysItDoesNotKnowOutsideABundle() {
+    #expect(CPMenubarCore.version(from: nil) == CPMenubarCore.unknownVersion)
+    #expect(CPMenubarCore.version(from: ["CFBundleShortVersionString": " "]) == CPMenubarCore.unknownVersion)
 }

@@ -24,6 +24,7 @@ import {
   EffectiveConfig,
   loadBootstrap,
   localSocketPath,
+  socketMovedOutOfStateDir,
   parseAssignments,
   parseOffers,
   parseCatalogue,
@@ -75,8 +76,8 @@ import {
 import { scrubPatch } from "./scrub.js";
 import { ClaimedTask } from "./types.js";
 import { createWorkspace, reapOrphans } from "./workspace.js";
+import { entryDirectory, workerVersion } from "./version.js";
 
-const WORKER_VERSION = "1.0.0";
 const MIN_REFRESH_INTERVAL_MS = 30_000;
 
 // Every ambient thing the wiring used to reach for directly. main.ts is the one place that supplies
@@ -98,6 +99,8 @@ export interface WorkerDeps {
   // null for "not there", so a missing manifest is not confused with an unreadable one
   readFile: (path: string) => string | null;
   execPath: string;
+  // The release this worker was built from, as stamped into the package.json it ships with
+  version: string;
   isExecutable: (path: string) => boolean;
   runPreflight: (deps: PreflightDeps) => Promise<PreflightReport>;
   // childEnv() copies PATH from this process, so repairing the worker's own is what reaches every
@@ -136,6 +139,10 @@ function fileStore(path: string): Store {
   };
 }
 
+function readFileOrNull(path: string): string | null {
+  return existsSync(path) ? readFileSync(path, "utf8") : null;
+}
+
 export function defaultWorkerDeps(): WorkerDeps {
   return {
     env: process.env,
@@ -152,8 +159,9 @@ export function defaultWorkerDeps(): WorkerDeps {
     },
     fetchImpl: (...args) => fetch(...args),
     createStore: fileStore,
-    readFile: (path) => (existsSync(path) ? readFileSync(path, "utf8") : null),
+    readFile: readFileOrNull,
     execPath: process.execPath,
+    version: workerVersion(readFileOrNull, entryDirectory()),
     isExecutable: (path) => {
       try {
         accessSync(path, constants.X_OK);
@@ -790,7 +798,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
       name: bootstrap.workerName,
       host: deps.hostname(),
       platform: process.platform,
-      version: WORKER_VERSION,
+      version: deps.version,
     },
     store: identityStore,
     handlers: channels.remote,
@@ -812,6 +820,10 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
   // The socket is given the bus, not the right to write to it: its dependency is subscribe/recent.
   const local = deps.startLocalServer({
     socketPath: localSocketPath(bootstrap.stateDir),
+    privateDirectory: socketMovedOutOfStateDir(
+      bootstrap.stateDir,
+      localSocketPath(bootstrap.stateDir)
+    ),
     handlers: channels.local,
     telemetry,
     paused: () => loop.paused(),

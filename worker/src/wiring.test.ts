@@ -166,6 +166,14 @@ describe("the enrolment token file in the wiring", () => {
   });
 });
 
+describe("the version the worker reports", () => {
+  it("registers with the version it was built from, not a literal", () => {
+    const { seen } = harness({ version: "1.2.3" });
+
+    expect(seen.heartbeat?.registration.version).toBe("1.2.3");
+  });
+});
+
 describe("the local socket's place in the wiring", () => {
   // The two server channels deliver the same standing command, so they must share the guard that
   // tells a redelivery from a fresh instruction.

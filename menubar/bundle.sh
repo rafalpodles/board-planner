@@ -58,8 +58,9 @@ fi
 mkdir -p "$APP/Contents/Resources/worker"
 cp -R "$WORKER_DIST"/* "$APP/Contents/Resources/worker/"
 rm -rf "$APP/Contents/Resources/worker/__fixtures__"
-# Without it node decides ESM vs CommonJS by sniffing, which older releases do not do
-echo '{ "type": "module" }' > "$APP/Contents/Resources/worker/package.json"
+# Without it node decides ESM vs CommonJS by sniffing, which older releases do not do. The version
+# is what the running worker reports to the server.
+printf '{ "type": "module", "version": "%s" }\n' "$VERSION" > "$APP/Contents/Resources/worker/package.json"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
