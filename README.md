@@ -182,7 +182,7 @@ That runs the published image, `ghcr.io/rafalpodles/board-planner`, built for `l
 newest release; pin one with `BOARD_PLANNER_VERSION=1.2.3` in a `.env` next to the compose file. To upgrade,
 `docker compose pull && docker compose up -d`.
 
-The compose file on `main` needs an image of **1.2.0 or later**: it passes `COOKIE_ALLOW_INSECURE=auto`,
+The compose file on `main` needs an image of **1.1.2 or later**: it passes `COOKIE_ALLOW_INSECURE=auto`,
 which 1.1.1 does not know, so a 1.1.1 image served over plain HTTP anywhere but localhost cannot
 sign in. To run 1.1.1 with it, put `COOKIE_ALLOW_INSECURE=1` in `.env`.
 

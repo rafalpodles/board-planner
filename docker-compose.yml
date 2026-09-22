@@ -38,7 +38,7 @@ services:
       # auto: a plain cookie only while PUBLIC_ORIGIN and every APP_ORIGIN are http://, as on this
       # file's localhost defaults, and only to a sign-in that did not come over https; an https
       # PUBLIC_ORIGIN makes it Secure with nothing else to change. 0 forces the secure cookie, 1 the
-      # plain one. Needs an image of 1.2.0 or later: 1.1.1 reads auto as off
+      # plain one. Needs an image of 1.1.2 or later: 1.1.1 reads auto as off
       COOKIE_ALLOW_INSECURE: ${COOKIE_ALLOW_INSECURE:-auto}
       APP_ORIGIN: ${APP_ORIGIN:-http://localhost:${APP_PORT:-3000}}
       # 0 unless something in front of the app appends to X-Forwarded-For — the login throttle
