@@ -230,7 +230,7 @@ test.describe("a member's own task, as the board changes under it", () => {
     await expect(machine).toHaveCount(1);
     await expect(machine.getByTestId("offering-machine-state")).toHaveText("cannot use its checkout");
     await expect(machine.getByTestId("offering-machine-error")).toHaveText(
-      "its checkout is in /private/tmp, a directory the worker refuses to work in. Move the checkout somewhere else, such as your home folder, and update repos.json on that machine."
+      "Its checkout is in /private/tmp, a directory the worker refuses to work in. Move the checkout somewhere else, such as your home folder, and update repos.json on that machine."
     );
   });
 

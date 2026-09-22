@@ -18,6 +18,10 @@ import { useStore } from "@/app/(app)/agents/store";
 import { isWorkerLockedByInstance } from "@/lib/worker-gate";
 import { bindingErrorFor, describeBindingError } from "@/lib/binding-error";
 
+function sentence(clause: string): string {
+  return clause.charAt(0).toUpperCase() + clause.slice(1);
+}
+
 const NUMBER_FIELDS = new Set(["taskTimeoutMs", "runCeilingMs", "maxDiffLines", "maxDiffFiles"]);
 const LABELS: Record<string, string> = {
   autoMerge: "Merge automatically",
@@ -256,7 +260,7 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
                               className="basis-full text-xs text-danger break-words"
                               title={refused}
                             >
-                              {describeBindingError(refused)}
+                              {sentence(describeBindingError(refused))}
                             </p>
                           )}
                         </li>

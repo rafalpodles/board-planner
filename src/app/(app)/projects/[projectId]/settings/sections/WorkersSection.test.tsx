@@ -134,7 +134,7 @@ describe("machines offering this repository", () => {
 
     expect(screen.getByTestId("offering-machine-state").textContent).toBe("cannot use its checkout");
     expect(screen.getByTestId("offering-machine-error").textContent).toBe(
-      "its checkout is in /private/tmp, a directory the worker refuses to work in. Move the checkout somewhere else, such as your home folder, and update repos.json on that machine."
+      "Its checkout is in /private/tmp, a directory the worker refuses to work in. Move the checkout somewhere else, such as your home folder, and update repos.json on that machine."
     );
   });
 
