@@ -160,9 +160,12 @@ mkdir -p -m 700 ~/.boardplanner
 install -m 600 /dev/null ~/.boardplanner/token && pbpaste > ~/.boardplanner/token
 ```
 
-The plist points `CP_ENROLMENT_TOKEN_FILE` at that file. The worker refuses one that is readable by
-group or others, and stops with that reason rather than starting without a token. The inline
-variable still works for a container, where there is no file to protect.
+The plist points `CP_ENROLMENT_TOKEN_FILE` at that file. The worker will not use one that is readable
+by group or others: a worker with no identity yet stays unregistered and logs that reason, ending in
+`run chmod 600 on it`, until you fix the file and
+run the `unload` and `load` below again. A worker that has already registered
+never reads the token, so a leftover file there does not stop it. The inline variable still works
+for a container, where there is no file to protect.
 
 Then install the plist and load it. It ships with `REPO_DIR` and `HOME_DIR` placeholders rather than
 one developer's absolute paths, so substitute them as you install it:
@@ -170,8 +173,12 @@ one developer's absolute paths, so substitute them as you install it:
 ```bash
 sed -e "s|REPO_DIR|$(cd .. && pwd)|g" -e "s|HOME_DIR|$HOME|g" \
   launchd/com.boardplanner.worker.plist > ~/Library/LaunchAgents/com.boardplanner.worker.plist
+launchctl unload ~/Library/LaunchAgents/com.boardplanner.worker.plist 2>/dev/null
 launchctl load ~/Library/LaunchAgents/com.boardplanner.worker.plist
 ```
+
+The `unload` makes the sequence safe to repeat: it stops a copy already loaded, so the `load` picks up
+the new plist.
 
 Loading it before the token is in place starts a worker that stays unregistered: it reads the token
 only when it starts, so it logs every 30 seconds that it has none until you `launchctl unload` and
@@ -650,8 +657,9 @@ outside the worker API accepts it.
 Settings → Workers → "Enrol a worker" and put it on the machine. The first registration spends it
 server-side, the worker deletes the file, and it is never needed again — a worker with an identity
 in `worker.json` does not re-register. Optional by design: an enrolled worker must keep booting
-after you remove it, so a token file that is gone is not an error; one that is there but readable
-by group or others is, and stops the worker with `chmod 600` in the message.
+after you remove it, so a token file that is gone is not an error. One that is there but readable
+by group or others is ignored by a registered worker; a worker with no identity yet stays
+unregistered and logs the reason, with `chmod 600` in it.
 
 **`CP_API_TOKEN` / `CP_API_TOKEN_FILE`** — **no longer used**, and not a credential this worker
 holds. The worker's own `cpw_` credential
