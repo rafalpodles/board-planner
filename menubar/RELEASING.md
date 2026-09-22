@@ -1,7 +1,60 @@
 # Releasing the menubar app
 
-Everything below the "one-time" section is already wired up. `bundle.sh` signs with the hardened
-runtime, notarises, staples and produces a zip — it just needs an identity to sign with.
+## From CI — the normal way
+
+`.github/workflows/release.yml` runs on a pushed tag `vX.Y.Z`, in two jobs:
+
+- **build** (`macos-latest`, `contents: read`, environment `release`). Installs the worker with
+  `npm ci --ignore-scripts`, builds it, runs the Swift tests and packs the worker tarball, all
+  before any secret touches the disk. Then it imports the Developer ID into a temporary keychain,
+  runs `bundle.sh release` as a universal build (arm64 and x86_64), notarises with an App Store
+  Connect API key (90-minute limit, submission id printed first), staples (three tries), and
+  requires `spctl` to report `source=Notarized Developer ID`. The keychain and key files are
+  deleted in an `always()` step. The assets go up as a workflow artifact kept for 3 days.
+- **publish** (`ubuntu-latest`, `contents: write`, tag pushes only). Downloads that artifact and
+  attaches it to the release, creating it with generated notes if it does not exist, or replacing
+  the assets if it does.
+
+| Asset | What it is |
+| --- | --- |
+| `board-planner-menubar-X.Y.Z.zip` | The app, worker inside, signed, notarised and stapled |
+| `board-planner-worker-X.Y.Z.tar.gz` | The worker alone, for a machine run by hand: `worker/` with `dist/`, `package.json`, `launchd/`; runs with `node`, no install |
+| `SHA256SUMS` | Checksums of both |
+
+```bash
+git tag v1.0.1 && git push origin v1.0.1
+```
+
+**Actions → Release → Run workflow** is a dry run: the build job alone, attached to no release. Its
+artifact is still downloadable by anyone for 3 days, because the repository is public. Turn
+*signed* off to exercise it before the secrets exist; that run uses no environment.
+
+### The `release` environment
+
+The secrets are **environment** secrets, not repository secrets: **Settings → Environments → New
+environment → `release`**. Under *Deployment branches and tags* choose **Selected branches and
+tags** and add the branch `main` and the tag pattern `v*`, so no other ref can reach the signing
+certificate. A required reviewer is optional and makes every signed run wait for approval.
+
+The build job stops before signing unless all six are set, and names each missing one:
+
+| Secret | Holds |
+| --- | --- |
+| `MACOS_CERTIFICATE_P12_BASE64` | The *Developer ID Application* certificate and its private key, exported as `.p12`, base64 |
+| `MACOS_CERTIFICATE_PASSWORD` | The password the `.p12` was exported with |
+| `APPLE_TEAM_ID` | The team id (see below: the `OU`, not the id in a development certificate's name) |
+| `ASC_KEY_ID` | App Store Connect API key id |
+| `ASC_ISSUER_ID` | App Store Connect issuer id |
+| `ASC_KEY_P8_BASE64` | The downloaded `AuthKey_<id>.p8`, base64 |
+
+A notarisation that has no verdict within the limit fails the job with its submission id. Finish
+it by hand with `xcrun notarytool wait <id>` and staple, or re-run the job.
+
+## By hand
+
+`bundle.sh` signs with the hardened runtime, notarises, staples and produces a zip — it just needs
+an identity to sign with. `CP_VERSION`, `CP_BUILD_NUMBER`, `CP_ARCHS` and `CP_NOTARY_TIMEOUT` (default `90m`) are what CI sets; unset,
+the build is `1.0.0`, build 1, for this Mac's architecture.
 
 ## The signing path is already proven with a real certificate
 
@@ -75,7 +128,8 @@ That prints the path to `CPMenubar.zip` with the ticket stapled. `bundle.sh` run
 `spctl --assess --type execute` at the end, which is the decision another Mac will make on first
 launch — read that line before sending the file anywhere.
 
-Without `CP_NOTARY_PROFILE` it signs and stops, saying so. Without `CP_SIGN_IDENTITY` it is ad-hoc
+`CP_NOTARY_KEY_PATH`, `CP_NOTARY_KEY_ID` and `CP_NOTARY_ISSUER` notarise with an API key instead
+of a stored profile, which is what CI does. Without either it signs and stops, saying so. Without `CP_SIGN_IDENTITY` it is ad-hoc
 and says that too — that build opens on the machine that made it and nowhere else.
 
 ## Sanity checks worth keeping

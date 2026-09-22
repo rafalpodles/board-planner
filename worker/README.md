@@ -146,6 +146,10 @@ working normally.
 npm install && npm run build && npm start
 ```
 
+Without a clone: every release carries `board-planner-worker-X.Y.Z.tar.gz`, built by
+`pack.sh` — this directory's `dist/`, `launchd/` and a `package.json` with nothing to install.
+Unpack it and run `npm start` (or `node dist/main.js`) inside the `worker/` it contains.
+
 As a macOS service:
 
 The plist ships with `REPO_DIR` and `HOME_DIR` placeholders rather than one developer's

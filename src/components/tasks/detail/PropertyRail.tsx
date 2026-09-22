@@ -17,6 +17,7 @@ import {
 import { activeFields, orderedOptions, sortedFields } from "@/lib/custom-fields";
 import { categoryColor } from "@/lib/category-colors";
 import { roundForDisplay } from "@/lib/estimates";
+import { EXECUTION_DOCS_URL } from "@/lib/docs-urls";
 import { Switch } from "@/components/ui/Switch";
 import { Avatar, PriorityBars, SectionLabel } from "./atoms";
 import {
@@ -65,7 +66,6 @@ function formatDate(value: string): string {
   });
 }
 
-export const EXECUTION_DOCS_URL = "https://board-planner.com/docs/ai/execution-workers/";
 const CONNECT_MACHINE_URL = `${EXECUTION_DOCS_URL}#setting-one-up`;
 
 /** What GET /handover answers: the board's own readiness, read fresh rather than off the page */

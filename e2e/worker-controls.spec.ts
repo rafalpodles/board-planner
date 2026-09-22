@@ -742,6 +742,38 @@ test("an admin mints a single-use enrolment token, and a machine spends it on a 
   expect((await asToken.json()).error).toBe("Interactive session required");
 });
 
+test("the Enrol dialog sends a machine with nothing installed to the download, before and after minting", async ({
+  page,
+}) => {
+  const download = "https://board-planner.com/docs/ai/execution-workers/#getting-the-software";
+  await signIn(page);
+  await page.goto("/settings/workers");
+  await page.getByRole("button", { name: "Enrol a worker" }).click();
+  const dialog = page.getByRole("dialog", { name: "Enrol a worker" });
+
+  await expect(dialog.getByRole("link", { name: "Getting the software" })).toHaveAttribute(
+    "href",
+    download
+  );
+
+  const [minted] = await Promise.all([
+    page.waitForResponse(
+      (r) =>
+        new URL(r.url()).pathname === "/api/workers/enrolment" && r.request().method() === "POST"
+    ),
+    dialog.getByRole("button", { name: "Mint token" }).click(),
+  ]);
+  expect(minted.status()).toBe(201);
+  await expect(dialog.getByText(/^cpe_[0-9a-f]+$/)).toBeVisible();
+
+  const firstStep = dialog.getByRole("listitem").first();
+  await expect(firstStep).toContainText("Install the worker");
+  await expect(firstStep.getByRole("link", { name: "Getting the software" })).toHaveAttribute(
+    "href",
+    download
+  );
+});
+
 test("the checkout picker: what a machine has, what it is given, and what saving takes away", async ({
   page,
   request,
