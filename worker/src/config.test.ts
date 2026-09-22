@@ -53,6 +53,25 @@ describe("loadBootstrap", () => {
     );
   });
 
+  // BP-778. The digest is pinned: the menubar app computes the same path in Swift
+  // (SocketClientTests), and the two must agree byte for byte.
+  it("moves the socket to a short private path when the state dir is too deep for one", () => {
+    const deep = `/Users/operator/${"nested/".repeat(12)}state`;
+    const socket = localSocketPath(deep, 501);
+
+    expect(Buffer.byteLength(join(deep, "worker.sock"))).toBeGreaterThan(103);
+    expect(socket).toBe("/tmp/cp-worker-501-7038366db39fb12e/worker.sock");
+    expect(Buffer.byteLength(socket)).toBeLessThanOrEqual(103);
+  });
+
+  it("keeps the socket beside the state at exactly the longest path a socket may have", () => {
+    const dir = `/${"a".repeat(103 - "/worker.sock".length - 1)}`;
+
+    expect(Buffer.byteLength(join(dir, "worker.sock"))).toBe(103);
+    expect(localSocketPath(dir, 501)).toBe(join(dir, "worker.sock"));
+    expect(localSocketPath(`${dir}b`, 501)).toMatch(/^\/tmp\/cp-worker-501-[0-9a-f]{16}\/worker\.sock$/);
+  });
+
   it("does not require a project or a repository path", () => {
     // CP_PROJECT_ID and CP_REPO_PATH are gone: assignments and their proposed paths come from
     // the server now, not from the environment

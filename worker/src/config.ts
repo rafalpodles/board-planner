@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import { readFileSync, statSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
@@ -249,10 +250,26 @@ export function loadBootstrap(env: Env, readSecret: SecretReader = readSecretFil
 
 export const LOCAL_SOCKET_NAME = "worker.sock";
 
+// sun_path is 104 bytes on macOS, the terminating NUL included
+export const MAX_SOCKET_PATH_BYTES = 103;
+
 // The local control plane lives beside the identity and the outbox, in the one directory this
-// worker already owns — see local-server.ts for why it is a socket there and not a port
-export function localSocketPath(stateDir: string): string {
-  return join(stateDir, LOCAL_SOCKET_NAME);
+// worker already owns — see local-server.ts for why it is a socket there and not a port. A state
+// directory too deep for that moves it to /tmp, under a name the menubar app derives the same way
+// (SocketClient.socketPath): the uid, and a digest of the state directory (BP-778).
+export function localSocketPath(stateDir: string, uid = currentUid()): string {
+  const beside = join(stateDir, LOCAL_SOCKET_NAME);
+  if (Buffer.byteLength(beside) <= MAX_SOCKET_PATH_BYTES) return beside;
+  const digest = createHash("sha256").update(stateDir).digest("hex").slice(0, 16);
+  return join("/tmp", `cp-worker-${uid}-${digest}`, LOCAL_SOCKET_NAME);
+}
+
+export function socketMovedOutOfStateDir(stateDir: string, socketPath: string): boolean {
+  return socketPath !== join(stateDir, LOCAL_SOCKET_NAME);
+}
+
+function currentUid(): number {
+  return process.getuid ? process.getuid() : 0;
 }
 
 function isPositiveNumber(value: unknown): value is number {
