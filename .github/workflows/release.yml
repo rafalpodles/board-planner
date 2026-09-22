@@ -314,6 +314,36 @@ jobs:
           [ "$STATE" = "false $EXPECTED" ] \
             || { echo "::error::$TAG is still a draft, or does not carry the $EXPECTED assets"; exit 1; }
 
+  # board-planner.com/docs/changelog/ is generated when the site is built, and the site is only built
+  # when its own repository deploys — so without this the page would not mention a release until the
+  # next docs change happened to land. It runs after `publish`, which is where the release stops
+  # being a draft: a draft is invisible to the unauthenticated fetch the site makes, and after
+  # `image`, so the page never prints a pull command for a tag that was not pushed.
+  #
+  # A `repository_dispatch` into the site repository would need a token that reaches it, which this
+  # workflow has not got: `github.token` is scoped to this repository alone. A Railway project token
+  # reaches only the one service it is issued for, so that is what this uses.
+  docs:
+    name: Refresh the changelog on the docs site
+    needs: [resolve, publish, image]
+    if: needs.resolve.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: {}
+    steps:
+      - name: Redeploy board-planner-site
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          SERVICE: ${{ vars.RAILWAY_SITE_SERVICE || 'board-planner-site' }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          if [ -z "$RAILWAY_TOKEN" ]; then
+            echo "::warning::RAILWAY_TOKEN is unset: board-planner.com will not list $TAG until its site is deployed for some other reason"
+            exit 0
+          fi
+          npm install -g @railway/cli@5.43.4
+          railway redeploy --service "$SERVICE" --from-source --yes
+
   # Independent of the macOS jobs: a failed notarisation does not hold the image back, nor the reverse.
   # The dry run below repeats these steps through anchors, so it builds exactly what a tag pushes.
   image:
