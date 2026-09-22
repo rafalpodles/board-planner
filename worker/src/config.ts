@@ -73,6 +73,8 @@ export interface Bootstrap {
   // Single-use, spent by the first registration. Empty once the operator has removed it, which is
   // the intended end state — an enrolled worker never needs it again.
   enrolmentToken: string;
+  // Why the token file could not be read. Only matters to a worker with no identity yet
+  enrolmentTokenError: string;
   enrolmentTokenFile: string;
   workerName: string;
   stateDir: string;
@@ -178,9 +180,31 @@ function requiredSecret(env: Env, key: string, readSecret: SecretReader): string
   throw new Error(`${key} or ${key}_FILE is required`);
 }
 
-// Optional by design: once a worker has an identity it never registers again, so the operator is
-// meant to delete this. Requiring it would stop an enrolled worker from booting.
-function optionalSecret(env: Env, key: string, readSecret: SecretReader): string {
+const isMissingFile = (e: unknown) => (e as NodeJS.ErrnoException)?.code === "ENOENT";
+
+// Never fatal at boot: an enrolled worker never reads the token again, and a file left at that path
+// (an old plist's cp_ token, say) must not stop it. A missing file is the normal end state — the
+// worker deletes it after registering. Any other failure is kept, and registration reports it.
+function enrolmentSecret(
+  env: Env,
+  key: string,
+  readSecret: SecretReader
+): { token: string; error: string } {
+  const inline = env[key];
+  if (inline?.trim()) return { token: inline.trim(), error: "" };
+
+  const path = env[`${key}_FILE`];
+  if (!path?.trim()) return { token: "", error: "" };
+  try {
+    return { token: readSecret(path.trim()).trim(), error: "" };
+  } catch (e) {
+    if (isMissingFile(e)) return { token: "", error: "" };
+    return { token: "", error: `${key}_FILE: ${e instanceof Error ? e.message : String(e)}` };
+  }
+}
+
+// Nothing reads this any more, so a leftover file in any state must not stop a working worker
+function ignoredSecret(env: Env, key: string, readSecret: SecretReader): string {
   const inline = env[key];
   if (inline?.trim()) return inline.trim();
 
@@ -209,12 +233,14 @@ export function stateDirFrom(env: Env): string {
 }
 
 export function loadBootstrap(env: Env, readSecret: SecretReader = readSecretFile): Bootstrap {
+  const enrolment = enrolmentSecret(env, "CP_ENROLMENT_TOKEN", readSecret);
   return {
     apiBaseUrl: required(env, "CP_API_URL").replace(/\/$/, ""),
     // Optional since CP-237: the worker holds one credential, minted by registration, whose scope
     // tracks its assignments. Still read when present so an existing plist keeps booting.
-    apiToken: optionalSecret(env, "CP_API_TOKEN", readSecret),
-    enrolmentToken: optionalSecret(env, "CP_ENROLMENT_TOKEN", readSecret),
+    apiToken: ignoredSecret(env, "CP_API_TOKEN", readSecret),
+    enrolmentToken: enrolment.token,
+    enrolmentTokenError: enrolment.error,
     enrolmentTokenFile: env.CP_ENROLMENT_TOKEN_FILE?.trim() || "",
     workerName: required(env, "CP_WORKER_NAME"),
     stateDir: stateDirFrom(env),

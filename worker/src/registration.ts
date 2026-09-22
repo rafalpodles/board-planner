@@ -39,6 +39,8 @@ export interface HeartbeatDeps {
   // Removed after a successful registration: the token is already spent server-side, and leaving a
   // dead secret on a disk the agent can read is pointless risk.
   forgetEnrolmentToken?: () => void;
+  enrolmentTokenFile?: string;
+  enrolmentTokenError?: string;
   registration: RegistrationInfo;
   store: Store;
   // The command channel that survives SSE loss and a restart, so this is the durable one
@@ -120,8 +122,14 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
   async function register(): Promise<StoredIdentity | null> {
     if (!deps.enrolmentToken) {
       log(
-        "no identity on disk and no CP_ENROLMENT_TOKEN: mint one in Settings -> Workers and set " +
-          "CP_ENROLMENT_TOKEN_FILE. It is spent by the first registration; delete it afterwards."
+        deps.enrolmentTokenError
+          ? `no identity on disk, and the enrolment token cannot be used: ${deps.enrolmentTokenError}. ` +
+              "Fix the file, then restart the worker."
+          : deps.enrolmentTokenFile
+          ? `no identity on disk and CP_ENROLMENT_TOKEN_FILE (${deps.enrolmentTokenFile}) is missing ` +
+              "or empty: mint a token in Settings -> Workers and write it there, chmod 600."
+          : "no identity on disk and no CP_ENROLMENT_TOKEN: mint one in Settings -> Workers and set " +
+              "CP_ENROLMENT_TOKEN_FILE. It is spent by the first registration; delete it afterwards."
       );
       return null;
     }

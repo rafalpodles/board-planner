@@ -742,7 +742,7 @@ test("an admin mints a single-use enrolment token, and a machine spends it on a 
   expect((await asToken.json()).error).toBe("Interactive session required");
 });
 
-test("the Enrol dialog sends a machine with nothing installed to the download, before and after minting", async ({
+test("the Enrol dialog sends a machine with nothing installed to the download, and asks it for no credential but the enrolment token", async ({
   page,
 }) => {
   const download = "https://board-planner.com/docs/ai/execution-workers/#getting-the-software";
@@ -772,6 +772,11 @@ test("the Enrol dialog sends a machine with nothing installed to the download, b
     "href",
     download
   );
+
+  await expect(dialog.getByRole("listitem")).toHaveCount(2);
+  await expect(dialog.getByRole("listitem").nth(1)).toContainText("CP_ENROLMENT_TOKEN_FILE");
+  await expect(dialog.getByRole("listitem").nth(1)).toContainText("chmod 600");
+  await expect(dialog).not.toContainText("CP_API_TOKEN");
 });
 
 test("the checkout picker: what a machine has, what it is given, and what saving takes away", async ({

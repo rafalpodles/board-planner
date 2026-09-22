@@ -51,6 +51,8 @@ export function useTriggerAutocomplete(
   // Measured when the trigger fires, not on every render: the list stays where the caret was when
   // it opened, which is where the person is looking
   const [at, setAt] = useState<CaretPoint | null>(null);
+  const selection = useRef({ items, index });
+  selection.current = { items, index };
   // Answers can arrive out of order once a trigger asks the server; only the newest may land
   const request = useRef(0);
   // What the last detection was looking at, so a trigger whose data arrives later can be asked
@@ -58,7 +60,7 @@ export function useTriggerAutocomplete(
   // empty with nothing to make it look again.
   const last = useRef<{ value: string; caret: number } | null>(null);
 
-  const close = useCallback(() => {
+  const reset = useCallback(() => {
     setOpen(null);
     setItems([]);
     setIndex(0);
@@ -66,8 +68,14 @@ export function useTriggerAutocomplete(
     request.current++;
   }, []);
 
+  // A list somebody dismissed, picked from or left stays shut when the triggers are rebuilt
+  const close = useCallback(() => {
+    last.current = null;
+    reset();
+  }, [reset]);
+
   const detect = useCallback(
-    (value: string, caret: number) => {
+    (value: string, caret: number, keepSelection = false) => {
       last.current = { value, caret };
       const before = value.slice(0, caret);
 
@@ -77,13 +85,18 @@ export function useTriggerAutocomplete(
 
         const ticket = ++request.current;
         setOpen({ trigger: trigger.name, start: caret - match[0].length, caret });
-        setIndex(0);
+        if (!keepSelection) setIndex(0);
         if (textareaRef.current) setAt(caretCoordinates(textareaRef.current));
 
         Promise.resolve(trigger.suggest(match[1] ?? ""))
           .then((found) => {
             if (request.current !== ticket) return;
-            setItems(found.slice(0, MAX_SUGGESTIONS));
+            const shown = found.slice(0, MAX_SUGGESTIONS);
+            if (keepSelection) {
+              const selected = selection.current.items[selection.current.index]?.id;
+              setIndex(Math.max(shown.findIndex((item) => item.id === selected), 0));
+            }
+            setItems(shown);
           })
           .catch(() => {
             if (request.current === ticket) setItems([]);
@@ -91,15 +104,15 @@ export function useTriggerAutocomplete(
         return;
       }
 
-      close();
+      reset();
     },
-    [triggers, close, textareaRef]
+    [triggers, reset, textareaRef]
   );
 
   // Triggers change identity when their data does — the people list arriving, the board key
   // resolving. Anything already typed is re-offered against it.
   useEffect(() => {
-    if (last.current) detect(last.current.value, last.current.caret);
+    if (last.current) detect(last.current.value, last.current.caret, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [triggers]);
 

@@ -15,7 +15,7 @@
   <dict>
     <key>CP_API_URL</key>
     <string>https://app.board-planner.com</string>
-    <key>CP_API_TOKEN_FILE</key>
+    <key>CP_ENROLMENT_TOKEN_FILE</key>
     <string>HOME_DIR/.boardplanner/token</string>
     <key>CP_WORKER_NAME</key>
     <string>owner-laptop</string>

@@ -1,5 +1,6 @@
-import { describe, it, expect, vi } from "vitest";
-import { homedir } from "os";
+import { afterEach, describe, it, expect, vi } from "vitest";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { homedir, tmpdir } from "os";
 import { join } from "path";
 import {
   DEFAULT_POLICY,
@@ -107,6 +108,70 @@ describe("the legacy api token", () => {
     });
 
     expect(() => loadBootstrap({ ...base, CP_API_TOKEN_FILE: "/secrets/token" }, read)).not.toThrow();
+  });
+});
+
+describe("the enrolment token file", () => {
+  const base = { CP_API_URL: "https://app.example.com", CP_WORKER_NAME: "worker-1" };
+  let dir = "";
+  const tokenAt = (mode: number) => {
+    dir = mkdtempSync(join(tmpdir(), "cp-enrol-"));
+    const path = join(dir, "token");
+    writeFileSync(path, "cpe_from_file\n");
+    chmodSync(path, mode);
+    return path;
+  };
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+    dir = "";
+  });
+
+  it("reads a file only its owner can read", () => {
+    const path = tokenAt(0o600);
+
+    expect(loadBootstrap({ ...base, CP_ENROLMENT_TOKEN_FILE: path }).enrolmentToken).toBe(
+      "cpe_from_file"
+    );
+  });
+
+  // Under the default umask the file is 0644. Swallowing the refusal left the operator reading
+  // "set CP_ENROLMENT_TOKEN_FILE" about a variable that was set. Not thrown here: an enrolled worker
+  // must boot past a leftover file, so registration decides whether the reason matters
+  it("keeps the refusal of a file others can read, naming the variable and the fix", () => {
+    const path = tokenAt(0o644);
+
+    const bootstrap = loadBootstrap({ ...base, CP_ENROLMENT_TOKEN_FILE: path });
+
+    expect(bootstrap.enrolmentToken).toBe("");
+    expect(bootstrap.enrolmentTokenError).toMatch(
+      /^CP_ENROLMENT_TOKEN_FILE: .*readable by group or others.*chmod 600/
+    );
+  });
+
+  it("keeps any other read failure rather than booting as if nothing was set", () => {
+    const read = vi.fn(() => {
+      throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+    });
+
+    expect(
+      loadBootstrap({ ...base, CP_ENROLMENT_TOKEN_FILE: "/secrets/token" }, read).enrolmentTokenError
+    ).toBe("CP_ENROLMENT_TOKEN_FILE: EACCES: permission denied");
+  });
+
+  // The worker deletes the file itself once registered, and the plist still names it: an enrolled
+  // worker has to keep booting
+  it("is empty, with nothing to report, once the file is gone", () => {
+    const bootstrap = loadBootstrap({
+      ...base,
+      CP_ENROLMENT_TOKEN_FILE: join(tmpdir(), "cp-enrol-absent", "token"),
+    });
+
+    expect(bootstrap.enrolmentToken).toBe("");
+    expect(bootstrap.enrolmentTokenError).toBe("");
+  });
+
+  it("is empty when the variable is not set", () => {
+    expect(loadBootstrap(base, vi.fn()).enrolmentToken).toBe("");
   });
 });
 

@@ -169,7 +169,8 @@ audit trail. Webhooks, signed. GitHub and GitLab PR linking. Works on a phone.
 
 ## Quick start
 
-You need Docker. Nothing else — no Node, no MongoDB, not even a clone.
+You need Docker with Compose 2.24 or newer — older Compose rejects the file's `env_file` entry even
+without a `.env`. Nothing else: no Node, no MongoDB, not even a clone.
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/rafalpodles/board-planner/main/docker-compose.yml
@@ -177,8 +178,8 @@ docker compose up -d
 ```
 
 That runs the published image, `ghcr.io/rafalpodles/board-planner`, built for `linux/amd64` and
-`linux/arm64` on every release. `:latest` is the newest release; pin one with
-`BOARD_PLANNER_VERSION=1.2.3` in a `.env` next to the compose file. To upgrade,
+`linux/arm64` on every release from 1.1.0 on — 1.0.x predates it and has no image. `:latest` is the
+newest release; pin one with `BOARD_PLANNER_VERSION=1.2.3` in a `.env` next to the compose file. To upgrade,
 `docker compose pull && docker compose up -d`.
 
 **From a clone, run `docker compose up -d --build`.** Plain `docker compose up -d` pulls and runs
@@ -249,7 +250,8 @@ cd mcp-server && npm install && npm run build
 ## Configuration
 
 Everything is optional except the database. Put overrides in a `.env` file next to
-`docker-compose.yml`.
+`docker-compose.yml`; the compose file hands every variable in it to the app, except `NODE_ENV`,
+`PORT` and `HOSTNAME`, which it pins to `production`, `3000` and `0.0.0.0`.
 
 | Variable | Default | What it does |
 | --- | --- | --- |
@@ -264,11 +266,14 @@ Everything is optional except the database. Put overrides in a `.env` file next 
 | `ENCRYPTION_KEY` | — | 32 bytes, hex or standard base64 (not base64url), encrypting stored integration tokens and chat webhook URLs at rest |
 | `ENCRYPTION_KEYS_OLD` | — | Comma-separated retired keys, so a rotation can still read what they wrote |
 | `WEBHOOK_SIGNING_SECRET` | — | Signs outgoing webhook deliveries |
-| `OPENAI_API_KEY` | — | AI task generation in the task form |
+| `OPENAI_API_KEY` | — | AI task generation in the task form. The older name `OPENAPI_KEY` is still accepted |
 | `AI_DAILY_GENERATION_CAP` | `200` | AI task generations one project may run per day, on the instance's key. Each person may also start 20 per 15 minutes, one at a time |
 | `OPENROUTER_API_KEY`, `PM_MODEL`, `PM_MAX_TOKENS`, `PM_DAILY_TURN_CAP`, `PM_DAILY_TOKEN_CAP`, `PM_SCHEDULER_TICK_MS` | — | PM agent |
+| `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | Where PM agent calls go — a proxy, or another OpenAI-compatible endpoint |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | — | Email notifications |
 | `DIGEST_HOUR`, `DIGEST_TIMEZONE`, `DIGEST_TICK_MS` | `7`, `Europe/Warsaw`, `300000` | When the opt-in daily digest goes out |
+| `GITHUB_SYNC_TICK_MS` | `300000` | How often projects with a GitHub token are re-synced; `0` turns the background sync off |
+| `GITHUB_API_BASE_URL` | `https://api.github.com` | Where GitHub's API is, for GitHub Enterprise Server |
 
 A few of these have sharp edges worth reading once.
 

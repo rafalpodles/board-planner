@@ -152,24 +152,37 @@ Unpack it and run `npm start` (or `node dist/main.js`) inside the `worker/` it c
 
 As a macOS service:
 
-The plist ships with `REPO_DIR` and `HOME_DIR` placeholders rather than one developer's
-absolute paths, so substitute them as you install it:
+Write the enrolment token first, to a file only you can read — never into the plist, which sits
+at `0644` and rides along into Time Machine. With the token copied from the Enrol dialog:
+
+```bash
+mkdir -p -m 700 ~/.boardplanner
+install -m 600 /dev/null ~/.boardplanner/token && pbpaste > ~/.boardplanner/token
+```
+
+The plist points `CP_ENROLMENT_TOKEN_FILE` at that file. The worker will not use one that is readable
+by group or others: a worker with no identity yet stays unregistered and logs that reason, including
+`run chmod 600 on it`, until you fix the file and
+run the `unload` and `load` below again. A worker that has already registered
+never uses the token, so a leftover file there does not stop it. The inline variable still works
+for a container, where there is no file to protect.
+
+Then install the plist and load it. It ships with `REPO_DIR` and `HOME_DIR` placeholders rather than
+one developer's absolute paths, so substitute them as you install it:
 
 ```bash
 sed -e "s|REPO_DIR|$(cd .. && pwd)|g" -e "s|HOME_DIR|$HOME|g" \
   launchd/com.boardplanner.worker.plist > ~/Library/LaunchAgents/com.boardplanner.worker.plist
+launchctl unload ~/Library/LaunchAgents/com.boardplanner.worker.plist 2>/dev/null
 launchctl load ~/Library/LaunchAgents/com.boardplanner.worker.plist
 ```
 
-Put the enrolment token in a file only you can read, and point `CP_ENROLMENT_TOKEN_FILE` at it —
-never in the plist, which sits at `0644` and rides along into Time Machine:
+The `unload` makes the sequence safe to repeat: it stops a copy already loaded, so the `load` picks up
+the new plist.
 
-```bash
-install -m 600 /dev/null ~/.boardplanner/token && pbpaste > ~/.boardplanner/token
-```
-
-The worker refuses to read a secret file that is readable by group or others. The inline variable
-still works for a container, where there is no file to protect.
+Loading it before the token is in place starts a worker that stays unregistered: it reads the token
+only when it starts, so it logs every 30 seconds that it has none until you `launchctl unload` and
+`load` it again.
 
 The plist carries the paths for this machine — check `ProgramArguments` and `PATH` before loading
 it anywhere else. Logs go to `/tmp/boardplanner-worker.log` and
@@ -631,24 +644,28 @@ replaced. Nothing leaves the machine.
 
 ## Credentials
 
-Two, and neither of them can lift this worker's kill switch. That is the point: the worker runs the
-coding agent at the same uid with `Read` and `bypassPermissions`, so anything on this disk is
-readable by the agent, and an unscoped instance-admin token there would let it switch its own
-`enabled` flag back on.
+One, and it cannot lift this worker's kill switch. That is the point: the worker runs the coding
+agent at the same uid with `Read` and `bypassPermissions`, so anything on this disk is readable by
+the agent, and an unscoped instance-admin token there would let it switch its own `enabled` flag
+back on.
+
+**The `cpw_` credential in `worker.json`** — minted at registration, and the only one the worker
+uses: claiming, reporting status, commenting, releasing, and all of `/api/workers/**`. No route
+outside the worker API accepts it.
 
 **`CP_ENROLMENT_TOKEN` / `CP_ENROLMENT_TOKEN_FILE`** — single-use, one hour to live. Mint one from
 Settings → Workers → "Enrol a worker" and put it on the machine. The first registration spends it
 server-side, the worker deletes the file, and it is never needed again — a worker with an identity
 in `worker.json` does not re-register. Optional by design: an enrolled worker must keep booting
-after you remove it.
+after you remove it, so a token file that is gone is not an error. One that is there but readable
+by group or others is ignored by a registered worker; a worker with no identity yet stays
+unregistered and logs the reason, with `chmod 600` in it.
 
-**`CP_API_TOKEN` / `CP_API_TOKEN_FILE`** — **no longer used.** The worker's own `cpw_` credential
+**`CP_API_TOKEN` / `CP_API_TOKEN_FILE`** — **no longer used**, and not a credential this worker
+holds. The worker's own `cpw_` credential
 does the claiming and the reporting, and its scope is re-derived on every call from the projects
 this machine is actually assigned to, so it cannot drift the way a minted list does. The kill switch
 still holds: `PATCH /api/workers/:id` refuses every machine credential, worker credentials included.
-
-Claiming itself uses neither: `worker.json` holds a `cpw_` credential minted at registration, which
-no route outside the worker API accepts.
 
 ## Which repositories this machine will run
 
