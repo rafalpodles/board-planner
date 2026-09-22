@@ -775,6 +775,7 @@ test("the Enrol dialog sends a machine with nothing installed to the download, a
 
   await expect(dialog.getByRole("listitem")).toHaveCount(2);
   await expect(dialog.getByRole("listitem").nth(1)).toContainText("CP_ENROLMENT_TOKEN_FILE");
+  await expect(dialog.getByRole("listitem").nth(1)).toContainText("chmod 600");
   await expect(dialog).not.toContainText("CP_API_TOKEN");
 });
 

@@ -132,9 +132,11 @@ export function EnrolWorkerModal({ open, onClose }: EnrolWorkerModalProps) {
                 Install the worker from the latest release — see <GettingTheSoftware />.
               </li>
               <li>
-                Write the token to a file the worker can read and point{" "}
-                <code className="text-text">CP_ENROLMENT_TOKEN_FILE</code> at it. The worker deletes
-                that file once it has registered, and never needs it again.
+                Write the token to a file, make it readable only by you with{" "}
+                <code className="text-text">chmod 600</code>, and point{" "}
+                <code className="text-text">CP_ENROLMENT_TOKEN_FILE</code> at it — the worker refuses
+                a file anyone else can read. It deletes that file once it has registered, and never
+                needs it again.
               </li>
             </ol>
           </div>

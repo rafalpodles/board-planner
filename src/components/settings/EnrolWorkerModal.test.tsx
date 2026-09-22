@@ -56,6 +56,7 @@ describe("EnrolWorkerModal", () => {
     const steps = screen.getAllByRole("listitem");
     expect(steps).toHaveLength(2);
     expect(steps[1].textContent).toContain("CP_ENROLMENT_TOKEN_FILE");
+    expect(steps[1].textContent).toContain("chmod 600");
     expect(screen.getByRole("dialog").textContent).not.toContain("CP_API_TOKEN");
   });
 });
