@@ -504,6 +504,14 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     const identity = loadIdentity(identityStore);
     if (!identity) return;
 
+    await refreshPolicy(identity);
+    // Whatever the server answered: repos.json is this machine's, and a refused or failed GET must
+    // not freeze what the next heartbeat reports (BP-776).
+    await refreshInventory();
+    await rebind();
+  }
+
+  async function refreshPolicy(identity: { workerId: string; credential: string }): Promise<void> {
     try {
       const response = await deps.fetchImpl(`${bootstrap.apiBaseUrl}/api/workers/${identity.workerId}`, {
         headers: {
@@ -546,11 +554,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
         deps.logError(reason);
         lastPolicyRefreshError = reason;
       }
-      return;
     }
-
-    await refreshInventory();
-    await rebind();
   }
 
   const runs = createRunGuard();

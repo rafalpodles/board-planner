@@ -1417,6 +1417,27 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       expect(failures).toHaveLength(2);
     });
 
+    // BP-776. repos.json is this machine's own file, so a server that refuses the GET must not
+    // freeze what the heartbeat reports: a checkout granted mid-run reaches the next refresh.
+    it("re-reads repos.json on every refresh even while the server refuses the GET", async () => {
+      const run = await runOneTask(undefined, undefined, {
+        fetchImpl: async () => ({ ok: false, status: 403 }) as unknown as Response,
+        stateFiles: { "repos.json": "not json" },
+        passes: 2,
+        clockJumpOnSleepMs: 31_000,
+        onSleep: (stateDir, sleepIndex) => {
+          if (sleepIndex === 0) {
+            writeFileSync(join(stateDir, "repos.json"), JSON.stringify({ repos: [REPO] }), {
+              mode: 0o600,
+            });
+          }
+        },
+      });
+
+      expect(run.rebinds).toBeGreaterThanOrEqual(2);
+      expect(run.heartbeatDeps?.repos?.()).toEqual([expect.objectContaining({ path: REPO })]);
+    });
+
     // The same half, for the neighbouring site: a server that comes back and then goes away again
     // with the identical message must not go silent the second time.
     it("says an unreachable server again after it recovers and fails the same way", async () => {
