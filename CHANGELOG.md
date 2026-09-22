@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.1](https://github.com/rafalpodles/board-planner/compare/v1.1.0...v1.1.1) (2026-09-22)
+
+
+### Bug Fixes
+
+* **ci:** pass secrets to the called release workflow, so a release-please release can sign ([4a326bf](https://github.com/rafalpodles/board-planner/commit/4a326bf986b60f6b4c270661b1f912b896386834))
+* **ci:** pass secrets to the called release workflow, so a release-please release can sign (BP-767) ([829e162](https://github.com/rafalpodles/board-planner/commit/829e1629f248d6ddf862a92dcfaacdf632e60e76))
+
 ## [1.1.0](https://github.com/rafalpodles/board-planner/compare/v1.0.1...v1.1.0) (2026-09-22)
 
 
