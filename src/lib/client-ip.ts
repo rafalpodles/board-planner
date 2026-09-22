@@ -36,41 +36,48 @@ export function trustedProxyHops(): number {
 // whichever request happens to reach a throttle first
 trustedProxyHops();
 
-// The warning carries how many entries the header held, because that count is the number this
-// variable wants: an operator reads the value off their own log instead of guessing at their chain
-// (BP-774). The count only — an entry is an address, and addresses do not belong in a log nobody
-// asked to collect them in.
+// The count the header carried is the number this variable wants, so the warning names it and an
+// operator reads the value off their own log (BP-774). The count only, never the entries.
 //
-// Once per distinct count, not once per process. The first forwarded request is a sample of one and
-// often not a browser's: a platform health check or an uptime probe reaches the app by a shorter
-// path and carries fewer entries, and a caller can forge the header outright. A second path through
-// the chain is exactly what an operator needs to see before choosing a number. The cap keeps a
-// caller who varies the header's length from turning this into a per-request log.
-const DISTINCT_COUNTS_WARNED = 4;
+// Each count not reported before: the first forwarded request is a sample of one, and often a probe
+// on a shorter path rather than a browser. A caller can forge the header, so after
+// MAX_COUNTS_WARNED distinct counts a further new one waits for QUIET_MS — which bounds the log
+// without letting forged lengths suppress the operator's own line for more than that.
+const MAX_COUNTS_WARNED = 4;
+const QUIET_MS = 10 * 60 * 1000;
 const warnedCounts = new Set<number>();
+let lastWarnedAt = 0;
 
 function warnHeaderIgnored(count: number): void {
-  if (warnedCounts.has(count) || warnedCounts.size >= DISTINCT_COUNTS_WARNED) return;
+  // A header with no addresses in it measures nothing, and telling the operator to set 0 would be
+  // advice to change nothing
+  if (count === 0 || warnedCounts.has(count)) return;
+  const now = Date.now();
+  if (warnedCounts.size >= MAX_COUNTS_WARNED && now - lastWarnedAt < QUIET_MS) return;
+  // Only a reported count is remembered, so one held back by the quiet period is still new later
   warnedCounts.add(count);
-  const last = warnedCounts.size === DISTINCT_COUNTS_WARNED;
+  lastWarnedAt = now;
   console.warn(
-    `A request arrived with X-Forwarded-For carrying ${count} ${count === 1 ? "entry" : "entries"} while ${TRUSTED_PROXY_HOPS_VAR}=0, so the header is ignored and the login throttle has no per-address key. If a proxy sits in front of this app, set ${TRUSTED_PROXY_HOPS_VAR} to the number of proxies that append to that header — the count above, read from a request you made yourself through the whole chain.${last ? " Further counts will not be reported." : ""}`
+    `A request arrived with X-Forwarded-For carrying ${count} ${count === 1 ? "entry" : "entries"} while ${TRUSTED_PROXY_HOPS_VAR}=0, so the header is ignored and the login throttle has no per-address key. If a proxy sits in front of this app, set ${TRUSTED_PROXY_HOPS_VAR} to the number of proxies that append to that header — the count above, when the request was a sign-in you attempted yourself through the whole chain, and every proxy in front appends rather than replaces the header.`
   );
 }
+
+const forwardedEntries = (header: string): string[] =>
+  header
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 
 export function getClientIp(request: Request): string | null {
   const hops = trustedProxyHops();
   const header = request.headers.get("x-forwarded-for");
 
-  const entries = (header ?? "")
-    .split(",")
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-
   if (hops === 0) {
-    if (header !== null) warnHeaderIgnored(entries.length);
+    if (header !== null) warnHeaderIgnored(forwardedEntries(header).length);
     return null;
   }
+
+  const entries = forwardedEntries(header ?? "");
 
   // Fewer entries than the operator described means the request did not come through the proxies
   // they configured, so nothing in it is the address they promised. Counting the leftmost entry

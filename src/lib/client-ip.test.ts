@@ -120,7 +120,12 @@ describe("isIpAddress", () => {
 
 // BP-774. Production ran behind Railway's proxy with the variable unset, and nothing said so.
 describe("a forwarded request with no proxy configured", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     vi.resetModules();
   });
@@ -134,6 +139,9 @@ describe("a forwarded request with no proxy configured", () => {
 
   const forwarded = (value: string) =>
     new Request("https://app.example.com/api/auth/login", { headers: { "x-forwarded-for": value } });
+
+  const chain = (entries: number) =>
+    Array.from({ length: entries }, (_, i) => `203.0.113.${i + 1}`).join(", ");
 
   it("says once that the header is ignored, and still ignores it", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -202,18 +210,87 @@ describe("a forwarded request with no proxy configured", () => {
     expect(warn.mock.calls[1][0]).toContain("carrying 2 entries");
   });
 
-  // Without the cap a caller who varies the header's length has a per-request log
-  it("goes quiet after four distinct counts, and says so", async () => {
+  it("never repeats a count it has already reported", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const getIp = await fresh();
 
-    for (let entries = 1; entries <= 9; entries++) {
-      getIp(forwarded(Array.from({ length: entries }, () => "203.0.113.9").join(", ")));
-    }
+    for (let i = 0; i < 20; i++) getIp(forwarded("203.0.113.9, 172.16.0.1"));
+
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  // Without a bound, a caller who varies the header's length has a per-request log
+  it("holds a fifth count back once four have been reported", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const getIp = await fresh();
+
+    for (let entries = 1; entries <= 9; entries++) getIp(forwarded(chain(entries)));
 
     expect(warn).toHaveBeenCalledTimes(4);
-    expect(warn.mock.calls[3][0]).toContain("Further counts will not be reported.");
-    expect(warn.mock.calls[0][0]).not.toContain("Further counts");
+  });
+
+  // The bound must not let an outsider who burns the four slots with forged lengths suppress the
+  // operator's own sign-in: a count still unseen is reported once the quiet period is up
+  it("reports a still-unseen count again after the quiet period", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const getIp = await fresh();
+
+    for (let entries = 1; entries <= 9; entries++) getIp(forwarded(chain(entries)));
+    expect(warn).toHaveBeenCalledTimes(4);
+
+    vi.setSystemTime(Date.now() + 10 * 60 * 1000);
+    getIp(forwarded(chain(7)));
+
+    expect(warn).toHaveBeenCalledTimes(5);
+    expect(warn.mock.calls[4][0]).toContain("carrying 7 entries");
+  });
+
+  // A count held back is not remembered, or the quiet period would swallow it for good
+  it("does not count a held-back request as reported", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const getIp = await fresh();
+
+    for (let entries = 1; entries <= 5; entries++) getIp(forwarded(chain(entries)));
+    vi.setSystemTime(Date.now() + 10 * 60 * 1000);
+    getIp(forwarded(chain(5)));
+
+    expect(warn.mock.calls[4][0]).toContain("carrying 5 entries");
+  });
+
+  // Nothing to measure, and "set it to 0" is advice to change nothing — so it says nothing and
+  // spends none of the four
+  it.each(["", " ", " , , "])("says nothing about a header carrying no address (%o)", async (value) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const getIp = await fresh();
+
+    expect(getIp(forwarded(value))).toBeNull();
+    getIp(forwarded(chain(1)));
+    getIp(forwarded(chain(2)));
+    getIp(forwarded(chain(3)));
+    getIp(forwarded(chain(4)));
+
+    expect(warn).toHaveBeenCalledTimes(4);
+    expect(warn.mock.calls.every((call) => !String(call[0]).includes("carrying 0"))).toBe(true);
+  });
+
+  // The measurement is only the right number if each proxy adds an entry rather than overwriting
+  it("tells the operator the count counts only where every proxy appends", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const getIp = await fresh();
+
+    getIp(forwarded(chain(2)));
+
+    expect(warn.mock.calls[0][0]).toContain("appends rather than replaces");
+  });
+
+  // getClientIp runs on the login POST, after the body validates — opening the page logs nothing
+  it("names the sign-in attempt that produces the count", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const getIp = await fresh();
+
+    getIp(forwarded(chain(2)));
+
+    expect(warn.mock.calls[0][0]).toContain("sign-in you attempted yourself");
   });
 
   it("stays silent once the hops are set, whatever the header carries", async () => {
