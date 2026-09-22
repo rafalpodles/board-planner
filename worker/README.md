@@ -173,8 +173,9 @@ sed -e "s|REPO_DIR|$(cd .. && pwd)|g" -e "s|HOME_DIR|$HOME|g" \
 launchctl load ~/Library/LaunchAgents/com.boardplanner.worker.plist
 ```
 
-Loading it before the token is in place starts a worker with nothing to register with, which
-launchd then restarts over and over.
+Loading it before the token is in place starts a worker that stays unregistered: it reads the token
+only when it starts, so it logs every 30 seconds that it has none until you `launchctl unload` and
+`load` it again.
 
 The plist carries the paths for this machine — check `ProgramArguments` and `PATH` before loading
 it anywhere else. Logs go to `/tmp/boardplanner-worker.log` and
