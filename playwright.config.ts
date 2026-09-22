@@ -337,7 +337,7 @@ export default defineConfig({
       env: devServerEnv(BASE_URL),
     },
     // Opt-in (RUN_PROXIED_SERVER): see the constant above. Same app, same seeded database, only
-    // TRUSTED_PROXY_HOPS, its own origin and its own `.next` output differ — a second `next dev`
+    // TRUSTED_PROXY_HOPS, the compose cookie mode, its own origin and its own `.next` output differ — a second `next dev`
     // sharing the first one's build directory corrupts both (BP-409).
     ...(RUN_PROXIED_SERVER
       ? [
@@ -351,6 +351,10 @@ export default defineConfig({
             env: {
               ...devServerEnv(PROXIED_BASE_URL),
               TRUSTED_PROXY_HOPS: "1",
+              // What docker-compose.yml passes, so compose-cookie.spec.ts signs in the way a
+              // plain-HTTP compose deployment does (BP-773)
+              COOKIE_ALLOW_INSECURE: "auto",
+              APP_ORIGIN: PROXIED_BASE_URL,
               NEXT_DIST_DIR: ".next-proxied",
             },
           },

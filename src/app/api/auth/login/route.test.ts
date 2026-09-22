@@ -75,6 +75,7 @@ beforeEach(async () => {
   process.env.TRUSTED_PROXY_HOPS = "1";
   delete process.env.COOKIE_ALLOW_INSECURE;
   delete process.env.APP_ORIGIN;
+  delete process.env.PUBLIC_ORIGIN;
   verifyCredentials.mockResolvedValue(USER);
   createSession.mockResolvedValue({
     token: "cps_deadbeef",
@@ -341,6 +342,20 @@ describe("POST /api/auth/login — cookie", () => {
     expect(cookie).toContain("bp_session=cps_deadbeef");
     expect(cookie).not.toContain("__Host-");
     expect(cookie).not.toContain("Secure");
+  });
+
+  // BP-773 review: compose behind TLS with its origins left at the localhost defaults
+  it("issues the prefixed cookie under auto when the sign-in came over https", async () => {
+    process.env.COOKIE_ALLOW_INSECURE = "auto";
+    process.env.APP_ORIGIN = "http://localhost:3000";
+    process.env.PUBLIC_ORIGIN = "http://localhost:3000";
+
+    const cookies = setCookies(
+      await POST(request({ "sec-fetch-site": "same-origin", origin: "https://board.example.com" }))
+    );
+
+    expect(cookies[0]).toMatch(/^__Host-bp_session=cps_deadbeef; .*; Secure$/);
+    expect(cookies[1]).toMatch(/^bp_session=; .*Max-Age=0/);
   });
 
   it("leaves secure mode on for flag values that are not exactly \"1\"", async () => {

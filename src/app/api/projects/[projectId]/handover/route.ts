@@ -7,7 +7,7 @@ import { projectRepositoryUrl } from "@/lib/repository";
 import { isWorkerLockedByInstance } from "@/lib/worker-gate";
 import { Project } from "@/models/project";
 import { Worker } from "@/models/worker";
-import { machineStateFor } from "@/lib/worker-service";
+import { machineReadinessFor } from "@/lib/worker-service";
 import type { ApiHandoverReadiness } from "@/types";
 
 /**
@@ -23,19 +23,21 @@ export const GET = withProjectAccess(async (_request, { params, user }) => {
     Project.findById(projectId, "repositoryUrl githubRepo gitlabRepo worker columns").lean(),
     Worker.find(
       { owner: user._id },
-      "enabled lastSeenAt repos preflight command commandIssuedAt commandAckedAt"
+      "enabled lastSeenAt repos preflight command commandIssuedAt commandAckedAt bindingError"
     ).lean(),
     check(user, projectId, "admin"),
   ]);
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
+  const machine = machineReadinessFor(workers, project);
   const body: ApiHandoverReadiness = {
     canAdmin,
     repositoryUrl: projectRepositoryUrl(project),
     workerEnabled: !!project.worker?.enabled,
     lockedByInstance: isWorkerLockedByInstance(project.worker),
     columns: getProjectColumns(project).map((c) => ({ role: c.role })),
-    machine: machineStateFor(workers, project),
+    machine: machine.state,
+    bindingError: machine.bindingError,
   };
   return NextResponse.json(body);
 });

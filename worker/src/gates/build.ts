@@ -69,7 +69,7 @@ export function buildGate(runner: Runner, timeoutMs: number): Gate {
       if (build.code !== 0) {
         return { ok: false, reason: `build failed (exit ${build.code}):\n${outputTail(build)}` };
       }
-      return { ok: true, reason: "" };
+      return { ok: true, reason: "", commands: [`npm ${INSTALL_ARGS.join(" ")}`, "npm run build"] };
     },
   };
 }

@@ -82,6 +82,7 @@ beforeEach(() => {
 afterEach(() => {
   delete process.env.COOKIE_ALLOW_INSECURE;
   delete process.env.APP_ORIGIN;
+  delete process.env.PUBLIC_ORIGIN;
 });
 
 describe("getAuthUser — session cookie", () => {
@@ -353,6 +354,51 @@ describe("getAuthUser — forwarded headers do not decide anything", () => {
         withCookie(SESSION_TOKEN, { "x-forwarded-host": "app.example.com" }, "POST")
       )
     ).rejects.toBeInstanceOf(ProvenanceError);
+  });
+});
+
+// BP-773 review: under auto both names can be in the jar, and the prefixed one is read first —
+// but a revoked row under that name must not log a reader out while their other session is live.
+describe("getAuthUser — two cookie names under auto", () => {
+  beforeEach(() => {
+    process.env.COOKIE_ALLOW_INSECURE = "auto";
+    process.env.APP_ORIGIN = "http://localhost:3000";
+    process.env.PUBLIC_ORIGIN = "http://localhost:3000";
+  });
+
+  const both = (headers: Record<string, string> = {}) =>
+    request({ cookie: `__Host-bp_session=${SESSION_TOKEN}; bp_session=cps_plain`, ...headers });
+
+  // Session fixation: only a secure context can set the prefixed name, so a request that carries
+  // one is judged on it alone — a plain cookie a sibling subdomain planted must not take over once
+  // the real session is revoked or expired (BP-773 review)
+  it("does not read a planted plain cookie once the prefixed session is dead", async () => {
+    sessionFindOne.mockImplementation((query: { tokenHash?: unknown }) => ({
+      lean: async () => (JSON.stringify(query).includes(sha256("cps_plain")) ? sessionRow() : null),
+    }));
+    userFindById.mockResolvedValue({ _id: "u1", username: "ada" });
+
+    expect(await getAuthUser(both())).toBeNull();
+  });
+
+  it("still resolves a plain session when there is no prefixed cookie at all", async () => {
+    sessionFindOne.mockImplementation((query: { tokenHash?: unknown }) => ({
+      lean: async () => (JSON.stringify(query).includes(sha256("cps_plain")) ? sessionRow() : null),
+    }));
+    userFindById.mockResolvedValue({ _id: "u1", username: "ada" });
+
+    const result = await getAuthUser(request({ cookie: "bp_session=cps_plain" }));
+
+    expect(result).toMatchObject({ username: "ada" });
+  });
+
+  it("reads the prefixed name first when both are live", async () => {
+    sessionFound(sessionRow());
+    userFindById.mockResolvedValue({ _id: "u1", username: "ada" });
+
+    await getAuthUser(both());
+
+    expect(JSON.stringify(sessionFindOne.mock.calls[0])).toContain(sha256(SESSION_TOKEN));
   });
 });
 

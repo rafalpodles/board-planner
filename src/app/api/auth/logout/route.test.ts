@@ -31,7 +31,51 @@ beforeEach(() => {
   vi.clearAllMocks();
   delete process.env.COOKIE_ALLOW_INSECURE;
   delete process.env.APP_ORIGIN;
+  delete process.env.PUBLIC_ORIGIN;
   revokeSession.mockResolvedValue(true);
+});
+
+// BP-773 review: under auto a browser can hold both names, each a row of its own, and revoking
+// only the one that reads first left the http-issued session — the exposed one — alive for 90 days
+describe("POST /api/auth/logout — both names under auto", () => {
+  beforeEach(() => {
+    process.env.COOKIE_ALLOW_INSECURE = "auto";
+    process.env.APP_ORIGIN = "http://localhost:3000";
+    process.env.PUBLIC_ORIGIN = "http://localhost:3000";
+  });
+
+  it("revokes the session behind each cookie name", async () => {
+    await POST(
+      request({
+        "sec-fetch-site": "same-origin",
+        cookie: "__Host-bp_session=cps_secure; bp_session=cps_plain",
+      })
+    );
+
+    expect(revokeSession.mock.calls.map(([token]) => token)).toEqual(["cps_secure", "cps_plain"]);
+  });
+
+  it("revokes the prefixed session even when the plain name is shadowed", async () => {
+    await POST(
+      request({
+        "sec-fetch-site": "same-origin",
+        cookie: "__Host-bp_session=cps_live; bp_session=a; bp_session=b",
+      })
+    );
+
+    expect(revokeSession.mock.calls.map(([token]) => token)).toEqual(["cps_live"]);
+  });
+
+  it("revokes one token once when both names carry it", async () => {
+    await POST(
+      request({
+        "sec-fetch-site": "same-origin",
+        cookie: "__Host-bp_session=cps_same; bp_session=cps_same",
+      })
+    );
+
+    expect(revokeSession.mock.calls).toHaveLength(1);
+  });
 });
 
 describe("POST /api/auth/logout", () => {

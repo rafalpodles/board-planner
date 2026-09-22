@@ -99,7 +99,9 @@ struct PanelView: View {
         case .needsHuman: return "Needs a human"
         case .faulted: return machineFaultHeadline
         // Only the socket is visible from here, so this cannot claim to know about the network.
-        case .disconnected: return "Can't reach the worker · retrying"
+        case .disconnected:
+            if let reason = model.state.disconnectReason { return "Won't connect: \(reason)" }
+            return "Can't reach the worker · retrying"
         }
     }
 

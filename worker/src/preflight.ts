@@ -4,7 +4,15 @@ import { dirname, join } from "path";
 import { childEnv, unconfinedAgentAllowed } from "./env.js";
 import { confine, SANDBOX_COMMAND, UNCONFINED_ACCEPTED_DETAIL } from "./sandbox.js";
 import { Runner } from "./exec.js";
-import { GhAccount, parseGhAccounts, resolveGhToken, usableAccount } from "./github-account.js";
+import { CommitIdentity, resolveCommitIdentity } from "./commit.js";
+import {
+  accountCommitIdentity,
+  describeIdentity,
+  GhAccount,
+  parseGhAccounts,
+  resolveGhToken,
+  usableAccount,
+} from "./github-account.js";
 
 // The four binaries the worker shells out to. Nothing here is optional: without any one of them a
 // task is claimed, run, and failed — three times, until the attempt cap routes it to a human.
@@ -51,7 +59,11 @@ export interface PreflightDeps {
   // The GitHub login the operator pinned, read from the state directory by the caller. Empty means
   // nothing is pinned, which is what every machine did before BP-373: use gh's active account.
   pinnedGithubAccount?: string;
+  // A name and address set in github.json, which win over everything else
+  configuredCommitIdentity?: CommitIdentity | null;
 }
+
+export const COMMIT_IDENTITY_CHECK = "commit identity";
 
 const TIMEOUT_MS = 20_000;
 
@@ -195,7 +207,13 @@ async function ghSession(
   deps: PreflightDeps,
   path: string,
   env: NodeJS.ProcessEnv
-): Promise<{ check: PreflightCheck; accounts: GhAccount[]; login: string; pinned: boolean }> {
+): Promise<{
+  check: PreflightCheck;
+  accounts: GhAccount[];
+  login: string;
+  pinned: boolean;
+  token?: string;
+}> {
   const result = await deps.runner.run(path, ["auth", "status"], {
     cwd: deps.env.HOME?.trim() || "/",
     timeoutMs: TIMEOUT_MS,
@@ -225,9 +243,10 @@ async function ghSession(
   // picker gets its options, but deciding a machine is broken on it would turn any change to that
   // output into a red row on a worker that is fine — while `auth token --user` answers the actual
   // question, by name, with an exit code. The token itself is dropped on the floor here.
-  const resolvable = usable.pinned
-    ? !!(await resolveGhToken(deps.runner, path, usable.login, env, deps.env.HOME?.trim() || "/"))
-    : false;
+  const token = usable.pinned
+    ? await resolveGhToken(deps.runner, path, usable.login, env, deps.env.HOME?.trim() || "/")
+    : "";
+  const resolvable = !!token;
 
   if (usable.pinned && !resolvable) {
     return {
@@ -252,6 +271,7 @@ async function ghSession(
       accounts,
       login: usable.login,
       pinned: true,
+      token,
     };
   }
 
@@ -276,6 +296,64 @@ async function ghSession(
     accounts,
     login: usable.login,
     pinned: false,
+  };
+}
+
+// What the worker's commits will carry, named before the first run rather than found in a pull
+// request (BP-779). The same order the run resolves it in: github.json, then the pinned account,
+// then this machine's git config.
+async function commitIdentityCheck(
+  deps: PreflightDeps,
+  paths: Record<string, string>,
+  env: NodeJS.ProcessEnv,
+  gh: { login: string; pinned: boolean; token?: string }
+): Promise<PreflightCheck> {
+  const name = COMMIT_IDENTITY_CHECK;
+  const home = deps.env.HOME?.trim() || "/";
+  if (deps.configuredCommitIdentity) {
+    return {
+      name,
+      ok: true,
+      detail: `commits are authored as ${describeIdentity(deps.configuredCommitIdentity)}, set in github.json`,
+    };
+  }
+
+  const fromAccount =
+    gh.pinned && gh.token
+      ? await accountCommitIdentity(deps.runner, paths.gh ?? "", gh.token, env, home)
+      : null;
+  if (fromAccount) {
+    return {
+      name,
+      ok: true,
+      detail: `commits are authored as ${describeIdentity(fromAccount)}, the pinned account ${gh.login}`,
+    };
+  }
+
+  // Asked in the home directory, because preflight has no checkout: a checkout's own user.* is what
+  // a run in it actually commits as, so this names the machine's answer and says it can be
+  // overridden. A machine that names nobody is a warning, not a failure — a checkout may still.
+  const fromGit = paths.git
+    ? await resolveCommitIdentity(deps.runner, paths.git, home)
+    : { ok: false as const, reason: "git could not be found" };
+  const why = !gh.pinned
+    ? "pin a GitHub account in the app to commit as that account"
+    : gh.token
+      ? `GitHub would not say who ${gh.login} is`
+      : `gh has no token for ${gh.login}`;
+  if (!fromGit.ok) {
+    return {
+      name,
+      ok: true,
+      warn: true,
+      detail: `this machine's git config names nobody to commit as (${fromGit.reason}); a checkout whose own config sets user.name and user.email is used, any other is handed back — ${why}`,
+    };
+  }
+  return {
+    name,
+    ok: true,
+    warn: gh.pinned,
+    detail: `commits are authored as ${describeIdentity(fromGit.identity)}, from this machine's git config unless a checkout's own sets another — ${why}`,
   };
 }
 
@@ -387,6 +465,7 @@ export async function runPreflight(deps: PreflightDeps): Promise<PreflightReport
   let githubAccounts: GhAccount[] = [];
   let githubAccount = "";
   let githubPinned = false;
+  let githubToken = "";
 
   for (const tool of TOOLS) {
     const path = paths[tool];
@@ -410,12 +489,20 @@ export async function runPreflight(deps: PreflightDeps): Promise<PreflightReport
       githubAccounts = session.accounts;
       githubAccount = session.login;
       githubPinned = session.pinned;
+      githubToken = session.token ?? "";
       checks.push(session.check);
     } else {
       checks.push({ name: tool, ok: true, detail: path });
     }
   }
 
+  checks.push(
+    await commitIdentityCheck(deps, paths, env, {
+      login: githubAccount,
+      pinned: githubPinned,
+      token: githubToken,
+    })
+  );
   checks.push(await sandboxCheck(deps, env));
 
   return {

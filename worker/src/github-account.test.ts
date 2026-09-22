@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  accountCommitIdentity,
+  configuredCommitIdentity,
   ghAccountPath,
   parseGhAccounts,
   pinnedAccount,
@@ -159,5 +161,57 @@ describe("resolveGhToken", () => {
   it("resolves nothing when gh refuses", async () => {
     const deps = runner({ code: 1, stderr: "no such user" });
     await expect(resolveGhToken(deps, "/usr/bin/gh", "ghost", {})).resolves.toBe("");
+  });
+});
+
+describe("the identity a pinned machine commits as (BP-779)", () => {
+  const read = (contents: string) => (path: string) =>
+    path === ghAccountPath("/state") ? contents : null;
+
+  it("reads a name and an address set beside the pin", () => {
+    expect(
+      configuredCommitIdentity(
+        read(JSON.stringify({ account: "octocat", name: "Octo Cat", email: "octo@example.com" })),
+        "/state"
+      )
+    ).toEqual({ name: "Octo Cat", email: "octo@example.com" });
+  });
+
+  it("takes neither when only one is set, or when one could break an ident line", () => {
+    expect(configuredCommitIdentity(read(JSON.stringify({ account: "octocat", name: "Octo" })), "/state")).toBeNull();
+    expect(
+      configuredCommitIdentity(read(JSON.stringify({ name: "a <b>", email: "c@d" })), "/state")
+    ).toBeNull();
+    for (const name of ["a\rb", "a\u0000b", "a\nb"]) {
+      expect(configuredCommitIdentity(read(JSON.stringify({ name, email: "c@d" })), "/state")).toBeNull();
+    }
+    expect(configuredCommitIdentity(read("not json"), "/state")).toBeNull();
+    expect(configuredCommitIdentity(() => null, "/state")).toBeNull();
+  });
+
+  it("asks GitHub who the account is with that account's own token, and uses its noreply address", async () => {
+    const seen: { args?: string[] } = {};
+    const r = runner({ stdout: JSON.stringify({ login: "octocat", id: 583231, name: "The Octocat" }) }, seen);
+
+    const identity = await accountCommitIdentity(r, "/bin/gh", "gho_pinned", { PATH: "/bin" });
+
+    expect(identity).toEqual({ name: "The Octocat", email: "583231+octocat@users.noreply.github.com" });
+    expect(seen.args).toEqual(["api", "user"]);
+    expect(r.run.mock.calls[0][2].env?.GH_TOKEN).toBe("gho_pinned");
+  });
+
+  it("falls back to the login when the account has no display name", async () => {
+    const r = runner({ stdout: JSON.stringify({ login: "octocat", id: 1, name: null }) });
+
+    expect(await accountCommitIdentity(r, "/bin/gh", "t", {})).toEqual({
+      name: "octocat",
+      email: "1+octocat@users.noreply.github.com",
+    });
+  });
+
+  it("answers nothing without a token, or when GitHub will not say", async () => {
+    expect(await accountCommitIdentity(runner({}), "/bin/gh", "", {})).toBeNull();
+    expect(await accountCommitIdentity(runner({ code: 1, stderr: "HTTP 401" }), "/bin/gh", "t", {})).toBeNull();
+    expect(await accountCommitIdentity(runner({ stdout: "{}" }), "/bin/gh", "t", {})).toBeNull();
   });
 });

@@ -3,7 +3,7 @@ import { childEnv } from "./env.js";
 import { CommandResult, Runner } from "./exec.js";
 import { GIT_SAFE_ENV, refuseOptionShapedPositionals, NO_GLOBAL_CONFIG, requireGitPath } from "./git-safety.js";
 import { plantedConfig } from "./repos.js";
-import { ClaimedTask } from "./types.js";
+import { ClaimedTask, PassedCheck } from "./types.js";
 import { scrub } from "./scrub.js";
 
 const TIMEOUT_MS = 120_000;
@@ -21,6 +21,8 @@ export interface Delivery {
     // hours later has the record the refusal left behind and nothing else (BP-381).
     task: PrSubject,
     summary: string,
+    // The gates the run passed before this pull request, listed under the summary (BP-780)
+    checks?: PassedCheck[],
   ): Promise<string>;
   merge(worktreePath: string, prUrl: string): Promise<void>;
 }
@@ -66,10 +68,48 @@ function prTitle(task: PrSubject): string {
 // Scrubbed here as well as on the board path. The PR body is the more public sink of the two —
 // on a public repository a secret the agent quoted is published verbatim, while the board copy
 // already showed [redacted] (BP-306).
-function prBody(summary: string): string {
-  const body = scrub(summary).trim();
-  if (body.length <= MAX_BODY_CHARS) return body;
-  return `${body.slice(0, MAX_BODY_CHARS)}\n\n[summary truncated to ${MAX_BODY_CHARS} characters]`;
+export function prBody(summary: string, checks: PassedCheck[] = []): string {
+  const passed = checksSection(checks);
+  const room = MAX_BODY_CHARS - (passed ? passed.length + 2 : 0);
+  // The agent writes the summary, so a heading of the worker's own in it is removed: only the
+  // section below the rule is the worker's word
+  let body = scrub(summary)
+    .split("\n")
+    .filter((line) => !WORKER_HEADING.test(line))
+    .join("\n")
+    .trim();
+  if (body.length > room) {
+    const noteFor = (kept: number) => `\n\n[summary truncated to ${kept} characters]`;
+    const kept = room - noteFor(room).length;
+    body = `${body.slice(0, kept)}${noteFor(kept)}`;
+  }
+  return passed ? `${body}\n\n${passed}`.trim() : body;
+}
+
+const CHECKS_HEADING = "### Checks run by the worker, not written by the agent";
+// A heading, not a sentence: a Markdown heading or a whole line in bold, about checks and the
+// worker. The rule above the worker's own section and the "not written by the agent" label are
+// what a reader goes by; this keeps the obvious impostor out of the body (BP-780 review).
+const WORKER_HEADING =
+  /^\s*(?:#{1,6}\s*checks?\b[^\n]*|(?:\*\*|__)\s*checks?\b[^\n]*(?:\*\*|__))\s*$/i;
+
+export function formatDuration(ms: number): string {
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds} s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes} min ${seconds % 60} s`;
+}
+
+// Written by the worker, not by the agent: the agent has no shell and cannot say what ran.
+function checksSection(checks: PassedCheck[]): string {
+  if (checks.length === 0) return "";
+  const lines = checks.map((check) => {
+    const ran = check.commands.length
+      ? `: ${check.commands.map((command) => `\`${command}\``).join(", ")}`
+      : "";
+    return `- **${check.name}**${ran} (${formatDuration(check.durationMs)})`;
+  });
+  return ["---", "", CHECKS_HEADING, "", ...lines].join("\n");
 }
 
 function repoArgs(prUrl: string): string[] {
@@ -290,7 +330,7 @@ export function createDelivery(
       if (result.code !== 0) throw failure("git push", result);
     },
 
-    async openPr(worktreePath, task, summary) {
+    async openPr(worktreePath, task, summary, checks = []) {
       const result = await run(
         "gh",
         [
@@ -299,7 +339,7 @@ export function createDelivery(
           "--title",
           prTitle(task),
           "--body",
-          prBody(summary),
+          prBody(summary, checks),
           ...baseArgs,
         ],
         worktreePath,

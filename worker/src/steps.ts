@@ -4,7 +4,7 @@ import { Executor } from "./executor.js";
 import { Runner } from "./exec.js";
 import { unexpectedHistory } from "./provenance.js";
 import { StreamEvent } from "./stream.js";
-import { ClaimedTask, ExecutionResult, SnapshotEntry } from "./types.js";
+import { ClaimedTask, ExecutionResult, PassedCheck, SnapshotEntry } from "./types.js";
 
 export type StepOutcome =
   | { kind: "ok" }
@@ -42,6 +42,8 @@ export interface RunState {
   prUrl: string;
   merged: boolean;
   summary: string;
+  /** Every gate this run has passed so far, in order, for the pull request to list (BP-780). */
+  checks: PassedCheck[];
   /** A gate's context takes one result and a composed agent produces several; the last is the honest one. */
   lastResult: ExecutionResult;
 }
@@ -60,6 +62,8 @@ export interface StepContext {
   baseSha: string;
   runner: Runner;
   gitPath: string;
+  /** Where this entry sits in the agent's sequence — two identical steps are not the same step */
+  position?: number;
 }
 
 // A push or a merge that throws must not reach the pipeline's outer catch: that requeues and
@@ -104,6 +108,7 @@ async function deliver(
         ctx.worktreePath,
         ctx.task,
         ctx.state.summary,
+        ctx.state.checks,
       );
       return { kind: "ok" };
 
@@ -128,6 +133,18 @@ async function deliver(
   }
 }
 
+function laterGateKinds(ctx: StepContext, entry: SnapshotEntry): string[] {
+  const sequence = ctx.task.agent?.sequence ?? [];
+  // indexOf finds the first entry that looks like this one, and a sequence may hold the same step
+  // twice — the caller knows which position this is
+  const at = ctx.position ?? sequence.indexOf(entry);
+  if (at === -1 || sequence[at] !== entry) return [];
+  return sequence
+    .slice(at + 1)
+    .filter((later) => later.kind === "gate")
+    .map((later) => later.gateKind ?? "");
+}
+
 /** One position in the sequence: a call to the model, or something the worker does itself. */
 export async function runStep(
   entry: SnapshotEntry,
@@ -146,6 +163,7 @@ export async function runStep(
       model: entry.model ?? "",
       fallbackModel: entry.fallbackModel ?? "",
       timeoutMs: ctx.timeoutMs,
+      laterChecks: laterGateKinds(ctx, entry),
     },
   });
 
@@ -170,7 +188,11 @@ export async function runStep(
       const sha = await ctx.commit(
         `${ctx.task.taskKey}: ${entry.name.toLowerCase()}`,
       );
-      if (sha) ctx.state.commits.push(sha);
+      if (sha) {
+        ctx.state.commits.push(sha);
+        // A gate passed before this commit judged code that is no longer what gets delivered
+        ctx.state.checks.splice(0);
+      }
       // Sticky, not overwritten: a later edit step that finds nothing to commit must not erase what
       // an earlier one already did.
       ctx.state.committed = ctx.state.committed || sha !== "";

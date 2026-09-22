@@ -20,7 +20,8 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 IDENTITY="${CP_SIGN_IDENTITY:--}"
 NOTARY_PROFILE="${CP_NOTARY_PROFILE:-}"
 NOTARY_KEY_PATH="${CP_NOTARY_KEY_PATH:-}"
-VERSION="${CP_VERSION:-1.0.0}"
+# Unset, the version is the worker's own, which release-please keeps at the last release
+VERSION="${CP_VERSION:-$(sed -n 's/^  "version": "\(.*\)",$/\1/p' "$ROOT/../worker/package.json")}"
 BUILD_NUMBER="${CP_BUILD_NUMBER:-1}"
 
 if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -58,8 +59,9 @@ fi
 mkdir -p "$APP/Contents/Resources/worker"
 cp -R "$WORKER_DIST"/* "$APP/Contents/Resources/worker/"
 rm -rf "$APP/Contents/Resources/worker/__fixtures__"
-# Without it node decides ESM vs CommonJS by sniffing, which older releases do not do
-echo '{ "type": "module" }' > "$APP/Contents/Resources/worker/package.json"
+# Without it node decides ESM vs CommonJS by sniffing, which older releases do not do. The version
+# is what the running worker reports to the server.
+printf '{ "type": "module", "version": "%s" }\n' "$VERSION" > "$APP/Contents/Resources/worker/package.json"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

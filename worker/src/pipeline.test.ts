@@ -309,7 +309,7 @@ describe("runTask", () => {
     await runTask(h.deps, merging);
 
     expect(h.delivery.push).toHaveBeenCalledWith("/wt", "cp-158/worker", IMPLEMENT_COMMIT_SHA);
-    expect(h.delivery.openPr).toHaveBeenCalledWith("/wt", merging, "did it");
+    expect(h.delivery.openPr).toHaveBeenCalledWith("/wt", merging, "did it", expect.any(Array));
     expect(h.delivery.merge).toHaveBeenCalledWith("/wt", "https://x/pull/7");
     expect(h.reporter.merged).toHaveBeenCalledWith(merging, "https://x/pull/7", "did it");
     expect(h.workspace.destroy).toHaveBeenCalledWith("CP-158");
@@ -2410,5 +2410,92 @@ describe("what a machine fault is recorded as", () => {
     await runTask(h.deps, task);
 
     expect(h.recordRun.mock.calls.at(-1)![1]).toMatchObject({ outcome: "requeued" });
+  });
+});
+
+// BP-780. The pull request used to carry only the agent's summary, which — the agent having no
+// shell — ended "the tests were not run" while the worker had just run them.
+describe("the checks a pull request lists", () => {
+  it("hands delivery every gate the run passed, in order, with what each ran and how long it took", async () => {
+    let clock = 1_000;
+    const h = harness({
+      now: () => (clock += 1_500),
+      gateFor: (entry) =>
+        entry.key === "build"
+          ? {
+              name: "build",
+              run: vi.fn<Gate["run"]>().mockResolvedValue({
+                ok: true,
+                reason: "",
+                commands: ["npm ci --ignore-scripts", "npm run build"],
+              }),
+            }
+          : passingGate(entry.key),
+    });
+
+    await runTask(h.deps, task);
+
+    const checks = vi.mocked(h.delivery.openPr).mock.calls[0][3];
+    expect(checks?.map((check) => check.name)).toEqual([
+      "protected-paths",
+      "diff-size",
+      "test-presence",
+      "build",
+      "test-run",
+      "review",
+    ]);
+    expect(checks?.[3]).toEqual({
+      name: "build",
+      commands: ["npm ci --ignore-scripts", "npm run build"],
+      durationMs: 1_500,
+    });
+  });
+
+  // Review of BP-780: a gate that ran before a later edit step never saw the code delivered
+  it("lists only the gates that ran after the last commit", async () => {
+    let dirty = true;
+    const shas: string[] = [];
+    const runner = {
+      run: vi.fn<Runner["run"]>(async (_command, args) => {
+        if (args.includes("status")) return shell(dirty ? " M a.ts\n" : "");
+        if (args.includes("commit")) {
+          dirty = false;
+          shas.push(`sha-edit-${shas.length + 1}`);
+          return shell();
+        }
+        if (args.includes("rev-list")) return shell(shas.length ? `${[...shas].reverse().join("\n")}\n` : "");
+        if (args.includes("rev-parse")) return shell(shas.at(-1) ?? "base1");
+        return shell();
+      }),
+    };
+    const execute = vi.fn<Executor["execute"]>(async () => {
+      dirty = true;
+      return { kind: "result", result: completed };
+    });
+    const implement = DEFAULT_SEQUENCE[0];
+    const h = harness({ runner, executor: { execute } });
+    const sequence = [
+      implement,
+      { key: "test-run", kind: "gate", name: "Tests pass", gateKind: "test-run" },
+      { ...implement, key: "polish", name: "Polish" },
+      { key: "diff-size", kind: "gate", name: "Size", gateKind: "diff-size" },
+      { key: "push", kind: "step", name: "Push", deterministic: true },
+      { key: "pull-request", kind: "step", name: "Pull request", deterministic: true },
+    ] as SnapshotEntry[];
+
+    await runTask(h.deps, { ...task, agent: agentOf(sequence) });
+
+    expect(shas).toHaveLength(2);
+    expect(vi.mocked(h.delivery.openPr).mock.calls[0][3]?.map((check) => check.name)).toEqual([
+      "diff-size",
+    ]);
+  });
+
+  it("lists no gate that refused", async () => {
+    const h = harness({ gateFor: gateForOnly("review", rejectingGate("review", "no")) });
+
+    await runTask(h.deps, task);
+
+    expect(h.delivery.openPr).not.toHaveBeenCalled();
   });
 });

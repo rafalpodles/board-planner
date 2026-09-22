@@ -189,11 +189,50 @@ describe("GET handover readiness", () => {
     expect(JSON.stringify(body)).not.toContain("/private/path");
   });
 
+  // BP-777. The reader's own machine, so the reason is theirs to read — and only this board's.
+  it("answers unbound, with this board's reason, for a machine that refuses its checkout", async () => {
+    workerLean.mockResolvedValue([
+      {
+        enabled: true,
+        lastSeenAt: new Date(),
+        repos: [{ remote: "git@github.com:acme/orbit.git", path: "/private/tmp/orbit" }],
+        bindingError: `6ab2986860cb176ff84c4fc4: elsewhere; ${PROJECT}: /private/tmp/orbit is under the sensitive directory /private/tmp`,
+      },
+    ]);
+
+    const { body } = await read();
+
+    expect(body.machine).toBe("unbound");
+    expect(body.bindingError).toBe("/private/tmp/orbit is under the sensitive directory /private/tmp");
+  });
+
+  it("answers no binding error for a machine that is live here", async () => {
+    workerLean.mockResolvedValue([
+      {
+        enabled: true,
+        lastSeenAt: new Date(),
+        repos: [{ remote: "git@github.com:acme/orbit.git", path: "/Users/ada/orbit" }],
+        bindingError: "6ab2986860cb176ff84c4fc4: /x is not approved on this machine",
+      },
+    ]);
+
+    expect((await read()).body).toMatchObject({ machine: "live", bindingError: "" });
+  });
+
   it("selects what pause and preflight are read from", async () => {
     await read();
 
     expect(workerFind.mock.calls[0][1].split(" ").sort()).toEqual(
-      ["enabled", "lastSeenAt", "repos", "preflight", "command", "commandIssuedAt", "commandAckedAt"].sort()
+      [
+        "enabled",
+        "lastSeenAt",
+        "repos",
+        "preflight",
+        "command",
+        "commandIssuedAt",
+        "commandAckedAt",
+        "bindingError",
+      ].sort()
     );
   });
 

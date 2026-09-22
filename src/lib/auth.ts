@@ -9,7 +9,7 @@ import { sha256 } from "./oauth";
 import {
   ProvenanceError,
   checkProvenance,
-  readSessionCookie,
+  sessionCookieTokens,
   resolveSession,
 } from "./session";
 import { IUser } from "@/types";
@@ -127,13 +127,15 @@ async function verifyOAuthAccessToken(token: string): Promise<IUser | null> {
 }
 
 async function verifySessionCookie(request: Request): Promise<IUser | null> {
-  const token = readSessionCookie(request.headers.get("cookie"));
-  if (!token) return null;
+  const tokens = sessionCookieTokens(request.headers.get("cookie"));
+  if (tokens.length === 0) return null;
 
   const provenance = checkProvenance(request);
   if (!provenance.ok) throw new ProvenanceError(provenance.reason);
 
-  const session = await resolveSession(token);
+  // One token: under auto the prefixed cookie wins whenever it is present, dead or alive, and the
+  // plain name is read only when there is no prefixed cookie at all (BP-773 review).
+  const session = await resolveSession(tokens[0]);
   if (!session) return null;
 
   await connectDB();

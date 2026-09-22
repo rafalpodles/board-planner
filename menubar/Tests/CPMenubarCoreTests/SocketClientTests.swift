@@ -166,6 +166,30 @@ private struct RecordingTransport: Transport {
     #expect(recorder.requests.first?.contains("Connection: close") == true)
 }
 
+// BP-778. The same input and the same answer as the worker's own test (worker/src/config.test.ts):
+// the two sides derive the path independently and have to agree byte for byte.
+@Test func movesTheSocketWhereTheWorkerDoesForADeepStateDirectory() {
+    let deep = "/Users/operator/" + String(repeating: "nested/", count: 12) + "state"
+
+    #expect(SocketClient.socketPath(in: deep, uid: 501)
+            == "/tmp/cp-worker-501-7038366db39fb12e/worker.sock")
+}
+
+@Test func derivesOneSocketPathFromEverySpellingOfTheStateDirectory() {
+    let spelled = "  /Users/operator/./x/../" + String(repeating: "nested/", count: 12) + "state/\n"
+
+    #expect(SocketClient.socketPath(in: spelled, uid: 501)
+            == "/tmp/cp-worker-501-7038366db39fb12e/worker.sock")
+    #expect(SocketClient.socketPath(in: "/rig/./state/", uid: 501) == "/rig/state/worker.sock")
+}
+
+@Test func keepsTheSocketBesideAStateDirectoryShortEnoughForOne() {
+    let dir = "/" + String(repeating: "a", count: 103 - "/worker.sock".count - 1)
+
+    #expect(SocketClient.socketPath(in: dir, uid: 501) == dir + "/worker.sock")
+    #expect(SocketClient.socketPath(in: dir + "b", uid: 501).hasPrefix("/tmp/cp-worker-501-"))
+}
+
 @Test func defaultsToTheWorkersOwnStateDirectory() {
     #expect(SocketClient.defaultSocketPath().hasSuffix("/worker.sock"))
 }
@@ -205,4 +229,119 @@ private struct RecordingTransport: Transport {
 
     #expect(status.paused == false)
     #expect(status.recent.isEmpty)
+}
+
+// BP-778 review. The relocated socket lives under /tmp, where anyone could have made its directory
+// before the worker ran; the app must not hand a pause, a resume or its trust to whatever answers.
+private func scratchDirectory(mode: mode_t) throws -> String {
+    let path = NSTemporaryDirectory() + "cp-socket-dir-" + UUID().uuidString
+    try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: false)
+    chmod(path, mode)
+    return path
+}
+
+@Test func acceptsAPrivateDirectoryOfThisUsers() throws {
+    let dir = try scratchDirectory(mode: 0o700)
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+
+    #expect(SocketClient.directoryRefusal(dir) == nil)
+}
+
+@Test func refusesADirectoryOtherUsersCanOpen() throws {
+    let dir = try scratchDirectory(mode: 0o755)
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+
+    #expect(SocketClient.directoryRefusal(dir)?.contains("can be opened by other users") == true)
+}
+
+@Test func refusesADirectoryAnotherUserOwns() throws {
+    let dir = try scratchDirectory(mode: 0o700)
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+
+    #expect(SocketClient.directoryRefusal(dir, uid: getuid() + 1)?.contains("belongs to another user") == true)
+}
+
+@Test func refusesASymlinkInPlaceOfTheDirectory() throws {
+    let dir = try scratchDirectory(mode: 0o700)
+    let link = dir + "-link"
+    defer {
+        try? FileManager.default.removeItem(atPath: link)
+        try? FileManager.default.removeItem(atPath: dir)
+    }
+    try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: dir)
+
+    #expect(SocketClient.directoryRefusal(link)?.contains("symbolic link") == true)
+}
+
+@Test func sendsNothingToARelocatedSocketInADirectoryOthersCanOpen() async throws {
+    let dir = "/tmp/cp-worker-\(getuid())-test\(UUID().uuidString.prefix(8))"
+    try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: false)
+    chmod(dir, 0o777)
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let recorder = RecordingTransport.Recorder()
+    let client = SocketClient(socketPath: dir + "/worker.sock",
+                              transport: RecordingTransport(body: #"{"paused":false}"#, seen: recorder))
+
+    await #expect(throws: SocketError.self) { _ = try await client.command("pause") }
+    #expect(recorder.requests.isEmpty)
+}
+
+@Test func leavesAStateDirectorySocketToTheOperator() {
+    #expect(SocketClient.unsafeDirectoryReason(forSocketAt: "/Users/someone/.boardplanner/worker.sock") == nil)
+}
+
+// BP-778 review, D1: the directory check runs before connect(2), and /tmp is shared — a local
+// attacker looping create and delete on that directory eventually wins the gap. The peer's uid is
+// asked of the connection itself, so whoever answers is checked rather than whatever was on disk.
+@Test func acceptsAPeerRunningAsThisUser() {
+    #expect(POSIXTransport.peerRefusal(peer: getuid(), ours: getuid()) == nil)
+}
+
+@Test func refusesAPeerRunningAsAnotherUser() {
+    let refusal = POSIXTransport.peerRefusal(peer: getuid() + 1, ours: getuid())
+
+    #expect(refusal?.contains("not your worker") == true)
+    #expect(refusal?.contains("uid \(getuid() + 1)") == true)
+}
+
+// The control, and the proof the check is on the live path: a socket this user really owns answers.
+@Test func readsFromASocketThisUserOwns() async throws {
+    let path = NSTemporaryDirectory() + "cp-peer-\(UUID().uuidString.prefix(8)).sock"
+    defer { unlink(path) }
+    let listener = socket(AF_UNIX, SOCK_STREAM, 0)
+    #expect(listener >= 0)
+    var address = sockaddr_un()
+    address.sun_family = sa_family_t(AF_UNIX)
+    let bytes = Array(path.utf8)
+    let capacity = MemoryLayout.size(ofValue: address.sun_path)
+    withUnsafeMutablePointer(to: &address.sun_path) { field in
+        field.withMemoryRebound(to: CChar.self, capacity: capacity) { target in
+            for (offset, byte) in bytes.enumerated() { target[offset] = CChar(bitPattern: byte) }
+            target[bytes.count] = 0
+        }
+    }
+    let bound = withUnsafePointer(to: &address) { pointer in
+        pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { generic in
+            bind(listener, generic, socklen_t(MemoryLayout<sockaddr_un>.size))
+        }
+    }
+    #expect(bound == 0)
+    #expect(listen(listener, 1) == 0)
+    let answering = Task.detached {
+        let accepted = accept(listener, nil, nil)
+        let reply = "HTTP/1.1 200 OK\r\n\r\n{\"paused\":false}"
+        _ = Array(reply.utf8).withUnsafeBufferPointer { write(accepted, $0.baseAddress, $0.count) }
+        close(accepted)
+    }
+    defer {
+        close(listener)
+        answering.cancel()
+    }
+
+    var received = Data()
+    for try await chunk in try await POSIXTransport().send("GET /status HTTP/1.1\r\n\r\n", to: path) {
+        received.append(chunk)
+    }
+
+    #expect(String(data: received, encoding: .utf8)?.contains("paused") == true)
 }

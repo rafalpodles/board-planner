@@ -166,6 +166,14 @@ describe("the enrolment token file in the wiring", () => {
   });
 });
 
+describe("the version the worker reports", () => {
+  it("registers with the version it was built from, not a literal", () => {
+    const { seen } = harness({ version: "1.2.3" });
+
+    expect(seen.heartbeat?.registration.version).toBe("1.2.3");
+  });
+});
+
 describe("the local socket's place in the wiring", () => {
   // The two server channels deliver the same standing command, so they must share the guard that
   // tells a redelivery from a fresh instruction.
@@ -189,6 +197,16 @@ describe("the local socket's place in the wiring", () => {
     const { seen } = harness();
 
     expect(seen.local?.socketPath).toBe(join(STATE_DIR, "worker.sock"));
+    expect(seen.local?.privateDirectory).toBe(false);
+  });
+
+  // BP-778 review: a socket moved under /tmp has to have its directory checked before it binds
+  it("asks for the private-directory check when a deep state dir moves the socket to /tmp", () => {
+    const deep = `/Users/operator/${"nested/".repeat(12)}state`;
+    const { seen } = harness({ env: { ...ENV, CP_STATE_DIR: deep } });
+
+    expect(seen.local?.socketPath).toMatch(/^\/tmp\/cp-worker-\d+-[0-9a-f]{16}\/worker\.sock$/);
+    expect(seen.local?.privateDirectory).toBe(true);
   });
 
   it("reports the live loop's pause state, not a copy taken at startup", () => {
@@ -358,7 +376,10 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     // claiming against it, and the agent of an earlier run is what writes the key.
     scopedConfig: string | Record<string, string> = "",
     sandboxBroken = false,
-    plantAfterBind = false
+    plantAfterBind = false,
+    // What `gh auth token` and `gh api user` answer, and the environment each staging call got
+    gh: { token?: string; user?: string } = {},
+    stagingEnvs: NodeJS.ProcessEnv[] = []
   ): Runner {
     // `bindRepository` asks `rev-parse --show-toplevel` first and scans second, so the scan that
     // follows one in the same directory is the bind's. Nothing else tells the two apart: since
@@ -379,6 +400,15 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     return {
       async run(command, args, opts) {
         everyCall.push([command, ...args]);
+        if (command.endsWith("/gh") && args[0] === "auth" && args[1] === "token" && gh.token) {
+          return { code: 0, stdout: `${gh.token}\n`, stderr: "", timedOut: false };
+        }
+        if (command.endsWith("/gh") && args[0] === "api" && args[1] === "user" && gh.user) {
+          return { code: 0, stdout: gh.user, stderr: "", timedOut: false };
+        }
+        if (command === GIT_PATH && args.includes("status") && args.includes("--porcelain")) {
+          stagingEnvs.push(opts.env ?? {});
+        }
         // establishPreflight's own resolution call, ahead of everything else: answered with the
         // fixed path every check below matches on.
         if (args[0] === "-lc" && args[1] === "command -v git") {
@@ -516,6 +546,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       // Replaces the default 200-with-assignments response — a server this worker cannot reach at
       // all, rather than one answering something to parse.
       fetchImpl?: typeof fetch;
+      gh?: { token?: string; user?: string };
       // Run between passes, after the clock jump — the one hook point available to change what is
       // on disk mid-run, for a test about recovering from a failure and then repeating it.
       onSleep?: (stateDir: string, sleepIndex: number) => void;
@@ -537,6 +568,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
     const everyCall: string[][] = [];
     const remoteCalls: RemoteCall[] = [];
     const bindingErrors: string[] = [];
+    const stagingEnvs: NodeJS.ProcessEnv[] = [];
     const queue = opts.tasks ?? [CLAIMED];
     const logError = vi.fn();
     let claims = 0;
@@ -584,7 +616,9 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         remoteCalls,
         opts.scopedConfig,
         opts.sandboxBroken,
-        opts.plantAfterBind
+        opts.plantAfterBind,
+        opts.gh,
+        stagingEnvs
       ),
       hostname: () => "host-1",
       // the loop only sleeps once it has nothing left to claim, which is one pass after the run
@@ -684,6 +718,7 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       localConfig,
       heartbeatDeps: seenHeartbeat,
       rebinds: serverFetch.mock.calls.length,
+      stagingEnvs,
     };
   }
 
@@ -1046,6 +1081,47 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
       "--user",
       "owner",
     ]);
+  });
+
+  // BP-779. The pin decides who the commits are by, not the machine's global git config.
+  it("commits as the name and address pinned beside the account", async () => {
+    const { everyCall } = await runOneTask(undefined, undefined, {
+      stateFiles: {
+        "github.json": JSON.stringify({ account: "owner", name: "Owner", email: "owner@example.org" }),
+      },
+    });
+
+    expect(everyCall.some((call) => call.includes("worktree") && call.includes("add"))).toBe(true);
+    expect(everyCall.some((call) => call.includes("GIT_AUTHOR_IDENT"))).toBe(false);
+  });
+
+  // Review of BP-779: nothing held the identity GitHub names to the commit — a wiring that dropped
+  // it fell back to git config and stayed green.
+  it("commits as the name and noreply address GitHub gives for the pinned account", async () => {
+    const { stagingEnvs, everyCall } = await runOneTask(undefined, undefined, {
+      stateFiles: { "github.json": JSON.stringify({ account: "owner" }) },
+      gh: { token: "gho_owner", user: JSON.stringify({ login: "owner", id: 42, name: "Owner Name" }) },
+    });
+
+    expect(everyCall).toContainEqual([expect.stringMatching(/\/gh$/), "api", "user"]);
+    const committing = stagingEnvs.filter((env) => env.GIT_AUTHOR_EMAIL !== undefined);
+    expect(committing.length).toBeGreaterThan(0);
+    for (const env of committing) {
+      expect(env).toMatchObject({
+        GIT_AUTHOR_NAME: "Owner Name",
+        GIT_AUTHOR_EMAIL: "42+owner@users.noreply.github.com",
+        GIT_COMMITTER_EMAIL: "42+owner@users.noreply.github.com",
+      });
+    }
+  });
+
+  // The control: nothing pinned, and the machine's own git config is who the commits are by
+  it("commits as the machine's git identity when nothing is pinned", async () => {
+    const { stagingEnvs } = await runOneTask();
+
+    const committing = stagingEnvs.filter((env) => env.GIT_AUTHOR_EMAIL !== undefined);
+    expect(committing.length).toBeGreaterThan(0);
+    expect(committing[0]).toMatchObject({ GIT_AUTHOR_EMAIL: "operator@example.com" });
   });
 
   // The seam gate-integrity.integration.test.ts cannot reach: that test mirrors what this call site
@@ -1415,6 +1491,26 @@ describe("telemetry, from the agent's stdout to the two sinks", () => {
         ([line]) => typeof line === "string" && line.includes("could not read repos.json")
       );
       expect(failures).toHaveLength(2);
+    });
+
+    // BP-776. repos.json is this machine's own file, so a server that refuses the GET must not
+    // freeze what the heartbeat reports: a checkout granted mid-run reaches the next refresh.
+    it("re-reads repos.json on every refresh even while the server refuses the GET", async () => {
+      const run = await runOneTask(undefined, undefined, {
+        fetchImpl: async () => ({ ok: false, status: 403 }) as unknown as Response,
+        stateFiles: { "repos.json": "not json" },
+        passes: 2,
+        clockJumpOnSleepMs: 31_000,
+        onSleep: (stateDir, sleepIndex) => {
+          if (sleepIndex === 0) {
+            writeFileSync(join(stateDir, "repos.json"), JSON.stringify({ repos: [REPO] }), {
+              mode: 0o600,
+            });
+          }
+        },
+      });
+
+      expect(run.heartbeatDeps?.repos?.()).toEqual([expect.objectContaining({ path: REPO })]);
     });
 
     // The same half, for the neighbouring site: a server that comes back and then goes away again

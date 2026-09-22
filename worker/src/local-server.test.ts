@@ -1,12 +1,13 @@
 import { execFileSync } from "child_process";
-import { existsSync, lstatSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
 import { request as httpRequest } from "http";
 import { tmpdir } from "os";
-import { join } from "path";
+import { dirname, join } from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiClient } from "./api.js";
 import { CommandChannels, createCommandHandlers } from "./commands.js";
 import { LocalConfigView, LocalServer, startLocalServer } from "./local-server.js";
+import { localSocketPath, socketMovedOutOfStateDir } from "./config.js";
 import { createLoop, Loop } from "./loop.js";
 import { createTelemetry, Telemetry } from "./telemetry.js";
 
@@ -68,6 +69,7 @@ async function serve(
     // /status reads current() too, so a stub standing in for the real telemetry has to have it
     telemetry?: Pick<Telemetry, "subscribe" | "recent" | "current">;
     socketPath?: string;
+    privateDirectory?: boolean;
     config?: () => LocalConfigView;
   } = {}
 ) {
@@ -79,6 +81,7 @@ async function serve(
 
   const server = startLocalServer({
     socketPath,
+    privateDirectory: opts.privateDirectory,
     handlers: channels.local,
     telemetry: opts.telemetry ?? createTelemetry(),
     paused: () => loop.paused(),
@@ -490,5 +493,38 @@ describe("the progress stream", () => {
     stream.close();
 
     await vi.waitFor(() => expect(live).toBe(0));
+  });
+});
+
+// BP-778. macOS refuses a socket path over 104 bytes with EINVAL, and a CP_STATE_DIR a little over
+// ninety characters deep used to leave the menubar with no way to reach the worker.
+describe("a state directory too deep for a socket", () => {
+  function deepStateDir(): string {
+    const dir = `/Users/operator/${"a-rather-long-folder-name/".repeat(4)}${Math.random().toString(36).slice(2)}`;
+    const socketPath = localSocketPath(dir);
+    dirs.push(dirname(socketPath));
+    return dir;
+  }
+
+  it("still answers on a short path the menubar can derive", async () => {
+    const stateDir = deepStateDir();
+    const socketPath = localSocketPath(stateDir);
+
+    await serve({ socketPath, privateDirectory: socketMovedOutOfStateDir(stateDir, socketPath) });
+
+    expect(socketPath.startsWith("/tmp/cp-worker-")).toBe(true);
+    expect((await call(socketPath, "GET", "/status")).status).toBe(200);
+    expect(statSync(dirname(socketPath)).mode & 0o777).toBe(0o700);
+  });
+
+  it("refuses a directory under /tmp that anybody else can write to", async () => {
+    const stateDir = deepStateDir();
+    const socketPath = localSocketPath(stateDir);
+    mkdirSync(dirname(socketPath), { recursive: true });
+    chmodSync(dirname(socketPath), 0o777);
+
+    await expect(
+      serve({ socketPath, privateDirectory: socketMovedOutOfStateDir(stateDir, socketPath) })
+    ).rejects.toThrow(/not private to this user/);
   });
 });

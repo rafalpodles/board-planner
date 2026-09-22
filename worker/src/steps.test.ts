@@ -22,6 +22,7 @@ function ctx(over: Partial<StepContext> = {}) {
     prUrl: "",
     merged: false,
     summary: "",
+    checks: [],
     lastResult: completed,
   };
   const baseSha = over.baseSha ?? "base";
@@ -247,7 +248,7 @@ describe("runStep — a model step", () => {
 
 describe("runStep — a worker action", () => {
   it("pushes on the push step and calls no model", async () => {
-    const c = ctx({ state: { committed: true, uncommittedWork: false, commits: ["sha1"], pushed: false, prUrl: "", merged: false, summary: "", lastResult: completed } });
+    const c = ctx({ state: { committed: true, uncommittedWork: false, commits: ["sha1"], pushed: false, prUrl: "", merged: false, summary: "", checks: [], lastResult: completed } });
     await runStep(entry({ key: "push", deterministic: true }), c);
 
     expect(c.delivery.push).toHaveBeenCalledWith("/wt", "cp-1/x", "sha1");
@@ -273,6 +274,74 @@ describe("runStep — a worker action", () => {
     await runStep(entry({ key: "push", deterministic: true }), c);
 
     expect(c.delivery.push).toHaveBeenCalledWith("/wt", "cp-1/x", "sha2");
+  });
+
+  // Review of BP-780: Implement → test-run → Implement listed test-run as passed on code it never saw
+  it("forgets the checks a later commit made stale", async () => {
+    const c = ctx();
+    c.state.checks.push({ name: "test-run", commands: ["npm test"], durationMs: 5 });
+
+    await runStep(entry({ capability: "edit" }), c);
+
+    expect(c.state.checks).toEqual([]);
+  });
+
+  it("keeps the checks when a step commits nothing", async () => {
+    const c = ctx({ commit: vi.fn(async () => "") });
+    c.state.checks.push({ name: "test-run", commands: ["npm test"], durationMs: 5 });
+
+    await runStep(entry({ capability: "edit" }), c);
+
+    expect(c.state.checks).toHaveLength(1);
+  });
+
+  it("tells a model step which gates follow it in the sequence", async () => {
+    const implement = entry({ key: "implement", capability: "edit" });
+    const sequence = [
+      entry({ key: "plan", capability: "read-only" }),
+      implement,
+      entry({ key: "build", kind: "gate", gateKind: "build" }),
+      entry({ key: "review", kind: "gate", gateKind: "review" }),
+    ];
+    const c = ctx({
+      task: { taskKey: "CP-1", title: "t", description: "", acceptanceCriteria: [], agent: { sequence } },
+    } as never);
+
+    await runStep(implement, c);
+
+    expect(c.executor.execute.mock.calls[0][0].brief.laterChecks).toEqual(["build", "review"]);
+  });
+
+  // Review of BP-780: the same step object twice in one sequence, and indexOf answered for the
+  // first — so the second was promised a gate that had already run before it
+  it("answers for the step at this position, not the first one that looks like it", async () => {
+    const step = entry({ key: "implement", capability: "edit" });
+    const sequence = [
+      step,
+      entry({ key: "build", kind: "gate", gateKind: "build" }),
+      step,
+      entry({ key: "test-run", kind: "gate", gateKind: "test-run" }),
+    ];
+    const task = { taskKey: "CP-1", title: "t", description: "", acceptanceCriteria: [], agent: { sequence } };
+
+    const first = ctx({ task, position: 0 } as never);
+    await runStep(step, first);
+    const second = ctx({ task, position: 2 } as never);
+    await runStep(step, second);
+
+    expect(first.executor.execute.mock.calls[0][0].brief.laterChecks).toEqual(["build", "test-run"]);
+    expect(second.executor.execute.mock.calls[0][0].brief.laterChecks).toEqual(["test-run"]);
+  });
+
+  it("gives the pull request the checks the run passed", async () => {
+    const c = ctx();
+    c.state.checks.push({ name: "build", commands: ["npm run build"], durationMs: 5 });
+
+    await runStep(entry({ key: "pull-request", deterministic: true }), c);
+
+    expect(c.delivery.openPr).toHaveBeenCalledWith("/wt", c.task, "", [
+      { name: "build", commands: ["npm run build"], durationMs: 5 },
+    ]);
   });
 
   it("remembers the pull request url, and that a merge happened", async () => {
@@ -301,7 +370,7 @@ describe("runStep — a worker action", () => {
 
   it("refuses to push a history it did not write", async () => {
     const c = ctx({
-      state: { committed: true, uncommittedWork: false, commits: ["sha1"], pushed: false, prUrl: "", merged: false, summary: "", lastResult: completed },
+      state: { committed: true, uncommittedWork: false, commits: ["sha1"], pushed: false, prUrl: "", merged: false, summary: "", checks: [], lastResult: completed },
       runner: {
         run: vi.fn(async (_command: string, args: string[]) =>
           args.includes("rev-list")

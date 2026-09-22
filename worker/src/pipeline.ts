@@ -551,13 +551,14 @@ export async function runTask(
     prUrl: "",
     merged: false,
     summary: "",
+    checks: [],
     lastResult: EMPTY_RESULT,
   };
 
   try {
     const budget = createBudget(config.runCeilingMs, now);
 
-    for (const entry of task.agent.sequence) {
+    for (const [position, entry] of task.agent.sequence.entries()) {
       if (
         await releaseIfAborted(deps, reporter, task, whatLanded(state, branch))
       )
@@ -595,6 +596,7 @@ export async function runTask(
           baseSha: worktree.baseSha,
           runner,
           gitPath: deps.gitPath,
+          position,
         });
         // Before the abort check, not after it. An earlier step may already have committed, and
         // exiting without keeping the worktree destroys the only copy of that work: nothing is
@@ -721,6 +723,7 @@ export async function runTask(
           worktree.path,
           worktree.baseSha,
         );
+        const gateStartedAt = now();
         const verdict = await gate.run({
           worktreePath: worktree.path,
           task,
@@ -729,6 +732,13 @@ export async function runTask(
           signal: deps.signal,
         });
         if (await releaseIfAborted(deps, reporter, task)) return;
+        if (verdict.ok) {
+          state.checks.push({
+            name: gate.name,
+            commands: verdict.commands ?? [],
+            durationMs: Math.max(0, now() - gateStartedAt),
+          });
+        }
 
         if (!verdict.ok) {
           // The gate did not judge the change; this machine could not run it. Reported as a

@@ -5,7 +5,26 @@
   "packages": {
     ".": {
       "release-type": "node",
-      "package-name": "board-planner"
+      "package-name": "board-planner",
+      "draft": true,
+      "force-tag-creation": true,
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "worker/package.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "worker/package-lock.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "worker/package-lock.json",
+          "jsonpath": "$.packages[''].version"
+        }
+      ]
     }
   }
 }

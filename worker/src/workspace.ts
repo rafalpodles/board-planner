@@ -132,7 +132,9 @@ export function createWorkspace(
   runner: Runner,
   gitPath: string,
   remoteEnv?: () => NodeJS.ProcessEnv,
-  remoteUrl?: string
+  remoteUrl?: string,
+  // The pinned GitHub account's identity; without one, whatever git config names (BP-779)
+  pinnedIdentity?: CommitIdentity
 ): Workspace {
   // api.ts refuses a key that is not a name; this is the sink where a key becomes a path, and the
   // only place that can still tell a traversal from a directory name
@@ -381,7 +383,9 @@ export function createWorkspace(
       // saving is the work not done, not a leak avoided.) Read in the shared checkout, which is
       // the config a linked worktree has: the per-worktree scope is the only thing that could
       // differ, and a key in it is refused above.
-      const identity = await resolveCommitIdentity(runner, gitPath, config.repoPath);
+      const identity: ResolvedIdentity = pinnedIdentity
+        ? { ok: true, identity: pinnedIdentity }
+        : await resolveCommitIdentity(runner, gitPath, config.repoPath);
       if (!identity.ok) throw new MissingIdentityError(identity.reason, await whoseFault(identity));
 
       let baseSha: string;

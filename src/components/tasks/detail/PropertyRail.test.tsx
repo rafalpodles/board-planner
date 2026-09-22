@@ -966,6 +966,7 @@ describe("the hand-over notice, with the board judged too", () => {
     canAdmin: false,
     columns: BOARD.map((c) => ({ role: c.role })),
     machine: "live",
+    bindingError: "",
   };
 
   function withBoard(
@@ -1136,6 +1137,21 @@ describe("the hand-over notice, with the board judged too", () => {
       );
     }
   );
+
+  // BP-777. A machine whose checkout the worker refuses reported in like any other, and the task
+  // said it was waiting for it.
+  it("says why the assignee's machine refuses its checkout, in what to do about it", () => {
+    withBoard({
+      machine: "unbound",
+      bindingError: "/private/tmp/recurro is under the sensitive directory /private/tmp",
+    });
+
+    expect(notice().dataset.reason).toBe("machine-unbound");
+    expect(notice().textContent).toBe(
+      "Nothing will run this yet. Your machine is connected but not taking work for this board: its checkout is in /private/tmp, a directory the worker refuses to work in. Move the checkout somewhere else, such as your home folder, and update repos.json on that machine."
+    );
+    expect(screen.queryByTestId("handover-waiting")).toBeNull();
+  });
 
   // The sandbox check is the one that stops the claim itself
   it("says a machine whose sandbox check failed is not taking work", () => {

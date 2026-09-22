@@ -32,6 +32,10 @@ export async function register() {
       // this block is for, and survives the module-level call being removed.
       const { assertEncryptionConfig } = await import("@/lib/encryption");
       assertEncryptionConfig();
+      // The same for the session cookie: an insecure cookie on an https origin used to throw only
+      // when the login route first loaded the module, which read as a 500 on sign-in (BP-773)
+      const { assertSessionConfig } = await import("@/lib/session");
+      assertSessionConfig();
     } catch (err) {
       // Exiting rather than throwing, and this is not belt-and-braces. `NextServer.prepare()`
       // awaits the real prepare only when `dev` (next/dist/server/next.js), so under `next start`

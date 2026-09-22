@@ -105,6 +105,47 @@ describe("WorkersSection", () => {
   });
 });
 
+// BP-777. The list said "live" for a machine whose worker refused its checkout of this board.
+describe("machines offering this repository", () => {
+  function worker(over: Record<string, unknown> = {}) {
+    return {
+      _id: "w1",
+      name: "ada-mbp",
+      host: "ada.local",
+      repos: [{ remote: "git@github.com:owner/board-planner.git", path: "/Users/ada/board-planner" }],
+      stale: false,
+      bindingError: "",
+      ...over,
+    };
+  }
+
+  async function listed(workers: Record<string, unknown>[]) {
+    api.get.mockImplementation(async (url: string) => (url === "/api/admin/workers" ? workers : []));
+    renderSection(true);
+    await waitFor(() => expect(screen.getAllByTestId("offering-machine")).toHaveLength(workers.length));
+  }
+
+  it("names a machine whose checkout of this board is refused, and says what to do", async () => {
+    await listed([
+      worker({
+        bindingError: `68b1000000000000000000ff: refused elsewhere; ${PROJECT_OID}: /private/tmp/bp is under the sensitive directory /private/tmp`,
+      }),
+    ]);
+
+    expect(screen.getByTestId("offering-machine-state").textContent).toBe("cannot use its checkout");
+    expect(screen.getByTestId("offering-machine-error").textContent).toBe(
+      "Its checkout is in /private/tmp, a directory the worker refuses to work in. Move the checkout somewhere else, such as your home folder, and update repos.json on that machine."
+    );
+  });
+
+  it("still calls a machine live when only another board's checkout is refused", async () => {
+    await listed([worker({ bindingError: "68b1000000000000000000ff: refused elsewhere" })]);
+
+    expect(screen.getByTestId("offering-machine-state").textContent).toBe("live");
+    expect(screen.queryByTestId("offering-machine-error")).toBeNull();
+  });
+});
+
 function run(over: Record<string, unknown> = {}) {
   return {
     _id: "r1",

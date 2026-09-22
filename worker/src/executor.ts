@@ -43,9 +43,21 @@ const SYSTEM_PROMPT = [
   PROTECTED_PATHS_BRIEF,
 ].join(" ");
 
+const CHECK_NAMES: Record<string, string> = { build: "the build", "test-run": "the test suite" };
+
+// Said only when a check really follows: the agent has no shell, and without this it closes its
+// summary with "the tests were not run", which reads on the pull request as an untested change
+// (BP-780). Promising checks an agent is not composed with would be the opposite lie.
+function checksNote(laterChecks: string[]): string {
+  const named = [...new Set(laterChecks.map((kind) => CHECK_NAMES[kind]).filter(Boolean))];
+  if (named.length === 0) return "";
+  return ` You have no shell and cannot run anything. After this step the worker itself runs ${named.join(" and ")}, before anything is delivered, and lists what passed on the pull request — so do not say in your summary that it was not run.`;
+}
+
 function systemPromptFor(brief: StepBrief): string {
+  const base = SYSTEM_PROMPT + checksNote(brief.laterChecks ?? []);
   const step = brief.prompt.trim();
-  return step ? `${SYSTEM_PROMPT}\n\nThis step: ${step}` : SYSTEM_PROMPT;
+  return step ? `${base}\n\nThis step: ${step}` : base;
 }
 
 function isUsageLimit(text: string): boolean {
@@ -188,6 +200,8 @@ export interface StepBrief {
   model: string;
   fallbackModel: string;
   timeoutMs: number;
+  /** The gate kinds that run after this step in the agent's sequence */
+  laterChecks?: string[];
 }
 
 export interface ExecuteOptions {

@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start -H 0.0.0.0 -p ${PORT:-3000}",
+    "start": "node scripts/start.mjs",
     "lint": "next lint",
     "test": "vitest run",
     "test:watch": "vitest",

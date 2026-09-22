@@ -60,3 +60,22 @@ private func scratch() throws -> String {
 
     #expect(try GithubAccountFile(path: path).read() == "")
 }
+
+// BP-779. The worker commits as a name and address set beside the pin; picking the same account
+// again in the app must not quietly drop them, and picking another must not carry them over.
+@Test func keepsAHandSetIdentityOnlyForTheAccountItWasSetFor() throws {
+    let path = try scratch()
+    try Data(#"{"account":"owner","name":"Owner","email":"owner@example.org"}"#.utf8)
+        .write(to: URL(fileURLWithPath: path))
+    let file = GithubAccountFile(path: path)
+
+    try file.write("owner")
+    var parsed = try JSONSerialization.jsonObject(
+        with: Data(contentsOf: URL(fileURLWithPath: path))) as? [String: String]
+    #expect(parsed == ["account": "owner", "name": "Owner", "email": "owner@example.org"])
+
+    try file.write("someone-else")
+    parsed = try JSONSerialization.jsonObject(
+        with: Data(contentsOf: URL(fileURLWithPath: path))) as? [String: String]
+    #expect(parsed == ["account": "someone-else"])
+}

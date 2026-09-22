@@ -13,14 +13,20 @@ bump, `fix` a patch, `!` or `BREAKING CHANGE` a major; `ci`, `docs`, `test`, `bu
 and each of its commits.
 
 **Merging that pull request is the release.** The push it makes to `main` runs the workflow again,
-which tags `vX.Y.Z` on the merge commit, creates the GitHub release with the changelog section as
-its notes, and — in the same run — calls `release.yml` with that tag. It has to call it: a tag
-created with `GITHUB_TOKEN` starts no workflow of its own. The called jobs check out the tag, not
-`main`, so a commit landing in the meantime is not built into the release.
+which tags `vX.Y.Z` on the merge commit, creates the GitHub release as a **draft** with the changelog
+section as its notes, and — in the same run — calls `release.yml` with that tag. The call is needed
+because a tag created with `GITHUB_TOKEN` starts no workflow of its own. The called jobs check out
+the tag, not `main`, so a commit landing in the meantime is not built into the release.
+
+The draft is published by `release.yml`'s publish job once the app and the worker are attached to
+it, never before. GitHub's "latest release" — the link the docs send people to — therefore cannot
+land on a release with nothing to download while the build runs, or for good when it fails, as
+v1.1.0's did (BP-772). The publish job fails if the release is still a draft afterwards or does not
+carry every asset.
 
 | Where it is set | What |
 | --- | --- |
-| `release-please-config.json` | `release-type: node`, tags without the package name (`v1.2.3`), and `bootstrap-sha` at `v1.0.1`'s commit |
+| `release-please-config.json` | `release-type: node`; tags without the package name (`v1.2.3`); `bootstrap-sha` at `v1.0.1`'s commit; `draft` with `force-tag-creation`, because GitHub tags a draft only when it is published and release-please needs the tag to find the previous release; and `worker/package.json` and `worker/package-lock.json` as extra files whose versions it bumps |
 | `.release-please-manifest.json` | The last released version. It started at `1.0.1`, so the first release PR holds only what came after `v1.0.1` |
 
 The `release-please` job holds `contents`, `issues` and `pull-requests: write`; the job that calls
@@ -47,13 +53,17 @@ calling job grants.
 
 A tag pushed by hand still releases (below), but release-please does not know about it: bump
 `.release-please-manifest.json` and `package.json` to that version in a commit, or the next release
-PR proposes a version that already exists. To force a version, put `Release-As: 2.0.0` in a commit
-body.
+PR proposes a version that already exists. Bump `worker/package.json` and `worker/package-lock.json`
+with them, which the release PR otherwise does for you. To force a version, put
+`Release-As: 2.0.0` in a commit body.
 
 A called run that fails — say notarisation times out — is re-run from its Release Please run with
-**Re-run failed jobs**. The tag and the release already exist, the build checks the tag out again,
-and publish uploads over the assets. **Re-run all jobs** builds nothing: release-please finds the
-release already made and reports `release_created=false`.
+**Re-run failed jobs**. The tag and the draft release already exist, the build checks the tag out
+again, and publish uploads over the assets and publishes it. Until then the draft is visible only to
+people with write access, and `latest` stays where it was. A release that is abandoned instead is a
+draft to delete by hand (**Releases → the draft → Delete**); its tag stays unless you delete it too.
+**Re-run all jobs** builds nothing: release-please finds the release already made and leaves
+`release_created` empty, so the `release` job is skipped.
 
 `fix`, `perf`, `revert` and `deps` commits bump the patch, `feat` the minor, and `!` or a
 `BREAKING CHANGE` footer the major.
@@ -81,9 +91,13 @@ jobs:
   requires `spctl` to report `source=Notarized Developer ID`. The keychain and key files are
   deleted in an `always()` step. The assets go up as a workflow artifact kept for 3 days.
 - **publish** (`ubuntu-latest`, `contents: write`, releases only). Downloads that artifact and
-  attaches it to the release. A release from release-please exists already, with its changelog as
-  the notes, and only gets the assets (replacing any from an earlier attempt); a tag pushed by hand
-  has no release yet and gets one with generated notes.
+  attaches it to the release. A release from release-please exists already as a draft, with its
+  changelog as the notes: it gets the assets (replacing any from an earlier attempt) and is then
+  published. A tag pushed by hand has no release yet and gets one with generated notes, created with
+  its assets in the one call. Either way the release is marked GitHub's **latest** only here, after
+  the upload, and only when `vX.Y.Z` is the highest `vX.Y.Z` tag — the same rule, and the same
+  step, as the image's `:latest` below — so a backport published after a newer release leaves
+  `latest` where it is.
 - **image** (`ubuntu-latest`, `contents: read` + `packages: write`, releases only). Builds the
   repository's `Dockerfile` for `linux/amd64` and `linux/arm64` (QEMU + Buildx) and pushes
   `ghcr.io/rafalpodles/board-planner:X.Y.Z` — and `:latest` only when `vX.Y.Z` is the highest
@@ -105,7 +119,10 @@ jobs:
 The app's `CFBundleShortVersionString` and the worker tarball's `package.json` both carry the tag's
 version. The build number, `CFBundleVersion`, is `github.run_number` of whichever workflow started the
 run — Release Please's or Release's — so it is not comparable between the two paths; the app reads
-neither. The running worker still reports a hard-coded `1.0.0` to the server (BP-768).
+neither. The running worker reports the version stamped into the `package.json` it ships with — the
+tarball's, and the one `bundle.sh` writes beside the worker inside the app — to the server on every
+heartbeat (BP-768). A hand-pushed tag is stamped the same way, since the stamp comes from the tag;
+only a clone's `worker/package.json` depends on release-please, which bumps it in the release PR.
 
 By hand, bypassing the release PR:
 

@@ -11,6 +11,7 @@ export type ReadinessGap =
   | "missing-columns"
   | "no-machine"
   | "machine-stale"
+  | "machine-unbound"
   | "machine-paused"
   | "machine-stopped"
   | "machine-failing";
@@ -45,6 +46,7 @@ export function missingRolesText(columns: RoleBearing[]): string {
 const MACHINE_GAPS: Partial<Record<MachineState, ReadinessGap>> = {
   none: "no-machine",
   stale: "machine-stale",
+  unbound: "machine-unbound",
   paused: "machine-paused",
   stopped: "machine-stopped",
   failing: "machine-failing",

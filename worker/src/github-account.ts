@@ -1,4 +1,5 @@
 import { join } from "path";
+import type { CommitIdentity } from "./commit.js";
 import { Runner } from "./exec.js";
 
 // Which GitHub identity this machine pushes as. `gh auth switch` writes global machine state that
@@ -79,6 +80,63 @@ export function pinnedAccount(
   } catch {
     return "";
   }
+}
+
+// github.json may also carry the name and address to commit as, for an operator who wants neither
+// the machine's git config nor the account's noreply address. Both or neither.
+export function configuredCommitIdentity(
+  read: (path: string) => string | null,
+  stateDir: string
+): CommitIdentity | null {
+  let raw: string | null;
+  try {
+    raw = read(ghAccountPath(stateDir));
+  } catch {
+    return null;
+  }
+  if (raw === null) return null;
+  try {
+    const parsed = JSON.parse(raw) as { name?: unknown; email?: unknown } | null;
+    const name = typeof parsed?.name === "string" ? parsed.name.trim() : "";
+    const email = typeof parsed?.email === "string" ? parsed.email.trim() : "";
+    return name && email && !/[<>\r\n\0]/.test(name + email) ? { name, email } : null;
+  } catch {
+    return null;
+  }
+}
+
+export function noreplyAddress(id: number, login: string): string {
+  return `${id}+${login}@users.noreply.github.com`;
+}
+
+// The pinned account as GitHub knows it, asked with that account's own token so gh's active
+// account cannot answer instead. Its noreply address, never its private one.
+export async function accountCommitIdentity(
+  runner: Runner,
+  ghPath: string,
+  token: string,
+  env: NodeJS.ProcessEnv,
+  cwd = "/"
+): Promise<CommitIdentity | null> {
+  if (!ghPath || !token) return null;
+  const result = await runner.run(ghPath, ["api", "user"], {
+    cwd,
+    timeoutMs: TIMEOUT_MS,
+    env: { ...env, GH_TOKEN: token, GITHUB_TOKEN: token },
+  });
+  if (result.code !== 0) return null;
+  try {
+    const user = JSON.parse(result.stdout) as { login?: unknown; id?: unknown; name?: unknown };
+    if (typeof user.login !== "string" || !user.login || typeof user.id !== "number") return null;
+    const name = typeof user.name === "string" && user.name.trim() ? user.name.trim() : user.login;
+    return { name, email: noreplyAddress(user.id, user.login) };
+  } catch {
+    return null;
+  }
+}
+
+export function describeIdentity(identity: CommitIdentity): string {
+  return `${identity.name} <${identity.email}>`;
 }
 
 export function serialisePinnedAccount(account: string): string {

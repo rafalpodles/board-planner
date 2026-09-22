@@ -36,9 +36,25 @@ export function trustedProxyHops(): number {
 // whichever request happens to reach a throttle first
 trustedProxyHops();
 
+let warnedHeaderIgnored = false;
+
+// Once per process. A caller can send the header too, so this cannot conclude a proxy is there —
+// but on a deployment behind one (Railway, BP-774) it is the only sign that the throttle has no
+// per-address key.
+function warnHeaderIgnored(): void {
+  if (warnedHeaderIgnored) return;
+  warnedHeaderIgnored = true;
+  console.warn(
+    `A request arrived with X-Forwarded-For while ${TRUSTED_PROXY_HOPS_VAR}=0, so the header is ignored and the login throttle has no per-address key. If a proxy sits in front of this app, set ${TRUSTED_PROXY_HOPS_VAR} to the number of proxies that append to that header.`
+  );
+}
+
 export function getClientIp(request: Request): string | null {
   const hops = trustedProxyHops();
-  if (hops === 0) return null;
+  if (hops === 0) {
+    if (request.headers.has("x-forwarded-for")) warnHeaderIgnored();
+    return null;
+  }
 
   const entries = (request.headers.get("x-forwarded-for") ?? "")
     .split(",")

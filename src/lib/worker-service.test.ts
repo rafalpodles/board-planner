@@ -25,6 +25,7 @@ vi.mock("@/models/grant", () => ({ Grant: { find: grantFind } }));
 const {
   assignmentsFor,
   machineStateFor,
+  machineReadinessFor,
   catalogueFor,
   offersFor,
   lostCheckouts,
@@ -912,6 +913,39 @@ describe("machineStateFor", () => {
 
   it("is none on a board that names no repository", () => {
     expect(machineStateFor([machine({})], { _id: "p1", repositoryUrl: "" }, NOW)).toBe("none");
+  });
+
+  // BP-777. A worker that refuses its checkout of this board still reports in every minute, and
+  // counting it live told its owner their task was simply waiting.
+  describe("a machine whose checkout of this board the worker refuses", () => {
+    const refusal = "/private/tmp/orbit is under the sensitive directory /private/tmp";
+
+    it("is unbound, and carries the reason for this board only", () => {
+      const worker = machine({ bindingError: `p9: no checkout of x on this machine; p1: ${refusal}` });
+
+      expect(machineReadinessFor([worker], board, NOW)).toEqual({
+        state: "unbound",
+        bindingError: refusal,
+      });
+    });
+
+    it("is live when the refusal names another board", () => {
+      expect(state([machine({ bindingError: `p9: ${refusal}` })])).toBe("live");
+      expect(machineReadinessFor([machine({ bindingError: "" })], board, NOW)).toEqual({
+        state: "live",
+        bindingError: "",
+      });
+    });
+
+    it("gives way to another machine that is live for this board", () => {
+      expect(state([machine({ bindingError: `p1: ${refusal}` }), machine({})])).toBe("live");
+    });
+
+    it("says what is actionable over a machine that is only stale", () => {
+      expect(state([machine({ lastSeenAt: old }), machine({ bindingError: `p1: ${refusal}` })])).toBe(
+        "unbound"
+      );
+    });
   });
 
   it("is paused when a pause was issued and the machine acknowledged it", () => {

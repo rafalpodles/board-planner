@@ -102,7 +102,11 @@ public struct WorkerState: Equatable, Sendable {
         health = status.paused ? .paused : (status.current == nil ? .idle : .working)
     }
 
-    public mutating func markDisconnected() {
+    // Why the app will not talk to the socket at all, when that is the reason it is disconnected
+    public private(set) var disconnectReason: String?
+
+    public mutating func markDisconnected(reason: String? = nil) {
+        disconnectReason = reason
         health = .disconnected
         currentPhase = nil
         phaseSince = nil

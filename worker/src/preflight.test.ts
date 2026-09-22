@@ -25,6 +25,10 @@ interface Machine {
   // `gh auth token --user <login>` — the authoritative answer to "does gh hold this account", and
   // a different call from `gh auth status`
   ghToken?: CommandResult;
+  // `gh api user`, asked with the pinned account's token
+  ghUser?: CommandResult;
+  // `git var GIT_AUTHOR_IDENT` in the home directory
+  gitIdent?: CommandResult;
   versions?: Record<string, CommandResult>;
   shellNoise?: string;
   // Present on disk but not on the login shell's PATH — ~/.local/bin, which .zshrc adds and a
@@ -73,6 +77,15 @@ function machine(spec: Machine = {}): {
       if (command.endsWith("/gh") && args[0] === "auth" && args[1] === "token") {
         return spec.ghToken ?? ok("gho_a_token\n");
       }
+      if (command.endsWith("/gh") && args[0] === "api" && args[1] === "user") {
+        return spec.ghUser ?? ok(JSON.stringify({ login: "someone", id: 42, name: "Some One" }));
+      }
+      if (command.endsWith("/git") && args.includes("var")) {
+        return spec.gitIdent ?? ok("Machine Person <machine@example.com> 1700000000 +0000\n");
+      }
+      if (command.endsWith("/git") && args.includes("--get") && args.includes("user.email")) {
+        return ok("machine@example.com\n");
+      }
       if (command.endsWith("/gh") && args[0] === "auth") {
         return spec.ghAuth ?? ok("Logged in to github.com account someone");
       }
@@ -93,7 +106,11 @@ const env = { SHELL: "/bin/zsh", HOME: "/Users/someone", PATH: "/usr/bin:/bin" }
 
 function depsFor(
   m: ReturnType<typeof machine>,
-  override: Partial<{ env: Record<string, string | undefined>; pinnedGithubAccount: string }> = {}
+  override: Partial<{
+    env: Record<string, string | undefined>;
+    pinnedGithubAccount: string;
+    configuredCommitIdentity: { name: string; email: string };
+  }> = {}
 ) {
   return {
     runner: m.runner,
@@ -101,6 +118,7 @@ function depsFor(
     execPath: NODE,
     isExecutable: m.isExecutable,
     pinnedGithubAccount: override.pinnedGithubAccount,
+    configuredCommitIdentity: override.configuredCommitIdentity,
   };
 }
 
@@ -615,5 +633,73 @@ describe("the sandbox check", () => {
 
     expect(probed).toHaveLength(1);
     expect(existsSync(probed[0])).toBe(false);
+  });
+});
+
+// BP-779. A run on a pinned machine used to commit as whatever the global git config named — a
+// work identity in a personal repository — and nothing said so before the pull request did.
+describe("the identity commits are authored as", () => {
+  it("names the pinned account and its noreply address", async () => {
+    const m = machine({ ghAuth: ok(TWO_GH_ACCOUNTS) });
+    const report = await runPreflight(depsFor(m, { pinnedGithubAccount: "owner" }));
+
+    const row = check(report, "commit identity");
+    expect(row.ok).toBe(true);
+    expect(row.warn).toBeFalsy();
+    expect(row.detail).toBe(
+      "commits are authored as Some One <42+someone@users.noreply.github.com>, the pinned account owner"
+    );
+    const asked = m.envs.gh;
+    expect(asked?.GH_TOKEN).toBe("gho_a_token");
+  });
+
+  it("prefers a name and address set in github.json", async () => {
+    const m = machine({ ghAuth: ok(TWO_GH_ACCOUNTS) });
+    const report = await runPreflight(
+      depsFor(m, {
+        pinnedGithubAccount: "owner",
+        configuredCommitIdentity: { name: "Owner", email: "owner@example.org" },
+      })
+    );
+
+    expect(check(report, "commit identity").detail).toBe(
+      "commits are authored as Owner <owner@example.org>, set in github.json"
+    );
+  });
+
+  it("says a machine with no pin commits as its own git config", async () => {
+    const report = await runPreflight(depsFor(machine()));
+
+    const row = check(report, "commit identity");
+    expect(row.ok).toBe(true);
+    expect(row.detail).toMatch(/^commits are authored as Machine Person <machine@example\.com>, from this machine's git config unless a checkout's own sets another/);
+  });
+
+  it("warns when GitHub will not say who the pinned account is", async () => {
+    const m = machine({ ghAuth: ok(TWO_GH_ACCOUNTS), ghUser: fail("HTTP 401") });
+    const report = await runPreflight(depsFor(m, { pinnedGithubAccount: "owner" }));
+
+    const row = check(report, "commit identity");
+    expect(row.ok).toBe(true);
+    expect(row.warn).toBe(true);
+    expect(row.detail).toMatch(/Machine Person <machine@example\.com>, .* GitHub would not say who owner is$/);
+  });
+
+  it("says a pinned account gh holds no token for, rather than blaming GitHub", async () => {
+    const m = machine({ ghAuth: ok(TWO_GH_ACCOUNTS), ghToken: fail("no token") });
+    const report = await runPreflight(depsFor(m, { pinnedGithubAccount: "owner" }));
+
+    expect(check(report, "commit identity").detail).toMatch(/gh has no token for owner$/);
+  });
+
+  // Review of BP-779: a failure here held Connect back in the app for a machine whose checkouts
+  // name their own identity, which is exactly what a run commits as
+  it("warns, and does not fail, a machine whose own git config names nobody", async () => {
+    const m = machine({ gitIdent: fail("Author identity unknown") });
+    const report = await runPreflight(depsFor(m));
+
+    expect(check(report, "commit identity")).toMatchObject({ ok: true, warn: true });
+    expect(check(report, "commit identity").detail).toContain("names nobody to commit as (Author identity unknown)");
+    expect(report.ok).toBe(true);
   });
 });

@@ -1,7 +1,7 @@
 import { defaultWorkerDeps, createWorker } from "./wiring.js";
 import { pathWithTools } from "./preflight.js";
 import { stateDirFrom } from "./config.js";
-import { pinnedAccount } from "./github-account.js";
+import { configuredCommitIdentity, pinnedAccount } from "./github-account.js";
 
 // `node dist/main.js --preflight` answers "can this machine do the work" as JSON and exits, without
 // registering anything or claiming anything. The menubar app runs this before it will enrol a
@@ -18,6 +18,7 @@ async function preflight(): Promise<void> {
     // The same pin the running worker reads, so the app's checklist answers for the identity that
     // will actually push rather than for whichever account gh has active while it is on screen
     pinnedGithubAccount: pinnedAccount(deps.readFile, stateDirFrom(deps.env)),
+    configuredCommitIdentity: configuredCommitIdentity(deps.readFile, stateDirFrom(deps.env)),
   });
 
   process.stdout.write(

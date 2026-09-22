@@ -130,12 +130,20 @@ export interface GateContext {
 export interface GateResult {
   ok: boolean;
   reason: string;
+  /** What the gate ran, for the pull request to name when it passed (BP-780). */
+  commands?: string[];
   /**
    * The gate did not judge the change — it could not run on this machine, and will not run for the
    * next task either. A refusal, reported as one, would blame the change for the machine and push
    * its branch; this routes it to the released path instead, with the attempt refunded.
    */
   machineFault?: boolean;
+}
+
+export interface PassedCheck {
+  name: string;
+  commands: string[];
+  durationMs: number;
 }
 
 export interface Gate {

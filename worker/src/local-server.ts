@@ -65,6 +65,9 @@ export interface LocalConfigView {
 
 export interface LocalServerDeps {
   socketPath: string;
+  // Set when the socket lives in a shared directory such as /tmp rather than in the state directory:
+  // its parent must then be this user's own, mode 0700, and not a link somebody else left there.
+  privateDirectory?: boolean;
   // The same dispatcher the server channels use, so pause/resume/stop get the same effects and the
   // same acknowledgement — but by its local entry point, which does not touch the recency guard.
   // That guard orders instants from the server's clock; feeding it this laptop's would let one
@@ -94,6 +97,19 @@ function removeStale(socketPath: string): void {
     throw new Error(`${socketPath} exists and is not a socket; refusing to remove it`);
   }
   unlinkSync(socketPath);
+}
+
+function refuseSharedDirectory(directory: string): void {
+  const info = lstatSync(directory);
+  const uid = process.getuid ? process.getuid() : info.uid;
+  if (!info.isDirectory() || info.isSymbolicLink()) {
+    throw new Error(`${directory} is not a directory; refusing to put the control socket there`);
+  }
+  if (info.uid !== uid || (info.mode & 0o077) !== 0) {
+    throw new Error(
+      `${directory} is not private to this user (owner ${info.uid}, mode ${(info.mode & 0o777).toString(8)}); remove it and restart the worker`
+    );
+  }
 }
 
 export function startLocalServer(deps: LocalServerDeps): LocalServer {
@@ -170,6 +186,7 @@ export function startLocalServer(deps: LocalServerDeps): LocalServer {
   const ready = new Promise<void>((resolve, reject) => {
     try {
       mkdirSync(dirname(deps.socketPath), { recursive: true, mode: 0o700 });
+      if (deps.privateDirectory) refuseSharedDirectory(dirname(deps.socketPath));
       removeStale(deps.socketPath);
     } catch (error) {
       reject(error instanceof Error ? error : new Error(String(error)));
