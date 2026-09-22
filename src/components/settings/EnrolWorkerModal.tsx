@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
 import { enrolmentExpiry, enrolmentMintBody, ENROLMENT_LABEL_MAX } from "@/lib/enrolment-view";
+import { GETTING_THE_SOFTWARE_URL } from "@/lib/docs-urls";
 
 interface MintedEnrolment {
   token: string;
@@ -16,6 +17,14 @@ interface MintedEnrolment {
 interface EnrolWorkerModalProps {
   open: boolean;
   onClose: () => void;
+}
+
+function GettingTheSoftware() {
+  return (
+    <a href={GETTING_THE_SOFTWARE_URL} target="_blank" rel="noreferrer" className="text-primary underline">
+      Getting the software
+    </a>
+  );
 }
 
 export function EnrolWorkerModal({ open, onClose }: EnrolWorkerModalProps) {
@@ -70,6 +79,9 @@ export function EnrolWorkerModal({ open, onClose }: EnrolWorkerModalProps) {
             A worker registers itself with a single-use enrolment token instead of an admin
             credential. The token is good for one hour and for one registration.
           </p>
+          <p className="text-sm text-text-muted">
+            Nothing installed on that machine yet? Download it: <GettingTheSoftware />.
+          </p>
           <Input
             label="Label (optional)"
             value={label}
@@ -116,6 +128,9 @@ export function EnrolWorkerModal({ open, onClose }: EnrolWorkerModalProps) {
           <div className="border border-border rounded-lg p-4 space-y-3 text-sm">
             <p className="font-medium">On the worker machine</p>
             <ol className="list-decimal pl-5 space-y-2 text-text-muted">
+              <li>
+                Install the worker from the latest release — see <GettingTheSoftware />.
+              </li>
               <li>
                 Write the token to a file the worker can read and point{" "}
                 <code className="text-text">CP_ENROLMENT_TOKEN_FILE</code> at it. The worker deletes
