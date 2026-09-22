@@ -277,6 +277,9 @@ jobs:
     needs: resolve
     if: needs.resolve.outputs.release == 'true'
     runs-on: ubuntu-latest
+    concurrency:
+      group: publish-docker-image
+      cancel-in-progress: false
     timeout-minutes: 90
     permissions:
       contents: read

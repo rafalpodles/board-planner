@@ -52,7 +52,14 @@ body.
 
 A called run that fails — say notarisation times out — is re-run from its Release Please run with
 **Re-run failed jobs**. The tag and the release already exist, the build checks the tag out again,
-and publish uploads over the assets.
+and publish uploads over the assets. **Re-run all jobs** builds nothing: release-please finds the
+release already made and reports `release_created=false`.
+
+`fix`, `perf`, `revert` and `deps` commits bump the patch, `feat` the minor, and `!` or a
+`BREAKING CHANGE` footer the major.
+
+The action is pinned to the commit of its v5.0.0 release, because its outputs start the signing
+build. Bump the SHA deliberately, from the action's release page.
 
 ## From CI — what the release runs
 
