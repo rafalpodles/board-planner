@@ -357,10 +357,13 @@ failure above. Make each proxy append first, then measure.
 
 Read the count off a request **you** made through the whole chain. A caller can send the header too,
 and a health check or uptime probe that reaches the app by a shorter path carries fewer entries than
-a browser does. That is why the app reports each *new* count rather than only the first: after four
-distinct counts it reports a further new one at most once every ten minutes, so forged headers can
-delay your line but not suppress it, and a restart clears what it has reported. A header carrying no
-address at all is not reported and costs none of the four.
+a browser does. That is why the app reports each *new* count rather than only the first: the first four distinct
+counts go out at once, and past that a further new one waits out ten minutes. **That bound can be
+held open against you.** The app cannot tell your sign-in from a forged header, so a caller sending a
+fresh header length every few minutes keeps the slot taken and your own line may never appear. The
+way out is a **restart**: it empties what the app has reported and frees the first four, so restart
+and attempt the sign-in straight afterwards. A header carrying no address at all is never reported
+and costs none of the four.
 
 </details>
 
