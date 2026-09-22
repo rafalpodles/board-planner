@@ -218,6 +218,8 @@ does — `next start` refuses standalone output, and Railway deploys with `next 
 Every `vX.Y.Z` tag also publishes `ghcr.io/rafalpodles/board-planner:<x.y.z>` and `:latest`
 (amd64 + arm64, `.github/workflows/release.yml`), which `docker-compose.yml` runs by default; `--build`
 builds the checkout instead. The image bakes in no address — see [README.md](README.md).
+Releases are cut by merging release-please's PR, which tags `vX.Y.Z` and runs `release.yml` in the
+same run; a tag pushed by hand still releases too — see [menubar/RELEASING.md](menubar/RELEASING.md).
 
 ## Deploy
 Railway auto-deploys from `main` branch.
