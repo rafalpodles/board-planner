@@ -182,6 +182,9 @@ describe("the identity a pinned machine commits as (BP-779)", () => {
     expect(
       configuredCommitIdentity(read(JSON.stringify({ name: "a <b>", email: "c@d" })), "/state")
     ).toBeNull();
+    for (const name of ["a\rb", "a\u0000b", "a\nb"]) {
+      expect(configuredCommitIdentity(read(JSON.stringify({ name, email: "c@d" })), "/state")).toBeNull();
+    }
     expect(configuredCommitIdentity(read("not json"), "/state")).toBeNull();
     expect(configuredCommitIdentity(() => null, "/state")).toBeNull();
   });

@@ -99,7 +99,7 @@ export function configuredCommitIdentity(
     const parsed = JSON.parse(raw) as { name?: unknown; email?: unknown } | null;
     const name = typeof parsed?.name === "string" ? parsed.name.trim() : "";
     const email = typeof parsed?.email === "string" ? parsed.email.trim() : "";
-    return name && email && !/[<>\n]/.test(name + email) ? { name, email } : null;
+    return name && email && !/[<>\r\n\0]/.test(name + email) ? { name, email } : null;
   } catch {
     return null;
   }

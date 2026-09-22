@@ -330,20 +330,30 @@ async function commitIdentityCheck(
     };
   }
 
+  // Asked in the home directory, because preflight has no checkout: a checkout's own user.* is what
+  // a run in it actually commits as, so this names the machine's answer and says it can be
+  // overridden. A machine that names nobody is a warning, not a failure — a checkout may still.
   const fromGit = paths.git
     ? await resolveCommitIdentity(deps.runner, paths.git, home)
     : { ok: false as const, reason: "git could not be found" };
+  const why = !gh.pinned
+    ? "pin a GitHub account in the app to commit as that account"
+    : gh.token
+      ? `GitHub would not say who ${gh.login} is`
+      : `gh has no token for ${gh.login}`;
   if (!fromGit.ok) {
-    return { name, ok: false, detail: `no identity to commit as: ${fromGit.reason}` };
+    return {
+      name,
+      ok: true,
+      warn: true,
+      detail: `this machine's git config names nobody to commit as (${fromGit.reason}); a checkout whose own config sets user.name and user.email is used, any other is handed back — ${why}`,
+    };
   }
-  const why = gh.pinned
-    ? `GitHub did not say who ${gh.login} is, so this machine's git config is used instead`
-    : "from this machine's git config — pin a GitHub account in the app to commit as that account";
   return {
     name,
     ok: true,
     warn: gh.pinned,
-    detail: `commits are authored as ${describeIdentity(fromGit.identity)}, ${why}`,
+    detail: `commits are authored as ${describeIdentity(fromGit.identity)}, from this machine's git config unless a checkout's own sets another — ${why}`,
   };
 }
 

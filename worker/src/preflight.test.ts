@@ -672,7 +672,7 @@ describe("the identity commits are authored as", () => {
 
     const row = check(report, "commit identity");
     expect(row.ok).toBe(true);
-    expect(row.detail).toMatch(/^commits are authored as Machine Person <machine@example\.com>, from this machine's git config/);
+    expect(row.detail).toMatch(/^commits are authored as Machine Person <machine@example\.com>, from this machine's git config unless a checkout's own sets another/);
   });
 
   it("warns when GitHub will not say who the pinned account is", async () => {
@@ -682,16 +682,24 @@ describe("the identity commits are authored as", () => {
     const row = check(report, "commit identity");
     expect(row.ok).toBe(true);
     expect(row.warn).toBe(true);
-    expect(row.detail).toMatch(/Machine Person <machine@example\.com>, GitHub did not say who owner is/);
+    expect(row.detail).toMatch(/Machine Person <machine@example\.com>, .* GitHub would not say who owner is$/);
   });
 
-  it("fails a machine git will not name anybody on", async () => {
+  it("says a pinned account gh holds no token for, rather than blaming GitHub", async () => {
+    const m = machine({ ghAuth: ok(TWO_GH_ACCOUNTS), ghToken: fail("no token") });
+    const report = await runPreflight(depsFor(m, { pinnedGithubAccount: "owner" }));
+
+    expect(check(report, "commit identity").detail).toMatch(/gh has no token for owner$/);
+  });
+
+  // Review of BP-779: a failure here held Connect back in the app for a machine whose checkouts
+  // name their own identity, which is exactly what a run commits as
+  it("warns, and does not fail, a machine whose own git config names nobody", async () => {
     const m = machine({ gitIdent: fail("Author identity unknown") });
     const report = await runPreflight(depsFor(m));
 
-    expect(check(report, "commit identity")).toMatchObject({
-      ok: false,
-      detail: "no identity to commit as: Author identity unknown",
-    });
+    expect(check(report, "commit identity")).toMatchObject({ ok: true, warn: true });
+    expect(check(report, "commit identity").detail).toContain("names nobody to commit as (Author identity unknown)");
+    expect(report.ok).toBe(true);
   });
 });
