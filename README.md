@@ -182,6 +182,10 @@ That runs the published image, `ghcr.io/rafalpodles/board-planner`, built for `l
 newest release; pin one with `BOARD_PLANNER_VERSION=1.2.3` in a `.env` next to the compose file. To upgrade,
 `docker compose pull && docker compose up -d`.
 
+The compose file on `main` needs an image of **1.2.0 or later**: it passes `COOKIE_ALLOW_INSECURE=auto`,
+which 1.1.1 does not know, so a 1.1.1 image served over plain HTTP anywhere but localhost cannot
+sign in. To run 1.1.1 with it, put `COOKIE_ALLOW_INSECURE=1` in `.env`.
+
 **From a clone, run `docker compose up -d --build`.** Plain `docker compose up -d` pulls and runs
 the last *release*, not the code you have checked out; `--build` builds the checkout and runs that.
 
@@ -215,8 +219,9 @@ MONGODB_URI=mongodb://localhost:27017/boardplanner npm start
 ```
 
 `npm run dev` for the development server. Copy `.env.example` to `.env.local` for a place to keep
-the variables below. `npm start` listens on `PORT` — from the environment first, then from `.env`,
-`.env.local` and the other files Next reads — and on `3000` when neither names one.
+the variables below. `npm start` listens on `PORT` — from the environment first, then from
+`.env.production.local`, `.env.local`, `.env.production` and `.env`, in that order, as Next reads
+them — and on `3000` when none names one.
 
 ## Connect an agent
 
@@ -287,12 +292,14 @@ issues the plain cookie only while `PUBLIC_ORIGIN` and every entry in `APP_ORIGI
 the compose defaults, `http://localhost` — because a browser silently discards a `Secure` cookie
 over plain HTTP anywhere but localhost, and every request after login then fails with a 401. **Once
 the instance is behind TLS, set `PUBLIC_ORIGIN` (and `APP_ORIGIN`) to its `https://` address** and
-the cookie is `Secure` and `__Host-`-prefixed with nothing else to change. `COOKIE_ALLOW_INSECURE=0`
-forces the secure cookie whatever the origins say; `1` forces the plain one. Outside compose the
-app's own default is the secure cookie, and only `1` or `auto` turns it off.
+the cookie is `Secure` and `__Host-`-prefixed with nothing else to change. Until you do, `auto`
+still issues the secure cookie to a sign-in whose `Origin` is `https://`, so an instance reached over
+TLS with its origins left at the defaults is not downgraded. `COOKIE_ALLOW_INSECURE=0` forces the
+secure cookie whatever the origins say; `1` forces the plain one. Outside compose the app's own
+default is the secure cookie, and only `1` or `auto` turns it off.
 
 `APP_ORIGIN` is **required whenever `COOKIE_ALLOW_INSECURE=1`**, and the app refuses to start
-otherwise — as it does when `1` meets an `https://` `APP_ORIGIN`. Writes are rejected unless the browser proves the request came from the app's own origin,
+otherwise — as it does when `1` meets an `https://` `APP_ORIGIN` or `PUBLIC_ORIGIN`. Writes are rejected unless the browser proves the request came from the app's own origin,
 and over plain HTTP at anything other than `localhost` the browser sends no `Sec-Fetch-Site` header,
 so the only remaining proof is `Origin` matching this list or `PUBLIC_ORIGIN`. Set it to the URL
 users actually open — `https://board.example.com`, or `http://192.168.1.10:3000` for a LAN
@@ -322,8 +329,9 @@ than the client's, so every request on earth may land in the same bucket — and
 looks to the app like a genuine address, it is metered at the *tight* per-address ceilings rather
 than the raised anonymous ones. Too low throttles the whole world as though it were one caller.
 
-At `0`, the first request that arrives carrying `X-Forwarded-For` makes the app log one warning that
-the header is being ignored. A caller can send that header too, so the warning cannot prove a proxy
+At `0`, the first request carrying `X-Forwarded-For` to a route that throttles by address — sign-in,
+password reset, the OAuth endpoints, machine enrolment, account changes — makes the app log one
+warning that the header is being ignored. A caller can send that header too, so the warning cannot prove a proxy
 is there — but behind one, it is the sign this is still unset.
 
 </details>

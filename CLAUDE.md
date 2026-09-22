@@ -200,13 +200,15 @@ APP_ORIGIN=               # Comma-separated origins allowed to write — the CSR
 TRUSTED_PROXY_HOPS=       # Proxies appending to X-Forwarded-For in front of the app; default 0,
                           # which ignores the header. The login throttle keys on it, so on a
                           # proxy-less deployment a forged header used to reset every counter (BP-318).
-                          # At 0 the first request carrying the header logs one warning (BP-774)
+                          # At 0 the first throttled request carrying the header logs one warning
+                          # (BP-774)
 COOKIE_ALLOW_INSECURE=    # 1: plain session cookie (no Secure, no __Host-) for plain HTTP. auto:
-                          # the same only while PUBLIC_ORIGIN and every APP_ORIGIN are http:// —
-                          # what docker-compose.yml passes, so an https PUBLIC_ORIGIN is secure with
-                          # nothing else set. Empty or unset: secure (BP-773)
+                          # the same only while PUBLIC_ORIGIN and every APP_ORIGIN are http:// and
+                          # the sign-in's Origin is not https — what docker-compose.yml passes.
+                          # Empty or unset: secure (BP-773)
 PORT=                     # `npm start` (scripts/start.mjs) reads it from the environment, then from
-                          # .env and the other files Next reads; default 3000 (BP-775)
+                          # .env.production.local, .env.local, .env.production, .env; default 3000
+                          # (BP-775)
 PUBLIC_ORIGIN=            # This instance's own address, at runtime. Required for /api/mcp, both
                           # /.well-known documents and the PM OAuth redirect_uri, which answer 500
                           # without it rather than falling back to a request header (BP-316).
