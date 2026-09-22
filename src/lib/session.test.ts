@@ -33,6 +33,8 @@ const {
   buildSessionCookie,
   checkProvenance,
   clearSessionCookies,
+  revocableSessionTokens,
+  sessionCookieTokens,
   createSession,
   legacySessionCookies,
   readSessionCookie,
@@ -180,6 +182,36 @@ describe("COOKIE_ALLOW_INSECURE=auto", () => {
       expect(readSessionCookie("bp_session=cps_plain")).toBe("cps_plain");
       expect(readSessionCookie("bp_session=a; bp_session=b")).toBeNull();
       expect(readSessionCookie("__Host-bp_session=a; __Host-bp_session=b; bp_session=c")).toBeNull();
+    });
+
+    // Review of the review: a sibling subdomain can send two plain cookies, and dropping the whole
+    // request on that would log out anybody holding a perfectly good prefixed session — for good,
+    // since a cookie set on the parent domain is not one this app can clear
+    it("judges each name on its own, so a shadowed plain name cannot cancel the prefixed one", () => {
+      expect(sessionCookieTokens("__Host-bp_session=live; bp_session=a; bp_session=b")).toEqual([
+        "live",
+      ]);
+      expect(revocableSessionTokens("__Host-bp_session=live; bp_session=a; bp_session=b")).toEqual([
+        "live",
+      ]);
+    });
+
+    // A prefixed cookie that is present but dead must not fall through to a planted plain one:
+    // only a secure context can set the prefixed name, anyone on a sibling subdomain the other
+    it("reads nothing but the prefixed cookie while there is one", () => {
+      expect(sessionCookieTokens("__Host-bp_session=dead; bp_session=planted")).toEqual(["dead"]);
+      expect(sessionCookieTokens("bp_session=planted")).toEqual(["planted"]);
+    });
+
+    it("gives logout every session the jar holds", () => {
+      expect(revocableSessionTokens("__Host-bp_session=secure; bp_session=plain")).toEqual([
+        "secure",
+        "plain",
+      ]);
+      expect(revocableSessionTokens("__Host-bp_session=same; bp_session=same")).toEqual(["same"]);
+      expect(revocableSessionTokens("__Host-bp_session=a; __Host-bp_session=b; bp_session=c")).toEqual([
+        "c",
+      ]);
     });
 
     it("clears both names on logout", () => {

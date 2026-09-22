@@ -133,13 +133,9 @@ async function verifySessionCookie(request: Request): Promise<IUser | null> {
   const provenance = checkProvenance(request);
   if (!provenance.ok) throw new ProvenanceError(provenance.reason);
 
-  // The second name only matters under auto, where the jar can hold both: a revoked prefixed
-  // session must not log a reader out while their plain one is still live.
-  let session: Awaited<ReturnType<typeof resolveSession>> = null;
-  for (const token of tokens) {
-    session = await resolveSession(token);
-    if (session) break;
-  }
+  // One token: under auto the prefixed cookie wins whenever it is present, dead or alive, and the
+  // plain name is read only when there is no prefixed cookie at all (BP-773 review).
+  const session = await resolveSession(tokens[0]);
   if (!session) return null;
 
   await connectDB();

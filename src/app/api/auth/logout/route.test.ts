@@ -55,6 +55,17 @@ describe("POST /api/auth/logout — both names under auto", () => {
     expect(revokeSession.mock.calls.map(([token]) => token)).toEqual(["cps_secure", "cps_plain"]);
   });
 
+  it("revokes the prefixed session even when the plain name is shadowed", async () => {
+    await POST(
+      request({
+        "sec-fetch-site": "same-origin",
+        cookie: "__Host-bp_session=cps_live; bp_session=a; bp_session=b",
+      })
+    );
+
+    expect(revokeSession.mock.calls.map(([token]) => token)).toEqual(["cps_live"]);
+  });
+
   it("revokes one token once when both names carry it", async () => {
     await POST(
       request({

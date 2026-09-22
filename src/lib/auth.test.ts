@@ -369,13 +369,25 @@ describe("getAuthUser — two cookie names under auto", () => {
   const both = (headers: Record<string, string> = {}) =>
     request({ cookie: `__Host-bp_session=${SESSION_TOKEN}; bp_session=cps_plain`, ...headers });
 
-  it("falls through to the other name when the first names no live session", async () => {
+  // Session fixation: only a secure context can set the prefixed name, so a request that carries
+  // one is judged on it alone — a plain cookie a sibling subdomain planted must not take over once
+  // the real session is revoked or expired (BP-773 review)
+  it("does not read a planted plain cookie once the prefixed session is dead", async () => {
     sessionFindOne.mockImplementation((query: { tokenHash?: unknown }) => ({
       lean: async () => (JSON.stringify(query).includes(sha256("cps_plain")) ? sessionRow() : null),
     }));
     userFindById.mockResolvedValue({ _id: "u1", username: "ada" });
 
-    const result = await getAuthUser(both());
+    expect(await getAuthUser(both())).toBeNull();
+  });
+
+  it("still resolves a plain session when there is no prefixed cookie at all", async () => {
+    sessionFindOne.mockImplementation((query: { tokenHash?: unknown }) => ({
+      lean: async () => (JSON.stringify(query).includes(sha256("cps_plain")) ? sessionRow() : null),
+    }));
+    userFindById.mockResolvedValue({ _id: "u1", username: "ada" });
+
+    const result = await getAuthUser(request({ cookie: "bp_session=cps_plain" }));
 
     expect(result).toMatchObject({ username: "ada" });
   });

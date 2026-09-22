@@ -202,18 +202,46 @@ export function legacySessionCookies(request?: Request): string[] {
  */
 export function sessionCookieTokens(header: string | null): string[] {
   if (!header) return [];
+  if (!autoMode()) return listed(tokenNamed(header, sessionCookieName()));
+
+  const prefixed = cookieValues(header, HOST_COOKIE_NAME);
+  // Two cookies of the prefixed name cannot be told apart and the prefix exists to make that
+  // impossible, so nothing in this request is trusted.
+  if (prefixed.length > 1) return [];
+  // A prefixed cookie that is present but dead does NOT fall through to the plain name: only a
+  // secure context can set the prefixed one, while anyone on a sibling subdomain can set the plain
+  // one, and reading past a revoked session to theirs is session fixation (BP-773 review).
+  const host = soleValue(prefixed);
+  if (host) return [host];
+  return listed(tokenNamed(header, UNPREFIXED_COOKIE_NAME));
+}
+
+/**
+ * Every session this request could be holding, for logout to end.
+ *
+ * Wider than the authenticating read on purpose: under auto a browser can hold a session under
+ * each name, and signing out has to end both — including the plain one, which is the exposed one.
+ * A name carrying two cookies is dropped rather than guessed at, and never drops the other name's.
+ */
+export function revocableSessionTokens(header: string | null): string[] {
+  if (!header) return [];
   const names = autoMode() ? KNOWN_COOKIE_NAMES : [sessionCookieName()];
   const tokens: string[] = [];
   for (const name of names) {
-    const values = cookieValues(header, name);
-    // Two cookies of one name mean one was set for a parent domain — the shadowing the __Host-
-    // prefix exists to prevent. Taking either is a coin flip on whose session wins, and so is
-    // reading past it to the other name, so the request carries nothing.
-    if (values.length > 1) return [];
-    const value = soleValue(values);
-    if (value && !tokens.includes(value)) tokens.push(value);
+    const token = tokenNamed(header, name);
+    if (token && !tokens.includes(token)) tokens.push(token);
   }
   return tokens;
+}
+
+function listed(token: string | null): string[] {
+  return token ? [token] : [];
+}
+
+// Null for a name carrying two cookies: one of them was set for a parent domain — the shadowing
+// the __Host- prefix exists to prevent — and taking either is a coin flip on whose session wins.
+function tokenNamed(header: string, name: string): string | null {
+  return soleValue(cookieValues(header, name));
 }
 
 export function readSessionCookie(header: string | null): string | null {

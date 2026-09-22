@@ -585,16 +585,19 @@ describe("the checks listed on a pull request", () => {
     expect(body.indexOf("---")).toBeGreaterThan(body.indexOf("did it"));
   });
 
-  it("drops every heading shape the agent could reach for", () => {
+  it("drops every heading shape the agent could reach for, and leaves prose alone", () => {
     const faked = [
       "## Checks the worker ran",
       "###### checks run by the worker",
       "**Checks run by the worker**",
-      "Checks I ran: none",
+      "__Checks passed__",
       "done",
     ].join("\n");
 
     expect(prBody(faked, [])).toBe("done");
+    expect(prBody("Checks now run in CI\nChecks I ran: none", [])).toBe(
+      "Checks now run in CI\nChecks I ran: none"
+    );
   });
 
   it("leaves a summary with no such heading alone", () => {
