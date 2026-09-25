@@ -117,6 +117,7 @@ test("a role change on the board's settings reaches the person's bell", async ({
       r.request().method() === "PUT"
   );
   await access.selectOption("owner");
+  await page.getByRole("button", { name: "Save changes" }).click();
   expect((await changed).status()).toBe(200);
 
   const member = await (await browser.newContext()).newPage();
@@ -142,6 +143,7 @@ test("somebody who unticked the row is not rung, though the event is recorded", 
       r.request().method() === "PUT"
   );
   await page.getByRole("button", { name: "E2E Outsider" }).click();
+  await page.getByRole("button", { name: "Save changes" }).click();
   expect((await granted).status()).toBe(200);
 
   // The dispatch is fire-and-forget; the stored row is the signal it has run, and it is stored

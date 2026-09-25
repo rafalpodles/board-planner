@@ -885,3 +885,59 @@ test.describe("Integrations · the save bar", () => {
     await expect(page.getByText(/Last deliver/)).toHaveCount(2);
   });
 });
+
+/**
+ * BP-738. The bar closes on screen after a save or a Discard, but it used to keep its last summary
+ * in the page, clipped to nothing: "1 unsaved change · Integrations · Repository" for anything that
+ * reads the page's text rather than its pixels. That is how an operator's own tools read it, and
+ * they were told a switch was still pending when it had already taken effect.
+ *
+ * `getByText` does not care that the text is clipped — which is the whole defect, and why it is the
+ * right probe here, where the older save-bar tests above deliberately avoid it.
+ */
+test.describe("the save bar once it has closed", () => {
+  const summary = (page: Page) => page.getByText(/unsaved change/);
+  const sidebar = (page: Page) => page.locator('nav[data-settings-nav="sidebar"]');
+
+  test("holds nothing once a save has landed and the section is switched", async ({ page }) => {
+    await signIn(page, "owner");
+    await page.goto(`${SETTINGS}?section=integrations`);
+    const repository = page.getByLabel("Repository URL");
+    await expect(repository).toBeVisible();
+    // The control: a page that never had anything to save holds no summary either
+    await expect(summary(page)).toHaveCount(0);
+
+    await repository.fill("https://github.com/orbit-dev/orbit");
+    await expect(saveButton(page)).toBeEnabled();
+    await expect(summary(page)).toContainText("1 unsaved change");
+
+    const saved = page.waitForResponse(
+      (r) =>
+        r.request().method() === "PUT" &&
+        new URL(r.url()).pathname === `/api/projects/${PROJECT_KEY}`
+    );
+    await saveButton(page).click();
+    expect((await saved).status()).toBe(200);
+
+    await sidebar(page).getByRole("button", { name: "Workers" }).click();
+    await expect(page.getByRole("heading", { name: "Workers", exact: true })).toBeVisible();
+
+    await expect(summary(page)).toHaveCount(0);
+    await expect(page.getByText("Integrations · Repository")).toHaveCount(0);
+    await expect(repository).toHaveValue("https://github.com/orbit-dev/orbit");
+  });
+
+  test("holds nothing once a change is discarded", async ({ page }) => {
+    await signIn(page, "owner");
+    await page.goto(`${SETTINGS}?section=workers`);
+    const baseBranch = page.getByLabel("Base branch");
+    await expect(baseBranch).toHaveValue("main");
+
+    await baseBranch.fill("develop");
+    await expect(saveButton(page)).toBeEnabled();
+    await page.getByRole("button", { name: "Discard" }).click();
+
+    await expect(baseBranch).toHaveValue("main");
+    await expect(summary(page)).toHaveCount(0);
+  });
+});

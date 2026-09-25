@@ -230,9 +230,25 @@ test.describe("Workers · Default agent", () => {
 
     const agentWrite = () =>
       page.waitForResponse((r) => r.request().method() === "PUT" && r.url().endsWith("/agent"));
+    const save = page.getByRole("button", { name: "Save changes" });
+
+    // BP-740: staged like everything else on the page — nothing is written until Save, and
+    // Discard puts it back
+    const sent: string[] = [];
+    page.on("request", (r) => {
+      if (r.method() === "PUT" && r.url().endsWith("/agent")) sent.push(r.url());
+    });
+    await picker.selectOption({ label: "Default" });
+    await expect(save).toBeEnabled();
+    await page.waitForTimeout(1_000);
+    expect(sent, "written before Save").toEqual([]);
+    await page.getByRole("button", { name: "Discard" }).click();
+    await expect(picker).toHaveValue("");
+    expect((await storedProject())?.worker?.agent ?? null).toBeNull();
 
     let written = agentWrite();
     await picker.selectOption({ label: "Default" });
+    await save.click();
     expect((await written).status()).toBe(200);
     expect(String((await storedProject())?.worker?.agent)).toBe(defaultId);
     await page.reload();
@@ -240,10 +256,24 @@ test.describe("Workers · Default agent", () => {
 
     written = agentWrite();
     await page.getByLabel("Default agent").selectOption({ label: "No default — the task picker starts empty" });
+    await save.click();
     expect((await written).status()).toBe(200);
     expect((await storedProject())?.worker?.agent ?? null).toBeNull();
     await page.reload();
     await expect(page.getByLabel("Default agent")).toBeEnabled();
     await expect(page.getByLabel("Default agent")).toHaveValue("");
+
+    // And both are on the project's audit log, by the agent's name. The write is fire-and-forget
+    // and the card reads once per mount, so the read is retried rather than assumed to have caught it
+    const details = page.getByTestId("audit-detail");
+    await expect(async () => {
+      await page.goto(`${SETTINGS}?section=audit`);
+      await expect(details.filter({ hasText: "Default agent: none → Default" })).toHaveCount(1, {
+        timeout: 2_000,
+      });
+      await expect(details.filter({ hasText: "Default agent: Default → none" })).toHaveCount(1, {
+        timeout: 2_000,
+      });
+    }).toPass({ timeout: 20_000 });
   });
 });

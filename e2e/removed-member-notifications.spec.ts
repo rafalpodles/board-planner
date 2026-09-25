@@ -130,6 +130,7 @@ test("a member removed from the board stops hearing about the task they watch", 
   // refresh. That is not the same as proving the optimistic patch was right — the refresh removes
   // the row either way, which is why the property has its own test below
   await admin.getByLabel(`Access for ${MEMBER_USERNAME}`).selectOption("none");
+  await admin.getByRole("button", { name: "Save changes" }).click();
   await expect(admin.getByText("Access updated")).toBeVisible();
   expect(await admin.getByLabel(`Access for ${MEMBER_USERNAME}`).count()).toBe(0);
 
@@ -197,6 +198,7 @@ test("a revoked row goes even when the list cannot be re-read", async ({ page })
   );
 
   await select.selectOption("none");
+  await page.getByRole("button", { name: "Save changes" }).click();
 
   await expect(page.getByText("The list could not be refreshed")).toBeVisible();
   expect(await page.getByLabel(`Access for ${MEMBER_USERNAME}`).count()).toBe(0);
