@@ -234,9 +234,59 @@ describe("the project's default agent", () => {
     expect(select.selectedOptions[0]?.textContent).toContain("No default");
   });
 
+  // BP-740: staged behind the page's Save bar like every other control on it
+  const register = vi.fn();
+  const agentGroup = () =>
+    register.mock.calls.map(([group]) => group).filter((g) => g.id === "workers-agent").at(-1);
+
+  function renderRegistered(over: Partial<ApiProject> = {}) {
+    return render(
+      <SettingsProvider register={register} unregister={vi.fn()}>
+        <WorkersSection
+          projectId="TP"
+          project={project(over)}
+          patchProject={vi.fn()}
+          replaceProject={vi.fn()}
+          isAdmin
+          stats={null}
+        />
+      </SettingsProvider>
+    );
+  }
+
+  beforeEach(() => register.mockReset());
+
+  it("writes nothing when changed, and counts as an unsaved change until saved", async () => {
+    store.allAgents = [OURS, GLOBAL] as never;
+    renderRegistered();
+
+    fireEvent.change(picker(), { target: { value: "a1" } });
+
+    await waitFor(() => expect(agentGroup()?.count).toBe(1));
+    expect(api.put).not.toHaveBeenCalled();
+
+    await agentGroup().save();
+
+    expect(api.put).toHaveBeenCalledWith("/api/projects/TP/agent", { agentId: "a1" });
+    await waitFor(() => expect(agentGroup()?.count).toBe(0));
+  });
+
+  it("goes back to the saved agent on Discard", async () => {
+    store.allAgents = [OURS, GLOBAL] as never;
+    renderRegistered({ worker: { ...project().worker!, agent: "a3" } } as Partial<ApiProject>);
+
+    fireEvent.change(picker(), { target: { value: "a1" } });
+    await waitFor(() => expect(agentGroup()?.count).toBe(1));
+
+    agentGroup().discard();
+
+    await waitFor(() => expect(picker().value).toBe("a3"));
+    expect(agentGroup()?.count).toBe(0);
+  });
+
   it("can be cleared once one is set", async () => {
     store.allAgents = [GLOBAL] as never;
-    renderSection(true, { worker: { ...project().worker!, agent: "a3" } } as Partial<ApiProject>);
+    renderRegistered({ worker: { ...project().worker!, agent: "a3" } } as Partial<ApiProject>);
 
     const select = picker();
     expect(select.value).toBe("a3");
@@ -247,22 +297,24 @@ describe("the project's default agent", () => {
     const clearOption = [...select.querySelectorAll("option")].find((o) => o.value === "");
     expect(clearOption, "there is no option a person could pick to clear it").toBeTruthy();
     fireEvent.change(select, { target: { value: clearOption!.value } });
-    await waitFor(() =>
-      expect(api.put).toHaveBeenCalledWith("/api/projects/TP/agent", { agentId: "" })
-    );
+    await waitFor(() => expect(agentGroup()?.count).toBe(1));
+    await agentGroup().save();
+
+    expect(api.put).toHaveBeenCalledWith("/api/projects/TP/agent", { agentId: "" });
   });
 
-  it("says why a refused choice snapped back, rather than reverting in silence", async () => {
+  it("says why a save was refused, and keeps the choice to try again", async () => {
     store.allAgents = [OURS, GLOBAL] as never;
     api.put.mockRejectedValueOnce(new Error("That agent has nothing in it yet"));
-    renderSection(true);
+    renderRegistered();
 
     fireEvent.change(picker(), { target: { value: "a1" } });
+    await waitFor(() => expect(agentGroup()?.count).toBe(1));
+    await agentGroup().save();
 
-    await waitFor(() => expect(toast).toHaveBeenCalled());
     expect(toast.mock.calls[0][0]).toContain("nothing in it yet");
-    // and the control is back where it was
-    await waitFor(() => expect(picker().value).toBe(""));
+    expect(picker().value).toBe("a1");
+    expect(agentGroup()?.count).toBe(1);
   });
 });
 
