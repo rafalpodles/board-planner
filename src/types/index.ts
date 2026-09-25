@@ -543,6 +543,7 @@ export interface ProjectWorkerPolicy {
   reviewGate: boolean;
   baseBranch: string;
   taskTimeoutMs: number;
+  runCeilingMs: number;
   maxDiffLines: number;
   maxDiffFiles: number;
   model: string;

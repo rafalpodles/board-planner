@@ -153,6 +153,21 @@ describe("PUT /api/projects/:projectId/agent", () => {
       expect(logProjectAudit.mock.calls[0][3]).toBe("Default agent: a deleted agent → Ship it");
     });
 
+    it("still records the change, and answers, when the old agent's name cannot be read", async () => {
+      previously(OLD_ID);
+      agentFindById.mockImplementation((id: string) => ({
+        lean: () =>
+          id === AGENT_ID
+            ? Promise.resolve({ name: "Ship it", scope: "global", project: null, composition: RUNNABLE })
+            : Promise.reject(new Error("the read gave up")),
+      }));
+
+      const res = await put({ agentId: AGENT_ID });
+
+      expect(res.status).toBe(200);
+      expect(logProjectAudit.mock.calls[0][3]).toBe(`Default agent: agent ${OLD_ID} → Ship it`);
+    });
+
     it("records nothing when the default already was that agent", async () => {
       previously(AGENT_ID);
 

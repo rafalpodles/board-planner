@@ -168,14 +168,14 @@ export const DELETE = withProjectOwner(async (request, { params, user }) => {
   if (!userId) {
     return NextResponse.json({ error: "userId is required" }, { status: 400 });
   }
-  // PUT validates this and DELETE did not, so anything unparseable reached Grant.deleteOne and
+  // PUT validates this and DELETE did not, so anything unparseable reached the grant delete and
   // left the handler as a CastError-shaped 500.
   if (!isValidObjectId(userId)) {
     return NextResponse.json({ error: "userId must be an object id" }, { status: 400 });
   }
   // Normalised once, because the check below compares this against a stored subject as strings and
   // BSON accepts a hex id in either case: the same id shouted was a different string and the same
-  // row, so it skipped the last-owner refusal while `deleteOne` cast it back and removed the grant.
+  // row, so it skipped the last-owner refusal while the delete cast it back and removed the grant.
   // Same defect as BP-546, one route over, and reachable here by any board owner.
   const subject = new Types.ObjectId(userId).toString();
 
@@ -195,11 +195,12 @@ export const DELETE = withProjectOwner(async (request, { params, user }) => {
     }
   }
 
+  // Read before the delete: nothing after it may turn into a failed response
+  const person = await User.findById(subject).select("username");
   const removed = await Grant.findOneAndDelete({ subject, objectType: "project", object: projectId })
     .select("relation")
     .lean();
   if (removed) {
-    const person = await User.findById(subject).select("username");
     auditAccess(projectId, user._id, person?.username ?? "a deleted user", removed.relation, undefined);
   }
 

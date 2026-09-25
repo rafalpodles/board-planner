@@ -24,6 +24,21 @@ vi.mock("@/lib/auth", () => ({
 }));
 vi.mock("@/lib/grants", () => ({ check }));
 vi.mock("@/lib/projectAudit", () => ({ logProjectAudit }));
+// The schema's own casting is exercised by settings-audit.test.ts and the e2e; here the update is
+// laid over the before-image as written
+const writtenPopulate = vi.hoisted(() => vi.fn(async () => undefined));
+vi.mock("@/lib/project-write-images", () => ({
+  projectWriteImages: (before: Record<string, unknown>, updates: Record<string, unknown>) => {
+    const after = JSON.parse(JSON.stringify(before));
+    for (const [path, value] of Object.entries(updates)) {
+      const keys = path.split(".");
+      let node = after;
+      for (const key of keys.slice(0, -1)) node = node[key] ??= {};
+      node[keys[keys.length - 1]] = value;
+    }
+    return { before, after: { ...after, toObject: () => after, populate: writtenPopulate } };
+  },
+}));
 vi.mock("@/lib/encryption", () => ({
   encryptSecret: (v: string) => `enc:${v}`,
   isEncryptionConfigured: () => true,
@@ -359,10 +374,13 @@ describe("the key a project may be renamed to", () => {
 describe("PUT /api/projects/[projectId] worker settings", () => {
   const ADMIN = { _id: "a1", role: "admin" };
 
+  // Both reads the route makes of it: the one its checks use, and the write's own before-image,
+  // which is what the instance audit is decided from
   function stored(worker: Record<string, unknown>) {
-    projectFindById.mockReturnValue({
-      select: () => Promise.resolve({ key: "TP", worker: { policyOverrides: [], ...worker } }),
-      populate: saved,
+    const project = { key: "TP", worker: { policyOverrides: [], ...worker } };
+    projectFindById.mockReturnValue({ select: () => Promise.resolve(project), populate: saved });
+    projectFindByIdAndUpdate.mockReturnValue({
+      lean: () => Promise.resolve({ _id: PROJECT_ID, ...project }),
     });
   }
 
@@ -550,7 +568,9 @@ describe("PUT /api/projects/[projectId] audit trail", () => {
   }
 
   function auditDetails(): string[] {
-    return logProjectAudit.mock.calls.map(([, , , detail]) => String(detail));
+    return logProjectAudit.mock.calls.map(([, , , detail]) =>
+      Array.isArray(detail) ? detail.join("\n") : String(detail)
+    );
   }
 
   beforeEach(() => {
@@ -599,6 +619,26 @@ describe("PUT /api/projects/[projectId] audit trail", () => {
     await PUT(putRequest({ worker: { enabled: true } }), ctx());
 
     expect(auditDetails()).toEqual([]);
+  });
+
+  // The write has landed by then, and a retry would find nothing left to record
+  it("records the change even when what follows the write fails", async () => {
+    writtenOver({ name: "Orbit" });
+    writtenPopulate.mockRejectedValueOnce(new Error("the read gave up"));
+
+    await PUT(putRequest({ name: "Orbit Two" }), ctx()).catch(() => undefined);
+
+    expect(auditDetails()).toEqual(["Name: Orbit → Orbit Two"]);
+  });
+
+  // Mongoose casts an object to the string it carries, and only a string is encrypted: an object
+  // token was stored in the clear, and logged as anything but set
+  it.each(["githubToken", "repositoryUrl", "name"])("refuses %s that is not a string", async (field) => {
+    const res = await PUT(putRequest({ [field]: { _id: "ghp_not_a_string" } }), ctx());
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: `${field} must be a string` });
+    expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
   });
 
   it("answers 404 when the project is gone by the time it is written", async () => {

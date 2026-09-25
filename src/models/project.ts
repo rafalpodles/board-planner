@@ -198,6 +198,7 @@ const projectSchema = new Schema<IProject>(
         reviewGate: { type: Boolean, default: true },
         baseBranch: { type: String, default: "main" },
         taskTimeoutMs: { type: Number, default: 1_800_000 },
+        runCeilingMs: { type: Number, default: 5_400_000 },
         maxDiffLines: { type: Number, default: 400 },
         maxDiffFiles: { type: Number, default: 10 },
         model: { type: String, default: "opus" },

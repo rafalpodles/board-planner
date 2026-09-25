@@ -5,6 +5,7 @@ import { withAdmin } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { describeSettingsChanges } from "@/lib/settings-audit";
+import { projectWriteImages } from "@/lib/project-write-images";
 
 const MAX_MODEL_LENGTH = 100;
 
@@ -66,33 +67,34 @@ export const PATCH = withAdmin(async (request, { params, user }) => {
   }
 
   await connectDB();
-  const before = await Project.findByIdAndUpdate(projectId, { $set: updates }, {
+  const beforeImage = await Project.findByIdAndUpdate(projectId, { $set: updates }, {
     returnDocument: "before",
   }).lean();
-  if (!before) {
+  if (!beforeImage) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
+  const { before, after } = projectWriteImages(beforeImage, updates);
+  const project = after.toObject();
 
-  const changes = describeSettingsChanges(before as never, updates);
+  let changes: string[];
+  try {
+    changes = describeSettingsChanges(before, project, Object.keys(updates));
+  } catch {
+    changes = [`Changed: ${Object.keys(updates).join(", ")}`];
+  }
   if (changes.length > 0) {
-    await logProjectAudit(
-      projectId,
-      String(user._id),
-      "settings_updated",
-      ["Instance admin console", ...changes].join("\n")
-    );
+    await logProjectAudit(projectId, String(user._id), "settings_updated", [
+      "Instance admin console",
+      ...changes,
+    ]);
   }
 
-  const pm = {
-    ...before.pm,
-    ...Object.fromEntries(Object.entries(updates).map(([key, value]) => [key.slice("pm.".length), value])),
-  };
   return NextResponse.json({
-    _id: String(before._id),
-    key: before.key,
-    enabled: !!pm.enabled,
-    lockedByInstance: !!pm.lockedByInstance,
-    model: pm.model || "",
-    dailyTurnCap: pm.dailyTurnCap || 0,
+    _id: String(project._id),
+    key: project.key,
+    enabled: !!project.pm?.enabled,
+    lockedByInstance: !!project.pm?.lockedByInstance,
+    model: project.pm?.model || "",
+    dailyTurnCap: project.pm?.dailyTurnCap || 0,
   });
 });

@@ -8,6 +8,20 @@ vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ getAuthUser, RateLimitError: class extends Error {} }));
 vi.mock("@/models/project", () => ({ Project: { findByIdAndUpdate: projectFindByIdAndUpdate } }));
 vi.mock("@/lib/projectAudit", () => ({ logProjectAudit }));
+// The schema's own casting is exercised by settings-audit.test.ts and the e2e; here the update is
+// laid over the before-image as written
+vi.mock("@/lib/project-write-images", () => ({
+  projectWriteImages: (before: Record<string, unknown>, updates: Record<string, unknown>) => {
+    const after = JSON.parse(JSON.stringify(before));
+    for (const [path, value] of Object.entries(updates)) {
+      const keys = path.split(".");
+      let node = after;
+      for (const key of keys.slice(0, -1)) node = node[key] ??= {};
+      node[keys[keys.length - 1]] = value;
+    }
+    return { before, after: { ...after, toObject: () => after, populate: async () => undefined } };
+  },
+}));
 
 const { PATCH } = await import("./route");
 
@@ -101,7 +115,7 @@ describe("PATCH /api/admin/agents/:projectId", () => {
       PROJECT_ID,
       ADMIN,
       "settings_updated",
-      "Instance admin console\nPM agent: on → off\nPM turns per day: 50 → server default"
+      ["Instance admin console", "PM agent: on → off", "PM turns per day: 50 → server default"]
     );
   });
 

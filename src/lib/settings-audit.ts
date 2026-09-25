@@ -3,7 +3,7 @@ import { DEFAULT_PM_AUTONOMY } from "@/types";
 import {
   POLICY_FIELD_LABELS,
   PROJECT_POLICY_DEFAULTS,
-  isProjectPolicyField,
+  type ProjectPolicyField,
 } from "@/lib/worker-policy";
 
 type Stored = Record<string, unknown>;
@@ -38,6 +38,8 @@ const TOKENS: Record<string, string> = {
   codaToken: "Coda token",
 };
 
+const URLS = new Set(["gitlabHost", "codaHost"]);
+
 const PM_FIELDS = [
   "enabled",
   "lockedByInstance",
@@ -62,27 +64,32 @@ const PM_DEFAULTS = {
   autonomy: DEFAULT_PM_AUTONOMY,
 };
 
-const SHOWN_AS: Record<string, (value: unknown) => string> = {
-  "pm.dailyTurnCap": (value) => (value ? auditValue(value) : "server default"),
-  "pm.dailyTokenCap": (value) => (value ? auditValue(value) : "no ceiling"),
-};
-
-const MCP_FIELDS: [string, string][] = [
-  ["url", "URL"],
-  ["authType", "Authentication"],
-  ["enabled", "Enabled"],
-  ["allowWrites", "Allow writes"],
-  ["toolAllowlist", "Tools allowed"],
-];
-
 const MAX_SHOWN = 80;
 
 export function auditValue(value: unknown): string {
   if (typeof value === "boolean") return value ? "on" : "off";
   if (Array.isArray(value)) return value.length > 0 ? value.map(auditValue).join(", ") : "none";
-  const text = value === undefined || value === null ? "" : String(value).replace(/\s+/g, " ").trim();
+  const text =
+    typeof value === "string" || typeof value === "number"
+      ? String(value).replace(/\s+/g, " ").replace(/→/g, "->").trim()
+      : "";
   if (!text) return "none";
   return text.length > MAX_SHOWN ? `${text.slice(0, MAX_SHOWN - 1)}…` : text;
+}
+
+// Whatever a pasted address carries besides where it points — a clone URL's credentials, a token
+// in its query — stays out of a trail nobody can edit afterwards
+export function auditUrl(value: unknown): string {
+  if (typeof value !== "string" || !value.trim()) return "none";
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    return auditValue(value);
+  }
+  const credentials = url.username || url.password ? "•••@" : "";
+  const query = url.search ? "?•••" : "";
+  return auditValue(`${url.protocol}//${credentials}${url.host}${url.pathname}${query}`);
 }
 
 function at(doc: unknown, path: string): unknown {
@@ -118,7 +125,10 @@ export function auditChange(
   show: (value: unknown) => string = auditValue
 ): string | null {
   if (same(before, after)) return null;
-  return `${label}: ${show(before)} → ${show(after)}`;
+  const was = show(before);
+  const is = show(after);
+  // Shortened to the same text, an arrow between them would read as no change at all
+  return was === is ? `${label} changed` : `${label}: ${was} → ${is}`;
 }
 
 function secretChange(label: string, before: unknown, after: unknown): string | null {
@@ -129,34 +139,46 @@ function secretChange(label: string, before: unknown, after: unknown): string | 
   return had ? `${label} replaced` : `${label} set`;
 }
 
-function policyChanges(before: Stored, updates: Stored): string[] {
-  const overrides = (value: unknown) => new Set(Array.isArray(value) ? (value as string[]) : []);
-  const pinnedBefore = overrides(at(before, "worker.policyOverrides"));
-  const pinnedAfter =
-    "worker.policyOverrides" in updates
-      ? overrides(updates["worker.policyOverrides"])
-      : pinnedBefore;
+const SHOWN_AS: Record<string, (value: unknown) => string> = {
+  "pm.dailyTurnCap": (value) => (value ? auditValue(value) : "server default"),
+  "pm.dailyTokenCap": (value) => (value ? auditValue(value) : "no ceiling"),
+};
+
+function policyChanges(before: Stored, after: Stored): string[] {
+  const pinned = (doc: Stored) =>
+    new Set(((at(doc, "worker.policyOverrides") as string[] | undefined) ?? []).map(String));
+  const pinnedBefore = pinned(before);
+  const pinnedAfter = pinned(after);
 
   const lines: string[] = [];
-  for (const [key, value] of Object.entries(updates)) {
-    const field = key.startsWith("worker.policy.") ? key.slice("worker.policy.".length) : "";
-    if (!isProjectPolicyField(field)) continue;
-
-    const resolvedBefore = pinnedBefore.has(field) ? at(before, key) : PROJECT_POLICY_DEFAULTS[field];
-    const shown = (v: unknown, pinned: boolean) =>
-      pinned ? auditValue(v) : `${auditValue(v)} (default)`;
-    const wasText = shown(resolvedBefore, pinnedBefore.has(field));
-    const isText = shown(value, pinnedAfter.has(field));
-    if (wasText !== isText) lines.push(`${POLICY_FIELD_LABELS[field]}: ${wasText} → ${isText}`);
+  // Every field rather than the ones a request named: an overrides list another save computed can
+  // drop a pin, and that changes what a worker runs just the same
+  for (const field of Object.keys(PROJECT_POLICY_DEFAULTS) as ProjectPolicyField[]) {
+    const resolved = (doc: Stored, pins: Set<string>) =>
+      pins.has(field)
+        ? auditValue(at(doc, `worker.policy.${field}`))
+        : `${auditValue(PROJECT_POLICY_DEFAULTS[field])} (default)`;
+    const was = resolved(before, pinnedBefore);
+    const is = resolved(after, pinnedAfter);
+    if (was !== is) lines.push(`${POLICY_FIELD_LABELS[field]}: ${was} → ${is}`);
   }
   return lines;
 }
 
 interface McpServer {
   name?: string;
+  url?: string;
+  authType?: string;
   authToken?: string;
-  oauth?: { status?: string };
-  [field: string]: unknown;
+  allowWrites?: boolean;
+  toolAllowlist?: string[];
+  enabled?: boolean;
+  oauth?: { status?: string; clientId?: string; clientSecret?: string };
+}
+
+// Replacing the list gives every server a fresh _id, stored as well, so an id is no change
+function withoutIds(value: unknown): unknown {
+  return JSON.parse(JSON.stringify(value ?? null, (key, v) => (key === "_id" ? undefined : v)));
 }
 
 function mcpChanges(before: unknown, after: unknown): string[] {
@@ -165,36 +187,49 @@ function mcpChanges(before: unknown, after: unknown): string[] {
   const is = list(after);
   const lines: string[] = [];
 
-  const names = auditChange(
-    "PM MCP servers",
-    was.map((s) => s.name),
-    is.map((s) => s.name)
-  );
-  if (names) lines.push(names);
-
+  for (const server of was) {
+    if (!is.some((s) => s.name === server.name)) lines.push(`PM MCP server ${server.name} removed`);
+  }
   for (const server of is) {
-    const old = was.find((s) => s.name === server.name);
-    if (!old) continue;
     const label = `PM MCP server ${server.name}`;
-    for (const [field, name] of MCP_FIELDS) {
-      const line = auditChange(`${label} · ${name}`, old[field], server[field]);
-      if (line) lines.push(line);
+    const old = was.find((s) => s.name === server.name);
+    if (!old) {
+      lines.push(
+        `${label} added: ${auditUrl(server.url)}, ${auditValue(server.authType)}, writes ${auditValue(
+          !!server.allowWrites
+        )}`
+      );
+      continue;
     }
-    const token = secretChange(`${label} · Token`, old.authToken ?? "", server.authToken ?? "");
-    if (token) lines.push(token);
-    const oauth = auditChange(`${label} · OAuth`, old.oauth?.status, server.oauth?.status);
-    if (oauth) lines.push(oauth);
+    const found = [
+      auditChange(`${label} · URL`, old.url, server.url, auditUrl),
+      auditChange(`${label} · Authentication`, old.authType, server.authType),
+      auditChange(`${label} · Enabled`, old.enabled, server.enabled),
+      auditChange(`${label} · Allow writes`, old.allowWrites, server.allowWrites),
+      auditChange(`${label} · Tools allowed`, old.toolAllowlist, server.toolAllowlist),
+      secretChange(`${label} · Token`, old.authToken ?? "", server.authToken ?? ""),
+      auditChange(`${label} · OAuth`, old.oauth?.status, server.oauth?.status),
+      auditChange(`${label} · OAuth client`, old.oauth?.clientId, server.oauth?.clientId),
+      secretChange(
+        `${label} · OAuth client secret`,
+        old.oauth?.clientSecret ?? "",
+        server.oauth?.clientSecret ?? ""
+      ),
+    ].filter((line): line is string => line !== null);
+    if (found.length === 0 && !same(withoutIds(old), withoutIds(server))) found.push(`${label} changed`);
+    lines.push(...found);
   }
   return lines;
 }
 
 function linkList(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
-  return (value as { label?: string; url?: string }[]).map((l) => `${l.label} (${l.url})`);
+  return (value as { label?: string; url?: string }[]).map(
+    (l) => `${auditValue(l.label)} (${auditUrl(l.url)})`
+  );
 }
 
-function pmChanges(before: Stored, pm: unknown): string[] {
-  const after = { pm };
+function pmChanges(before: Stored, after: Stored): string[] {
   const lines = PM_FIELDS.map((field) => {
     const key = `pm.${field}`;
     return auditChange(LABELS[key], stored(before, key), stored(after, key), SHOWN_AS[key]);
@@ -216,33 +251,56 @@ function fieldName(project: Stored, id: unknown): string {
   return fields.find((f) => String(f._id) === String(id))?.name ?? String(id);
 }
 
-export function describeSettingsChanges(before: Stored, updates: Stored): string[] {
+/**
+ * `before` is the write's own before-image, `after` that image with the write applied the way the
+ * schema stores it — so a value the schema drops or trims is not reported as the request sent it.
+ */
+export function describeSettingsChanges(
+  beforeImage: object,
+  afterImage: object,
+  keys: string[]
+): string[] {
+  const before = beforeImage as Stored;
+  const after = afterImage as Stored;
   const lines: (string | null)[] = [];
+  let pm = false;
+  let policy = false;
 
-  for (const [key, value] of Object.entries(updates)) {
+  for (const key of keys) {
     if (key in TOKENS) {
-      lines.push(secretChange(TOKENS[key], before[key], value));
+      lines.push(secretChange(TOKENS[key], before[key], after[key]));
     } else if (key === "repositoryUrl") {
       lines.push(
         auditChange(
           LABELS.repositoryUrl,
           projectRepositoryUrl(before),
-          projectRepositoryUrl({ ...before, repositoryUrl: String(value ?? "") })
+          projectRepositoryUrl(after),
+          auditUrl
         )
       );
     } else if (key === "estimateFieldId") {
       lines.push(
-        auditChange("Estimate field", fieldName(before, before.estimateFieldId), fieldName(before, value))
+        auditChange(
+          "Estimate field",
+          fieldName(before, before.estimateFieldId),
+          fieldName(after, after.estimateFieldId)
+        )
       );
-    } else if (key === "pm") {
-      lines.push(...pmChanges(before, value));
-    } else if (!key.startsWith("worker.policy")) {
-      lines.push(auditChange(LABELS[key] ?? key, stored(before, key), value, SHOWN_AS[key]));
+    } else if (key === "pm" || key.startsWith("pm.")) {
+      pm = true;
+    } else if (key.startsWith("worker.policy")) {
+      policy = true;
+    } else if (key in LABELS) {
+      const show = URLS.has(key) ? auditUrl : auditValue;
+      lines.push(auditChange(LABELS[key], at(before, key), at(after, key), show));
+    } else if (!same(at(before, key), at(after, key))) {
+      lines.push(`${key} changed`);
     }
   }
 
   return [
     ...lines.filter((line): line is string => line !== null),
-    ...policyChanges(before, updates),
+    ...(pm ? pmChanges(before, after) : []),
+    ...(policy ? policyChanges(before, after) : []),
   ];
 }

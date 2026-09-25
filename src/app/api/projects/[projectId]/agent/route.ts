@@ -74,7 +74,12 @@ async function setDefaultAgent(
   const previousId = before?.worker?.agent ? String(before.worker.agent) : "";
   if (!before || previousId === (next?.id.toLowerCase() ?? "")) return;
 
-  const previous = previousId ? await Agent.findById(previousId, "name").lean() : null;
+  // After the write, so a failed read costs the name and never the entry or the response
+  const previous = previousId
+    ? await Agent.findById(previousId, "name")
+        .lean()
+        .catch(() => ({ name: `agent ${previousId}` }))
+    : null;
   const was = previousId ? (previous?.name ?? "a deleted agent") : "";
   logProjectAudit(
     projectId,

@@ -525,6 +525,17 @@ describe("the audit trail of board access", () => {
     expect(logProjectAudit).not.toHaveBeenCalled();
   });
 
+  // Read before the delete: after it, a failure would answer 500 for a removal that happened, and
+  // the retry would find no grant left to record
+  it("removes nothing when the name cannot be read", async () => {
+    userFindByIdSelect.mockRejectedValue(new Error("the read gave up"));
+
+    await DELETE(new Request(url, { method: "DELETE" }), { params }).catch(() => undefined);
+
+    expect(grantDelete).not.toHaveBeenCalled();
+    expect(logProjectAudit).not.toHaveBeenCalled();
+  });
+
   it("still names a removal whose account has since been deleted", async () => {
     userFindByIdSelect.mockResolvedValue(null);
 
