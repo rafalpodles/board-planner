@@ -16,6 +16,7 @@ import { Sprint } from "@/models/sprint";
 import { Notification } from "@/models/notification";
 import { PmMessage } from "@/models/pmMessage";
 import { logProjectAudit } from "@/lib/projectAudit";
+import { describeSettingsChanges } from "@/lib/settings-audit";
 import { tokensInvalidatedByHostChange } from "@/lib/host-bound-secrets";
 import { encryptSecret, isEncryptionConfigured } from "@/lib/encryption";
 import { isAllowedMcpServerUrl } from "@/lib/url-validation";
@@ -270,13 +271,14 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     }
   }
 
-  
+  const before = await Project.findByIdAndUpdate(projectId, updates, {
+    returnDocument: "before",
+  }).lean();
+  const project = before
+    ? await Project.findById(projectId).populate("createdBy", "username fullName")
+    : null;
 
-  const project = await Project.findByIdAndUpdate(projectId, updates, {
-    returnDocument: "after",
-  }).populate("createdBy", "username fullName");
-
-  if (!project) {
+  if (!before || !project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
@@ -284,13 +286,10 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     void logInstanceAudit({ ...entry, user: String(user._id), actorUsername: user.username });
   }
 
-  const changedFields = Object.keys(updates)
-    .filter((f) => f !== "githubToken" && f !== "gitlabToken")
-    .join(", ");
-  const auditDetail = updates.githubToken !== undefined
-    ? `Changed: ${changedFields ? changedFields + ", " : ""}GitHub token`
-    : `Changed: ${changedFields}`;
-  logProjectAudit(projectId, user._id, "settings_updated", auditDetail);
+  const changes = describeSettingsChanges(before as never, updates);
+  if (changes.length > 0) {
+    logProjectAudit(projectId, user._id, "settings_updated", changes.join("\n"));
+  }
 
   // Its own entry, not folded into the "Changed: …" list. Somebody reading the trail after a
   // suspected leak needs to see that a credential's destination moved, and when.

@@ -8,7 +8,12 @@ import { Input } from "@/components/ui/Input";
 import { Switch } from "@/components/ui/Switch";
 import { SettingsCard } from "@/components/settings/SettingsCard";
 import { useDirtyGroup } from "@/components/settings/settings-context";
-import { PROJECT_POLICY_DEFAULTS, PROJECT_POLICY_FIELDS_MOVED_TO_BLOCKS } from "@/lib/worker-policy";
+import {
+  POLICY_FIELD_LABELS,
+  PROJECT_POLICY_DEFAULTS,
+  PROJECT_POLICY_FIELDS_MOVED_TO_BLOCKS,
+  type ProjectPolicyField,
+} from "@/lib/worker-policy";
 import { projectRemotes, sameRepo } from "@/lib/repo-match";
 import { ApiAgentRun, ApiProject, ApiWorker } from "@/types";
 import { SectionProps } from "./types";
@@ -23,18 +28,6 @@ function sentence(clause: string): string {
 }
 
 const NUMBER_FIELDS = new Set(["taskTimeoutMs", "runCeilingMs", "maxDiffLines", "maxDiffFiles"]);
-const LABELS: Record<string, string> = {
-  autoMerge: "Merge automatically",
-  reviewGate: "Review the diff before delivering",
-  baseBranch: "Base branch",
-  taskTimeoutMs: "Timeout for one step (ms)",
-  runCeilingMs: "Timeout for the whole run (ms)",
-  maxDiffLines: "Largest diff (lines)",
-  maxDiffFiles: "Largest diff (files)",
-  model: "Model",
-  fallbackModel: "Fallback model",
-  reviewModel: "Review model",
-};
 
 type PolicyValue = string | number | boolean;
 type Draft = Record<string, PolicyValue>;
@@ -288,7 +281,7 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
         <div className="space-y-3">
           {FIELDS.map((field) => {
             const value = draft.value[field];
-            const label = LABELS[field] ?? field;
+            const label = POLICY_FIELD_LABELS[field as ProjectPolicyField];
             const fieldId = `${policyFieldId}-${field}`;
             // What the row will mean once saved, not what is stored right now
             const inherits = unpinned.has(field) || (!pinned.has(field) && !draft.isDirty(field));

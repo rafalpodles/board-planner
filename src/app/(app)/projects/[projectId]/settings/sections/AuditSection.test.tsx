@@ -33,6 +33,21 @@ describe("AuditSection", () => {
     await waitFor(() => expect(screen.getByText("owner")).toBeTruthy());
   });
 
+  // BP-742: one line per changed setting, each with its value after the arrow, and none cut off
+  it("shows every line of a multi-setting change", async () => {
+    api.get.mockResolvedValue([
+      { ...entry, detail: "Workers: off → on\nRepository: none → https://github.com/orbit-dev/orbit" },
+    ]);
+    render(<AuditSection projectId="TP" active />);
+
+    const cell = await screen.findByTestId("audit-detail");
+    expect(cell.textContent).toBe(
+      "Workers: off → on\nRepository: none → https://github.com/orbit-dev/orbit"
+    );
+    expect(cell.className).toContain("whitespace-pre-line");
+    expect(cell.className).not.toMatch(/\btruncate\b/);
+  });
+
   // typeof null === "object", so a deleted user used to take the populated branch and throw
   it("falls back to system when the user was deleted", async () => {
     api.get.mockResolvedValue([{ ...entry, user: null }]);

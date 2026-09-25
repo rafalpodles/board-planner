@@ -95,19 +95,19 @@ function putRequest(body: unknown) {
 
 const ctx = () => ({ params: Promise.resolve({ projectId: PROJECT_ID }) });
 
+const SAVED = { _id: PROJECT_ID, toObject: () => ({ _id: PROJECT_ID, name: "Test Project" }) };
+const saved = () => Promise.resolve(SAVED);
+
 beforeEach(() => {
   vi.clearAllMocks();
   getAuthUser.mockResolvedValue(OWNER);
   projectFindById.mockReturnValue({
     toObject: () => ({ _id: PROJECT_ID, name: "Test Project" }),
     select: () => Promise.resolve({ customFields: PROJECT_CUSTOM_FIELDS }),
+    populate: saved,
   });
   projectFindByIdAndUpdate.mockReturnValue({
-    populate: () =>
-      Promise.resolve({
-        _id: PROJECT_ID,
-        toObject: () => ({ _id: PROJECT_ID, name: "Test Project" }),
-      }),
+    lean: () => Promise.resolve({ _id: PROJECT_ID, name: "Test Project" }),
   });
   taskFind.mockReturnValue({
     distinct: () => Promise.resolve([]),
@@ -255,6 +255,7 @@ describe("PUT /api/projects/[projectId] and a repointed integration host", () =>
       lean: () => Promise.resolve(project),
       select: () => Promise.resolve({ customFields: PROJECT_CUSTOM_FIELDS }),
       toObject: () => ({ _id: PROJECT_ID, name: "Test Project" }),
+      populate: saved,
     });
   }
 
@@ -327,6 +328,7 @@ describe("the key a project may be renamed to", () => {
       toObject: () => ({ _id: PROJECT_ID }),
       select: () => Promise.resolve({ customFields: PROJECT_CUSTOM_FIELDS }),
       lean: () => Promise.resolve({ key: "TP", formerKeys: [] }),
+      populate: saved,
     });
   });
 
@@ -360,6 +362,7 @@ describe("PUT /api/projects/[projectId] worker settings", () => {
   function stored(worker: Record<string, unknown>) {
     projectFindById.mockReturnValue({
       select: () => Promise.resolve({ key: "TP", worker: { policyOverrides: [], ...worker } }),
+      populate: saved,
     });
   }
 
@@ -532,5 +535,78 @@ describe("PUT /api/projects/[projectId] worker settings", () => {
     const response = await PUT(putRequest({ worker: { lockedByInstance: true } }), ctx());
 
     expect(response.status).toBe(403);
+  });
+});
+
+/**
+ * BP-742. The trail named the fields a save touched and never their values, so it could not say
+ * which repository machines were pointed at or whether runs were switched on. The before side is
+ * the write's own before-image: a read taken earlier describes a document somebody else may have
+ * changed since (BP-658).
+ */
+describe("PUT /api/projects/[projectId] audit trail", () => {
+  function writtenOver(beforeImage: Record<string, unknown>) {
+    projectFindByIdAndUpdate.mockReturnValue({ lean: () => Promise.resolve(beforeImage) });
+  }
+
+  function auditDetails(): string[] {
+    return logProjectAudit.mock.calls.map(([, , , detail]) => String(detail));
+  }
+
+  beforeEach(() => {
+    check.mockResolvedValue(true);
+  });
+
+  it("records each changed setting with its value before and after", async () => {
+    writtenOver({ name: "Orbit", repositoryUrl: "" });
+
+    await PUT(
+      putRequest({ name: "Orbit Two", repositoryUrl: "https://github.com/orbit-dev/orbit" }),
+      ctx()
+    );
+
+    expect(auditDetails()).toEqual([
+      "Name: Orbit → Orbit Two\nRepository: none → https://github.com/orbit-dev/orbit",
+    ]);
+  });
+
+  it("writes no entry for a save that changed nothing", async () => {
+    writtenOver({ name: "Orbit", description: "", icon: "" });
+
+    const response = await PUT(putRequest({ name: "Orbit", description: "", icon: "" }), ctx());
+
+    expect(response.status).toBe(200);
+    expect(logProjectAudit).not.toHaveBeenCalled();
+  });
+
+  it("names a token without writing it", async () => {
+    writtenOver({ githubToken: "" });
+
+    await PUT(putRequest({ githubToken: "ghp_live_secret" }), ctx());
+
+    expect(auditDetails()).toEqual(["GitHub token set"]);
+    expect(auditDetails().join()).not.toContain("ghp_live_secret");
+  });
+
+  it("takes the value before from the write, not from the read that preceded it", async () => {
+    getAuthUser.mockResolvedValue({ ...OWNER });
+    projectFindById.mockReturnValue({
+      select: () => Promise.resolve({ key: "TP", worker: { enabled: false, policyOverrides: [] } }),
+      populate: saved,
+    });
+    writtenOver({ key: "TP", worker: { enabled: true, policyOverrides: [] } });
+
+    await PUT(putRequest({ worker: { enabled: true } }), ctx());
+
+    expect(auditDetails()).toEqual([]);
+  });
+
+  it("answers 404 when the project is gone by the time it is written", async () => {
+    projectFindByIdAndUpdate.mockReturnValue({ lean: () => Promise.resolve(null) });
+
+    const response = await PUT(putRequest({ name: "Orbit Two" }), ctx());
+
+    expect(response.status).toBe(404);
+    expect(logProjectAudit).not.toHaveBeenCalled();
   });
 });

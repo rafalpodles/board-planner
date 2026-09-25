@@ -24,7 +24,7 @@ function patch(body: unknown, projectId = PROJECT_ID) {
   );
 }
 
-/** The project as it comes back after the update. */
+/** The project as the update found it. */
 function stored(pm: Record<string, unknown> = {}) {
   projectFindByIdAndUpdate.mockReturnValue({
     lean: async () => ({ _id: PROJECT_ID, key: "TP", pm }),
@@ -79,13 +79,21 @@ describe("PATCH /api/admin/agents/:projectId", () => {
   it("reports absent pm settings as off rather than undefined", async () => {
     stored({});
 
-    const body = await (await patch({ enabled: true })).json();
+    const body = await (await patch({ lockedByInstance: true })).json();
 
-    expect(body).toMatchObject({ enabled: false, lockedByInstance: false, model: "", dailyTurnCap: 0 });
+    expect(body).toMatchObject({ enabled: false, lockedByInstance: true, model: "", dailyTurnCap: 0 });
+  });
+
+  it("answers with what it wrote over what it found", async () => {
+    stored({ enabled: true, lockedByInstance: false, model: "x/y", dailyTurnCap: 7 });
+
+    const body = await (await patch({ enabled: false, model: "a/b" })).json();
+
+    expect(body).toMatchObject({ enabled: false, lockedByInstance: false, model: "a/b", dailyTurnCap: 7 });
   });
 
   // The audit row is what an instance admin's reach over somebody else's board is read from
-  // afterwards, so it names the fields and their values, and says who it was.
+  // afterwards, so it names each field with its value before and after, and says who it was.
   it("records what was changed on the project's audit log", async () => {
     await patch({ enabled: false, dailyTurnCap: 0 });
 
@@ -93,8 +101,15 @@ describe("PATCH /api/admin/agents/:projectId", () => {
       PROJECT_ID,
       ADMIN,
       "settings_updated",
-      "instance admin: enabled=false, dailyTurnCap=0"
+      "Instance admin console\nPM agent: on → off\nPM turns per day: 50 → server default"
     );
+  });
+
+  it("records nothing when every field named already held that value", async () => {
+    const res = await patch({ enabled: true, model: "x/y" });
+
+    expect(res.status).toBe(200);
+    expect(logProjectAudit).not.toHaveBeenCalled();
   });
 
   describe("what it refuses", () => {

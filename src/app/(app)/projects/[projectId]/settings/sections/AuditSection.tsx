@@ -83,12 +83,12 @@ export function AuditSection({ projectId, active }: { projectId: string; active:
                   <td className="align-top text-text-muted sm:table-cell sm:whitespace-nowrap sm:py-1.5 sm:pr-3">
                     {log.action.replace(/_/g, " ")}
                   </td>
-                  {/* w-full + max-w-0 is what lets a table cell truncate instead of pushing
-                      the table past its container; below sm it gets the whole next line
-                      instead, because truncated to a phone's width it showed nothing */}
+                  {/* w-full + max-w-0 keeps the cell from pushing the table past its container;
+                      the detail wraps inside it, one line per changed setting, because truncated
+                      it cut off the value after the arrow — the part that matters */}
                   <td
-                    className="w-full align-top text-text sm:table-cell sm:max-w-0 sm:truncate sm:py-1.5"
-                    title={log.detail || undefined}
+                    data-testid="audit-detail"
+                    className="w-full whitespace-pre-line break-words align-top text-text sm:table-cell sm:max-w-0 sm:py-1.5"
                   >
                     {log.detail}
                   </td>

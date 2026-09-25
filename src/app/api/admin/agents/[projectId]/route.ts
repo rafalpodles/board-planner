@@ -4,6 +4,7 @@ import { connectDB } from "@/lib/db";
 import { withAdmin } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { logProjectAudit } from "@/lib/projectAudit";
+import { describeSettingsChanges } from "@/lib/settings-audit";
 
 const MAX_MODEL_LENGTH = 100;
 
@@ -65,24 +66,33 @@ export const PATCH = withAdmin(async (request, { params, user }) => {
   }
 
   await connectDB();
-  const project = await Project.findByIdAndUpdate(projectId, { $set: updates }, {
-    returnDocument: "after",
+  const before = await Project.findByIdAndUpdate(projectId, { $set: updates }, {
+    returnDocument: "before",
   }).lean();
-  if (!project) {
+  if (!before) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  const detail = Object.entries(updates)
-    .map(([field, value]) => `${field.replace("pm.", "")}=${String(value)}`)
-    .join(", ");
-  await logProjectAudit(projectId, String(user._id), "settings_updated", `instance admin: ${detail}`);
+  const changes = describeSettingsChanges(before as never, updates);
+  if (changes.length > 0) {
+    await logProjectAudit(
+      projectId,
+      String(user._id),
+      "settings_updated",
+      ["Instance admin console", ...changes].join("\n")
+    );
+  }
 
+  const pm = {
+    ...before.pm,
+    ...Object.fromEntries(Object.entries(updates).map(([key, value]) => [key.slice("pm.".length), value])),
+  };
   return NextResponse.json({
-    _id: String(project._id),
-    key: project.key,
-    enabled: !!project.pm?.enabled,
-    lockedByInstance: !!project.pm?.lockedByInstance,
-    model: project.pm?.model || "",
-    dailyTurnCap: project.pm?.dailyTurnCap || 0,
+    _id: String(before._id),
+    key: before.key,
+    enabled: !!pm.enabled,
+    lockedByInstance: !!pm.lockedByInstance,
+    model: pm.model || "",
+    dailyTurnCap: pm.dailyTurnCap || 0,
   });
 });
