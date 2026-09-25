@@ -2979,6 +2979,22 @@
       },
       {
         "_id": {
+          "$oid": "6a710b361e3f54529de00635"
+        },
+        "project": {
+          "$oid": "6a710b361e3f54529de005b1"
+        },
+        "user": {
+          "$oid": "6a710b361e3f54529de005ad"
+        },
+        "action": "member_role_changed",
+        "detail": "maya: member → owner",
+        "createdAt": {
+          "$date": "2026-07-28T09:10:00Z"
+        }
+      },
+      {
+        "_id": {
           "$oid": "6a710b361e3f54529de00633"
         },
         "project": {
@@ -2988,7 +3004,7 @@
           "$oid": "6a710b361e3f54529de005ad"
         },
         "action": "settings_updated",
-        "detail": "Changed: pm",
+        "detail": "PM scheduled review: off → on\nPM reviews \"Needs human review\": off → on",
         "createdAt": {
           "$date": "2026-07-30T21:25:00Z"
         }
@@ -3004,7 +3020,7 @@
           "$oid": "6a710b361e3f54529de005ad"
         },
         "action": "settings_updated",
-        "detail": "Changed: worker",
+        "detail": "Workers: off → on",
         "createdAt": {
           "$date": "2026-08-01T16:28:00Z"
         }
