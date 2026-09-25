@@ -146,15 +146,23 @@ test("a settings save names each value before and after, and never a token", asy
 
   await page.goto(`${SETTINGS}?section=workers`);
   await page.getByLabel("Base branch").fill("develop");
+  await page.getByLabel("Timeout for one step (ms)").fill("600000");
   await saveChanges(page);
 
   const stored = await detailsOnceStored(page, 3);
   expect(stored.map((row) => row.detail).sort()).toEqual([
-    "Base branch: main (default) → develop",
+    "Base branch: main (default) → develop\nTimeout for one step (ms): 1800000 (default) → 600000",
     "GitHub token set",
     "Repository: none → https://github.com/orbit-dev/orbit",
   ]);
   expect(JSON.stringify(stored)).not.toContain(TOKEN);
+
+  // One save, one row, a line per setting — rendered as lines, not run together into one
+  const workersRow = page.getByTestId("audit-detail").filter({ hasText: "Base branch" });
+  expect(await workersRow.evaluate((cell) => (cell as HTMLElement).innerText.split("\n"))).toEqual([
+    "Base branch: main (default) → develop",
+    "Timeout for one step (ms): 1800000 (default) → 600000",
+  ]);
 
   // On screen whole, the value after the arrow included: truncated, the cell used to end first
   const repositoryRow = page
