@@ -30,6 +30,10 @@ export function SaveBar({ pending, total, onGoToSection }: SaveBarProps) {
   }
   const view = shown.current;
 
+  // The held summary is for the slide only: clipped to nothing, it still reads as pending work (BP-738)
+  const [slidAway, setSlidAway] = useState(!open);
+  if (open && slidAway) setSlidAway(false);
+
   async function saveAll() {
     setSaving(true);
     try {
@@ -54,41 +58,46 @@ export function SaveBar({ pending, total, onGoToSection }: SaveBarProps) {
       className={`sticky bottom-0 z-40 overflow-hidden transition-[max-height] duration-200
         ${open ? "max-h-56" : "max-h-0 pointer-events-none"}`}
       aria-hidden={!open}
+      onTransitionEnd={(e) => {
+        if (!open && e.target === e.currentTarget) setSlidAway(true);
+      }}
     >
       {/* Padded so the card floats clear of the bottom edge — flush against it, the frame
           reads as cut off and whatever scrolls past shows below it */}
-      <div className="px-0.5 pb-3 pt-2">
-        <div className="flex w-full flex-wrap items-center gap-3 rounded-xl border border-warning/45 bg-bg-card px-4 py-3 sm:px-6">
-          <span className="h-2 w-2 shrink-0 rounded-full bg-warning" />
-          <div className="text-sm">
-            {view.total === 1
-              ? "1 unsaved change"
-              : `${view.total} unsaved changes`}
-            {view.label && (
-              <button
-                type="button"
-                onClick={() => onGoToSection(view.section)}
-                className="flex min-h-11 items-center text-xs text-text-muted hover:text-text hover:underline sm:min-h-0"
-              >
-                {view.label}
-                {view.more > 0 ? ` and ${view.more} more` : ""}
-              </button>
-            )}
+      {!slidAway && (
+        <div className="px-0.5 pb-3 pt-2">
+          <div className="flex w-full flex-wrap items-center gap-3 rounded-xl border border-warning/45 bg-bg-card px-4 py-3 sm:px-6">
+            <span className="h-2 w-2 shrink-0 rounded-full bg-warning" />
+            <div className="text-sm">
+              {view.total === 1
+                ? "1 unsaved change"
+                : `${view.total} unsaved changes`}
+              {view.label && (
+                <button
+                  type="button"
+                  onClick={() => onGoToSection(view.section)}
+                  className="flex min-h-11 items-center text-xs text-text-muted hover:text-text hover:underline sm:min-h-0"
+                >
+                  {view.label}
+                  {view.more > 0 ? ` and ${view.more} more` : ""}
+                </button>
+              )}
+            </div>
+            <span className="flex-1" />
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={saving || !open}
+              onClick={() => pending.forEach((g) => g.discard())}
+            >
+              Discard
+            </Button>
+            <Button size="sm" disabled={saving || !open} onClick={saveAll}>
+              {saving ? "Saving..." : "Save changes"}
+            </Button>
           </div>
-          <span className="flex-1" />
-          <Button
-            size="sm"
-            variant="secondary"
-            disabled={saving || !open}
-            onClick={() => pending.forEach((g) => g.discard())}
-          >
-            Discard
-          </Button>
-          <Button size="sm" disabled={saving || !open} onClick={saveAll}>
-            {saving ? "Saving..." : "Save changes"}
-          </Button>
         </div>
-      </div>
+      )}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, cleanup } from "@testing-library/react";
+import { render, cleanup, fireEvent, screen } from "@testing-library/react";
 import { SaveBar } from "./SaveBar";
 
 /**
@@ -37,5 +37,57 @@ describe("SaveBar and the strip below it", () => {
     render(<SaveBar pending={[]} total={0} onGoToSection={vi.fn()} />);
 
     expect(bar()).toBeNull();
+  });
+});
+
+/**
+ * BP-738. A closed bar is clipped to nothing, not removed, so whatever it still holds is on the page
+ * for anything reading text rather than pixels. It keeps the last summary for the slide only.
+ */
+describe("SaveBar once it has closed", () => {
+  const summary = () => screen.queryByText(/unsaved change/)?.textContent ?? null;
+
+  it("holds no summary on a page that never had anything to save", () => {
+    render(<SaveBar pending={[]} total={0} onGoToSection={vi.fn()} />);
+
+    expect(summary()).toBeNull();
+  });
+
+  it("keeps the last summary while it slides away, and drops it once the slide has ended", () => {
+    const { container, rerender } = render(
+      <SaveBar pending={[group]} total={1} onGoToSection={vi.fn()} />
+    );
+    rerender(<SaveBar pending={[]} total={0} onGoToSection={vi.fn()} />);
+
+    expect(summary()).toContain("1 unsaved change");
+
+    fireEvent.transitionEnd(container.firstElementChild!);
+
+    expect(summary()).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save changes", hidden: true })).toBeNull();
+  });
+
+  it("is not emptied by a transition that ends on something inside it", () => {
+    const { rerender } = render(<SaveBar pending={[group]} total={1} onGoToSection={vi.fn()} />);
+    rerender(<SaveBar pending={[]} total={0} onGoToSection={vi.fn()} />);
+
+    fireEvent.transitionEnd(screen.getByRole("button", { name: "Discard", hidden: true }));
+
+    expect(summary()).toContain("1 unsaved change");
+  });
+
+  it("shows the new summary when something is changed again after it slid away", () => {
+    const { container, rerender } = render(
+      <SaveBar pending={[group]} total={1} onGoToSection={vi.fn()} />
+    );
+    rerender(<SaveBar pending={[]} total={0} onGoToSection={vi.fn()} />);
+    fireEvent.transitionEnd(container.firstElementChild!);
+
+    rerender(<SaveBar pending={[{ ...group, count: 2 }]} total={2} onGoToSection={vi.fn()} />);
+
+    expect(summary()).toContain("2 unsaved changes");
+    expect(
+      (screen.getByRole("button", { name: "Save changes" }) as HTMLButtonElement).disabled
+    ).toBe(false);
   });
 });
