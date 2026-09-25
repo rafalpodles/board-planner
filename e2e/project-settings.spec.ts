@@ -904,7 +904,8 @@ test.describe("the save bar once it has closed", () => {
     await page.goto(`${SETTINGS}?section=integrations`);
     const repository = page.getByLabel("Repository URL");
     await expect(repository).toBeVisible();
-    // The control: a page that never had anything to save holds no summary either
+    // A page that never had anything to save holds no summary either: the old bar held
+    // "0 unsaved changes" here, which is what the ticket saw after a reload
     await expect(summary(page)).toHaveCount(0);
 
     await repository.fill("https://github.com/orbit-dev/orbit");
