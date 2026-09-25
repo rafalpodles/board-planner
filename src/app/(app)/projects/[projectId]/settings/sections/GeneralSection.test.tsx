@@ -33,9 +33,20 @@ const members: ApiProjectMember[] = [
   { _id: "u3", username: "carol", fullName: "Carol C", relation: null, instanceAdmin: true },
 ];
 
+const register = vi.fn();
+const accessGroup = () =>
+  register.mock.calls.map(([group]) => group).filter((g) => g.id === "general-access").at(-1);
+
+// BP-741: access is staged like the rest of the page, so every change here lands through Save
+async function save() {
+  await act(async () => {
+    await accessGroup().save();
+  });
+}
+
 function renderSection() {
   return render(
-    <SettingsProvider register={vi.fn()} unregister={vi.fn()}>
+    <SettingsProvider register={register} unregister={vi.fn()}>
       <GeneralSection
         projectId="p1"
         project={project()}
@@ -49,6 +60,7 @@ function renderSection() {
 }
 
 beforeEach(() => {
+  register.mockReset();
   api.get.mockReset();
   api.put.mockReset();
   api.del.mockReset();
@@ -75,11 +87,46 @@ describe("GeneralSection member access", () => {
     expect(screen.queryByLabelText("Access for carol")).toBeNull();
   });
 
+  it("writes nothing when access is changed, and counts it as an unsaved change", async () => {
+    renderSection();
+    const select = await screen.findByLabelText("Access for bob");
+
+    fireEvent.change(select, { target: { value: "owner" } });
+
+    await waitFor(() => expect(accessGroup()?.count).toBe(1));
+    expect(select).toHaveProperty("value", "owner");
+    expect(api.put).not.toHaveBeenCalled();
+    expect(api.del).not.toHaveBeenCalled();
+  });
+
+  it("puts the row back on Discard", async () => {
+    renderSection();
+    const select = await screen.findByLabelText("Access for alice");
+
+    fireEvent.change(select, { target: { value: "member" } });
+    await waitFor(() => expect(accessGroup()?.count).toBe(1));
+    act(() => accessGroup().discard());
+
+    await waitFor(() => expect(select).toHaveProperty("value", "owner"));
+    expect(accessGroup()?.count).toBe(0);
+  });
+
+  it("does not count a change put back by hand", async () => {
+    renderSection();
+    const select = await screen.findByLabelText("Access for alice");
+
+    fireEvent.change(select, { target: { value: "member" } });
+    fireEvent.change(select, { target: { value: "owner" } });
+
+    await waitFor(() => expect(accessGroup()?.count).toBe(0));
+  });
+
   it("PUTs the chosen relation when access is granted or changed, not DELETE", async () => {
     renderSection();
     const select = await screen.findByLabelText("Access for bob");
 
     fireEvent.change(select, { target: { value: "owner" } });
+    await save();
 
     await waitFor(() =>
       expect(api.put).toHaveBeenCalledWith("/api/projects/p1/members", {
@@ -95,6 +142,7 @@ describe("GeneralSection member access", () => {
     const select = await screen.findByLabelText("Access for alice");
 
     fireEvent.change(select, { target: { value: "none" } });
+    await save();
 
     await waitFor(() =>
       expect(api.del).toHaveBeenCalledWith("/api/projects/p1/members?userId=u1")
@@ -107,6 +155,7 @@ describe("GeneralSection member access", () => {
     const select = await screen.findByLabelText("Access for bob");
 
     fireEvent.change(select, { target: { value: "owner" } });
+    await save();
 
     await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2));
     expect(toast).toHaveBeenCalledWith("Access updated", "success");
@@ -123,6 +172,7 @@ describe("GeneralSection member access", () => {
     api.get.mockRejectedValueOnce(new Error("network down"));
 
     fireEvent.change(select, { target: { value: "owner" } });
+    await save();
 
     await waitFor(() => expect(toast).toHaveBeenCalledWith(LIST_REFRESH_FAILED, "error"));
     expect(toast).toHaveBeenCalledWith("Access updated", "success");
@@ -137,6 +187,7 @@ describe("GeneralSection member access", () => {
     api.get.mockRejectedValueOnce(new Error("network down"));
 
     fireEvent.change(select, { target: { value: "member" } });
+    await save();
 
     await waitFor(() => expect(toast).toHaveBeenCalledWith(LIST_REFRESH_FAILED, "error"));
     expect(select).toHaveProperty("value", "member");
@@ -155,6 +206,7 @@ describe("GeneralSection member access", () => {
     api.get.mockRejectedValueOnce(new Error("network down"));
 
     fireEvent.change(select, { target: { value: "none" } });
+    await save();
 
     await waitFor(() => expect(toast).toHaveBeenCalledWith(LIST_REFRESH_FAILED, "error"));
     expect(screen.queryByLabelText("Access for alice")).toBeNull();
@@ -189,10 +241,14 @@ describe("GeneralSection member access", () => {
     api.put.mockRejectedValueOnce(new Error("nope"));
 
     fireEvent.change(select, { target: { value: "owner" } });
+    await save();
 
-    await waitFor(() => expect(toast).toHaveBeenCalledWith("nope", "error"));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("bob: nope", "error"));
     expect(toast).not.toHaveBeenCalledWith("Access updated", "success");
     expect(toast).not.toHaveBeenCalledWith(LIST_REFRESH_FAILED, "error");
+    // and it is still there to save again
+    expect(select).toHaveProperty("value", "owner");
+    expect(accessGroup()?.count).toBe(1);
   });
 
   // A write that failed must not be followed by the read at all: the list on screen is still true
@@ -203,8 +259,9 @@ describe("GeneralSection member access", () => {
     api.put.mockRejectedValueOnce(new Error("nope"));
 
     fireEvent.change(select, { target: { value: "owner" } });
+    await save();
 
-    await waitFor(() => expect(toast).toHaveBeenCalledWith("nope", "error"));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("bob: nope", "error"));
     expect(api.get).toHaveBeenCalledTimes(1);
   });
 
@@ -214,11 +271,48 @@ describe("GeneralSection member access", () => {
     const select = await screen.findByLabelText("Access for bob");
 
     fireEvent.change(select, { target: { value: "owner" } });
+    await save();
 
     await waitFor(() =>
-      expect(toast).toHaveBeenCalledWith("A board must keep at least one owner", "error")
+      expect(toast).toHaveBeenCalledWith("bob: A board must keep at least one owner", "error")
     );
     expect(toast).not.toHaveBeenCalledWith("Failed to update access", "error");
+  });
+
+  // Handing the board over in one save: were the demotion sent first, the server would refuse it
+  // as the last owner stepping down
+  it("grants ownership before it takes any away", async () => {
+    renderSection();
+    fireEvent.change(await screen.findByLabelText("Access for alice"), {
+      target: { value: "member" },
+    });
+    fireEvent.change(screen.getByLabelText("Access for bob"), { target: { value: "owner" } });
+    await waitFor(() => expect(accessGroup()?.count).toBe(2));
+
+    await save();
+
+    expect(api.put.mock.calls.map(([, body]) => body)).toEqual([
+      { userId: "u2", relation: "owner" },
+      { userId: "u1", relation: "member" },
+    ]);
+  });
+
+  it("keeps a refused change pending while the others land", async () => {
+    api.put.mockImplementation(async (_url: string, body: { userId: string }) => {
+      if (body.userId === "u1") throw new Error("A board must keep at least one owner");
+      return { ok: true };
+    });
+    renderSection();
+    fireEvent.change(await screen.findByLabelText("Access for alice"), {
+      target: { value: "member" },
+    });
+    fireEvent.change(screen.getByLabelText("Access for bob"), { target: { value: "owner" } });
+
+    await save();
+
+    await waitFor(() => expect(accessGroup()?.count).toBe(1));
+    expect(screen.getByLabelText("Access for alice")).toHaveProperty("value", "member");
+    expect(toast).toHaveBeenCalledWith("Alice A: A board must keep at least one owner", "error");
   });
 });
 
@@ -271,23 +365,25 @@ describe("GeneralSection add person", () => {
     expect(await screen.findByText("No matches")).toBeTruthy();
   });
 
-  it("choosing a candidate grants member access, refreshes the list, and clears the search", async () => {
+  it("choosing a candidate lists them as a member to be saved, and clears the search", async () => {
     mockCandidates([{ _id: "u9", username: "dee", fullName: "Dee D" }]);
     renderSection();
     const input = (await screen.findByLabelText("Add person")) as HTMLInputElement;
 
     fireEvent.change(input, { target: { value: "dee" } });
-    const candidate = await screen.findByText("Dee D");
-    fireEvent.click(candidate);
+    fireEvent.click(await screen.findByRole("button", { name: "Dee D" }));
 
-    await waitFor(() =>
-      expect(api.put).toHaveBeenCalledWith("/api/projects/p1/members", {
-        userId: "u9",
-        relation: "member",
-      })
-    );
     await waitFor(() => expect(input.value).toBe(""));
-    expect(screen.queryByText("Dee D")).toBeNull();
+    expect(screen.getByLabelText("Access for dee")).toHaveProperty("value", "member");
+    expect(accessGroup()?.count).toBe(1);
+    expect(api.put).not.toHaveBeenCalled();
+
+    await save();
+
+    expect(api.put).toHaveBeenCalledWith("/api/projects/p1/members", {
+      userId: "u9",
+      relation: "member",
+    });
   });
 
   it("grants through PUT, not DELETE, when a candidate is chosen", async () => {
@@ -296,9 +392,39 @@ describe("GeneralSection add person", () => {
     const input = await screen.findByLabelText("Add person");
 
     fireEvent.change(input, { target: { value: "dee" } });
-    fireEvent.click(await screen.findByText("Dee D"));
+    fireEvent.click(await screen.findByRole("button", { name: "Dee D" }));
+    await waitFor(() => expect(accessGroup()?.count).toBe(1));
+    await save();
 
-    await waitFor(() => expect(api.put).toHaveBeenCalled());
+    expect(api.put).toHaveBeenCalled();
     expect(api.del).not.toHaveBeenCalled();
+  });
+
+  it("drops somebody added but not yet saved on Discard", async () => {
+    mockCandidates([{ _id: "u9", username: "dee", fullName: "Dee D" }]);
+    renderSection();
+    const input = await screen.findByLabelText("Add person");
+
+    fireEvent.change(input, { target: { value: "dee" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Dee D" }));
+    await screen.findByLabelText("Access for dee");
+
+    act(() => accessGroup().discard());
+
+    await waitFor(() => expect(screen.queryByLabelText("Access for dee")).toBeNull());
+    expect(accessGroup()?.count).toBe(0);
+  });
+
+  it("drops somebody added but not yet saved when set back to No access", async () => {
+    mockCandidates([{ _id: "u9", username: "dee", fullName: "Dee D" }]);
+    renderSection();
+    const input = await screen.findByLabelText("Add person");
+
+    fireEvent.change(input, { target: { value: "dee" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Dee D" }));
+    fireEvent.change(await screen.findByLabelText("Access for dee"), { target: { value: "none" } });
+
+    await waitFor(() => expect(screen.queryByLabelText("Access for dee")).toBeNull());
+    expect(accessGroup()?.count).toBe(0);
   });
 });

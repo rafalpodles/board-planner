@@ -11,6 +11,7 @@ const ACTIONS = [
   "template_removed",
   "template_updated",
   "member_added",
+  "member_role_changed",
   "member_removed",
   "task_created",
   "task_deleted",

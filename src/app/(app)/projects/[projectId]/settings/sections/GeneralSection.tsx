@@ -19,6 +19,25 @@ import { SectionProps } from "./types";
 // Matches the API, which refuses anything shorter
 const MIN_QUERY = 2;
 
+type Access = GrantRelation | "none";
+
+// Grants before removals, so handing ownership over and stepping down in one save never leaves the
+// board without an owner in between — the server refuses that step
+const APPLY_ORDER: Record<Access, number> = { owner: 0, member: 1, none: 2 };
+
+function withAccessApplied(
+  rows: ApiProjectMember[],
+  id: string,
+  relation: Access,
+  newcomer: ApiMemberCandidate | undefined
+): ApiProjectMember[] {
+  if (relation === "none") return rows.filter((m) => m._id !== id);
+  if (rows.some((m) => m._id === id)) {
+    return rows.map((m) => (m._id === id ? { ...m, relation } : m));
+  }
+  return newcomer ? [...rows, { ...newcomer, relation, instanceAdmin: false }] : rows;
+}
+
 export function GeneralSection({ projectId, project, replaceProject, stats }: SectionProps) {
   const api = useApi();
   const router = useRouter();
@@ -88,33 +107,67 @@ export function GeneralSection({ projectId, project, replaceProject, stats }: Se
     }
   );
 
-  async function setRelation(userId: string, relation: GrantRelation | "none") {
-    try {
-      if (relation === "none") {
-        await api.del(`/api/projects/${projectId}/members?userId=${userId}`);
-      } else {
-        await api.put(`/api/projects/${projectId}/members`, { userId, relation });
+  // Only what differs from the list on screen: staged like the rest of the page (BP-741)
+  const [accessEdits, setAccessEdits] = useState<Record<string, Access>>({});
+  const [newcomers, setNewcomers] = useState<Record<string, ApiMemberCandidate>>({});
+
+  function chooseAccess(userId: string, relation: Access) {
+    const current = members.find((m) => m._id === userId)?.relation ?? "none";
+    setAccessEdits((prev) => {
+      const next = { ...prev };
+      if (relation === current) delete next[userId];
+      else next[userId] = relation;
+      return next;
+    });
+  }
+
+  function addMember(candidate: ApiMemberCandidate) {
+    setNewcomers((prev) => ({ ...prev, [candidate._id]: candidate }));
+    chooseAccess(candidate._id, "member");
+    setCandidateQuery("");
+    setCandidates([]);
+  }
+
+  function nameOf(userId: string) {
+    const person = members.find((m) => m._id === userId) ?? newcomers[userId];
+    return person ? person.fullName || person.username : userId;
+  }
+
+  async function saveAccess() {
+    const sent = Object.entries(accessEdits).sort(
+      ([, a], [, b]) => APPLY_ORDER[a] - APPLY_ORDER[b]
+    );
+    const refused: string[] = [];
+    let landed = 0;
+
+    for (const [userId, relation] of sent) {
+      try {
+        if (relation === "none") {
+          await api.del(`/api/projects/${projectId}/members?userId=${userId}`);
+        } else {
+          await api.put(`/api/projects/${projectId}/members`, { userId, relation });
+        }
+      } catch (err) {
+        refused.push(`${nameOf(userId)}: ${err instanceof Error ? err.message : "Failed to update access"}`);
+        continue;
       }
-    } catch (err) {
-      toast(err instanceof Error ? err.message : "Failed to update access", "error");
-      return;
+      landed++;
+      setAccessEdits((prev) => {
+        if (prev[userId] !== relation) return prev;
+        const next = { ...prev };
+        delete next[userId];
+        return next;
+      });
+      // The row carries what the server did even if the re-read below fails. A revocation drops
+      // it: `GET …/members` never returns a non-admin holding no relation (BP-592)
+      setMembers((prev) => withAccessApplied(prev, userId, relation, newcomers[userId]));
     }
 
-    // A row already on screen carries the change the server made, so a refresh that fails leaves
-    // it right rather than showing the relation that was replaced — the select reads from this
-    // list. Somebody added from the search has no row to patch; the refresh message covers that.
-    //
-    // A revocation removes the row: `GET …/members` cannot return a non-admin holding no relation,
-    // so nulling it left a live access select on somebody the endpoint could not produce (BP-592)
-    setMembers((prev) =>
-      prev.flatMap((m) => {
-        if (m._id !== userId) return [m];
-        return relation === "none" ? [] : [{ ...m, relation }];
-      })
-    );
-    toast("Access updated", "success");
+    if (refused.length > 0) toast(refused.join(" · "), "error");
+    if (landed === 0) return;
+    if (refused.length === 0) toast("Access updated", "success");
 
-    // Its own failure is not the write's: the access change landed
+    // Its own failure is not the write's: the access change landed (BP-583)
     try {
       setMembers(await api.get(`/api/projects/${projectId}/members`));
     } catch {
@@ -122,11 +175,19 @@ export function GeneralSection({ projectId, project, replaceProject, stats }: Se
     }
   }
 
-  async function addMember(userId: string) {
-    await setRelation(userId, "member");
-    setCandidateQuery("");
-    setCandidates([]);
-  }
+  useDirtyGroup(
+    {
+      id: "general-access",
+      section: "general",
+      label: "General · Access",
+      count: Object.keys(accessEdits).length,
+    },
+    { save: saveAccess, discard: () => setAccessEdits({}) }
+  );
+
+  const pendingNewcomers = Object.keys(accessEdits)
+    .filter((id) => !members.some((m) => m._id === id) && newcomers[id])
+    .map((id): ApiProjectMember => ({ ...newcomers[id], relation: null, instanceAdmin: false }));
 
   async function handleDelete() {
     try {
@@ -196,7 +257,7 @@ export function GeneralSection({ projectId, project, replaceProject, stats }: Se
                     <button
                       key={c._id}
                       type="button"
-                      onClick={() => addMember(c._id)}
+                      onClick={() => addMember(c)}
                       className="focus-ring block w-full px-3 py-2 text-left text-sm hover:bg-bg-hover"
                     >
                       {c.fullName || c.username}
@@ -208,16 +269,18 @@ export function GeneralSection({ projectId, project, replaceProject, stats }: Se
           </div>
 
           <div className="space-y-2">
-            {members.map((m) => (
+            {[...members, ...pendingNewcomers].map((m) => (
               <ListRow key={m._id}>
                 <span className="flex-1 text-sm font-medium">{m.fullName || m.username}</span>
                 {m.instanceAdmin ? (
                   <span className="text-sm text-text-muted">Instance admin</span>
                 ) : (
                   <select
-                    value={m.relation ?? "none"}
-                    onChange={(e) => setRelation(m._id, e.target.value as GrantRelation | "none")}
-                    className="focus-ring rounded-lg border border-border bg-bg-input min-h-11 px-2 py-1.5 text-sm sm:min-h-0"
+                    value={accessEdits[m._id] ?? m.relation ?? "none"}
+                    onChange={(e) => chooseAccess(m._id, e.target.value as Access)}
+                    className={`focus-ring rounded-lg border bg-bg-input min-h-11 px-2 py-1.5 text-sm sm:min-h-0 ${
+                      m._id in accessEdits ? "border-warning/60" : "border-border"
+                    }`}
                     aria-label={`Access for ${m.username}`}
                   >
                     <option value="none">No access</option>
