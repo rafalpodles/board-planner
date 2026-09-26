@@ -227,7 +227,12 @@ describe("GET /api/pm/oauth/callback — storing the connection", () => {
 
     expect(res.headers.get("location")).toBe("/projects/p1/settings?mcp_oauth=ok");
     expect(Project.findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: "p1", "pm.mcpServers": { $elemMatch: { name: "notion", "oauth.clientId": "c1" } } },
+      {
+        _id: "p1",
+        "pm.mcpServers": {
+          $elemMatch: { name: "notion", url: "https://mcp.notion.com/mcp", "oauth.clientId": "c1" },
+        },
+      },
       {
         $set: {
           "pm.mcpServers.$.oauth.accessToken": "access",
@@ -266,7 +271,7 @@ describe("GET /api/pm/oauth/callback — storing the connection", () => {
     );
   });
 
-  it("stores nothing and records nothing when the client changed during the exchange", async () => {
+  it("stores nothing and records nothing when the client or the address changed during the exchange", async () => {
     await stored({ status: "unconfigured" }, null);
 
     const res = await approve();

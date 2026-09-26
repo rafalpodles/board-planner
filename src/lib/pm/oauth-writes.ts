@@ -1,9 +1,10 @@
 import { Project } from "@/models/project";
 
-// Scoped to the client the caller read: a client changed meanwhile has reset these fields itself
+// Scoped to the address and the client the caller read: a server moved meanwhile is another
+// server, and a client changed meanwhile has reset these fields itself (BP-315)
 export function writeServerOauth(
   projectId: string,
-  server: { name: string; oauth?: { clientId?: string } | null },
+  server: { name: string; url: string; oauth?: { clientId?: string } | null },
   fields: Record<string, unknown>
 ) {
   const clientId = server.oauth?.clientId;
@@ -11,7 +12,11 @@ export function writeServerOauth(
     {
       _id: projectId,
       "pm.mcpServers": {
-        $elemMatch: { name: server.name, "oauth.clientId": clientId ? clientId : { $in: ["", null] } },
+        $elemMatch: {
+          name: server.name,
+          url: server.url,
+          "oauth.clientId": clientId ? clientId : { $in: ["", null] },
+        },
       },
     },
     {

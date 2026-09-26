@@ -73,17 +73,20 @@ beforeEach(() => {
   // with that name whose client is still the one the caller read
   projectFindOneAndUpdate.mockImplementation(
     (
-      filter: { "pm.mcpServers": { $elemMatch: { name: string; "oauth.clientId": unknown } } },
+      filter: { "pm.mcpServers": { $elemMatch: { name: string; url: string; "oauth.clientId": unknown } } },
       update: { $set: Record<string, unknown> }
     ) => {
       const before = stored && copy(stored);
-      const { name, "oauth.clientId": clientId } = filter["pm.mcpServers"].$elemMatch;
+      const { name, url, "oauth.clientId": clientId } = filter["pm.mcpServers"].$elemMatch;
       const server = stored?.pm.mcpServers.find(
+        // A condition the filter leaves out constrains nothing, as in MongoDB
         (s) =>
           s.name === name &&
-          (typeof clientId === "string"
-            ? s.oauth.clientId === clientId
-            : s.oauth.clientId === "" || s.oauth.clientId === undefined)
+          (url === undefined || s.url === url) &&
+          (clientId === undefined ||
+            (typeof clientId === "string"
+              ? s.oauth.clientId === clientId
+              : s.oauth.clientId === "" || s.oauth.clientId === undefined))
       );
       if (!server) return { lean: () => Promise.resolve(null) };
       for (const [path, value] of Object.entries(update.$set)) {
@@ -339,6 +342,29 @@ describe("POST /api/projects/[projectId]/pm/mcp-oauth/start — what it writes a
     expect(server.oauth.tokenEndpoint).toBeUndefined();
     expect(pmOauthStateCreate).not.toHaveBeenCalled();
     expect(logProjectAudit).not.toHaveBeenCalled();
+  });
+
+  // Review: a server moved to another address while it was connecting took the old provider's
+  // client and endpoints, and the callback then stored that provider's token on the new address
+  it("stores nothing when the server was moved to another address while it was connecting", async () => {
+    const server = storeServer({ clientId: "", status: "unconfigured" });
+    discoverOauthConfig.mockImplementationOnce(async () => {
+      server.url = "https://moved.example/mcp";
+      server.oauth = {};
+      return {
+        authorizationEndpoint: "https://provider.example/authorize",
+        tokenEndpoint: "https://provider.example/token",
+        registrationEndpoint: "https://provider.example/register",
+        scopes: [],
+        tokenAuthMethod: "none",
+      };
+    });
+
+    const res = await POST(request(), ctx());
+
+    expect(res.status).toBe(409);
+    expect(server.oauth).toEqual({});
+    expect(pmOauthStateCreate).not.toHaveBeenCalled();
   });
 
   it("records a client it registered, and a connection it dropped to do so", async () => {
