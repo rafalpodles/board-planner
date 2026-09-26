@@ -57,6 +57,7 @@ const OWNED: readonly { prefix: string; groups: readonly GroupName[] }[] = [
   // every settings page, so it is a partial signal here, never the whole story for any one of them.
   { prefix: "src/app/(app)/settings/", groups: ["project"] },
   { prefix: "src/app/(app)/settings/workers/", groups: ["automation", "people"] },
+  { prefix: "src/app/(app)/settings/machines/", groups: ["automation"] },
   { prefix: "src/app/(app)/settings/agents/", groups: ["project", "automation", "people"] },
   { prefix: "src/app/(app)/settings/profile/", groups: ["people", "project", "automation"] },
   { prefix: "src/app/(app)/settings/users/", groups: ["people", "automation"] },
@@ -71,7 +72,7 @@ const OWNED: readonly { prefix: string; groups: readonly GroupName[] }[] = [
   { prefix: "src/app/forgot/", groups: ["people"] },
   { prefix: "src/app/reset/", groups: ["people"] },
   { prefix: "src/app/confirm-email/", groups: ["people"] },
-  { prefix: "src/app/enrol/", groups: ["people"] },
+  { prefix: "src/app/enrol/", groups: ["automation"] },
   { prefix: "src/app/oauth/", groups: ["people", "project"] },
 
   // API routes
@@ -112,6 +113,7 @@ const OWNED: readonly { prefix: string; groups: readonly GroupName[] }[] = [
   { prefix: "src/app/api/tokens/", groups: ["project"] },
   { prefix: "src/app/api/auth/", groups: ["people"] },
   { prefix: "src/app/api/users/", groups: ["people"] },
+  { prefix: "src/app/api/users/me/machines/", groups: ["automation"] },
 ];
 
 // A file under any of these can affect every group, so the OWNED table must not be trusted for it:
