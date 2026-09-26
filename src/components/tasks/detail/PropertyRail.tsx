@@ -186,8 +186,8 @@ function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }
     case "machine-stale":
       return (
         <>
-          Your machine with this board&apos;s repository has not reported in for over five minutes,
-          or is switched off. <MachineLink>Check it is running</MachineLink>
+          Your machine with this board&apos;s repository has not reported in for over five minutes.{" "}
+          <MachineLink>Check it is running</MachineLink>
         </>
       );
     case "machine-disabled":

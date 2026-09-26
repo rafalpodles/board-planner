@@ -147,18 +147,20 @@ describe("machines offering this repository", () => {
 
   // BP-762. Switched off, it is refused its heartbeat, and read here as not reporting
   it("says a machine an instance admin switched off is switched off, not that it has gone quiet", async () => {
-    await listed([worker({ enabled: false, stale: true })]);
+    await listed([worker({ stale: true, condition: { state: "disabled", haltedBy: null } })]);
 
     expect(screen.getByTestId("offering-machine-state").textContent).toBe("switched off");
   });
 
+  // The server's reading, the one the task rail and Settings → Machines use: a machine's own report
+  // while it is fresh, and an older worker's acknowledged command otherwise
   it.each([
-    ["pause", "paused"],
-    ["stop", "stopped"],
-  ] as const)("says a machine that reports a %s is %s, whoever made it", async (command, label) => {
-    await listed([worker({ enabled: true, halt: { paused: true, by: "machine", command } })]);
+    ["paused", "machine"],
+    ["stopped", "board"],
+  ] as const)("says a machine the server reads as %s is %s, whoever halted it", async (state, haltedBy) => {
+    await listed([worker({ condition: { state, haltedBy } })]);
 
-    expect(screen.getByTestId("offering-machine-state").textContent).toBe(label);
+    expect(screen.getByTestId("offering-machine-state").textContent).toBe(state);
   });
 });
 

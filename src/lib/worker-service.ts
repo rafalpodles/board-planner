@@ -11,7 +11,7 @@ import { ensureWorkerUser } from "@/lib/worker-user";
 import { accessibleProjectIds } from "@/lib/grants";
 import { User } from "@/models/user";
 import { isWorkerLockedByInstance, projectRunsWorkers } from "@/lib/worker-gate";
-import type { MachineState, WorkerHalt, WorkerHaltSource } from "@/types";
+import type { ApiMachineCondition, MachineState, WorkerHalt, WorkerHaltSource } from "@/types";
 import { bindingErrorFor } from "@/lib/binding-error";
 
 export const PROTOCOL_VERSION = 1;
@@ -218,10 +218,7 @@ export interface MachineReadiness {
 
 type ServedProject = MatchableProject & { _id?: unknown };
 
-export interface MachineCondition {
-  state: "disabled" | "stale" | "paused" | "stopped" | "live";
-  haltedBy: WorkerHaltSource | null;
-}
+export type MachineCondition = ApiMachineCondition;
 
 /**
  * Whether a machine is taking work at all, whatever project is asking. Switched off comes first: it
@@ -644,6 +641,7 @@ export function toApiWorker(
     commandIssuedAt: worker.commandIssuedAt ? new Date(worker.commandIssuedAt).toISOString() : null,
     commandAckedAt: worker.commandAckedAt ? new Date(worker.commandAckedAt).toISOString() : null,
     halt: halt ? { paused: halt.paused, by: halt.by ?? null, command: halt.command ?? null } : null,
+    condition: machineCondition(worker, now),
     createdAt: new Date(worker.createdAt).toISOString(),
     updatedAt: new Date(worker.updatedAt).toISOString(),
     stale,

@@ -1104,6 +1104,10 @@ describe("the hand-over notice, with the board judged too", () => {
     withBoard({ machine: "stale" });
 
     expect(notice().dataset.reason).toBe("machine-stale");
+    // Switched off by an instance admin has its own sentence since BP-762
+    expect(notice().textContent).toBe(
+      "Nothing will run this yet. Your machine with this board's repository has not reported in for over five minutes. Check it is running"
+    );
     expect(screen.getByRole("link", { name: "Check it is running" }).getAttribute("href")).toBe(
       "https://board-planner.com/docs/ai/execution-workers/#setting-one-up"
     );

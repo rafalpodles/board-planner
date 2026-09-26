@@ -1113,4 +1113,19 @@ describe("the halt the fleet console is sent", () => {
   it("is nothing once the report is older than a heartbeat can be late", () => {
     expect(toApiWorker(doc(new Date(NOW.getTime() - WORKER_STALE_MS - 1000)), NOW).halt).toBeNull();
   });
+
+  // One reading for every screen that says what a machine is doing, the project list among them
+  it("comes with the machine's condition, read the way the task reads it", () => {
+    expect(toApiWorker(doc(new Date(NOW.getTime() - 1000)), NOW).condition).toEqual({
+      state: "paused",
+      haltedBy: "machine",
+    });
+    const older = {
+      ...(doc(new Date(NOW.getTime() - WORKER_STALE_MS - 1000)) as object),
+      command: "stop",
+      commandIssuedAt: new Date(NOW.getTime() - 60_000),
+      commandAckedAt: new Date(NOW.getTime() - 30_000),
+    };
+    expect(toApiWorker(older as never, NOW).condition).toEqual({ state: "stopped", haltedBy: "board" });
+  });
 });

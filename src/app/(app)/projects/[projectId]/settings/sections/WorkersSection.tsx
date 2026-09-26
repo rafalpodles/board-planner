@@ -242,10 +242,11 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
                 ) : (
                   <ul className="border border-border rounded-lg divide-y divide-border">
                     {offering.map((w) => {
-                      const off = w.enabled === false;
-                      const quiet = off || w.stale;
+                      const state = w.condition?.state ?? (w.stale ? "stale" : "live");
+                      const off = state === "disabled";
+                      const quiet = off || state === "stale";
                       const refused = quiet ? "" : bindingErrorFor(w.bindingError, String(project._id));
-                      const halted = quiet || !w.halt?.paused ? "" : w.halt.command === "stop" ? "stopped" : "paused";
+                      const halted = state === "paused" || state === "stopped" ? state : "";
                       return (
                         <li
                           key={w._id}

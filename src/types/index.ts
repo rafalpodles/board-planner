@@ -676,6 +676,12 @@ export interface ApiWorkerHalt {
   command: "pause" | "stop" | null;
 }
 
+/** Whether a machine is taking work at all, whatever project is asking */
+export interface ApiMachineCondition {
+  state: "disabled" | "stale" | "paused" | "stopped" | "live";
+  haltedBy: WorkerHaltSource | null;
+}
+
 export interface WorkerHalt extends ApiWorkerHalt {
   reportedAt: Date;
 }
@@ -700,6 +706,7 @@ export interface ApiWorker {
   commandIssuedAt: string | null;
   commandAckedAt: string | null;
   halt: ApiWorkerHalt | null;
+  condition: ApiMachineCondition;
   createdAt: string;
   updatedAt: string;
   stale: boolean;
@@ -1785,7 +1792,7 @@ export interface ApiMyMachine {
   host: string;
   version: string;
   lastSeenAt: string | null;
-  state: "disabled" | "stale" | "paused" | "stopped" | "live";
+  state: ApiMachineCondition["state"];
   haltedBy: WorkerHaltSource | null;
   checkouts: number;
 }
