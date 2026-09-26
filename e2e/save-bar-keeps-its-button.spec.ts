@@ -139,10 +139,12 @@ for (const [width, height] of [
  * sticks.
  */
 // 1280×480 scrolls, but the settings nav is taller than the section; at 1440×540 nothing scrolls
-// and the section ends where the bar used to rest in the launcher's band
+// and the section ends where the bar used to rest in the launcher's band; 390×800 is the same on a
+// phone, where the sections are pills instead of a sidebar
 for (const [width, height] of [
   [1280, 480],
   [1440, 540],
+  [390, 800],
 ] as const) {
   test(`on a short section the launcher clears Discard and Save changes at ${width}×${height}`, async ({
     page,
@@ -150,7 +152,8 @@ for (const [width, height] of [
     await page.setViewportSize({ width, height });
     await signIn(page);
     await makeDirty(page);
-    await page.locator('[data-settings-nav="sidebar"]').getByRole("button", { name: "Audit log" }).click();
+    const nav = width < 768 ? '[data-settings-nav="pills"]' : '[data-settings-nav="sidebar"]';
+    await page.locator(nav).getByRole("button", { name: "Audit log" }).click();
     await expect(page.getByRole("heading", { name: "Audit log", level: 2 })).toBeVisible();
 
     await scrollToTheEnd(page);

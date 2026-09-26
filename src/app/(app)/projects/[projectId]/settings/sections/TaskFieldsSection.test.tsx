@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { useState } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render as rtlRender, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { render as rtlRender, screen, cleanup, fireEvent, waitFor, act } from "@testing-library/react";
 import { TaskFieldsSection } from "./TaskFieldsSection";
 import { SettingsProvider, useDirtyRegistry } from "@/components/settings/settings-context";
 import { ApiCustomField, ApiProject } from "@/types";
@@ -409,6 +409,46 @@ describe("TaskFieldsSection estimate field", () => {
     expect((screen.getByLabelText("Estimate field") as HTMLSelectElement).value).toBe(numberFieldId);
     expect(screen.getByTestId("saved-estimate-field-id").textContent).toBe(numberFieldId);
     expect(api.put).not.toHaveBeenCalled();
+  });
+
+  it("falls back to a choice saved during this visit, not to the one the page opened with", async () => {
+    api.put.mockResolvedValue({});
+    api.del.mockResolvedValue([twoNumericFields[0]]);
+    rtlRender(<DirtyHarness initial={{ ...project, customFields: twoNumericFields }} />);
+    const select = screen.getByLabelText("Estimate field") as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: numberFieldId } });
+    fireEvent.click(screen.getByRole("button", { name: "Save all" }));
+    await waitFor(() => expect(screen.getByTestId("saved-estimate-field-id").textContent).toBe(numberFieldId));
+
+    fireEvent.change(select, { target: { value: otherFieldId } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[1]);
+    fireEvent.click(await screen.findByRole("button", { name: "Delete field" }));
+
+    await waitFor(() => expect(screen.getByTestId("pending-total").textContent).toBe("0"));
+    expect(select.value).toBe(numberFieldId);
+  });
+
+  // The fallback is read after the delete's await, so a save landing during it must count
+  it("follows a choice saved while the delete was still out", async () => {
+    let answerDelete!: (fields: unknown) => void;
+    api.del.mockImplementation(() => new Promise((resolve) => (answerDelete = resolve)));
+    api.put.mockResolvedValue({});
+    rtlRender(
+      <DirtyHarness initial={{ ...project, customFields: twoNumericFields, estimateFieldId: numberFieldId }} />
+    );
+    const select = screen.getByLabelText("Estimate field") as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: otherFieldId } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[1]);
+    fireEvent.click(await screen.findByRole("button", { name: "Delete field" }));
+    await waitFor(() => expect(api.del).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("button", { name: "Save all" }));
+    await waitFor(() => expect(screen.getByTestId("saved-estimate-field-id").textContent).toBe(otherFieldId));
+    await act(async () => answerDelete([twoNumericFields[0]]));
+
+    await waitFor(() => expect(screen.getByTestId("saved-estimate-field-id").textContent).toBe(""));
+    expect(select.value).toBe("");
+    expect(screen.getByTestId("pending-total").textContent).toBe("0");
   });
 
   it("leaves a saved choice and an unsaved one alone when another field is removed", async () => {

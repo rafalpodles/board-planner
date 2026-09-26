@@ -321,10 +321,10 @@ describe("where a toast lands", () => {
   });
 
   /**
-   * BP-625. `SaveBar` and `MobileCommentBar` are both `sticky bottom-0`, so their place in the
-   * viewport changes when their scrollport reaches the point where they un-stick. That is no
-   * resize and no mutation — the bar's size and the DOM are both untouched — so nothing else here
-   * notices, and the offset computed when the toast was raised is wrong from then on.
+   * BP-625. A `sticky bottom-0` bar whose column ends before its scrollport does moves when the
+   * scroll reaches the point where it un-sticks. That is no resize and no mutation — the bar's size
+   * and the DOM are both untouched — so nothing else here notices, and the offset computed when
+   * the toast was raised is wrong from then on.
    */
   it("re-places when a sticky bar moves without resizing or changing the DOM", async () => {
     stateViewport(800);

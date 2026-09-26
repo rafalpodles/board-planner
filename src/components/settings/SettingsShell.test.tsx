@@ -39,6 +39,7 @@ describe("SettingsShell", () => {
     const bar = screen.getByTestId("bar");
     const column = bar.parentElement!;
     expect(column.contains(screen.getByText("body"))).toBe(true);
+    expect(column.parentElement!.contains(sidebar())).toBe(true);
     expect(column.lastElementChild).toBe(bar);
     expect(bar.previousElementSibling).toBe(screen.getByTestId("bottom-bar-spacer"));
     expect(screen.getByTestId("bottom-bar-spacer").className).toMatch(/\bflex-1\b/);
@@ -52,6 +53,8 @@ describe("SettingsShell", () => {
     );
     const column = screen.getByTestId("bar").parentElement!;
     for (let el: Element | null = column; el && el !== container; el = el.parentElement) {
+      expect(el.className, el.outerHTML.slice(0, 80)).toMatch(/(^|\s)flex(\s|$)/);
+      expect(el.className, el.outerHTML.slice(0, 80)).toMatch(/\bflex-col\b/);
       expect(el.className, el.outerHTML.slice(0, 80)).toMatch(/\bflex-1\b/);
       expect(el.className).not.toMatch(/\bpb-/);
     }

@@ -43,7 +43,7 @@ describe("SaveBar and the strip below it", () => {
 // BP-783: split, a narrow bar kept Discard at the right of its top row, under the raised PM launcher.
 // Where the pair lands at each width is measured in e2e/save-bar-keeps-its-button.spec.ts.
 describe("SaveBar's buttons", () => {
-  it("wrap as one pair, after a spacer that stays behind on the row above", () => {
+  it("are one pair, after a spacer that is not part of it", () => {
     render(<SaveBar pending={[group]} total={1} onGoToSection={vi.fn()} />);
 
     const discard = screen.getByRole("button", { name: "Discard" });
