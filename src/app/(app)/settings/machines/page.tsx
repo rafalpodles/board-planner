@@ -103,7 +103,7 @@ export default function MachinesPage() {
                 data-testid="my-machine"
                 className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 text-sm"
               >
-                <div className="min-w-0 flex-1">
+                <div className="min-w-0 basis-full sm:basis-0 sm:flex-1">
                   <p className="break-words font-medium">{machine.name}</p>
                   <p className="break-words text-xs text-text-muted">
                     {machine.host || "—"} ·{" "}
