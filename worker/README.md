@@ -312,8 +312,9 @@ the queue with the attempt counted, so a supervisor restarting in a loop cannot 
   Refusing alone would only hand the same clone to the next attempt, so the checkout is
   **quarantined**: this machine stops claiming for every project bound to it — the poison is in the
   path's config, not in a project — and the task is handed back with its attempt refunded, because
-  it did nothing wrong. Settings → Workers shows it as a failed check naming the key, and the
-  worker's log says the same thing. The quarantine is deliberately not lifted by the next rebind,
+  it did nothing wrong. The worker's log names the key, and so does the menubar app on that
+  project's row; an instance admin also sees it as a failed check in Settings → Workers. The
+  quarantine is deliberately not lifted by the next rebind,
   because a re-scan reading clean thirty seconds later is exactly what re-planting produces. Remove
   the key, then restart the worker.
 

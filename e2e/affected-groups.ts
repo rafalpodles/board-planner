@@ -79,6 +79,7 @@ const OWNED: readonly { prefix: string; groups: readonly GroupName[] }[] = [
   { prefix: "src/app/api/projects/[projectId]/tasks/", groups: ["tasks"] },
   { prefix: "src/app/api/projects/[projectId]/tasks/[taskId]/gitlab-activity/", groups: ["tasks", "project"] },
   { prefix: "src/app/api/projects/[projectId]/sprints/", groups: ["board"] },
+  { prefix: "src/app/api/projects/[projectId]/handover/", groups: ["tasks"] },
   { prefix: "src/app/api/projects/[projectId]/custom-fields/", groups: ["task-fields", "project"] },
   { prefix: "src/app/api/projects/[projectId]/ai/", groups: ["task-fields"] },
   { prefix: "src/app/api/projects/[projectId]/pm/", groups: ["automation", "project"] },

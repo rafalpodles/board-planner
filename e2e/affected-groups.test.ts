@@ -104,6 +104,10 @@ describe("computeAffectedGroups", () => {
     }
   });
 
+  it("sends the hand-over readiness route to the tasks group, whose task-screen specs read it", () => {
+    expect(computeAffectedGroups(["src/app/api/projects/[projectId]/handover/route.ts"])).toEqual(["tasks"]);
+  });
+
   it("falls back to every group for a non-spec e2e helper file", () => {
     expect(computeAffectedGroups(["e2e/api.ts"])).toEqual([...GROUP_NAMES]);
     expect(computeAffectedGroups(["e2e/groups.ts"])).toEqual([...GROUP_NAMES]);
