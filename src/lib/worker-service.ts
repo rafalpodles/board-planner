@@ -11,7 +11,7 @@ import { ensureWorkerUser } from "@/lib/worker-user";
 import { accessibleProjectIds } from "@/lib/grants";
 import { User } from "@/models/user";
 import { isWorkerLockedByInstance, projectRunsWorkers } from "@/lib/worker-gate";
-import type { MachineState, WorkerHaltSource } from "@/types";
+import type { MachineState, WorkerHalt, WorkerHaltSource } from "@/types";
 import { bindingErrorFor } from "@/lib/binding-error";
 
 export const PROTOCOL_VERSION = 1;
@@ -165,17 +165,31 @@ function haltAcknowledged(worker: ServingMachine): "paused" | "stopped" | null {
   return worker.command === "pause" ? "paused" : "stopped";
 }
 
+// A report is as old as the heartbeat that carried it, so a machine replaced by a worker too old to
+// send one stops refreshing it — and is then read from its command again, not from what it once said
+export function currentHalt(
+  worker: Pick<IWorker, "halt">,
+  now = new Date()
+): WorkerHalt | null {
+  const reportedAt = worker.halt ? new Date(worker.halt.reportedAt).getTime() : NaN;
+  return Number.isFinite(reportedAt) && now.getTime() - reportedAt <= WORKER_STALE_MS
+    ? worker.halt!
+    : null;
+}
+
 // A machine that reports its halt is read from that report, the only place a pause or resume made
 // at the machine shows; one too old to report it, from the command it acknowledged.
 function haltOf(
-  worker: ServingMachine
+  worker: ServingMachine,
+  now: Date
 ): { state: "paused" | "stopped"; by: WorkerHaltSource } | null {
   const acknowledged = haltAcknowledged(worker);
-  if (!worker.halt) return acknowledged ? { state: acknowledged, by: "board" } : null;
-  if (!worker.halt.paused) return null;
+  const halt = currentHalt(worker, now);
+  if (!halt) return acknowledged ? { state: acknowledged, by: "board" } : null;
+  if (!halt.paused) return null;
   return {
-    state: worker.halt.command === "stop" ? "stopped" : "paused",
-    by: worker.halt.by ?? (acknowledged ? "board" : "machine"),
+    state: halt.command === "stop" ? "stopped" : "paused",
+    by: halt.by ?? (acknowledged ? "board" : "machine"),
   };
 }
 
@@ -217,7 +231,7 @@ export interface MachineCondition {
 export function machineCondition(worker: ServingMachine, now = new Date()): MachineCondition {
   if (!worker.enabled) return { state: "disabled", haltedBy: null };
   if (!isLive(worker as IWorker, now)) return { state: "stale", haltedBy: null };
-  const halt = haltOf(worker);
+  const halt = haltOf(worker, now);
   return halt ? { state: halt.state, haltedBy: halt.by } : { state: "live", haltedBy: null };
 }
 
@@ -597,6 +611,7 @@ export function toApiWorker(
 ): ApiWorker {
   const seenAt = worker.lastSeenAt ? new Date(worker.lastSeenAt).getTime() : NaN;
   const stale = !Number.isFinite(seenAt) || now.getTime() - seenAt > WORKER_STALE_MS;
+  const halt = currentHalt(worker, now);
 
   return {
     _id: String(worker._id),
@@ -628,9 +643,7 @@ export function toApiWorker(
     command: worker.command,
     commandIssuedAt: worker.commandIssuedAt ? new Date(worker.commandIssuedAt).toISOString() : null,
     commandAckedAt: worker.commandAckedAt ? new Date(worker.commandAckedAt).toISOString() : null,
-    halt: worker.halt
-      ? { paused: worker.halt.paused, by: worker.halt.by ?? null, command: worker.halt.command ?? null }
-      : null,
+    halt: halt ? { paused: halt.paused, by: halt.by ?? null, command: halt.command ?? null } : null,
     createdAt: new Date(worker.createdAt).toISOString(),
     updatedAt: new Date(worker.updatedAt).toISOString(),
     stale,

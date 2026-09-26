@@ -39,6 +39,7 @@ const {
   PROTOCOL_VERSION,
   WORKER_STALE_MS,
   WORKER_HEARTBEAT_MS,
+  toApiWorker,
 } = await import("./worker-service");
 
 // Reach is resolved from the owner's grants by the caller and handed in, so every case that is not
@@ -1064,11 +1065,52 @@ describe("machineStateFor", () => {
       expect(readiness([commanded("pause")])).toMatchObject({ state: "paused", haltedBy: "board" });
     });
 
+    // A machine whose worker was replaced by one too old to report goes on heartbeating without it,
+    // and what it once said must not stand for ever
+    it("is read from its command again once its report is older than a heartbeat can be late", () => {
+      const long = new Date(NOW.getTime() - WORKER_STALE_MS - 1000);
+      const said = { halt: { paused: true, by: "machine", command: "pause", reportedAt: long } };
+
+      expect(readiness([machine(said)])).toMatchObject({ state: "live", haltedBy: null });
+      expect(readiness([commanded("pause", said)])).toMatchObject({ state: "paused", haltedBy: "board" });
+    });
+
     it("is the board's when it does not say who, while the board's pause stands, and the machine's otherwise", () => {
       expect(readiness([commanded("pause", halted(true, null, "pause"))])).toMatchObject({
         haltedBy: "board",
       });
       expect(readiness([machine(halted(true, null, "pause"))])).toMatchObject({ haltedBy: "machine" });
     });
+  });
+});
+
+// BP-762. The fleet console reads a machine's halt off the same field, and ages it the same way
+describe("the halt the fleet console is sent", () => {
+  const NOW = new Date("2026-09-26T12:00:00Z");
+  const doc = (reportedAt: Date) =>
+    ({
+      _id: "6a7309535eb49af333b85a04",
+      name: "MacBook",
+      host: "ada.local",
+      repos: [],
+      policyOverrides: [],
+      enabled: true,
+      lastSeenAt: NOW,
+      command: "",
+      halt: { paused: true, by: "machine", command: "pause", reportedAt },
+      createdAt: NOW,
+      updatedAt: NOW,
+    }) as never;
+
+  it("is what the machine said on its last heartbeat", () => {
+    expect(toApiWorker(doc(new Date(NOW.getTime() - 1000)), NOW).halt).toEqual({
+      paused: true,
+      by: "machine",
+      command: "pause",
+    });
+  });
+
+  it("is nothing once the report is older than a heartbeat can be late", () => {
+    expect(toApiWorker(doc(new Date(NOW.getTime() - WORKER_STALE_MS - 1000)), NOW).halt).toBeNull();
   });
 });
