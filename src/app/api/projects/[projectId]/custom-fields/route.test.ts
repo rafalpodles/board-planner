@@ -62,10 +62,11 @@ function project(names: string[] = []) {
     async (filter: Record<string, unknown>, update: { $push: { customFields: Field } }) => {
       const full = doc.customFields.length >= MAX_FIELDS;
       if (`customFields.${MAX_FIELDS - 1}` in filter && full) return null;
-      // The name condition, read under the case-insensitive collation the route asks for
-      const taken = (filter.customFields as { $not?: { $elemMatch: { name: string } } } | undefined)?.$not
-        ?.$elemMatch.name;
-      if (taken !== undefined && doc.customFields.some((f) => f.name.toLowerCase() === taken.toLowerCase())) {
+      // The name condition, evaluated the way MongoDB evaluates a $regex
+      const taken = (
+        filter.customFields as { $not?: { $elemMatch: { name: { $regex: string; $options: string } } } } | undefined
+      )?.$not?.$elemMatch.name;
+      if (taken && doc.customFields.some((f) => new RegExp(taken.$regex, taken.$options).test(f.name))) {
         return null;
       }
       doc.customFields = [...doc.customFields, update.$push.customFields];
@@ -200,7 +201,7 @@ describe("POST /api/projects/:projectId/custom-fields", () => {
       {
         _id: PROJECT_ID,
         [`customFields.${MAX_FIELDS - 1}`]: { $exists: false },
-        customFields: { $not: { $elemMatch: { name: "Points" } } },
+        customFields: { $not: { $elemMatch: { name: { $regex: "^Points$", $options: "i" } } } },
       },
       {
         $push: {
@@ -217,7 +218,7 @@ describe("POST /api/projects/:projectId/custom-fields", () => {
           },
         },
       },
-      { returnDocument: "after", collation: { locale: "en", strength: 2 } }
+      { returnDocument: "after" }
     );
   });
 });

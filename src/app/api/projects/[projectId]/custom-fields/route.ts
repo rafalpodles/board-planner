@@ -7,7 +7,7 @@ import { CUSTOM_FIELD_TYPES, CustomFieldType } from "@/types";
 import {
   isOptionField,
   parseOptions,
-  FIELD_NAME_COLLATION,
+  sameFieldName,
   MAX_FIELD_NAME_LENGTH,
 } from "@/lib/custom-fields";
 
@@ -81,7 +81,7 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
     {
       _id: projectId,
       [`customFields.${MAX_FIELDS - 1}`]: { $exists: false },
-      customFields: { $not: { $elemMatch: { name: name.trim() } } },
+      customFields: { $not: { $elemMatch: { name: sameFieldName(name.trim()) } } },
     },
     {
       $push: {
@@ -100,7 +100,7 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
         } as any,
       },
     },
-    { returnDocument: "after", collation: FIELD_NAME_COLLATION }
+    { returnDocument: "after" }
   );
   if (!updated) {
     // A miss is the ceiling, the name taken since the read, or the project deleted in between,
@@ -109,10 +109,10 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
     if (!current) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
-    if ((current.customFields || []).some((f) => f.name.toLowerCase() === name.trim().toLowerCase())) {
-      return NextResponse.json({ error: "Field with this name already exists" }, { status: 409 });
+    if ((current.customFields || []).length >= MAX_FIELDS) {
+      return NextResponse.json({ error: `Maximum ${MAX_FIELDS} custom fields per project` }, { status: 400 });
     }
-    return NextResponse.json({ error: `Maximum ${MAX_FIELDS} custom fields per project` }, { status: 400 });
+    return NextResponse.json({ error: "Field with this name already exists" }, { status: 409 });
   }
 
   logProjectAudit(projectId, user._id, "settings_updated", `Custom field added: ${name.trim()} (${fieldType})`);

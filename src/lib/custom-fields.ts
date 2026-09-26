@@ -5,6 +5,7 @@ import {
   OPTION_FIELD_TYPES,
 } from "@/types";
 import { hasControlCharacters } from "@/lib/identifiers";
+import { escapeRegex } from "@/lib/escape-regex";
 import { echo } from "@/lib/echo";
 
 /** An option value reaches the PM's system prompt, and had no limit at all before BP-321 */
@@ -190,8 +191,10 @@ export function orderedOptions(field: { options?: LegacyOption[] }): ICustomFiel
 
 export const MAX_FIELD_NAME_LENGTH = 100;
 
-// Two fields whose names differ only in case are one name to everything that looks a field up by it
-export const FIELD_NAME_COLLATION = { locale: "en", strength: 2 } as const;
+// The same rule as every other name check here, `toLowerCase()`, spelled for a query
+export function sameFieldName(name: string) {
+  return { $regex: `^${escapeRegex(name)}$`, $options: "i" };
+}
 export const MAX_OPTIONS = 100;
 
 export function optionIdsDropped(existing: ICustomFieldOption[], input: unknown): boolean {

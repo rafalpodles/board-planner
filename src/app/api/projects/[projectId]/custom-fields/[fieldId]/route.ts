@@ -13,7 +13,7 @@ import {
   normalizeOptions,
   optionIdsDropped,
   parseOptions,
-  FIELD_NAME_COLLATION,
+  sameFieldName,
   MAX_FIELD_NAME_LENGTH,
 } from "@/lib/custom-fields";
 
@@ -59,9 +59,12 @@ export const PATCH = withProjectAccess(async (request, { params, user }) => {
         { status: 400 }
       );
     }
-    const clash = (project.customFields || []).some(
-      (f) => String(f._id) !== fieldId && f.name.toLowerCase() === name.toLowerCase()
-    );
+    // Only a new name can clash: a form re-sending the stored one saves a legacy twin's other settings
+    const clash =
+      name !== field.name &&
+      (project.customFields || []).some(
+        (f) => String(f._id) !== fieldId && f.name.toLowerCase() === name.toLowerCase()
+      );
     if (clash) {
       return NextResponse.json({ error: "Field with this name already exists" }, { status: 409 });
     }
@@ -98,13 +101,17 @@ export const PATCH = withProjectAccess(async (request, { params, user }) => {
 
   // This field's own paths only: saving the whole list put back a field added or edited meanwhile.
   // A new name is checked in the write too, since another rename may have taken it since the read.
-  const renamed = changes.name !== undefined;
+  const renamed = changes.name !== undefined && changes.name !== field.name;
   const before = await Project.findOneAndUpdate(
     {
       _id: projectId,
       "customFields._id": fieldId,
       ...(renamed
-        ? { customFields: { $not: { $elemMatch: { _id: { $ne: fieldId }, name: changes.name } } } }
+        ? {
+            customFields: {
+              $not: { $elemMatch: { _id: { $ne: fieldId }, name: sameFieldName(changes.name as string) } },
+            },
+          }
         : {}),
     },
     {
@@ -112,7 +119,7 @@ export const PATCH = withProjectAccess(async (request, { params, user }) => {
         Object.entries(changes).map(([key, value]) => [`customFields.$.${key}`, value])
       ),
     },
-    { returnDocument: "before", ...(renamed ? { collation: FIELD_NAME_COLLATION } : {}) }
+    { returnDocument: "before" }
   ).lean();
   if (!before) {
     if (renamed) {

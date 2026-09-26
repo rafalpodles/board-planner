@@ -107,11 +107,13 @@ beforeEach(() => {
       }
       const field = project.customFields.find((f) => sameId(f._id, filter["customFields._id"]));
       if (!field) return query(null);
-      // The name condition, read under the case-insensitive collation the route asks for
-      const clash = (filter.customFields as { $not?: { $elemMatch: { name: string } } } | undefined)?.$not?.$elemMatch;
+      // The name condition, evaluated the way MongoDB evaluates a $regex
+      const clash = (
+        filter.customFields as { $not?: { $elemMatch: { name: { $regex: string; $options: string } } } } | undefined
+      )?.$not?.$elemMatch.name;
       if (
         clash &&
-        project.customFields.some((f) => f !== field && f.name.toLowerCase() === clash.name.toLowerCase())
+        project.customFields.some((f) => f !== field && new RegExp(clash.$regex, clash.$options).test(f.name))
       ) {
         return query(null);
       }
@@ -224,10 +226,12 @@ describe("PATCH /api/projects/:projectId/custom-fields/:fieldId", () => {
       {
         _id: PROJECT_ID,
         "customFields._id": numberFieldId,
-        customFields: { $not: { $elemMatch: { _id: { $ne: numberFieldId }, name: "Story Points" } } },
+        customFields: {
+          $not: { $elemMatch: { _id: { $ne: numberFieldId }, name: { $regex: "^Story Points$", $options: "i" } } },
+        },
       },
       { $set: { "customFields.$.name": "Story Points", "customFields.$.required": true } },
-      { returnDocument: "before", collation: { locale: "en", strength: 2 } }
+      { returnDocument: "before" }
     );
   });
 
@@ -380,6 +384,20 @@ describe("a rename racing another", () => {
     expect(res.status).toBe(409);
     expect(project.customFields[0].name).toBe("Points");
     expect(logProjectAudit).not.toHaveBeenCalled();
+  });
+
+  // Review: the form sends the name on every save, so a field whose name another shares only by
+  // case — stored before names were checked — could no longer save any of its other settings
+  it("saves a field's other settings when the name it re-sends is the one stored", async () => {
+    project.customFields[1].name = "points";
+
+    const res = await PATCH(patchRequest({ name: "Points", required: true }), fieldCtx(numberFieldId));
+
+    expect(res.status).toBe(200);
+    expect(project.customFields[0].required).toBe(true);
+    expect(logProjectAudit).toHaveBeenCalledWith(PROJECT_ID, "u1", "settings_updated", [
+      "Custom field Points · Required: off → on",
+    ]);
   });
 
   it("may still change the case of its own name", async () => {
