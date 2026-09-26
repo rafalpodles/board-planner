@@ -137,9 +137,7 @@ export function createCommandHandlers(deps: CommandDeps): CommandChannels {
     if (issuedAt !== undefined && issuedAt === appliedBeforeRestart) {
       appliedBeforeRestart = null;
       const instant = Date.parse(issuedAt);
-      // A newer command already applied: this is a late answer, and the guard must not move back
-      if (Number.isNaN(instant) || instant <= lastAppliedAt) return;
-      lastAppliedAt = instant;
+      if (!Number.isNaN(instant)) lastAppliedAt = instant;
       settle(command);
       return;
     }
@@ -151,6 +149,7 @@ export function createCommandHandlers(deps: CommandDeps): CommandChannels {
     } else {
       if (instant <= lastAppliedAt) return;
       lastAppliedAt = instant;
+      // Superseded: a late answer still carrying the spared issuance must not move the guard back
       appliedBeforeRestart = null;
     }
 
