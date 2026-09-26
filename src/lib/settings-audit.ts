@@ -1,5 +1,4 @@
 import { hostOf, projectRepositoryUrl } from "@/lib/repository";
-import { maskSecretUrl } from "@/lib/project-secrets";
 import { DEFAULT_PM_AUTONOMY } from "@/types";
 import {
   POLICY_FIELD_LABELS,
@@ -99,9 +98,18 @@ export function auditUrl(value: unknown): string {
   return host ? auditValue(host) : "(not a web address)";
 }
 
-// An MCP server's or a link's address can be the credential itself, the way a webhook's is
-const capabilityUrl = (value: unknown) =>
-  typeof value === "string" && value.trim() ? auditValue(maskSecretUrl(value.trim())) : "none";
+// An MCP server's or a link's address can be the credential itself, the way a webhook's is, so
+// only where it points is shown
+function capabilityUrl(value: unknown): string {
+  if (typeof value !== "string" || !value.trim()) return "none";
+  try {
+    const url = new URL(value.trim());
+    if (url.host) {
+      return auditValue(url.pathname === "/" && !url.search ? url.origin : `${url.origin}/••••`);
+    }
+  } catch {}
+  return auditUrl(value);
+}
 
 function at(doc: unknown, path: string): unknown {
   return path

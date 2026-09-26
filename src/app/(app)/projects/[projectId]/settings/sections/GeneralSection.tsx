@@ -54,7 +54,6 @@ export function GeneralSection({
 
   const identity = useDraft({
     name: project.name,
-    // A stored null would go back on every rename, and the settings route takes strings only
     description: project.description ?? "",
     icon: project.icon || "",
   });

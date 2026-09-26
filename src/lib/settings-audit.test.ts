@@ -218,7 +218,7 @@ describe("describeSettingsChanges", () => {
       expect(lines).toEqual([
         "PM MCP server github · Allow writes: off → on",
         "PM MCP server github · Token replaced",
-        "PM MCP server linear added: https://mcp.example/••••hree, bearer, writes off",
+        "PM MCP server linear added: https://mcp.example/••••, bearer, writes off",
       ]);
       expect(lines.join("\n")).not.toMatch(/secret/);
     });
@@ -281,7 +281,7 @@ describe("describeSettingsChanges", () => {
 
     it("names links by label and address", () => {
       expect(changes({ pm }, { pm: { ...pm, links: [] } })).toEqual([
-        "PM links: Docs (https://docs.example/••••) → none",
+        "PM links: Docs (https://docs.example) → none",
       ]);
     });
 

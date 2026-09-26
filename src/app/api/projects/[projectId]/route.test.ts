@@ -632,9 +632,7 @@ describe("PUT /api/projects/[projectId] audit trail", () => {
     expect(auditDetails()).toEqual(["Name: Orbit → Orbit Two"]);
   });
 
-  // Mongoose casts an object to the string it carries, and only a string is encrypted: an object
-  // token was stored in the clear, and logged as anything but set
-  // A client clearing a field with null keeps working, as it always did through the API
+  // A client clearing a field with null keeps working, as it always did for the token fields
   it("reads null as clearing a field", async () => {
     writtenOver({ githubToken: "enc:old" });
 
@@ -652,6 +650,15 @@ describe("PUT /api/projects/[projectId] audit trail", () => {
     expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
   });
 
+  it("refuses a name left empty", async () => {
+    const res = await PUT(putRequest({ name: "   " }), ctx());
+
+    expect(res.status).toBe(400);
+    expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
+  // Mongoose casts an object to the string it carries, and only a string is encrypted: an object
+  // token was stored in the clear, and logged as anything but set
   it.each(["githubToken", "repositoryUrl", "name"])("refuses %s that is not a string", async (field) => {
     const res = await PUT(putRequest({ [field]: { _id: "ghp_not_a_string" } }), ctx());
 
