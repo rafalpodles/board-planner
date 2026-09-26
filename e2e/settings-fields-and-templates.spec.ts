@@ -267,12 +267,16 @@ test.describe("custom fields", () => {
     request,
   }) => {
     await openFields(page);
+    const picker = page.getByRole("combobox", { name: "Estimate field" });
+    const isProjectWrite = (method: string, url: string) =>
+      method === "PUT" && /\/api\/projects\/[^/]+$/.test(url);
+    const projectWritten = () =>
+      page.waitForResponse((res) => isProjectWrite(res.request().method(), res.url()));
+    let pointsId = "";
 
     await test.step("Create \"Story points\" makes a number field and designates it", async () => {
       const created = fieldWrite(page, "POST");
-      const designated = page.waitForResponse(
-        (res) => res.request().method() === "PUT" && /\/api\/projects\/[^/]+$/.test(res.url())
-      );
+      const designated = projectWritten();
       await page.getByRole("button", { name: 'Create "Story points"' }).click();
       expect((await created).status()).toBe(201);
       expect((await designated).status()).toBe(200);
@@ -280,10 +284,11 @@ test.describe("custom fields", () => {
       const [points] = await storedFields(request);
       expect(points).toMatchObject({ name: "Story points", fieldType: "number" });
       expect((await storedProject(request)).estimateFieldId).toBe(points._id);
-      await expect(page.getByRole("combobox", { name: "Estimate field" })).toHaveValue(points._id);
+      await expect(picker).toHaveValue(points._id);
+      pointsId = points._id;
     });
 
-    await test.step("another numeric field can be chosen instead", async () => {
+    await test.step("another numeric field waits for Save, and Discard takes it back (BP-785)", async () => {
       await page.getByRole("button", { name: "+ Add field" }).click();
       await page.getByLabel("Name", { exact: true }).fill("Hours");
       await page.getByLabel("Type", { exact: true }).selectOption("number");
@@ -292,12 +297,26 @@ test.describe("custom fields", () => {
       expect((await created).status()).toBe(201);
       const hours = (await storedFields(request)).find((f) => f.name === "Hours")!;
 
-      const designated = page.waitForResponse(
-        (res) => res.request().method() === "PUT" && /\/api\/projects\/[^/]+$/.test(res.url())
-      );
-      await page.getByRole("combobox", { name: "Estimate field" }).selectOption({ label: "Hours" });
+      const writes: string[] = [];
+      page.on("request", (req) => {
+        if (isProjectWrite(req.method(), req.url())) writes.push(req.url());
+      });
+      await picker.selectOption({ label: "Hours" });
+      await expect(page.getByText("1 unsaved change")).toBeVisible();
+      await expect(page.getByRole("button", { name: "Task fields · Estimate field" })).toBeVisible();
+
+      await page.getByRole("button", { name: "Discard" }).click();
+      await expect(picker).toHaveValue(pointsId);
+      await expect(page.getByText(/unsaved change/)).toHaveCount(0);
+      expect(writes).toEqual([]);
+      expect((await storedProject(request)).estimateFieldId).toBe(pointsId);
+
+      await picker.selectOption({ label: "Hours" });
+      const designated = projectWritten();
+      await page.getByRole("button", { name: "Save changes" }).click();
       expect((await designated).status()).toBe(200);
       expect((await storedProject(request)).estimateFieldId).toBe(hours._id);
+      await expect(page.getByText(/unsaved change/)).toHaveCount(0);
     });
 
     await test.step("archiving the designated field clears the designation", async () => {
@@ -305,7 +324,15 @@ test.describe("custom fields", () => {
       await fieldRow(page, "Hours").getByRole("button", { name: "Archive" }).click();
       expect((await archived).status()).toBe(200);
       expect((await storedProject(request)).estimateFieldId).toBe("");
-      await expect(page.getByRole("combobox", { name: "Estimate field" })).toHaveValue("");
+      await expect(picker).toHaveValue("");
+      await expect(page.getByText(/unsaved change/)).toHaveCount(0);
+    });
+
+    await test.step("the saved choice is in the audit log", async () => {
+      await page.goto(`${SETTINGS}?section=audit`);
+      await expect(
+        page.getByTestId("audit-detail").filter({ hasText: "Estimate field: Story points → Hours" })
+      ).toBeVisible();
     });
   });
 });
