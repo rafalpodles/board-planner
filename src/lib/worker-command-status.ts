@@ -47,6 +47,11 @@ export function commandStatus(worker: CommandStateWorker, now: number = Date.now
       tone: "applied",
     };
   }
+  // Halted, and no standing command of this record's explains it: say what the machine says rather
+  // than a clean row the one person who can act on it would read past
+  if (worker.halt?.paused && (!worker.command || worker.command === "resume")) {
+    return { text: worker.halt.command === "stop" ? "Stopped" : "Paused", tone: "applied" };
+  }
   if (!worker.command) return null;
   if (worker.halt && !worker.halt.paused && worker.command !== "resume") {
     return { text: "Resumed on the machine", tone: "applied" };

@@ -16,7 +16,7 @@ export const GET = withAuth(async (_request, { user }) => {
 
   const workers = await Worker.find(
     { owner: user._id },
-    "_id name host version enabled lastSeenAt repos command commandIssuedAt commandAckedAt halt"
+    "_id name host version enabled lastSeenAt repos preflight command commandIssuedAt commandAckedAt halt"
   )
     .sort({ createdAt: 1 })
     .lean();

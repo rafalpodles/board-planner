@@ -162,6 +162,27 @@ describe("machines offering this repository", () => {
 
     expect(screen.getByTestId("offering-machine-state").textContent).toBe(state);
   });
+
+  it("says a machine whose sandbox check failed is failing it, not live", async () => {
+    await listed([worker({ condition: { state: "failing", haltedBy: null } })]);
+
+    const state = screen.getByTestId("offering-machine-state");
+    expect(state.textContent).toBe("failing its sandbox check");
+    expect(state.className).toContain("text-danger");
+  });
+
+  it("colours a halted machine as halted even when it also refuses its checkout", async () => {
+    await listed([
+      worker({
+        condition: { state: "paused", haltedBy: "machine" },
+        bindingError: `${PROJECT_OID}: /private/tmp/bp is under the sensitive directory /private/tmp`,
+      }),
+    ]);
+
+    const state = screen.getByTestId("offering-machine-state");
+    expect(state.textContent).toBe("paused");
+    expect(state.className).toContain("text-warning");
+  });
 });
 
 function run(over: Record<string, unknown> = {}) {

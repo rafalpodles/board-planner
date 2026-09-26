@@ -1114,16 +1114,17 @@ describe("the hand-over notice, with the board judged too", () => {
   });
 
   // A pause or stop comes only from the fleet console, which only an instance admin can open —
-  // telling anyone else to resume it there would send them to a page that turns them away
+  // telling anyone else to resume it there would send them to a page that turns them away. The
+  // menubar app's Resume lifts it too, which is the one thing the assignee can do themselves.
   it.each([
     ["paused", "machine-paused"],
     ["stopped", "machine-stopped"],
-  ] as const)("tells a non-admin assignee their machine was %s, and that only an admin can resume it", (state, reason) => {
+  ] as const)("tells a non-admin assignee their machine was %s by an admin, and how they can resume it", (state, reason) => {
     withBoard({ machine: state });
 
     expect(notice().dataset.reason).toBe(reason);
     expect(notice().textContent).toBe(
-      `Nothing will run this yet. Your machine is connected but not taking work: an instance admin ${state} it, and only an instance admin can resume it.`
+      `Nothing will run this yet. Your machine is connected but not taking work: an instance admin ${state} it. Resume it from the menubar app on that machine, or ask an instance admin to.`
     );
     expect(screen.queryByRole("link", { name: "Settings → Workers" })).toBeNull();
     expect(screen.queryByTestId("handover-waiting")).toBeNull();
@@ -1135,7 +1136,7 @@ describe("the hand-over notice, with the board judged too", () => {
       withBoard({ machine: state }, {}, { viewerIsInstanceAdmin: true });
 
       expect(notice().textContent).toBe(
-        `Nothing will run this yet. Your machine is connected but not taking work: it is ${state}. Resume it in Settings → Workers.`
+        `Nothing will run this yet. Your machine is connected but not taking work: it is ${state}. Resume it in Settings → Workers, or from the menubar app on that machine.`
       );
       expect(screen.getByRole("link", { name: "Settings → Workers" }).getAttribute("href")).toBe(
         "/settings/workers"

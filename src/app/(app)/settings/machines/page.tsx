@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { LoadFailed } from "@/components/ui/LoadFailed";
 import { EnrolWorkerModal } from "@/components/settings/EnrolWorkerModal";
 import { GETTING_THE_SOFTWARE_URL } from "@/lib/docs-urls";
+import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
 import { timeAgo } from "@/lib/time";
 import type { ApiMyMachine } from "@/types";
 
@@ -17,7 +18,11 @@ function describeState(machine: ApiMyMachine): { text: string; tone: string } {
   const byMachine = machine.haltedBy === "machine";
   switch (machine.state) {
     case "live":
-      return { text: "Taking work", tone: "text-success" };
+      return machine.checkouts > 0
+        ? { text: "Running", tone: "text-success" }
+        : { text: "Running, no checkouts yet", tone: "text-text-muted" };
+    case "failing":
+      return { text: "Sandbox check failing", tone: "text-danger" };
     case "stale":
       return { text: "Not reporting", tone: "text-danger" };
     case "disabled":
@@ -65,11 +70,11 @@ export default function MachinesPage() {
   return (
     <div className="max-w-3xl">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0 flex-1">
+        <div className="min-w-[12rem] flex-1">
           <h2 className="mb-1 text-lg font-semibold">Machines</h2>
           <p className="text-sm text-text-muted">
-            The machines you connected. A machine takes only tasks assigned to you that name an agent,
-            in projects you can reach.
+            The machines you connected. A machine takes only tasks you assigned to yourself — or the
+            PM agent assigned to you — that name an agent, in projects you can reach.
           </p>
         </div>
         <Button onClick={() => setConnecting(true)}>Connect a machine</Button>
@@ -84,6 +89,12 @@ export default function MachinesPage() {
       </p>
 
       <EnrolWorkerModal open={connecting} onClose={closeDialog} title="Connect a machine" />
+
+      {failed && machines !== null && (
+        <p role="status" className="mb-3 text-sm text-warning">
+          {LIST_REFRESH_FAILED}
+        </p>
+      )}
 
       {failed && machines === null ? (
         <LoadFailed message="Could not load your machines." onRetry={() => void load()} />
@@ -103,11 +114,17 @@ export default function MachinesPage() {
                 data-testid="my-machine"
                 className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 text-sm"
               >
-                <div className="min-w-0 basis-full sm:basis-0 sm:flex-1">
+                <div className="min-w-[12rem] flex-1">
                   <p className="break-words font-medium">{machine.name}</p>
                   <p className="break-words text-xs text-text-muted">
-                    {machine.host || "—"} ·{" "}
-                    {machine.lastSeenAt ? `last seen ${timeAgo(machine.lastSeenAt)}` : "never seen"}
+                    {[
+                      machine.host || "—",
+                      machine.version && `worker ${machine.version}`,
+                      `${machine.checkouts} checkout${machine.checkouts === 1 ? "" : "s"}`,
+                      machine.lastSeenAt ? `last seen ${timeAgo(machine.lastSeenAt)}` : "never seen",
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
                   </p>
                 </div>
                 <span data-testid="my-machine-state" className={`text-xs ${state.tone}`}>
@@ -115,6 +132,7 @@ export default function MachinesPage() {
                 </span>
                 <Link
                   href={`/settings/workers/${machine._id}/projects`}
+                  aria-label={`Choose projects for ${machine.name}`}
                   className="text-sm text-primary underline"
                 >
                   Choose projects

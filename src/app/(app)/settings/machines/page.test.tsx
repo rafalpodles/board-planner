@@ -42,13 +42,17 @@ describe("Settings → Machines", () => {
     expect(api.get).toHaveBeenCalledWith("/api/users/me/machines");
     expect(row.textContent).toContain("MacBook");
     expect(row.textContent).toContain("ada.local");
-    expect(within(row).getByTestId("my-machine-state").textContent).toBe("Taking work");
-    expect(within(row).getByRole("link", { name: "Choose projects" }).getAttribute("href")).toBe(
-      "/settings/workers/6a7309535eb49af333b85a04/projects"
-    );
+    expect(within(row).getByTestId("my-machine-state").textContent).toBe("Running");
+    expect(row.textContent).toContain("1 checkout");
+    // Named for its machine: a list of identical "Choose projects" links reads as one to a screen reader
+    expect(
+      within(row).getByRole("link", { name: "Choose projects for MacBook" }).getAttribute("href")
+    ).toBe("/settings/workers/6a7309535eb49af333b85a04/projects");
   });
 
   it.each([
+    [{ checkouts: 0 }, "Running, no checkouts yet"],
+    [{ state: "failing" }, "Sandbox check failing"],
     [{ state: "stale" }, "Not reporting"],
     [{ state: "disabled" }, "Switched off by an instance admin"],
     [{ state: "paused", haltedBy: "machine" }, "Paused on the machine"],
@@ -98,6 +102,20 @@ describe("Settings → Machines", () => {
     await act(async () => screen.getByRole("button", { name: "Retry" }).click());
     await waitFor(() => expect(screen.getByTestId("my-machine")).toBeTruthy());
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("keeps the list it has, and says it may be out of date, when a later read fails", async () => {
+    api.get.mockResolvedValueOnce([machine()]).mockRejectedValue(new Error("offline"));
+
+    render(<MachinesPage />);
+    await screen.findByTestId("my-machine");
+    await act(async () => screen.getByRole("button", { name: "Connect a machine" }).click());
+    await act(async () => screen.getByRole("button", { name: "Cancel" }).click());
+
+    expect((await screen.findByRole("status")).textContent).toBe(
+      "The list could not be refreshed — reload the page to see it"
+    );
+    expect(screen.getByTestId("my-machine")).toBeTruthy();
   });
 
   it("keeps the list it has when a later read answers after a newer one", async () => {

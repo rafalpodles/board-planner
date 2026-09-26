@@ -392,6 +392,19 @@ describe("saving the machine's projects", () => {
   });
 });
 
+// BP-761. Every member now reaches this from Settings → Machines, a Linux box's owner among them,
+// and only the menubar app acts on what is ticked here
+describe("what the page says a tick does", () => {
+  it("says it is the menubar app that clones, and what a machine without it needs instead", async () => {
+    render(<MachineProjectsPage />);
+
+    await screen.findByText(/Tick a project and the menubar app on this machine sets up a checkout/);
+    expect(screen.getByTestId("without-the-app").textContent).toContain(
+      "clone the repository there yourself and list it in repos.json"
+    );
+  });
+});
+
 // BP-761. The way back led to the fleet console, which turns away everybody but an instance admin
 describe("the way back from a machine's projects", () => {
   it("leads a machine's owner back to their own machines", async () => {

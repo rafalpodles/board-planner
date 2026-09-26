@@ -112,6 +112,16 @@ describe("commandStatus", () => {
       expect(commandStatus(w, T0 + 2_000)).toEqual({ text: "Paused", tone: "applied" });
     });
 
+    // BP-762 review. A machine that registered again as a new record can report a halt this record
+    // never issued, and the console showed nothing at all
+    it.each([
+      ["stop", "Stopped"],
+      ["pause", "Paused"],
+    ] as const)("a board %s no standing command explains still shows as %s", (command, text) => {
+      const w = worker({ command: "", halt: { paused: true, by: "board", command } });
+      expect(commandStatus(w, T0)).toEqual({ text, tone: "applied" });
+    });
+
     it("a resume the board issued and the machine applied stays Resumed", () => {
       const w = worker({ command: "resume", ...acked, halt: { paused: false, by: null, command: null } });
       expect(commandStatus(w, T0 + 2_000)).toEqual({ text: "Resumed", tone: "applied" });

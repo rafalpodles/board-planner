@@ -169,8 +169,12 @@ export default function MachineProjectsPage() {
         subtitle={view.worker.host || undefined}
       />
       <p className="mt-2 text-text-muted">
-        Tick a project and this machine sets up a checkout for it. Untick one and the app offers to
-        remove the checkout, asking on the machine first.
+        Tick a project and the menubar app on this machine sets up a checkout for it. Untick one and
+        the app offers to remove the checkout, asking on the machine first.
+      </p>
+      <p data-testid="without-the-app" className="mt-2 text-sm text-text-muted">
+        A machine run without the app — a Linux box, a container, a worker started by hand — acts on
+        none of this: clone the repository there yourself and list it in repos.json.
       </p>
 
       <div className="mt-6 space-y-2">

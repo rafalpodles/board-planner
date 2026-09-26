@@ -309,7 +309,8 @@ test("a member connects a machine from their own settings, finds it listed, and 
   await expect(row).toHaveCount(1);
   await expect(row).toContainText("e2e-member-box");
   await expect(row).toContainText("member-box.local");
-  await expect(row.getByTestId("my-machine-state")).toHaveText("Taking work");
+  // Registered, and nothing reported yet: it runs, but has no checkout to take work for
+  await expect(row.getByTestId("my-machine-state")).toHaveText("Running, no checkouts yet");
   await expect(page.getByText(WORKER_NAME)).toHaveCount(0);
 
   await row.getByRole("link", { name: "Choose projects" }).click();

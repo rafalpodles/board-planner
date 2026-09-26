@@ -77,8 +77,8 @@ export function EnrolWorkerModal({ open, onClose, title = "Enrol a worker" }: En
       {!minted ? (
         <div className="space-y-4">
           <p className="text-sm text-text-muted">
-            A worker registers itself with a single-use enrolment token instead of an admin
-            credential. The token is good for one hour and for one registration.
+            A machine registers itself with a single-use enrolment token, never with your password or
+            an API token. The token is good for one hour and for one registration.
           </p>
           <p className="text-sm text-text-muted">
             Nothing installed on that machine yet? Download it: <GettingTheSoftware />.

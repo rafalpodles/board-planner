@@ -203,7 +203,7 @@ test.describe("a member's own task, as the board changes under it", () => {
 
     await expect(notice(page)).toHaveAttribute("data-reason", "machine-paused");
     await expect(notice(page)).toHaveText(
-      "Nothing will run this yet. Your machine is connected but not taking work: an instance admin paused it, and only an instance admin can resume it."
+      "Nothing will run this yet. Your machine is connected but not taking work: an instance admin paused it. Resume it from the menubar app on that machine, or ask an instance admin to."
     );
     await expect(waiting(page)).toHaveCount(0);
   });

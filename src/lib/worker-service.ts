@@ -229,7 +229,8 @@ export function machineCondition(worker: ServingMachine, now = new Date()): Mach
   if (!worker.enabled) return { state: "disabled", haltedBy: null };
   if (!isLive(worker as IWorker, now)) return { state: "stale", haltedBy: null };
   const halt = haltOf(worker, now);
-  return halt ? { state: halt.state, haltedBy: halt.by } : { state: "live", haltedBy: null };
+  if (halt) return { state: halt.state, haltedBy: halt.by };
+  return { state: sandboxFailed(worker) ? "failing" : "live", haltedBy: null };
 }
 
 /**
@@ -249,13 +250,7 @@ export function machineReadinessFor(
     const refused = bindingErrorFor(worker.bindingError, projectId);
     const condition = machineCondition(worker, now);
     const state: MachineState =
-      condition.state !== "live"
-        ? condition.state
-        : sandboxFailed(worker)
-          ? "failing"
-          : refused
-            ? "unbound"
-            : "live";
+      condition.state !== "live" ? condition.state : refused ? "unbound" : "live";
     if (MACHINE_RANK[state] > MACHINE_RANK[best.state]) {
       best = {
         state,

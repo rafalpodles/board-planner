@@ -216,19 +216,20 @@ function BlockerText({ blocker, ctx }: { blocker: Blocker; ctx: BlockerContext }
           </>
         );
       }
-      // The board's own pause or stop comes from the fleet console, which only an instance admin opens
+      // The board's own pause or stop comes from the fleet console, which only an instance admin
+      // opens — and the menubar app's Resume lifts it too
       return ctx.viewerIsInstanceAdmin ? (
         <>
           Your machine is connected but not taking work: it is {done}. Resume it in{" "}
           <a href="/settings/workers" className="underline">
             Settings → Workers
           </a>
-          .
+          , or from the menubar app on that machine.
         </>
       ) : (
         <>
-          Your machine is connected but not taking work: an instance admin {done} it, and only an
-          instance admin can resume it.
+          Your machine is connected but not taking work: an instance admin {done} it. Resume it from
+          the menubar app on that machine, or ask an instance admin to.
         </>
       );
     }

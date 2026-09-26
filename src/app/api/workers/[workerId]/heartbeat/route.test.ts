@@ -457,7 +457,6 @@ describe("the preflight report a worker sends", () => {
   });
 });
 
-// BP-323: every other worker's claim and heartbeat read this inventory back
 // BP-762. The only way a pause or resume made at the machine reaches the board
 describe("the halt a worker reports", () => {
   function haltPatch() {
@@ -516,6 +515,7 @@ describe("the halt a worker reports", () => {
   });
 });
 
+// BP-323: every other worker's claim and heartbeat read this inventory back
 describe("POST heartbeat — what one worker may store about itself", () => {
   const storedRepos = () => workerUpdateOne.mock.calls[0][1].$set.repos as { remote: string }[];
   const touched = () => touchWorker.mock.calls[0][1] as Record<string, unknown>;
