@@ -264,8 +264,9 @@ export function mergeMcpServerTokens(
     // URLs now equal. The client registration goes too: it was issued by the old provider, and
     // keeping it means the next Connect skips re-registration and sends that client secret to
     // whatever token endpoint the new server advertises (BP-315 review).
+    // A copy, because a save that has to merge again after a conflict merges the same input twice
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const transient = server as any;
+    const transient = { ...server } as any;
     let oauth = prior?.oauth && sameServer ? plainOauth(prior.oauth) : undefined;
     if (server.authType === "oauth") {
       oauth = oauth ?? { ...EMPTY_OAUTH };
@@ -285,7 +286,7 @@ export function mergeMcpServerTokens(
     delete transient.oauthClientId;
     delete transient.oauthClientSecret;
 
-    merged.push({ ...server, authToken, oauth });
+    merged.push({ ...transient, authToken, oauth });
   }
   return { valid: true, value: merged };
 }

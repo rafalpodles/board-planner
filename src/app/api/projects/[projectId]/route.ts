@@ -23,7 +23,7 @@ import { encryptSecret, isEncryptionConfigured } from "@/lib/encryption";
 import { isAllowedMcpServerUrl } from "@/lib/url-validation";
 import { validatePmConfig, isPmAvailable, mergeMcpServerTokens, sanitizeMcpServers } from "@/lib/pm/config";
 import { sanitizeProjectSecrets } from "@/lib/project-secrets";
-import { PROJECT_ICONS } from "@/types";
+import { PROJECT_ICONS, type IPmMcpServer } from "@/types";
 import { projectRepositoryUrl, repositoryProvider } from "@/lib/repository";
 
 export const GET = withProjectAccessOrWorker(async (_request, { params, user }) => {
@@ -49,6 +49,62 @@ export const GET = withProjectAccessOrWorker(async (_request, { params, user }) 
   obj.canAdmin = await check(user, String(project._id), "admin");
   return NextResponse.json(obj);
 });
+
+const PM_SAVED_FIELDS = [
+  "enabled",
+  "model",
+  "contextNotes",
+  "links",
+  "dailyTurnCap",
+  "dailyTokenCap",
+] as const;
+
+const PM_SAVED_AUTONOMY_FIELDS = [
+  "dailyReview",
+  "reviewHour",
+  "reviewIntervalHours",
+  "timezone",
+  "handleNeedsHumanReview",
+] as const;
+
+const MCP_SERVERS_WRITE_ATTEMPTS = 3;
+
+// The MCP list is written only over the one its tokens were merged from: a refresh rotates them on its own
+async function writeProjectSettings(
+  projectId: string,
+  updates: Record<string, unknown>,
+  pmServers: { incoming: IPmMcpServer[]; stored: unknown } | null
+) {
+  for (let attempt = 1; ; attempt++) {
+    const before = await Project.findOneAndUpdate(
+      pmServers
+        ? {
+            _id: projectId,
+            $expr: {
+              $eq: [{ $ifNull: ["$pm.mcpServers", []] }, { $literal: pmServers.stored }],
+            },
+          }
+        : { _id: projectId },
+      updates,
+      { returnDocument: "before" }
+    ).lean();
+    if (before) return { before };
+    if (!pmServers) return { error: "Project not found", status: 404 as const };
+
+    const fresh = await Project.findById(projectId).select("pm.mcpServers").lean();
+    if (!fresh) return { error: "Project not found", status: 404 as const };
+    if (attempt === MCP_SERVERS_WRITE_ATTEMPTS) {
+      return {
+        error: "The PM agent's MCP connections kept changing while this was saved. Nothing was saved; save again.",
+        status: 409 as const,
+      };
+    }
+    pmServers.stored = fresh.pm?.mcpServers ?? [];
+    const merged = mergeMcpServerTokens(pmServers.incoming, fresh.pm?.mcpServers);
+    if (!merged.valid) return { error: merged.error, status: 400 as const };
+    updates["pm.mcpServers"] = merged.value;
+  }
+}
 
 export const PUT = withProjectOwner(async (request, { params, user }) => {
   await connectDB();
@@ -162,11 +218,16 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     Object.assign(updates, parsed.update);
   }
 
+  // A save writes the PM paths it sent and nothing else: the lock, the scheduler's slot and the
+  // OAuth tokens are other writers', and copying them from a read put back whatever they had
+  // written in between (BP-786)
+  let pmServers: { incoming: IPmMcpServer[]; stored: unknown } | null = null;
   if (body.pm !== undefined) {
     if (typeof body.pm !== "object" || body.pm === null || Array.isArray(body.pm)) {
       return NextResponse.json({ error: "pm must be an object" }, { status: 400 });
     }
-    const existing = await Project.findById(projectId).select("pm");
+    const sent = new Set(Object.keys(body.pm));
+    const existing = await Project.findById(projectId).select("pm").lean();
     if (!existing) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
@@ -181,35 +242,31 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
           { status: 403 }
         );
       }
+      // Only so validation passes; none of these is written
       body.pm.enabled = existing.pm?.enabled ?? false;
-      body.pm.model = existing.pm?.model ?? "";
-      body.pm.dailyTurnCap = existing.pm?.dailyTurnCap ?? 0;
-      body.pm.dailyTokenCap = existing.pm?.dailyTokenCap ?? 0;
     }
     const pmResult = validatePmConfig(body.pm);
     if (!pmResult.valid) {
       return NextResponse.json({ error: pmResult.error }, { status: 400 });
     }
-    // validatePmConfig rebuilds pm from a whitelist, so the instance lock would be
-    // dropped by any project-side save. It is settable only from the admin console.
-    pmResult.value.lockedByInstance = existing.pm?.lockedByInstance ?? false;
-    if (body.pm.mcpServers === undefined) {
-      // Clients unaware of mcpServers must not wipe the configured list
-      pmResult.value.mcpServers = existing.pm?.mcpServers ?? [];
-    } else {
-      const merged = mergeMcpServerTokens(pmResult.value.mcpServers ?? [], existing.pm?.mcpServers);
+    const pm = pmResult.value;
+    for (const key of PM_SAVED_FIELDS) {
+      if (sent.has(key)) updates[`pm.${key}`] = pm[key];
+    }
+    if (sent.has("autonomy") && pm.autonomy) {
+      for (const key of PM_SAVED_AUTONOMY_FIELDS) {
+        updates[`pm.autonomy.${key}`] = pm.autonomy[key];
+      }
+    }
+    if (sent.has("mcpServers")) {
+      const stored = existing.pm?.mcpServers ?? [];
+      const merged = mergeMcpServerTokens(pm.mcpServers ?? [], stored);
       if (!merged.valid) {
         return NextResponse.json({ error: merged.error }, { status: 400 });
       }
-      pmResult.value.mcpServers = merged.value;
+      updates["pm.mcpServers"] = merged.value;
+      pmServers = { incoming: pm.mcpServers ?? [], stored };
     }
-    if (body.pm.autonomy === undefined && existing.pm?.autonomy) {
-      // Clients unaware of autonomy must not silently disable the scheduled review
-      pmResult.value.autonomy = existing.pm.autonomy;
-    } else if (pmResult.value.autonomy) {
-      pmResult.value.autonomy.lastReviewSlot = existing.pm?.autonomy?.lastReviewSlot ?? "";
-    }
-    updates.pm = pmResult.value;
   }
 
   if (updates.gitlabHost !== undefined) {
@@ -272,12 +329,11 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     }
   }
 
-  const beforeImage = await Project.findByIdAndUpdate(projectId, updates, {
-    returnDocument: "before",
-  }).lean();
-  if (!beforeImage) {
-    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+  const written = await writeProjectSettings(projectId, updates, pmServers);
+  if ("error" in written) {
+    return NextResponse.json({ error: written.error }, { status: written.status });
   }
+  const beforeImage = written.before;
   // Both trails before anything else can fail: the write has landed, and a retry would find
   // nothing left to record
   const workerAudit = pendingWorkerAudit(
