@@ -899,8 +899,16 @@ describe("machineStateFor", () => {
     expect(state([machine({ lastSeenAt: old })])).toBe("stale");
   });
 
-  it("is stale when the machine with the checkout is switched off", () => {
-    expect(state([machine({ enabled: false })])).toBe("stale");
+  // BP-762. Switched off, it is refused its heartbeat and goes stale too — and "check it is running"
+  // was advice its owner could not act on
+  it("is disabled when the machine with the checkout is switched off, however recently it reported", () => {
+    expect(state([machine({ enabled: false })])).toBe("disabled");
+    expect(state([machine({ enabled: false, lastSeenAt: old })])).toBe("disabled");
+  });
+
+  it("prefers a stale machine, which its owner can see to, over a switched-off one", () => {
+    expect(state([machine({ enabled: false }), machine({ lastSeenAt: old })])).toBe("stale");
+    expect(state([machine({ lastSeenAt: old }), machine({ enabled: false })])).toBe("stale");
   });
 
   it("is live when any one of several machines serves it", () => {
@@ -926,6 +934,7 @@ describe("machineStateFor", () => {
       expect(machineReadinessFor([worker], board, NOW)).toEqual({
         state: "unbound",
         bindingError: refusal,
+        haltedBy: null,
       });
     });
 
@@ -934,6 +943,7 @@ describe("machineStateFor", () => {
       expect(machineReadinessFor([machine({ bindingError: "" })], board, NOW)).toEqual({
         state: "live",
         bindingError: "",
+        haltedBy: null,
       });
     });
 
@@ -1017,5 +1027,48 @@ describe("machineStateFor", () => {
 
   it("is stale, not paused, when a paused machine has also stopped reporting in", () => {
     expect(state([commanded("pause", { lastSeenAt: old })])).toBe("stale");
+  });
+
+  // BP-762. A pause or resume made at the machine goes through its local socket, and the board
+  // learns of it only from what the heartbeat says
+  describe("a machine that reports its own halt", () => {
+    const halted = (paused: boolean, by: string | null, command: string | null) => ({
+      halt: { paused, by, command, reportedAt: NOW },
+    });
+    const readiness = (workers: unknown[]) => machineReadinessFor(workers as never[], board, NOW);
+
+    it("is paused by the machine when the pause was made there, with nothing issued from the board", () => {
+      expect(readiness([machine(halted(true, "machine", "pause"))])).toEqual({
+        state: "paused",
+        bindingError: "",
+        haltedBy: "machine",
+      });
+    });
+
+    it("is stopped by the board when it says the board stopped it", () => {
+      expect(readiness([commanded("stop", halted(true, "board", "stop"))])).toMatchObject({
+        state: "stopped",
+        haltedBy: "board",
+      });
+    });
+
+    it("is live when it says it runs, although the board's pause stands acknowledged", () => {
+      expect(readiness([commanded("pause", halted(false, null, null))])).toEqual({
+        state: "live",
+        bindingError: "",
+        haltedBy: null,
+      });
+    });
+
+    it("is read from the command it acknowledged when it is too old to report, as the board's", () => {
+      expect(readiness([commanded("pause")])).toMatchObject({ state: "paused", haltedBy: "board" });
+    });
+
+    it("is the board's when it does not say who, while the board's pause stands, and the machine's otherwise", () => {
+      expect(readiness([commanded("pause", halted(true, null, "pause"))])).toMatchObject({
+        haltedBy: "board",
+      });
+      expect(readiness([machine(halted(true, null, "pause"))])).toMatchObject({ haltedBy: "machine" });
+    });
   });
 });

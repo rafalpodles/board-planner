@@ -232,8 +232,36 @@ describe("GET handover readiness", () => {
         "commandIssuedAt",
         "commandAckedAt",
         "bindingError",
+        "halt",
       ].sort()
     );
+  });
+
+  // BP-762. A pause made at the machine reached the board only as "waiting for your machine"
+  it("answers paused, by the machine, for a machine that says it was paused there", async () => {
+    workerLean.mockResolvedValue([
+      {
+        enabled: true,
+        lastSeenAt: new Date(),
+        repos: [{ remote: "git@github.com:acme/orbit.git", path: "/Users/ada/orbit" }],
+        command: "",
+        halt: { paused: true, by: "machine", command: "pause", reportedAt: new Date() },
+      },
+    ]);
+
+    expect((await read()).body).toMatchObject({ machine: "paused", haltedBy: "machine" });
+  });
+
+  it("answers disabled, with nobody named as halting it, for a machine switched off", async () => {
+    workerLean.mockResolvedValue([
+      {
+        enabled: false,
+        lastSeenAt: new Date(Date.now() - 60 * 60 * 1000),
+        repos: [{ remote: "git@github.com:acme/orbit.git", path: "/Users/ada/orbit" }],
+      },
+    ]);
+
+    expect((await read()).body).toMatchObject({ machine: "disabled", haltedBy: null });
   });
 
   it("answers none when the reader has no machine", async () => {

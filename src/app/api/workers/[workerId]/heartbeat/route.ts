@@ -5,7 +5,7 @@ import { withWorker, protocolOf } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { Worker } from "@/models/worker";
 import { RepoReport } from "@/lib/repo-match";
-import { WorkerPreflight, WorkerPreflightCheck } from "@/types";
+import { WorkerHalt, WorkerPreflight, WorkerPreflightCheck } from "@/types";
 import { assignmentsFor, ownerReachableProjectIds, overriddenWorkerPolicy, touchWorker, usableRepos } from "@/lib/worker-service";
 import { PROJECT_RUNS_WORKERS_QUERY } from "@/lib/worker-gate";
 
@@ -99,6 +99,18 @@ function reportedPreflight(value: unknown): WorkerPreflight | null {
   };
 }
 
+function reportedHalt(value: unknown): WorkerHalt | null {
+  if (typeof value !== "object" || value === null) return null;
+  const { paused, by, command } = value as Record<string, unknown>;
+  if (typeof paused !== "boolean") return null;
+  return {
+    paused,
+    by: paused && (by === "board" || by === "machine") ? by : null,
+    command: paused && (command === "pause" || command === "stop") ? command : null,
+    reportedAt: new Date(),
+  };
+}
+
 // The only path guaranteed to survive SSE loss, so it carries both the abort
 // verdict and the command acknowledgement
 export const POST = withWorker(async (request, { worker }) => {
@@ -114,6 +126,7 @@ export const POST = withWorker(async (request, { worker }) => {
   const protocolVersion = protocolOf(request);
   const repos = reportedRepos(body.repos);
   const preflight = reportedPreflight(body.preflight);
+  const halt = reportedHalt(body.halt);
 
   await touchWorker(String(worker._id), {
     // A missing/unparseable protocol header must not overwrite a valid stored version with NaN
@@ -126,6 +139,7 @@ export const POST = withWorker(async (request, { worker }) => {
       : {}),
     // Absent means a worker that has not been taught to report it, not one that suddenly passes
     ...(preflight ? { preflight } : {}),
+    ...(halt ? { halt } : {}),
   });
 
   // An absent list is a worker that has not been taught to report yet, not a worker that suddenly

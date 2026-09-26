@@ -661,8 +661,23 @@ export interface IWorker {
   command: "" | "pause" | "resume" | "stop";
   commandIssuedAt: Date | null;
   commandAckedAt: Date | null;
+  // What the machine says its loop is doing, whoever halted it. Absent from a worker too old to
+  // say, which is then read from the command it acknowledged.
+  halt?: WorkerHalt | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export type WorkerHaltSource = "board" | "machine";
+
+export interface ApiWorkerHalt {
+  paused: boolean;
+  by: WorkerHaltSource | null;
+  command: "pause" | "stop" | null;
+}
+
+export interface WorkerHalt extends ApiWorkerHalt {
+  reportedAt: Date;
 }
 
 export interface ApiWorker {
@@ -684,6 +699,7 @@ export interface ApiWorker {
   command: "" | "pause" | "resume" | "stop";
   commandIssuedAt: string | null;
   commandAckedAt: string | null;
+  halt: ApiWorkerHalt | null;
   createdAt: string;
   updatedAt: string;
   stale: boolean;
@@ -1739,6 +1755,7 @@ export interface ApiAgentBlock {
 
 export type MachineState =
   | "none"
+  | "disabled"
   | "stale"
   | "unbound"
   | "paused"
@@ -1757,6 +1774,8 @@ export interface ApiHandoverReadiness {
   machine: MachineState;
   /** Why the reader's machine cannot use its checkout of this board, when `machine` is "unbound" */
   bindingError: string;
+  /** Who halted the reader's machine, when `machine` is "paused" or "stopped" */
+  haltedBy: WorkerHaltSource | null;
 }
 
 export interface ApiAgent {

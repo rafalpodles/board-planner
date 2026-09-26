@@ -11,7 +11,7 @@ import { ensureWorkerUser } from "@/lib/worker-user";
 import { accessibleProjectIds } from "@/lib/grants";
 import { User } from "@/models/user";
 import { isWorkerLockedByInstance, projectRunsWorkers } from "@/lib/worker-gate";
-import type { MachineState } from "@/types";
+import type { MachineState, WorkerHaltSource } from "@/types";
 import { bindingErrorFor } from "@/lib/binding-error";
 
 export const PROTOCOL_VERSION = 1;
@@ -146,7 +146,10 @@ function isLive(worker: IWorker, now: Date): boolean {
 
 type ServingMachine = Pick<IWorker, "enabled" | "lastSeenAt" | "repos"> &
   Partial<
-    Pick<IWorker, "preflight" | "command" | "commandIssuedAt" | "commandAckedAt" | "bindingError">
+    Pick<
+      IWorker,
+      "preflight" | "command" | "commandIssuedAt" | "commandAckedAt" | "bindingError" | "halt"
+    >
   >;
 
 // The name the worker gives the check that stops it claiming (worker/src/preflight.ts)
@@ -162,6 +165,20 @@ function haltAcknowledged(worker: ServingMachine): "paused" | "stopped" | null {
   return worker.command === "pause" ? "paused" : "stopped";
 }
 
+// A machine that reports its halt is read from that report, the only place a pause or resume made
+// at the machine shows; one too old to report it, from the command it acknowledged.
+function haltOf(
+  worker: ServingMachine
+): { state: "paused" | "stopped"; by: WorkerHaltSource } | null {
+  const acknowledged = haltAcknowledged(worker);
+  if (!worker.halt) return acknowledged ? { state: acknowledged, by: "board" } : null;
+  if (!worker.halt.paused) return null;
+  return {
+    state: worker.halt.command === "stop" ? "stopped" : "paused",
+    by: worker.halt.by ?? (acknowledged ? "board" : "machine"),
+  };
+}
+
 // Only the sandbox check stops the claim outright. Other failed checks may belong to another
 // project's checkout, which the report does not attribute, so they say nothing about this board.
 function sandboxFailed(worker: ServingMachine): boolean {
@@ -170,13 +187,20 @@ function sandboxFailed(worker: ServingMachine): boolean {
 
 const MACHINE_RANK: Record<MachineState, number> = {
   none: 0,
-  stale: 1,
-  unbound: 2,
-  failing: 3,
-  stopped: 4,
-  paused: 5,
-  live: 6,
+  disabled: 1,
+  stale: 2,
+  unbound: 3,
+  failing: 4,
+  stopped: 5,
+  paused: 6,
+  live: 7,
 };
+
+export interface MachineReadiness {
+  state: MachineState;
+  bindingError: string;
+  haltedBy: WorkerHaltSource | null;
+}
 
 type ServedProject = MatchableProject & { _id?: unknown };
 
@@ -189,18 +213,26 @@ export function machineReadinessFor(
   workers: ServingMachine[],
   project: ServedProject,
   now = new Date()
-): { state: MachineState; bindingError: string } {
-  let best: { state: MachineState; bindingError: string } = { state: "none", bindingError: "" };
+): MachineReadiness {
+  let best: MachineReadiness = { state: "none", bindingError: "", haltedBy: null };
   const projectId = project._id ? String(project._id) : "";
   for (const worker of workers) {
     if (!matchRepo(project, worker.repos ?? [])) continue;
     const refused = bindingErrorFor(worker.bindingError, projectId);
-    const state: MachineState = !isLive(worker as IWorker, now)
-      ? "stale"
-      : (haltAcknowledged(worker) ??
-        (sandboxFailed(worker) ? "failing" : refused ? "unbound" : "live"));
+    const halt = haltOf(worker);
+    // Switched off comes first: it is refused its heartbeat, so it goes stale too, and "check it
+    // is running" is advice its owner cannot act on
+    const state: MachineState = !worker.enabled
+      ? "disabled"
+      : !isLive(worker as IWorker, now)
+        ? "stale"
+        : (halt?.state ?? (sandboxFailed(worker) ? "failing" : refused ? "unbound" : "live"));
     if (MACHINE_RANK[state] > MACHINE_RANK[best.state]) {
-      best = { state, bindingError: state === "unbound" ? refused : "" };
+      best = {
+        state,
+        bindingError: state === "unbound" ? refused : "",
+        haltedBy: state === "paused" || state === "stopped" ? (halt?.by ?? null) : null,
+      };
     }
   }
   return best;
@@ -519,7 +551,10 @@ export async function verifyWorkerCredential(
 export async function touchWorker(
   workerId: string,
   patch: Partial<
-    Pick<IWorker, "protocolVersion" | "version" | "commandAckedAt" | "bindingError" | "preflight">
+    Pick<
+      IWorker,
+      "protocolVersion" | "version" | "commandAckedAt" | "bindingError" | "preflight" | "halt"
+    >
   > = {}
 ): Promise<void> {
   await connectDB();
@@ -575,6 +610,9 @@ export function toApiWorker(
     command: worker.command,
     commandIssuedAt: worker.commandIssuedAt ? new Date(worker.commandIssuedAt).toISOString() : null,
     commandAckedAt: worker.commandAckedAt ? new Date(worker.commandAckedAt).toISOString() : null,
+    halt: worker.halt
+      ? { paused: worker.halt.paused, by: worker.halt.by ?? null, command: worker.halt.command ?? null }
+      : null,
     createdAt: new Date(worker.createdAt).toISOString(),
     updatedAt: new Date(worker.updatedAt).toISOString(),
     stale,

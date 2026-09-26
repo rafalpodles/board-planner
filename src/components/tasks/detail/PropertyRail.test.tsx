@@ -967,6 +967,7 @@ describe("the hand-over notice, with the board judged too", () => {
     columns: BOARD.map((c) => ({ role: c.role })),
     machine: "live",
     bindingError: "",
+    haltedBy: null,
   };
 
   function withBoard(
@@ -1137,6 +1138,45 @@ describe("the hand-over notice, with the board judged too", () => {
       );
     }
   );
+
+  it.each([
+    ["paused", "machine-paused"],
+    ["stopped", "machine-stopped"],
+  ] as const)(
+    "tells the assignee a machine %s at the machine itself is resumed there, not by an admin",
+    (state, reason) => {
+      withBoard({ machine: state, haltedBy: "machine" }, {}, { viewerIsInstanceAdmin: true });
+
+      expect(notice().dataset.reason).toBe(reason);
+      expect(notice().textContent).toBe(
+        `Nothing will run this yet. Your machine is connected but not taking work: it was ${state} on the machine itself. Resume it from the menubar app there.`
+      );
+      expect(screen.queryByRole("link", { name: "Settings → Workers" })).toBeNull();
+    }
+  );
+
+  // BP-762. Switched off by an instance admin, it is refused its heartbeat and went stale, and the
+  // task told its owner to check it was running — which they cannot fix.
+  it("tells a non-admin their machine was switched off by an instance admin, with no advice they cannot take", () => {
+    withBoard({ machine: "disabled" });
+
+    expect(notice().dataset.reason).toBe("machine-disabled");
+    expect(notice().textContent).toBe(
+      "Nothing will run this yet. An instance admin switched your machine off, so it takes no work, and only an instance admin can switch it back on."
+    );
+    expect(screen.queryByRole("link", { name: "Check it is running" })).toBeNull();
+  });
+
+  it("tells an instance admin where their switched-off machine is switched back on", () => {
+    withBoard({ machine: "disabled" }, {}, { viewerIsInstanceAdmin: true });
+
+    expect(notice().textContent).toBe(
+      "Nothing will run this yet. Your machine is switched off in Settings → Workers, so it takes no work — switch it back on there."
+    );
+    expect(screen.getByRole("link", { name: "Settings → Workers" }).getAttribute("href")).toBe(
+      "/settings/workers"
+    );
+  });
 
   // BP-777. A machine whose checkout the worker refuses reported in like any other, and the task
   // said it was waiting for it.

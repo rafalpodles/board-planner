@@ -23,7 +23,7 @@ export const GET = withProjectAccess(async (_request, { params, user }) => {
     Project.findById(projectId, "repositoryUrl githubRepo gitlabRepo worker columns").lean(),
     Worker.find(
       { owner: user._id },
-      "enabled lastSeenAt repos preflight command commandIssuedAt commandAckedAt bindingError"
+      "enabled lastSeenAt repos preflight command commandIssuedAt commandAckedAt bindingError halt"
     ).lean(),
     check(user, projectId, "admin"),
   ]);
@@ -38,6 +38,7 @@ export const GET = withProjectAccess(async (_request, { params, user }) => {
     columns: getProjectColumns(project).map((c) => ({ role: c.role })),
     machine: machine.state,
     bindingError: machine.bindingError,
+    haltedBy: machine.haltedBy,
   };
   return NextResponse.json(body);
 });
