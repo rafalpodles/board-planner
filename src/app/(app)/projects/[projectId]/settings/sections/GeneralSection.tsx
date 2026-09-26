@@ -154,6 +154,11 @@ export function GeneralSection({
     setSavingAccess(true);
     try {
       for (const [userId, relation] of sent) {
+        // Sent now, it would take the page — and the refused change with it — out of reach
+        if (userId === currentUserId && refused.length > 0) {
+          refused.push(`Your own access was left as it is, so the change above can be saved again first`);
+          continue;
+        }
         try {
           if (relation === "none") {
             await api.del(`/api/projects/${projectId}/members?userId=${userId}`);
@@ -291,12 +296,15 @@ export function GeneralSection({
             {trimmedCandidateQuery.length >= MIN_QUERY && (
               <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-lg border border-border bg-bg-card shadow-lg">
                 {offered.length === 0 ? (
-                  <p className="px-3 py-2 text-sm text-text-muted">No matches</p>
+                  <p className="px-3 py-2 text-sm text-text-muted">
+                    {candidates.length > 0 ? "Already on the list" : "No matches"}
+                  </p>
                 ) : (
                   offered.map((c) => (
                     <button
                       key={c._id}
                       type="button"
+                      disabled={savingAccess}
                       onClick={() => addMember(c)}
                       className="focus-ring block w-full px-3 py-2 text-left text-sm hover:bg-bg-hover"
                     >

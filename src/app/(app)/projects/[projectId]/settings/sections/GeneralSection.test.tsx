@@ -336,6 +336,26 @@ describe("GeneralSection member access", () => {
       });
     });
 
+    // Were it sent, the page would drop to a member's view and the refused change could not be
+    // saved again from it
+    it("is kept back when a change before it was refused", async () => {
+      api.del.mockRejectedValueOnce(new Error("Internal server error"));
+      renderSection({ currentUserId: "u1" });
+      fireEvent.change(await screen.findByLabelText("Access for alice"), {
+        target: { value: "member" },
+      });
+      fireEvent.change(screen.getByLabelText("Access for bob"), { target: { value: "none" } });
+      await waitFor(() => expect(accessGroup()?.count).toBe(2));
+
+      await save();
+
+      expect(api.put).not.toHaveBeenCalled();
+      expect(accessGroup()?.count).toBe(2);
+      expect(toast.mock.calls[0][0]).toContain("bob: Internal server error");
+      expect(toast.mock.calls[0][0]).toContain("Your own access was left as it is");
+      expect(replaceProject).not.toHaveBeenCalled();
+    });
+
     it("once stepped down, re-reads the board rather than the owners' members list", async () => {
       renderSection({ currentUserId: "u1" });
       fireEvent.change(await screen.findByLabelText("Access for alice"), {
@@ -517,7 +537,7 @@ describe("GeneralSection add person", () => {
     await screen.findByLabelText("Access for dee");
     fireEvent.change(input, { target: { value: "ee" } });
 
-    expect(await screen.findByText("No matches")).toBeTruthy();
+    expect(await screen.findByText("Already on the list")).toBeTruthy();
   });
 
   it("drops somebody added but not yet saved on Discard", async () => {
