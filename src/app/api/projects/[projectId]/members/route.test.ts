@@ -490,16 +490,18 @@ describe("the audit trail of board access", () => {
   it("records nothing when the grant already held that relation", async () => {
     grantUpsertLean.mockResolvedValue({ relation: "owner" });
 
-    await PUT(put({ userId: U2, relation: "owner" }), { params });
+    const res = await PUT(put({ userId: U2, relation: "owner" }), { params });
 
+    expect(res.status).toBe(200);
     expect(logProjectAudit).not.toHaveBeenCalled();
   });
 
   it("records nothing for the losing side of a concurrent double submit", async () => {
     grantUpsertLean.mockRejectedValue(Object.assign(new Error("dup"), { code: 11000 }));
 
-    await PUT(put({ userId: U2, relation: "member" }), { params });
+    const res = await PUT(put({ userId: U2, relation: "member" }), { params });
 
+    expect(res.status).toBe(200);
     expect(logProjectAudit).not.toHaveBeenCalled();
   });
 

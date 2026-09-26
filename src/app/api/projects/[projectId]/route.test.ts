@@ -616,8 +616,9 @@ describe("PUT /api/projects/[projectId] audit trail", () => {
     });
     writtenOver({ key: "TP", worker: { enabled: true, policyOverrides: [] } });
 
-    await PUT(putRequest({ worker: { enabled: true } }), ctx());
+    const response = await PUT(putRequest({ worker: { enabled: true } }), ctx());
 
+    expect(response.status).toBe(200);
     expect(auditDetails()).toEqual([]);
   });
 

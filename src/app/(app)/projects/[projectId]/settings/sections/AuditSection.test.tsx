@@ -35,17 +35,22 @@ describe("AuditSection", () => {
 
   // BP-742: one line per changed setting, each with its value after the arrow, and none cut off
   it("shows every line of a multi-setting change", async () => {
-    api.get.mockResolvedValue([
-      { ...entry, detail: "Workers: off → on\nRepository: none → https://github.com/orbit-dev/orbit" },
-    ]);
+    const lines = ["Workers: off → on", "Repository: none → https://github.com/orbit-dev/orbit"];
+    api.get.mockResolvedValue([{ ...entry, detail: lines.join("\n"), lines }]);
     render(<AuditSection projectId="TP" active />);
 
     const cell = await screen.findByTestId("audit-detail");
-    expect(cell.textContent).toBe(
-      "Workers: off → on\nRepository: none → https://github.com/orbit-dev/orbit"
-    );
+    expect(cell.textContent).toBe(lines.join("\n"));
     expect(cell.className).toContain("whitespace-pre-line");
     expect(cell.className).not.toMatch(/\btruncate\b/);
+  });
+
+  // A row written before lines were stored can hold a newline somebody typed into a name
+  it("keeps a row stored as one string on one line", async () => {
+    api.get.mockResolvedValue([{ ...entry, detail: "Bug\nRepository: a → b" }]);
+    render(<AuditSection projectId="TP" active />);
+
+    expect((await screen.findByTestId("audit-detail")).textContent).toBe("Bug Repository: a → b");
   });
 
   // typeof null === "object", so a deleted user used to take the populated branch and throw

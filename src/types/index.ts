@@ -1550,6 +1550,7 @@ export interface IProjectAuditLog {
   user: Types.ObjectId | IUser;
   action: ProjectAuditAction;
   detail: string;
+  lines?: string[];
   createdAt: Date;
 }
 
@@ -1559,6 +1560,7 @@ export interface ApiProjectAuditLog {
   user: { _id: string; username: string; fullName: string } | string;
   action: ProjectAuditAction;
   detail: string;
+  lines?: string[];
   createdAt: string;
 }
 

@@ -41,6 +41,10 @@ const projectAuditLogSchema = new Schema<IProjectAuditLog>(
       type: String,
       default: "",
     },
+    lines: {
+      type: [String],
+      default: undefined,
+    },
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );

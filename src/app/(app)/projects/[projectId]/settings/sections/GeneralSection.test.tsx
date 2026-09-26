@@ -93,6 +93,14 @@ describe("GeneralSection member access", () => {
     expect(screen.queryByLabelText("Access for carol")).toBeNull();
   });
 
+  // Once the reader's own access changes they may own the board no more: the page saves it last
+  it("asks to be saved after every other group", async () => {
+    renderSection();
+    await screen.findByLabelText("Access for bob");
+
+    expect(accessGroup()?.saveLast).toBe(true);
+  });
+
   it("writes nothing when access is changed, and counts it as an unsaved change", async () => {
     renderSection();
     const select = await screen.findByLabelText("Access for bob");
@@ -352,7 +360,7 @@ describe("GeneralSection member access", () => {
       expect(api.put).not.toHaveBeenCalled();
       expect(accessGroup()?.count).toBe(2);
       expect(toast.mock.calls[0][0]).toContain("bob: Internal server error");
-      expect(toast.mock.calls[0][0]).toContain("Your own access was left as it is");
+      expect(toast.mock.calls[0][0]).toContain("Your own access was left as it is until the refused");
       expect(replaceProject).not.toHaveBeenCalled();
     });
 

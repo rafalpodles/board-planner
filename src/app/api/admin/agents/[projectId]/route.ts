@@ -73,12 +73,24 @@ export const PATCH = withAdmin(async (request, { params, user }) => {
   if (!beforeImage) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
-  const { before, after } = projectWriteImages(beforeImage, updates);
-  const project = after.toObject();
-
+  let project: {
+    _id: unknown;
+    key?: string;
+    pm?: { enabled?: unknown; lockedByInstance?: unknown; model?: unknown; dailyTurnCap?: unknown };
+  } = {
+    ...beforeImage,
+    pm: {
+      ...beforeImage.pm,
+      ...Object.fromEntries(
+        Object.entries(updates).map(([key, value]) => [key.slice("pm.".length), value])
+      ),
+    },
+  };
   let changes: string[];
   try {
-    changes = describeSettingsChanges(before, project, Object.keys(updates));
+    const images = projectWriteImages(beforeImage, updates);
+    project = images.after.toObject();
+    changes = describeSettingsChanges(images.before, project, Object.keys(updates));
   } catch {
     changes = [`Changed: ${Object.keys(updates).join(", ")}`];
   }

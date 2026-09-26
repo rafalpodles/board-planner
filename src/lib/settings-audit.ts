@@ -1,4 +1,5 @@
-import { projectRepositoryUrl } from "@/lib/repository";
+import { hostOf, projectRepositoryUrl } from "@/lib/repository";
+import { maskSecretUrl } from "@/lib/project-secrets";
 import { DEFAULT_PM_AUTONOMY } from "@/types";
 import {
   POLICY_FIELD_LABELS,
@@ -78,19 +79,29 @@ export function auditValue(value: unknown): string {
 }
 
 // Whatever a pasted address carries besides where it points — a clone URL's credentials, a token
-// in its query — stays out of a trail nobody can edit afterwards
+// in its query — stays out of a trail nobody can edit afterwards. What does not parse as one is
+// shown by its host, or not at all: a token pasted into the field would otherwise print whole.
 export function auditUrl(value: unknown): string {
   if (typeof value !== "string" || !value.trim()) return "none";
-  let url: URL;
+  const text = value.trim();
+  let url: URL | null = null;
   try {
-    url = new URL(value.trim());
-  } catch {
-    return auditValue(value);
+    url = new URL(text);
+  } catch {}
+  if (url?.host) {
+    const credentials = url.username || url.password ? "•••@" : "";
+    const query = url.search ? "?•••" : "";
+    return auditValue(`${url.protocol}//${credentials}${url.host}${url.pathname}${query}`);
   }
-  const credentials = url.username || url.password ? "•••@" : "";
-  const query = url.search ? "?•••" : "";
-  return auditValue(`${url.protocol}//${credentials}${url.host}${url.pathname}${query}`);
+  const ssh = /^[\w.-]+@([\w.-]+):([\w./~-]+)$/.exec(text);
+  if (ssh) return auditValue(`${ssh[1]}:${ssh[2]}`);
+  const host = hostOf(text);
+  return host ? auditValue(host) : "(not a web address)";
 }
+
+// An MCP server's or a link's address can be the credential itself, the way a webhook's is
+const capabilityUrl = (value: unknown) =>
+  typeof value === "string" && value.trim() ? auditValue(maskSecretUrl(value.trim())) : "none";
 
 function at(doc: unknown, path: string): unknown {
   return path
@@ -195,14 +206,14 @@ function mcpChanges(before: unknown, after: unknown): string[] {
     const old = was.find((s) => s.name === server.name);
     if (!old) {
       lines.push(
-        `${label} added: ${auditUrl(server.url)}, ${auditValue(server.authType)}, writes ${auditValue(
+        `${label} added: ${capabilityUrl(server.url)}, ${auditValue(server.authType)}, writes ${auditValue(
           !!server.allowWrites
         )}`
       );
       continue;
     }
     const found = [
-      auditChange(`${label} · URL`, old.url, server.url, auditUrl),
+      auditChange(`${label} · URL`, old.url, server.url, capabilityUrl),
       auditChange(`${label} · Authentication`, old.authType, server.authType),
       auditChange(`${label} · Enabled`, old.enabled, server.enabled),
       auditChange(`${label} · Allow writes`, old.allowWrites, server.allowWrites),
@@ -225,7 +236,7 @@ function mcpChanges(before: unknown, after: unknown): string[] {
 function linkList(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return (value as { label?: string; url?: string }[]).map(
-    (l) => `${auditValue(l.label)} (${auditUrl(l.url)})`
+    (l) => `${auditValue(l.label)} (${capabilityUrl(l.url)})`
   );
 }
 

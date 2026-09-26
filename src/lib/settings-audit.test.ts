@@ -67,6 +67,19 @@ describe("describeSettingsChanges", () => {
     expect(line).toBe("Repository: none → https://•••@github.com/org/app.git?•••");
   });
 
+  // What does not parse as a web address is shown by its host, or not at all — never whole
+  it.each([
+    ["a token pasted on its own", "ghp_abcdefghijklmnopqrstuvwxyz0123456789", "(not a web address)"],
+    ["credentials with no scheme", "x-access-token:ghp_secret@github.com/org/app.git", "(not a web address)"],
+    ["an SSH remote", "git@github.com:org/app.git", "github.com:org/app.git"],
+  ])("never prints %s whole", (_case, value, shown) => {
+    expect(changes({}, { repositoryUrl: value })).toEqual([`Repository: none → ${shown}`]);
+  });
+
+  it("says nothing of a path the schema does not store", () => {
+    expect(changes({ name: "A" }, { name: "B", bogusPath: "x" })).toEqual(["Name: A → B"]);
+  });
+
   it("names the estimate field rather than its id", () => {
     const customFields = [
       { _id: FIELD_A, name: "Points", fieldType: "number" },
@@ -205,7 +218,7 @@ describe("describeSettingsChanges", () => {
       expect(lines).toEqual([
         "PM MCP server github · Allow writes: off → on",
         "PM MCP server github · Token replaced",
-        "PM MCP server linear added: https://mcp.example/linear?•••, bearer, writes off",
+        "PM MCP server linear added: https://mcp.example/••••hree, bearer, writes off",
       ]);
       expect(lines.join("\n")).not.toMatch(/secret/);
     });
@@ -246,7 +259,7 @@ describe("describeSettingsChanges", () => {
 
     it("names links by label and address", () => {
       expect(changes({ pm }, { pm: { ...pm, links: [] } })).toEqual([
-        "PM links: Docs (https://docs.example/) → none",
+        "PM links: Docs (https://docs.example/••••) → none",
       ]);
     });
 

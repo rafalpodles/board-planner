@@ -274,22 +274,22 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
   if (!beforeImage) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
-  const { before, after: project } = projectWriteImages(beforeImage, updates);
-
   // Both trails before anything else can fail: the write has landed, and a retry would find
   // nothing left to record
   const workerAudit = pendingWorkerAudit(
-    before as never,
+    beforeImage as never,
     updates,
-    String(before.key || projectId)
+    String(beforeImage.key || projectId)
   );
   for (const entry of workerAudit) {
     void logInstanceAudit({ ...entry, user: String(user._id), actorUsername: user.username });
   }
 
+  let images: ReturnType<typeof projectWriteImages> | null = null;
   let changes: string[];
   try {
-    changes = describeSettingsChanges(before, project.toObject(), Object.keys(updates));
+    images = projectWriteImages(beforeImage, updates);
+    changes = describeSettingsChanges(images.before, images.after.toObject(), Object.keys(updates));
   } catch {
     changes = [`Changed: ${Object.keys(updates).join(", ")}`];
   }
@@ -308,6 +308,10 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
     );
   }
 
+  const project = images?.after ?? (await Project.findById(projectId));
+  if (!project) {
+    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+  }
   await project.populate("createdBy", "username fullName");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const obj: any = sanitizeProjectSecrets(project.toObject());

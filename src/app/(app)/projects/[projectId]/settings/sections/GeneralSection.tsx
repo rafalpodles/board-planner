@@ -156,7 +156,7 @@ export function GeneralSection({
       for (const [userId, relation] of sent) {
         // Sent now, it would take the page — and the refused change with it — out of reach
         if (userId === currentUserId && refused.length > 0) {
-          refused.push(`Your own access was left as it is, so the change above can be saved again first`);
+          refused.push("Your own access was left as it is until the refused changes are saved");
           continue;
         }
         try {

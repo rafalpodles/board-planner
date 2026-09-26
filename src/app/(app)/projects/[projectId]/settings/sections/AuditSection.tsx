@@ -90,7 +90,7 @@ export function AuditSection({ projectId, active }: { projectId: string; active:
                     data-testid="audit-detail"
                     className="w-full whitespace-pre-line break-words align-top text-text sm:table-cell sm:max-w-0 sm:py-1.5"
                   >
-                    {log.detail}
+                    {log.lines?.length ? log.lines.join("\n") : (log.detail ?? "").replace(/\s+/g, " ")}
                   </td>
                 </tr>
               ))}

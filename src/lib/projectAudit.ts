@@ -1,14 +1,19 @@
 import { Types } from "mongoose";
 import { ProjectAuditLog } from "@/models/projectAuditLog";
 import { ProjectAuditAction } from "@/types";
+import { isControlCodePoint } from "@/lib/identifiers";
 
-// The view renders a detail's line breaks, so only lines passed as lines may carry one: a name
-// somebody typed with a newline in it would otherwise print as a settings line of its own
+// A name somebody typed is one line of text, whatever it carries: a newline would print as a
+// settings line of its own, and a bidi override reorders the rest of the row
 function oneLine(text: string): string {
-  // eslint-disable-next-line no-control-regex
-  return text.replace(/[\s\u0000-\u001f\u007f]+/g, " ").trim();
+  return Array.from(text.replace(/\s+/g, " "), (ch) =>
+    isControlCodePoint(ch.codePointAt(0) ?? 0) ? "" : ch
+  )
+    .join("")
+    .trim();
 }
 
+// Only the lines passed as lines are stored as lines; the view renders nothing else on more than one
 export async function logProjectAudit(
   projectId: Types.ObjectId | string,
   userId: Types.ObjectId | string,
@@ -22,6 +27,7 @@ export async function logProjectAudit(
       user: userId,
       action,
       detail: lines.join("\n"),
+      ...(Array.isArray(detail) ? { lines } : {}),
     });
   } catch {
     console.warn("Failed to log project audit");

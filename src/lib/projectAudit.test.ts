@@ -22,5 +22,18 @@ describe("logProjectAudit", () => {
     await logProjectAudit("p1", "u1", "settings_updated", ["Name: A → B", "Coda doc:\n none → d1", "  "]);
 
     expect(written()).toBe("Name: A → B\nCoda doc: none → d1");
+    expect(create.mock.calls[0][0].lines).toEqual(["Name: A → B", "Coda doc: none → d1"]);
+  });
+
+  it("stores no lines for a detail passed as one string", async () => {
+    await logProjectAudit("p1", "u1", "template_added", "Bug report");
+
+    expect(create.mock.calls[0][0]).not.toHaveProperty("lines");
+  });
+
+  it("drops the characters that reorder or hide text", async () => {
+    await logProjectAudit("p1", "u1", "template_added", "Bug\u0085\u202eevil\u200b name");
+
+    expect(written()).toBe("Bugevil name");
   });
 });
