@@ -406,6 +406,32 @@ describe("a rename racing another", () => {
     ]);
   });
 
+  // Review: a form sends the name it was opened with on every save, and writing that back undid a
+  // rename that landed in between — or recreated a name another field had taken since
+  it("does not write back the name a form re-sends", async () => {
+    projectFindById.mockImplementationOnce(() => ({
+      select: () => {
+        const read = query(image());
+        project.customFields[0].name = "Score";
+        return read;
+      },
+    }));
+
+    const res = await PATCH(patchRequest({ name: "Points", required: true }), fieldCtx(numberFieldId));
+
+    expect(res.status).toBe(200);
+    expect(project.customFields[0]).toMatchObject({ name: "Score", required: true });
+    const [, update] = projectFindOneAndUpdate.mock.calls[0];
+    expect(update).toEqual({ $set: { "customFields.$.required": true } });
+  });
+
+  it("refuses a name with a control character, before writing anything", async () => {
+    const res = await PATCH(patchRequest({ name: "Al\u0000pha" }), fieldCtx(numberFieldId));
+
+    expect(res.status).toBe(400);
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
+  });
+
   it("may still change the case of its own name", async () => {
     const res = await PATCH(patchRequest({ name: "POINTS" }), fieldCtx(numberFieldId));
 

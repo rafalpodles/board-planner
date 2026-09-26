@@ -5,6 +5,7 @@ import { Project } from "@/models/project";
 import { Task } from "@/models/task";
 import { check } from "@/lib/grants";
 import { logProjectAudit } from "@/lib/projectAudit";
+import { hasControlCharacters } from "@/lib/identifiers";
 import { customFieldChanges } from "@/lib/settings-audit";
 import { projectWriteImages } from "@/lib/project-write-images";
 import { canonicalObjectId } from "@/lib/object-id";
@@ -59,16 +60,20 @@ export const PATCH = withProjectAccess(async (request, { params, user }) => {
         { status: 400 }
       );
     }
-    // Only a new name can clash: a form re-sending the stored one saves a legacy twin's other settings
-    const clash =
-      name !== field.name &&
-      (project.customFields || []).some(
+    if (hasControlCharacters(name)) {
+      return NextResponse.json({ error: "Field name cannot contain control characters" }, { status: 400 });
+    }
+    // Only a new name is checked and written: a form re-sends the stored one on every save, and
+    // writing it back would undo a rename that landed since the read
+    if (name !== field.name) {
+      const clash = (project.customFields || []).some(
         (f) => String(f._id) !== fieldId && f.name.toLowerCase() === name.toLowerCase()
       );
-    if (clash) {
-      return NextResponse.json({ error: "Field with this name already exists" }, { status: 409 });
+      if (clash) {
+        return NextResponse.json({ error: "Field with this name already exists" }, { status: 409 });
+      }
+      changes.name = name;
     }
-    changes.name = name;
   }
 
   // Dropping a saved option erases it from every task, like the owner-gated DELETE; archiving keeps values
@@ -101,7 +106,7 @@ export const PATCH = withProjectAccess(async (request, { params, user }) => {
 
   // This field's own paths only: saving the whole list put back a field added or edited meanwhile.
   // A new name is checked in the write too, since another rename may have taken it since the read.
-  const renamed = changes.name !== undefined && changes.name !== field.name;
+  const renamed = changes.name !== undefined;
   const before = await Project.findOneAndUpdate(
     {
       _id: projectId,

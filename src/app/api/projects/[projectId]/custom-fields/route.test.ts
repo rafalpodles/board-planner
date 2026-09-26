@@ -276,6 +276,13 @@ describe("an add racing another", () => {
     expect(logProjectAudit).not.toHaveBeenCalled();
   });
 
+  it("refuses a name with a control character, before writing anything", async () => {
+    const res = await POST(request("POST", { name: "Bad\u0000Name", fieldType: "text" }), ctx());
+
+    expect(res.status).toBe(400);
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
+  });
+
   it("still tells a full list from a taken name", async () => {
     project(Array.from({ length: MAX_FIELDS }, (_, i) => `Field ${i}`));
 

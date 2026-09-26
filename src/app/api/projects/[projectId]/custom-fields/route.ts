@@ -3,6 +3,7 @@ import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { logProjectAudit } from "@/lib/projectAudit";
+import { hasControlCharacters } from "@/lib/identifiers";
 import { CUSTOM_FIELD_TYPES, CustomFieldType } from "@/types";
 import {
   isOptionField,
@@ -45,6 +46,9 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
   }
   if (name.trim().length > MAX_FIELD_NAME_LENGTH) {
     return NextResponse.json({ error: `Field name must be ${MAX_FIELD_NAME_LENGTH} characters or less` }, { status: 400 });
+  }
+  if (hasControlCharacters(name)) {
+    return NextResponse.json({ error: "Field name cannot contain control characters" }, { status: 400 });
   }
   if (!fieldType || !CUSTOM_FIELD_TYPES.includes(fieldType as CustomFieldType)) {
     return NextResponse.json({ error: "Invalid field type" }, { status: 400 });
