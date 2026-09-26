@@ -33,8 +33,9 @@ interface SettingsShellProps {
   sidebarTop?: React.ReactNode;
   sidebarFooter?: React.ReactNode;
   /**
-   * A bar stuck to the foot of the content column. Nothing is padded under it, so at the end of
-   * the page it rests where it sticks everywhere else, and the PM launcher's raise holds (BP-783).
+   * A bar stuck to the foot of the content column. The column fills the page and nothing is padded
+   * under the bar, so however short the section it rests where it sticks, and the PM launcher's
+   * raise holds (BP-783).
    */
   bottomBar?: React.ReactNode;
   children: React.ReactNode;
@@ -165,10 +166,12 @@ export function SettingsShell({
   }
 
   return (
-    <div className={bottomBar ? "-mt-6 md:mt-0" : "-mt-6 pb-8 md:mt-0"}>
+    <div className={bottomBar ? "-mt-6 flex flex-1 flex-col md:mt-0" : "-mt-6 pb-8 md:mt-0"}>
       <PageHeader title={title} subtitle={subtitle} />
 
-      <div className="md:grid md:grid-cols-[236px_minmax(0,1fr)] md:gap-7">
+      <div
+        className={`${bottomBar ? "flex flex-1 flex-col " : ""}md:grid md:grid-cols-[236px_minmax(0,1fr)] md:gap-7`}
+      >
         <nav
           data-settings-nav="sidebar"
           className="hidden md:sticky md:top-4 md:block md:self-start"
@@ -197,15 +200,15 @@ export function SettingsShell({
           {pills.map(pill)}
         </SectionPillsNav>
 
-        <div className="min-w-0">
-          {children}
-          {bottomBar && (
-            <>
-              <div aria-hidden="true" className="h-8" />
-              {bottomBar}
-            </>
-          )}
-        </div>
+        {bottomBar ? (
+          <div className="flex min-w-0 flex-1 flex-col">
+            <div>{children}</div>
+            <div aria-hidden="true" data-testid="bottom-bar-spacer" className="min-h-8 flex-1" />
+            {bottomBar}
+          </div>
+        ) : (
+          <div className="min-w-0">{children}</div>
+        )}
       </div>
     </div>
   );

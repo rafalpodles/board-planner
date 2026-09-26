@@ -28,16 +28,33 @@ const sidebar = () => document.querySelector('[data-settings-nav="sidebar"]')!;
 const pills = () => document.querySelector('[data-settings-nav="pills"]')!;
 
 describe("SettingsShell", () => {
-  // BP-783: padding under a sticky bar is where it rests at the end of the page, above where it sticks
-  it("pads nothing under a bottom bar, and puts the bar last in the content column", () => {
+  // BP-783: whatever lies under a sticky bar in its own column is where it rests at the end of the
+  // page, above where it sticks — padding there, or the column ending before the page does
+  it("puts a bottom bar last in the content column, under a spacer that takes up the slack", () => {
+    render(
+      <SettingsShell groups={SELECTED} active="general" bottomBar={<div data-testid="bar" />}>
+        <p>body</p>
+      </SettingsShell>
+    );
+    const bar = screen.getByTestId("bar");
+    const column = bar.parentElement!;
+    expect(column.contains(screen.getByText("body"))).toBe(true);
+    expect(column.lastElementChild).toBe(bar);
+    expect(bar.previousElementSibling).toBe(screen.getByTestId("bottom-bar-spacer"));
+    expect(screen.getByTestId("bottom-bar-spacer").className).toMatch(/\bflex-1\b/);
+  });
+
+  it("fills the page down to the bottom when it has a bar, with nothing padded under it", () => {
     const { container } = render(
       <SettingsShell groups={SELECTED} active="general" bottomBar={<div data-testid="bar" />}>
         body
       </SettingsShell>
     );
-    const bar = screen.getByTestId("bar");
-    expect(bar.parentElement!.lastElementChild).toBe(bar);
-    expect(container.firstElementChild!.className).not.toMatch(/\bpb-/);
+    const column = screen.getByTestId("bar").parentElement!;
+    for (let el: Element | null = column; el && el !== container; el = el.parentElement) {
+      expect(el.className, el.outerHTML.slice(0, 80)).toMatch(/\bflex-1\b/);
+      expect(el.className).not.toMatch(/\bpb-/);
+    }
   });
 
   it("keeps its bottom padding when there is no bar", () => {

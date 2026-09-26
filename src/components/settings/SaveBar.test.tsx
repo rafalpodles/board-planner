@@ -40,20 +40,33 @@ describe("SaveBar and the strip below it", () => {
   });
 });
 
+// BP-783: split, a narrow bar kept Discard at the right of its top row, under the raised PM launcher.
+// Where the pair lands at each width is measured in e2e/save-bar-keeps-its-button.spec.ts.
+describe("SaveBar's buttons", () => {
+  it("wrap as one pair, after a spacer that stays behind on the row above", () => {
+    render(<SaveBar pending={[group]} total={1} onGoToSection={vi.fn()} />);
+
+    const discard = screen.getByRole("button", { name: "Discard" });
+    const save = screen.getByRole("button", { name: "Save changes" });
+    const pair = discard.parentElement!;
+    expect(save.parentElement).toBe(pair);
+    expect(pair.children).toHaveLength(2);
+    expect(pair.previousElementSibling!.className).toMatch(/\bflex-1\b/);
+  });
+
+  it("never break their own labels", () => {
+    render(<SaveBar pending={[group]} total={1} onGoToSection={vi.fn()} />);
+
+    for (const name of ["Discard", "Save changes"]) {
+      expect(screen.getByRole("button", { name }).className).toMatch(/\bwhitespace-nowrap\b/);
+    }
+  });
+});
+
 /**
  * BP-738. A closed bar is clipped to nothing, not removed, so whatever it still holds is on the page
  * for anything reading text rather than pixels. It keeps the last summary for the slide only.
  */
-// BP-783: split, a narrow bar kept Discard on its top row, under the raised PM launcher
-it("wraps Discard and Save changes as one unit", () => {
-  render(<SaveBar pending={[group]} total={1} onGoToSection={vi.fn()} />);
-
-  const discard = screen.getByRole("button", { name: "Discard" });
-  const save = screen.getByRole("button", { name: "Save changes" });
-  expect(discard.parentElement).toBe(save.parentElement);
-  expect(discard.parentElement!.children).toHaveLength(2);
-});
-
 describe("SaveBar once it has closed", () => {
   const summary = () => screen.queryByText(/unsaved change/)?.textContent ?? null;
 
