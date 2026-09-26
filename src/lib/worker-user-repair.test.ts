@@ -86,6 +86,15 @@ describe("repairMachineNames", () => {
     expect(users[0].fullName).toBe("OldMachine");
   });
 
+  it("keeps the owner in the name of a machine enrolled before its owner was recorded", async () => {
+    users.push(machineUser(ID, "Ada · evil\nname"));
+    workers.push({ _id: ID, name: "evil\nname", owner: null });
+
+    expect(await repairMachineNames()).toBe(1);
+
+    expect(users[0].fullName).toBe("Ada · evilname");
+  });
+
   it("names a machine whose owner has no full name by the owner's username", async () => {
     users.push(machineUser(ID, "​MacBook"));
     workers.push({ _id: ID, name: "MacBook", owner: { fullName: "", username: "ada" } });

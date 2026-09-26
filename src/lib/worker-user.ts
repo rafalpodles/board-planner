@@ -89,9 +89,11 @@ export async function repairMachineNames(): Promise<number> {
   for (const user of poisoned) {
     const worker = byId.get(user.username.slice("worker-".length));
     const owner = worker?.owner as { fullName?: string; username?: string } | null | undefined;
-    const fullName = worker
-      ? workerDisplayName(worker.name, owner?.fullName?.trim() || owner?.username?.trim() || "")
-      : workerDisplayName(user.fullName ?? "", "");
+    const ownerName = owner?.fullName?.trim() || owner?.username?.trim() || "";
+    const fullName =
+      worker && ownerName
+        ? workerDisplayName(worker.name, ownerName)
+        : workerDisplayName(user.fullName ?? "", "");
     if (fullName === user.fullName) continue;
     const written = await User.updateOne(
       { _id: user._id, fullName: user.fullName },
