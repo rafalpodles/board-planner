@@ -187,7 +187,8 @@ same path from the same state directory, so nothing needs configuring (BP-778).
 As a macOS service:
 
 Write the enrolment token first, to a file only you can read — never into the plist, which sits
-at `0644` and rides along into Time Machine. With the token copied from the Enrol dialog:
+at `0644` and rides along into Time Machine. With the token copied from Settings → Machines →
+"Connect a machine":
 
 ```bash
 mkdir -p -m 700 ~/.boardplanner
@@ -697,7 +698,7 @@ uses: claiming, reporting status, commenting, releasing, and all of `/api/worker
 outside the worker API accepts it.
 
 **`CP_ENROLMENT_TOKEN` / `CP_ENROLMENT_TOKEN_FILE`** — single-use, one hour to live. Mint one from
-Settings → Workers → "Enrol a worker" and put it on the machine. The first registration spends it
+Settings → Machines → "Connect a machine" and put it on the machine. The first registration spends it
 server-side, the worker deletes the file, and it is never needed again — a worker with an identity
 in `worker.json` does not re-register. Optional by design: an enrolled worker must keep booting
 after you remove it, so a token file that is gone is not an error. One that is there but readable

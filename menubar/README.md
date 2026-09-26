@@ -16,7 +16,8 @@ Connecting is the device flow in `DeviceEnrolment.swift`: requests to
 while you approve in the browser. The credential that comes back is the worker's, and the app
 writes it straight to the worker's identity file (`IdentityFile.swift`, mode 0600) — the file
 registration writes — and does not use it itself. The other network traffic it starts is git: the
-clone of each repository you add, and the push probe that checks you may push to it. Past that,
+clone of each repository you add, or a fetch when its checkout is already there, and the push probe
+that checks you may push to it. Past that,
 policy and registration live on the worker and in the web console; the Connection and Policy tabs
 are read-only views of what the worker reports over `GET /config`.
 
