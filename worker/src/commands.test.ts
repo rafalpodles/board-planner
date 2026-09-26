@@ -348,6 +348,37 @@ describe("a halt across a restart", () => {
     expect(after.abort).toHaveBeenCalledTimes(1);
   });
 
+  // A board command issued while the first heartbeat after a restart is out: the stream delivers
+  // the newer one first, and the heartbeat's late answer still carries the spared issuance
+  it("lets a late answer carrying the spared issuance undo nothing a newer board command did", () => {
+    const memory = memoryOf();
+    restart(memory).channels.remote.pause(T1);
+
+    const after = restart(memory);
+    after.channels.remote.resume(T2);
+    after.channels.local.pause();
+    after.ack.mockClear();
+    after.channels.remote.pause(T1);
+    after.channels.remote.resume(T2);
+
+    expect(after.loop.paused()).toBe(true);
+    expect(after.ack).not.toHaveBeenCalled();
+  });
+
+  it("does not apply a newer board stop twice around a late answer, aborting a run the operator started", () => {
+    const memory = memoryOf();
+    restart(memory).channels.remote.pause(T1);
+
+    const after = restart(memory);
+    after.channels.remote.stop(T2);
+    after.channels.local.resume();
+    after.channels.remote.pause(T1);
+    after.channels.remote.stop(T2);
+
+    expect(after.abort).toHaveBeenCalledTimes(1);
+    expect(after.loop.paused()).toBe(false);
+  });
+
   it("starts as if nothing was saved when the file is not what it wrote", () => {
     const after = restart(memoryOf("not json"));
 

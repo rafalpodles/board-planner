@@ -137,7 +137,9 @@ export function createCommandHandlers(deps: CommandDeps): CommandChannels {
     if (issuedAt !== undefined && issuedAt === appliedBeforeRestart) {
       appliedBeforeRestart = null;
       const instant = Date.parse(issuedAt);
-      if (!Number.isNaN(instant)) lastAppliedAt = instant;
+      // A newer command already applied: this is a late answer, and the guard must not move back
+      if (Number.isNaN(instant) || instant <= lastAppliedAt) return;
+      lastAppliedAt = instant;
       settle(command);
       return;
     }
@@ -149,6 +151,7 @@ export function createCommandHandlers(deps: CommandDeps): CommandChannels {
     } else {
       if (instant <= lastAppliedAt) return;
       lastAppliedAt = instant;
+      appliedBeforeRestart = null;
     }
 
     effect();

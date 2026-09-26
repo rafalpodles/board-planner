@@ -221,7 +221,9 @@ only when it starts, so it logs every 30 seconds that it has none until you `lau
 `load` it again.
 
 A worker whose `CP_API_URL` is still `BOARD_URL`, or is not an `http` or `https` address at all,
-stops at start and says so in the error log rather than retrying an address it cannot reach.
+stops at start and says so in the error log rather than retrying an address it cannot reach —
+`launchd` starts it again every 30 seconds, so the line repeats until you fix the plist and unload
+and load it.
 
 The plist carries the paths for this machine — check `ProgramArguments` and `PATH` before loading
 it anywhere else. Logs go to `/tmp/boardplanner-worker.log` and

@@ -121,7 +121,7 @@ describe("repairMachineNames", () => {
   it("leaves the PM agent's user and every person alone", async () => {
     users.push(
       { _id: "u-pm", username: "pm", kind: "machine", fullName: "PM\nagent" },
-      { _id: "u-ada", username: "ada", kind: "person", fullName: "A‮da" },
+      { _id: "u-ada", username: "ada", kind: "human", fullName: "A‮da" },
       { _id: "u-look", username: `worker-${ID}`, fullName: "not\na machine" }
     );
 
