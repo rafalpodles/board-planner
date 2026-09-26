@@ -39,7 +39,7 @@ describe("SettingsShell", () => {
     const bar = screen.getByTestId("bar");
     const column = bar.parentElement!;
     expect(column.contains(screen.getByText("body"))).toBe(true);
-    expect(column.parentElement!.contains(sidebar())).toBe(true);
+    expect(column.parentElement).toBe(sidebar().parentElement);
     expect(column.lastElementChild).toBe(bar);
     expect(bar.previousElementSibling).toBe(screen.getByTestId("bottom-bar-spacer"));
     expect(screen.getByTestId("bottom-bar-spacer").className).toMatch(/\bflex-1\b/);

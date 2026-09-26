@@ -676,6 +676,36 @@ describe("GeneralSection members read", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  // Strict Mode reads twice; the first one failing says nothing while the second is still out
+  it("does not report a failure from a read another has replaced", async () => {
+    const second = held();
+    api.get.mockReset();
+    api.get.mockRejectedValueOnce(new Error("offline")).mockReturnValueOnce(second.promise);
+    render(
+      <StrictMode>
+        <SettingsProvider register={register} unregister={vi.fn()}>
+          <GeneralSection
+            projectId="p1"
+            project={project()}
+            patchProject={vi.fn()}
+            replaceProject={replaceProject}
+            isAdmin={false}
+            stats={null}
+          />
+        </SettingsProvider>
+      </StrictMode>
+    );
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2));
+    await act(async () => {});
+
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("Loading who can use this board…");
+
+    await act(async () => second.resolve(members));
+
+    expect(await screen.findByLabelText("Access for alice")).toHaveProperty("value", "owner");
+  });
+
   it("keeps the list it has when only a later re-read fails", async () => {
     renderSection();
     fireEvent.change(await screen.findByLabelText("Access for bob"), { target: { value: "member" } });

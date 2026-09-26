@@ -313,8 +313,7 @@ export function GeneralSection({
         )}
         {membersRead === "failed" && (
           <LoadFailed
-            variant="row"
-            className="mb-0"
+            className="py-4"
             message="Could not load who can use this board."
             onRetry={readMembers}
           />

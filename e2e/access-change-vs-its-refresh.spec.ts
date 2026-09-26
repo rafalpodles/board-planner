@@ -32,8 +32,8 @@ async function makeOwner(page: Page) {
 
 /**
  * The refresh, told apart from a mount read by what it carries rather than by when it arrives:
- * `next dev` runs the mount effect twice, and the second read is still in flight when the select
- * first paints. Only the read that follows the write reports the new relation.
+ * `next dev` runs the mount effect twice, so a mount read can still answer after the select has
+ * painted. Only the read that follows the write reports the new relation.
  */
 function refreshCarrying(page: Page, relation: string) {
   return page.waitForResponse(async (r) => {
