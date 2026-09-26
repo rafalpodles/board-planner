@@ -170,7 +170,7 @@ export function validatePmConfig(
   if (!isValidTimezone(timezone)) {
     return { valid: false, error: `pm.autonomy.timezone is not a valid IANA timezone: ${timezone}` };
   }
-  // Server-managed: the PUT body must never set it, the route carries the stored value across
+  // Server-managed: the PUT body never sets it and the route never writes it
   const autonomy: IPmAutonomy = {
     dailyReview: rawAutonomy.dailyReview === true,
     reviewHour,

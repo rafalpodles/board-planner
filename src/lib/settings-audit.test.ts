@@ -403,10 +403,11 @@ describe("customFieldChanges", () => {
     ).toEqual(["Custom field Size · Options changed"]);
   });
 
+  // What is stored may still be plain strings, while an edit writes the objects parseOptions builds
   it("reads legacy string options the way the field does", () => {
-    expect(
-      customFieldChanges({ ...field, options: ["Small", "Large"] }, { ...field, options: ["Small", "Large"] })
-    ).toEqual([]);
+    const rebuilt = ["Small", "Large"].map((value, order) => ({ id: value, value, color: "#64748b", order }));
+
+    expect(customFieldChanges({ ...field, options: ["Small", "Large"] }, { ...field, options: rebuilt })).toEqual([]);
   });
 
   it("names flags as on and off, and a field stored before a flag existed as off", () => {
