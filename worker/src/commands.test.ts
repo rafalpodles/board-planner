@@ -403,13 +403,35 @@ describe("a halt across a restart", () => {
   });
 
   it("keeps the loop halted after a new registration, but as the machine's, and takes the new record's commands", () => {
-    const { loop, channels } = restart(memoryOf());
+    let id = "w1";
+    const loop = idleLoop();
+    const channels = createCommandHandlers({
+      loop,
+      runs: { abort: vi.fn() },
+      ack: vi.fn(),
+      memory: memoryOf(),
+      workerId: () => id,
+    });
     channels.remote.stop(T2);
 
+    id = "w2";
     channels.registered();
 
     expect(channels.halt()).toEqual({ paused: true, by: "machine", command: "stop" });
+    // Another record's board may run a clock behind the old one's
     channels.remote.resume(T1);
+    expect(loop.paused()).toBe(false);
+  });
+
+  it("takes a registration that reclaims the same record as nothing new, so its standing stop is not applied twice", () => {
+    const { loop, abort, channels } = restart(memoryOf(), "w1");
+    channels.remote.stop(T1);
+    channels.local.resume();
+
+    channels.registered();
+    channels.remote.stop(T1);
+
+    expect(abort).toHaveBeenCalledTimes(1);
     expect(loop.paused()).toBe(false);
   });
 

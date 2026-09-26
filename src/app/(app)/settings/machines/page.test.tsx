@@ -40,6 +40,8 @@ describe("Settings → Machines", () => {
 
     const row = await screen.findByTestId("my-machine");
     expect(api.get).toHaveBeenCalledWith("/api/users/me/machines");
+    // A PM hand-over runs only for the person who asked for it (task-service's claim filter)
+    expect(screen.getByText(/tasks you assigned to yourself — or asked the PM agent to assign to you —/)).toBeTruthy();
     expect(row.textContent).toContain("MacBook");
     expect(row.textContent).toContain("ada.local");
     expect(within(row).getByTestId("my-machine-state").textContent).toBe("Running");
@@ -52,7 +54,7 @@ describe("Settings → Machines", () => {
 
   it.each([
     [{ checkouts: 0 }, "Running, no checkouts yet"],
-    [{ state: "failing" }, "Sandbox check failing"],
+    [{ state: "failing" }, "Sandbox check failing — the menubar app says what to fix"],
     [{ state: "stale" }, "Not reporting"],
     [{ state: "disabled" }, "Switched off by an instance admin"],
     [{ state: "paused", haltedBy: "machine" }, "Paused on the machine"],

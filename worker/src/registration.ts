@@ -110,10 +110,16 @@ function parseHeartbeatMs(text: string): number | null {
   }
 }
 
-// fetch reports every network failure as the same "fetch failed"; what failed is its cause
+// fetch reports every network failure as the same "fetch failed"; what failed is its cause, and a
+// host with two addresses fails with an AggregateError that says nothing but its code
 function describeFailure(error: unknown): string {
   const cause = (error as { cause?: unknown } | null)?.cause;
-  return cause ? `${String(error)} (${String(cause)})` : String(error);
+  if (!cause) return String(error);
+  const text = String(cause);
+  const code = (cause as { code?: unknown }).code;
+  return typeof code === "string" && !text.includes(code)
+    ? `${String(error)} (${code}: ${text})`
+    : `${String(error)} (${text})`;
 }
 
 export function loadIdentity(store: Pick<Store, "read">): Identity | null {
@@ -269,9 +275,10 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
         }
       }
     } catch (error) {
-      const reason = `heartbeat could not reach the server: ${describeFailure(error)}`;
+      // Keyed on the failure, not its cause: a flapping resolver alternates causes every beat
+      const reason = String(error);
       if (reason !== lastUnreachableReason) {
-        log(reason);
+        log(`heartbeat could not reach the server: ${describeFailure(error)}`);
         lastUnreachableReason = reason;
       }
     }

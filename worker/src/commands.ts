@@ -117,8 +117,8 @@ export function createCommandHandlers(deps: CommandDeps): CommandChannels {
   let haltedBy: { by: HaltSource; command: "pause" | "stop" } | null = null;
 
   const stored = readSavedHalt(deps.memory);
-  const current = deps.workerId?.() ?? null;
-  const saved = stored && current !== null && stored.workerId === current ? stored : null;
+  let registeredAs = deps.workerId?.() ?? null;
+  const saved = stored && registeredAs !== null && stored.workerId === registeredAs ? stored : null;
   let boardIssuedAt = saved?.boardIssuedAt ?? null;
   // Matched by equality and never ordered against anything: the file sits on the machine's own disk,
   // so it may only spare the one board command it names, never gate a later one.
@@ -151,6 +151,10 @@ export function createCommandHandlers(deps: CommandDeps): CommandChannels {
   // The loop stays as it is, and a board halt is the machine's to lift now: the record that issued
   // it is not the one this process reports to, and that board's instants order nothing here
   function registered(): void {
+    const id = deps.workerId?.() ?? null;
+    // Registering again as the same machine reclaims its record, standing command and all
+    if (id !== null && id === registeredAs) return;
+    registeredAs = id;
     if (haltedBy?.by === "board") haltedBy = { by: "machine", command: haltedBy.command };
     lastAppliedAt = -Infinity;
     boardIssuedAt = null;

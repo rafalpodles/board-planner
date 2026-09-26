@@ -387,6 +387,32 @@ describe("startHeartbeat", () => {
     heartbeat.stop();
   });
 
+  it("names the code of a failure whose cause says nothing else, such as a host with two addresses", async () => {
+    const deps = depsWith();
+    const both = Object.assign(new AggregateError([], ""), { code: "ECONNREFUSED" });
+    answering(deps, [new TypeError("fetch failed", { cause: both })]);
+    const heartbeat = startHeartbeat(deps);
+
+    await heartbeat.tick();
+
+    expect(deps.log).toHaveBeenCalledWith(
+      "heartbeat could not reach the server: TypeError: fetch failed (ECONNREFUSED: AggregateError)"
+    );
+    heartbeat.stop();
+  });
+
+  it("says one outage once even while its cause keeps changing", async () => {
+    const deps = depsWith();
+    const flapping = (code: string) => new TypeError("fetch failed", { cause: new Error(`getaddrinfo ${code} board.example.com`) });
+    answering(deps, [flapping("EAI_AGAIN"), flapping("ENOTFOUND"), flapping("EAI_AGAIN")]);
+    const heartbeat = startHeartbeat(deps);
+
+    for (let i = 0; i < 3; i++) await heartbeat.tick();
+
+    expect(deps.log).toHaveBeenCalledTimes(1);
+    heartbeat.stop();
+  });
+
   it("says nothing about a recovery when the server was never out of reach", async () => {
     const deps = depsWith();
     answering(deps, [200, 200]);

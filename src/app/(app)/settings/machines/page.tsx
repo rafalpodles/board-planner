@@ -22,7 +22,7 @@ function describeState(machine: ApiMyMachine): { text: string; tone: string } {
         ? { text: "Running", tone: "text-success" }
         : { text: "Running, no checkouts yet", tone: "text-text-muted" };
     case "failing":
-      return { text: "Sandbox check failing", tone: "text-danger" };
+      return { text: "Sandbox check failing — the menubar app says what to fix", tone: "text-danger" };
     case "stale":
       return { text: "Not reporting", tone: "text-danger" };
     case "disabled":
@@ -70,11 +70,11 @@ export default function MachinesPage() {
   return (
     <div className="max-w-3xl">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-[12rem] flex-1">
+        <div className="min-w-0 grow basis-48">
           <h2 className="mb-1 text-lg font-semibold">Machines</h2>
           <p className="text-sm text-text-muted">
-            The machines you connected. A machine takes only tasks you assigned to yourself — or the
-            PM agent assigned to you — that name an agent, in projects you can reach.
+            The machines you connected. A machine takes only tasks you assigned to yourself — or asked
+            the PM agent to assign to you — that name an agent, in projects you can reach.
           </p>
         </div>
         <Button onClick={() => setConnecting(true)}>Connect a machine</Button>
@@ -114,13 +114,14 @@ export default function MachinesPage() {
                 data-testid="my-machine"
                 className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 text-sm"
               >
-                <div className="min-w-[12rem] flex-1">
+                <div className="min-w-0 grow basis-48">
                   <p className="break-words font-medium">{machine.name}</p>
                   <p className="break-words text-xs text-text-muted">
                     {[
                       machine.host || "—",
                       machine.version && `worker ${machine.version}`,
-                      `${machine.checkouts} checkout${machine.checkouts === 1 ? "" : "s"}`,
+                      machine.checkouts > 0 &&
+                        `${machine.checkouts} checkout${machine.checkouts === 1 ? "" : "s"}`,
                       machine.lastSeenAt ? `last seen ${timeAgo(machine.lastSeenAt)}` : "never seen",
                     ]
                       .filter(Boolean)
