@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { describeSettingsChanges } from "./settings-audit";
+import {
+  channelChanges,
+  customFieldChanges,
+  describeSettingsChanges,
+  webhookChanges,
+} from "./settings-audit";
 import { projectWriteImages } from "./project-write-images";
 
 // Through the real schema, so what is compared is what a write would have stored
@@ -328,5 +333,85 @@ describe("describeSettingsChanges", () => {
 
     expect(line.length).toBeLessThan(120);
     expect(line.endsWith("…")).toBe(true);
+  });
+});
+
+// BP-782
+describe("webhookChanges", () => {
+  const hook = { url: "https://hooks.example.com/services/T0/B0/secretpart", events: ["task_created"], enabled: true };
+
+  it("names the webhook and its new address masked, the way its add and removal do", () => {
+    const [line] = webhookChanges(hook, { ...hook, url: "https://other.example.com/in/abcd" });
+
+    expect(line).toBe(
+      "Webhook https://hooks.example.com/••••part · URL: https://hooks.example.com/••••part → https://other.example.com/••••abcd"
+    );
+    expect(line).not.toContain("secret");
+  });
+
+  it("does not call a reordered event list a change", () => {
+    const events = ["comment_added", "task_created"];
+
+    expect(
+      webhookChanges({ ...hook, events }, { ...hook, events: [...events].reverse() })
+    ).toEqual([]);
+  });
+
+  it("names added events and a switch-off", () => {
+    expect(
+      webhookChanges(hook, { ...hook, events: ["task_created", "comment_added"], enabled: false })
+    ).toEqual([
+      "Webhook https://hooks.example.com/••••part · Events: task_created → comment_added, task_created",
+      "Webhook https://hooks.example.com/••••part · Enabled: on → off",
+    ]);
+  });
+});
+
+describe("channelChanges", () => {
+  const channel = { name: "Releases", events: ["task_created"], enabled: true };
+
+  it("says a new address was set without printing it", () => {
+    expect(channelChanges(channel, channel, true)).toEqual([
+      "Notification channel Releases · Webhook URL replaced",
+    ]);
+  });
+
+  it("names a rename under the name it had", () => {
+    expect(channelChanges(channel, { ...channel, name: "Ops" }, false)).toEqual([
+      "Notification channel Releases · Name: Releases → Ops",
+    ]);
+  });
+});
+
+describe("customFieldChanges", () => {
+  const options = [
+    { id: "s", value: "Small", color: "#111111", order: 0 },
+    { id: "l", value: "Large", color: "#222222", order: 1 },
+  ];
+  const field = { name: "Size", options, required: false, archived: false, order: 0 };
+
+  it("shows options by value", () => {
+    expect(
+      customFieldChanges(field, { ...field, options: [...options, { id: "h", value: "Huge", color: "#333333", order: 2 }] })
+    ).toEqual(["Custom field Size · Options: Small, Large → Small, Large, Huge"]);
+  });
+
+  // Compared whole: a new colour is a change even though the values read the same
+  it("records a recoloured option as a change", () => {
+    expect(
+      customFieldChanges(field, { ...field, options: [{ ...options[0], color: "#999999" }, options[1]] })
+    ).toEqual(["Custom field Size · Options changed"]);
+  });
+
+  it("reads legacy string options the way the field does", () => {
+    expect(
+      customFieldChanges({ ...field, options: ["Small", "Large"] }, { ...field, options: ["Small", "Large"] })
+    ).toEqual([]);
+  });
+
+  it("names flags as on and off, and a field stored before a flag existed as off", () => {
+    expect(
+      customFieldChanges({ name: "Size" }, { name: "Size", required: true, showOnCard: false })
+    ).toEqual(["Custom field Size · Required: off → on"]);
   });
 });

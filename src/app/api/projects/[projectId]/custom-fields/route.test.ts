@@ -7,8 +7,10 @@ const check = vi.fn();
 const projectFindById = vi.fn();
 const projectFindOneAndUpdate = vi.fn();
 const projectExists = vi.fn();
+const logProjectAudit = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+vi.mock("@/lib/projectAudit", () => ({ logProjectAudit }));
 vi.mock("@/lib/auth", () => ({
   getAuthUser,
   RateLimitError: class RateLimitError extends Error {},
@@ -201,5 +203,36 @@ describe("POST /api/projects/:projectId/custom-fields", () => {
       },
       { returnDocument: "after" }
     );
+  });
+});
+
+// BP-782: a field added from Task fields left no trace in the project's audit log
+describe("what adding a field records", () => {
+  beforeEach(() => {
+    getAuthUser.mockResolvedValue(OWNER);
+    check.mockResolvedValue(true);
+    project(["Existing"]);
+  });
+
+  it("names the field and its type once it is stored", async () => {
+    const res = await POST(request("POST", { name: "  Story points ", fieldType: "number" }), ctx());
+
+    expect(res.status).toBe(201);
+    expect(logProjectAudit).toHaveBeenCalledWith(
+      PROJECT_ID,
+      "u1",
+      "settings_updated",
+      "Custom field added: Story points (number)"
+    );
+  });
+
+  it("records nothing for an add that did not happen", async () => {
+    project(Array.from({ length: MAX_FIELDS }, (_, i) => `Field ${i}`));
+    projectExists.mockResolvedValue(true);
+
+    const res = await POST(request("POST", { name: "One too many", fieldType: "number" }), ctx());
+
+    expect(res.status).toBe(400);
+    expect(logProjectAudit).not.toHaveBeenCalled();
   });
 });

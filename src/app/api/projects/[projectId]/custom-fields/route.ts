@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess } from "@/lib/middleware";
 import { Project } from "@/models/project";
+import { logProjectAudit } from "@/lib/projectAudit";
 import { CUSTOM_FIELD_TYPES, CustomFieldType } from "@/types";
 import { isOptionField, parseOptions, MAX_FIELD_NAME_LENGTH } from "@/lib/custom-fields";
 
@@ -19,7 +20,7 @@ export const GET = withProjectAccess(async (_request, { params }) => {
   return NextResponse.json(project.customFields || []);
 });
 
-export const POST = withProjectAccess(async (request, { params }) => {
+export const POST = withProjectAccess(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
 
@@ -99,6 +100,8 @@ export const POST = withProjectAccess(async (request, { params }) => {
     }
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
+
+  logProjectAudit(projectId, user._id, "settings_updated", `Custom field added: ${name.trim()} (${fieldType})`);
 
   return NextResponse.json(updated.customFields, { status: 201 });
 });
