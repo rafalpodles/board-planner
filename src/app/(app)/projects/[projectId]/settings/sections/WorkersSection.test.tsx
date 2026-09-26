@@ -144,6 +144,22 @@ describe("machines offering this repository", () => {
     expect(screen.getByTestId("offering-machine-state").textContent).toBe("live");
     expect(screen.queryByTestId("offering-machine-error")).toBeNull();
   });
+
+  // BP-762. Switched off, it is refused its heartbeat, and read here as not reporting
+  it("says a machine an instance admin switched off is switched off, not that it has gone quiet", async () => {
+    await listed([worker({ enabled: false, stale: true })]);
+
+    expect(screen.getByTestId("offering-machine-state").textContent).toBe("switched off");
+  });
+
+  it.each([
+    ["pause", "paused"],
+    ["stop", "stopped"],
+  ] as const)("says a machine that reports a %s is %s, whoever made it", async (command, label) => {
+    await listed([worker({ enabled: true, halt: { paused: true, by: "machine", command } })]);
+
+    expect(screen.getByTestId("offering-machine-state").textContent).toBe(label);
+  });
 });
 
 function run(over: Record<string, unknown> = {}) {

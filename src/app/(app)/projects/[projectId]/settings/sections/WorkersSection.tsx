@@ -242,7 +242,10 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
                 ) : (
                   <ul className="border border-border rounded-lg divide-y divide-border">
                     {offering.map((w) => {
-                      const refused = w.stale ? "" : bindingErrorFor(w.bindingError, String(project._id));
+                      const off = w.enabled === false;
+                      const quiet = off || w.stale;
+                      const refused = quiet ? "" : bindingErrorFor(w.bindingError, String(project._id));
+                      const halted = quiet || !w.halt?.paused ? "" : w.halt.command === "stop" ? "stopped" : "paused";
                       return (
                         <li
                           key={w._id}
@@ -253,9 +256,15 @@ export function WorkersSection({ projectId, project, replaceProject, isAdmin }: 
                           <span className="text-text-muted">{w.host}</span>
                           <span
                             data-testid="offering-machine-state"
-                            className={`ml-auto text-xs ${w.stale || refused ? "text-danger" : "text-success"}`}
+                            className={`ml-auto text-xs ${
+                              quiet || refused ? "text-danger" : halted ? "text-warning" : "text-success"
+                            }`}
                           >
-                            {w.stale ? "not reporting" : refused ? "cannot use its checkout" : "live"}
+                            {off
+                              ? "switched off"
+                              : w.stale
+                                ? "not reporting"
+                                : halted || (refused ? "cannot use its checkout" : "live")}
                           </span>
                           {refused && (
                             <p
