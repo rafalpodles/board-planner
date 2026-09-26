@@ -5,21 +5,25 @@ run is stuck or working, raises a notification when one ends, and manages the re
 
 ## What it talks to, and what it does not
 
-Its only I/O is the worker's unix socket at `${CP_STATE_DIR}/worker.sock` (default
+Day to day its I/O is the worker's unix socket at `${CP_STATE_DIR}/worker.sock` (default
 `~/.boardplanner/worker.sock`; under `/tmp/cp-worker-<uid>-<digest>/` when that path is longer than
 the 104 bytes macOS allows a socket, derived the same way the worker derives it) and the allowlist
 at `${CP_STATE_DIR}/repos.json`.
 
-**It holds no Board Planner credential and never opens a network connection.** Registration and
-policy live on the worker and in the web console; the Connection and Policy tabs are read-only
-views of what the worker reports over `GET /config`. This follows from what registration is —
-a credential minted for this machine acts with its owner's reach, and there is no reason for a
-second process to hold a copy.
+**It talks to the board only to connect this machine, and keeps no credential of its own.**
+Connecting is the device flow in `DeviceEnrolment.swift`: requests to
+`/api/workers/enrolment/device` and `/api/workers/enrolment/device/token` on the board you named,
+while you approve in the browser. The credential that comes back is the worker's, and the app
+writes it straight to the worker's identity file (`IdentityFile.swift`, mode 0600) — the file
+registration writes — and does not use it itself. The other network traffic it starts is git: the
+clone of each repository you add, and the push probe that checks you may push to it. Past that,
+policy and registration live on the worker and in the web console; the Connection and Policy tabs
+are read-only views of what the worker reports over `GET /config`.
 
 ## What the server sends, and where each value lands
 
-The app opens no network connection, but the worker's socket relays values that originated on the
-board, and two of them used to decide what ran and where. This is the menubar half of the sweep in
+Past connecting, the app talks to the board only through the worker's socket, which relays values
+that originated on the board, and two of them used to decide what ran and where. This is the menubar half of the sweep in
 [`worker/README.md`](../worker/README.md) (BP-327, BP-399); the worker half covers everything that
 arrives over HTTP.
 
