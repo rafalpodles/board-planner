@@ -28,6 +28,23 @@ const sidebar = () => document.querySelector('[data-settings-nav="sidebar"]')!;
 const pills = () => document.querySelector('[data-settings-nav="pills"]')!;
 
 describe("SettingsShell", () => {
+  // BP-783: padding under a sticky bar is where it rests at the end of the page, above where it sticks
+  it("pads nothing under a bottom bar, and puts the bar last in the content column", () => {
+    const { container } = render(
+      <SettingsShell groups={SELECTED} active="general" bottomBar={<div data-testid="bar" />}>
+        body
+      </SettingsShell>
+    );
+    const bar = screen.getByTestId("bar");
+    expect(bar.parentElement!.lastElementChild).toBe(bar);
+    expect(container.firstElementChild!.className).not.toMatch(/\bpb-/);
+  });
+
+  it("keeps its bottom padding when there is no bar", () => {
+    const { container } = render(<SettingsShell groups={SELECTED} active="general">body</SettingsShell>);
+    expect(container.firstElementChild!.className).toMatch(/\bpb-8\b/);
+  });
+
   it("puts the page title in the one h1 and keeps the subtitle", () => {
     render(<SettingsShell title="Settings" subtitle="This account and this instance" groups={ROUTED} active="profile">body</SettingsShell>);
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);

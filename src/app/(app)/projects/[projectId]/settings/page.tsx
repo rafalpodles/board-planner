@@ -323,6 +323,7 @@ export default function ProjectSettingsPage() {
       pillItems={visible.map(navItem)}
       active={active}
       onSelect={goToSection}
+      bottomBar={<SaveBar pending={pending} total={total} onGoToSection={goToSection} />}
       sidebarTop={
         <div className="relative mb-3">
           <input
@@ -382,7 +383,6 @@ export default function ProjectSettingsPage() {
           </div>
         ))}
       </SettingsProvider>
-      <SaveBar pending={pending} total={total} onGoToSection={goToSection} />
     </SettingsShell>
   );
 }

@@ -92,18 +92,21 @@ export function SaveBar({ pending, total, onGoToSection }: SaveBarProps) {
                 </button>
               )}
             </div>
-            <span className="flex-1" />
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={saving || !open}
-              onClick={() => pending.forEach((g) => g.discard())}
-            >
-              Discard
-            </Button>
-            <Button size="sm" disabled={saving || !open} onClick={saveAll}>
-              {saving ? "Saving..." : "Save changes"}
-            </Button>
+            {/* One unit, so a narrow bar wraps both into its bottom row, which the raised PM
+                launcher clears; split, Discard stayed on the top row under it (BP-783) */}
+            <div className="ml-auto flex gap-3">
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={saving || !open}
+                onClick={() => pending.forEach((g) => g.discard())}
+              >
+                Discard
+              </Button>
+              <Button size="sm" disabled={saving || !open} onClick={saveAll}>
+                {saving ? "Saving..." : "Save changes"}
+              </Button>
+            </div>
           </div>
         </div>
       )}
