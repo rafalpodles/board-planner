@@ -4,9 +4,50 @@ export type WorkerCommand = "pause" | "resume" | "stop";
 export type CommandHandlers = Record<WorkerCommand, (issuedAt?: string) => void>;
 export type LocalCommands = Record<WorkerCommand, () => void>;
 
+export type HaltSource = "board" | "machine";
+
+export interface HaltReport {
+  paused: boolean;
+  by: HaltSource | null;
+  command: "pause" | "stop" | null;
+}
+
 export interface CommandChannels {
   remote: CommandHandlers;
   local: LocalCommands;
+  halt(): HaltReport;
+}
+
+export interface HaltMemory {
+  read(): string;
+  write(text: string): void;
+}
+
+interface SavedHalt {
+  paused: boolean;
+  by: HaltSource;
+  command: "pause" | "stop";
+  boardIssuedAt: string | null;
+}
+
+const MAX_ISSUANCE_LENGTH = 64;
+
+function readSavedHalt(memory: HaltMemory | undefined): SavedHalt | null {
+  if (!memory) return null;
+  try {
+    const saved = JSON.parse(memory.read()) as Record<string, unknown> | null;
+    if (!saved || typeof saved.paused !== "boolean") return null;
+    const issued = saved.boardIssuedAt;
+    return {
+      paused: saved.paused,
+      by: saved.by === "board" ? "board" : "machine",
+      command: saved.command === "stop" ? "stop" : "pause",
+      boardIssuedAt:
+        typeof issued === "string" && issued.length <= MAX_ISSUANCE_LENGTH ? issued : null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 const COMMANDS = new Set<string>(["pause", "resume", "stop"]);
@@ -50,6 +91,9 @@ export interface CommandDeps {
   loop: Pick<Loop, "pause" | "resume" | "paused">;
   runs: Pick<RunGuard, "abort">;
   ack: (command: WorkerCommand) => void;
+  // Where the halt outlives a restart. Without it a restart forgets a pause made on this machine,
+  // and re-applies a board pause that was resumed here.
+  memory?: HaltMemory;
 }
 
 export function createCommandHandlers(deps: CommandDeps): CommandChannels {
@@ -63,8 +107,41 @@ export function createCommandHandlers(deps: CommandDeps): CommandChannels {
   // would make one local pause silently swallow a later board-issued stop — the emergency brake,
   // dropped, while the run carries on to merge.
   let lastAppliedAt = -Infinity;
+  let haltedBy: { by: HaltSource; command: "pause" | "stop" } | null = null;
+
+  const saved = readSavedHalt(deps.memory);
+  let boardIssuedAt = saved?.boardIssuedAt ?? null;
+  // Matched by equality and never ordered against anything: the file sits on the machine's own disk,
+  // so it may only spare the one board command it names, never gate a later one.
+  let appliedBeforeRestart = boardIssuedAt;
+  if (saved?.paused) {
+    deps.loop.pause();
+    haltedBy = { by: saved.by, command: saved.command };
+  }
+
+  function halt(): HaltReport {
+    if (!deps.loop.paused()) return { paused: false, by: null, command: null };
+    return { paused: true, by: haltedBy?.by ?? null, command: haltedBy?.command ?? null };
+  }
+
+  function record(command: WorkerCommand, by: HaltSource): void {
+    haltedBy = command === "resume" ? null : { by, command };
+    try {
+      deps.memory?.write(JSON.stringify({ ...halt(), boardIssuedAt }));
+    } catch {
+      // Only the halt's survival across a restart is lost; this process still holds it
+    }
+  }
 
   function apply(command: WorkerCommand, issuedAt: string | undefined, effect: () => void): void {
+    if (issuedAt !== undefined && issuedAt === appliedBeforeRestart) {
+      appliedBeforeRestart = null;
+      const instant = Date.parse(issuedAt);
+      if (!Number.isNaN(instant)) lastAppliedAt = instant;
+      settle(command);
+      return;
+    }
+
     const instant = issuedAt ? Date.parse(issuedAt) : NaN;
     if (Number.isNaN(instant)) {
       // Undated pause/stop is a safe default to apply; undated resume is not — see commit message.
@@ -75,6 +152,8 @@ export function createCommandHandlers(deps: CommandDeps): CommandChannels {
     }
 
     effect();
+    boardIssuedAt = issuedAt ?? null;
+    record(command, "board");
     settle(command);
   }
 
@@ -96,6 +175,7 @@ export function createCommandHandlers(deps: CommandDeps): CommandChannels {
   // redelivered and never reordered, so it needs no recency guard — and must not touch one.
   function applyLocal(command: WorkerCommand): void {
     effects[command]();
+    record(command, "machine");
     settle(command);
   }
 
@@ -110,5 +190,6 @@ export function createCommandHandlers(deps: CommandDeps): CommandChannels {
       resume: () => applyLocal("resume"),
       stop: () => applyLocal("stop"),
     },
+    halt,
   };
 }

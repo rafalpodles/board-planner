@@ -460,6 +460,25 @@ describe("startHeartbeat", () => {
     expect(deps.store.write).not.toHaveBeenCalled();
   });
 
+  it("tells the server whether the loop is halted and who halted it", async () => {
+    const deps = depsWith();
+    deps.halt = () => ({ paused: true, by: "machine", command: "pause" });
+
+    await startHeartbeat(deps).tick();
+
+    const [, init] = calls(deps)[0];
+    expect(JSON.parse(init.body).halt).toEqual({ paused: true, by: "machine", command: "pause" });
+  });
+
+  it("sends no halt at all from a worker that cannot tell, rather than claiming it runs", async () => {
+    const deps = depsWith();
+
+    await startHeartbeat(deps).tick();
+
+    const [, init] = calls(deps)[0];
+    expect("halt" in JSON.parse(init.body)).toBe(false);
+  });
+
   it("sends an empty binding error when nothing has ever been reported", async () => {
     const deps = depsWith();
 

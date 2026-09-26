@@ -245,3 +245,135 @@ describe("a command with no issuance", () => {
     expect(abort).toHaveBeenCalledTimes(1);
   });
 });
+
+function memoryOf(initial = ""): { read: () => string; write: (text: string) => void; text: () => string } {
+  let text = initial;
+  return {
+    read: () => text,
+    write: (value) => {
+      text = value;
+    },
+    text: () => text,
+  };
+}
+
+const T1 = "2026-08-01T12:00:00.000Z";
+const T2 = "2026-08-01T12:30:00.000Z";
+
+describe("what the heartbeat is told about a halt", () => {
+  it("names the machine as the one that paused it when the pause came from its own socket", () => {
+    const channels = createCommandHandlers({ loop: idleLoop(), runs: { abort: vi.fn() }, ack: vi.fn() });
+
+    channels.local.pause();
+
+    expect(channels.halt()).toEqual({ paused: true, by: "machine", command: "pause" });
+  });
+
+  it("names the board for a board stop, and reports running once the machine resumes it", () => {
+    const channels = createCommandHandlers({ loop: idleLoop(), runs: { abort: vi.fn() }, ack: vi.fn() });
+
+    channels.remote.stop(T1);
+    expect(channels.halt()).toEqual({ paused: true, by: "board", command: "stop" });
+
+    channels.local.resume();
+    expect(channels.halt()).toEqual({ paused: false, by: null, command: null });
+  });
+});
+
+describe("a halt across a restart", () => {
+  function restart(memory: ReturnType<typeof memoryOf>) {
+    const loop = idleLoop();
+    const ack = vi.fn();
+    const abort = vi.fn();
+    const channels = createCommandHandlers({ loop, runs: { abort }, ack, memory });
+    return { loop, ack, abort, channels };
+  }
+
+  it("keeps a pause made on the machine", () => {
+    const memory = memoryOf();
+    restart(memory).channels.local.pause();
+
+    const after = restart(memory);
+
+    expect(after.loop.paused()).toBe(true);
+    expect(after.channels.halt()).toEqual({ paused: true, by: "machine", command: "pause" });
+  });
+
+  it("does not re-apply a board pause the machine resumed, when the board delivers it again", () => {
+    const memory = memoryOf();
+    const before = restart(memory);
+    before.channels.remote.pause(T1);
+    before.channels.local.resume();
+
+    const after = restart(memory);
+    after.channels.remote.pause(T1);
+
+    expect(after.loop.paused()).toBe(false);
+  });
+
+  it("keeps a board pause nobody resumed, and acknowledges it again", () => {
+    const memory = memoryOf();
+    restart(memory).channels.remote.pause(T1);
+
+    const after = restart(memory);
+    after.channels.remote.pause(T1);
+
+    expect(after.loop.paused()).toBe(true);
+    expect(after.channels.halt()).toEqual({ paused: true, by: "board", command: "pause" });
+    expect(after.ack).toHaveBeenCalledWith("pause");
+  });
+
+  it("applies a newer board command after the restart", () => {
+    const memory = memoryOf();
+    const before = restart(memory);
+    before.channels.remote.pause(T1);
+    before.channels.local.resume();
+
+    const after = restart(memory);
+    after.channels.remote.stop(T2);
+
+    expect(after.loop.paused()).toBe(true);
+    expect(after.abort).toHaveBeenCalledTimes(1);
+  });
+
+  it("spares only the issuance the file names: a far-future one cannot hold back the board's stop", () => {
+    const memory = memoryOf(
+      JSON.stringify({ paused: false, by: null, command: null, boardIssuedAt: "2999-01-01T00:00:00.000Z" })
+    );
+
+    const after = restart(memory);
+    after.channels.remote.stop(T1);
+
+    expect(after.loop.paused()).toBe(true);
+    expect(after.abort).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts as if nothing was saved when the file is not what it wrote", () => {
+    const after = restart(memoryOf("not json"));
+
+    expect(after.loop.paused()).toBe(false);
+    after.channels.remote.pause(T1);
+    expect(after.loop.paused()).toBe(true);
+  });
+
+  it("still applies and acknowledges a command whose halt could not be written down", () => {
+    const loop = idleLoop();
+    const ack = vi.fn();
+    const channels = createCommandHandlers({
+      loop,
+      runs: { abort: vi.fn() },
+      ack,
+      memory: {
+        read: () => "",
+        write: () => {
+          throw new Error("ENOSPC");
+        },
+      },
+    });
+
+    channels.remote.pause(T1);
+
+    expect(loop.paused()).toBe(true);
+    expect(ack).toHaveBeenCalledWith("pause");
+  });
+});

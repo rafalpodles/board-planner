@@ -1,5 +1,5 @@
 import { RepoInventory } from "./config.js";
-import { CommandHandlers, isWorkerCommand } from "./commands.js";
+import { CommandHandlers, HaltReport, isWorkerCommand } from "./commands.js";
 import { PreflightCheck } from "./preflight.js";
 
 export const PROTOCOL_VERSION = 1;
@@ -45,6 +45,9 @@ export interface HeartbeatDeps {
   store: Store;
   // The command channel that survives SSE loss and a restart, so this is the durable one
   handlers: CommandHandlers;
+  // Whether the loop is paused and who paused it. The board cannot see a pause made on the machine
+  // any other way.
+  halt?: () => HaltReport;
   fetchImpl?: typeof fetch;
   log?: (message: string) => void;
 }
@@ -211,6 +214,7 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
 
     const reported = deps.repos?.();
     const preflight = deps.preflight?.();
+    const halt = deps.halt?.();
 
     try {
       const response = await fetchImpl(`${deps.apiBaseUrl}/api/workers/${identity.workerId}/heartbeat`, {
@@ -230,6 +234,7 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
           // being told this machine suddenly has nothing.
           ...(reported === undefined ? {} : { repos: reported }),
           ...(preflight === undefined ? {} : { preflight }),
+          ...(halt === undefined ? {} : { halt }),
           ...(acked !== undefined ? { acked } : {}),
         }),
       });
