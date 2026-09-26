@@ -152,8 +152,12 @@ export function createCommandHandlers(deps: CommandDeps): CommandChannels {
   // it is not the one this process reports to, and that board's instants order nothing here
   function registered(): void {
     const id = deps.workerId?.() ?? null;
-    // Registering again as the same machine reclaims its record, standing command and all
-    if (id !== null && id === registeredAs) return;
+    // Registering again as the same machine reclaims its record, standing command and all — only
+    // what was written down while worker.json was blank needs the id stamped back on
+    if (id !== null && id === registeredAs) {
+      persist();
+      return;
+    }
     registeredAs = id;
     if (haltedBy?.by === "board") haltedBy = { by: "machine", command: haltedBy.command };
     lastAppliedAt = -Infinity;

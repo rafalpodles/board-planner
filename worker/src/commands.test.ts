@@ -435,6 +435,21 @@ describe("a halt across a restart", () => {
     expect(loop.paused()).toBe(false);
   });
 
+  it("stamps the reclaimed record back on what was written down while it had none", () => {
+    const memory = memoryOf();
+    let id: string | null = "w1";
+    const loop = idleLoop();
+    const channels = createCommandHandlers({ loop, runs: { abort: vi.fn() }, ack: vi.fn(), memory, workerId: () => id });
+    id = null;
+    channels.local.pause();
+    expect(JSON.parse(memory.text()).workerId).toBeNull();
+
+    id = "w1";
+    channels.registered();
+
+    expect(JSON.parse(memory.text())).toMatchObject({ paused: true, by: "machine", workerId: "w1" });
+  });
+
   it("writes the halt down under the record it registered as", () => {
     const memory = memoryOf();
     let id = "w-old";

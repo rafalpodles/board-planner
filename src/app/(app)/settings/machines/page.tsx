@@ -22,7 +22,10 @@ function describeState(machine: ApiMyMachine): { text: string; tone: string } {
         ? { text: "Running", tone: "text-success" }
         : { text: "Running, no checkouts yet", tone: "text-text-muted" };
     case "failing":
-      return { text: "Sandbox check failing — the menubar app says what to fix", tone: "text-danger" };
+      return {
+        text: "Sandbox check failing — the menubar app or the worker's log says what to fix",
+        tone: "text-danger",
+      };
     case "stale":
       return { text: "Not reporting", tone: "text-danger" };
     case "disabled":
