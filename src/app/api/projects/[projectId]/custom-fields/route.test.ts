@@ -52,13 +52,22 @@ let doc: { customFields: Field[] };
 /** A project with the given field names already defined. */
 function project(names: string[] = []) {
   doc = { customFields: names.map((name, i) => ({ name, fieldType: "text", order: i })) };
-  projectFindById.mockResolvedValue(doc);
+  // Awaited whole by the route's own check, and through select().lean() by the re-read after a miss
+  projectFindById.mockImplementation(() =>
+    Object.assign(Promise.resolve(doc), { select: () => ({ lean: () => Promise.resolve(doc) }) })
+  );
   // The add is an atomic $push with the ceiling in its filter, so the stub applies the write the
   // way the database would — including refusing it once the array is full.
   projectFindOneAndUpdate.mockImplementation(
     async (filter: Record<string, unknown>, update: { $push: { customFields: Field } }) => {
       const full = doc.customFields.length >= MAX_FIELDS;
       if (`customFields.${MAX_FIELDS - 1}` in filter && full) return null;
+      // The name condition, read under the case-insensitive collation the route asks for
+      const taken = (filter.customFields as { $not?: { $elemMatch: { name: string } } } | undefined)?.$not
+        ?.$elemMatch.name;
+      if (taken !== undefined && doc.customFields.some((f) => f.name.toLowerCase() === taken.toLowerCase())) {
+        return null;
+      }
       doc.customFields = [...doc.customFields, update.$push.customFields];
       return doc;
     }
@@ -162,7 +171,10 @@ describe("POST /api/projects/:projectId/custom-fields", () => {
   // and this write — the two must not both read as "full" (review).
   it("404s, not 400, when the project vanished between the read and the write", async () => {
     projectAtTheCeiling();
-    projectExists.mockResolvedValue(false);
+    const read = projectFindById.getMockImplementation()!;
+    projectFindById
+      .mockImplementationOnce(read)
+      .mockImplementationOnce(() => ({ select: () => ({ lean: () => Promise.resolve(null) }) }));
 
     const res = await POST(request("POST", { name: "one too many", fieldType: "text" }), ctx());
 
@@ -185,7 +197,11 @@ describe("POST /api/projects/:projectId/custom-fields", () => {
     await POST(request("POST", body), ctx());
 
     expect(projectFindOneAndUpdate).toHaveBeenCalledWith(
-      { _id: PROJECT_ID, [`customFields.${MAX_FIELDS - 1}`]: { $exists: false } },
+      {
+        _id: PROJECT_ID,
+        [`customFields.${MAX_FIELDS - 1}`]: { $exists: false },
+        customFields: { $not: { $elemMatch: { name: "Points" } } },
+      },
       {
         $push: {
           customFields: {
@@ -201,7 +217,7 @@ describe("POST /api/projects/:projectId/custom-fields", () => {
           },
         },
       },
-      { returnDocument: "after" }
+      { returnDocument: "after", collation: { locale: "en", strength: 2 } }
     );
   });
 });
@@ -234,5 +250,36 @@ describe("what adding a field records", () => {
 
     expect(res.status).toBe(400);
     expect(logProjectAudit).not.toHaveBeenCalled();
+  });
+});
+
+// Review: the name was checked against a read, so two adds of one name at once both landed
+describe("an add racing another", () => {
+  beforeEach(() => {
+    getAuthUser.mockResolvedValue(OWNER);
+    check.mockResolvedValue(true);
+    project(["Existing"]);
+  });
+
+  it("is refused when the name was taken between its read and its write", async () => {
+    projectFindById.mockImplementationOnce(() => {
+      const read = Promise.resolve({ customFields: [...doc.customFields] });
+      doc.customFields = [...doc.customFields, { name: "story points", fieldType: "number" }];
+      return read;
+    });
+
+    const res = await POST(request("POST", { name: "Story Points", fieldType: "number" }), ctx());
+
+    expect(res.status).toBe(409);
+    expect(doc.customFields.filter((f) => f.name.toLowerCase() === "story points")).toHaveLength(1);
+    expect(logProjectAudit).not.toHaveBeenCalled();
+  });
+
+  it("still tells a full list from a taken name", async () => {
+    project(Array.from({ length: MAX_FIELDS }, (_, i) => `Field ${i}`));
+
+    const res = await POST(request("POST", { name: "One too many", fieldType: "number" }), ctx());
+
+    expect(res.status).toBe(400);
   });
 });

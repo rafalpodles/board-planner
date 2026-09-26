@@ -4,7 +4,12 @@ import { withProjectAccess } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { CUSTOM_FIELD_TYPES, CustomFieldType } from "@/types";
-import { isOptionField, parseOptions, MAX_FIELD_NAME_LENGTH } from "@/lib/custom-fields";
+import {
+  isOptionField,
+  parseOptions,
+  FIELD_NAME_COLLATION,
+  MAX_FIELD_NAME_LENGTH,
+} from "@/lib/custom-fields";
 
 const MAX_FIELDS = 50;
 
@@ -71,8 +76,13 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
   // The ceiling goes in the write's own filter, not in a count read against the document
   // above: every concurrent racer sees the same pre-write length, so a check up there
   // bounds nothing — the same fix already applied to the webhook writers (BP-719).
+  // The name as well: the check above read the list, and another add may have taken it since
   const updated = await Project.findOneAndUpdate(
-    { _id: projectId, [`customFields.${MAX_FIELDS - 1}`]: { $exists: false } },
+    {
+      _id: projectId,
+      [`customFields.${MAX_FIELDS - 1}`]: { $exists: false },
+      customFields: { $not: { $elemMatch: { name: name.trim() } } },
+    },
     {
       $push: {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -90,15 +100,19 @@ export const POST = withProjectAccess(async (request, { params, user }) => {
         } as any,
       },
     },
-    { returnDocument: "after" }
+    { returnDocument: "after", collation: FIELD_NAME_COLLATION }
   );
   if (!updated) {
-    // The project was read a moment ago, so ordinarily a miss here is the ceiling — but it can
-    // also mean the project was deleted in between, and the two answer differently (review).
-    if (await Project.exists({ _id: projectId })) {
-      return NextResponse.json({ error: `Maximum ${MAX_FIELDS} custom fields per project` }, { status: 400 });
+    // A miss is the ceiling, the name taken since the read, or the project deleted in between,
+    // and the three answer differently
+    const current = await Project.findById(projectId).select("customFields").lean();
+    if (!current) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
-    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    if ((current.customFields || []).some((f) => f.name.toLowerCase() === name.trim().toLowerCase())) {
+      return NextResponse.json({ error: "Field with this name already exists" }, { status: 409 });
+    }
+    return NextResponse.json({ error: `Maximum ${MAX_FIELDS} custom fields per project` }, { status: 400 });
   }
 
   logProjectAudit(projectId, user._id, "settings_updated", `Custom field added: ${name.trim()} (${fieldType})`);

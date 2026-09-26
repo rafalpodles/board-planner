@@ -189,6 +189,9 @@ export function orderedOptions(field: { options?: LegacyOption[] }): ICustomFiel
 }
 
 export const MAX_FIELD_NAME_LENGTH = 100;
+
+// Two fields whose names differ only in case are one name to everything that looks a field up by it
+export const FIELD_NAME_COLLATION = { locale: "en", strength: 2 } as const;
 export const MAX_OPTIONS = 100;
 
 export function optionIdsDropped(existing: ICustomFieldOption[], input: unknown): boolean {
