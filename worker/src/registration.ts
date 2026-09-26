@@ -45,6 +45,8 @@ export interface HeartbeatDeps {
   store: Store;
   // The command channel that survives SSE loss and a restart, so this is the durable one
   handlers: CommandHandlers;
+  // Called once a registration has stored a new identity
+  onRegistered?: () => void;
   // Whether the loop is paused and who paused it. The board cannot see a pause made on the machine
   // any other way.
   halt?: () => HaltReport;
@@ -108,6 +110,12 @@ function parseHeartbeatMs(text: string): number | null {
   }
 }
 
+// fetch reports every network failure as the same "fetch failed"; what failed is its cause
+function describeFailure(error: unknown): string {
+  const cause = (error as { cause?: unknown } | null)?.cause;
+  return cause ? `${String(error)} (${String(cause)})` : String(error);
+}
+
 export function loadIdentity(store: Pick<Store, "read">): Identity | null {
   return parseIdentity(store.read());
 }
@@ -131,11 +139,11 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
               "Fix the file, then restart the worker."
           : deps.enrolmentTokenFile
           ? `no identity on disk and CP_ENROLMENT_TOKEN_FILE (${deps.enrolmentTokenFile}) is missing ` +
-              "or empty: mint a token under Settings -> Machines -> Connect a machine and write it " +
-              "there, chmod 600."
+              "or empty: mint a token under Settings -> Machines -> Connect a machine, write it " +
+              "there, chmod 600, then restart the worker."
           : "no identity on disk and no CP_ENROLMENT_TOKEN: mint one under Settings -> Machines -> " +
-              "Connect a machine and point CP_ENROLMENT_TOKEN_FILE at it. The first registration " +
-              "spends it, and the worker deletes the file itself."
+              "Connect a machine, point CP_ENROLMENT_TOKEN_FILE at it and restart the worker. The " +
+              "first registration spends it, and the worker deletes the file itself."
       );
       return null;
     }
@@ -179,6 +187,7 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
       } catch (error) {
         log(`could not remove the spent enrolment token: ${String(error)}`);
       }
+      deps.onRegistered?.();
       return identity;
     } catch (error) {
       log(`worker registration failed: ${String(error)}`);
@@ -238,6 +247,7 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
           ...(acked !== undefined ? { acked } : {}),
         }),
       });
+      if (lastUnreachableReason) log("heartbeat reached the server again");
       lastUnreachableReason = "";
 
       if (response.status === 403) {
@@ -259,7 +269,7 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
         }
       }
     } catch (error) {
-      const reason = `heartbeat could not reach the server: ${String(error)}`;
+      const reason = `heartbeat could not reach the server: ${describeFailure(error)}`;
       if (reason !== lastUnreachableReason) {
         log(reason);
         lastUnreachableReason = reason;

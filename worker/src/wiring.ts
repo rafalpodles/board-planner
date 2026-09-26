@@ -815,6 +815,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     runs,
     ack: (command) => heartbeat.ack(command),
     memory: deps.createStore(join(bootstrap.stateDir, "halt.json")),
+    workerId: () => loadIdentity(identityStore)?.workerId ?? null,
   });
 
   const heartbeatDeps: HeartbeatDeps = {
@@ -840,6 +841,7 @@ export function createWorker(overrides: Partial<WorkerDeps> = {}): WorkerRuntime
     store: identityStore,
     handlers: channels.remote,
     halt: channels.halt,
+    onRegistered: () => channels.registered(),
     fetchImpl: deps.fetchImpl,
     log: deps.logError,
   };

@@ -179,6 +179,26 @@ describe("startHeartbeat", () => {
   });
 
   // Order matters: forgetting first would strand the worker with a spent token and no credential
+  it("says so once a registration has stored the new identity, and not before", async () => {
+    const onRegistered = vi.fn();
+    const deps = depsWith({ stored: null });
+    deps.onRegistered = () => onRegistered(JSON.parse(vi.mocked(deps.store.write).mock.calls[0][0]).workerId);
+
+    await startHeartbeat(deps).tick();
+
+    expect(onRegistered).toHaveBeenCalledWith("6a7c686f70ed274cf658b1b3");
+  });
+
+  it("says nothing of a registration that failed", async () => {
+    const onRegistered = vi.fn();
+    const deps = depsWith({ stored: null, registerStatus: 401 });
+    deps.onRegistered = onRegistered;
+
+    await startHeartbeat(deps).tick();
+
+    expect(onRegistered).not.toHaveBeenCalled();
+  });
+
   it("keeps the token when registration fails", async () => {
     const forget = vi.fn();
     const deps = depsWith({ stored: null, registerStatus: 401, forgetEnrolmentToken: forget });
@@ -218,6 +238,7 @@ describe("startHeartbeat", () => {
 
     const message = String(vi.mocked(deps.log!).mock.calls[0][0]);
     expect(message).toContain("Settings -> Machines -> Connect a machine");
+    expect(message).toContain("restart the worker");
     expect(message).toContain("the worker deletes the file itself");
     expect(message).not.toContain("Settings -> Workers");
     expect(message).not.toContain("delete it afterwards");
@@ -236,6 +257,7 @@ describe("startHeartbeat", () => {
     expect(message).toContain("CP_ENROLMENT_TOKEN_FILE (/Users/op/.boardplanner/token) is missing");
     expect(message).not.toContain("and set CP_ENROLMENT_TOKEN_FILE");
     expect(message).toContain("Settings -> Machines -> Connect a machine");
+    expect(message).toContain("then restart the worker");
     expect(message).not.toContain("Settings -> Workers");
   });
 
@@ -343,7 +365,37 @@ describe("startHeartbeat", () => {
 
     await heartbeat.tick();
     await heartbeat.tick();
-    expect(deps.log).toHaveBeenCalledTimes(2);
+    // The recovery is said too, or the error log's last line goes on saying the server is gone
+    expect(vi.mocked(deps.log!).mock.calls.map(([line]) => line)).toEqual([
+      "heartbeat could not reach the server: Error: ECONNREFUSED",
+      "heartbeat reached the server again",
+      "heartbeat could not reach the server: Error: ECONNREFUSED",
+    ]);
+    heartbeat.stop();
+  });
+
+  it("says what failed underneath fetch's own \"fetch failed\"", async () => {
+    const deps = depsWith();
+    answering(deps, [new TypeError("fetch failed", { cause: new Error("connect ECONNREFUSED 10.0.0.2:443") })]);
+    const heartbeat = startHeartbeat(deps);
+
+    await heartbeat.tick();
+
+    expect(deps.log).toHaveBeenCalledWith(
+      "heartbeat could not reach the server: TypeError: fetch failed (Error: connect ECONNREFUSED 10.0.0.2:443)"
+    );
+    heartbeat.stop();
+  });
+
+  it("says nothing about a recovery when the server was never out of reach", async () => {
+    const deps = depsWith();
+    answering(deps, [200, 200]);
+    const heartbeat = startHeartbeat(deps);
+
+    await heartbeat.tick();
+    await heartbeat.tick();
+
+    expect(deps.log).not.toHaveBeenCalled();
     heartbeat.stop();
   });
 
@@ -354,7 +406,11 @@ describe("startHeartbeat", () => {
 
     for (let i = 0; i < 3; i++) await heartbeat.tick();
 
-    expect(deps.log).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(deps.log!).mock.calls.map(([line]) => line)).toEqual([
+      "heartbeat could not reach the server: Error: ECONNREFUSED",
+      "heartbeat reached the server again",
+      "heartbeat could not reach the server: Error: ECONNREFUSED",
+    ]);
     heartbeat.stop();
   });
 

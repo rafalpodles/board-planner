@@ -281,11 +281,11 @@ describe("what the heartbeat is told about a halt", () => {
 });
 
 describe("a halt across a restart", () => {
-  function restart(memory: ReturnType<typeof memoryOf>) {
+  function restart(memory: ReturnType<typeof memoryOf>, workerId: string | null = "w1") {
     const loop = idleLoop();
     const ack = vi.fn();
     const abort = vi.fn();
-    const channels = createCommandHandlers({ loop, runs: { abort }, ack, memory });
+    const channels = createCommandHandlers({ loop, runs: { abort }, ack, memory, workerId: () => workerId });
     return { loop, ack, abort, channels };
   }
 
@@ -338,7 +338,13 @@ describe("a halt across a restart", () => {
 
   it("spares only the issuance the file names: a far-future one cannot hold back the board's stop", () => {
     const memory = memoryOf(
-      JSON.stringify({ paused: false, by: null, command: null, boardIssuedAt: "2999-01-01T00:00:00.000Z" })
+      JSON.stringify({
+        paused: false,
+        by: null,
+        command: null,
+        boardIssuedAt: "2999-01-01T00:00:00.000Z",
+        workerId: "w1",
+      })
     );
 
     const after = restart(memory);
@@ -377,6 +383,48 @@ describe("a halt across a restart", () => {
 
     expect(after.abort).toHaveBeenCalledTimes(1);
     expect(after.loop.paused()).toBe(false);
+  });
+
+  // A machine that registers again — renamed, moved to another host, or pointed at another board —
+  // is a new record, and a halt saved under the old one belongs to nobody it reports to
+  it.each([
+    ["another record", "w-old"],
+    ["no record at all", null],
+  ])("does not restore a halt saved under %s", (_what, savedUnder) => {
+    const memory = memoryOf(
+      JSON.stringify({ paused: true, by: "board", command: "stop", boardIssuedAt: T1, workerId: savedUnder })
+    );
+
+    const after = restart(memory, "w1");
+
+    expect(after.loop.paused()).toBe(false);
+    after.channels.remote.stop(T1);
+    expect(after.abort).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the loop halted after a new registration, but as the machine's, and takes the new record's commands", () => {
+    const { loop, channels } = restart(memoryOf());
+    channels.remote.stop(T2);
+
+    channels.registered();
+
+    expect(channels.halt()).toEqual({ paused: true, by: "machine", command: "stop" });
+    channels.remote.resume(T1);
+    expect(loop.paused()).toBe(false);
+  });
+
+  it("writes the halt down under the record it registered as", () => {
+    const memory = memoryOf();
+    let id = "w-old";
+    const loop = idleLoop();
+    const channels = createCommandHandlers({ loop, runs: { abort: vi.fn() }, ack: vi.fn(), memory, workerId: () => id });
+    channels.remote.pause(T1);
+
+    id = "w-new";
+    channels.registered();
+
+    expect(JSON.parse(memory.text())).toMatchObject({ paused: true, by: "machine", workerId: "w-new" });
+    expect(restart(memory, "w-new").channels.halt()).toEqual({ paused: true, by: "machine", command: "pause" });
   });
 
   it("starts as if nothing was saved when the file is not what it wrote", () => {

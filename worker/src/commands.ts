@@ -16,6 +16,9 @@ export interface CommandChannels {
   remote: CommandHandlers;
   local: LocalCommands;
   halt(): HaltReport;
+  // A new registration is a new record on the board, which never issued the command behind a
+  // board halt this process carries
+  registered(): void;
 }
 
 export interface HaltMemory {
@@ -28,6 +31,7 @@ interface SavedHalt {
   by: HaltSource;
   command: "pause" | "stop";
   boardIssuedAt: string | null;
+  workerId: string | null;
 }
 
 const MAX_ISSUANCE_LENGTH = 64;
@@ -44,6 +48,7 @@ function readSavedHalt(memory: HaltMemory | undefined): SavedHalt | null {
       command: saved.command === "stop" ? "stop" : "pause",
       boardIssuedAt:
         typeof issued === "string" && issued.length <= MAX_ISSUANCE_LENGTH ? issued : null,
+      workerId: typeof saved.workerId === "string" ? saved.workerId : null,
     };
   } catch {
     return null;
@@ -94,6 +99,8 @@ export interface CommandDeps {
   // Where the halt outlives a restart. Without it a restart forgets a pause made on this machine,
   // and re-applies a board pause that was resumed here.
   memory?: HaltMemory;
+  // The record the halt belongs to: a file written under another one is not restored
+  workerId?: () => string | null;
 }
 
 export function createCommandHandlers(deps: CommandDeps): CommandChannels {
@@ -109,7 +116,9 @@ export function createCommandHandlers(deps: CommandDeps): CommandChannels {
   let lastAppliedAt = -Infinity;
   let haltedBy: { by: HaltSource; command: "pause" | "stop" } | null = null;
 
-  const saved = readSavedHalt(deps.memory);
+  const stored = readSavedHalt(deps.memory);
+  const current = deps.workerId?.() ?? null;
+  const saved = stored && current !== null && stored.workerId === current ? stored : null;
   let boardIssuedAt = saved?.boardIssuedAt ?? null;
   // Matched by equality and never ordered against anything: the file sits on the machine's own disk,
   // so it may only spare the one board command it names, never gate a later one.
@@ -124,13 +133,29 @@ export function createCommandHandlers(deps: CommandDeps): CommandChannels {
     return { paused: true, by: haltedBy?.by ?? null, command: haltedBy?.command ?? null };
   }
 
-  function record(command: WorkerCommand, by: HaltSource): void {
-    haltedBy = command === "resume" ? null : { by, command };
+  function persist(): void {
     try {
-      deps.memory?.write(JSON.stringify({ ...halt(), boardIssuedAt }));
+      deps.memory?.write(
+        JSON.stringify({ ...halt(), boardIssuedAt, workerId: deps.workerId?.() ?? null })
+      );
     } catch {
       // Only the halt's survival across a restart is lost; this process still holds it
     }
+  }
+
+  function record(command: WorkerCommand, by: HaltSource): void {
+    haltedBy = command === "resume" ? null : { by, command };
+    persist();
+  }
+
+  // The loop stays as it is, and a board halt is the machine's to lift now: the record that issued
+  // it is not the one this process reports to, and that board's instants order nothing here
+  function registered(): void {
+    if (haltedBy?.by === "board") haltedBy = { by: "machine", command: haltedBy.command };
+    lastAppliedAt = -Infinity;
+    boardIssuedAt = null;
+    appliedBeforeRestart = null;
+    persist();
   }
 
   function apply(command: WorkerCommand, issuedAt: string | undefined, effect: () => void): void {
@@ -193,5 +218,6 @@ export function createCommandHandlers(deps: CommandDeps): CommandChannels {
       stop: () => applyLocal("stop"),
     },
     halt,
+    registered,
   };
 }
