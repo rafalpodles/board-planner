@@ -3,6 +3,9 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { withProjectOwner } from "@/lib/middleware";
 import { Project } from "@/models/project";
+import { logProjectAudit } from "@/lib/projectAudit";
+import { auditChange } from "@/lib/settings-audit";
+import { serverNamed, writeServerOauth } from "@/lib/pm/oauth-writes";
 import { PmOauthState } from "@/models/pmOauthState";
 import { encryptSecret } from "@/lib/encryption";
 import { selfOrigin, ORIGIN_REQUIRED } from "@/lib/session";
@@ -21,11 +24,11 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
   const { projectId } = await params;
   const { name } = await request.json();
 
-  const project = await Project.findById(projectId);
+  const project = await Project.findById(projectId).select("pm.mcpServers").lean();
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
-  const server = (project.pm?.mcpServers ?? []).find((s) => s.name === name);
+  const server = typeof name === "string" ? serverNamed(project.pm?.mcpServers, name) : undefined;
   if (!server) {
     return NextResponse.json({ error: `No MCP server named "${name}" — save the connection first` }, { status: 404 });
   }
@@ -41,8 +44,10 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
     return NextResponse.json({ error: ORIGIN_REQUIRED }, { status: 500 });
   }
   const redirectUri = getPmOauthRedirectUri();
+  const read = { ...(server.oauth ?? {}) } as Record<string, unknown>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const oauth: any = server.oauth ?? {};
+  const oauth: any = { ...read };
+  let clientRegistered = false;
 
   // The app's public URL changed since registration (e.g. localhost → production): a dynamically
   // registered client is bound to the old callback, so re-register. Gated on
@@ -77,10 +82,7 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
       // an action that does not exist (BP-751 review). Recording it makes the retry this message
       // asks for actually work: Connect again once the provider knows the new address, and this
       // guard no longer has anything to compare against.
-      oauth.redirectUri = redirectUri;
-      server.oauth = oauth;
-      project.markModified("pm.mcpServers");
-      await project.save();
+      await writeServerOauth(projectId, server, { redirectUri });
       return NextResponse.json(
         {
           error: `This connection's callback address changed to ${redirectUri}. Make sure this client is registered with that address on the provider, then Connect again — a client id this app did not register itself is never replaced automatically.`,
@@ -112,6 +114,7 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
       oauth.clientSecret = registered.clientSecret ? encryptSecret(registered.clientSecret) : "";
       oauth.clientSource = "registered";
       if (registered.clientSecret) oauth.tokenAuthMethod = "client_secret_basic";
+      clientRegistered = true;
     }
   } catch (err) {
     return NextResponse.json(
@@ -122,9 +125,23 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
 
   oauth.status = oauth.status === "connected" ? "connected" : "unconfigured";
   oauth.redirectUri = redirectUri;
-  server.oauth = oauth;
-  project.markModified("pm.mcpServers");
-  await project.save();
+  // Only what this flow set: the discovery and registration above can take seconds, and a whole
+  // list saved after them put back whatever else had changed on the board meanwhile
+  const changed = Object.fromEntries(
+    Object.entries(oauth).filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(read[key]))
+  );
+  if (Object.keys(changed).length > 0 && !(await writeServerOauth(projectId, server, changed))) {
+    return NextResponse.json(
+      { error: `The connection "${server.name}" changed while it was being set up. Connect again.` },
+      { status: 409 }
+    );
+  }
+  const label = `PM MCP server ${server.name}`;
+  const audited = [
+    auditChange(`${label} · OAuth`, read.status ?? "unconfigured", oauth.status),
+    clientRegistered ? `${label} · OAuth client registered` : null,
+  ].filter((line): line is string => line !== null);
+  if (audited.length > 0) logProjectAudit(projectId, user._id, "settings_updated", audited);
 
   const { verifier, challenge } = createPkce();
   const state = crypto.randomBytes(32).toString("base64url");

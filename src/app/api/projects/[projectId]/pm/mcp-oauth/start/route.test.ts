@@ -3,9 +3,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const getAuthUser = vi.fn();
 const check = vi.fn();
 const projectFindById = vi.fn();
+const projectFindOneAndUpdate = vi.fn();
 const pmOauthStateCreate = vi.fn();
 const discoverOauthConfig = vi.fn();
 const registerClient = vi.fn();
+const logProjectAudit = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/lib/auth", () => ({
@@ -13,8 +15,9 @@ vi.mock("@/lib/auth", () => ({
   RateLimitError: class RateLimitError extends Error {},
 }));
 vi.mock("@/lib/grants", () => ({ check }));
+vi.mock("@/lib/projectAudit", () => ({ logProjectAudit }));
 vi.mock("@/models/project", () => ({
-  Project: { findById: projectFindById },
+  Project: { findById: projectFindById, findOneAndUpdate: projectFindOneAndUpdate },
 }));
 vi.mock("@/models/pmOauthState", () => ({ PmOauthState: { create: pmOauthStateCreate } }));
 vi.mock("@/lib/encryption", () => ({ encryptSecret: (v: string) => `enc:${v}` }));
@@ -47,25 +50,48 @@ function request(body: unknown = { name: "srv" }) {
 
 const ctx = () => ({ params: Promise.resolve({ projectId: PROJECT_ID }) });
 
-function projectWithServer(oauth: Record<string, unknown>) {
-  const server = {
-    name: "srv",
-    authType: "oauth",
-    url: "https://mcp.example/mcp",
-    oauth,
-  };
-  return {
-    pm: { mcpServers: [server] },
-    markModified: vi.fn(),
-    save: vi.fn().mockResolvedValue(undefined),
-  };
+type Oauth = Record<string, unknown>;
+let stored: { pm: { mcpServers: { name: string; authType: string; url: string; oauth: Oauth }[] } } | null;
+
+/** What the database holds; the route reads it and writes to it only through the stubs below */
+function storeServer(oauth: Oauth) {
+  stored = { pm: { mcpServers: [{ name: "srv", authType: "oauth", url: "https://mcp.example/mcp", oauth }] } };
+  return stored.pm.mcpServers[0];
 }
+
+const copy = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
 
 beforeEach(() => {
   vi.clearAllMocks();
+  stored = null;
   getAuthUser.mockResolvedValue(OWNER);
   check.mockResolvedValue(true);
-  projectFindById.mockResolvedValue(null);
+  projectFindById.mockImplementation(() => ({
+    select: () => ({ lean: () => Promise.resolve(stored && copy(stored)) }),
+  }));
+  // The positional write the route makes, applied the way the database would: only to the server
+  // with that name whose client is still the one the caller read
+  projectFindOneAndUpdate.mockImplementation(
+    (
+      filter: { "pm.mcpServers": { $elemMatch: { name: string; "oauth.clientId": unknown } } },
+      update: { $set: Record<string, unknown> }
+    ) => {
+      const before = stored && copy(stored);
+      const { name, "oauth.clientId": clientId } = filter["pm.mcpServers"].$elemMatch;
+      const server = stored?.pm.mcpServers.find(
+        (s) =>
+          s.name === name &&
+          (typeof clientId === "string"
+            ? s.oauth.clientId === clientId
+            : s.oauth.clientId === "" || s.oauth.clientId === undefined)
+      );
+      if (!server) return { lean: () => Promise.resolve(null) };
+      for (const [path, value] of Object.entries(update.$set)) {
+        server.oauth[path.slice("pm.mcpServers.$.oauth.".length)] = value;
+      }
+      return { lean: () => Promise.resolve(before) };
+    }
+  );
   discoverOauthConfig.mockResolvedValue({
     authorizationEndpoint: "https://provider.example/authorize",
     tokenEndpoint: "https://provider.example/token",
@@ -107,29 +133,25 @@ describe("POST /api/projects/[projectId]/pm/mcp-oauth/start", () => {
 // it anyway silently hands the connection a client_id the provider has never heard of.
 describe("POST /api/projects/[projectId]/pm/mcp-oauth/start — a client whose callback changed", () => {
   it("re-registers silently when the stored client is this app's own registration", async () => {
-    projectFindById.mockResolvedValue(
-      projectWithServer({
-        clientId: "old-registered-id",
-        clientSecret: "enc:old-secret",
-        clientSource: "registered",
-        authorizationEndpoint: "https://provider.example/authorize",
-        tokenEndpoint: "https://provider.example/token",
-        registrationEndpoint: "https://provider.example/register",
-        redirectUri: "https://old.example.com/api/pm/oauth/callback",
-        accessToken: "enc:stale-access",
-        refreshToken: "enc:stale-refresh",
-        expiresAt: new Date(Date.now() + 3600_000),
-        status: "connected",
-      })
-    );
+    const server = storeServer({
+      clientId: "old-registered-id",
+      clientSecret: "enc:old-secret",
+      clientSource: "registered",
+      authorizationEndpoint: "https://provider.example/authorize",
+      tokenEndpoint: "https://provider.example/token",
+      registrationEndpoint: "https://provider.example/register",
+      redirectUri: "https://old.example.com/api/pm/oauth/callback",
+      accessToken: "enc:stale-access",
+      refreshToken: "enc:stale-refresh",
+      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+      status: "connected",
+    });
 
     const res = await POST(request(), ctx());
 
     expect(res.status).toBe(200);
     expect(registerClient).toHaveBeenCalledWith("https://provider.example/register", REDIRECT_URI);
-    // The route mutates the object `findById` resolved to in place, then saves it.
-    const oauth = (await projectFindById.mock.results[0].value).pm.mcpServers[0].oauth;
-    expect(oauth).toMatchObject({
+    expect(server.oauth).toMatchObject({
       clientId: "fresh-registered-id",
       clientSource: "registered",
       status: "unconfigured",
@@ -140,7 +162,7 @@ describe("POST /api/projects/[projectId]/pm/mcp-oauth/start — a client whose c
   });
 
   it("refuses rather than replacing a client the admin typed by hand", async () => {
-    const project = projectWithServer({
+    const server = storeServer({
       clientId: "admin-typed-id",
       clientSecret: "enc:admin-secret",
       clientSource: "typed",
@@ -149,7 +171,6 @@ describe("POST /api/projects/[projectId]/pm/mcp-oauth/start — a client whose c
       redirectUri: "https://old.example.com/api/pm/oauth/callback",
       status: "connected",
     });
-    projectFindById.mockResolvedValue(project);
 
     const res = await POST(request(), ctx());
 
@@ -157,20 +178,18 @@ describe("POST /api/projects/[projectId]/pm/mcp-oauth/start — a client whose c
     expect(await res.json()).toMatchObject({ error: expect.stringContaining(REDIRECT_URI) });
     expect(registerClient).not.toHaveBeenCalled();
     expect(pmOauthStateCreate).not.toHaveBeenCalled();
-    const oauth = project.pm.mcpServers[0].oauth;
-    expect(oauth.clientId).toBe("admin-typed-id");
-    expect(oauth.clientSecret).toBe("enc:admin-secret");
+    expect(server.oauth.clientId).toBe("admin-typed-id");
+    expect(server.oauth.clientSecret).toBe("enc:admin-secret");
     // Test-quality review: this write is the entire point of the fix — the refusal is a dead end
     // without it. Nothing had pinned that it actually happens.
-    expect(oauth.redirectUri).toBe(REDIRECT_URI);
-    expect(project.save).toHaveBeenCalled();
+    expect(server.oauth.redirectUri).toBe(REDIRECT_URI);
   });
 
   // Test-quality review: the refusal above writes the one thing its own guard reads, so nothing
   // had proven the retry it asks for ("Connect again") actually gets past that guard rather than
-  // refusing forever. This is that proof — same server object, POST called twice.
+  // refusing forever. This is that proof — same stored server, POST called twice.
   it("a retry after the refusal above no longer hits the same guard", async () => {
-    const project = projectWithServer({
+    const server = storeServer({
       clientId: "admin-typed-id",
       clientSecret: "enc:admin-secret",
       clientSource: "typed",
@@ -179,7 +198,6 @@ describe("POST /api/projects/[projectId]/pm/mcp-oauth/start — a client whose c
       redirectUri: "https://old.example.com/api/pm/oauth/callback",
       status: "connected",
     });
-    projectFindById.mockResolvedValue(project);
 
     const first = await POST(request(), ctx());
     expect(first.status).toBe(400);
@@ -188,51 +206,45 @@ describe("POST /api/projects/[projectId]/pm/mcp-oauth/start — a client whose c
 
     expect(second.status).toBe(200);
     expect(registerClient).not.toHaveBeenCalled();
-    expect(project.pm.mcpServers[0].oauth.clientId).toBe("admin-typed-id");
+    expect(server.oauth.clientId).toBe("admin-typed-id");
   });
 
   it("refuses a legacy record with unknown provenance the same way, rather than guessing", async () => {
-    projectFindById.mockResolvedValue(
-      projectWithServer({
-        clientId: "legacy-id",
-        clientSecret: "enc:legacy-secret",
-        // A connection that genuinely worked before `redirectUri` was tracked: discovery has
-        // completed (authorizationEndpoint is set) but no clientSource, no stored redirectUri —
-        // every record from before both fields existed. Distinct from a server that has simply
-        // never connected, which has no authorizationEndpoint either.
-        authorizationEndpoint: "https://provider.example/authorize",
-        tokenEndpoint: "https://provider.example/token",
-        status: "connected",
-      })
-    );
+    const server = storeServer({
+      clientId: "legacy-id",
+      clientSecret: "enc:legacy-secret",
+      // A connection that genuinely worked before `redirectUri` was tracked: discovery has
+      // completed (authorizationEndpoint is set) but no clientSource, no stored redirectUri —
+      // every record from before both fields existed. Distinct from a server that has simply
+      // never connected, which has no authorizationEndpoint either.
+      authorizationEndpoint: "https://provider.example/authorize",
+      tokenEndpoint: "https://provider.example/token",
+      status: "connected",
+    });
 
     const res = await POST(request(), ctx());
 
     expect(res.status).toBe(400);
     expect(registerClient).not.toHaveBeenCalled();
-    const oauth = (await projectFindById.mock.results[0].value).pm.mcpServers[0].oauth;
-    expect(oauth.clientId).toBe("legacy-id");
+    expect(server.oauth.clientId).toBe("legacy-id");
   });
 
   it("does nothing special when the callback address has not changed", async () => {
-    projectFindById.mockResolvedValue(
-      projectWithServer({
-        clientId: "admin-typed-id",
-        clientSecret: "enc:admin-secret",
-        clientSource: "typed",
-        redirectUri: REDIRECT_URI,
-        authorizationEndpoint: "https://provider.example/authorize",
-        tokenEndpoint: "https://provider.example/token",
-        status: "connected",
-      })
-    );
+    const server = storeServer({
+      clientId: "admin-typed-id",
+      clientSecret: "enc:admin-secret",
+      clientSource: "typed",
+      redirectUri: REDIRECT_URI,
+      authorizationEndpoint: "https://provider.example/authorize",
+      tokenEndpoint: "https://provider.example/token",
+      status: "connected",
+    });
 
     const res = await POST(request(), ctx());
 
     expect(res.status).toBe(200);
     expect(registerClient).not.toHaveBeenCalled();
-    const oauth = (await projectFindById.mock.results[0].value).pm.mcpServers[0].oauth;
-    expect(oauth.clientId).toBe("admin-typed-id");
+    expect(server.oauth.clientId).toBe("admin-typed-id");
   });
 
   // The control this whole describe block needs: a server whose Connect has never once
@@ -240,26 +252,22 @@ describe("POST /api/projects/[projectId]/pm/mcp-oauth/start — a client whose c
   // reason that this route has never finished a run for it, not because a callback changed. That
   // must not be mistaken for the "changed since a real connection" case above.
   it("connects normally on the very first attempt, although redirectUri has never been set", async () => {
-    projectFindById.mockResolvedValue(
-      projectWithServer({ clientId: "typed-before-ever-connecting", clientSecret: "enc:s", clientSource: "typed" })
-    );
+    const server = storeServer({ clientId: "typed-before-ever-connecting", clientSecret: "enc:s", clientSource: "typed" });
 
     const res = await POST(request(), ctx());
 
     expect(res.status).toBe(200);
     expect(registerClient).not.toHaveBeenCalled();
-    const oauth = (await projectFindById.mock.results[0].value).pm.mcpServers[0].oauth;
-    expect(oauth).toMatchObject({ clientId: "typed-before-ever-connecting", redirectUri: REDIRECT_URI });
+    expect(server.oauth).toMatchObject({ clientId: "typed-before-ever-connecting", redirectUri: REDIRECT_URI });
   });
 
   it("marks a freshly registered client as this app's own", async () => {
-    projectFindById.mockResolvedValue(projectWithServer({}));
+    const server = storeServer({});
 
     const res = await POST(request(), ctx());
 
     expect(res.status).toBe(200);
-    const oauth = (await projectFindById.mock.results[0].value).pm.mcpServers[0].oauth;
-    expect(oauth).toMatchObject({ clientId: "fresh-registered-id", clientSource: "registered" });
+    expect(server.oauth).toMatchObject({ clientId: "fresh-registered-id", clientSource: "registered" });
   });
 
   // Test-quality review: the leading `oauth.clientId &&` had no fixture pairing an empty
@@ -267,22 +275,97 @@ describe("POST /api/projects/[projectId]/pm/mcp-oauth/start — a client whose c
   // (a client disconnected and cleared by hand, on a server that had already discovered once).
   // Nothing to reset or refuse when there is no clientId; this just registers a fresh one.
   it("registers fresh rather than refusing when the client id is empty but discovery already ran", async () => {
-    projectFindById.mockResolvedValue(
-      projectWithServer({
-        clientId: "",
-        authorizationEndpoint: "https://provider.example/authorize",
-        tokenEndpoint: "https://provider.example/token",
-        registrationEndpoint: "https://provider.example/register",
-        redirectUri: "https://old.example.com/api/pm/oauth/callback",
-        status: "unconfigured",
-      })
-    );
+    const server = storeServer({
+      clientId: "",
+      authorizationEndpoint: "https://provider.example/authorize",
+      tokenEndpoint: "https://provider.example/token",
+      registrationEndpoint: "https://provider.example/register",
+      redirectUri: "https://old.example.com/api/pm/oauth/callback",
+      status: "unconfigured",
+    });
 
     const res = await POST(request(), ctx());
 
     expect(res.status).toBe(200);
     expect(registerClient).toHaveBeenCalledWith("https://provider.example/register", REDIRECT_URI);
-    const oauth = (await projectFindById.mock.results[0].value).pm.mcpServers[0].oauth;
-    expect(oauth).toMatchObject({ clientId: "fresh-registered-id", clientSource: "registered" });
+    expect(server.oauth).toMatchObject({ clientId: "fresh-registered-id", clientSource: "registered" });
+  });
+});
+
+// BP-782 and BP-786: the connection was saved as the whole server list after discovery and
+// registration, seconds of network later, and recorded nowhere
+describe("POST /api/projects/[projectId]/pm/mcp-oauth/start — what it writes and records", () => {
+  it("leaves a token refreshed during discovery as the refresh left it", async () => {
+    const server = storeServer({
+      clientId: "typed-id",
+      clientSource: "typed",
+      accessToken: "enc:before-refresh",
+      status: "connected",
+    });
+    discoverOauthConfig.mockImplementationOnce(async () => {
+      server.oauth.accessToken = "enc:refreshed";
+      return {
+        authorizationEndpoint: "https://provider.example/authorize",
+        tokenEndpoint: "https://provider.example/token",
+        registrationEndpoint: "",
+        scopes: [],
+        tokenAuthMethod: "none",
+      };
+    });
+
+    const res = await POST(request(), ctx());
+
+    expect(res.status).toBe(200);
+    expect(server.oauth.accessToken).toBe("enc:refreshed");
+    expect(server.oauth.tokenEndpoint).toBe("https://provider.example/token");
+  });
+
+  it("stores nothing when the client was changed while it was connecting", async () => {
+    const server = storeServer({ clientId: "typed-id", clientSource: "typed", status: "unconfigured" });
+    discoverOauthConfig.mockImplementationOnce(async () => {
+      server.oauth.clientId = "retyped-meanwhile";
+      return {
+        authorizationEndpoint: "https://provider.example/authorize",
+        tokenEndpoint: "https://provider.example/token",
+        registrationEndpoint: "",
+        scopes: [],
+        tokenAuthMethod: "none",
+      };
+    });
+
+    const res = await POST(request(), ctx());
+
+    expect(res.status).toBe(409);
+    expect(server.oauth.tokenEndpoint).toBeUndefined();
+    expect(pmOauthStateCreate).not.toHaveBeenCalled();
+    expect(logProjectAudit).not.toHaveBeenCalled();
+  });
+
+  it("records a client it registered, and a connection it dropped to do so", async () => {
+    storeServer({
+      clientId: "old-registered-id",
+      clientSource: "registered",
+      authorizationEndpoint: "https://provider.example/authorize",
+      tokenEndpoint: "https://provider.example/token",
+      registrationEndpoint: "https://provider.example/register",
+      redirectUri: "https://old.example.com/api/pm/oauth/callback",
+      accessToken: "enc:stale-access",
+      status: "connected",
+    });
+
+    await POST(request(), ctx());
+
+    expect(logProjectAudit).toHaveBeenCalledWith(PROJECT_ID, "u1", "settings_updated", [
+      "PM MCP server srv · OAuth: connected → unconfigured",
+      "PM MCP server srv · OAuth client registered",
+    ]);
+  });
+
+  it("records nothing when all it did was look up where the provider is", async () => {
+    storeServer({ clientId: "typed-id", clientSource: "typed", status: "unconfigured" });
+
+    await POST(request(), ctx());
+
+    expect(logProjectAudit).not.toHaveBeenCalled();
   });
 });
