@@ -7,8 +7,10 @@ const check = vi.fn();
 const projectFindById = vi.fn();
 const projectFindOneAndUpdate = vi.fn();
 const projectExists = vi.fn();
+const logProjectAudit = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
+vi.mock("@/lib/projectAudit", () => ({ logProjectAudit }));
 vi.mock("@/lib/auth", () => ({
   getAuthUser,
   RateLimitError: class RateLimitError extends Error {},
@@ -50,13 +52,23 @@ let doc: { customFields: Field[] };
 /** A project with the given field names already defined. */
 function project(names: string[] = []) {
   doc = { customFields: names.map((name, i) => ({ name, fieldType: "text", order: i })) };
-  projectFindById.mockResolvedValue(doc);
+  // Awaited whole by the route's own check, and through select().lean() by the re-read after a miss
+  projectFindById.mockImplementation(() =>
+    Object.assign(Promise.resolve(doc), { select: () => ({ lean: () => Promise.resolve(doc) }) })
+  );
   // The add is an atomic $push with the ceiling in its filter, so the stub applies the write the
   // way the database would — including refusing it once the array is full.
   projectFindOneAndUpdate.mockImplementation(
     async (filter: Record<string, unknown>, update: { $push: { customFields: Field } }) => {
       const full = doc.customFields.length >= MAX_FIELDS;
       if (`customFields.${MAX_FIELDS - 1}` in filter && full) return null;
+      // The name condition, evaluated the way MongoDB evaluates a $regex
+      const taken = (
+        filter.customFields as { $not?: { $elemMatch: { name: { $regex: string; $options: string } } } } | undefined
+      )?.$not?.$elemMatch.name;
+      if (taken && doc.customFields.some((f) => new RegExp(taken.$regex, taken.$options).test(f.name))) {
+        return null;
+      }
       doc.customFields = [...doc.customFields, update.$push.customFields];
       return doc;
     }
@@ -160,7 +172,10 @@ describe("POST /api/projects/:projectId/custom-fields", () => {
   // and this write — the two must not both read as "full" (review).
   it("404s, not 400, when the project vanished between the read and the write", async () => {
     projectAtTheCeiling();
-    projectExists.mockResolvedValue(false);
+    const read = projectFindById.getMockImplementation()!;
+    projectFindById
+      .mockImplementationOnce(read)
+      .mockImplementationOnce(() => ({ select: () => ({ lean: () => Promise.resolve(null) }) }));
 
     const res = await POST(request("POST", { name: "one too many", fieldType: "text" }), ctx());
 
@@ -183,7 +198,11 @@ describe("POST /api/projects/:projectId/custom-fields", () => {
     await POST(request("POST", body), ctx());
 
     expect(projectFindOneAndUpdate).toHaveBeenCalledWith(
-      { _id: PROJECT_ID, [`customFields.${MAX_FIELDS - 1}`]: { $exists: false } },
+      {
+        _id: PROJECT_ID,
+        [`customFields.${MAX_FIELDS - 1}`]: { $exists: false },
+        customFields: { $not: { $elemMatch: { name: { $regex: "^Points$", $options: "i" } } } },
+      },
       {
         $push: {
           customFields: {
@@ -201,5 +220,74 @@ describe("POST /api/projects/:projectId/custom-fields", () => {
       },
       { returnDocument: "after" }
     );
+  });
+});
+
+// BP-782: a field added from Task fields left no trace in the project's audit log
+describe("what adding a field records", () => {
+  beforeEach(() => {
+    getAuthUser.mockResolvedValue(OWNER);
+    check.mockResolvedValue(true);
+    project(["Existing"]);
+  });
+
+  it("names the field and its type once it is stored", async () => {
+    const res = await POST(request("POST", { name: "  Story points ", fieldType: "number" }), ctx());
+
+    expect(res.status).toBe(201);
+    expect(logProjectAudit).toHaveBeenCalledWith(
+      PROJECT_ID,
+      "u1",
+      "settings_updated",
+      "Custom field added: Story points (number)"
+    );
+  });
+
+  it("records nothing for an add that did not happen", async () => {
+    project(Array.from({ length: MAX_FIELDS }, (_, i) => `Field ${i}`));
+    projectExists.mockResolvedValue(true);
+
+    const res = await POST(request("POST", { name: "One too many", fieldType: "number" }), ctx());
+
+    expect(res.status).toBe(400);
+    expect(logProjectAudit).not.toHaveBeenCalled();
+  });
+});
+
+// Review: the name was checked against a read, so two adds of one name at once both landed
+describe("an add racing another", () => {
+  beforeEach(() => {
+    getAuthUser.mockResolvedValue(OWNER);
+    check.mockResolvedValue(true);
+    project(["Existing"]);
+  });
+
+  it("is refused when the name was taken between its read and its write", async () => {
+    projectFindById.mockImplementationOnce(() => {
+      const read = Promise.resolve({ customFields: [...doc.customFields] });
+      doc.customFields = [...doc.customFields, { name: "story points", fieldType: "number" }];
+      return read;
+    });
+
+    const res = await POST(request("POST", { name: "Story Points", fieldType: "number" }), ctx());
+
+    expect(res.status).toBe(409);
+    expect(doc.customFields.filter((f) => f.name.toLowerCase() === "story points")).toHaveLength(1);
+    expect(logProjectAudit).not.toHaveBeenCalled();
+  });
+
+  it("refuses a name with a control character, before writing anything", async () => {
+    const res = await POST(request("POST", { name: "Bad\u0000Name", fieldType: "text" }), ctx());
+
+    expect(res.status).toBe(400);
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("still tells a full list from a taken name", async () => {
+    project(Array.from({ length: MAX_FIELDS }, (_, i) => `Field ${i}`));
+
+    const res = await POST(request("POST", { name: "One too many", fieldType: "number" }), ctx());
+
+    expect(res.status).toBe(400);
   });
 });

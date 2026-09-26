@@ -3,11 +3,13 @@ import { connectDB } from "@/lib/db";
 import { withProjectOwner } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { logProjectAudit } from "@/lib/projectAudit";
+import { channelChanges } from "@/lib/settings-audit";
+import { canonicalObjectId } from "@/lib/object-id";
 import { NOTIFICATION_CHANNEL_TYPES, WEBHOOK_EVENTS, NotificationChannelType } from "@/types";
 import { sanitizeProjectSecrets } from "@/lib/project-secrets";
 import { parseWebhookUrl, parseWebhookEvents, MAX_CHANNEL_NAME_LENGTH, MAX_NOTIFICATION_CHANNELS } from "@/lib/webhook-input";
 import { isAllowedWebhookUrl, WEBHOOK_DESTINATION, WEBHOOK_DESTINATION_REFUSED } from "@/lib/url-validation";
-import { encryptSecret, isEncryptedSecret, isEncryptionConfigured } from "@/lib/encryption";
+import { decryptSecret, encryptSecret, isEncryptedSecret, isEncryptionConfigured } from "@/lib/encryption";
 
 // Built per call: a Response's body is a one-shot stream, so one shared instance answers the
 // second caller with no body at all and two concurrent ones with a locked stream.
@@ -19,7 +21,18 @@ const noKey = () =>
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function masked(project: any) {
-  return sanitizeProjectSecrets(project.toObject()).notificationChannels || [];
+  return sanitizeProjectSecrets(typeof project.toObject === "function" ? project.toObject() : project)
+    .notificationChannels || [];
+}
+
+function storedUrl(value: string | undefined): string | null {
+  if (!value) return null;
+  if (!isEncryptedSecret(value)) return value;
+  try {
+    return decryptSecret(value);
+  } catch {
+    return null;
+  }
 }
 
 export const GET = withProjectOwner(async (_request, { params }) => {
@@ -112,27 +125,18 @@ export const POST = withProjectOwner(async (request, { params, user }) => {
   return NextResponse.json(masked(updated), { status: 201 });
 });
 
-export const PUT = withProjectOwner(async (request, { params }) => {
+export const PUT = withProjectOwner(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
 
-  const { channelId, ...updates } = await request.json();
+  const { channelId: rawChannelId, ...updates } = await request.json();
+  const channelId = canonicalObjectId(rawChannelId);
   if (!channelId) {
     return NextResponse.json({ error: "channelId is required" }, { status: 400 });
   }
 
-  const project = await Project.findById(projectId);
-  if (!project) {
-    return NextResponse.json({ error: "Project not found" }, { status: 404 });
-  }
-
-  const channel = (project.notificationChannels || []).find(
-    (ch) => ch._id.toString() === channelId
-  );
-  if (!channel) {
-    return NextResponse.json({ error: "Channel not found" }, { status: 404 });
-  }
-
+  const changes: { name?: string; webhookUrl?: string; events?: string[]; enabled?: boolean } = {};
+  let newUrl: string | null = null;
   if (updates.name !== undefined) {
     if (typeof updates.name !== "string" || !updates.name.trim()) {
       return NextResponse.json({ error: "Name is required" }, { status: 400 });
@@ -140,7 +144,7 @@ export const PUT = withProjectOwner(async (request, { params }) => {
     if (updates.name.trim().length > MAX_CHANNEL_NAME_LENGTH) {
       return NextResponse.json({ error: `Name must be at most ${MAX_CHANNEL_NAME_LENGTH} characters` }, { status: 400 });
     }
-    channel.name = updates.name.trim();
+    changes.name = updates.name.trim();
   }
   if (updates.webhookUrl !== undefined) {
     const parsedUrl = parseWebhookUrl(updates.webhookUrl);
@@ -151,11 +155,8 @@ export const PUT = withProjectOwner(async (request, { params }) => {
       return NextResponse.json({ error: WEBHOOK_DESTINATION_REFUSED }, { status: 400 });
     }
     if (!isEncryptionConfigured()) return noKey();
-    channel.webhookUrl = encryptSecret(parsedUrl);
-  } else if (!isEncryptedSecret(channel.webhookUrl) && isEncryptionConfigured()) {
-    // Rows written before BP-372 hold the URL in the clear. Any save on the channel carries them
-    // over, so renaming one is enough to migrate it.
-    channel.webhookUrl = encryptSecret(channel.webhookUrl);
+    newUrl = parsedUrl;
+    changes.webhookUrl = encryptSecret(parsedUrl);
   }
   if (updates.events !== undefined) {
     const parsedEvents = parseWebhookEvents(updates.events);
@@ -165,37 +166,77 @@ export const PUT = withProjectOwner(async (request, { params }) => {
         { status: 400 }
       );
     }
-    channel.events = parsedEvents;
+    changes.events = parsedEvents;
   }
-  if (updates.enabled !== undefined) channel.enabled = !!updates.enabled;
+  if (updates.enabled !== undefined) changes.enabled = !!updates.enabled;
 
-  await project.save();
-  return NextResponse.json(masked(project));
+  // One positional write rather than load, mutate, save(): save() sent the whole list back, so a
+  // channel added or edited meanwhile was put back the way this request had read it
+  const before = await Project.findOneAndUpdate(
+    { _id: projectId, "notificationChannels._id": channelId },
+    {
+      $set: Object.fromEntries(
+        Object.entries(changes).map(([field, value]) => [`notificationChannels.$.${field}`, value])
+      ),
+    },
+    { returnDocument: "before" }
+  ).lean();
+  if (!before) {
+    if (await Project.exists({ _id: projectId })) {
+      return NextResponse.json({ error: "Channel not found" }, { status: 404 });
+    }
+    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+  }
+
+  const channels = before.notificationChannels ?? [];
+  const was = channels.find((ch) => String(ch._id) === channelId)!;
+  let is = { ...was, ...changes };
+
+  // Rows written before BP-372 hold the URL in the clear. Any save on the channel carries them
+  // over, so renaming one is enough to migrate it — but only the value this save read
+  if (!changes.webhookUrl && was.webhookUrl && !isEncryptedSecret(was.webhookUrl) && isEncryptionConfigured()) {
+    const sealed = encryptSecret(was.webhookUrl);
+    const migrated = await Project.updateOne(
+      {
+        _id: projectId,
+        notificationChannels: { $elemMatch: { _id: channelId, webhookUrl: was.webhookUrl } },
+      },
+      { $set: { "notificationChannels.$.webhookUrl": sealed } }
+    );
+    if (migrated.modifiedCount > 0) is = { ...is, webhookUrl: sealed };
+  }
+
+  const lines = channelChanges(was, is, newUrl !== null && newUrl !== storedUrl(was.webhookUrl));
+  if (lines.length > 0) logProjectAudit(projectId, user._id, "settings_updated", lines);
+
+  const notificationChannels = channels.map((ch) => (ch === was ? is : ch));
+  return NextResponse.json(masked({ _id: before._id, key: before.key, notificationChannels }));
 });
 
 export const DELETE = withProjectOwner(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
 
-  const { channelId } = await request.json();
+  const channelId = canonicalObjectId((await request.json()).channelId);
   if (!channelId) {
     return NextResponse.json({ error: "channelId is required" }, { status: 400 });
   }
 
-  const project = await Project.findById(projectId);
-  if (!project) {
+  const before = await Project.findOneAndUpdate(
+    { _id: projectId },
+    { $pull: { notificationChannels: { _id: channelId } } },
+    { returnDocument: "before" }
+  ).lean();
+  if (!before) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  const removed = (project.notificationChannels || []).find((ch) => ch._id.toString() === channelId);
-  project.notificationChannels = (project.notificationChannels || []).filter(
-    (ch) => ch._id.toString() !== channelId
-  );
-  await project.save();
-
+  const channels = before.notificationChannels ?? [];
+  const removed = channels.find((ch) => String(ch._id) === channelId);
   if (removed) {
     logProjectAudit(projectId, user._id, "settings_updated", `Notification channel removed: ${removed.name}`);
   }
 
-  return NextResponse.json(masked(project));
+  const notificationChannels = channels.filter((ch) => ch !== removed);
+  return NextResponse.json(masked({ _id: before._id, key: before.key, notificationChannels }));
 });

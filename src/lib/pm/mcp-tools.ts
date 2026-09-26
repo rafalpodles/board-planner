@@ -34,7 +34,8 @@ function sanitizeName(raw: string): string {
 const EXPIRY_MARGIN_MS = 60_000;
 const refreshInFlight = new Map<string, Promise<string | undefined>>();
 
-// Scoped to the client whose tokens these are: a client id changed meanwhile has reset them
+// Scoped to the server and client whose tokens these are: a URL or client id changed meanwhile has
+// reset them, and a token issued for one address must not land on another (BP-315)
 async function persistOauthFields(
   projectId: string,
   server: IPmMcpServer,
@@ -47,7 +48,9 @@ async function persistOauthFields(
   await Project.updateOne(
     {
       _id: projectId,
-      "pm.mcpServers": { $elemMatch: { name: server.name, "oauth.clientId": server.oauth?.clientId ?? "" } },
+      "pm.mcpServers": {
+        $elemMatch: { name: server.name, url: server.url, "oauth.clientId": server.oauth?.clientId ?? "" },
+      },
     },
     { $set }
   );

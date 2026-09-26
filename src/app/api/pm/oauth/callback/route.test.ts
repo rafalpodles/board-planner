@@ -7,7 +7,9 @@ const check = vi.fn();
 
 vi.mock("@/lib/db", () => ({ connectDB: vi.fn() }));
 vi.mock("@/models/pmOauthState", () => ({ PmOauthState: { findOne, findOneAndDelete } }));
-vi.mock("@/models/project", () => ({ Project: { findById: vi.fn() } }));
+vi.mock("@/models/project", () => ({ Project: { findById: vi.fn(), findOneAndUpdate: vi.fn() } }));
+const logProjectAudit = vi.fn();
+vi.mock("@/lib/projectAudit", () => ({ logProjectAudit }));
 vi.mock("@/lib/auth", () => ({ getAuthUser }));
 vi.mock("@/lib/session", () => ({ ProvenanceError: class ProvenanceError extends Error {} }));
 vi.mock("@/lib/grants", () => ({ check }));
@@ -146,7 +148,9 @@ describe("GET /api/pm/oauth/callback — binding the flow to whoever started it"
     findOneAndDelete.mockResolvedValue(PENDING);
     getAuthUser.mockResolvedValue({ _id: "owner1", viaMachineCredential: false });
     const { Project } = await import("@/models/project");
-    vi.mocked(Project.findById).mockResolvedValue(null);
+    vi.mocked(Project.findById).mockReturnValue({
+      select: () => ({ lean: () => Promise.resolve(null) }),
+    } as never);
 
     const res = await GET(approveRequest());
 
@@ -177,5 +181,102 @@ describe("GET /api/pm/oauth/callback — binding the flow to whoever started it"
 
     expect(res.headers.get("location")).toBe("/projects/p1/settings?mcp_oauth=error%3Awrong_user");
     expect(findOneAndDelete).not.toHaveBeenCalled();
+  });
+});
+
+// BP-782 and BP-786: the tokens were saved as the whole server list, over whatever had changed
+// during the exchange, and the connection being made was recorded nowhere
+describe("GET /api/pm/oauth/callback — storing the connection", () => {
+  const PENDING = { project: "p1", serverName: "notion", initiatedBy: "owner1", codeVerifier: "v" };
+  const server = (oauth: Record<string, unknown>) => ({
+    name: "notion",
+    url: "https://mcp.notion.com/mcp",
+    authType: "oauth",
+    oauth: { clientId: "c1", tokenEndpoint: "https://provider.example/token", ...oauth },
+  });
+
+  async function stored(oauth: Record<string, unknown>, written: unknown = "same") {
+    const { Project } = await import("@/models/project");
+    const project = { _id: "p1", pm: { mcpServers: [server(oauth)] } };
+    vi.mocked(Project.findById).mockReturnValue({
+      select: () => ({ lean: () => Promise.resolve(project) }),
+    } as never);
+    vi.mocked(Project.findOneAndUpdate).mockReturnValue({
+      lean: () => Promise.resolve(written === "same" ? project : written),
+    } as never);
+    return Project;
+  }
+
+  beforeEach(async () => {
+    findOne.mockResolvedValue(PENDING);
+    findOneAndDelete.mockResolvedValue(PENDING);
+    const { exchangeCode } = await import("@/lib/pm/mcp-oauth");
+    vi.mocked(exchangeCode).mockResolvedValue({
+      accessToken: "access",
+      refreshToken: "refresh",
+      expiresAt: null,
+    } as never);
+  });
+
+  const approve = () => GET(new Request("https://board.example.com/api/pm/oauth/callback?state=s&code=c"));
+
+  it("writes the tokens to the server and client it exchanged them for, and nothing else", async () => {
+    const Project = await stored({ status: "unconfigured" });
+
+    const res = await approve();
+
+    expect(res.headers.get("location")).toBe("/projects/p1/settings?mcp_oauth=ok");
+    expect(Project.findOneAndUpdate).toHaveBeenCalledWith(
+      {
+        _id: "p1",
+        "pm.mcpServers": {
+          $elemMatch: { name: "notion", url: "https://mcp.notion.com/mcp", "oauth.clientId": "c1" },
+        },
+      },
+      {
+        $set: {
+          "pm.mcpServers.$.oauth.accessToken": "access",
+          "pm.mcpServers.$.oauth.refreshToken": "refresh",
+          "pm.mcpServers.$.oauth.expiresAt": null,
+          "pm.mcpServers.$.oauth.status": "connected",
+        },
+      },
+      { returnDocument: "before" }
+    );
+  });
+
+  it("records the connection under the person who made it", async () => {
+    await stored({ status: "unconfigured" });
+
+    await approve();
+
+    expect(logProjectAudit).toHaveBeenCalledWith(
+      "p1",
+      "owner1",
+      "settings_updated",
+      "PM MCP server notion · OAuth: unconfigured → connected"
+    );
+  });
+
+  it("records a reconnection as one", async () => {
+    await stored({ status: "connected" });
+
+    await approve();
+
+    expect(logProjectAudit).toHaveBeenCalledWith(
+      "p1",
+      "owner1",
+      "settings_updated",
+      "PM MCP server notion · OAuth connection renewed"
+    );
+  });
+
+  it("stores nothing and records nothing when the client or the address changed during the exchange", async () => {
+    await stored({ status: "unconfigured" }, null);
+
+    const res = await approve();
+
+    expect(res.headers.get("location")).toBe("/projects/p1/settings?mcp_oauth=error%3Aconnection_gone");
+    expect(logProjectAudit).not.toHaveBeenCalled();
   });
 });

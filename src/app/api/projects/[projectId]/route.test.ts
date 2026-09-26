@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const getAuthUser = vi.fn();
 const check = vi.fn();
 const projectFindById = vi.fn();
-const projectFindByIdAndUpdate = vi.fn();
+const projectFindOneAndUpdate = vi.fn();
 const taskFind = vi.fn();
 const taskDeleteMany = vi.fn();
 const commentDeleteMany = vi.fn();
@@ -48,7 +48,7 @@ vi.mock("@/models/project", () => ({
   Project: {
     findById: projectFindById,
     findByIdAndDelete: projectFindByIdAndDelete,
-    findByIdAndUpdate: projectFindByIdAndUpdate,
+    findOneAndUpdate: projectFindOneAndUpdate,
   },
 }));
 vi.mock("@/models/task", () => ({
@@ -121,7 +121,7 @@ beforeEach(() => {
     select: () => Promise.resolve({ customFields: PROJECT_CUSTOM_FIELDS }),
     populate: saved,
   });
-  projectFindByIdAndUpdate.mockReturnValue({
+  projectFindOneAndUpdate.mockReturnValue({
     lean: () => Promise.resolve({ _id: PROJECT_ID, name: "Test Project" }),
   });
   taskFind.mockReturnValue({
@@ -170,7 +170,7 @@ describe("PUT /api/projects/[projectId] key immutability", () => {
     const res = await PUT(putRequest({ key: "NEWKEY" }), ctx());
 
     expect(res.status).toBe(403);
-    expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
   });
 
   // Control: an ordinary field update must still go through, so the 403 above is about `key`
@@ -179,8 +179,8 @@ describe("PUT /api/projects/[projectId] key immutability", () => {
     const res = await PUT(putRequest({ name: "Renamed" }), ctx());
 
     expect(res.status).toBe(200);
-    expect(projectFindByIdAndUpdate).toHaveBeenCalledWith(
-      PROJECT_ID,
+    expect(projectFindOneAndUpdate).toHaveBeenCalledWith(
+      { _id: PROJECT_ID },
       expect.objectContaining({ name: "Renamed" }),
       expect.anything()
     );
@@ -196,21 +196,21 @@ describe("PUT /api/projects/[projectId] estimateFieldId", () => {
     const res = await PUT(putRequest({ estimateFieldId: "6a70afff45d39cd9bc8bb5ff" }), ctx());
 
     expect(res.status).toBe(400);
-    expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it("refuses a designation naming a field that is not numeric", async () => {
     const res = await PUT(putRequest({ estimateFieldId: textFieldId }), ctx());
 
     expect(res.status).toBe(400);
-    expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it("refuses a designation naming an archived field", async () => {
     const res = await PUT(putRequest({ estimateFieldId: archivedNumberFieldId }), ctx());
 
     expect(res.status).toBe(400);
-    expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it("refuses a non-string designation instead of coercing it", async () => {
@@ -219,22 +219,22 @@ describe("PUT /api/projects/[projectId] estimateFieldId", () => {
     const res = await PUT(putRequest({ estimateFieldId: [] }), ctx());
 
     expect(res.status).toBe(400);
-    expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it("refuses a non-string designation that would coerce to a real field id", async () => {
     const res = await PUT(putRequest({ estimateFieldId: [numberFieldId] }), ctx());
 
     expect(res.status).toBe(400);
-    expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it("accepts an empty designation", async () => {
     const res = await PUT(putRequest({ estimateFieldId: "" }), ctx());
 
     expect(res.status).toBe(200);
-    expect(projectFindByIdAndUpdate).toHaveBeenCalledWith(
-      PROJECT_ID,
+    expect(projectFindOneAndUpdate).toHaveBeenCalledWith(
+      { _id: PROJECT_ID },
       expect.objectContaining({ estimateFieldId: "" }),
       expect.anything()
     );
@@ -244,8 +244,8 @@ describe("PUT /api/projects/[projectId] estimateFieldId", () => {
     const res = await PUT(putRequest({ estimateFieldId: numberFieldId }), ctx());
 
     expect(res.status).toBe(200);
-    expect(projectFindByIdAndUpdate).toHaveBeenCalledWith(
-      PROJECT_ID,
+    expect(projectFindOneAndUpdate).toHaveBeenCalledWith(
+      { _id: PROJECT_ID },
       expect.objectContaining({ estimateFieldId: numberFieldId }),
       expect.anything()
     );
@@ -275,7 +275,7 @@ describe("PUT /api/projects/[projectId] and a repointed integration host", () =>
   }
 
   function updatesSentToMongo() {
-    return projectFindByIdAndUpdate.mock.calls[0][1] as Record<string, unknown>;
+    return projectFindOneAndUpdate.mock.calls[0][1] as Record<string, unknown>;
   }
 
   beforeEach(() => {
@@ -357,7 +357,7 @@ describe("the key a project may be renamed to", () => {
     const res = await PUT(putRequest({ key }), ctx());
 
     expect(res.status).toBe(403);
-    expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
   });
 
   // Without this the refusals above would pass on a route that refuses every rename
@@ -365,7 +365,7 @@ describe("the key a project may be renamed to", () => {
     const res = await PUT(putRequest({ key: " bp " }), ctx());
 
     expect(res.status).toBe(403);
-    expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
   });
 });
 
@@ -379,13 +379,13 @@ describe("PUT /api/projects/[projectId] worker settings", () => {
   function stored(worker: Record<string, unknown>) {
     const project = { key: "TP", worker: { policyOverrides: [], ...worker } };
     projectFindById.mockReturnValue({ select: () => Promise.resolve(project), populate: saved });
-    projectFindByIdAndUpdate.mockReturnValue({
+    projectFindOneAndUpdate.mockReturnValue({
       lean: () => Promise.resolve({ _id: PROJECT_ID, ...project }),
     });
   }
 
   function lastUpdate() {
-    return projectFindByIdAndUpdate.mock.calls.at(-1)?.[1] as Record<string, unknown> | undefined;
+    return projectFindOneAndUpdate.mock.calls.at(-1)?.[1] as Record<string, unknown> | undefined;
   }
 
   // Honours `need` and the caller, the way grants.check does: OWNER holds the owner grant, MEMBER
@@ -428,7 +428,7 @@ describe("PUT /api/projects/[projectId] worker settings", () => {
     const response = await PUT(putRequest({ worker: { enabled: true } }), ctx());
 
     expect(response.status).toBe(403);
-    expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it("refuses the owner's machine credential", async () => {
@@ -437,7 +437,7 @@ describe("PUT /api/projects/[projectId] worker settings", () => {
     const response = await PUT(putRequest({ worker: { enabled: true } }), ctx());
 
     expect(response.status).toBe(403);
-    expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it("refuses the owner an enable while an instance admin's lock is on", async () => {
@@ -447,7 +447,7 @@ describe("PUT /api/projects/[projectId] worker settings", () => {
 
     expect(response.status).toBe(403);
     expect((await response.json()).error).toMatch(/locked workers off/);
-    expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it("still lets the owner switch workers off under the lock", async () => {
@@ -467,7 +467,7 @@ describe("PUT /api/projects/[projectId] worker settings", () => {
 
       expect(response.status).toBe(403);
     }
-    expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it("lets an instance admin lock a project, and records it for the instance", async () => {
@@ -525,7 +525,7 @@ describe("PUT /api/projects/[projectId] worker settings", () => {
 
       expect(response.status).toBe(403);
       expect((await response.json()).error).toContain(field);
-      expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+      expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
     }
   );
 
@@ -564,7 +564,7 @@ describe("PUT /api/projects/[projectId] worker settings", () => {
  */
 describe("PUT /api/projects/[projectId] audit trail", () => {
   function writtenOver(beforeImage: Record<string, unknown>) {
-    projectFindByIdAndUpdate.mockReturnValue({ lean: () => Promise.resolve(beforeImage) });
+    projectFindOneAndUpdate.mockReturnValue({ lean: () => Promise.resolve(beforeImage) });
   }
 
   function auditDetails(): string[] {
@@ -639,7 +639,7 @@ describe("PUT /api/projects/[projectId] audit trail", () => {
     const res = await PUT(putRequest({ githubToken: null }), ctx());
 
     expect(res.status).toBe(200);
-    expect(projectFindByIdAndUpdate.mock.calls[0][1]).toMatchObject({ githubToken: "" });
+    expect(projectFindOneAndUpdate.mock.calls[0][1]).toMatchObject({ githubToken: "" });
     expect(auditDetails()).toEqual(["GitHub token cleared"]);
   });
 
@@ -647,14 +647,14 @@ describe("PUT /api/projects/[projectId] audit trail", () => {
     const res = await PUT(putRequest({ name: null }), ctx());
 
     expect(res.status).toBe(400);
-    expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it("refuses a name left empty", async () => {
     const res = await PUT(putRequest({ name: "   " }), ctx());
 
     expect(res.status).toBe(400);
-    expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
   });
 
   // Mongoose casts an object to the string it carries, and only a string is encrypted: an object
@@ -664,15 +664,182 @@ describe("PUT /api/projects/[projectId] audit trail", () => {
 
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: `${field} must be a string` });
-    expect(projectFindByIdAndUpdate).not.toHaveBeenCalled();
+    expect(projectFindOneAndUpdate).not.toHaveBeenCalled();
   });
 
   it("answers 404 when the project is gone by the time it is written", async () => {
-    projectFindByIdAndUpdate.mockReturnValue({ lean: () => Promise.resolve(null) });
+    projectFindOneAndUpdate.mockReturnValue({ lean: () => Promise.resolve(null) });
 
     const response = await PUT(putRequest({ name: "Orbit Two" }), ctx());
 
     expect(response.status).toBe(404);
     expect(logProjectAudit).not.toHaveBeenCalled();
+  });
+});
+
+// BP-786: a PM save used to $set the whole pm block from a read taken earlier in the request, so
+// anything written in between (a refreshed OAuth token, the instance lock, the scheduler's slot)
+// was put back the way the save had read it
+describe("PUT /api/projects/[projectId] PM settings", () => {
+  const ADMIN = { _id: "a1", role: "admin" };
+
+  const oauthServer = (token: string) => ({
+    _id: "s1",
+    name: "linear",
+    url: "https://mcp.linear.app/sse",
+    authType: "oauth",
+    authToken: "",
+    allowWrites: false,
+    toolAllowlist: [],
+    enabled: true,
+    oauth: {
+      clientId: "c1",
+      clientSecret: "",
+      clientSource: "registered",
+      authorizationEndpoint: "https://auth.linear.app/authorize",
+      tokenEndpoint: "https://auth.linear.app/token",
+      registrationEndpoint: "",
+      redirectUri: "http://localhost/api/pm/oauth/callback",
+      scopes: [],
+      tokenAuthMethod: "none",
+      accessToken: `enc:${token}`,
+      refreshToken: `enc:${token}-refresh`,
+      expiresAt: null,
+      status: "connected",
+    },
+  });
+
+  const autonomy = {
+    dailyReview: true,
+    reviewHour: 9,
+    reviewIntervalHours: 24,
+    timezone: "Europe/Warsaw",
+    handleNeedsHumanReview: false,
+  };
+
+  const adminSave = {
+    pm: {
+      enabled: true,
+      model: "",
+      contextNotes: "notes",
+      links: [],
+      dailyTurnCap: 0,
+      dailyTokenCap: 0,
+      autonomy,
+      mcpServers: [
+        {
+          name: "linear",
+          url: "https://mcp.linear.app/sse",
+          authType: "oauth",
+          authToken: "",
+          oauthClientId: "c1",
+          oauthClientSecret: "",
+          allowWrites: false,
+          toolAllowlist: [],
+          enabled: true,
+        },
+      ],
+    },
+  };
+
+  // Each read of the project in turn: the route's own, then one per retry
+  function reads(...pms: (Record<string, unknown> | null)[]) {
+    for (const pm of pms) {
+      projectFindById.mockReturnValueOnce({
+        select: () => ({ lean: () => Promise.resolve(pm && { _id: PROJECT_ID, pm }) }),
+      });
+    }
+  }
+
+  function writes(...befores: (Record<string, unknown> | null)[]) {
+    for (const before of befores) {
+      projectFindOneAndUpdate.mockReturnValueOnce({ lean: () => Promise.resolve(before) });
+    }
+  }
+
+  const stored = (token: string) => ({
+    enabled: true,
+    lockedByInstance: true,
+    mcpServers: [oauthServer(token)],
+    autonomy: { ...autonomy, lastReviewSlot: "2026-09-26T09" },
+  });
+
+  it("writes the paths an owner sent, and never the lock or the scheduler's slot", async () => {
+    getAuthUser.mockResolvedValue(OWNER);
+    check.mockResolvedValue(true);
+    reads(stored("old"));
+    writes({ _id: PROJECT_ID, pm: stored("old") });
+
+    const res = await PUT(putRequest({ pm: { contextNotes: "notes", links: [], autonomy } }), ctx());
+
+    expect(res.status).toBe(200);
+    const [filter, update] = projectFindOneAndUpdate.mock.calls[0];
+    expect(filter).toEqual({ _id: PROJECT_ID });
+    expect(Object.keys(update).sort()).toEqual([
+      "pm.autonomy.dailyReview",
+      "pm.autonomy.handleNeedsHumanReview",
+      "pm.autonomy.reviewHour",
+      "pm.autonomy.reviewIntervalHours",
+      "pm.autonomy.timezone",
+      "pm.contextNotes",
+      "pm.links",
+    ]);
+  });
+
+  it("writes the MCP list only over the list it merged the tokens from", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    reads(stored("old"));
+    writes({ _id: PROJECT_ID, pm: stored("old") });
+
+    const res = await PUT(putRequest(adminSave), ctx());
+
+    expect(res.status).toBe(200);
+    const [filter, update] = projectFindOneAndUpdate.mock.calls[0];
+    expect(filter).toEqual({
+      _id: PROJECT_ID,
+      $expr: { $eq: [{ $ifNull: ["$pm.mcpServers", []] }, { $literal: [oauthServer("old")] }] },
+    });
+    expect(update).not.toHaveProperty("pm.lockedByInstance");
+    expect(update).not.toHaveProperty("pm");
+    expect(update["pm.mcpServers"][0].oauth.accessToken).toBe("enc:old");
+  });
+
+  it("keeps a token refreshed between its read and its write", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    reads(stored("old"), stored("refreshed"));
+    writes(null, { _id: PROJECT_ID, pm: stored("refreshed") });
+
+    const res = await PUT(putRequest(adminSave), ctx());
+
+    expect(res.status).toBe(200);
+    expect(projectFindOneAndUpdate).toHaveBeenCalledTimes(2);
+    const [filter, update] = projectFindOneAndUpdate.mock.calls[1];
+    expect(filter.$expr.$eq[1]).toEqual({ $literal: [oauthServer("refreshed")] });
+    expect(update["pm.mcpServers"][0].oauth).toMatchObject({
+      accessToken: "enc:refreshed",
+      refreshToken: "enc:refreshed-refresh",
+    });
+  });
+
+  it("gives up with a conflict when the list keeps changing, and records nothing", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    reads(stored("a"), stored("b"), stored("c"), stored("d"));
+    writes(null, null, null);
+
+    const res = await PUT(putRequest(adminSave), ctx());
+
+    expect(res.status).toBe(409);
+    expect(projectFindOneAndUpdate).toHaveBeenCalledTimes(3);
+    expect(logProjectAudit).not.toHaveBeenCalled();
+  });
+
+  it("answers 404 when the project is gone by the time it retries", async () => {
+    getAuthUser.mockResolvedValue(ADMIN);
+    reads(stored("old"), null);
+    writes(null);
+
+    const res = await PUT(putRequest(adminSave), ctx());
+
+    expect(res.status).toBe(404);
   });
 });

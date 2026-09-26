@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { Project } from "@/models/project";
+import { logProjectAudit } from "@/lib/projectAudit";
+import { auditChange } from "@/lib/settings-audit";
+import { serverNamed, writeServerOauth } from "@/lib/pm/oauth-writes";
 import { PmOauthState } from "@/models/pmOauthState";
 import { getAuthUser } from "@/lib/auth";
 import { ProvenanceError } from "@/lib/session";
@@ -85,8 +88,8 @@ export async function GET(request: Request) {
     return settingsRedirect(projectId, "error:missing_code");
   }
 
-  const project = await Project.findById(pending.project);
-  const server = (project?.pm?.mcpServers ?? []).find((s) => s.name === pending.serverName);
+  const project = await Project.findById(pending.project).select("pm.mcpServers").lean();
+  const server = serverNamed(project?.pm?.mcpServers, pending.serverName);
   if (!project || !server || server.authType !== "oauth" || !server.oauth?.tokenEndpoint) {
     return settingsRedirect(projectId, "error:connection_gone");
   }
@@ -102,12 +105,25 @@ export async function GET(request: Request) {
       redirectUri: server.oauth.redirectUri || getPmOauthRedirectUri(),
       resource: server.url,
     });
-    server.oauth.accessToken = encryptSecret(tokens.accessToken);
-    server.oauth.refreshToken = tokens.refreshToken ? encryptSecret(tokens.refreshToken) : "";
-    server.oauth.expiresAt = tokens.expiresAt;
-    server.oauth.status = "connected";
-    project.markModified("pm.mcpServers");
-    await project.save();
+    // The tokens belong to the client they were exchanged for: if that changed during the
+    // exchange, they are not this connection's to store
+    const before = await writeServerOauth(projectId, server, {
+      accessToken: encryptSecret(tokens.accessToken),
+      refreshToken: tokens.refreshToken ? encryptSecret(tokens.refreshToken) : "",
+      expiresAt: tokens.expiresAt,
+      status: "connected",
+    });
+    if (!before) {
+      return settingsRedirect(projectId, "error:connection_gone");
+    }
+    const was = serverNamed(before.pm?.mcpServers, server.name);
+    const label = `PM MCP server ${server.name} · OAuth`;
+    logProjectAudit(
+      projectId,
+      user._id,
+      "settings_updated",
+      auditChange(label, was?.oauth?.status ?? "unconfigured", "connected") ?? `${label} connection renewed`
+    );
     return settingsRedirect(projectId, "ok");
   } catch (err) {
     console.error("PM OAuth token exchange failed:", err);

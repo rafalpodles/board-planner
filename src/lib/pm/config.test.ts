@@ -334,3 +334,20 @@ describe("validatePmConfig and the cost controls", () => {
     expect(valid({ dailyTokenCap: "lots" }).valid).toBe(false);
   });
 });
+
+// BP-786: a save that meets a concurrent change merges the same input again
+describe("mergeMcpServerTokens and the input it is given", () => {
+  it("leaves the servers it merges untouched, typed client credentials included", () => {
+    const incoming = [
+      server({ authType: "oauth", oauthClientId: "typed-id", oauthClientSecret: "typed-secret" }),
+    ];
+    const copy = JSON.parse(JSON.stringify(incoming));
+
+    const first = mergeMcpServerTokens(incoming, stored());
+    const second = mergeMcpServerTokens(incoming, stored());
+
+    expect(incoming).toEqual(copy);
+    expect(first.valid && first.value[0].oauth?.clientId).toBe("typed-id");
+    expect(second.valid && second.value[0].oauth?.clientId).toBe("typed-id");
+  });
+});

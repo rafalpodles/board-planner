@@ -144,7 +144,7 @@ describe("discoverMcpTools — an OAuth server's token", () => {
 
     expect(refreshTokens).toHaveBeenCalledWith(expect.objectContaining({ refreshToken: "the-refresh", resource: "https://acme.example/mcp" }));
     const [filter, update] = updateOne.mock.calls[0];
-    expect(filter).toEqual({ _id: "p1", "pm.mcpServers": { $elemMatch: { name: "acme", "oauth.clientId": "client-1" } } });
+    expect(filter).toEqual({ _id: "p1", "pm.mcpServers": { $elemMatch: { name: "acme", url: "https://acme.example/mcp", "oauth.clientId": "client-1" } } });
     // The expiry too: without it every later turn would refresh again
     expect(update.$set).toEqual({
       "pm.mcpServers.$.oauth.accessToken": "enc:new-access",
@@ -162,12 +162,32 @@ describe("discoverMcpTools — an OAuth server's token", () => {
     await discoverMcpTools("p1", [oauthServer({})]);
 
     const [filter] = updateOne.mock.calls[0];
-    const storedWith = (clientId: string) => ({
+    const storedWith = (clientId: string, url = "https://acme.example/mcp") => ({
       _id: "p1",
-      pm: { mcpServers: [{ name: "other" }, { name: "acme", oauth: { clientId, accessToken: "", status: "unconfigured" } }] },
+      pm: {
+        mcpServers: [
+          { name: "other" },
+          { name: "acme", url, oauth: { clientId, accessToken: "", status: "unconfigured" } },
+        ],
+      },
     });
     expect(sift(filter)(storedWith("client-1"))).toBe(true);
     expect(sift(filter)(storedWith("client-2"))).toBe(false);
+  });
+
+  // Review of BP-782: a token issued for one address must not land on a server moved to another
+  it("writes nothing over a server moved to another address while the refresh was in flight", async () => {
+    refreshTokens.mockResolvedValue({ accessToken: "new-access", expiresAt: new Date(Date.now() + hour) });
+
+    await discoverMcpTools("p1", [oauthServer({})]);
+
+    const [filter] = updateOne.mock.calls[0];
+    const storedAt = (url: string) => ({
+      _id: "p1",
+      pm: { mcpServers: [{ name: "acme", url, oauth: { clientId: "client-1", status: "connected" } }] },
+    });
+    expect(sift(filter)(storedAt("https://acme.example/mcp"))).toBe(true);
+    expect(sift(filter)(storedAt("https://elsewhere.example/mcp"))).toBe(false);
   });
 
   it("keeps the stored refresh token when the provider does not issue a new one", async () => {
@@ -192,7 +212,7 @@ describe("discoverMcpTools — an OAuth server's token", () => {
     const runtime = await discoverMcpTools("p1", [oauthServer({})]);
 
     expect(updateOne).toHaveBeenCalledWith(
-      { _id: "p1", "pm.mcpServers": { $elemMatch: { name: "acme", "oauth.clientId": "client-1" } } },
+      { _id: "p1", "pm.mcpServers": { $elemMatch: { name: "acme", url: "https://acme.example/mcp", "oauth.clientId": "client-1" } } },
       { $set: { "pm.mcpServers.$.oauth.status": "needs_reauth" } }
     );
     expect(McpClientMock).not.toHaveBeenCalled();
@@ -204,7 +224,7 @@ describe("discoverMcpTools — an OAuth server's token", () => {
 
     expect(refreshTokens).not.toHaveBeenCalled();
     expect(updateOne).toHaveBeenCalledWith(
-      { _id: "p1", "pm.mcpServers": { $elemMatch: { name: "acme", "oauth.clientId": "client-1" } } },
+      { _id: "p1", "pm.mcpServers": { $elemMatch: { name: "acme", url: "https://acme.example/mcp", "oauth.clientId": "client-1" } } },
       { $set: { "pm.mcpServers.$.oauth.status": "needs_reauth" } }
     );
   });
@@ -263,7 +283,7 @@ describe("discoverMcpTools — a 401 despite a stored expiry that still looked f
     expect(refreshTokens).not.toHaveBeenCalled();
     expect(updateOne).toHaveBeenCalledTimes(1);
     expect(updateOne).toHaveBeenCalledWith(
-      { _id: "p1", "pm.mcpServers": { $elemMatch: { name: "acme", "oauth.clientId": "client-1" } } },
+      { _id: "p1", "pm.mcpServers": { $elemMatch: { name: "acme", url: "https://acme.example/mcp", "oauth.clientId": "client-1" } } },
       { $set: { "pm.mcpServers.$.oauth.status": "needs_reauth" } }
     );
     expect(runtime.serverNames).toEqual([]);

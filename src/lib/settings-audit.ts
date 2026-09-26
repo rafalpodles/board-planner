@@ -5,6 +5,8 @@ import {
   PROJECT_POLICY_DEFAULTS,
   type ProjectPolicyField,
 } from "@/lib/worker-policy";
+import { maskSecretUrl } from "@/lib/project-secrets";
+import { normalizeOptions } from "@/lib/custom-fields";
 
 type Stored = Record<string, unknown>;
 
@@ -342,4 +344,91 @@ export function describeSettingsChanges(
     ...(pm ? pmChanges(before, after) : []),
     ...(policy ? policyChanges(before, after) : []),
   ];
+}
+
+const found = (lines: (string | null)[]) => lines.filter((line): line is string => line !== null);
+
+// The order a picker happens to send them in is no change
+function eventList(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(String).sort() : [];
+}
+
+const shownWebhookUrl = (value: unknown) =>
+  auditValue(maskSecretUrl(typeof value === "string" ? value : undefined));
+
+interface WebhookImage {
+  url?: string;
+  events?: unknown;
+  enabled?: boolean;
+}
+
+// Masked the way the added and removed entries already name a webhook
+export function webhookChanges(before: WebhookImage, after: WebhookImage): string[] {
+  const label = `Webhook ${shownWebhookUrl(before.url)}`;
+  return found([
+    auditChange(`${label} · URL`, before.url, after.url, shownWebhookUrl),
+    auditChange(`${label} · Events`, eventList(before.events), eventList(after.events)),
+    auditChange(`${label} · Enabled`, before.enabled, after.enabled),
+  ]);
+}
+
+interface ChannelImage {
+  name?: string;
+  events?: unknown;
+  enabled?: boolean;
+}
+
+// A chat webhook's address is its credential, so a new one is only ever named, never shown
+export function channelChanges(
+  before: ChannelImage,
+  after: ChannelImage,
+  urlReplaced: boolean
+): string[] {
+  const label = `Notification channel ${auditValue(before.name)}`;
+  return found([
+    auditChange(`${label} · Name`, before.name, after.name),
+    urlReplaced ? `${label} · Webhook URL replaced` : null,
+    auditChange(`${label} · Events`, eventList(before.events), eventList(after.events)),
+    auditChange(`${label} · Enabled`, before.enabled, after.enabled),
+  ]);
+}
+
+const FIELD_FLAGS = {
+  required: "Required",
+  showOnCard: "Shown on cards",
+  showInList: "Shown in the list",
+  filterable: "Filterable",
+  archived: "Archived",
+} as const;
+
+interface CustomFieldImage {
+  name?: string;
+  options?: Parameters<typeof normalizeOptions>[0];
+  order?: number;
+  required?: boolean;
+  showOnCard?: boolean;
+  showInList?: boolean;
+  filterable?: boolean;
+  archived?: boolean;
+}
+
+// Compared whole, so a recoloured option is a change even though only the values are shown
+const shownOptions = (value: unknown) =>
+  auditValue((value as { value: string }[]).map((option) => option.value));
+
+export function customFieldChanges(before: CustomFieldImage, after: CustomFieldImage): string[] {
+  const label = `Custom field ${auditValue(before.name)}`;
+  return found([
+    auditChange(`${label} · Name`, before.name, after.name),
+    auditChange(
+      `${label} · Options`,
+      normalizeOptions(before.options),
+      normalizeOptions(after.options),
+      shownOptions
+    ),
+    ...(Object.keys(FIELD_FLAGS) as (keyof typeof FIELD_FLAGS)[]).map((flag) =>
+      auditChange(`${label} · ${FIELD_FLAGS[flag]}`, !!before[flag], !!after[flag])
+    ),
+    auditChange(`${label} · Position`, before.order, after.order),
+  ]);
 }
