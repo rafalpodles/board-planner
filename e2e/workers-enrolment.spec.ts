@@ -265,6 +265,73 @@ test("a machine is connected by the person sitting at it, and the credential it 
   expect(String((await workerRow(MACHINE.name))?.owner)).toBe(String(MEMBER_ID));
 });
 
+/**
+ * BP-761. Anyone signed in could mint an enrolment token, but the button was on the fleet console,
+ * which turns away everybody but an instance admin — so a member with a Linux box had no way to
+ * connect it, and no page listing the machines they did connect.
+ */
+test("a member connects a machine from their own settings, finds it listed, and reaches its projects", async ({
+  page,
+  request,
+}) => {
+  await signIn(page, MEMBER_USERNAME, MEMBER_PASSWORD);
+  await page.goto("/settings/profile");
+  await page.getByRole("link", { name: "Machines", exact: true }).first().click();
+  await expect(page).toHaveURL(/\/settings\/machines$/);
+  await expect(page.getByTestId("no-machines")).toBeVisible();
+
+  await page.getByRole("button", { name: "Connect a machine" }).click();
+  const dialog = page.getByRole("dialog", { name: "Connect a machine" });
+  const [minted] = await Promise.all([
+    page.waitForResponse(
+      (r) => new URL(r.url()).pathname === "/api/workers/enrolment" && r.request().method() === "POST"
+    ),
+    dialog.getByRole("button", { name: "Mint token" }).click(),
+  ]);
+  expect(minted.status(), await minted.text()).toBe(201);
+  const token = (await dialog.getByText(/^cpe_[0-9a-f]+$/).innerText()).trim();
+
+  // The machine's half, exactly as worker/src/registration.ts does it
+  const registered = await request.post("/api/workers/register", {
+    headers: { Authorization: `Bearer ${token}`, "x-cp-protocol": PROTOCOL },
+    data: { name: "e2e-member-box", host: "member-box.local", platform: "linux", version: "1.1.3" },
+  });
+  expect(registered.status(), await registered.text()).toBe(200);
+  const { workerId } = await registered.json();
+  expect(String((await workerRow("e2e-member-box"))?.owner)).toBe(String(MEMBER_ID));
+
+  const reread = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/users/me/machines");
+  await dialog.getByRole("button", { name: "Done" }).click();
+  await reread;
+
+  // Theirs and nobody else's: the seeded fleet has an admin's machine in it too
+  const row = page.getByTestId("my-machine");
+  await expect(row).toHaveCount(1);
+  await expect(row).toContainText("e2e-member-box");
+  await expect(row).toContainText("member-box.local");
+  await expect(row.getByTestId("my-machine-state")).toHaveText("Taking work");
+  await expect(page.getByText(WORKER_NAME)).toHaveCount(0);
+
+  await row.getByRole("link", { name: "Choose projects" }).click();
+  await expect(page).toHaveURL(new RegExp(`/settings/workers/${workerId}/projects$`));
+  await expect(page.getByText("e2e-member-box").first()).toBeVisible();
+  await expect(page.getByRole("link", { name: "Machines", exact: true }).first()).toHaveAttribute(
+    "aria-current",
+    "page"
+  );
+
+  await page.getByRole("link", { name: "Back to machines" }).click();
+  await expect(page).toHaveURL(/\/settings\/machines$/);
+  await expect(page.getByTestId("my-machine")).toHaveCount(1);
+
+  // At a phone's width the row still carries its way to the machine's projects, on the screen
+  await page.setViewportSize({ width: 390, height: 800 });
+  const link = page.getByTestId("my-machine").getByRole("link", { name: "Choose projects" });
+  await expect(link).toBeVisible();
+  const box = await link.boundingBox();
+  expect(box!.x + box!.width).toBeLessThanOrEqual(390);
+});
+
 test("refusing hands the machine nothing", async ({ page, request }) => {
   const started = await machineAsksToEnrol(request);
 
@@ -325,9 +392,10 @@ test("the project pick is framed as a first checkout, not as what the machine ma
   await page.getByRole("button", { name: "Connect it" }).click();
 
   // And the question the operator was left holding is answered where they end up, naming the screen
-  // that answers it — the ticked list BP-378 added, not the Preferences pane it replaced
+  // that answers it — the ticked list BP-378 added, not the Preferences pane it replaced. Settings →
+  // Machines since BP-761: Settings → Workers turned away everybody but an instance admin.
   await expect(page.getByRole("heading", { name: "Connected" })).toBeVisible();
-  await expect(page.getByText(/Settings . Workers/)).toBeVisible();
+  await expect(page.getByText(/Settings . Machines/)).toBeVisible();
 
   // The control: saying a different thing is not the same as granting a different thing. The
   // machine still gets one project's repository, and it is the one that was ticked.

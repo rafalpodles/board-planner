@@ -1273,6 +1273,71 @@ test("the fleet screen says whether a machine confines the agent it runs", async
 });
 
 /**
+ * BP-689. A check that FAILED, and the binding error, were each said in one cell only — the last
+ * two of ten columns, off the right edge at 1280 and behind the pinned controls at 1440. The line
+ * under the row that BP-606 gave a warning now carries them too.
+ */
+test("a failed check and a binding error are read under the row without scrolling the table", async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await signIn(page);
+
+  const refusal = `${PROJECT_ID}: /private/tmp/board-planner is under the sensitive directory /private/tmp`;
+  await heartbeat(request, {
+    bindingError: refusal,
+    preflight: {
+      ok: false,
+      account: "owner",
+      checks: [
+        { name: "sandbox", ok: true, detail: "the agent can only write inside its own worktree" },
+        { name: "gh", ok: false, detail: "not signed in: run gh auth login" },
+      ],
+    },
+  });
+  await page.goto("/settings/workers");
+
+  const failure = page.getByTestId("preflight-failure");
+  const binding = page.getByTestId("binding-error-line");
+  await expect(failure).toHaveText("Failed: gh — not signed in: run gh auth login");
+  await expect(binding).toHaveText(`Binding error: ${refusal}`);
+  await expect(failure).toHaveClass(/text-danger/);
+  await expect(binding).toHaveClass(/text-danger/);
+
+  // Read where they are, with the table as it loaded: not scrolled, both lines inside the viewport
+  const scrolled = await page.locator("table").evaluate((table) => (table.parentElement as HTMLElement).scrollLeft);
+  expect(scrolled, "the table was scrolled, so nothing below is about reading it unscrolled").toBe(0);
+  const width = page.viewportSize()?.width ?? 0;
+  for (const line of [failure, binding]) {
+    const box = await line.boundingBox();
+    expect(box, "the line has no box").not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width, "the line runs off the right edge of the viewport").toBeLessThanOrEqual(width);
+  }
+
+  // The control: the cells that used to be the only place saying this are off the right edge here
+  const cell = fleetRow(page, WORKER_NAME).getByText(/gh — not signed in/);
+  const cellBox = await cell.boundingBox();
+  expect(cellBox!.x + cellBox!.width, "the Preflight cell is on screen, so this test proves nothing").toBeGreaterThan(width);
+});
+
+// BP-762. A pause made at the machine never passes through the board, and the console said nothing
+test("a machine paused at the machine itself says so in the fleet console", async ({ page, request }) => {
+  await signIn(page);
+  await heartbeat(request, { halt: { paused: true, by: "machine", command: "pause" } });
+  await page.goto("/settings/workers");
+
+  await expect(fleetRow(page, WORKER_NAME).getByTestId("worker-controls")).toContainText(
+    "Paused on the machine"
+  );
+
+  await heartbeat(request, { halt: { paused: false, by: null, command: null } });
+  await page.reload();
+  await expect(fleetRow(page, WORKER_NAME).getByTestId("worker-controls")).not.toContainText("on the machine");
+});
+
+/**
  * BP-585. The catalogue was re-read under the same `try` as the PUT that saved it, so a failed
  * re-read painted "Could not save" beside the "Saved." the same handler had just set. The save
  * landing and the list going stale are different facts and the screen has to say both.

@@ -2463,9 +2463,12 @@ export async function seedMachine(
     command = "",
     failingChecks = [],
     bindingError = "",
+    enabled = true,
   }: {
     owner?: mongoose.Types.ObjectId;
     seenAgoMs?: number;
+    /** Off is an instance admin's kill switch, which the heartbeat then refuses */
+    enabled?: boolean;
     /** Issued and acknowledged, the way a board-issued pause or stop settles */
     command?: "" | "pause" | "stop";
     failingChecks?: string[];
@@ -2487,7 +2490,7 @@ export async function seedMachine(
     owner,
     policy: { pollIntervalMs: 30_000 },
     policyOverrides: [],
-    enabled: true,
+    enabled,
     lastSeenAt: new Date(now.getTime() - seenAgoMs),
     identity: null,
     bindingError,

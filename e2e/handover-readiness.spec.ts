@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 import {
   seed,
   seedAgents,
@@ -19,6 +19,8 @@ import {
   HANDOVER_REPOSITORY,
   MEMBER_HANDOVER_TASK_NUMBER,
   MEMBER_BACKLOG_TASK_NUMBER,
+  MEMBER_MACHINE_ID,
+  WORKER_CREDENTIAL,
 } from "./seed";
 import { signIn } from "./session";
 
@@ -37,6 +39,27 @@ test.beforeEach(async () => {
 const notice = (page: Page) => page.getByRole("complementary").getByTestId("handover-notice");
 const waiting = (page: Page) => page.getByRole("complementary").getByTestId("handover-waiting");
 const problems = (page: Page) => notice(page).getByTestId("handover-problem");
+
+/** The member's machine reporting in, exactly as worker/src/registration.ts does */
+async function machineSays(request: APIRequestContext, body: Record<string, unknown>) {
+  const response = await request.post(`/api/workers/${MEMBER_MACHINE_ID}/heartbeat`, {
+    headers: {
+      Authorization: `Bearer ${WORKER_CREDENTIAL}`,
+      "x-worker-id": String(MEMBER_MACHINE_ID),
+      "x-cp-protocol": "1",
+    },
+    data: body,
+  });
+  expect(response.status(), await response.text()).toBe(200);
+}
+
+async function readAgain(page: Page) {
+  const reread = page.waitForResponse(
+    (res) => res.url().endsWith("/handover") && res.request().method() === "GET"
+  );
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await reread;
+}
 
 async function openAs(page: Page, who: "admin" | "member", taskNumber = MEMBER_HANDOVER_TASK_NUMBER) {
   await signIn(page, who);
@@ -320,6 +343,60 @@ test.describe("a member's own task, as the board changes under it", () => {
       `It waits on an unfinished blocker, ${PROJECT_KEY}-${MEMBER_BACKLOG_TASK_NUMBER}`
     );
     await expect(waiting(page)).toHaveCount(0);
+  });
+
+  // BP-762. A pause made at the machine goes through its local socket and reached the board as
+  // "waiting for your machine"; the heartbeat now says it, and who made it
+  test("a pause made at the machine itself is named as such, and a resume there clears it", async ({
+    page,
+    request,
+  }) => {
+    await setBoardReadiness({ repositoryUrl: HANDOVER_REPOSITORY, workerEnabled: true });
+    await seedMachine("git@github.com:e2e/handover-board.git");
+    await machineSays(request, { halt: { paused: true, by: "machine", command: "pause" } });
+    await openAs(page, "member");
+
+    await expect(notice(page)).toHaveAttribute("data-reason", "machine-paused");
+    await expect(notice(page)).toHaveText(
+      "Nothing will run this yet. Your machine is connected but not taking work: it was paused on the machine itself. Resume it from the menubar app there."
+    );
+
+    await machineSays(request, { halt: { paused: false, by: null, command: null } });
+    await readAgain(page);
+
+    await expect(waiting(page)).toHaveText("Waiting for your machine to take it.", { timeout: 1_000 });
+    await expect(notice(page)).toHaveCount(0);
+  });
+
+  test("a board pause the machine has since resumed reads as waiting for it, not as paused", async ({
+    page,
+    request,
+  }) => {
+    await setBoardReadiness({ repositoryUrl: HANDOVER_REPOSITORY, workerEnabled: true });
+    await seedMachine("git@github.com:e2e/handover-board.git", { command: "pause" });
+    await machineSays(request, { halt: { paused: false, by: null, command: null } });
+    await openAs(page, "member");
+
+    await expect(waiting(page)).toHaveText("Waiting for your machine to take it.");
+    await expect(notice(page)).toHaveCount(0);
+  });
+
+  test("a machine an instance admin switched off says so, and not that it should be checked", async ({
+    page,
+  }) => {
+    await setBoardReadiness({ repositoryUrl: HANDOVER_REPOSITORY, workerEnabled: true });
+    // Switched off, it is refused its heartbeat, so it has also gone quiet
+    await seedMachine("git@github.com:e2e/handover-board.git", {
+      enabled: false,
+      seenAgoMs: 10 * 60 * 1000,
+    });
+    await openAs(page, "member");
+
+    await expect(notice(page)).toHaveAttribute("data-reason", "machine-disabled");
+    await expect(notice(page)).toHaveText(
+      "Nothing will run this yet. An instance admin switched your machine off, so it takes no work, and only an instance admin can switch it back on."
+    );
+    await expect(notice(page).getByRole("link", { name: "Check it is running" })).toHaveCount(0);
   });
 
   test("a machine that stopped reporting in is named as such", async ({ page }) => {
