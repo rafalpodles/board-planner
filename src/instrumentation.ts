@@ -133,6 +133,14 @@ async function bootWhenDatabaseIsReady(): Promise<void> {
     const { markPmAsMachine } = await import("@/lib/pm/pm-user");
     await markPmAsMachine();
 
+    // Caught like the catalog seed: a name it could not repair must not keep the schedulers down
+    const { repairMachineNames } = await import("@/lib/worker-user");
+    const repaired = await repairMachineNames().catch((error) => {
+      console.error("Failed to repair machine names:", error);
+      return 0;
+    });
+    if (repaired > 0) console.log(`Repaired the display name of ${repaired} machine(s)`);
+
     const { startPmScheduler } = await import("@/lib/pm/scheduler");
     startPmScheduler();
     console.log("PM scheduler started");
