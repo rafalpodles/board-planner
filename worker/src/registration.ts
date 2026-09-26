@@ -118,6 +118,7 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
   let cached: StoredIdentity | null = null;
   let acked: string | undefined;
   let bindingError = "";
+  let lastUnreachableReason = "";
 
   async function register(): Promise<StoredIdentity | null> {
     if (!deps.enrolmentToken) {
@@ -127,9 +128,11 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
               "Fix the file, then restart the worker."
           : deps.enrolmentTokenFile
           ? `no identity on disk and CP_ENROLMENT_TOKEN_FILE (${deps.enrolmentTokenFile}) is missing ` +
-              "or empty: mint a token in Settings -> Workers and write it there, chmod 600."
-          : "no identity on disk and no CP_ENROLMENT_TOKEN: mint one in Settings -> Workers and set " +
-              "CP_ENROLMENT_TOKEN_FILE. It is spent by the first registration; delete it afterwards."
+              "or empty: mint a token under Settings -> Machines -> Connect a machine and write it " +
+              "there, chmod 600."
+          : "no identity on disk and no CP_ENROLMENT_TOKEN: mint one under Settings -> Machines -> " +
+              "Connect a machine and point CP_ENROLMENT_TOKEN_FILE at it. The first registration " +
+              "spends it, and the worker deletes the file itself."
       );
       return null;
     }
@@ -230,6 +233,7 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
           ...(acked !== undefined ? { acked } : {}),
         }),
       });
+      lastUnreachableReason = "";
 
       if (response.status === 403) {
         for (const cb of abortCallbacks) cb();
@@ -250,7 +254,11 @@ export function startHeartbeat(deps: HeartbeatDeps): Heartbeat {
         }
       }
     } catch (error) {
-      log(`heartbeat could not reach the server: ${String(error)}`);
+      const reason = `heartbeat could not reach the server: ${String(error)}`;
+      if (reason !== lastUnreachableReason) {
+        log(reason);
+        lastUnreachableReason = reason;
+      }
     }
 
     scheduleNext(identity.heartbeatMs);

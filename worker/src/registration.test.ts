@@ -211,6 +211,18 @@ describe("startHeartbeat", () => {
     expect(deps.log).toHaveBeenCalledWith(expect.stringContaining("CP_ENROLMENT_TOKEN"));
   });
 
+  it("sends a machine with no token to the page any person can mint one on, and never asks for a deletion the worker does itself", async () => {
+    const deps = depsWith({ stored: null, enrolmentToken: "" });
+
+    await startHeartbeat(deps).tick();
+
+    const message = String(vi.mocked(deps.log!).mock.calls[0][0]);
+    expect(message).toContain("Settings -> Machines -> Connect a machine");
+    expect(message).toContain("the worker deletes the file itself");
+    expect(message).not.toContain("Settings -> Workers");
+    expect(message).not.toContain("delete it afterwards");
+  });
+
   it("names the configured token file when it is missing, rather than asking for it to be set", async () => {
     const deps = depsWith({
       stored: null,
@@ -223,6 +235,8 @@ describe("startHeartbeat", () => {
     const message = String(vi.mocked(deps.log!).mock.calls[0][0]);
     expect(message).toContain("CP_ENROLMENT_TOKEN_FILE (/Users/op/.boardplanner/token) is missing");
     expect(message).not.toContain("and set CP_ENROLMENT_TOKEN_FILE");
+    expect(message).toContain("Settings -> Machines -> Connect a machine");
+    expect(message).not.toContain("Settings -> Workers");
   });
 
   it("with no identity, reports why the token file could not be used and does not register", async () => {
@@ -306,6 +320,54 @@ describe("startHeartbeat", () => {
     await startHeartbeat(deps).tick();
 
     expect(deps.store.write).not.toHaveBeenCalled();
+  });
+
+  function answering(deps: HeartbeatDeps, outcomes: Array<Error | number>): void {
+    deps.fetchImpl = vi.fn(async () => {
+      const next = outcomes.shift();
+      if (next instanceof Error) throw next;
+      const status = next ?? 200;
+      return { ok: status < 300, status, json: async () => ({}) };
+    }) as unknown as typeof fetch;
+  }
+
+  it("says an unreachable server once per outage, and again for the next one", async () => {
+    const deps = depsWith();
+    const down = () => new Error("ECONNREFUSED");
+    answering(deps, [down(), down(), down(), 200, down()]);
+    const heartbeat = startHeartbeat(deps);
+
+    for (let i = 0; i < 3; i++) await heartbeat.tick();
+    expect(deps.log).toHaveBeenCalledTimes(1);
+    expect(deps.log).toHaveBeenCalledWith("heartbeat could not reach the server: Error: ECONNREFUSED");
+
+    await heartbeat.tick();
+    await heartbeat.tick();
+    expect(deps.log).toHaveBeenCalledTimes(2);
+    heartbeat.stop();
+  });
+
+  it("counts a refused heartbeat as the server answering, so the next outage is said again", async () => {
+    const deps = depsWith();
+    answering(deps, [new Error("ECONNREFUSED"), 403, new Error("ECONNREFUSED")]);
+    const heartbeat = startHeartbeat(deps);
+
+    for (let i = 0; i < 3; i++) await heartbeat.tick();
+
+    expect(deps.log).toHaveBeenCalledTimes(2);
+    heartbeat.stop();
+  });
+
+  it("says a different failure even while the first one is still going on", async () => {
+    const deps = depsWith();
+    answering(deps, [new Error("ECONNREFUSED"), new Error("ENOTFOUND")]);
+    const heartbeat = startHeartbeat(deps);
+
+    await heartbeat.tick();
+    await heartbeat.tick();
+
+    expect(deps.log).toHaveBeenCalledTimes(2);
+    heartbeat.stop();
   });
 
   it("echoes the command it applied, so the console can stop saying Pausing", async () => {
