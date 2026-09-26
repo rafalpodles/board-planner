@@ -107,13 +107,19 @@ beforeEach(() => {
       }
       const field = project.customFields.find((f) => sameId(f._id, filter["customFields._id"]));
       if (!field) return query(null);
-      // The name condition, evaluated the way MongoDB evaluates a $regex
+      // The name condition, evaluated the way MongoDB evaluates it: the $ne and the $regex as sent
       const clash = (
-        filter.customFields as { $not?: { $elemMatch: { name: { $regex: string; $options: string } } } } | undefined
-      )?.$not?.$elemMatch.name;
+        filter.customFields as
+          | { $not?: { $elemMatch: { _id?: { $ne: string }; name: { $regex: string; $options: string } } } }
+          | undefined
+      )?.$not?.$elemMatch;
       if (
         clash &&
-        project.customFields.some((f) => f !== field && new RegExp(clash.$regex, clash.$options).test(f.name))
+        project.customFields.some(
+          (f) =>
+            (clash._id === undefined || !sameId(f._id, clash._id.$ne)) &&
+            new RegExp(clash.name.$regex, clash.name.$options).test(f.name)
+        )
       ) {
         return query(null);
       }

@@ -265,7 +265,9 @@ describe("what a webhook edit records", () => {
   });
 
   it("names a removed webhook from the pull's own before-image", async () => {
-    await DELETE(request("DELETE", { webhookId: W1 }), ctx());
+    const res = await DELETE(request("DELETE", { webhookId: W1 }), ctx());
+
+    expect(await res.json()).toEqual([]);
 
     expect(logProjectAudit).toHaveBeenCalledWith(
       "p1",
@@ -274,6 +276,16 @@ describe("what a webhook edit records", () => {
       "Webhook removed: masked(https://hooks.example.com/a)"
     );
     expect(findOne).not.toHaveBeenCalled();
+  });
+
+  it("answers a removal with the addresses left, masked", async () => {
+    const other = { ...webhook, _id: "6a70afff45d39cd9bc8bb5a2", url: "https://hooks.example.com/b" };
+    findOneAndUpdate.mockImplementation(() => query(projectDoc([webhook, other])));
+
+    const res = await DELETE(request("DELETE", { webhookId: W1 }), ctx());
+
+    const { url, ...rest } = other;
+    expect(await res.json()).toEqual([{ ...rest, urlMasked: `masked(${url})` }]);
   });
 
   it("records no removal of a webhook that was already gone", async () => {
