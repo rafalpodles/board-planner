@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withProjectAccess, withProjectOwner } from "@/lib/middleware";
 import { Project } from "@/models/project";
@@ -8,11 +7,13 @@ import { check } from "@/lib/grants";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { customFieldChanges } from "@/lib/settings-audit";
 import { projectWriteImages } from "@/lib/project-write-images";
+import { canonicalObjectId } from "@/lib/object-id";
 import {
   isOptionField,
   normalizeOptions,
   optionIdsDropped,
   parseOptions,
+  FIELD_NAME_COLLATION,
   MAX_FIELD_NAME_LENGTH,
 } from "@/lib/custom-fields";
 
@@ -28,10 +29,11 @@ async function clearEstimateField(projectId: string, fieldId: string): Promise<b
 }
 
 export const PATCH = withProjectAccess(async (request, { params, user }) => {
-  const { projectId, fieldId } = await params;
+  const { projectId, fieldId: rawFieldId } = await params;
   await connectDB();
 
-  if (!isValidObjectId(fieldId)) {
+  const fieldId = canonicalObjectId(rawFieldId);
+  if (!fieldId) {
     return NextResponse.json({ error: "Field not found" }, { status: 404 });
   }
   const body = await request.json();
@@ -94,17 +96,31 @@ export const PATCH = withProjectAccess(async (request, { params, user }) => {
     changes.order = Number(body.order);
   }
 
-  // This field's own paths only: saving the whole list put back a field added or edited meanwhile
+  // This field's own paths only: saving the whole list put back a field added or edited meanwhile.
+  // A new name is checked in the write too, since another rename may have taken it since the read.
+  const renamed = changes.name !== undefined;
   const before = await Project.findOneAndUpdate(
-    { _id: projectId, "customFields._id": fieldId },
+    {
+      _id: projectId,
+      "customFields._id": fieldId,
+      ...(renamed
+        ? { customFields: { $not: { $elemMatch: { _id: { $ne: fieldId }, name: changes.name } } } }
+        : {}),
+    },
     {
       $set: Object.fromEntries(
         Object.entries(changes).map(([key, value]) => [`customFields.$.${key}`, value])
       ),
     },
-    { returnDocument: "before" }
+    { returnDocument: "before", ...(renamed ? { collation: FIELD_NAME_COLLATION } : {}) }
   ).lean();
   if (!before) {
+    if (renamed) {
+      const current = await Project.findById(projectId).select("customFields").lean();
+      if ((current?.customFields || []).some((f) => String(f._id) === fieldId)) {
+        return NextResponse.json({ error: "Field with this name already exists" }, { status: 409 });
+      }
+    }
     return NextResponse.json({ error: "Field not found" }, { status: 404 });
   }
 
@@ -129,10 +145,11 @@ export const PATCH = withProjectAccess(async (request, { params, user }) => {
 });
 
 export const DELETE = withProjectOwner(async (_request, { params, user }) => {
-  const { projectId, fieldId } = await params;
+  const { projectId, fieldId: rawFieldId } = await params;
   await connectDB();
 
-  if (!isValidObjectId(fieldId)) {
+  const fieldId = canonicalObjectId(rawFieldId);
+  if (!fieldId) {
     const project = await Project.findById(projectId).select("customFields");
     if (!project) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });

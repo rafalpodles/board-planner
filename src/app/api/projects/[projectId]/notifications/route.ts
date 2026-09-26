@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withProjectOwner } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { channelChanges } from "@/lib/settings-audit";
+import { canonicalObjectId } from "@/lib/object-id";
 import { NOTIFICATION_CHANNEL_TYPES, WEBHOOK_EVENTS, NotificationChannelType } from "@/types";
 import { sanitizeProjectSecrets } from "@/lib/project-secrets";
 import { parseWebhookUrl, parseWebhookEvents, MAX_CHANNEL_NAME_LENGTH, MAX_NOTIFICATION_CHANNELS } from "@/lib/webhook-input";
@@ -129,8 +129,9 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
 
-  const { channelId, ...updates } = await request.json();
-  if (typeof channelId !== "string" || !isValidObjectId(channelId)) {
+  const { channelId: rawChannelId, ...updates } = await request.json();
+  const channelId = canonicalObjectId(rawChannelId);
+  if (!channelId) {
     return NextResponse.json({ error: "channelId is required" }, { status: 400 });
   }
 
@@ -216,8 +217,8 @@ export const DELETE = withProjectOwner(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
 
-  const { channelId } = await request.json();
-  if (typeof channelId !== "string" || !isValidObjectId(channelId)) {
+  const channelId = canonicalObjectId((await request.json()).channelId);
+  if (!channelId) {
     return NextResponse.json({ error: "channelId is required" }, { status: 400 });
   }
 

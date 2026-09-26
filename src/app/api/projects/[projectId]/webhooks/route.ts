@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { isValidObjectId } from "mongoose";
 import { connectDB } from "@/lib/db";
 import { withProjectOwner } from "@/lib/middleware";
 import { Project } from "@/models/project";
 import { logProjectAudit } from "@/lib/projectAudit";
 import { webhookChanges } from "@/lib/settings-audit";
+import { canonicalObjectId } from "@/lib/object-id";
 import { maskSecretUrl, sanitizeProjectSecrets } from "@/lib/project-secrets";
 import { parseWebhookUrl, parseWebhookEvents, MAX_WEBHOOK_URL_LENGTH, MAX_WEBHOOKS } from "@/lib/webhook-input";
 import { WEBHOOK_EVENTS } from "@/types";
@@ -66,8 +66,9 @@ export const PUT = withProjectOwner(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
 
-  const { webhookId, ...updates } = await request.json();
-  if (typeof webhookId !== "string" || !isValidObjectId(webhookId)) {
+  const { webhookId: rawWebhookId, ...updates } = await request.json();
+  const webhookId = canonicalObjectId(rawWebhookId);
+  if (!webhookId) {
     return NextResponse.json({ error: "webhookId is required" }, { status: 400 });
   }
 
@@ -123,8 +124,8 @@ export const DELETE = withProjectOwner(async (request, { params, user }) => {
   const { projectId } = await params;
   await connectDB();
 
-  const { webhookId } = await request.json();
-  if (typeof webhookId !== "string" || !isValidObjectId(webhookId)) {
+  const webhookId = canonicalObjectId((await request.json()).webhookId);
+  if (!webhookId) {
     return NextResponse.json({ error: "webhookId is required" }, { status: 400 });
   }
 

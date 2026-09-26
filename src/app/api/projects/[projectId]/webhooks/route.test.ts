@@ -11,7 +11,11 @@ const logProjectAudit = vi.fn();
 vi.mock("@/lib/projectAudit", () => ({ logProjectAudit }));
 vi.mock("@/lib/project-secrets", () => ({
   maskSecretUrl: (u: string | undefined) => (u ? `masked(${u})` : ""),
-  sanitizeProjectSecrets: (p: unknown) => p,
+  // Shaped like the real one for webhooks, so a response that skipped it would show
+  sanitizeProjectSecrets: (p: { webhooks?: { url?: string }[] }) => ({
+    ...p,
+    webhooks: p.webhooks?.map(({ url, ...rest }) => ({ ...rest, urlMasked: url ? `masked(${url})` : "" })),
+  }),
 }));
 vi.mock("@/lib/middleware", () => ({
   withProjectOwner:
@@ -253,10 +257,11 @@ describe("what a webhook edit records", () => {
     expect(logProjectAudit).not.toHaveBeenCalled();
   });
 
-  it("answers with the list as the write left it", async () => {
+  it("answers with the list as the write left it, addresses masked", async () => {
     const res = await PUT(request("PUT", { webhookId: W1, enabled: false }), ctx());
 
-    expect(await res.json()).toEqual([{ ...webhook, enabled: false }]);
+    const { url, ...rest } = webhook;
+    expect(await res.json()).toEqual([{ ...rest, enabled: false, urlMasked: `masked(${url})` }]);
   });
 
   it("names a removed webhook from the pull's own before-image", async () => {
@@ -285,5 +290,39 @@ describe("what a webhook edit records", () => {
 
     expect(res.status).toBe(400);
     expect(findOneAndUpdate).not.toHaveBeenCalled();
+  });
+});
+
+// Review: BSON reads hex case-insensitively while a stored id prints in lower case, so an id sent in
+// upper case wrote through Mongo's cast and then matched nothing in the before-image — no trace
+describe("an id sent in upper case", () => {
+  it("is written and recorded under the id as stored", async () => {
+    const res = await PUT(request("PUT", { webhookId: W1.toUpperCase(), enabled: false }), ctx());
+
+    expect(res.status).toBe(200);
+    expect(findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: "p1", "webhooks._id": W1 },
+      { $set: { "webhooks.$.enabled": false } },
+      { returnDocument: "before" }
+    );
+    expect(logProjectAudit).toHaveBeenCalledWith("p1", "owner1", "settings_updated", [
+      "Webhook masked(https://hooks.example.com/a) · Enabled: on → off",
+    ]);
+  });
+
+  it("is removed and recorded under the id as stored", async () => {
+    await DELETE(request("DELETE", { webhookId: W1.toUpperCase() }), ctx());
+
+    expect(findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: "p1" },
+      { $pull: { webhooks: { _id: W1 } } },
+      { returnDocument: "before" }
+    );
+    expect(logProjectAudit).toHaveBeenCalledWith(
+      "p1",
+      "owner1",
+      "settings_updated",
+      "Webhook removed: masked(https://hooks.example.com/a)"
+    );
   });
 });

@@ -99,12 +99,22 @@ beforeEach(() => {
       update: { $set?: Record<string, unknown>; $pull?: { customFields: { _id: string } } }
     ) => {
       const before = image();
+      // Mongo casts both sides to an ObjectId, so hex case does not matter to the match
+      const sameId = (a: unknown, b: unknown) => String(a).toLowerCase() === String(b).toLowerCase();
       if (update.$pull) {
-        project.customFields = project.customFields.filter((f) => f._id !== update.$pull!.customFields._id);
+        project.customFields = project.customFields.filter((f) => !sameId(f._id, update.$pull!.customFields._id));
         return query(before);
       }
-      const field = project.customFields.find((f) => f._id === filter["customFields._id"]);
+      const field = project.customFields.find((f) => sameId(f._id, filter["customFields._id"]));
       if (!field) return query(null);
+      // The name condition, read under the case-insensitive collation the route asks for
+      const clash = (filter.customFields as { $not?: { $elemMatch: { name: string } } } | undefined)?.$not?.$elemMatch;
+      if (
+        clash &&
+        project.customFields.some((f) => f !== field && f.name.toLowerCase() === clash.name.toLowerCase())
+      ) {
+        return query(null);
+      }
       for (const [path, value] of Object.entries(update.$set ?? {})) {
         (field as Record<string, unknown>)[path.split(".$.")[1]] = value;
       }
@@ -211,9 +221,13 @@ describe("PATCH /api/projects/:projectId/custom-fields/:fieldId", () => {
     await PATCH(patchRequest({ name: "Story Points", required: true }), fieldCtx(numberFieldId));
 
     expect(projectFindOneAndUpdate).toHaveBeenCalledWith(
-      { _id: PROJECT_ID, "customFields._id": numberFieldId },
+      {
+        _id: PROJECT_ID,
+        "customFields._id": numberFieldId,
+        customFields: { $not: { $elemMatch: { _id: { $ne: numberFieldId }, name: "Story Points" } } },
+      },
       { $set: { "customFields.$.name": "Story Points", "customFields.$.required": true } },
-      { returnDocument: "before" }
+      { returnDocument: "before", collation: { locale: "en", strength: 2 } }
     );
   });
 
@@ -244,7 +258,10 @@ describe("PATCH /api/projects/:projectId/custom-fields/:fieldId", () => {
   });
 
   it("404s a field deleted between its read and its write", async () => {
-    projectFindOneAndUpdate.mockImplementation(() => query(null));
+    projectFindOneAndUpdate.mockImplementation(() => {
+      project.customFields = project.customFields.filter((f) => f._id !== numberFieldId);
+      return query(null);
+    });
 
     const res = await PATCH(patchRequest({ name: "Story Points" }), fieldCtx(numberFieldId));
 
@@ -314,5 +331,61 @@ describe("PATCH options — who may remove one", () => {
 
     expect(res.status).toBe(200);
     expect(check).toHaveBeenCalledWith(OWNER, PROJECT_ID, "admin");
+  });
+});
+
+// Review: an id in upper case removed the field through Mongo's cast, then matched nothing it was
+// compared with as a string — no audit line, the designation left pointing at a deleted field, and
+// the tasks' values kept under a key nobody reads
+describe("a field id sent in upper case", () => {
+  it("is removed with everything that goes with it, and recorded", async () => {
+    await DELETE(deleteRequest(), fieldCtx(numberFieldId.toUpperCase()));
+
+    expect(project.customFields.map((f) => f._id)).toEqual([otherFieldId]);
+    expect(project.estimateFieldId).toBe("");
+    expect(taskUpdateMany).toHaveBeenCalledWith(
+      { project: PROJECT_ID },
+      { $unset: { [`customFieldValues.${numberFieldId}`]: "" } }
+    );
+    expect(logProjectAudit).toHaveBeenCalledWith(PROJECT_ID, "u1", "settings_updated", [
+      "Custom field removed: Points",
+      "Estimate field: Points → none",
+    ]);
+  });
+
+  it("is edited and recorded", async () => {
+    await PATCH(patchRequest({ name: "Story Points" }), fieldCtx(numberFieldId.toUpperCase()));
+
+    expect(project.customFields[0].name).toBe("Story Points");
+    expect(logProjectAudit).toHaveBeenCalledWith(PROJECT_ID, "u1", "settings_updated", [
+      "Custom field Points · Name: Points → Story Points",
+    ]);
+  });
+});
+
+// Review: the name was checked against a read, and the write took it whatever had happened since —
+// two renames to one name both landed, where the whole-list save used to refuse one of them
+describe("a rename racing another", () => {
+  it("is refused when the name was taken between its read and its write", async () => {
+    projectFindById.mockImplementationOnce(() => ({
+      select: () => {
+        const read = query(image());
+        project.customFields[1].name = "Story points";
+        return read;
+      },
+    }));
+
+    const res = await PATCH(patchRequest({ name: "Story Points" }), fieldCtx(numberFieldId));
+
+    expect(res.status).toBe(409);
+    expect(project.customFields[0].name).toBe("Points");
+    expect(logProjectAudit).not.toHaveBeenCalled();
+  });
+
+  it("may still change the case of its own name", async () => {
+    const res = await PATCH(patchRequest({ name: "POINTS" }), fieldCtx(numberFieldId));
+
+    expect(res.status).toBe(200);
+    expect(project.customFields[0].name).toBe("POINTS");
   });
 });

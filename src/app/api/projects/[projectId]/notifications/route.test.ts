@@ -85,13 +85,15 @@ beforeEach(() => {
         return query(project);
       }
       const before = image();
+      // Mongo casts both sides to an ObjectId, so hex case does not matter to the match
+      const sameId = (a: unknown, b: unknown) => String(a).toLowerCase() === String(b).toLowerCase();
       if (update.$pull) {
         project.notificationChannels = project.notificationChannels.filter(
-          (ch) => ch._id !== update.$pull!.notificationChannels._id
+          (ch) => !sameId(ch._id, update.$pull!.notificationChannels._id)
         );
         return query(before);
       }
-      const target = project.notificationChannels.find((ch) => ch._id === filter["notificationChannels._id"]);
+      const target = project.notificationChannels.find((ch) => sameId(ch._id, filter["notificationChannels._id"]));
       if (!target) return query(null);
       for (const [path, value] of Object.entries(update.$set ?? {})) {
         (target as Record<string, unknown>)[path.split(".$.")[1]] = value;
@@ -105,7 +107,10 @@ beforeEach(() => {
       update: { $set: Record<string, string> }
     ) => {
       const { _id, webhookUrl } = filter.notificationChannels.$elemMatch;
-      const target = project.notificationChannels.find((ch) => ch._id === _id && ch.webhookUrl === webhookUrl);
+      // A condition the filter leaves out constrains nothing, as in MongoDB
+      const target = project.notificationChannels.find(
+        (ch) => ch._id === _id && (webhookUrl === undefined || ch.webhookUrl === webhookUrl)
+      );
       if (!target) return { modifiedCount: 0 };
       target.webhookUrl = update.$set["notificationChannels.$.webhookUrl"];
       return { modifiedCount: 1 };
@@ -463,5 +468,34 @@ describe("DELETE /api/projects/:projectId/notifications", () => {
     const res = await DELETE(request("DELETE", { channelId: C1 }), ctx());
 
     expect(res.status).toBe(404);
+  });
+});
+
+// Review: an id sent in upper case wrote through Mongo's cast, then matched nothing in the
+// before-image — the URL was replaced, the answer was a 500, and nothing was recorded
+describe("a channel id sent in upper case", () => {
+  it("replaces the address and records it under the channel as stored", async () => {
+    const res = await PUT(
+      request("PUT", { channelId: C1.toUpperCase(), webhookUrl: "https://hooks.slack.com/b" }),
+      ctx()
+    );
+
+    expect(res.status).toBe(200);
+    expect(decryptSecret(channel.webhookUrl)).toBe("https://hooks.slack.com/b");
+    expect(logProjectAudit).toHaveBeenCalledWith("p1", "owner1", "settings_updated", [
+      "Notification channel Slack · Webhook URL replaced",
+    ]);
+  });
+
+  it("removes the channel and records it", async () => {
+    await DELETE(request("DELETE", { channelId: C1.toUpperCase() }), ctx());
+
+    expect(project.notificationChannels).toEqual([]);
+    expect(logProjectAudit).toHaveBeenCalledWith(
+      "p1",
+      "owner1",
+      "settings_updated",
+      "Notification channel removed: Slack"
+    );
   });
 });
