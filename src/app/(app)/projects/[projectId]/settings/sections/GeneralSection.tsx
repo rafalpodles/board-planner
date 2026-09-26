@@ -13,6 +13,7 @@ import { IconPicker } from "@/components/ui/IconPicker";
 import { SettingsCard, ListRow } from "@/components/settings/SettingsCard";
 import { DangerAction } from "@/components/settings/DangerAction";
 import { SettingRow } from "@/components/settings/SettingRow";
+import { LoadFailed } from "@/components/ui/LoadFailed";
 import { useDirtyGroup } from "@/components/settings/settings-context";
 import { SectionProps } from "./types";
 
@@ -59,16 +60,33 @@ export function GeneralSection({
   });
 
   const [members, setMembers] = useState<ApiProjectMember[]>([]);
+  // Nothing on the list can be changed before it has been read: a change made on a list still
+  // empty was applied to that empty list, and the people it did not touch vanished (BP-784)
+  const [membersRead, setMembersRead] = useState<"loading" | "loaded" | "failed">("loading");
   const latestMembersRead = useRef(0);
 
   async function loadMembers() {
     const read = ++latestMembersRead.current;
-    const loaded: ApiProjectMember[] = await api.get(`/api/projects/${projectId}/members`);
-    if (read === latestMembersRead.current) setMembers(loaded);
+    try {
+      const loaded: ApiProjectMember[] = await api.get(`/api/projects/${projectId}/members`);
+      if (read !== latestMembersRead.current) return;
+      setMembers(loaded);
+      setMembersRead("loaded");
+    } catch (error) {
+      if (read === latestMembersRead.current) {
+        setMembersRead((state) => (state === "loaded" ? state : "failed"));
+      }
+      throw error;
+    }
+  }
+
+  function readMembers() {
+    setMembersRead((state) => (state === "loaded" ? state : "loading"));
+    loadMembers().catch(() => {});
   }
 
   useEffect(() => {
-    loadMembers().catch(() => {});
+    readMembers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
@@ -184,9 +202,7 @@ export function GeneralSection({
           return next;
         });
         // The row carries what the server did even if the re-read below fails. A revocation drops
-        // it: `GET …/members` never returns a non-admin holding no relation (BP-592). A read
-        // already out when this lands is older than it, so its answer no longer applies (BP-784)
-        latestMembersRead.current++;
+        // it: `GET …/members` never returns a non-admin holding no relation (BP-592)
         setMembers((prev) => withAccessApplied(prev, userId, relation, newcomers[userId]));
       }
     } finally {
@@ -290,6 +306,20 @@ export function GeneralSection({
         title="Who can use this board"
         description="Owners can change everything on this page. Members work on tasks and sprints. Instance admins always have full access and are listed for reference."
       >
+        {membersRead === "loading" && (
+          <p role="status" className="text-sm text-text-muted">
+            Loading who can use this board…
+          </p>
+        )}
+        {membersRead === "failed" && (
+          <LoadFailed
+            variant="row"
+            className="mb-0"
+            message="Could not load who can use this board."
+            onRetry={readMembers}
+          />
+        )}
+        {membersRead === "loaded" && (
         <div className="space-y-3">
           <div className="relative">
             <Input
@@ -347,6 +377,7 @@ export function GeneralSection({
             ))}
           </div>
         </div>
+        )}
       </SettingsCard>
 
       {project.canAdmin && (

@@ -578,8 +578,7 @@ describe("GeneralSection add person", () => {
   });
 });
 
-// BP-784: an answer that arrives after a later read, or after a change the page made itself, used
-// to put the older list back
+// BP-784: an answer that arrived after a later read used to put the older list back
 describe("GeneralSection members read", () => {
   function held() {
     let resolve!: (rows: ApiProjectMember[]) => void;
@@ -644,38 +643,49 @@ describe("GeneralSection members read", () => {
     expect(screen.getByLabelText("Access for alice")).toHaveProperty("value", "member");
   });
 
-  // Review: a slow first read landing between two writes of one save put the list back to before
-  // the first, and with the re-read failing it stayed that way
-  it("keeps a change that landed after the first read went out, even when the re-read fails", async () => {
+  // Review: a change made while the list was still empty was applied to that empty list, and the
+  // people it did not touch vanished once the re-read failed
+  it("offers nothing to change until the list has been read", async () => {
     const first = held();
     api.get.mockReset();
-    api.get.mockImplementation((url: string) => {
-      if (url.includes("/members/candidates")) {
-        return Promise.resolve([
-          { _id: "u8", username: "dee", fullName: "Dee D" },
-          { _id: "u9", username: "eve", fullName: "Eve E" },
-        ]);
-      }
-      return api.get.mock.calls.filter(([u]) => !String(u).includes("candidates")).length === 1
-        ? first.promise
-        : Promise.reject(new Error("offline"));
-    });
-    api.put.mockImplementation(async (_url: string, body: { userId: string }) => {
-      // The first read answers between the two grants: after Dee's landed, before Eve's
-      if (body.userId === "u9") await act(async () => first.resolve(members));
-      return { ok: true };
-    });
+    api.get.mockReturnValueOnce(first.promise);
     renderSection();
-    const input = await screen.findByLabelText("Add person");
-    for (const name of ["Dee D", "Eve E"]) {
-      fireEvent.change(input, { target: { value: name.slice(0, 3).toLowerCase() } });
-      fireEvent.click(await screen.findByRole("button", { name }));
-    }
+
+    expect(await screen.findByRole("status")).toHaveProperty("textContent", "Loading who can use this board…");
+    expect(screen.queryByLabelText("Add person")).toBeNull();
+
+    await act(async () => first.resolve(members));
+
+    expect(await screen.findByLabelText("Add person")).toBeTruthy();
+    expect(screen.getByLabelText("Access for alice")).toHaveProperty("value", "owner");
+    expect(screen.queryByText("Loading who can use this board…")).toBeNull();
+  });
+
+  it("says so, and reads again on Retry, when the list cannot be read", async () => {
+    api.get.mockReset();
+    api.get.mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce(members);
+    renderSection();
+
+    const failure = await screen.findByRole("alert");
+    expect(failure.textContent).toContain("Could not load who can use this board.");
+    expect(screen.queryByLabelText("Add person")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(await screen.findByLabelText("Access for alice")).toHaveProperty("value", "owner");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("keeps the list it has when only a later re-read fails", async () => {
+    renderSection();
+    fireEvent.change(await screen.findByLabelText("Access for bob"), { target: { value: "member" } });
+    api.get.mockRejectedValueOnce(new Error("offline"));
 
     await save();
 
-    expect(screen.getByLabelText("Access for dee")).toHaveProperty("value", "member");
-    expect(screen.getByLabelText("Access for eve")).toHaveProperty("value", "member");
     expect(toast).toHaveBeenCalledWith(LIST_REFRESH_FAILED, "error");
+    expect(screen.getByLabelText("Access for alice")).toHaveProperty("value", "owner");
+    expect(screen.getByLabelText("Access for bob")).toHaveProperty("value", "member");
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });
