@@ -23,6 +23,7 @@ const GROUPS: SettingsGroup[] = [
       { id: "notifications", label: "Notifications" },
       { id: "security", label: "Security" },
       { id: "tokens", label: "API Tokens" },
+      { id: "machines", label: "Machines" },
     ],
   },
   {
@@ -46,7 +47,9 @@ export default function SettingsLayout({
   const pathname = usePathname();
   const { isAdmin } = useAuth();
 
-  const active = pathname?.split("/")[2] ?? "";
+  const section = pathname?.split("/")[2] ?? "";
+  // A machine's project picker lives under the fleet console's path, which only an admin's nav lists
+  const active = section === "workers" && !isAdmin ? "machines" : section;
   const groups: SettingsNavGroup[] = GROUPS.filter(
     (g) => !g.adminOnly || isAdmin,
   ).map((g) => ({

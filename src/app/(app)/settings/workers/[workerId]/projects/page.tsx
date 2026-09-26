@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useApi } from "@/hooks/use-api";
+import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/Button";
 import { PageHeader } from "@/components/shell/PageHeader";
 
@@ -55,6 +56,7 @@ export default function MachineProjectsPage() {
   const params = useParams();
   const workerId = String(params.workerId ?? "");
   const api = useApi();
+  const { isAdmin } = useAuth();
 
   const [view, setView] = useState<View | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -255,7 +257,7 @@ export default function MachineProjectsPage() {
         <Button onClick={save} disabled={saving}>
           {saving ? "Saving…" : "Save"}
         </Button>
-        <Link href="/settings/workers" className="text-sm text-text-muted underline">
+        <Link href={isAdmin ? "/settings/workers" : "/settings/machines"} className="text-sm text-text-muted underline">
           Back to machines
         </Link>
       </div>

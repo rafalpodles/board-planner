@@ -1778,6 +1778,18 @@ export interface ApiHandoverReadiness {
   haltedBy: WorkerHaltSource | null;
 }
 
+/** One of the reader's own machines, as Settings → Machines lists it */
+export interface ApiMyMachine {
+  _id: string;
+  name: string;
+  host: string;
+  version: string;
+  lastSeenAt: string | null;
+  state: "disabled" | "stale" | "paused" | "stopped" | "live";
+  haltedBy: WorkerHaltSource | null;
+  checkouts: number;
+}
+
 export interface ApiAgent {
   _id: string;
   name: string;

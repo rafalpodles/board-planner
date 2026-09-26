@@ -79,6 +79,18 @@ describe("the enrolment confirmation screen", () => {
     expect(screen.queryByRole("radio", { name: /Write, review and merge/i })).toBeNull();
   });
 
+  // BP-761. It sent a newly connected machine's owner to Settings → Workers, which turns away
+  // everybody but an instance admin
+  it("says where more projects are added in a place the person who connected it can open", async () => {
+    await show();
+    await chooseTheProject();
+
+    await act(async () => screen.getByRole("button", { name: /Connect it/i }).click());
+
+    expect(screen.getByText(/More projects are added any time under Settings → Machines/)).toBeTruthy();
+    expect(screen.queryByText(/Settings → Workers/)).toBeNull();
+  });
+
   it("sends only the project, with no preset", async () => {
     await show();
     await chooseTheProject();

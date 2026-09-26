@@ -115,7 +115,7 @@ function Enrol({ params }: { params: Promise<{ userCode: string }> }) {
     return (
       <Outcome
         title="Connected"
-        detail="The machine has its credential and sets up that repository next. More projects are added any time under Settings → Workers. You can close this tab."
+        detail="The machine has its credential and sets up that repository next. More projects are added any time under Settings → Machines, once it has connected. You can close this tab."
       />
     );
   }

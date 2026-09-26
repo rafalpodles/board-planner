@@ -204,6 +204,23 @@ export interface MachineReadiness {
 
 type ServedProject = MatchableProject & { _id?: unknown };
 
+export interface MachineCondition {
+  state: "disabled" | "stale" | "paused" | "stopped" | "live";
+  haltedBy: WorkerHaltSource | null;
+}
+
+/**
+ * Whether a machine is taking work at all, whatever project is asking. Switched off comes first: it
+ * is refused its heartbeat, so it goes stale too, and "check it is running" is advice its owner
+ * cannot act on.
+ */
+export function machineCondition(worker: ServingMachine, now = new Date()): MachineCondition {
+  if (!worker.enabled) return { state: "disabled", haltedBy: null };
+  if (!isLive(worker as IWorker, now)) return { state: "stale", haltedBy: null };
+  const halt = haltOf(worker);
+  return halt ? { state: halt.state, haltedBy: halt.by } : { state: "live", haltedBy: null };
+}
+
 /**
  * The best of these machines, for this project's repository. A machine that reports in but will
  * not take work — paused, stopped, failing its sandbox check, or refusing its checkout of this very
@@ -219,19 +236,20 @@ export function machineReadinessFor(
   for (const worker of workers) {
     if (!matchRepo(project, worker.repos ?? [])) continue;
     const refused = bindingErrorFor(worker.bindingError, projectId);
-    const halt = haltOf(worker);
-    // Switched off comes first: it is refused its heartbeat, so it goes stale too, and "check it
-    // is running" is advice its owner cannot act on
-    const state: MachineState = !worker.enabled
-      ? "disabled"
-      : !isLive(worker as IWorker, now)
-        ? "stale"
-        : (halt?.state ?? (sandboxFailed(worker) ? "failing" : refused ? "unbound" : "live"));
+    const condition = machineCondition(worker, now);
+    const state: MachineState =
+      condition.state !== "live"
+        ? condition.state
+        : sandboxFailed(worker)
+          ? "failing"
+          : refused
+            ? "unbound"
+            : "live";
     if (MACHINE_RANK[state] > MACHINE_RANK[best.state]) {
       best = {
         state,
         bindingError: state === "unbound" ? refused : "",
-        haltedBy: state === "paused" || state === "stopped" ? (halt?.by ?? null) : null,
+        haltedBy: condition.haltedBy,
       };
     }
   }

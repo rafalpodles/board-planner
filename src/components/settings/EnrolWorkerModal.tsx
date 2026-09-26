@@ -17,6 +17,7 @@ interface MintedEnrolment {
 interface EnrolWorkerModalProps {
   open: boolean;
   onClose: () => void;
+  title?: string;
 }
 
 function GettingTheSoftware() {
@@ -27,7 +28,7 @@ function GettingTheSoftware() {
   );
 }
 
-export function EnrolWorkerModal({ open, onClose }: EnrolWorkerModalProps) {
+export function EnrolWorkerModal({ open, onClose, title = "Enrol a worker" }: EnrolWorkerModalProps) {
   const api = useApi();
   const { toast } = useToast();
 
@@ -72,7 +73,7 @@ export function EnrolWorkerModal({ open, onClose }: EnrolWorkerModalProps) {
   const expiry = minted ? enrolmentExpiry(minted.expiresAt) : null;
 
   return (
-    <Modal open={open} onClose={close} closeDisabled={minting} title="Enrol a worker" size="lg">
+    <Modal open={open} onClose={close} closeDisabled={minting} title={title} size="lg">
       {!minted ? (
         <div className="space-y-4">
           <p className="text-sm text-text-muted">
