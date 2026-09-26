@@ -174,6 +174,43 @@ test("a settings save names each value before and after, and never a token", asy
 });
 
 /**
+ * BP-782. Switching a webhook off, or changing what it hears, decides where board events go, and
+ * left no trace. Each change is now a line under the webhook's masked address.
+ */
+test("a webhook edit names what changed, under the webhook's masked address", async ({ page }) => {
+  const URL = "https://example.com/e2e-audit-hook";
+  const shown = "https://example.com/••••hook";
+  await signIn(page);
+  expect(await openAuditLog(page)).toEqual([]);
+
+  await page.goto(`${SETTINGS}?section=integrations`);
+  // The catalogue shows its tiles until something is connected, and a picker after
+  const picker = page.getByRole("button", { name: /Add integration/ });
+  const webhooksTile = page.getByRole("button", { name: /Webhooks/ }).first();
+  await expect(picker.or(webhooksTile).first()).toBeVisible();
+  if (await picker.isVisible()) await picker.click();
+  await page.getByRole("button", { name: /Webhooks/ }).first().click();
+  await page.getByLabel("New webhook URL").fill(URL);
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await saveChanges(page);
+
+  await page.getByRole("button", { name: `Enabled for ${shown}` }).click();
+  await page.getByRole("button", { name: `comment added for ${shown}` }).click();
+  await saveChanges(page);
+
+  const stored = await detailsOnceStored(page, 2);
+  expect(stored.map((row) => row.detail)).toEqual([
+    [
+      `Webhook ${shown} · Events: comment_added, status_changed, task_created, task_linked, task_unlinked → status_changed, task_created, task_linked, task_unlinked`,
+      `Webhook ${shown} · Enabled: on → off`,
+    ].join("\n"),
+    `Webhook added: ${shown}`,
+  ]);
+  expect(JSON.stringify(stored)).not.toContain("e2e-audit-hook");
+  await expect(page.getByTestId("audit-detail").filter({ hasText: "Enabled: on → off" })).toBeVisible();
+});
+
+/**
  * BP-741. Adding somebody, promoting them and demoting them back reached no audit log at all.
  * Each is now its own row: the row's user is who did it, the detail whom and from what to what.
  */
