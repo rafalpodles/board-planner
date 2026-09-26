@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { StrictMode } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-library/react";
 import { GeneralSection } from "./GeneralSection";
@@ -574,5 +575,72 @@ describe("GeneralSection add person", () => {
 
     await waitFor(() => expect(screen.queryByLabelText("Access for dee")).toBeNull());
     expect(accessGroup()?.count).toBe(0);
+  });
+});
+
+// BP-784: an answer that arrives after a later read, or after a change the page made itself, used
+// to put the older list back
+describe("GeneralSection members read", () => {
+  function held() {
+    let resolve!: (rows: ApiProjectMember[]) => void;
+    const promise = new Promise<ApiProjectMember[]>((res) => {
+      resolve = res;
+    });
+    return { promise, resolve };
+  }
+
+  const aliceAs = (relation: "owner" | "member") => [{ ...members[0], relation }, ...members.slice(1)];
+
+  it("keeps the second mount's list when the first mount's read answers last", async () => {
+    const first = held();
+    api.get.mockReset();
+    api.get.mockReturnValueOnce(first.promise).mockResolvedValueOnce(members);
+
+    render(
+      <StrictMode>
+        <SettingsProvider register={register} unregister={vi.fn()}>
+          <GeneralSection
+            projectId="p1"
+            project={project()}
+            patchProject={vi.fn()}
+            replaceProject={replaceProject}
+            isAdmin={false}
+            stats={null}
+          />
+        </SettingsProvider>
+      </StrictMode>
+    );
+    expect(await screen.findByLabelText("Access for alice")).toHaveProperty("value", "owner");
+
+    await act(async () => first.resolve(aliceAs("member")));
+
+    expect(screen.getByLabelText("Access for alice")).toHaveProperty("value", "owner");
+  });
+
+  it("keeps the newest re-read when an older one answers after it", async () => {
+    const olderRefresh = held();
+    api.get.mockReset();
+    api.get
+      .mockResolvedValueOnce(members)
+      .mockReturnValueOnce(olderRefresh.promise)
+      .mockResolvedValueOnce(aliceAs("member"));
+    renderSection();
+    const alice = await screen.findByLabelText("Access for alice");
+
+    // First save: its re-read is held
+    fireEvent.change(screen.getByLabelText("Access for bob"), { target: { value: "member" } });
+    await act(async () => {
+      void accessGroup().save();
+    });
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2));
+
+    // Second save lands and its re-read answers
+    fireEvent.change(alice, { target: { value: "member" } });
+    await save();
+    await waitFor(() => expect(alice).toHaveProperty("value", "member"));
+
+    await act(async () => olderRefresh.resolve(members));
+
+    expect(screen.getByLabelText("Access for alice")).toHaveProperty("value", "member");
   });
 });

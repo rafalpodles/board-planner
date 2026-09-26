@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useApi } from "@/hooks/use-api";
 import { LIST_REFRESH_FAILED } from "@/lib/list-refresh";
@@ -59,12 +59,16 @@ export function GeneralSection({
   });
 
   const [members, setMembers] = useState<ApiProjectMember[]>([]);
+  const latestMembersRead = useRef(0);
+
+  async function loadMembers() {
+    const read = ++latestMembersRead.current;
+    const loaded: ApiProjectMember[] = await api.get(`/api/projects/${projectId}/members`);
+    if (read === latestMembersRead.current) setMembers(loaded);
+  }
 
   useEffect(() => {
-    api
-      .get(`/api/projects/${projectId}/members`)
-      .then(setMembers)
-      .catch(() => {});
+    loadMembers().catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
@@ -207,7 +211,7 @@ export function GeneralSection({
 
     // Its own failure is not the write's: the access change landed (BP-583)
     try {
-      setMembers(await api.get(`/api/projects/${projectId}/members`));
+      await loadMembers();
     } catch {
       toast(LIST_REFRESH_FAILED, "error");
     }
